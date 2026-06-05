@@ -1,0 +1,13 @@
+{
+  "name": "@tulipfarm/utils",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}
