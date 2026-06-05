@@ -1,5 +1,8 @@
 import { config } from 'dotenv'
 import Fastify from 'fastify'
+import { connectDb } from './db'
+import { runDataMigrations } from './migrate'
+import { runSoulMigrations } from './soul/migrate'
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: '.env.local' })
@@ -38,9 +41,22 @@ app.get('/health', async () => ({ status: 'ok' }))
 
 const port = parseInt(process.env.PORT || '4001', 10)
 
-app.listen({ port, host: '0.0.0.0' }, (err) => {
-  if (err) {
-    app.log.error(err)
+async function boot() {
+  try {
+    const { db } = await connectDb()
+    await runSoulMigrations(process.env.SOUL_PATH!)
+    await runDataMigrations(db)
+  } catch (error) {
+    console.error(`❌ Boot failed: ${error instanceof Error ? error.message : String(error)}`)
     process.exit(1)
   }
-})
+
+  app.listen({ port, host: '0.0.0.0' }, (err) => {
+    if (err) {
+      app.log.error(err)
+      process.exit(1)
+    }
+  })
+}
+
+boot()
