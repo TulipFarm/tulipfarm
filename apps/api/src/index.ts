@@ -1,5 +1,8 @@
 import { config } from "dotenv";
+import Redis from "ioredis";
 import { buildApp } from "./app";
+import { RedisSessionStore } from "./auth/session-store";
+import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
 import { runSoulMigrations } from "./soul/migrate";
@@ -38,23 +41,29 @@ validateEnvironment();
 const port = Number.parseInt(process.env.PORT || "4010", 10);
 
 async function boot() {
-  const app = await buildApp();
-
   try {
     const { db } = await connectDb();
     await runSoulMigrations(process.env.SOUL_PATH as string);
     await runDataMigrations(db);
+
+    const redis = new Redis(process.env.REDIS_URL as string);
+    const ttlSeconds = Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "604800", 10);
+    const sessionStore = new RedisSessionStore(redis, ttlSeconds);
+    const userRepo = new MongoUserRepo(db);
+
+    const app = await buildApp({ sessionStore, userRepo });
+    await bootstrapAdmin(userRepo, app.log);
+
+    app.listen({ port, host: "0.0.0.0" }, (err) => {
+      if (err) {
+        app.log.error(err);
+        process.exit(1);
+      }
+    });
   } catch (error) {
     console.error(`❌ Boot failed: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
-
-  app.listen({ port, host: "0.0.0.0" }, (err) => {
-    if (err) {
-      app.log.error(err);
-      process.exit(1);
-    }
-  });
 }
 
 boot();
