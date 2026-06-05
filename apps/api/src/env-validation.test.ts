@@ -127,6 +127,28 @@ describe("validateEnvironment", () => {
     vi.restoreAllMocks();
   });
 
+  it("passes when ENCRYPTION_KEY_PREVIOUS is absent (single-key mode)", () => {
+    const exit = vi.fn();
+    validateEnvironment(validEnv(), exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("passes when ENCRYPTION_KEY_PREVIOUS is a valid 32-byte base64 key", () => {
+    const exit = vi.fn();
+    const env = { ...validEnv(), ENCRYPTION_KEY_PREVIOUS: secret32() };
+    validateEnvironment(env, exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("exits when ENCRYPTION_KEY_PREVIOUS is set but wrong byte length", () => {
+    const exit = vi.fn();
+    const env = { ...validEnv(), ENCRYPTION_KEY_PREVIOUS: randomBytes(16).toString("base64") };
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    validateEnvironment(env, exit);
+    expect(exit).toHaveBeenCalledWith(1);
+    vi.restoreAllMocks();
+  });
+
   it("passes when SESSION_TTL_SECONDS is absent (optional)", () => {
     const exit = vi.fn();
     const env = validEnv();
