@@ -98,6 +98,17 @@ If a rule genuinely must be broken, add a scoped suppression on the line — nev
 - Migrations: `apps/api/src/migrations/` run on boot — add new ones there.
 - Env: copy `.env.local.example` → `.env.local`; never commit secrets.
 
+## API route schemas (OpenAPI)
+
+Every Fastify route **must** have a `schema` option. The spec at `/api/v1/openapi.json` is auto-generated from these schemas — no schema means the endpoint is invisible in docs.
+
+When adding or modifying a route:
+
+1. Add/update the `schema` object on the route with `description`, `tags`, `body`/`params`/`querystring`, and `response` (all status codes the handler can return).
+2. If the response shape is shared across routes, define it in `apps/api/src/auth/schemas.ts` (or a domain-level `schemas.ts` for future domains) and import it — don't inline duplicate schemas.
+3. Protected routes must include `security: [{ sessionCookie: [] }, { bearerToken: [] }]`.
+4. Verify the spec is updated: `curl http://localhost:4010/api/v1/openapi.json | jq '.paths'` should include the new/changed path.
+
 ## Local Dev Credentials
 
 Default seed credentials for local dev (used by `scripts/setup-dev.sh`):

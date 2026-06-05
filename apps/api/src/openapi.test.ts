@@ -1,0 +1,92 @@
+import type { FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { buildApp } from "./app";
+import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
+import { MemorySessionStore } from "./auth/session-store";
+import type { UserDoc, UserRepo } from "./auth/users";
+import type { PaginatedResult } from "./pagination";
+
+class FakeUserRepo implements UserRepo {
+  async findByEmail(): Promise<UserDoc | null> {
+    return null;
+  }
+  async findById(): Promise<UserDoc | null> {
+    return null;
+  }
+  async count(): Promise<number> {
+    return 0;
+  }
+  async insert(): Promise<void> {}
+}
+
+class FakeTokenRepo implements TokenRepo {
+  async create(): Promise<void> {}
+  async findByHash(): Promise<TokenDoc | null> {
+    return null;
+  }
+  async findByUserId(): Promise<TokenDoc[]> {
+    return [];
+  }
+  async findAll(): Promise<TokenDoc[]> {
+    return [];
+  }
+  async findById(): Promise<TokenDoc | null> {
+    return null;
+  }
+  async deleteById(): Promise<void> {}
+  async findAllPaginated(): Promise<PaginatedResult<TokenDoc>> {
+    return { items: [], nextCursor: null };
+  }
+  async findByUserIdPaginated(): Promise<PaginatedResult<TokenDoc>> {
+    return { items: [], nextCursor: null };
+  }
+}
+
+function buildTestApp() {
+  return buildApp({
+    sessionStore: new MemorySessionStore(),
+    userRepo: new FakeUserRepo(),
+    tokenRepo: new FakeTokenRepo(),
+  });
+}
+
+describe("OpenAPI spec", () => {
+  let app: FastifyInstance;
+
+  beforeEach(async () => {
+    app = await buildTestApp();
+    await app.ready();
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("GET /api/v1/openapi.json returns OpenAPI 3.1 spec", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/application\/json/);
+    const spec = res.json();
+    expect(spec.openapi).toBe("3.1.0");
+    expect(spec.info.title).toBe("TulipFarm API");
+  });
+
+  it("spec includes all documented paths", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
+    const spec = res.json();
+    const paths = Object.keys(spec.paths ?? {});
+    expect(paths).toContain("/health");
+    expect(paths).toContain("/api/v1/auth/login");
+    expect(paths).toContain("/api/v1/auth/logout");
+    expect(paths).toContain("/api/v1/auth/session");
+    expect(paths).toContain("/api/v1/auth/tokens");
+    expect(paths).toContain("/api/v1/auth/tokens/{id}");
+  });
+
+  it("GET /docs/ returns Scalar UI HTML", async () => {
+    const res = await app.inject({ method: "GET", url: "/docs/" });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/text\/html/);
+    expect(res.body).toContain("<html");
+  });
+});

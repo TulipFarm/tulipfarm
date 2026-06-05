@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parsePaginationQuery } from "../../pagination";
 import { type TokenRepo, createApiToken, toPublicToken } from "../api-tokens";
+import { ErrorSchema, PublicTokenSchema } from "../schemas";
 import type { UserDoc, UserRepo } from "../users";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -14,7 +15,36 @@ export function registerTokenRoutes(
 ): void {
   app.post(
     "/api/v1/auth/tokens",
-    { preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth },
+    {
+      preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
+      schema: {
+        description: "Create a new API token for the authenticated user.",
+        tags: ["auth"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string" },
+            userId: { type: "string", description: "Admin only — create token for another user." },
+          },
+        },
+        response: {
+          201: {
+            type: "object",
+            properties: {
+              token: { type: "string", description: "Raw token value. Shown once." },
+              ...PublicTokenSchema.properties,
+            },
+            required: ["token", ...PublicTokenSchema.required],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
     async (req, reply) => {
       const actor = req.user as UserDoc;
       const body = (req.body ?? {}) as { name?: unknown; userId?: unknown };
@@ -45,7 +75,33 @@ export function registerTokenRoutes(
 
   app.get(
     "/api/v1/auth/tokens",
-    { preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth },
+    {
+      preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
+      schema: {
+        description: "List API tokens. Admins see all tokens; members see their own.",
+        tags: ["auth"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+            cursor: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              tokens: { type: "array", items: PublicTokenSchema },
+              nextCursor: { type: ["string", "null"] },
+            },
+            required: ["tokens", "nextCursor"],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
     async (req, reply) => {
       const actor = req.user as UserDoc;
       const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
@@ -66,7 +122,26 @@ export function registerTokenRoutes(
 
   app.delete(
     "/api/v1/auth/tokens/:id",
-    { preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth },
+    {
+      preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
+      schema: {
+        description:
+          "Delete an API token. Admins can delete any token; members can only delete their own.",
+        tags: ["auth"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        response: {
+          204: { type: "null" },
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
     async (req, reply) => {
       const actor = req.user as UserDoc;
       const { id } = req.params as { id: string };
