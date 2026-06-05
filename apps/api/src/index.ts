@@ -7,7 +7,6 @@ import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
 import { RedisRateLimiter } from "./rate-limit";
-import { runSoulMigrations } from "./soul/migrate";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -104,7 +103,6 @@ const port = Number.parseInt(process.env.PORT || "4010", 10);
 async function boot() {
   try {
     const { db } = await connectDb();
-    await runSoulMigrations(process.env.SOUL_PATH as string);
     await runDataMigrations(db);
 
     const redis = new Redis(process.env.REDIS_URL as string);
