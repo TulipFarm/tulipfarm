@@ -1,9 +1,9 @@
-# Absolute Work Board: Session Auth (tf_sid cookie, Argon2id, Redis sessions)
+# Absolute Work Board: Bearer API Token Auth
 
-**Issue:** [#7](https://github.com/TulipFarm/project/issues/7)
+**Issue:** [#8](https://github.com/TulipFarm/project/issues/8)
 **Status:** COMPLETED
-**Date Created:** 2026-06-05
 **Date Completed:** 2026-06-05
+**Date Created:** 2026-06-05
 
 ---
 
@@ -20,98 +20,75 @@
 
 ## Rollback Point
 
-Pre-implementation commit: `9fa5e00` (ai: add AGENTS and update absolute-work)
+Pre-implementation commit: `05b2d63` (feat: session auth)
 
 ---
 
 ## Decisions
 
-1. User creation → env-seeded bootstrap admin on boot (no register endpoint).
-2. Argon2id → `@node-rs/argon2` (prebuilt NAPI).
-3. Session store → `SessionStore` interface; Redis (prod) + Memory (tests), injected.
-4. Redis client → `ioredis`.
-5. Scope → cookie session only; defer bearer + CSRF + rate-limit.
+1. Token format: `tulip_<base64url(randomBytes(32))>` — 49 chars, namespaced.
+2. Hashing: SHA-256 (node crypto) — tokens are high-entropy random, no slow KDF needed.
+3. Storage: `api_tokens` MongoDB collection.
+4. Listing: admin sees all; member sees own.
+5. Revocation: hard delete (simpler auth path — not found = not valid).
+6. Admin can create token for other users via optional `userId` body field.
+7. Dual-auth: cookie checked first, Bearer fallback.
 
 ---
 
 ## Tasks
 
-### AW-001: Add deps (@node-rs/argon2, ioredis, @fastify/cookie) + env example keys
-- **Type:** config | **Size:** S | **Dependencies:** none | **Wave:** 1
-- **Files:** `apps/api/package.json`, `.env.local.example`
+### AW-001: api-tokens.ts — TokenDoc, TokenRepo, MongoTokenRepo, createApiToken, hashToken + tests
+- **Type:** code+test | **Size:** S | **Dependencies:** none | **Wave:** 1
+- **Files:** `apps/api/src/auth/api-tokens.ts`, `apps/api/src/auth/api-tokens.test.ts`
 - **Status:** ✅ DONE
 
-### AW-002: passwords.ts — hashPassword / verifyPassword + test
-- **Type:** code+test | **Size:** S | **Dependencies:** AW-001 | **Wave:** 2
-- **Files:** `apps/api/src/auth/passwords.ts`, `passwords.test.ts`
-- **Acceptance:** hash roundtrip verifies true; wrong pw → false; hash != plaintext.
-- **Status:** ✅ DONE
-
-### AW-003: session-store.ts — SessionStore interface + Memory + Redis + test
-- **Type:** code+test | **Size:** S | **Dependencies:** AW-001 | **Wave:** 2
-- **Files:** `apps/api/src/auth/session-store.ts`, `session-store.test.ts`
-- **Acceptance:** Memory create→get returns userId; destroy→get null; sid random 32B base64url.
-- **Status:** ✅ DONE
-
-### AW-004: users.ts — UserDoc, UserRepo, MongoUserRepo, bootstrapAdmin
-- **Type:** code | **Size:** S | **Dependencies:** AW-001 | **Wave:** 2
-- **Files:** `apps/api/src/auth/users.ts`
-- **Acceptance:** typechecks; bootstrapAdmin idempotent (count>0 → noop; no env → noop).
-- **Status:** ✅ DONE
-
-### AW-005: migration — unique index on users.email
-- **Type:** infra | **Size:** S | **Dependencies:** AW-001 | **Wave:** 2
+### AW-002: Migration v2 — unique index on api_tokens.tokenHash
+- **Type:** infra | **Size:** S | **Dependencies:** none | **Wave:** 1
 - **Files:** `apps/api/src/migrations/index.ts`
-- **Acceptance:** DATA_MIGRATIONS has v1 creating unique index `{ email: 1 }`.
 - **Status:** ✅ DONE
 
-### AW-006: routes.ts (login/logout/session + requireAuth) + wire app.ts opts + integration tests
-- **Type:** code+test | **Size:** M | **Dependencies:** AW-002, AW-003, AW-004 | **Wave:** 3
-- **Files:** `apps/api/src/auth/routes.ts`, `apps/api/src/app.ts`, `apps/api/src/auth/routes.test.ts`
-- **Acceptance:** login sets tf_sid + 200; bad creds 401; session 200 w/ cookie, 401 w/o; logout 204 + clears. Existing health/CORS tests still pass.
+### AW-003: routes.ts — dual-auth requireAuth + token CRUD + route tests
+- **Type:** code+test | **Size:** M | **Dependencies:** AW-001 | **Wave:** 2
+- **Files:** `apps/api/src/auth/routes.ts`, `apps/api/src/auth/routes.test.ts`
 - **Status:** ✅ DONE
 
-### AW-007: index.ts wiring — RedisSessionStore + MongoUserRepo + bootstrapAdmin call
-- **Type:** code | **Size:** S | **Dependencies:** AW-003, AW-004, AW-006 | **Wave:** 4
-- **Files:** `apps/api/src/index.ts`
-- **Acceptance:** typechecks; boot path constructs Redis+Mongo repos, calls bootstrapAdmin after migrations, passes to buildApp.
+### AW-004: app.ts + index.ts wiring
+- **Type:** code | **Size:** S | **Dependencies:** AW-003 | **Wave:** 3
+- **Files:** `apps/api/src/app.ts`, `apps/api/src/index.ts`
 - **Status:** ✅ DONE
 
-### AW-008: Self code review (separate agent)
-- **Type:** test | **Size:** S | **Dependencies:** AW-007 | **Wave:** 5
-- **Status:** ✅ DONE
+### AW-005: Self code review
+- **Type:** test | **Size:** S | **Dependencies:** AW-004 | **Wave:** 4
+- **Status:** ✅ DONE — cavecrew reviewer: no issues found
 
-### AW-009: Requirements validation vs issue #7 ACs
-- **Type:** test | **Size:** S | **Dependencies:** AW-008 | **Wave:** 5
-- **Status:** ✅ DONE
+### AW-006: Requirements validation vs issue #8 ACs
+- **Type:** test | **Size:** S | **Dependencies:** AW-005 | **Wave:** 4
+- **Status:** ✅ DONE — all 5 ACs validated
 
-### AW-010: Full verification — pnpm lint && typecheck && test
-- **Type:** test | **Size:** S | **Dependencies:** AW-009 | **Wave:** 5
-- **Status:** ✅ DONE
+### AW-007: Full verification — pnpm lint && typecheck && test
+- **Type:** test | **Size:** S | **Dependencies:** AW-006 | **Wave:** 4
+- **Status:** ✅ DONE — lint 0 errors · typecheck 0 errors · 47/47 tests pass
 
 ---
 
-## Acceptance Criteria (#7)
+## Acceptance Criteria (#8)
 
-- [x] `POST /api/v1/auth/login` sets `tf_sid` cookie on success
-- [x] `POST /api/v1/auth/logout` clears session from Redis + cookie
-- [x] Passwords stored as Argon2id; plaintext never persisted
-- [x] Session stored in Redis with configurable TTL
-- [x] Expired/missing session returns 401
+- [x] `POST /api/v1/auth/tokens` creates a token (admin or self)
+- [x] `Authorization: Bearer <token>` authenticates requests
+- [x] Tokens stored hashed; raw value shown only at creation
+- [x] `DELETE /api/v1/auth/tokens/:id` revokes a token
+- [x] Both session and token auth work on the same endpoints (dual-auth)
 
 ## Verification
 
-- `pnpm lint` 5/5 · `pnpm typecheck` 5/5 · `pnpm test` 21/21 (8 unit + 4 app + 9 routes).
-- Independent reviewer (cavecrew): 1 finding (maxAge "ms") was a **false positive** —
-  verified `@fastify/cookie` calls `cookie.serialize` with no conversion; `cookie` lib
-  Max-Age is in seconds, so `ttlSeconds` is correct. clearCookie path-match sufficient.
+- `pnpm lint` 0 errors · `pnpm typecheck` 0 errors · `pnpm test` 47/47 (10 api-tokens unit + 9 session routes + 14 token routes + 4 bearer + 4 app + 4 session-store + 2 passwords)
 
 ---
 
 ## Deferred Work
 
-- Bearer API-token auth
 - CSRF double-submit token
 - Auth rate-limit (100/min/IP)
+- Graceful shutdown (close Redis + Mongo on SIGTERM)
 - Public register endpoint
-- Graceful shutdown (close Redis + Mongo on SIGTERM) — matches existing Mongo gap

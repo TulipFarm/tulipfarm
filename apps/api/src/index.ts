@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 import Redis from "ioredis";
 import { buildApp } from "./app";
+import { MongoTokenRepo } from "./auth/api-tokens";
 import { RedisSessionStore } from "./auth/session-store";
 import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
@@ -50,8 +51,9 @@ async function boot() {
     const ttlSeconds = Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "604800", 10);
     const sessionStore = new RedisSessionStore(redis, ttlSeconds);
     const userRepo = new MongoUserRepo(db);
+    const tokenRepo = new MongoTokenRepo(db);
 
-    const app = await buildApp({ sessionStore, userRepo });
+    const app = await buildApp({ sessionStore, userRepo, tokenRepo });
     await bootstrapAdmin(userRepo, app.log);
 
     app.listen({ port, host: "0.0.0.0" }, (err) => {

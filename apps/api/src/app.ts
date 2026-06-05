@@ -2,6 +2,7 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import Fastify from "fastify";
+import type { TokenRepo } from "./auth/api-tokens";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
@@ -9,6 +10,7 @@ import type { UserRepo } from "./auth/users";
 export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
+  tokenRepo?: TokenRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -29,8 +31,8 @@ export async function buildApp(opts: AppOptions = {}) {
 
   app.get("/health", async () => ({ status: "ok" }));
 
-  if (opts.sessionStore && opts.userRepo) {
-    registerAuthRoutes(app, opts.sessionStore, opts.userRepo);
+  if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
+    registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo);
   }
 
   return app;
