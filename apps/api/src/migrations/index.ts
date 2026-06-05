@@ -21,4 +21,11 @@ export const DATA_MIGRATIONS: DataMigration[] = [
       await db.collection("api_tokens").createIndex({ tokenHash: 1 }, { unique: true });
     },
   },
+  {
+    version: 3,
+    description: "Create unique index on secrets.key",
+    up: async (db) => {
+      await db.collection("secrets").createIndex({ key: 1 }, { unique: true });
+    },
+  },
 ];
