@@ -1,5 +1,5 @@
 import { config } from "dotenv";
-import Fastify from "fastify";
+import { buildApp } from "./app";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
 import { runSoulMigrations } from "./soul/migrate";
@@ -35,13 +35,11 @@ function validateEnvironment() {
 
 validateEnvironment();
 
-const app = Fastify({ logger: true });
-
-app.get("/health", async () => ({ status: "ok" }));
-
-const port = Number.parseInt(process.env.PORT || "4001", 10);
+const port = Number.parseInt(process.env.PORT || "4010", 10);
 
 async function boot() {
+  const app = await buildApp();
+
   try {
     const { db } = await connectDb();
     await runSoulMigrations(process.env.SOUL_PATH as string);

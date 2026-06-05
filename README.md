@@ -37,7 +37,7 @@
    pnpm install
    pnpm dev
    ```
-   - API will start on `http://localhost:4001` (default, configurable via `PORT` env var)
+   - API will start on `http://localhost:4010` (default, configurable via `PORT` env var)
    - Web UI will start on `http://localhost:4000` (default, configurable via `VITE_PORT` env var)
 
    **Individual app development:**
@@ -48,7 +48,7 @@
 
 4. **Check API health:**
    ```bash
-   curl http://localhost:3001/health
+   curl http://localhost:4010/health
    ```
 
 ### Environment Setup
