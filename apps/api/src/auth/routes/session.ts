@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { generateCsrfToken, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
 import type { SessionStore } from "../session-store";
@@ -54,6 +55,7 @@ export function registerSessionRoutes(
 
     const sid = await store.create(user._id);
     reply.setCookie(SESSION_COOKIE, sid, cookieOptions(ttlSeconds));
+    setCsrfCookie(reply, generateCsrfToken(), ttlSeconds);
     return reply.code(200).send({ user: toPublicUser(user) });
   });
 

@@ -1,6 +1,6 @@
-# Absolute Work Board: Bearer API Token Auth
+# Absolute Work Board: CSRF Double-Submit Cookie
 
-**Issue:** [#8](https://github.com/TulipFarm/project/issues/8)
+**Issue:** [#9](https://github.com/TulipFarm/project/issues/9)
 **Status:** COMPLETED
 **Date Completed:** 2026-06-05
 **Date Created:** 2026-06-05
@@ -20,75 +20,56 @@
 
 ## Rollback Point
 
-Pre-implementation commit: `05b2d63` (feat: session auth)
+Pre-implementation commit: `effc04d` (feat: bearer API token auth)
 
 ---
 
 ## Decisions
 
-1. Token format: `tulip_<base64url(randomBytes(32))>` — 49 chars, namespaced.
-2. Hashing: SHA-256 (node crypto) — tokens are high-entropy random, no slow KDF needed.
-3. Storage: `api_tokens` MongoDB collection.
-4. Listing: admin sees all; member sees own.
-5. Revocation: hard delete (simpler auth path — not found = not valid).
-6. Admin can create token for other users via optional `userId` body field.
-7. Dual-auth: cookie checked first, Bearer fallback.
+1. Cookie name: `csrf_token` (httpOnly=false, sameSite=strict)
+2. Header name: `x-csrf-token`
+3. Token: `randomBytes(32).toString("hex")` — 64 hex chars
+4. Login exemption: no-session skip (if no tf_sid, csrfHook returns early)
+5. TTL: matches session TTL (default 7 days)
+6. Stateless: no server storage — compare cookie ↔ header only
 
 ---
 
 ## Tasks
 
-### AW-001: api-tokens.ts — TokenDoc, TokenRepo, MongoTokenRepo, createApiToken, hashToken + tests
-- **Type:** code+test | **Size:** S | **Dependencies:** none | **Wave:** 1
-- **Files:** `apps/api/src/auth/api-tokens.ts`, `apps/api/src/auth/api-tokens.test.ts`
+### AW-001: csrf.ts — CSRF utilities + unit tests
+- **Status:** ✅ DONE — 12 unit tests pass
+
+### AW-002: session.ts — set CSRF cookie on login
 - **Status:** ✅ DONE
 
-### AW-002: Migration v2 — unique index on api_tokens.tokenHash
-- **Type:** infra | **Size:** S | **Dependencies:** none | **Wave:** 1
-- **Files:** `apps/api/src/migrations/index.ts`
+### AW-003: app.ts — register global CSRF hook
 - **Status:** ✅ DONE
 
-### AW-003: routes.ts — dual-auth requireAuth + token CRUD + route tests
-- **Type:** code+test | **Size:** M | **Dependencies:** AW-001 | **Wave:** 2
-- **Files:** `apps/api/src/auth/routes.ts`, `apps/api/src/auth/routes.test.ts`
-- **Status:** ✅ DONE
+### AW-004: Integration tests — CSRF behavior in routes
+- **Status:** ✅ DONE — 6 new integration tests; existing tests updated
 
-### AW-004: app.ts + index.ts wiring
-- **Type:** code | **Size:** S | **Dependencies:** AW-003 | **Wave:** 3
-- **Files:** `apps/api/src/app.ts`, `apps/api/src/index.ts`
-- **Status:** ✅ DONE
-
-### AW-005: Self code review
-- **Type:** test | **Size:** S | **Dependencies:** AW-004 | **Wave:** 4
-- **Status:** ✅ DONE — cavecrew reviewer: no issues found
-
-### AW-006: Requirements validation vs issue #8 ACs
-- **Type:** test | **Size:** S | **Dependencies:** AW-005 | **Wave:** 4
-- **Status:** ✅ DONE — all 5 ACs validated
-
-### AW-007: Full verification — pnpm lint && typecheck && test
-- **Type:** test | **Size:** S | **Dependencies:** AW-006 | **Wave:** 4
-- **Status:** ✅ DONE — lint 0 errors · typecheck 0 errors · 47/47 tests pass
+### AW-005: Self review + requirements validation + full verification
+- **Status:** ✅ DONE — lint 0 · typecheck 0 · 65/65 tests pass (18 new)
 
 ---
 
-## Acceptance Criteria (#8)
+## Acceptance Criteria (#9)
 
-- [x] `POST /api/v1/auth/tokens` creates a token (admin or self)
-- [x] `Authorization: Bearer <token>` authenticates requests
-- [x] Tokens stored hashed; raw value shown only at creation
-- [x] `DELETE /api/v1/auth/tokens/:id` revokes a token
-- [x] Both session and token auth work on the same endpoints (dual-auth)
+- [x] GET requests pass without CSRF token
+- [x] POST/PUT/PATCH/DELETE without correct CSRF header return 403
+- [x] Bearer-token-authenticated requests exempt from CSRF check
+- [x] CSRF token rotated on login
 
 ## Verification
 
-- `pnpm lint` 0 errors · `pnpm typecheck` 0 errors · `pnpm test` 47/47 (10 api-tokens unit + 9 session routes + 14 token routes + 4 bearer + 4 app + 4 session-store + 2 passwords)
+- `pnpm lint` 0 errors · `pnpm typecheck` 0 errors · `pnpm test` 65/65 (12 csrf unit + 6 csrf integration + 47 prior)
 
 ---
 
 ## Deferred Work
 
-- CSRF double-submit token
+- CSRF token refresh endpoint (if cookie expires mid-session)
 - Auth rate-limit (100/min/IP)
 - Graceful shutdown (close Redis + Mongo on SIGTERM)
 - Public register endpoint

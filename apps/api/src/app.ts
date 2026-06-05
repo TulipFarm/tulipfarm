@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import Fastify from "fastify";
 import type { TokenRepo } from "./auth/api-tokens";
+import { csrfHook } from "./auth/csrf";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
@@ -28,6 +29,8 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   await app.register(cookie);
+
+  app.addHook("preHandler", csrfHook);
 
   app.get("/health", async () => ({ status: "ok" }));
 
