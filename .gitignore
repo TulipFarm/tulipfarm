@@ -4,3 +4,6 @@ build/
 .turbo/
 *.local
 .env*
+!.env.local.example
+soul/
+specs

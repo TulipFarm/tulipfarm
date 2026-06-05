@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
       fastify:
         specifier: ^5.8.5
         version: 5.8.5
