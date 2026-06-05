@@ -1,9 +1,9 @@
-import { Db } from 'mongodb'
+import type { Db } from "mongodb";
 
 export interface DataMigration {
-  version: number
-  description: string
-  up: (db: Db) => Promise<void>
+  version: number;
+  description: string;
+  up: (db: Db) => Promise<void>;
 }
 
-export const DATA_MIGRATIONS: DataMigration[] = []
+export const DATA_MIGRATIONS: DataMigration[] = [];

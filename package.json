@@ -8,10 +8,19 @@
     "dev:api": "turbo dev --filter=@tulipfarm/api",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "lint": "turbo lint",
-    "typecheck": "turbo typecheck"
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "prepare": "lefthook install"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx,json,css}": "biome check --write --no-errors-on-unmatched"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9",
+    "lefthook": "^1",
+    "lint-staged": "^15",
     "turbo": "^2.9.16",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^3"
   }
 }

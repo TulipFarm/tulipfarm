@@ -4,6 +4,8 @@
   "private": true,
   "main": "src/index.ts",
   "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
