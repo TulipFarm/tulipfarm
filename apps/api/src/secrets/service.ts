@@ -1,7 +1,7 @@
 import { type SecretEnvelope, decryptSecret, encryptSecret } from "./crypto";
 import { assertValidSecretKey } from "./key-guard";
 import type { EncryptionKeys } from "./keys";
-import type { SecretRepo, SecretType } from "./repo";
+import type { SecretMeta, SecretRepo, SecretType } from "./repo";
 
 export class SecretUnavailableError extends Error {}
 
@@ -33,6 +33,15 @@ export class SecretsService {
     this.log = deps.log;
     this.ttlMs = deps.ttlMs ?? 300_000;
     this.staleMs = deps.staleMs ?? 900_000;
+  }
+
+  async list(): Promise<SecretMeta[]> {
+    return this.repo.list();
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.repo.delete(key);
+    this.cache.delete(key);
   }
 
   async set(key: string, plaintext: string, type: SecretType = "user-provided"): Promise<void> {

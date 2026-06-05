@@ -22,9 +22,18 @@ export interface SecretEnvelopeFields {
   type: SecretType;
 }
 
+export interface SecretMeta {
+  key: string;
+  type: SecretType;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface SecretRepo {
+  list(): Promise<SecretMeta[]>;
   findByKey(key: string): Promise<SecretDoc | null>;
   upsert(key: string, fields: SecretEnvelopeFields): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 export class MongoSecretRepo implements SecretRepo {
@@ -32,6 +41,11 @@ export class MongoSecretRepo implements SecretRepo {
 
   constructor(db: Db) {
     this.collection = db.collection<SecretDoc>("secrets");
+  }
+
+  async list(): Promise<SecretMeta[]> {
+    const docs = await this.collection.find({}).toArray();
+    return docs.map(({ key, type, createdAt, updatedAt }) => ({ key, type, createdAt, updatedAt }));
   }
 
   findByKey(key: string): Promise<SecretDoc | null> {
@@ -48,5 +62,9 @@ export class MongoSecretRepo implements SecretRepo {
       },
       { upsert: true }
     );
+  }
+
+  async delete(key: string): Promise<void> {
+    await this.collection.deleteOne({ key });
   }
 }

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
@@ -5,6 +6,8 @@ import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
 import { MemorySessionStore } from "./auth/session-store";
 import type { UserDoc, UserRepo } from "./auth/users";
 import type { PaginatedResult } from "./pagination";
+import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "./secrets/repo";
+import { SecretsService } from "./secrets/service";
 
 class FakeUserRepo implements UserRepo {
   async findByEmail(): Promise<UserDoc | null> {
@@ -42,11 +45,24 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
+class FakeSecretRepo implements SecretRepo {
+  async list(): Promise<SecretMeta[]> {
+    return [];
+  }
+  async findByKey(): Promise<null> {
+    return null;
+  }
+  async upsert(_key: string, _fields: SecretEnvelopeFields): Promise<void> {}
+  async delete(): Promise<void> {}
+}
+
 function buildTestApp() {
+  const secretsService = new SecretsService(new FakeSecretRepo(), { current: randomBytes(32) });
   return buildApp({
     sessionStore: new MemorySessionStore(),
     userRepo: new FakeUserRepo(),
     tokenRepo: new FakeTokenRepo(),
+    secretsService,
   });
 }
 
@@ -81,6 +97,8 @@ describe("OpenAPI spec", () => {
     expect(paths).toContain("/api/v1/auth/session");
     expect(paths).toContain("/api/v1/auth/tokens");
     expect(paths).toContain("/api/v1/auth/tokens/{id}");
+    expect(paths).toContain("/api/v1/secrets/status");
+    expect(paths).toContain("/api/v1/secrets/{key}");
   });
 
   it("GET /docs/ returns Scalar UI HTML", async () => {

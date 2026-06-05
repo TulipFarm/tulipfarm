@@ -7,6 +7,9 @@ import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
 import { RedisRateLimiter } from "./rate-limit";
+import { loadEncryptionKeys } from "./secrets/keys";
+import { MongoSecretRepo } from "./secrets/repo";
+import { SecretsService } from "./secrets/service";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -73,6 +76,11 @@ export function validateEnvironment(
   validateUriPrefix("MONGODB_URI", ["mongodb://", "mongodb+srv://"], env, exit);
   validateUriPrefix("REDIS_URL", ["redis://", "rediss://"], env, exit);
 
+  // Validate ENCRYPTION_KEY_PREVIOUS if set (optional, used for key rotation)
+  if (env.ENCRYPTION_KEY_PREVIOUS !== undefined) {
+    validateBase64Secret("ENCRYPTION_KEY_PREVIOUS", env, exit);
+  }
+
   // Validate SESSION_TTL_SECONDS if set (optional)
   if (env.SESSION_TTL_SECONDS !== undefined) {
     const ttl = Number.parseInt(env.SESSION_TTL_SECONDS, 10);
@@ -112,7 +120,11 @@ async function boot() {
     const tokenRepo = new MongoTokenRepo(db);
     const rateLimiter = new RedisRateLimiter(redis, console);
 
-    const app = await buildApp({ sessionStore, userRepo, tokenRepo, rateLimiter });
+    const secretRepo = new MongoSecretRepo(db);
+    const encryptionKeys = loadEncryptionKeys();
+    const secretsService = new SecretsService(secretRepo, encryptionKeys);
+
+    const app = await buildApp({ sessionStore, userRepo, tokenRepo, rateLimiter, secretsService });
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 
