@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TulipFarm Brand Assets Preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #0a0a0a; color: #e5e5e5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px; }
+    h1 { font-size: 28px; font-weight: 600; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; font-size: 14px; margin-bottom: 48px; }
+    .section { margin-bottom: 48px; }
+    .section-title { font-size: 18px; font-weight: 600; color: #E11D63; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; font-size: 13px; }
+    .grid { display: flex; flex-wrap: wrap; gap: 32px; align-items: end; }
+    .asset { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .asset img, .asset .svg-preview { background: repeating-conic-gradient(#1a1a1a 0% 25%, #222 0% 50%) 50% / 16px 16px; border-radius: 12px; border: 1px solid #333; }
+    .asset .dark-bg img { background: #0a0a0a; }
+    .asset-label { font-size: 12px; color: #888; text-align: center; line-height: 1.4; }
+    .asset-label strong { color: #ccc; display: block; font-size: 13px; }
+    .asset-label .size { color: #666; }
+    .og-preview { border-radius: 12px; border: 1px solid #333; overflow: hidden; }
+    .og-preview img { display: block; width: 600px; height: auto; }
+    .formats-row { display: flex; gap: 24px; flex-wrap: wrap; }
+    .format-card { background: #141414; border: 1px solid #262626; border-radius: 12px; padding: 24px; min-width: 200px; }
+    .format-card h3 { font-size: 14px; color: #E11D63; margin-bottom: 8px; }
+    .format-card p { font-size: 12px; color: #888; line-height: 1.5; }
+    .format-card .file { font-family: monospace; color: #ccc; font-size: 11px; background: #1a1a1a; padding: 2px 6px; border-radius: 4px; }
+    .badge { display: inline-block; background: #E11D63; color: #fff; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 99px; margin-left: 6px; }
+    table { border-collapse: collapse; width: 100%; max-width: 800px; }
+    th, td { text-align: left; padding: 10px 16px; border-bottom: 1px solid #1a1a1a; font-size: 13px; }
+    th { color: #888; font-weight: 500; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    td { color: #ccc; }
+    td:first-child { font-family: monospace; color: #E11D63; }
+    .svg-inline { padding: 24px; display: flex; align-items: center; justify-content: center; }
+  </style>
+</head>
+<body>
+  <h1>TulipFarm Brand Assets</h1>
+  <p class="subtitle">Generated from tulipfarm-raw.png &mdash; all metadata stripped, background cropped</p>
+
+  <div class="section">
+    <div class="section-title">PNG Variants</div>
+    <div class="grid">
+      <div class="asset">
+        <img src="./logo-512.png" width="512" height="512" alt="512px">
+        <div class="asset-label"><strong>512 &times; 512</strong><span class="size">214 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-256.png" width="256" height="256" alt="256px">
+        <div class="asset-label"><strong>256 &times; 256</strong><span class="size">52 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-192.png" width="192" height="192" alt="192px">
+        <div class="asset-label"><strong>192 &times; 192</strong><span class="size">31 KB &mdash; PWA</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-128.png" width="128" height="128" alt="128px">
+        <div class="asset-label"><strong>128 &times; 128</strong><span class="size">16 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-64.png" width="64" height="64" alt="64px">
+        <div class="asset-label"><strong>64 &times; 64</strong><span class="size">5.7 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-48.png" width="48" height="48" alt="48px">
+        <div class="asset-label"><strong>48 &times; 48</strong><span class="size">3.8 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-32.png" width="32" height="32" alt="32px">
+        <div class="asset-label"><strong>32 &times; 32</strong><span class="size">2.2 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-16.png" width="16" height="16" alt="16px">
+        <div class="asset-label"><strong>16 &times; 16</strong><span class="size">1.3 KB</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Special Formats</div>
+    <div class="grid">
+      <div class="asset">
+        <img src="./apple-touch-icon.png" width="180" height="180" alt="Apple Touch Icon">
+        <div class="asset-label"><strong>Apple Touch Icon</strong><span class="size">180 &times; 180 &mdash; 27 KB</span></div>
+      </div>
+      <div class="asset">
+        <img src="./favicon.ico" width="48" height="48" alt="Favicon ICO" style="image-rendering: pixelated;">
+        <div class="asset-label"><strong>favicon.ico</strong><span class="size">16+32+48 multi-size &mdash; 15 KB</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">WebP Variants</div>
+    <div class="grid">
+      <div class="asset">
+        <img src="./logo-512.webp" width="256" height="256" alt="WebP 512">
+        <div class="asset-label"><strong>512 &times; 512</strong><span class="size">145 KB (lossless)</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-256.webp" width="128" height="128" alt="WebP 256">
+        <div class="asset-label"><strong>256 &times; 256</strong><span class="size">32 KB (lossless)</span></div>
+      </div>
+      <div class="asset">
+        <img src="./logo-1024.webp" width="128" height="128" alt="WebP 1024">
+        <div class="asset-label"><strong>1024 (full)</strong><span class="size">354 KB (lossless)</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">OG Image (1200 &times; 630)</div>
+    <div class="og-preview">
+      <img src="./og-image.png" alt="OG Image preview">
+    </div>
+    <div class="asset-label" style="margin-top: 12px;"><span class="size">314 KB &mdash; dark background, centered logo</span></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Full Inventory</div>
+    <table>
+      <thead>
+        <tr><th>File</th><th>Dimensions</th><th>Format</th><th>Size</th><th>Use Case</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>logo-1024.png</td><td>1024 (padded)</td><td>PNG</td><td>580 KB</td><td>Source / hi-res</td></tr>
+        <tr><td>logo-512.png</td><td>512 &times; 512</td><td>PNG</td><td>214 KB</td><td>App icon, store listing</td></tr>
+        <tr><td>logo-256.png</td><td>256 &times; 256</td><td>PNG</td><td>52 KB</td><td>Desktop icon, avatar</td></tr>
+        <tr><td>logo-192.png</td><td>192 &times; 192</td><td>PNG</td><td>31 KB</td><td>PWA manifest icon</td></tr>
+        <tr><td>apple-touch-icon.png</td><td>180 &times; 180</td><td>PNG</td><td>27 KB</td><td>iOS home screen</td></tr>
+        <tr><td>logo-128.png</td><td>128 &times; 128</td><td>PNG</td><td>16 KB</td><td>Medium icon</td></tr>
+        <tr><td>logo-64.png</td><td>64 &times; 64</td><td>PNG</td><td>5.7 KB</td><td>Small icon</td></tr>
+        <tr><td>logo-48.png</td><td>48 &times; 48</td><td>PNG</td><td>3.8 KB</td><td>Toolbar / tab icon</td></tr>
+        <tr><td>logo-32.png</td><td>32 &times; 32</td><td>PNG</td><td>2.2 KB</td><td>Favicon fallback</td></tr>
+        <tr><td>logo-16.png</td><td>16 &times; 16</td><td>PNG</td><td>1.3 KB</td><td>Smallest favicon</td></tr>
+        <tr><td>favicon.ico</td><td>16+32+48</td><td>ICO</td><td>15 KB</td><td>Browser favicon</td></tr>
+        <tr><td>logo-1024.webp</td><td>1024 (padded)</td><td>WebP</td><td>354 KB</td><td>Web hi-res (39% smaller than PNG)</td></tr>
+        <tr><td>logo-512.webp</td><td>512 &times; 512</td><td>WebP</td><td>145 KB</td><td>Web standard (32% smaller)</td></tr>
+        <tr><td>logo-256.webp</td><td>256 &times; 256</td><td>WebP</td><td>32 KB</td><td>Web small (38% smaller)</td></tr>
+        <tr><td>og-image.png</td><td>1200 &times; 630</td><td>PNG</td><td>314 KB</td><td>Open Graph / social share</td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
