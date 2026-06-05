@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
+import { MemoryRateLimiter } from "../rate-limit";
 import type { TokenDoc, TokenRepo } from "./api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "./csrf";
 import { SESSION_COOKIE } from "./routes";
@@ -573,5 +574,85 @@ describe("CSRF protection", () => {
       headers: { authorization: `Bearer ${rawToken}` },
     });
     expect(res.statusCode).toBe(200);
+  });
+});
+
+describe("rate limiting", () => {
+  let app: FastifyInstance;
+  let rateLimiter: MemoryRateLimiter;
+
+  beforeEach(async () => {
+    rateLimiter = new MemoryRateLimiter();
+    const store = new MemorySessionStore();
+    const repo = new FakeUserRepo();
+    await createUser(repo, "user@example.com", "pass", "admin");
+    app = await buildApp({
+      sessionStore: store,
+      userRepo: repo,
+      tokenRepo: new MemoryTokenRepo(),
+      rateLimiter,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("returns 429 after exceeding limit", async () => {
+    // exhaust the limit
+    for (let i = 0; i < 100; i++) {
+      await rateLimiter.check("rl:auth:127.0.0.1", 100, 60_000);
+    }
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "user@example.com", password: "pass" },
+    });
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toEqual({ error: "rate_limit_exceeded" });
+  });
+
+  it("sets Retry-After header on 429", async () => {
+    for (let i = 0; i < 100; i++) {
+      await rateLimiter.check("rl:auth:127.0.0.1", 100, 60_000);
+    }
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "user@example.com", password: "pass" },
+    });
+    expect(res.statusCode).toBe(429);
+    const retryAfter = Number(res.headers["retry-after"]);
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(60);
+  });
+
+  it("sets X-RateLimit-* headers on allowed response", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "user@example.com", password: "pass" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["x-ratelimit-limit"]).toBe("100");
+    expect(Number(res.headers["x-ratelimit-remaining"])).toBeGreaterThanOrEqual(0);
+    expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
+  });
+
+  it("sets X-RateLimit-* headers on 429", async () => {
+    for (let i = 0; i < 100; i++) {
+      await rateLimiter.check("rl:auth:127.0.0.1", 100, 60_000);
+    }
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "user@example.com", password: "pass" },
+    });
+    expect(res.headers["x-ratelimit-limit"]).toBe("100");
+    expect(res.headers["x-ratelimit-remaining"]).toBe("0");
+    expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
   });
 });

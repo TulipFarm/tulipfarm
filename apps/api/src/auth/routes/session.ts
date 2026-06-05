@@ -34,9 +34,10 @@ export function registerSessionRoutes(
   store: SessionStore,
   repo: UserRepo,
   requireAuth: PreHandler,
-  ttlSeconds = DEFAULT_TTL_SECONDS
+  ttlSeconds = DEFAULT_TTL_SECONDS,
+  rateLimitHook?: PreHandler
 ): void {
-  app.post("/api/v1/auth/login", async (req, reply) => {
+  app.post("/api/v1/auth/login", { preHandler: rateLimitHook ?? [] }, async (req, reply) => {
     const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
     const email = typeof body.email === "string" ? body.email : "";
     const password = typeof body.password === "string" ? body.password : "";
@@ -59,7 +60,7 @@ export function registerSessionRoutes(
     return reply.code(200).send({ user: toPublicUser(user) });
   });
 
-  app.post("/api/v1/auth/logout", async (req, reply) => {
+  app.post("/api/v1/auth/logout", { preHandler: rateLimitHook ?? [] }, async (req, reply) => {
     const sid = req.cookies[SESSION_COOKIE];
     if (sid) {
       await store.destroy(sid);
@@ -68,10 +69,14 @@ export function registerSessionRoutes(
     return reply.code(204).send();
   });
 
-  app.get("/api/v1/auth/session", { preHandler: requireAuth }, async (req, reply) => {
-    if (!req.user) {
-      return reply.code(401).send({ error: "unauthorized" });
+  app.get(
+    "/api/v1/auth/session",
+    { preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth },
+    async (req, reply) => {
+      if (!req.user) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      return reply.send({ user: toPublicUser(req.user) });
     }
-    return reply.send({ user: toPublicUser(req.user) });
-  });
+  );
 }

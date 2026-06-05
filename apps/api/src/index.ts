@@ -6,6 +6,7 @@ import { RedisSessionStore } from "./auth/session-store";
 import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
+import { RedisRateLimiter } from "./rate-limit";
 import { runSoulMigrations } from "./soul/migrate";
 
 // Load .env.local (symlinked from root by setup script)
@@ -52,8 +53,9 @@ async function boot() {
     const sessionStore = new RedisSessionStore(redis, ttlSeconds);
     const userRepo = new MongoUserRepo(db);
     const tokenRepo = new MongoTokenRepo(db);
+    const rateLimiter = new RedisRateLimiter(redis, console);
 
-    const app = await buildApp({ sessionStore, userRepo, tokenRepo });
+    const app = await buildApp({ sessionStore, userRepo, tokenRepo, rateLimiter });
     await bootstrapAdmin(userRepo, app.log);
 
     app.listen({ port, host: "0.0.0.0" }, (err) => {

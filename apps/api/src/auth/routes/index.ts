@@ -1,4 +1,6 @@
 import type { FastifyInstance } from "fastify";
+import type { RateLimiter } from "../../rate-limit";
+import { makeRateLimitHook } from "../../rate-limit";
 import type { TokenRepo } from "../api-tokens";
 import { makeRequireAuth } from "../middleware";
 import type { SessionStore } from "../session-store";
@@ -10,7 +12,11 @@ export { SESSION_COOKIE } from "../middleware";
 
 interface AuthRouteOptions {
   ttlSeconds?: number;
+  rateLimiter?: RateLimiter;
 }
+
+const AUTH_LIMIT = 100;
+const AUTH_WINDOW_MS = 60_000;
 
 export function registerAuthRoutes(
   app: FastifyInstance,
@@ -23,6 +29,15 @@ export function registerAuthRoutes(
     options.ttlSeconds ?? Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "604800", 10);
   const requireAuth = makeRequireAuth(store, repo, tokenRepo);
 
-  registerSessionRoutes(app, store, repo, requireAuth, ttlSeconds);
-  registerTokenRoutes(app, repo, tokenRepo, requireAuth);
+  const preHandler = options.rateLimiter
+    ? makeRateLimitHook(
+        options.rateLimiter,
+        (req) => `rl:auth:${req.ip}`,
+        AUTH_LIMIT,
+        AUTH_WINDOW_MS
+      )
+    : undefined;
+
+  registerSessionRoutes(app, store, repo, requireAuth, ttlSeconds, preHandler);
+  registerTokenRoutes(app, repo, tokenRepo, requireAuth, preHandler);
 }
