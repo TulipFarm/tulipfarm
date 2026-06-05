@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Collection, Db } from "mongodb";
+import { type PaginatedResult, paginateCollection } from "../pagination";
 
 export interface TokenDoc {
   _id: string;
@@ -43,6 +44,15 @@ export interface TokenRepo {
   findAll(): Promise<TokenDoc[]>;
   findById(id: string): Promise<TokenDoc | null>;
   deleteById(id: string): Promise<void>;
+  findAllPaginated(
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>>;
+  findByUserIdPaginated(
+    userId: string,
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>>;
 }
 
 export class MongoTokenRepo implements TokenRepo {
@@ -74,6 +84,21 @@ export class MongoTokenRepo implements TokenRepo {
 
   async deleteById(id: string): Promise<void> {
     await this.collection.deleteOne({ _id: id });
+  }
+
+  findAllPaginated(
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>> {
+    return paginateCollection(this.collection, {}, limit, after);
+  }
+
+  findByUserIdPaginated(
+    userId: string,
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>> {
+    return paginateCollection(this.collection, { userId }, limit, after);
   }
 }
 

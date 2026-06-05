@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { PaginatedResult } from "../pagination";
 import {
   type TokenDoc,
   type TokenRepo,
@@ -27,6 +28,12 @@ class MemoryTokenRepo implements TokenRepo {
   }
   async deleteById(id: string): Promise<void> {
     this.tokens = this.tokens.filter((t) => t._id !== id);
+  }
+  async findAllPaginated(): Promise<PaginatedResult<TokenDoc>> {
+    return { items: [...this.tokens], nextCursor: null };
+  }
+  async findByUserIdPaginated(userId: string): Promise<PaginatedResult<TokenDoc>> {
+    return { items: this.tokens.filter((t) => t.userId === userId), nextCursor: null };
   }
 }
 

@@ -98,6 +98,33 @@ If a rule genuinely must be broken, add a scoped suppression on the line — nev
 - Migrations: `apps/api/src/migrations/` run on boot — add new ones there.
 - Env: copy `.env.local.example` → `.env.local`; never commit secrets.
 
+## Local Dev Credentials
+
+Default seed credentials for local dev (used by `scripts/setup-dev.sh`):
+
+- **Email**: `admin@example.com`
+- **Password**: `mypassword`
+
+### Start API
+
+```bash
+ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=mypassword pnpm --filter @tulipfarm/api dev
+```
+
+### Test with curl
+
+```bash
+# Login + save cookie
+curl -c /tmp/tulip.txt -X POST http://localhost:4010/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"mypassword"}'
+
+# Authenticated requests
+curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens"
+curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens?limit=2"
+curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens?limit=2&cursor=<nextCursor>"
+```
+
 ## Git
 
 - Never `git commit` unless explicitly asked.

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { parsePaginationQuery } from "../../pagination";
 import { type TokenRepo, createApiToken, toPublicToken } from "../api-tokens";
 import type { UserDoc, UserRepo } from "../users";
 
@@ -47,11 +48,19 @@ export function registerTokenRoutes(
     { preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth },
     async (req, reply) => {
       const actor = req.user as UserDoc;
-      const tokens =
+      const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
+
+      const rawCursor = (req.query as Record<string, unknown>).cursor;
+      if (typeof rawCursor === "string" && rawCursor !== "" && after === undefined) {
+        return reply.code(400).send({ error: "invalid cursor" });
+      }
+
+      const result =
         actor.role === "admin"
-          ? await tokenRepo.findAll()
-          : await tokenRepo.findByUserId(actor._id);
-      return reply.send({ tokens: tokens.map(toPublicToken) });
+          ? await tokenRepo.findAllPaginated(limit, after)
+          : await tokenRepo.findByUserIdPaginated(actor._id, limit, after);
+
+      return reply.send({ tokens: result.items.map(toPublicToken), nextCursor: result.nextCursor });
     }
   );
 

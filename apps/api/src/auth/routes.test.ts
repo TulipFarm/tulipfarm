@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
+import { type PaginatedResult, encodeCursor } from "../pagination";
 import { MemoryRateLimiter } from "../rate-limit";
 import type { TokenDoc, TokenRepo } from "./api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "./csrf";
@@ -29,6 +30,7 @@ class FakeUserRepo implements UserRepo {
 
 class MemoryTokenRepo implements TokenRepo {
   private tokens: TokenDoc[] = [];
+
   async create(token: TokenDoc): Promise<void> {
     this.tokens.push(token);
   }
@@ -47,6 +49,44 @@ class MemoryTokenRepo implements TokenRepo {
   async deleteById(id: string): Promise<void> {
     this.tokens = this.tokens.filter((t) => t._id !== id);
   }
+
+  async findAllPaginated(
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>> {
+    return paginateInMemory(this.tokens, {}, limit, after);
+  }
+
+  async findByUserIdPaginated(
+    userId: string,
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<TokenDoc>> {
+    return paginateInMemory(this.tokens, { userId }, limit, after);
+  }
+}
+
+function paginateInMemory(
+  tokens: TokenDoc[],
+  filter: { userId?: string },
+  limit: number,
+  after?: { createdAt: Date; _id: string }
+): PaginatedResult<TokenDoc> {
+  let items = filter.userId ? tokens.filter((t) => t.userId === filter.userId) : [...tokens];
+  items = items.sort((a, b) => {
+    const d = a.createdAt.getTime() - b.createdAt.getTime();
+    return d !== 0 ? d : a._id.localeCompare(b._id);
+  });
+  if (after) {
+    items = items.filter(
+      (t) =>
+        t.createdAt > after.createdAt ||
+        (t.createdAt.getTime() === after.createdAt.getTime() && t._id > after._id)
+    );
+  }
+  const hasMore = items.length > limit;
+  const page = items.slice(0, limit);
+  return { items: page, nextCursor: hasMore ? encodeCursor(page[page.length - 1]) : null };
 }
 
 function cookieValue(res: { cookies: Array<{ name: string; value: string }> }): string | undefined {
@@ -148,6 +188,94 @@ describe("auth routes", () => {
       cookies: { [SESSION_COOKIE]: "bogus" },
     });
     expect(res.statusCode).toBe(401);
+  });
+
+  describe("GET /tokens pagination", () => {
+    let sessionCookie: string;
+
+    beforeEach(async () => {
+      const login = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        payload: { email: "user@example.com", password: "correct-horse" },
+      });
+      sessionCookie = cookieValue(login) as string;
+    });
+
+    async function createToken(name: string): Promise<void> {
+      const csrfLogin = await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/login",
+        payload: { email: "user@example.com", password: "correct-horse" },
+      });
+      const csrf = csrfLogin.cookies.find((c) => c.name === CSRF_COOKIE)?.value as string;
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/auth/tokens",
+        cookies: { [SESSION_COOKIE]: sessionCookie, [CSRF_COOKIE]: csrf },
+        headers: { [CSRF_HEADER]: csrf },
+        payload: { name },
+      });
+    }
+
+    it("returns tokens with nextCursor null when results fit in one page", async () => {
+      await createToken("t1");
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/auth/tokens",
+        cookies: { [SESSION_COOKIE]: sessionCookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<{ tokens: unknown[]; nextCursor: string | null }>();
+      expect(body.tokens).toHaveLength(1);
+      expect(body.nextCursor).toBeNull();
+    });
+
+    it("returns nextCursor when results exceed limit", async () => {
+      await createToken("t1");
+      await createToken("t2");
+      await createToken("t3");
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/auth/tokens?limit=2",
+        cookies: { [SESSION_COOKIE]: sessionCookie },
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json<{ tokens: unknown[]; nextCursor: string | null }>();
+      expect(body.tokens).toHaveLength(2);
+      expect(typeof body.nextCursor).toBe("string");
+    });
+
+    it("fetches next page using cursor", async () => {
+      await createToken("t1");
+      await createToken("t2");
+      await createToken("t3");
+      const first = await app.inject({
+        method: "GET",
+        url: "/api/v1/auth/tokens?limit=2",
+        cookies: { [SESSION_COOKIE]: sessionCookie },
+      });
+      const { nextCursor } = first.json<{ tokens: unknown[]; nextCursor: string }>();
+      const second = await app.inject({
+        method: "GET",
+        url: `/api/v1/auth/tokens?limit=2&cursor=${nextCursor}`,
+        cookies: { [SESSION_COOKIE]: sessionCookie },
+      });
+      expect(second.statusCode).toBe(200);
+      const body = second.json<{ tokens: unknown[]; nextCursor: string | null }>();
+      expect(body.tokens).toHaveLength(1);
+      expect(body.nextCursor).toBeNull();
+    });
+
+    it("returns 400 for an invalid cursor", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/auth/tokens?cursor=notvalid!!",
+        cookies: { [SESSION_COOKIE]: sessionCookie },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("invalid cursor");
+    });
   });
 
   it("POST /logout clears the session and cookie", async () => {
