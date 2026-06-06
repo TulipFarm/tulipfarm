@@ -151,6 +151,8 @@ async function boot() {
       rateLimiter,
       secretsService,
       gitSync,
+      soulLoader,
+      db,
     });
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);

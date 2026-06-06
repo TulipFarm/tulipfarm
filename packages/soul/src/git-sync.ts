@@ -22,6 +22,10 @@ export class GitSyncService extends EventEmitter {
     super();
   }
 
+  get path(): string {
+    return this.soulPath;
+  }
+
   private authUrl(): string {
     if (!this.remoteUrl) return "";
     if (!this.credentials) return this.remoteUrl;

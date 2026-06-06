@@ -1,0 +1,338 @@
+import type { GitSyncService, SoulLoader, SoulResource } from "@tulipfarm/soul";
+import type { FastifyInstance } from "fastify";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../../app";
+import type { TokenDoc, TokenRepo } from "../../auth/api-tokens";
+import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
+import { SESSION_COOKIE } from "../../auth/middleware";
+import { MemorySessionStore } from "../../auth/session-store";
+import { type UserDoc, type UserRepo, createUser } from "../../auth/users";
+import type { PaginatedResult } from "../../pagination";
+
+vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
+vi.mock("node:fs/promises", () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
+
+import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+
+const TEST_CSRF = "a".repeat(64);
+
+const VALID_SCHEMA_YAML = `type: object
+properties:
+  title:
+    type: string
+required:
+  - title
+`;
+
+// ── Fake dependencies ─────────────────────────────────────────────────────────
+
+class FakeUserRepo implements UserRepo {
+  private users: UserDoc[] = [];
+  async findByEmail(email: string): Promise<UserDoc | null> {
+    return this.users.find((u) => u.email === email.trim().toLowerCase()) ?? null;
+  }
+  async findById(id: string): Promise<UserDoc | null> {
+    return this.users.find((u) => u._id === id) ?? null;
+  }
+  async count(): Promise<number> {
+    return this.users.length;
+  }
+  async insert(user: UserDoc): Promise<void> {
+    this.users.push(user);
+  }
+}
+
+class FakeTokenRepo implements TokenRepo {
+  private tokens: TokenDoc[] = [];
+  async create(token: TokenDoc): Promise<void> {
+    this.tokens.push(token);
+  }
+  async findByHash(hash: string): Promise<TokenDoc | null> {
+    return this.tokens.find((t) => t.tokenHash === hash) ?? null;
+  }
+  async findByUserId(userId: string): Promise<TokenDoc[]> {
+    return this.tokens.filter((t) => t.userId === userId);
+  }
+  async findAll(): Promise<TokenDoc[]> {
+    return [...this.tokens];
+  }
+  async findById(id: string): Promise<TokenDoc | null> {
+    return this.tokens.find((t) => t._id === id) ?? null;
+  }
+  async deleteById(id: string): Promise<void> {
+    this.tokens = this.tokens.filter((t) => t._id !== id);
+  }
+  async findAllPaginated(): Promise<PaginatedResult<TokenDoc>> {
+    return { items: [], nextCursor: null };
+  }
+  async findByUserIdPaginated(): Promise<PaginatedResult<TokenDoc>> {
+    return { items: [], nextCursor: null };
+  }
+}
+
+function makeFakeGitSync(soulPath = "/fake/soul"): GitSyncService {
+  return {
+    path: soulPath,
+    commit: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 }),
+    push: vi.fn().mockResolvedValue(true),
+    on: vi.fn(),
+  } as unknown as GitSyncService;
+}
+
+function makeFakeSoulLoader(resources: SoulResource[] = []): SoulLoader {
+  return {
+    resources: new Map(resources.map((r) => [r.name, r])),
+    reload: vi.fn().mockResolvedValue(undefined),
+  } as unknown as SoulLoader;
+}
+
+// ── Test setup ────────────────────────────────────────────────────────────────
+
+describe("resource-type routes", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let tokenRepo: FakeTokenRepo;
+  let gitSync: GitSyncService;
+  let soulLoader: SoulLoader;
+  let sid: string;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    tokenRepo = new FakeTokenRepo();
+    gitSync = makeFakeGitSync();
+    soulLoader = makeFakeSoulLoader();
+
+    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    sid = await store.create(user._id);
+
+    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  // ── POST /api/v1/resource-types ───────────────────────────────────────────
+
+  describe("POST /api/v1/resource-types", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        payload: { name: "ticket", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("creates resource type — writes raw YAML, commits, reloads, returns YAML schema", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toEqual({ name: "ticket", schema: VALID_SCHEMA_YAML, hasHooks: false });
+      expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("resources/ticket"), {
+        recursive: true,
+      });
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("schema.yml"),
+        VALID_SCHEMA_YAML,
+        "utf8"
+      );
+      expect(gitSync.commit).toHaveBeenCalledWith("soul: add resource type ticket");
+      expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("returns 400 for empty name", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: "invalid resource type name" });
+    });
+
+    it("returns 400 for name with uppercase", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "MyType", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: "invalid resource type name" });
+    });
+
+    it("returns 400 for name starting with digit", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "123bad", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: "invalid resource type name" });
+    });
+
+    it("returns 409 if resource type already exists", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(409);
+      expect(res.json()).toMatchObject({ error: "resource type already exists" });
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 for invalid YAML", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: "{ unclosed: [bracket" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({ error: expect.stringContaining("invalid YAML") });
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 for YAML that is not an object", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: "- item1\n- item2\n" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({ error: expect.stringContaining("YAML object") });
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 for invalid JSON Schema (type must be string)", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: "type: 123\n" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 for unknown x-normalize value", async () => {
+      const yaml = `type: object
+properties:
+  phone:
+    type: string
+    x-normalize:
+      - unknown-normalizer
+`;
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: yaml },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({
+        error: expect.stringContaining("unknown normalizer"),
+        boundary: "resource",
+      });
+      expect(mkdir).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 for unknown x-computed fn", async () => {
+      const yaml = `type: object
+x-computed:
+  - field: digest
+    from:
+      - title
+    fn: unknown-fn
+`;
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "ticket", schema: yaml },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({
+        error: expect.stringContaining("unknown computed fn"),
+        boundary: "resource",
+      });
+    });
+  });
+
+  // ── GET /api/v1/resource-types ────────────────────────────────────────────
+
+  describe("GET /api/v1/resource-types", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/resource-types" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns empty types array when no resources loaded", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ types: [] });
+    });
+
+    it("returns resource types with YAML schema strings", async () => {
+      await app.close();
+      soulLoader = makeFakeSoulLoader([
+        { name: "ticket", schema: { type: "object" }, hasHooks: false },
+        { name: "customer", schema: { type: "object" }, hasHooks: true },
+      ]);
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(200);
+      const { types } = res.json<{
+        types: { name: string; schema: string; hasHooks: boolean }[];
+      }>();
+      expect(types).toHaveLength(2);
+      const ticket = types.find((t) => t.name === "ticket");
+      const customer = types.find((t) => t.name === "customer");
+      expect(ticket?.hasHooks).toBe(false);
+      expect(ticket?.schema).toContain("type: object");
+      expect(customer?.hasHooks).toBe(true);
+      expect(customer?.schema).toContain("type: object");
+    });
+  });
+});

@@ -4,8 +4,9 @@ import helmet from "@fastify/helmet";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService } from "@tulipfarm/soul";
+import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
+import type { Db } from "mongodb";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
@@ -13,7 +14,9 @@ import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
 import type { RateLimiter } from "./rate-limit";
+import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
+import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
 
 export interface AppOptions {
@@ -23,6 +26,8 @@ export interface AppOptions {
   rateLimiter?: RateLimiter;
   secretsService?: SecretsService;
   gitSync?: GitSyncService;
+  soulLoader?: SoulLoader;
+  db?: Db;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -101,6 +106,12 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);
+      if (opts.soulLoader) {
+        registerResourceTypeRoutes(app, opts.gitSync, opts.soulLoader, requireAuth);
+      }
+    }
+    if (opts.db && opts.soulLoader) {
+      registerResourceRoutes(app, opts.db, opts.soulLoader, requireAuth);
     }
   }
 
