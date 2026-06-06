@@ -1,5 +1,5 @@
 import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
-import { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
 import { Queue, Worker } from "bullmq";
 import { config } from "dotenv";
 import Redis from "ioredis";
@@ -117,6 +117,8 @@ async function boot() {
       console
     );
     await gitSync.bootSync();
+
+    await runSoulMigrations(process.env.SOUL_PATH as string, console);
 
     const soulLoader = new SoulLoader(process.env.SOUL_PATH as string, console);
     await soulLoader.load();
