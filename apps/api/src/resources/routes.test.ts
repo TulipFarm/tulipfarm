@@ -532,3 +532,216 @@ describe("resource routes", () => {
     });
   });
 });
+
+// ── x-links validate-on-write ─────────────────────────────────────────────────
+
+const LINKED_SCHEMA = {
+  type: "object",
+  properties: {
+    title: { type: "string" },
+    customerId: { type: "string", "x-links": { target: "customer" } },
+  },
+  required: ["title"],
+};
+
+function makeFakeDbMulti(repos: Map<string, FakeResourceRepo>) {
+  return {
+    collection: vi.fn().mockImplementation((name: string) => {
+      const baseType = name.replace(/_history$/, "");
+      const repo = repos.get(baseType);
+      return {
+        insertOne: vi.fn().mockImplementation((doc: ResourceDoc) => {
+          repo?.docs.set(doc._id, { ...doc });
+          return Promise.resolve({ insertedId: doc._id });
+        }),
+        findOne: vi
+          .fn()
+          .mockImplementation(({ _id }: { _id: string }) =>
+            Promise.resolve(repo?.docs.get(_id) ?? null)
+          ),
+        find: vi.fn().mockReturnValue({
+          sort: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          toArray: vi.fn().mockImplementation(() => {
+            const items = Array.from(repo?.docs.values() ?? []).filter((d) => d.deletedAt == null);
+            return Promise.resolve(items);
+          }),
+        }),
+        replaceOne: vi
+          .fn()
+          .mockImplementation(
+            ({ _id, version }: { _id: string; version: number }, doc: ResourceDoc) => {
+              const existing = repo?.docs.get(_id);
+              if (!existing || existing.version !== version)
+                return Promise.resolve({ matchedCount: 0 });
+              repo?.docs.set(_id, { ...doc });
+              return Promise.resolve({ matchedCount: 1 });
+            }
+          ),
+        findOneAndUpdate: vi.fn().mockResolvedValue({ seq: 1 }),
+      };
+    }),
+  };
+}
+
+describe("x-links validate-on-write", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let tokenRepo: FakeTokenRepo;
+  let ticketRepo: FakeResourceRepo;
+  let customerRepo: FakeResourceRepo;
+  let sid: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    tokenRepo = new FakeTokenRepo();
+    ticketRepo = new FakeResourceRepo();
+    customerRepo = new FakeResourceRepo();
+
+    const soulLoader = makeFakeSoulLoader([
+      { name: "ticket", schema: LINKED_SCHEMA, hasHooks: false },
+      {
+        name: "customer",
+        schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
+        hasHooks: false,
+      },
+    ]);
+
+    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    sid = await store.create(user._id);
+
+    const db = makeFakeDbMulti(
+      new Map([
+        ["ticket", ticketRepo],
+        ["customer", customerRepo],
+      ])
+    ) as unknown as import("mongodb").Db;
+    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, soulLoader, db });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("rejects POST when linked record does not exist (AC-V1-001a)", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug", customerId: "nonexistent-id" },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json<{ error: string; path: string }>().error).toMatch(/linked record not found/);
+    expect(res.json<{ path: string }>().path).toBe("/customerId");
+  });
+
+  it("accepts POST when linked record exists (AC-V1-001b)", async () => {
+    const custId = randomUUID();
+    customerRepo.docs.set(custId, {
+      _id: custId,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      name: "Acme",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug", customerId: custId },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json<{ customerId: string }>().customerId).toBe(custId);
+  });
+
+  it("accepts POST when optional link field is absent", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug" },
+    });
+    expect(res.statusCode).toBe(201);
+  });
+
+  it("soft-deleting linked customer succeeds; ticket customerId unchanged (AC-V1-002)", async () => {
+    const custId = randomUUID();
+    customerRepo.docs.set(custId, {
+      _id: custId,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      name: "Acme",
+    });
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug", customerId: custId },
+    });
+    expect(create.statusCode).toBe(201);
+    const ticketId = create.json<{ id: string }>().id;
+
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/v1/resources/customer/${custId}`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+    });
+    expect(del.statusCode).toBe(204);
+
+    const custDoc = customerRepo.docs.get(custId);
+    expect(custDoc?.deletedAt).toBeDefined();
+
+    const ticketDoc = ticketRepo.docs.get(ticketId);
+    expect(ticketDoc?.customerId).toBe(custId);
+  });
+
+  it("rejects PATCH that references a soft-deleted record", async () => {
+    const custId = randomUUID();
+    customerRepo.docs.set(custId, {
+      _id: custId,
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      name: "Acme",
+    });
+
+    const create = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug", customerId: custId },
+    });
+    expect(create.statusCode).toBe(201);
+    const ticketId = create.json<{ id: string }>().id;
+
+    customerRepo.docs.set(custId, {
+      _id: custId,
+      version: 2,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      deletedAt: new Date(),
+      name: "Acme",
+    });
+
+    const patch = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/resources/ticket/${ticketId}`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+      payload: { title: "Bug Updated", customerId: custId },
+    });
+    expect(patch.statusCode).toBe(422);
+    expect(patch.json<{ error: string }>().error).toMatch(/linked record not found/);
+  });
+});

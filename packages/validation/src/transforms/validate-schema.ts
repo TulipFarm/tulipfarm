@@ -20,6 +20,27 @@ export function validateResourceSchema(schema: Record<string, unknown>): void {
     }
   }
 
+  // Validate x-links values on each property
+  for (const [field, propSchema] of Object.entries(properties)) {
+    const xl = propSchema["x-links"];
+    if (xl == null) continue;
+    if (typeof xl !== "object" || Array.isArray(xl)) {
+      throw new TulipFarmValidationError(
+        "resource",
+        `/properties/${field}/x-links`,
+        "x-links must be an object"
+      );
+    }
+    const { target } = xl as { target?: unknown };
+    if (typeof target !== "string" || target.length === 0) {
+      throw new TulipFarmValidationError(
+        "resource",
+        `/properties/${field}/x-links/target`,
+        "x-links.target must be a non-empty string"
+      );
+    }
+  }
+
   // Validate x-computed fn values
   const computedRaw = schema["x-computed"];
   const computedSpecs = Array.isArray(computedRaw)

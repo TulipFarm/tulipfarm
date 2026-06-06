@@ -70,6 +70,40 @@ function stripImmutable(
   return out;
 }
 
+function extractLinks(schema: Record<string, unknown>): Array<{ field: string; target: string }> {
+  const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const links: Array<{ field: string; target: string }> = [];
+  for (const [field, propSchema] of Object.entries(props)) {
+    const xl = propSchema["x-links"];
+    if (
+      xl &&
+      typeof xl === "object" &&
+      !Array.isArray(xl) &&
+      typeof (xl as { target?: unknown }).target === "string"
+    ) {
+      links.push({ field, target: (xl as { target: string }).target });
+    }
+  }
+  return links;
+}
+
+async function validateLinks(
+  links: Array<{ field: string; target: string }>,
+  data: Record<string, unknown>,
+  db: Db,
+  soulLoader: SoulLoader
+): Promise<{ field: string; id: string } | null> {
+  for (const { field, target } of links) {
+    const id = data[field];
+    if (id == null || typeof id !== "string") continue;
+    if (!soulLoader.resources.has(target)) continue;
+    const targetRepo = new MongoResourceRepo(db, target);
+    const doc = await targetRepo.findById(id);
+    if (!doc || doc.deletedAt != null) return { field, id };
+  }
+  return null;
+}
+
 export function registerResourceRoutes(
   app: FastifyInstance,
   db: Db,
@@ -127,6 +161,13 @@ export function registerResourceRoutes(
         return reply
           .code(422)
           .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
+      }
+
+      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
+      if (linkErr) {
+        return reply
+          .code(422)
+          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
       }
 
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
@@ -285,6 +326,13 @@ export function registerResourceRoutes(
           .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
       }
 
+      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
+      if (linkErr) {
+        return reply
+          .code(422)
+          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
+      }
+
       const now = new Date();
       const newDoc = {
         _id: id,
@@ -373,6 +421,13 @@ export function registerResourceRoutes(
         return reply
           .code(422)
           .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
+      }
+
+      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
+      if (linkErr) {
+        return reply
+          .code(422)
+          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
       }
 
       const now = new Date();
