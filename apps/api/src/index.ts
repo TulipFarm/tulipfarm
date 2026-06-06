@@ -1,3 +1,5 @@
+import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
+import { GitSyncService } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import Redis from "ioredis";
 import { buildApp } from "./app";
@@ -7,9 +9,6 @@ import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { runDataMigrations } from "./migrate";
 import { RedisRateLimiter } from "./rate-limit";
-import { loadEncryptionKeys } from "./secrets/keys";
-import { MongoSecretRepo } from "./secrets/repo";
-import { SecretsService } from "./secrets/service";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -110,6 +109,14 @@ const port = Number.parseInt(process.env.PORT || "4010", 10);
 
 async function boot() {
   try {
+    const gitSync = new GitSyncService(
+      process.env.SOUL_PATH as string,
+      process.env.GIT_REMOTE_URL,
+      process.env.GIT_CREDENTIALS,
+      console
+    );
+    await gitSync.bootSync();
+
     const { db } = await connectDb();
     await runDataMigrations(db);
 
@@ -132,6 +139,9 @@ async function boot() {
       if (err) {
         app.log.error(err);
         process.exit(1);
+      }
+      if (process.env.GIT_REMOTE_URL) {
+        gitSync.startPeriodicSync(5 * 60 * 1000);
       }
     });
   } catch (error) {

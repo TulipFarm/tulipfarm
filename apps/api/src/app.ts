@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
+import type { SecretsService } from "@tulipfarm/secrets";
 import Fastify from "fastify";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
@@ -12,7 +13,6 @@ import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
 import type { RateLimiter } from "./rate-limit";
 import { registerSecretsRoutes } from "./secrets/routes";
-import type { SecretsService } from "./secrets/service";
 
 export interface AppOptions {
   sessionStore?: SessionStore;

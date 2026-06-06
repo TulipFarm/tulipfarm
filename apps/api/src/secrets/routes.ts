@@ -1,9 +1,8 @@
+import { InvalidSecretKeyError } from "@tulipfarm/secrets";
+import type { SecretType, SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import { InvalidSecretKeyError } from "./key-guard";
-import type { SecretType } from "./repo";
-import type { SecretsService } from "./service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 

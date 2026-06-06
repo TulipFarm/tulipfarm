@@ -16,6 +16,8 @@
     "@fastify/swagger": "^9.7.0",
     "@node-rs/argon2": "^2.0.2",
     "@scalar/fastify-api-reference": "^1.58.0",
+    "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/soul": "workspace:*",
     "dotenv": "^16.4.5",
     "fastify": "^5.8.5",
     "ioredis": "^5.4.1",

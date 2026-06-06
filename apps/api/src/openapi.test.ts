@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { SecretsService } from "@tulipfarm/secrets";
+import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
@@ -6,8 +8,6 @@ import type { TokenDoc, TokenRepo } from "./auth/api-tokens";
 import { MemorySessionStore } from "./auth/session-store";
 import type { UserDoc, UserRepo } from "./auth/users";
 import type { PaginatedResult } from "./pagination";
-import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "./secrets/repo";
-import { SecretsService } from "./secrets/service";
 
 class FakeUserRepo implements UserRepo {
   async findByEmail(): Promise<UserDoc | null> {

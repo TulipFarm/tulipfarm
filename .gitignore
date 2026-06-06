@@ -5,7 +5,7 @@ build/
 *.local
 .env*
 !.env.local.example
-soul/
+/soul/
 specs
 docs/plans
 cookies.txt
