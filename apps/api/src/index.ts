@@ -1,5 +1,6 @@
 import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
 import { GitSyncService } from "@tulipfarm/soul";
+import { Queue, Worker } from "bullmq";
 import { config } from "dotenv";
 import Redis from "ioredis";
 import { buildApp } from "./app";
@@ -141,7 +142,12 @@ async function boot() {
         process.exit(1);
       }
       if (process.env.GIT_REMOTE_URL) {
-        gitSync.startPeriodicSync(5 * 60 * 1000);
+        const bullConnection = { url: process.env.REDIS_URL as string };
+        const syncQueue = new Queue("soul-sync", { connection: bullConnection });
+        new Worker("soul-sync", () => gitSync.syncOnce(), { connection: bullConnection });
+        syncQueue
+          .upsertJobScheduler("soul-sync-periodic", { every: 5 * 60 * 1000 })
+          .catch((err) => app.log.error(`Soul: failed to register sync scheduler — ${err}`));
       }
     });
   } catch (error) {

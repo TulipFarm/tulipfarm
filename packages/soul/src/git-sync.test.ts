@@ -11,15 +11,18 @@ const mockExistsSync = vi.mocked(existsSync);
 const mockSimpleGit = vi.mocked(simpleGit);
 
 function makeMockGit(overrides: Partial<Record<string, unknown>> = {}) {
-  return {
+  const git: Record<string, unknown> = {
     clone: vi.fn().mockResolvedValue(undefined),
     remote: vi.fn().mockResolvedValue(undefined),
     fetch: vi.fn().mockResolvedValue(undefined),
     raw: vi.fn().mockResolvedValue("0\t0"),
     reset: vi.fn().mockResolvedValue(undefined),
     pull: vi.fn().mockResolvedValue(undefined),
+    push: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
+  git.outputHandler = vi.fn().mockReturnValue(git);
+  return git;
 }
 
 function makeLogger() {
@@ -73,11 +76,10 @@ describe("GitSyncService", () => {
       );
     });
 
-    it("is non-fatal on clone failure", async () => {
+    it("throws on clone failure", async () => {
       mockGit.clone.mockRejectedValue(new Error("network error"));
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      await expect(svc.bootSync()).resolves.toBeUndefined();
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("network error"));
+      await expect(svc.bootSync()).rejects.toThrow("network error");
     });
   });
 
@@ -94,11 +96,10 @@ describe("GitSyncService", () => {
       expect(mockGit.pull).toHaveBeenCalledWith("origin", "main", ["--ff-only"]);
     });
 
-    it("is non-fatal on pull failure", async () => {
+    it("throws on pull failure", async () => {
       mockGit.fetch.mockRejectedValue(new Error("timeout"));
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      await expect(svc.bootSync()).resolves.toBeUndefined();
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("timeout"));
+      await expect(svc.bootSync()).rejects.toThrow("timeout");
     });
   });
 
@@ -146,8 +147,8 @@ describe("GitSyncService", () => {
 
   describe("credentials safety", () => {
     it("does not log the token in any log call", async () => {
-      mockExistsSync.mockReturnValue(false);
-      mockGit.clone.mockRejectedValue(new Error("auth failed"));
+      mockExistsSync.mockReturnValue(true);
+      mockGit.raw.mockResolvedValue("0\t0");
       const svc = new GitSyncService(SOUL, REMOTE, "ghp_secret_token", logger);
       await svc.bootSync();
       const logged = [
@@ -158,6 +159,69 @@ describe("GitSyncService", () => {
         .flat()
         .join(" ");
       expect(logged).not.toContain("ghp_secret_token");
+    });
+  });
+
+  describe("push retry (SOUL-V1-004)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it("retries push when ahead-only", async () => {
+      mockGit.raw.mockResolvedValue("3\t0");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("pushed"));
+    });
+
+    it("push failure is non-fatal — warns and continues", async () => {
+      mockGit.raw.mockResolvedValue("2\t0");
+      mockGit.push.mockRejectedValue(new Error("permission denied"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.bootSync()).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("permission denied"));
+    });
+
+    it("does not push when behind-only (fast-forward path)", async () => {
+      mockGit.raw.mockResolvedValue("0\t3");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.push).not.toHaveBeenCalled();
+    });
+
+    it("does not push on genuine divergence (hard-reset path)", async () => {
+      mockGit.raw.mockResolvedValueOnce("2\t3").mockResolvedValueOnce("abc123 local commit");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.push).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("syncOnce", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it("no-ops when no remote configured", async () => {
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await svc.syncOnce();
+      expect(mockGit.fetch).not.toHaveBeenCalled();
+    });
+
+    it("runs pull and logs success", async () => {
+      mockGit.raw.mockResolvedValue("0\t2");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.syncOnce();
+      expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
+      expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("periodic sync complete"));
+    });
+
+    it("is non-fatal on pull failure", async () => {
+      mockGit.fetch.mockRejectedValue(new Error("host unreachable"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.syncOnce()).resolves.toBeUndefined();
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("host unreachable"));
     });
   });
 

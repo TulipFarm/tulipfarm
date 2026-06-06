@@ -29,21 +29,20 @@ export class GitSyncService {
       this.logger.info("Soul: no GIT_REMOTE_URL set, running in local-only mode");
       return;
     }
-    try {
-      const url = this.authUrl();
-      if (!existsSync(join(this.soulPath, ".git"))) {
-        this.logger.info(`Soul: cloning from remote into ${this.soulPath}`);
-        await simpleGit().clone(url, this.soulPath);
-        this.logger.info("Soul: clone complete");
-      } else {
-        this.logger.info("Soul: pulling from origin/main");
-        await this.pull();
-        this.logger.info("Soul: synced from origin/main");
-      }
-    } catch (err) {
-      this.logger.error(
-        `Soul: boot sync failed — ${err instanceof Error ? err.message : String(err)}`
-      );
+    const url = this.authUrl();
+    if (!existsSync(join(this.soulPath, ".git"))) {
+      this.logger.info(`Soul: cloning from remote into ${this.soulPath}`);
+      await simpleGit()
+        .outputHandler((_cmd, stdout, stderr) => {
+          stdout.pipe(process.stdout);
+          stderr.pipe(process.stderr);
+        })
+        .clone(url, this.soulPath);
+      this.logger.info("Soul: clone complete");
+    } else {
+      this.logger.info("Soul: pulling from origin/main");
+      await this.pull();
+      this.logger.info("Soul: synced from origin/main");
     }
   }
 
@@ -59,9 +58,15 @@ export class GitSyncService {
 
     if (behind === 0) {
       if (ahead > 0) {
-        this.logger.info(
-          `Soul: local is ${ahead} commit(s) ahead, remote unchanged — keeping local`
-        );
+        this.logger.info(`Soul: local is ${ahead} commit(s) ahead — keeping local, retrying push`);
+        try {
+          await git.push("origin", "main");
+          this.logger.info("Soul: pushed local commits to origin/main");
+        } catch (err) {
+          this.logger.warn(
+            `Soul: push failed — ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       }
       return;
     }
@@ -79,6 +84,18 @@ export class GitSyncService {
 
     // behind > 0, ahead === 0: safe fast-forward
     await git.pull("origin", "main", ["--ff-only"]);
+  }
+
+  async syncOnce(): Promise<void> {
+    if (!this.remoteUrl) return;
+    try {
+      await this.pull();
+      this.logger.info("Soul: periodic sync complete");
+    } catch (err) {
+      this.logger.error(
+        `Soul: periodic sync failed — ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   startPeriodicSync(intervalMs: number): void {

@@ -18,6 +18,7 @@
     "@scalar/fastify-api-reference": "^1.58.0",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "bullmq": "^5.0.0",
     "dotenv": "^16.4.5",
     "fastify": "^5.8.5",
     "ioredis": "^5.4.1",
