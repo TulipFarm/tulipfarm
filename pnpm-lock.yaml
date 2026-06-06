@@ -53,6 +53,9 @@ importers:
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
+      '@tulipfarm/validation':
+        specifier: workspace:*
+        version: link:../../packages/validation
       bullmq:
         specifier: ^5.0.0
         version: 5.78.0
@@ -158,6 +161,9 @@ importers:
       '@tulipfarm/constants':
         specifier: workspace:*
         version: link:../constants
+      '@tulipfarm/validation':
+        specifier: workspace:*
+        version: link:../validation
       simple-git:
         specifier: ^3.36.0
         version: 3.36.0
@@ -213,6 +219,28 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
+
+  packages/validation:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: ^0.34.0
+        version: 0.34.49
+      ajv:
+        specifier: ^8.17.1
+        version: 8.20.0
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.19
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.19.19)(lightningcss@1.32.0)
 
 packages:
 
@@ -1442,6 +1470,9 @@ packages:
 
   '@simple-git/argv-parser@1.1.1':
     resolution: {integrity: sha512-Q9lBcfQ+VQCpQqGJFHe5yooOS5hGdLFFbJ5R+R5aDsnkPCahtn1hSkMcORX65J2Z5lxSkD0lQorMsncuBQxYUw==}
+
+  '@sinclair/typebox@0.34.49':
+    resolution: {integrity: sha512-brySQQs7Jtn0joV8Xh9ZV/hZb9Ozb0pmazDIASBkYKCjXrXU3mpcFahmK/z4YDhGkQvP9mWJbVyahdtU5wQA+A==}
 
   '@turbo/darwin-64@2.9.16':
     resolution: {integrity: sha512-jLjApWTSNd7JZ5JaLYfelW1ytnGQOvB7ivl+2RD1xQvJTbi8I9gBjzcga7tDZVPyaxpl10YTfJt3BrYXR18KDw==}
@@ -5182,6 +5213,8 @@ snapshots:
   '@simple-git/argv-parser@1.1.1':
     dependencies:
       '@simple-git/args-pathspec': 1.0.3
+
+  '@sinclair/typebox@0.34.49': {}
 
   '@turbo/darwin-64@2.9.16':
     optional: true

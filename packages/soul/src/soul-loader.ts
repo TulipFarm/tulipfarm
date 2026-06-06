@@ -1,5 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml } from "yaml";
 import type { SoulAgent, SoulIntegration, SoulResource, SoulRoutine, SoulSkill } from "./types";
 
@@ -123,6 +124,7 @@ export class SoulLoader {
       try {
         const content = await readFile(schemaPath, "utf8");
         const schema = (parseYaml(content) ?? {}) as Record<string, unknown>;
+        validateResourceSchema(schema);
         const hasHooks = await fileExists(join(this.soulPath, "resources", name, "hooks.ts"));
         map.set(name, { name, schema, hasHooks });
       } catch (err) {

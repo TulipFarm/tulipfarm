@@ -1,5 +1,5 @@
 {
-  "name": "@tulipfarm/soul",
+  "name": "@tulipfarm/validation",
   "version": "0.0.0",
   "private": true,
   "main": "src/index.ts",
@@ -9,10 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tulipfarm/constants": "workspace:*",
-    "@tulipfarm/validation": "workspace:*",
-    "simple-git": "^3.36.0",
-    "yaml": "^2.9.0"
+    "@sinclair/typebox": "^0.34.0",
+    "ajv": "^8.17.1"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
