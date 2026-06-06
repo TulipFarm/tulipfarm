@@ -1,5 +1,5 @@
 import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
-import { GitSyncService } from "@tulipfarm/soul";
+import { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { Queue, Worker } from "bullmq";
 import { config } from "dotenv";
 import Redis from "ioredis";
@@ -117,6 +117,16 @@ async function boot() {
       console
     );
     await gitSync.bootSync();
+
+    const soulLoader = new SoulLoader(process.env.SOUL_PATH as string, console);
+    await soulLoader.load();
+    gitSync.on("soul.synced", () =>
+      soulLoader
+        .reload()
+        .catch((err: unknown) =>
+          console.error(`Soul: reload failed — ${err instanceof Error ? err.message : String(err)}`)
+        )
+    );
 
     const { db } = await connectDb();
     await runDataMigrations(db);

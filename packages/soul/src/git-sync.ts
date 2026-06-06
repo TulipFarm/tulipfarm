@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
@@ -9,7 +10,7 @@ interface Logger {
   error: (msg: string) => void;
 }
 
-export class GitSyncService {
+export class GitSyncService extends EventEmitter {
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -17,7 +18,9 @@ export class GitSyncService {
     private readonly remoteUrl: string | undefined,
     private readonly credentials: string | undefined,
     private readonly logger: Logger
-  ) {}
+  ) {
+    super();
+  }
 
   private authUrl(): string {
     if (!this.remoteUrl) return "";
@@ -109,6 +112,7 @@ export class GitSyncService {
     try {
       await this.pull();
       this.logger.info("Soul: periodic sync complete");
+      this.emit("soul.synced");
     } catch (err) {
       this.logger.error(
         `Soul: periodic sync failed — ${err instanceof Error ? err.message : String(err)}`
