@@ -56,6 +56,13 @@ class FakeSecretRepo implements SecretRepo {
   async delete(): Promise<void> {}
 }
 
+function makeFakeGitSync() {
+  return {
+    commit: async () => ({ sha: "abc", filesChanged: 0 }),
+    push: async () => true,
+  } as unknown as import("@tulipfarm/soul").GitSyncService;
+}
+
 function buildTestApp() {
   const secretsService = new SecretsService(new FakeSecretRepo(), { current: randomBytes(32) });
   return buildApp({
@@ -63,6 +70,7 @@ function buildTestApp() {
     userRepo: new FakeUserRepo(),
     tokenRepo: new FakeTokenRepo(),
     secretsService,
+    gitSync: makeFakeGitSync(),
   });
 }
 
@@ -99,6 +107,8 @@ describe("OpenAPI spec", () => {
     expect(paths).toContain("/api/v1/auth/tokens/{id}");
     expect(paths).toContain("/api/v1/secrets/status");
     expect(paths).toContain("/api/v1/secrets/{key}");
+    expect(paths).toContain("/api/v1/soul/commit");
+    expect(paths).toContain("/api/v1/soul/push");
   });
 
   it("GET /docs/ returns Scalar UI HTML", async () => {

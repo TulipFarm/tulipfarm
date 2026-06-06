@@ -132,7 +132,14 @@ async function boot() {
     const encryptionKeys = loadEncryptionKeys();
     const secretsService = new SecretsService(secretRepo, encryptionKeys);
 
-    const app = await buildApp({ sessionStore, userRepo, tokenRepo, rateLimiter, secretsService });
+    const app = await buildApp({
+      sessionStore,
+      userRepo,
+      tokenRepo,
+      rateLimiter,
+      secretsService,
+      gitSync,
+    });
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 

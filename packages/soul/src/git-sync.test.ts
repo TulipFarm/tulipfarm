@@ -10,8 +10,10 @@ import { GitSyncService } from "./git-sync";
 const mockExistsSync = vi.mocked(existsSync);
 const mockSimpleGit = vi.mocked(simpleGit);
 
-function makeMockGit(overrides: Partial<Record<string, unknown>> = {}) {
-  const git: Record<string, unknown> = {
+// biome-ignore lint/suspicious/noExplicitAny: test mock
+function makeMockGit(overrides: Record<string, any> = {}) {
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
+  const git: Record<string, any> = {
     clone: vi.fn().mockResolvedValue(undefined),
     remote: vi.fn().mockResolvedValue(undefined),
     fetch: vi.fn().mockResolvedValue(undefined),
@@ -19,6 +21,12 @@ function makeMockGit(overrides: Partial<Record<string, unknown>> = {}) {
     reset: vi.fn().mockResolvedValue(undefined),
     pull: vi.fn().mockResolvedValue(undefined),
     push: vi.fn().mockResolvedValue(undefined),
+    add: vi.fn().mockResolvedValue(undefined),
+    addConfig: vi.fn().mockResolvedValue(undefined),
+    commit: vi.fn().mockResolvedValue({
+      commit: "abc1234",
+      summary: { changes: 2, insertions: 0, deletions: 0 },
+    }),
     ...overrides,
   };
   git.outputHandler = vi.fn().mockReturnValue(git);
@@ -195,6 +203,57 @@ describe("GitSyncService", () => {
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("commit", () => {
+    it("sets bot identity, stages all, returns sha and filesChanged", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const result = await svc.commit("chore: update soul");
+      expect(mockGit.addConfig).toHaveBeenCalledWith("user.name", "tulipfarm-bot");
+      expect(mockGit.addConfig).toHaveBeenCalledWith("user.email", "tulipfarmhq@gmail.com");
+      expect(mockGit.add).toHaveBeenCalledWith("-A");
+      expect(result).toEqual({ sha: "abc1234", filesChanged: 2 });
+    });
+
+    it("returns empty sha and zero changes when nothing to commit", async () => {
+      mockGit.commit.mockResolvedValue({ commit: "", summary: { changes: 0 } });
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const result = await svc.commit("chore: update soul");
+      expect(result).toEqual({ sha: "", filesChanged: 0 });
+    });
+
+    it("propagates commit failure", async () => {
+      mockGit.commit.mockRejectedValue(new Error("cannot commit"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.commit("chore: update soul")).rejects.toThrow("cannot commit");
+    });
+  });
+
+  describe("push (tool)", () => {
+    it("pushes to origin/main with auth URL and returns true", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, "ghp_token", logger);
+      const pushed = await svc.push();
+      expect(mockGit.remote).toHaveBeenCalledWith([
+        "set-url",
+        "origin",
+        "https://ghp_token@github.com/user/soul.git",
+      ]);
+      expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
+      expect(pushed).toBe(true);
+    });
+
+    it("no-ops and returns false when remoteUrl is undefined", async () => {
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const pushed = await svc.push();
+      expect(mockGit.push).not.toHaveBeenCalled();
+      expect(pushed).toBe(false);
+    });
+
+    it("propagates push failure", async () => {
+      mockGit.push.mockRejectedValue(new Error("permission denied"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.push()).rejects.toThrow("permission denied");
     });
   });
 

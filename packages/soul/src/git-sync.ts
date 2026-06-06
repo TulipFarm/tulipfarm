@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
 
 interface Logger {
@@ -84,6 +85,23 @@ export class GitSyncService {
 
     // behind > 0, ahead === 0: safe fast-forward
     await git.pull("origin", "main", ["--ff-only"]);
+  }
+
+  async commit(message: string): Promise<{ sha: string; filesChanged: number }> {
+    const git = simpleGit(this.soulPath);
+    await git.addConfig("user.name", BOT_GIT_NAME);
+    await git.addConfig("user.email", BOT_GIT_EMAIL);
+    await git.add("-A");
+    const result = await git.commit(message);
+    return { sha: result.commit, filesChanged: result.summary.changes };
+  }
+
+  async push(): Promise<boolean> {
+    if (!this.remoteUrl) return false;
+    const git = simpleGit(this.soulPath);
+    await git.remote(["set-url", "origin", this.authUrl()]);
+    await git.push("origin", "main");
+    return true;
   }
 
   async syncOnce(): Promise<void> {
