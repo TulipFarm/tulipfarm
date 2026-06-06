@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,12 +107,88 @@ describe("SoulLoader", () => {
       expect(loader.resources.get("ticket")?.hasHooks).toBe(false);
     });
 
-    it("detects present hooks.ts", async () => {
+    it("detects present hooks.ts and sets hasHooks=true", async () => {
       await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
       await write(join(TMP, "resources", "ticket", "hooks.ts"), "export default {}");
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
       expect(loader.resources.get("ticket")?.hasHooks).toBe(true);
+    });
+
+    it("reads hooks.ts source into hookSource when present", async () => {
+      const hookContent = "({ before(ctx) { ctx.patch({ x: 1 }); } })";
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      await write(join(TMP, "resources", "ticket", "hooks.ts"), hookContent);
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.hookSource).toBe(hookContent);
+    });
+
+    it("hookSource is undefined when hooks.ts absent", async () => {
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.hookSource).toBeUndefined();
+    });
+
+    it("hooksEnabled defaults to true when x-hooks-enabled absent", async () => {
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.hooksEnabled).toBe(true);
+    });
+
+    it("hooksEnabled is false when x-hooks-enabled: false in schema", async () => {
+      await write(
+        join(TMP, "resources", "ticket", "schema.yml"),
+        "type: object\nx-hooks-enabled: false\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.hooksEnabled).toBe(false);
+    });
+
+    it("hookHash is sha256 of hookSource when hooks.ts present", async () => {
+      const hookContent = "({ before(ctx) { ctx.patch({ x: 1 }); } })";
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      await write(join(TMP, "resources", "ticket", "hooks.ts"), hookContent);
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      const expected = createHash("sha256").update(hookContent).digest("hex");
+      expect(loader.resources.get("ticket")?.hookHash).toBe(expected);
+    });
+
+    it("hookHash is undefined when hooks.ts absent", async () => {
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.hookHash).toBeUndefined();
+    });
+
+    it("warns on reload when hookSource changes (integrity check)", async () => {
+      const schemaPath = join(TMP, "resources", "ticket", "schema.yml");
+      const hooksPath = join(TMP, "resources", "ticket", "hooks.ts");
+      await write(schemaPath, "type: object\n");
+      await write(hooksPath, "({ before() {} })");
+      const logger = makeLogger();
+      const loader = new SoulLoader(TMP, logger);
+      await loader.load();
+      await write(hooksPath, "({ before() { /* modified */ } })");
+      await loader.reload();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('hook integrity: hash changed for resource "ticket"')
+      );
+    });
+
+    it("does not warn on reload when hookSource unchanged", async () => {
+      const content = "({ before() {} })";
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      await write(join(TMP, "resources", "ticket", "hooks.ts"), content);
+      const logger = makeLogger();
+      const loader = new SoulLoader(TMP, logger);
+      await loader.load();
+      await loader.reload();
+      expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("hook integrity"));
     });
 
     it("skips resource with invalid YAML, logs warn, others still load", async () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/validation";
@@ -77,7 +78,16 @@ export class SoulLoader {
   }
 
   async reload(): Promise<void> {
+    const prevResources = this.resources;
     await this.load();
+    for (const [name, resource] of this.resources) {
+      const prev = prevResources.get(name);
+      if (prev?.hookHash && !resource.hookHash) {
+        this.logger.warn(`[soul] hook integrity: hook removed for resource "${name}"`);
+      } else if (prev?.hookHash && resource.hookHash && prev.hookHash !== resource.hookHash) {
+        this.logger.warn(`[soul] hook integrity: hash changed for resource "${name}"`);
+      }
+    }
   }
 
   private async loadAgents(): Promise<Map<string, SoulAgent>> {
@@ -125,8 +135,14 @@ export class SoulLoader {
         const content = await readFile(schemaPath, "utf8");
         const schema = (parseYaml(content) ?? {}) as Record<string, unknown>;
         validateResourceSchema(schema);
-        const hasHooks = await fileExists(join(this.soulPath, "resources", name, "hooks.ts"));
-        map.set(name, { name, schema, hasHooks });
+        const hooksPath = join(this.soulPath, "resources", name, "hooks.ts");
+        const hasHooks = await fileExists(hooksPath);
+        const hookSource = hasHooks ? await readFile(hooksPath, "utf8") : undefined;
+        const hookHash = hookSource
+          ? createHash("sha256").update(hookSource).digest("hex")
+          : undefined;
+        const hooksEnabled = schema["x-hooks-enabled"] !== false;
+        map.set(name, { name, schema, hasHooks, hookSource, hookHash, hooksEnabled });
       } catch (err) {
         this.logger.warn(
           `Soul: skipping resource "${name}" — ${err instanceof Error ? err.message : String(err)}`

@@ -150,7 +150,9 @@ describe("resource routes", () => {
     userRepo = new FakeUserRepo();
     tokenRepo = new FakeTokenRepo();
     fakeRepo = new FakeResourceRepo();
-    soulLoader = makeFakeSoulLoader([{ name: "ticket", schema: TICKET_SCHEMA, hasHooks: false }]);
+    soulLoader = makeFakeSoulLoader([
+      { name: "ticket", schema: TICKET_SCHEMA, hasHooks: false, hooksEnabled: true },
+    ]);
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
@@ -601,11 +603,12 @@ describe("x-links validate-on-write", () => {
     customerRepo = new FakeResourceRepo();
 
     const soulLoader = makeFakeSoulLoader([
-      { name: "ticket", schema: LINKED_SCHEMA, hasHooks: false },
+      { name: "ticket", schema: LINKED_SCHEMA, hasHooks: false, hooksEnabled: true },
       {
         name: "customer",
         schema: { type: "object", properties: { name: { type: "string" } }, required: ["name"] },
         hasHooks: false,
+        hooksEnabled: true,
       },
     ]);
 

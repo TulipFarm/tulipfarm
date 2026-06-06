@@ -4,6 +4,7 @@ import { TulipFarmValidationError, ajv, applyTransforms } from "@tulipfarm/valid
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "mongodb";
 import { ErrorSchema } from "../auth/schemas";
+import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination";
 import { MongoCounterStore, MongoResourceRepo, makeHistoryEntry, toApiRecord } from "./repo";
 
@@ -108,7 +109,8 @@ export function registerResourceRoutes(
   app: FastifyInstance,
   db: Db,
   soulLoader: SoulLoader,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  hookExecutor?: HookExecutor
 ): void {
   const counterStore = new MongoCounterStore(db);
   const counter = counterStore.makeCounterFn();
@@ -170,10 +172,35 @@ export function registerResourceRoutes(
           .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
       }
 
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        try {
+          data = await hookExecutor.runBeforeHook(
+            resourceDef.hookSource,
+            type,
+            data,
+            resourceDef.hookHash
+          );
+        } catch (err) {
+          if (err instanceof HookError) {
+            return reply.code(422).send({ error: err.message });
+          }
+          throw err;
+        }
+      }
+
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
       const repo = new MongoResourceRepo(db, type);
       await repo.insert(doc);
       await repo.appendHistory(makeHistoryEntry(id, "create", doc));
+
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        await hookExecutor.runAfterHook(
+          resourceDef.hookSource,
+          type,
+          toApiRecord(doc),
+          resourceDef.hookHash
+        );
+      }
 
       return reply.code(201).send(toApiRecord(doc));
     }
@@ -333,6 +360,22 @@ export function registerResourceRoutes(
           .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
       }
 
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        try {
+          data = await hookExecutor.runBeforeHook(
+            resourceDef.hookSource,
+            type,
+            data,
+            resourceDef.hookHash
+          );
+        } catch (err) {
+          if (err instanceof HookError) {
+            return reply.code(422).send({ error: err.message });
+          }
+          throw err;
+        }
+      }
+
       const now = new Date();
       const newDoc = {
         _id: id,
@@ -346,6 +389,16 @@ export function registerResourceRoutes(
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
+
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        await hookExecutor.runAfterHook(
+          resourceDef.hookSource,
+          type,
+          toApiRecord(newDoc),
+          resourceDef.hookHash
+        );
+      }
+
       return reply.send(toApiRecord(newDoc));
     }
   );
@@ -430,6 +483,22 @@ export function registerResourceRoutes(
           .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
       }
 
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        try {
+          data = await hookExecutor.runBeforeHook(
+            resourceDef.hookSource,
+            type,
+            data,
+            resourceDef.hookHash
+          );
+        } catch (err) {
+          if (err instanceof HookError) {
+            return reply.code(422).send({ error: err.message });
+          }
+          throw err;
+        }
+      }
+
       const now = new Date();
       const newDoc = {
         _id: id,
@@ -443,6 +512,16 @@ export function registerResourceRoutes(
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
+
+      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
+        await hookExecutor.runAfterHook(
+          resourceDef.hookSource,
+          type,
+          toApiRecord(newDoc),
+          resourceDef.hookHash
+        );
+      }
+
       return reply.send(toApiRecord(newDoc));
     }
   );

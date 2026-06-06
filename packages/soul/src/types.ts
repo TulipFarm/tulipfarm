@@ -14,6 +14,9 @@ export interface SoulResource {
   name: string;
   schema: Record<string, unknown>;
   hasHooks: boolean;
+  hookSource?: string;
+  hookHash?: string;
+  hooksEnabled: boolean;
 }
 
 export interface SoulRoutine {

@@ -4,5 +4,6 @@ packages:
 allowBuilds:
   "@biomejs/biome": true
   esbuild: true
+  isolated-vm: true
   lefthook: true
   msgpackr-extract: true

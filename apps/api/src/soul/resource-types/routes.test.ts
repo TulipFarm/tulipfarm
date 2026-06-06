@@ -311,8 +311,8 @@ x-computed:
     it("returns resource types with YAML schema strings", async () => {
       await app.close();
       soulLoader = makeFakeSoulLoader([
-        { name: "ticket", schema: { type: "object" }, hasHooks: false },
-        { name: "customer", schema: { type: "object" }, hasHooks: true },
+        { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+        { name: "customer", schema: { type: "object" }, hasHooks: true, hooksEnabled: true },
       ]);
       app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
 
