@@ -15,6 +15,13 @@ export class LlmNotConfiguredError extends Error {
   }
 }
 
+export class UnknownModelError extends Error {
+  constructor(modelId: string) {
+    super(`model not configured in any tier: ${modelId}`);
+    this.name = "UnknownModelError";
+  }
+}
+
 const ProviderEntrySchema = Type.Object({
   provider: Type.String(),
   model: Type.String(),

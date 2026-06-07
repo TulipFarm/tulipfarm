@@ -1,16 +1,18 @@
 import type { LanguageModelV1 } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { LlmConfigValidationError, LlmNotConfiguredError } from "./config";
+import { LlmConfigValidationError, LlmNotConfiguredError, UnknownModelError } from "./config";
 import { LlmService } from "./llm-service";
 
 vi.mock("./provider", () => ({
-  createModel: vi.fn().mockResolvedValue({
-    provider: "anthropic",
-    modelId: "claude-haiku-4-5",
-    defaultObjectGenerationMode: "json",
-    doGenerate: vi.fn(),
-    doStream: vi.fn(),
-  } as unknown as LanguageModelV1),
+  createModel: vi.fn((entry: { provider: string; model: string }) =>
+    Promise.resolve({
+      provider: entry.provider,
+      modelId: entry.model,
+      defaultObjectGenerationMode: "json",
+      doGenerate: vi.fn(),
+      doStream: vi.fn(),
+    } as unknown as LanguageModelV1)
+  ),
 }));
 
 const validConfig = {
@@ -64,5 +66,50 @@ describe("LlmService", () => {
   it("invalid config throws LlmConfigValidationError", async () => {
     const svc = new LlmService();
     await expect(svc.init({ tiers: {} }, fakeSecrets)).rejects.toThrow(LlmConfigValidationError);
+  });
+});
+
+describe("LlmService.select", () => {
+  const init = async () => {
+    const svc = new LlmService();
+    await svc.init(validConfig, fakeSecrets);
+    return svc;
+  };
+
+  it("model auto + supervised resolves to standard (AC-V1-001)", async () => {
+    const svc = await init();
+    expect(svc.select({ model: "auto", autonomy: "supervised" }).modelId).toBe("claude-sonnet-4-6");
+  });
+
+  it("explicit tier overrides auto rules (AC3)", async () => {
+    const svc = await init();
+    expect(svc.select({ model: "complex", autonomy: "full" }).modelId).toBe("claude-opus-4-8");
+  });
+
+  it("session model overrides configured tier for the turn (AC4)", async () => {
+    const svc = await init();
+    expect(svc.select({ model: "complex", sessionModel: "quick" }).modelId).toBe(
+      "claude-haiku-4-5"
+    );
+  });
+
+  it("raw model id bypasses tiers via getModelById", async () => {
+    const svc = await init();
+    expect(svc.select({ model: "claude-opus-4-8" }).modelId).toBe("claude-opus-4-8");
+  });
+
+  it("unknown raw model id throws UnknownModelError", async () => {
+    const svc = await init();
+    expect(() => svc.select({ sessionModel: "no-such-model" })).toThrow(UnknownModelError);
+  });
+
+  it("defaults to auto → standard when no model given", async () => {
+    const svc = await init();
+    expect(svc.select({}).modelId).toBe("claude-sonnet-4-6");
+  });
+
+  it("select before init throws LlmNotConfiguredError", () => {
+    const svc = new LlmService();
+    expect(() => svc.select({ model: "auto" })).toThrow(LlmNotConfiguredError);
   });
 });
