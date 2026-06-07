@@ -5,7 +5,9 @@ import {
   type MessageDoc,
   type MessagePart,
   assertValidMessage,
+  fromAssistantParts,
   fromAssistantText,
+  fromToolResult,
   fromUserText,
   toCoreMessage,
 } from "./messages";
@@ -182,6 +184,36 @@ describe("fromUserText / fromAssistantText", () => {
     const a = fromUserText("conv1", "x");
     const b = fromUserText("conv1", "x");
     expect(a._id).not.toBe(b._id);
+  });
+});
+
+describe("fromAssistantParts / fromToolResult", () => {
+  it("fromAssistantParts builds a valid assistant tool-call turn that round-trips", () => {
+    const parts: MessagePart[] = [
+      { type: "text", text: "saving that" },
+      { type: "tool-call", toolCallId: "c1", toolName: "update_memory", args: { key: "plan" } },
+    ];
+    const doc = fromAssistantParts("conv1", parts);
+    expect(doc.role).toBe("assistant");
+    expect(doc.content).toEqual(parts);
+    expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
+    expect(toCoreMessage(doc)).toEqual({ role: "assistant", content: parts });
+  });
+
+  it("fromToolResult builds a valid tool turn that round-trips", () => {
+    const parts: MessagePart[] = [
+      {
+        type: "tool-result",
+        toolCallId: "c1",
+        toolName: "update_memory",
+        result: { success: true },
+      },
+    ];
+    const doc = fromToolResult("conv1", parts);
+    expect(doc.role).toBe("tool");
+    expect(doc.content).toEqual(parts);
+    expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
+    expect(toCoreMessage(doc)).toEqual({ role: "tool", content: parts });
   });
 });
 

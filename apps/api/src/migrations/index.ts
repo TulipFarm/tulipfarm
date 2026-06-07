@@ -90,4 +90,13 @@ export const DATA_MIGRATIONS: DataMigration[] = [
       }
     },
   },
+  {
+    version: 6,
+    description: "Create working_memory indexes (unique userId+key, per-user LRU listing)",
+    up: async (db) => {
+      const col = db.collection("working_memory");
+      await col.createIndex({ userId: 1, key: 1 }, { unique: true });
+      await col.createIndex({ userId: 1, lastWrittenAt: 1 });
+    },
+  },
 ];

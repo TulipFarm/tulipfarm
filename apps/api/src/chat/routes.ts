@@ -4,9 +4,20 @@ import { type CoreMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import { buildMemoryToolSet } from "../memory/ai-toolset";
+import { MAX_TOOL_STEPS } from "../memory/limits";
+import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
-import { type MessageRepo, fromAssistantText, fromUserText, toCoreMessage } from "./messages";
+import {
+  type MessagePart,
+  type MessageRepo,
+  fromAssistantParts,
+  fromAssistantText,
+  fromToolResult,
+  fromUserText,
+  toCoreMessage,
+} from "./messages";
 import { MessageSchema } from "./schemas";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -69,12 +80,64 @@ export function buildTurnLog(args: {
   };
 }
 
+/** The subset of an AI SDK `StepResult` that persistence needs. */
+interface PersistableStep {
+  text: string;
+  finishReason: string;
+  toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; args: unknown }>;
+  toolResults: ReadonlyArray<{ toolCallId: string; toolName: string; result: unknown }>;
+}
+
+/**
+ * Persist one finished `streamText` step. A tool step yields an assistant message holding the
+ * tool-call parts (plus any text) followed by a tool message holding the results; a final text step
+ * yields a plain assistant message. Errored or empty steps persist nothing. Exported for tests.
+ */
+export async function persistStep(
+  messageRepo: MessageRepo,
+  conversationId: string,
+  step: PersistableStep,
+  onError: (err: unknown) => void
+): Promise<void> {
+  if (step.finishReason === "error") return;
+
+  if (step.toolCalls.length > 0) {
+    const parts: MessagePart[] = [];
+    if (step.text) parts.push({ type: "text", text: step.text });
+    for (const tc of step.toolCalls) {
+      parts.push({
+        type: "tool-call",
+        toolCallId: tc.toolCallId,
+        toolName: tc.toolName,
+        args: tc.args,
+      });
+    }
+    await messageRepo.create(fromAssistantParts(conversationId, parts)).catch(onError);
+
+    if (step.toolResults.length > 0) {
+      const resultParts: MessagePart[] = step.toolResults.map((tr) => ({
+        type: "tool-result",
+        toolCallId: tr.toolCallId,
+        toolName: tr.toolName,
+        result: tr.result,
+      }));
+      await messageRepo.create(fromToolResult(conversationId, resultParts)).catch(onError);
+    }
+    return;
+  }
+
+  if (step.text) {
+    await messageRepo.create(fromAssistantText(conversationId, step.text)).catch(onError);
+  }
+}
+
 export function registerChatRoutes(
   app: FastifyInstance,
   llmService: LlmService,
   repo: ConversationRepo,
   messageRepo: MessageRepo,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  workingMemory?: WorkingMemoryService
 ): void {
   app.post(
     "/api/v1/chat",
@@ -161,25 +224,25 @@ export function registerChatRoutes(
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
       reply.hijack();
 
+      // Bind the per-user memory tools for this turn; the SDK runs the tool loop (maxSteps).
+      const tools = workingMemory
+        ? buildMemoryToolSet({ userId: user._id, service: workingMemory, agentId: convo.agentId })
+        : undefined;
+
       const result = streamText({
         model: selected,
         messages,
+        tools,
+        maxSteps: MAX_TOOL_STEPS,
         onError: ({ error }) => {
           req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
         },
-        onFinish: async ({ text, finishReason }) => {
-          if (finishReason === "error") return;
-          if (!text) {
-            req.log.info(
-              { conversationId: convo._id, finishReason },
-              "assistant turn produced no text — skipping persist"
-            );
-            return;
-          }
-          await messageRepo
-            .create(fromAssistantText(convo._id, text))
-            .catch((e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"));
-        },
+        // Persist each finished step (text and/or tool-call + tool-result) so the durable history
+        // captures the whole tool loop, not just the final assistant text.
+        onStepFinish: (step) =>
+          persistStep(messageRepo, convo._id, step as unknown as PersistableStep, (e) =>
+            req.log.error({ err: e, conversationId: convo._id }, "persist failed")
+          ),
       });
 
       result.pipeDataStreamToResponse(reply.raw, {

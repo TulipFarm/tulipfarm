@@ -137,6 +137,28 @@ export function fromAssistantText(conversationId: string, text: string): Message
   };
 }
 
+/** Build an assistant turn that called tools — `parts` are text and/or tool-call parts. */
+export function fromAssistantParts(conversationId: string, parts: MessagePart[]): MessageDoc {
+  return {
+    _id: randomUUID(),
+    conversationId,
+    role: "assistant",
+    content: parts,
+    createdAt: new Date(),
+  };
+}
+
+/** Build the tool turn carrying the results of an assistant's tool calls. */
+export function fromToolResult(conversationId: string, parts: MessagePart[]): MessageDoc {
+  return {
+    _id: randomUUID(),
+    conversationId,
+    role: "tool",
+    content: parts,
+    createdAt: new Date(),
+  };
+}
+
 export interface MessageRepo {
   create(doc: MessageDoc): Promise<void>;
   listByConversation(

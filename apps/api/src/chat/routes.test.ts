@@ -9,9 +9,15 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { type UserDoc, type UserRepo, createUser } from "../auth/users";
+import { WorkingMemoryService } from "../memory/service";
+import {
+  type WorkingMemoryDoc,
+  type WorkingMemoryRepo,
+  assertValidEntry,
+} from "../memory/working-memory";
 import { type PaginatedResult, encodeCursor } from "../pagination";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
-import type { MessageDoc, MessageRepo } from "./messages";
+import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { buildTurnLog } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
@@ -55,6 +61,35 @@ function makeErrorStreamResult() {
   return { stream, rawCall: { rawPrompt: null, rawSettings: {} } };
 }
 
+// Stream that emits provider-level tool-call parts (args is a JSON string) then a tool-calls finish,
+// so streamText invokes the bound tool's execute and (with maxSteps>1) requests a continuation.
+function makeToolCallStreamResult(
+  toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
+) {
+  const chunks = [
+    ...toolCalls.map((tc) => ({
+      type: "tool-call",
+      toolCallType: "function",
+      toolCallId: tc.toolCallId,
+      toolName: tc.toolName,
+      args: JSON.stringify(tc.args),
+    })),
+    {
+      type: "finish",
+      finishReason: "tool-calls",
+      usage: { promptTokens: 1, completionTokens: 1 },
+    },
+  ];
+  let i = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (i < chunks.length) controller.enqueue(chunks[i++]);
+      else controller.close();
+    },
+  });
+  return { stream, rawCall: { rawPrompt: null, rawSettings: {} } };
+}
+
 function makeFakeModel(
   modelId: string,
   stream: () => ReturnType<typeof makeStreamResult> = () => makeStreamResult(["Hello"])
@@ -72,6 +107,20 @@ function makeFakeModel(
       throw new Error("doGenerate unused");
     }),
   } as unknown as LanguageModelV1;
+}
+
+// Model that calls a tool on its first step, then returns text on the continuation step.
+function makeToolThenTextModel(
+  toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>,
+  followupText: string
+): LanguageModelV1 {
+  let call = 0;
+  return makeFakeModel("claude-opus-4-8", () => {
+    call += 1;
+    return call === 1
+      ? (makeToolCallStreamResult(toolCalls) as ReturnType<typeof makeStreamResult>)
+      : makeStreamResult([followupText]);
+  });
 }
 
 // ── Fake conversation repo ────────────────────────────────────────────────────
@@ -127,6 +176,25 @@ class FakeMessageRepo implements MessageRepo {
 
   byConversation(conversationId: string): MessageDoc[] {
     return this.messages.filter((m) => m.conversationId === conversationId);
+  }
+}
+
+// ── Fake working-memory repo ──────────────────────────────────────────────────
+class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
+  docs: WorkingMemoryDoc[] = [];
+  async upsert(doc: WorkingMemoryDoc): Promise<void> {
+    assertValidEntry(doc);
+    const i = this.docs.findIndex((d) => d.userId === doc.userId && d.key === doc.key);
+    if (i >= 0) this.docs[i] = { ...doc };
+    else this.docs.push({ ...doc });
+  }
+  async deleteByKey(userId: string, key: string): Promise<boolean> {
+    const before = this.docs.length;
+    this.docs = this.docs.filter((d) => !(d.userId === userId && d.key === key));
+    return this.docs.length < before;
+  }
+  async listByUser(userId: string): Promise<WorkingMemoryDoc[]> {
+    return this.docs.filter((d) => d.userId === userId).map((d) => ({ ...d }));
   }
 }
 
@@ -227,6 +295,7 @@ describe("chat routes", () => {
   let tokenRepo: FakeTokenRepo;
   let repo: FakeConversationRepo;
   let messageRepo: FakeMessageRepo;
+  let workingMemoryRepo: FakeWorkingMemoryRepo;
   let sid: string;
   let userId: string;
   let otherSid: string;
@@ -240,6 +309,7 @@ describe("chat routes", () => {
     tokenRepo = new FakeTokenRepo();
     repo = new FakeConversationRepo();
     messageRepo = new FakeMessageRepo();
+    workingMemoryRepo = new FakeWorkingMemoryRepo();
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     userId = user._id;
@@ -258,6 +328,7 @@ describe("chat routes", () => {
       llmService,
       conversationRepo: repo,
       messageRepo,
+      workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
     });
   });
 
@@ -457,6 +528,45 @@ describe("chat routes", () => {
       const msgs = messageRepo.byConversation(id);
       expect(msgs.some((m) => m.role === "user")).toBe(true);
       expect(msgs.some((m) => m.role === "assistant")).toBe(false);
+    });
+
+    // Memory tool loop — update_memory is bound, executed, and the whole loop is persisted.
+    it("runs the update_memory tool loop and persists user → assistant(tool-call) → tool → assistant(text)", async () => {
+      select.mockImplementation(() =>
+        makeToolThenTextModel(
+          [
+            {
+              toolCallId: "call_1",
+              toolName: "update_memory",
+              args: { key: "plan", value: "enterprise" },
+            },
+          ],
+          "Saved your plan."
+        )
+      );
+
+      const res = await post({ message: userMsg("remember my plan is enterprise") });
+      expect(res.statusCode).toBe(200);
+      const id = res.headers["x-conversation-id"] as string;
+      await waitFor(() => messageRepo.byConversation(id).length >= 4);
+
+      const msgs = messageRepo.byConversation(id);
+      expect(msgs[0]).toMatchObject({ role: "user" });
+      expect(msgs[1].role).toBe("assistant");
+      const parts = msgs[1].content as MessagePart[];
+      expect(parts.some((p) => p.type === "tool-call" && p.toolName === "update_memory")).toBe(
+        true
+      );
+      expect(msgs[2].role).toBe("tool");
+      expect(msgs[3]).toMatchObject({ role: "assistant", content: "Saved your plan." });
+
+      // The fact landed in working memory, scoped to the authenticated user.
+      expect(workingMemoryRepo.docs).toHaveLength(1);
+      expect(workingMemoryRepo.docs[0]).toMatchObject({
+        userId,
+        key: "plan",
+        value: "enterprise",
+      });
     });
   });
 

@@ -18,6 +18,7 @@ import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
 import type { HookExecutor } from "./hooks/hook-executor";
+import type { WorkingMemoryService } from "./memory/service";
 import type { RateLimiter } from "./rate-limit";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
@@ -37,6 +38,7 @@ export interface AppOptions {
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
+  workingMemoryService?: WorkingMemoryService;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -128,7 +130,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.llmService,
         opts.conversationRepo,
         opts.messageRepo,
-        requireAuth
+        requireAuth,
+        opts.workingMemoryService
       );
     }
   }

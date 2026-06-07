@@ -14,6 +14,8 @@ import { connectDb } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { HookExecutor } from "./hooks/hook-executor";
 import { registerLlmReload } from "./llm-reload";
+import { WorkingMemoryService } from "./memory/service";
+import { MongoWorkingMemoryRepo } from "./memory/working-memory";
 import { runDataMigrations } from "./migrate";
 import { RedisRateLimiter } from "./rate-limit";
 
@@ -65,6 +67,7 @@ async function boot() {
     const embeddingService = new EmbeddingService();
     const conversationRepo = new MongoConversationRepo(db);
     const messageRepo = new MongoMessageRepo(db);
+    const workingMemoryService = new WorkingMemoryService(new MongoWorkingMemoryRepo(db));
 
     const app = await buildApp({
       sessionStore,
@@ -79,6 +82,7 @@ async function boot() {
       llmService,
       conversationRepo,
       messageRepo,
+      workingMemoryService,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
