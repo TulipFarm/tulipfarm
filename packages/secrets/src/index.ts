@@ -4,4 +4,4 @@ export { loadEncryptionKeys } from "./keys";
 export type { EncryptionKeys } from "./keys";
 export { MongoSecretRepo } from "./repo";
 export type { SecretDoc, SecretEnvelopeFields, SecretMeta, SecretRepo, SecretType } from "./repo";
-export { SecretsService } from "./service";
+export { SecretsService, SecretUnavailableError } from "./service";

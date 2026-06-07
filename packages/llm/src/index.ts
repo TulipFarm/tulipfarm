@@ -1,5 +1,6 @@
 export {
   LlmConfigValidationError,
+  LlmCredentialError,
   LlmNotConfiguredError,
   UnknownModelError,
   validateLlmConfig,

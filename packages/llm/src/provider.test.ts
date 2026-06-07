@@ -1,5 +1,6 @@
+import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { describe, expect, it, vi } from "vitest";
-import { LlmConfigValidationError } from "./config";
+import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import { createModel } from "./provider";
 
 vi.mock("@ai-sdk/anthropic", () => ({
@@ -91,5 +92,68 @@ describe("createModel", () => {
     await expect(
       createModel({ provider: "openai-compatible", model: "llama3" }, secrets as never)
     ).rejects.toThrow(LlmConfigValidationError);
+  });
+
+  it("wraps SecretUnavailableError as LlmCredentialError naming the key + hint (AC3)", async () => {
+    const secrets = {
+      get: vi.fn(() =>
+        Promise.reject(new SecretUnavailableError("secret not found: anthropic-api-key"))
+      ),
+    };
+    const promise = createModel(
+      { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+      secrets as never
+    );
+    await expect(promise).rejects.toBeInstanceOf(LlmCredentialError);
+    await expect(promise).rejects.toThrow("anthropic-api-key");
+    await expect(promise).rejects.toThrow(/env:\/\/|\/secrets\//);
+  });
+
+  it("never leaks the resolved credential value in the error (AC4)", async () => {
+    // get() throws *before* any value exists, but assert the secret value can never appear.
+    const secretValue = "sk-ant-supersecret-value";
+    const secrets = {
+      get: vi.fn(() =>
+        Promise.reject(new SecretUnavailableError("secret not found: anthropic-api-key"))
+      ),
+    };
+    let err: Error | undefined;
+    try {
+      await createModel(
+        { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+        secrets as never
+      );
+    } catch (e) {
+      err = e as Error;
+    }
+    expect(err).toBeInstanceOf(LlmCredentialError);
+    expect(err?.message).not.toContain(secretValue);
+    expect(err?.stack ?? "").not.toContain(secretValue);
+  });
+
+  it("does not log the resolved credential value on success (AC4)", async () => {
+    const logSpy = vi.spyOn(console, "info").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const secretValue = "sk-ant-supersecret-value";
+    const secrets = makeSecrets({ "anthropic-api-key": secretValue });
+    await createModel(
+      { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+      secrets as never
+    );
+    const logged = [...logSpy.mock.calls, ...errSpy.mock.calls].flat().join(" ");
+    expect(logged).not.toContain(secretValue);
+    logSpy.mockRestore();
+    errSpy.mockRestore();
+  });
+
+  it("propagates non-SecretUnavailableError from secrets.get unchanged", async () => {
+    const boom = new TypeError("unexpected internal failure");
+    const secrets = { get: vi.fn(() => Promise.reject(boom)) };
+    await expect(
+      createModel(
+        { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+        secrets as never
+      )
+    ).rejects.toBe(boom);
   });
 });

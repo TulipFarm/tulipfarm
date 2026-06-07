@@ -1,9 +1,9 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { SecretsService } from "@tulipfarm/secrets";
+import { SecretUnavailableError, type SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModelV1 } from "ai";
-import { LlmConfigValidationError } from "./config";
+import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import type { ProviderEntry } from "./config";
 
 async function resolveApiKey(
@@ -17,7 +17,17 @@ async function resolveApiKey(
     if (!value) throw new LlmConfigValidationError(`env var ${varName} not set`);
     return value;
   }
-  return secrets.get(api_key_ref);
+  try {
+    return await secrets.get(api_key_ref);
+  } catch (err) {
+    if (err instanceof SecretUnavailableError) {
+      throw new LlmCredentialError(
+        `LLM credential "${api_key_ref}" unavailable — set it (PUT /secrets/${api_key_ref}) ` +
+          `or use api_key_ref: env://VAR. (${err.message})`
+      );
+    }
+    throw err;
+  }
 }
 
 export async function createModel(

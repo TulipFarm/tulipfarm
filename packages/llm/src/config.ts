@@ -8,6 +8,13 @@ export class LlmConfigValidationError extends Error {
   }
 }
 
+export class LlmCredentialError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LlmCredentialError";
+  }
+}
+
 export class LlmNotConfiguredError extends Error {
   constructor() {
     super("LLM not configured");
