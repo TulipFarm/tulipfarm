@@ -24,7 +24,7 @@ export class UnknownModelError extends Error {
 
 const ProviderEntrySchema = Type.Object({
   provider: Type.String(),
-  model: Type.String(),
+  model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
   api_key_ref: Type.Optional(Type.String()),
   base_url: Type.Optional(Type.String()),
 });

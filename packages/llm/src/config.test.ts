@@ -46,4 +46,34 @@ describe("validateLlmConfig", () => {
     };
     expect(() => validateLlmConfig(config)).not.toThrow();
   });
+
+  it("rejects an empty model id", () => {
+    const bad = {
+      tiers: {
+        ...validConfig.tiers,
+        quick: { providers: [{ provider: "anthropic", model: "" }] },
+      },
+    };
+    expect(() => validateLlmConfig(bad)).toThrow(LlmConfigValidationError);
+  });
+
+  it("rejects a model id containing whitespace", () => {
+    const bad = {
+      tiers: {
+        ...validConfig.tiers,
+        quick: { providers: [{ provider: "anthropic", model: "claude opus" }] },
+      },
+    };
+    expect(() => validateLlmConfig(bad)).toThrow(LlmConfigValidationError);
+  });
+
+  it("accepts an org-prefixed model id", () => {
+    const config = {
+      tiers: {
+        ...validConfig.tiers,
+        quick: { providers: [{ provider: "openai-compatible", model: "meta-llama/Llama-3.1-8B" }] },
+      },
+    };
+    expect(() => validateLlmConfig(config)).not.toThrow();
+  });
 });

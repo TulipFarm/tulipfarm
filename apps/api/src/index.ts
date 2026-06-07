@@ -11,6 +11,7 @@ import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { connectDb } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { HookExecutor } from "./hooks/hook-executor";
+import { registerLlmReload } from "./llm-reload";
 import { runDataMigrations } from "./migrate";
 import { RedisRateLimiter } from "./rate-limit";
 
@@ -35,13 +36,6 @@ async function boot() {
 
     const soulLoader = new SoulLoader(process.env.SOUL_PATH as string, console);
     await soulLoader.load();
-    gitSync.on("soul.synced", () =>
-      soulLoader
-        .reload()
-        .catch((err: unknown) =>
-          console.error(`Soul: reload failed — ${err instanceof Error ? err.message : String(err)}`)
-        )
-    );
 
     const { client, db } = await connectDb();
     await runDataMigrations(db);
@@ -81,6 +75,7 @@ async function boot() {
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
+    registerLlmReload(gitSync, soulLoader, llmService, secretsService, app.log);
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 
