@@ -146,7 +146,6 @@ async function boot() {
     const secretsService = new SecretsService(secretRepo, encryptionKeys);
 
     const llmService = new LlmService();
-    await llmService.init(soulLoader.llmConfig, secretsService);
 
     const app = await buildApp({
       sessionStore,
@@ -159,6 +158,9 @@ async function boot() {
       llmService,
       db,
     });
+
+    // Init after buildApp so fallback events log through Fastify's Pino logger.
+    await llmService.init(soulLoader.llmConfig, secretsService, app.log);
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 

@@ -1,7 +1,7 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModelV1 } from "ai";
 import { LlmNotConfiguredError, UnknownModelError, validateLlmConfig } from "./config";
-import { FallbackModel } from "./fallback";
+import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
 import { type ModelSelector, type SelectionContext, resolveTier } from "./selection";
 
@@ -20,7 +20,11 @@ export class LlmService {
   private models: Map<Tier, LanguageModelV1> | null = null;
   private byModelId: Map<string, LanguageModelV1> = new Map();
 
-  async init(rawConfig: unknown, secrets: SecretsService): Promise<void> {
+  async init(
+    rawConfig: unknown,
+    secrets: SecretsService,
+    logger: FallbackLogger = console
+  ): Promise<void> {
     if (!rawConfig) {
       console.warn("[llm] no llm.config.yaml found — LLM features disabled");
       return;
@@ -37,7 +41,7 @@ export class LlmService {
         const id = providers[i]?.model;
         if (id && !byModelId.has(id)) byModelId.set(id, model);
       });
-      models.set(tier, new FallbackModel(built));
+      models.set(tier, new FallbackModel(built, logger));
       console.info(`[llm] tier=${tier} providers=${providers.length}`);
     }
 

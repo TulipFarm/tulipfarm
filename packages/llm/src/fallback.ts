@@ -1,9 +1,42 @@
-import type { LanguageModelV1, LanguageModelV1CallOptions, LanguageModelV1StreamPart } from "ai";
+import {
+  APICallError,
+  type LanguageModelV1,
+  type LanguageModelV1CallOptions,
+  type LanguageModelV1StreamPart,
+  LoadAPIKeyError,
+} from "ai";
 
 type ObjectGenerationMode = "json" | "tool" | undefined;
 
+/** Minimal logger surface for fallback events (pino/console compatible). */
+export interface FallbackLogger {
+  warn(msg: string): void;
+}
+
+const noopLogger: FallbackLogger = { warn() {} };
+
 function isAbortError(err: unknown): boolean {
   return err instanceof Error && err.name === "AbortError";
+}
+
+/**
+ * A hard failure aborts the chain immediately — retrying another provider cannot
+ * help. Covers request cancellation, missing/invalid credentials, and any
+ * APICallError the SDK marks non-retryable (401/403 auth, 404 model-not-found,
+ * 400 bad-request). Everything else (429/5xx/timeout/network/unknown) is
+ * transient and falls back to the next provider.
+ */
+export function isHardFailure(err: unknown): boolean {
+  if (isAbortError(err)) return true;
+  if (LoadAPIKeyError.isInstance(err)) return true;
+  if (APICallError.isInstance(err)) return err.isRetryable === false;
+  return false;
+}
+
+function errorReason(err: unknown): string {
+  if (APICallError.isInstance(err)) return `${err.statusCode ?? "?"} ${err.message}`;
+  if (err instanceof Error) return err.message;
+  return String(err);
 }
 
 export class FallbackModel implements LanguageModelV1 {
@@ -14,7 +47,10 @@ export class FallbackModel implements LanguageModelV1 {
   readonly supportsImageUrls?: boolean;
   readonly supportsStructuredOutputs?: boolean;
 
-  constructor(private readonly models: LanguageModelV1[]) {
+  constructor(
+    private readonly models: LanguageModelV1[],
+    private readonly logger: FallbackLogger = noopLogger
+  ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
     this.modelId = models.map((m) => m.modelId).join("|");
@@ -29,10 +65,12 @@ export class FallbackModel implements LanguageModelV1 {
       try {
         return await model.doGenerate(options);
       } catch (err) {
-        if (isAbortError(err)) throw err;
+        if (isHardFailure(err)) throw err;
         lastError = err;
+        this.logFallback(model, err);
       }
     }
+    this.logExhausted(lastError);
     throw lastError;
   }
 
@@ -43,8 +81,9 @@ export class FallbackModel implements LanguageModelV1 {
       try {
         result = await model.doStream(options);
       } catch (err) {
-        if (isAbortError(err)) throw err;
+        if (isHardFailure(err)) throw err;
         lastError = err;
+        this.logFallback(model, err);
         continue;
       }
 
@@ -54,8 +93,9 @@ export class FallbackModel implements LanguageModelV1 {
         firstChunk = await reader.read();
       } catch (err) {
         reader.cancel().catch(() => {});
-        if (isAbortError(err)) throw err;
+        if (isHardFailure(err)) throw err;
         lastError = err;
+        this.logFallback(model, err);
         continue;
       }
 
@@ -81,6 +121,19 @@ export class FallbackModel implements LanguageModelV1 {
 
       return { ...result, stream };
     }
+    this.logExhausted(lastError);
     throw lastError;
+  }
+
+  private logFallback(model: LanguageModelV1, err: unknown): void {
+    this.logger.warn(
+      `[llm] fallback provider=${model.provider} model=${model.modelId} reason=${errorReason(err)}`
+    );
+  }
+
+  private logExhausted(err: unknown): void {
+    this.logger.warn(
+      `[llm] all providers exhausted models=${this.modelId} reason=${errorReason(err)}`
+    );
   }
 }

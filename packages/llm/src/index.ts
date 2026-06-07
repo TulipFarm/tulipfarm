@@ -5,7 +5,7 @@ export {
   validateLlmConfig,
 } from "./config";
 export type { LlmConfig, ProviderEntry, TierConfig } from "./config";
-export { FallbackModel } from "./fallback";
+export { FallbackModel, type FallbackLogger, isHardFailure } from "./fallback";
 export { createModel } from "./provider";
 export { resolveTier } from "./selection";
 export type { Autonomy, ModelSelector, SelectionContext } from "./selection";
