@@ -3,10 +3,8 @@ import { generateCsrfToken, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
-import type { SessionStore } from "../session-store";
+import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../session-store";
 import { type UserRepo, toPublicUser } from "../users";
-
-const DEFAULT_TTL_SECONDS = 604800; // 7 days
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -35,7 +33,7 @@ export function registerSessionRoutes(
   store: SessionStore,
   repo: UserRepo,
   requireAuth: PreHandler,
-  ttlSeconds = DEFAULT_TTL_SECONDS,
+  ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   rateLimitHook?: PreHandler
 ): void {
   app.post(

@@ -3,16 +3,9 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
-
-interface Logger {
-  info: (msg: string) => void;
-  warn: (msg: string) => void;
-  error: (msg: string) => void;
-}
+import type { Logger } from "./types";
 
 export class GitSyncService extends EventEmitter {
-  private timer: ReturnType<typeof setInterval> | undefined;
-
   constructor(
     private readonly soulPath: string,
     private readonly remoteUrl: string | undefined,
@@ -121,26 +114,6 @@ export class GitSyncService extends EventEmitter {
       this.logger.error(
         `Soul: periodic sync failed — ${err instanceof Error ? err.message : String(err)}`
       );
-    }
-  }
-
-  startPeriodicSync(intervalMs: number): void {
-    this.timer = setInterval(async () => {
-      try {
-        await this.pull();
-        this.logger.info("Soul: periodic sync complete");
-      } catch (err) {
-        this.logger.error(
-          `Soul: periodic sync failed — ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }, intervalMs);
-  }
-
-  stopPeriodicSync(): void {
-    if (this.timer !== undefined) {
-      clearInterval(this.timer);
-      this.timer = undefined;
     }
   }
 }

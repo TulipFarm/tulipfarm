@@ -11,16 +11,23 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 
 ## Layout
 
-| Path                   | What                                                                                      |
-| ---------------------- | ----------------------------------------------------------------------------------------- |
-| `apps/api`             | Fastify API server. MongoDB, migration-on-boot, soul git store.                           |
-| `apps/web`             | Web UI.                                                                                   |
-| `packages/tsconfig`    | Shared `tsconfig` bases (`@tulipfarm/tsconfig`).                                          |
-| `packages/types`       | Shared TypeScript types.                                                                  |
-| `packages/ui`          | Shared UI components.                                                                     |
-| `packages/utils`       | Shared utilities.                                                                         |
-| `soul/`                | Local git repo holding system config (resources, routines, agents, skills, integrations). |
-| `scripts/setup-dev.sh` | Bootstraps MongoDB + Redis + soul + `.env.local`.                                         |
+| Path | What |
+| --- | --- |
+| [`apps/api`](apps/api/AGENTS.md) | Fastify API server. MongoDB, migration-on-boot, soul git store. |
+| [`apps/web`](apps/web/AGENTS.md) | Remix + React web UI. |
+| [`packages/llm`](packages/llm/AGENTS.md) | LLM provider abstraction + tiered fallback chains (`@tulipfarm/llm`). |
+| [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loader + git sync (`@tulipfarm/soul`). |
+| [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage + key rotation (`@tulipfarm/secrets`). |
+| [`packages/validation`](packages/validation/AGENTS.md) | Schema validation + resource transforms (`@tulipfarm/validation`). |
+| [`packages/ui`](packages/ui/AGENTS.md) | Shared React components (`@tulipfarm/ui`). |
+| [`packages/types`](packages/types/AGENTS.md) | Shared TypeScript types (`@tulipfarm/types`). |
+| [`packages/utils`](packages/utils/AGENTS.md) | Shared utilities (`@tulipfarm/utils`). |
+| [`packages/constants`](packages/constants/AGENTS.md) | Shared env-aware constants (`@tulipfarm/constants`). |
+| [`packages/tsconfig`](packages/tsconfig/AGENTS.md) | Shared `tsconfig` bases (`@tulipfarm/tsconfig`). |
+| `soul/` | Separate git repo created by `setup-dev.sh` (not part of this monorepo): resources, routines, agents, skills, integrations. |
+| `scripts/setup-dev.sh` | Bootstraps MongoDB + Redis + soul + `.env.local`. |
+
+Each app and package has its own `AGENTS.md` with local conventions — read the nearest one.
 
 ## Commands
 
@@ -28,7 +35,7 @@ Run from repo root. Turbo fans out across workspaces.
 
 ```bash
 pnpm install            # frozen install in CI: pnpm install --frozen-lockfile
-pnpm dev                # api on :4001, web on :4000
+pnpm dev                # api on :4010, web on :4000
 pnpm dev:api            # api only
 pnpm dev:web            # web only
 pnpm lint               # biome check across all workspaces

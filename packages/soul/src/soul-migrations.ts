@@ -2,12 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { SOUL_MIGRATIONS } from "./migrations/index";
-
-interface Logger {
-  info: (msg: string) => void;
-  warn: (msg: string) => void;
-  error: (msg: string) => void;
-}
+import type { Logger } from "./types";
 
 export async function runSoulMigrations(soulPath: string, logger: Logger): Promise<void> {
   const soulYamlPath = join(soulPath, "soul.yaml");

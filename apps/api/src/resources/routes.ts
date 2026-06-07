@@ -1,12 +1,24 @@
 import { randomUUID } from "node:crypto";
-import type { SoulLoader } from "@tulipfarm/soul";
-import { TulipFarmValidationError, ajv, applyTransforms } from "@tulipfarm/validation";
+import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
+import {
+  type CounterFn,
+  TulipFarmValidationError,
+  ajv,
+  applyTransforms,
+} from "@tulipfarm/validation";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { Db } from "mongodb";
 import { ErrorSchema } from "../auth/schemas";
 import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination";
-import { MongoCounterStore, MongoResourceRepo, makeHistoryEntry, toApiRecord } from "./repo";
+import {
+  MongoCounterStore,
+  MongoResourceRepo,
+  type ResourceDoc,
+  type ResourceRepo,
+  makeHistoryEntry,
+  toApiRecord,
+} from "./repo";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -105,6 +117,126 @@ async function validateLinks(
   return null;
 }
 
+/** A 422/404/409 response a write helper can hand back for the route to send. */
+type WriteError<C extends number = number> = {
+  code: C;
+  body: { error: string; boundary?: string; path?: string };
+};
+
+/** Load an existing record for update/delete, enforcing soft-delete and If-Match. */
+async function loadForWrite(
+  repo: ResourceRepo,
+  id: string,
+  ifMatch: number
+): Promise<{ ok: true; doc: ResourceDoc } | { ok: false; err: WriteError<404 | 409> }> {
+  const existing = await repo.findById(id);
+  if (!existing || existing.deletedAt != null) {
+    return { ok: false, err: { code: 404, body: { error: "not found" } } };
+  }
+  if (existing.version !== ifMatch) {
+    return { ok: false, err: { code: 409, body: { error: "version conflict" } } };
+  }
+  return { ok: true, doc: existing };
+}
+
+/** AJV schema + x-links validation. Runs before the hook and again after it. */
+async function validateAndLink(
+  schema: Record<string, unknown>,
+  data: Record<string, unknown>,
+  db: Db,
+  soulLoader: SoulLoader
+): Promise<WriteError<422> | null> {
+  const validate = ajv.compile(schema);
+  if (!validate(data)) {
+    const e = validate.errors?.[0];
+    return {
+      code: 422,
+      body: {
+        error: e?.message ?? "validation failed",
+        boundary: "resource",
+        path: e?.instancePath ?? "",
+      },
+    };
+  }
+  const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
+  if (linkErr) {
+    return {
+      code: 422,
+      body: {
+        error: `linked record not found: ${linkErr.id}`,
+        boundary: "resource",
+        path: `/${linkErr.field}`,
+      },
+    };
+  }
+  return null;
+}
+
+/** Declarative transforms (run once) followed by the validate+link gate. */
+async function transformAndValidate(
+  type: string,
+  schema: Record<string, unknown>,
+  data: Record<string, unknown>,
+  counter: CounterFn,
+  db: Db,
+  soulLoader: SoulLoader
+): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; err: WriteError<422> }> {
+  let out = data;
+  try {
+    out = await applyTransforms(type, schema, out, { counter });
+  } catch (err) {
+    if (err instanceof TulipFarmValidationError) {
+      return {
+        ok: false,
+        err: { code: 422, body: { error: err.message, boundary: err.boundary, path: err.path } },
+      };
+    }
+    throw err;
+  }
+  const err = await validateAndLink(schema, out, db, soulLoader);
+  if (err) return { ok: false, err };
+  return { ok: true, data: out };
+}
+
+/** Run the before hook if one is enabled. `ran` signals the caller to re-validate. */
+async function maybeRunBeforeHook(
+  hookExecutor: HookExecutor | undefined,
+  resourceDef: SoulResource,
+  type: string,
+  data: Record<string, unknown>
+): Promise<
+  { ok: true; data: Record<string, unknown>; ran: boolean } | { ok: false; err: WriteError<422> }
+> {
+  if (!hookExecutor || !resourceDef.hookSource || resourceDef.hooksEnabled === false) {
+    return { ok: true, data, ran: false };
+  }
+  try {
+    const out = await hookExecutor.runBeforeHook(
+      resourceDef.hookSource,
+      type,
+      data,
+      resourceDef.hookHash
+    );
+    return { ok: true, data: out, ran: true };
+  } catch (err) {
+    if (err instanceof HookError) {
+      return { ok: false, err: { code: 422, body: { error: err.message } } };
+    }
+    throw err;
+  }
+}
+
+/** Run the after hook if one is enabled (best-effort; never fails the request). */
+async function maybeRunAfterHook(
+  hookExecutor: HookExecutor | undefined,
+  resourceDef: SoulResource,
+  type: string,
+  record: Record<string, unknown>
+): Promise<void> {
+  if (!hookExecutor || !resourceDef.hookSource || resourceDef.hooksEnabled === false) return;
+  await hookExecutor.runAfterHook(resourceDef.hookSource, type, record, resourceDef.hookHash);
+}
+
 export function registerResourceRoutes(
   app: FastifyInstance,
   db: Db,
@@ -143,64 +275,25 @@ export function registerResourceRoutes(
       const now = new Date();
       const id = randomUUID();
 
-      let data = stripSystemFields(req.body as Record<string, unknown>);
-      data = stripReadOnly(schema, data);
+      let data = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
 
-      try {
-        data = await applyTransforms(type, schema, data, { counter });
-      } catch (err) {
-        if (err instanceof TulipFarmValidationError) {
-          return reply
-            .code(422)
-            .send({ error: err.message, boundary: err.boundary, path: err.path });
-        }
-        throw err;
-      }
+      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
+      data = prepared.data;
 
-      const validate = ajv.compile(schema);
-      if (!validate(data)) {
-        const e = validate.errors?.[0];
-        return reply
-          .code(422)
-          .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
-      }
-
-      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
-      if (linkErr) {
-        return reply
-          .code(422)
-          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
-      }
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        try {
-          data = await hookExecutor.runBeforeHook(
-            resourceDef.hookSource,
-            type,
-            data,
-            resourceDef.hookHash
-          );
-        } catch (err) {
-          if (err instanceof HookError) {
-            return reply.code(422).send({ error: err.message });
-          }
-          throw err;
-        }
+      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
+      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
+      data = before.data;
+      if (before.ran) {
+        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
       const repo = new MongoResourceRepo(db, type);
       await repo.insert(doc);
       await repo.appendHistory(makeHistoryEntry(id, "create", doc));
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        await hookExecutor.runAfterHook(
-          resourceDef.hookSource,
-          type,
-          toApiRecord(doc),
-          resourceDef.hookHash
-        );
-      }
+      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(doc));
 
       return reply.code(201).send(toApiRecord(doc));
     }
@@ -324,56 +417,27 @@ export function registerResourceRoutes(
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
       const repo = new MongoResourceRepo(db, type);
-      const existing = await repo.findById(id);
-      if (!existing || existing.deletedAt != null)
-        return reply.code(404).send({ error: "not found" });
-      if (existing.version !== ifMatch) return reply.code(409).send({ error: "version conflict" });
+      const loaded = await loadForWrite(repo, id, ifMatch);
+      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
+      const existing = loaded.doc;
 
       const schema = resourceDef.schema;
-      let data = stripSystemFields(req.body as Record<string, unknown>);
-      data = stripReadOnly(schema, data);
-      data = stripImmutable(schema, existing, data);
+      let data = stripImmutable(
+        schema,
+        existing,
+        stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>))
+      );
 
-      try {
-        data = await applyTransforms(type, schema, data, { counter });
-      } catch (err) {
-        if (err instanceof TulipFarmValidationError) {
-          return reply
-            .code(422)
-            .send({ error: err.message, boundary: err.boundary, path: err.path });
-        }
-        throw err;
-      }
+      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
+      data = prepared.data;
 
-      const validate = ajv.compile(schema);
-      if (!validate(data)) {
-        const e = validate.errors?.[0];
-        return reply
-          .code(422)
-          .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
-      }
-
-      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
-      if (linkErr) {
-        return reply
-          .code(422)
-          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
-      }
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        try {
-          data = await hookExecutor.runBeforeHook(
-            resourceDef.hookSource,
-            type,
-            data,
-            resourceDef.hookHash
-          );
-        } catch (err) {
-          if (err instanceof HookError) {
-            return reply.code(422).send({ error: err.message });
-          }
-          throw err;
-        }
+      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
+      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
+      data = before.data;
+      if (before.ran) {
+        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
       const now = new Date();
@@ -389,15 +453,7 @@ export function registerResourceRoutes(
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        await hookExecutor.runAfterHook(
-          resourceDef.hookSource,
-          type,
-          toApiRecord(newDoc),
-          resourceDef.hookHash
-        );
-      }
+      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -437,10 +493,9 @@ export function registerResourceRoutes(
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
       const repo = new MongoResourceRepo(db, type);
-      const existing = await repo.findById(id);
-      if (!existing || existing.deletedAt != null)
-        return reply.code(404).send({ error: "not found" });
-      if (existing.version !== ifMatch) return reply.code(409).send({ error: "version conflict" });
+      const loaded = await loadForWrite(repo, id, ifMatch);
+      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
+      const existing = loaded.doc;
 
       const schema = resourceDef.schema;
       const {
@@ -452,51 +507,19 @@ export function registerResourceRoutes(
         ...existingData
       } = existing;
 
-      let patch = stripSystemFields(req.body as Record<string, unknown>);
-      patch = stripReadOnly(schema, patch);
-      const merged = stripImmutable(schema, existingData, { ...existingData, ...patch });
+      const patch = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
+      let data = stripImmutable(schema, existingData, { ...existingData, ...patch });
 
-      let data = merged;
-      try {
-        data = await applyTransforms(type, schema, data, { counter });
-      } catch (err) {
-        if (err instanceof TulipFarmValidationError) {
-          return reply
-            .code(422)
-            .send({ error: err.message, boundary: err.boundary, path: err.path });
-        }
-        throw err;
-      }
+      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
+      data = prepared.data;
 
-      const validate = ajv.compile(schema);
-      if (!validate(data)) {
-        const e = validate.errors?.[0];
-        return reply
-          .code(422)
-          .send({ error: e?.message ?? "validation failed", path: e?.instancePath ?? "" });
-      }
-
-      const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
-      if (linkErr) {
-        return reply
-          .code(422)
-          .send({ error: `linked record not found: ${linkErr.id}`, path: `/${linkErr.field}` });
-      }
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        try {
-          data = await hookExecutor.runBeforeHook(
-            resourceDef.hookSource,
-            type,
-            data,
-            resourceDef.hookHash
-          );
-        } catch (err) {
-          if (err instanceof HookError) {
-            return reply.code(422).send({ error: err.message });
-          }
-          throw err;
-        }
+      const before = await maybeRunBeforeHook(hookExecutor, resourceDef, type, data);
+      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
+      data = before.data;
+      if (before.ran) {
+        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
       const now = new Date();
@@ -512,15 +535,7 @@ export function registerResourceRoutes(
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
-
-      if (hookExecutor && resourceDef.hookSource && resourceDef.hooksEnabled !== false) {
-        await hookExecutor.runAfterHook(
-          resourceDef.hookSource,
-          type,
-          toApiRecord(newDoc),
-          resourceDef.hookHash
-        );
-      }
+      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -559,10 +574,9 @@ export function registerResourceRoutes(
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
       const repo = new MongoResourceRepo(db, type);
-      const existing = await repo.findById(id);
-      if (!existing || existing.deletedAt != null)
-        return reply.code(404).send({ error: "not found" });
-      if (existing.version !== ifMatch) return reply.code(409).send({ error: "version conflict" });
+      const loaded = await loadForWrite(repo, id, ifMatch);
+      if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
+      const existing = loaded.doc;
 
       const now = new Date();
       const softDeleted = {

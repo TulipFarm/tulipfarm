@@ -7,6 +7,9 @@ export interface SessionStore {
   destroy(sid: string): Promise<void>;
 }
 
+/** Default session lifetime: 7 days (seconds). Override via SESSION_TTL_SECONDS. */
+export const DEFAULT_SESSION_TTL_SECONDS = 604800;
+
 // 32 random bytes → 43-char base64url string (no padding). Unguessable session id.
 function newSid(): string {
   return randomBytes(32).toString("base64url");

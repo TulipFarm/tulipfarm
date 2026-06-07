@@ -8,6 +8,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { type UserDoc, type UserRepo, createUser } from "../auth/users";
+import { HookError, type HookExecutor } from "../hooks/hook-executor";
 import type { PaginatedResult } from "../pagination";
 import type { ListOpts, ResourceDoc, ResourceHistoryDoc, ResourceRepo } from "./repo";
 
@@ -213,6 +214,7 @@ describe("resource routes", () => {
         payload: { priority: "high" },
       });
       expect(res.statusCode).toBe(422);
+      expect(res.json<{ boundary: string }>().boundary).toBe("resource");
     });
 
     it("strips system fields from body", async () => {
@@ -226,6 +228,87 @@ describe("resource routes", () => {
       expect(res.statusCode).toBe(201);
       const body = res.json<{ version: number }>();
       expect(body.version).toBe(1);
+    });
+  });
+
+  // ── Hooks ───────────────────────────────────────────────────────────────────
+
+  describe("before/after hooks", () => {
+    let hookApp: FastifyInstance;
+    let runBeforeHook: ReturnType<typeof vi.fn>;
+    let runAfterHook: ReturnType<typeof vi.fn>;
+    let hookSid: string;
+
+    beforeEach(async () => {
+      const hookStore = new MemorySessionStore();
+      const hookUserRepo = new FakeUserRepo();
+      const hookLoader = makeFakeSoulLoader([
+        {
+          name: "ticket",
+          schema: TICKET_SCHEMA,
+          hasHooks: true,
+          hookSource: "({})",
+          hookHash: "hash",
+          hooksEnabled: true,
+        },
+      ]);
+      runBeforeHook = vi.fn();
+      runAfterHook = vi.fn().mockResolvedValue(undefined);
+      const hookExecutor = { runBeforeHook, runAfterHook } as unknown as HookExecutor;
+
+      const user = await createUser(hookUserRepo, "hook@example.com", "pass", "member");
+      hookSid = await hookStore.create(user._id);
+      const db = makeFakeDb(new FakeResourceRepo()) as unknown as import("mongodb").Db;
+      hookApp = await buildApp({
+        sessionStore: hookStore,
+        userRepo: hookUserRepo,
+        tokenRepo: new FakeTokenRepo(),
+        soulLoader: hookLoader,
+        hookExecutor,
+        db,
+      });
+    });
+
+    afterEach(async () => {
+      await hookApp.close();
+    });
+
+    function post(payload: Record<string, unknown>) {
+      return hookApp.inject({
+        method: "POST",
+        url: "/api/v1/resources/ticket",
+        cookies: { [SESSION_COOKIE]: hookSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload,
+      });
+    }
+
+    it("persists before-hook mutations and runs the after hook", async () => {
+      runBeforeHook.mockImplementation(async (_src, _type, record) => ({
+        ...record,
+        priority: "high",
+      }));
+      const res = await post({ title: "Bug" });
+      expect(res.statusCode).toBe(201);
+      expect(res.json<{ priority: string }>().priority).toBe("high");
+      expect(runAfterHook).toHaveBeenCalledOnce();
+    });
+
+    it("re-validates after the before hook — rejects schema-violating hook output (422)", async () => {
+      runBeforeHook.mockImplementation(async (_src, _type, record) => ({
+        ...record,
+        priority: "INVALID",
+      }));
+      const res = await post({ title: "Bug" });
+      expect(res.statusCode).toBe(422);
+      expect(runAfterHook).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 when the before hook throws HookError", async () => {
+      runBeforeHook.mockRejectedValue(new HookError("hook boom"));
+      const res = await post({ title: "Bug" });
+      expect(res.statusCode).toBe(422);
+      expect(res.json<{ error: string }>().error).toBe("hook boom");
     });
   });
 

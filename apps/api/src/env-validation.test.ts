@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { validateBase64Secret, validateEnvironment, validateUriPrefix } from "./index";
+import { validateBase64Secret, validateEnvironment, validateUriPrefix } from "./env";
 
 /** Generate a valid 32-byte base64 secret */
 function secret32(): string {

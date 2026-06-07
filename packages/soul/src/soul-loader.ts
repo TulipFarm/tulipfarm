@@ -3,13 +3,14 @@ import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml } from "yaml";
-import type { SoulAgent, SoulIntegration, SoulResource, SoulRoutine, SoulSkill } from "./types";
-
-interface Logger {
-  info: (msg: string) => void;
-  warn: (msg: string) => void;
-  error: (msg: string) => void;
-}
+import type {
+  Logger,
+  SoulAgent,
+  SoulIntegration,
+  SoulResource,
+  SoulRoutine,
+  SoulSkill,
+} from "./types";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 

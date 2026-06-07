@@ -283,42 +283,4 @@ describe("GitSyncService", () => {
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("host unreachable"));
     });
   });
-
-  describe("startPeriodicSync / stopPeriodicSync", () => {
-    it("pulls on each interval tick", async () => {
-      vi.useFakeTimers();
-      mockExistsSync.mockReturnValue(true);
-      mockGit.raw.mockResolvedValue("0\t1");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      svc.startPeriodicSync(300_000);
-      await vi.advanceTimersByTimeAsync(300_000);
-      expect(mockGit.fetch).toHaveBeenCalled();
-      svc.stopPeriodicSync();
-      vi.useRealTimers();
-    });
-
-    it("stops pulling after stopPeriodicSync", async () => {
-      vi.useFakeTimers();
-      mockExistsSync.mockReturnValue(true);
-      mockGit.raw.mockResolvedValue("0\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      svc.startPeriodicSync(300_000);
-      svc.stopPeriodicSync();
-      await vi.advanceTimersByTimeAsync(300_000);
-      expect(mockGit.fetch).not.toHaveBeenCalled();
-      vi.useRealTimers();
-    });
-
-    it("is non-fatal on periodic sync failure", async () => {
-      vi.useFakeTimers();
-      mockExistsSync.mockReturnValue(true);
-      mockGit.fetch.mockRejectedValue(new Error("connection refused"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      svc.startPeriodicSync(300_000);
-      await vi.advanceTimersByTimeAsync(300_000);
-      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("connection refused"));
-      svc.stopPeriodicSync();
-      vi.useRealTimers();
-    });
-  });
 });

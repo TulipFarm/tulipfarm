@@ -29,3 +29,10 @@ export interface SoulIntegration {
   name: string;
   connection: Record<string, unknown>;
 }
+
+/** Minimal logger surface (pino/console compatible) shared across soul services. */
+export interface Logger {
+  info: (msg: string) => void;
+  warn: (msg: string) => void;
+  error: (msg: string) => void;
+}
