@@ -28,4 +28,11 @@ export const DATA_MIGRATIONS: DataMigration[] = [
       await db.collection("secrets").createIndex({ key: 1 }, { unique: true });
     },
   },
+  {
+    version: 4,
+    description: "Create index on conversations.userId",
+    up: async (db) => {
+      await db.collection("conversations").createIndex({ userId: 1 });
+    },
+  },
 ];

@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
+import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
@@ -13,6 +14,8 @@ import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
+import type { ConversationRepo } from "./chat/conversations";
+import { registerChatRoutes } from "./chat/routes";
 import type { HookExecutor } from "./hooks/hook-executor";
 import type { RateLimiter } from "./rate-limit";
 import { registerResourceRoutes } from "./resources/routes";
@@ -30,6 +33,8 @@ export interface AppOptions {
   soulLoader?: SoulLoader;
   hookExecutor?: HookExecutor;
   db?: Db;
+  llmService?: LlmService;
+  conversationRepo?: ConversationRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -114,6 +119,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.db && opts.soulLoader) {
       registerResourceRoutes(app, opts.db, opts.soulLoader, requireAuth, opts.hookExecutor);
+    }
+    if (opts.llmService && opts.conversationRepo) {
+      registerChatRoutes(app, opts.llmService, opts.conversationRepo, requireAuth);
     }
   }
 

@@ -59,6 +59,9 @@ importers:
       '@tulipfarm/validation':
         specifier: workspace:*
         version: link:../../packages/validation
+      ai:
+        specifier: ^4
+        version: 4.3.19(react@19.2.7)(zod@4.4.3)
       bullmq:
         specifier: ^5.0.0
         version: 5.78.0
