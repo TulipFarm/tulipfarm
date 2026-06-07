@@ -1,4 +1,4 @@
-import { LlmService } from "@tulipfarm/llm";
+import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
 import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
 import { Queue, Worker } from "bullmq";
@@ -61,6 +61,7 @@ async function boot() {
         : new HookExecutor(process.env.MONGODB_URI as string, db.databaseName);
 
     const llmService = new LlmService();
+    const embeddingService = new EmbeddingService();
     const conversationRepo = new MongoConversationRepo(db);
 
     const app = await buildApp({
@@ -79,7 +80,8 @@ async function boot() {
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
-    registerLlmReload(gitSync, soulLoader, llmService, secretsService, app.log);
+    await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
+    registerLlmReload(gitSync, soulLoader, llmService, embeddingService, secretsService, app.log);
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 

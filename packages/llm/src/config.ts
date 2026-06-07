@@ -29,6 +29,16 @@ export class UnknownModelError extends Error {
   }
 }
 
+export class EmbeddingUnavailableError extends Error {
+  constructor() {
+    super("no embedding provider available");
+    this.name = "EmbeddingUnavailableError";
+  }
+}
+
+/** Warning surfaced to search callers when no embedding provider is available. */
+export const EMBEDDING_UNAVAILABLE_WARNING = "embedding-unavailable";
+
 const ProviderEntrySchema = Type.Object({
   provider: Type.String(),
   model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
@@ -40,16 +50,32 @@ const TierConfigSchema = Type.Object({
   providers: Type.Array(ProviderEntrySchema, { minItems: 1 }),
 });
 
+const EmbeddingProviderEntrySchema = Type.Object({
+  provider: Type.String(),
+  model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
+  api_key_ref: Type.Optional(Type.String()),
+  base_url: Type.Optional(Type.String()),
+  resource_name: Type.Optional(Type.String()),
+  dimension: Type.Optional(Type.Integer({ minimum: 1 })),
+});
+
+const EmbeddingsConfigSchema = Type.Object({
+  providers: Type.Array(EmbeddingProviderEntrySchema, { minItems: 1 }),
+});
+
 export const LlmConfigSchema = Type.Object({
   tiers: Type.Object({
     quick: TierConfigSchema,
     standard: TierConfigSchema,
     complex: TierConfigSchema,
   }),
+  embeddings: Type.Optional(EmbeddingsConfigSchema),
 });
 
 export type ProviderEntry = Static<typeof ProviderEntrySchema>;
 export type TierConfig = Static<typeof TierConfigSchema>;
+export type EmbeddingProviderEntry = Static<typeof EmbeddingProviderEntrySchema>;
+export type EmbeddingsConfig = Static<typeof EmbeddingsConfigSchema>;
 export type LlmConfig = Static<typeof LlmConfigSchema>;
 
 const checkConfig = ajv.compile(LlmConfigSchema);

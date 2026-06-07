@@ -1,5 +1,5 @@
 import type { EventEmitter } from "node:events";
-import type { LlmService } from "@tulipfarm/llm";
+import type { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { Logger, SoulLoader } from "@tulipfarm/soul";
 
@@ -7,15 +7,16 @@ import type { Logger, SoulLoader } from "@tulipfarm/soul";
  * Reload the LLM config on every `soul.synced` event without restarting.
  *
  * Reloads the soul (re-reads `llm.config.yaml`) then re-initialises the
- * LlmService, which re-validates and rebuilds the tier models. Both
- * `SoulLoader.reload` and `LlmService.init` validate/build before mutating
- * their own state, so a failed reload leaves the running server on its
+ * LlmService and EmbeddingService, which re-validate and rebuild from the new
+ * config. Both `SoulLoader.reload` and the service `init`s validate/build before
+ * mutating their own state, so a failed reload leaves the running server on its
  * previously-loaded, valid config (LLM-V1-003 AC4).
  */
 export function registerLlmReload(
   gitSync: EventEmitter,
   soulLoader: SoulLoader,
   llmService: LlmService,
+  embeddingService: EmbeddingService,
   secrets: SecretsService,
   logger: Logger
 ): void {
@@ -24,6 +25,7 @@ export function registerLlmReload(
       try {
         await soulLoader.reload();
         await llmService.init(soulLoader.llmConfig, secrets, logger);
+        await embeddingService.init(soulLoader.llmConfig, secrets, logger);
         logger.info("[llm] config reloaded after soul.synced");
       } catch (err) {
         logger.error(

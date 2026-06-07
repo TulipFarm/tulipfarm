@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { LlmService } from "@tulipfarm/llm";
+import type { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { Logger, SoulLoader } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
@@ -22,23 +22,30 @@ function setup(overrides: { reload?: () => Promise<void>; init?: () => Promise<v
       await (overrides.init?.() ?? Promise.resolve());
     }),
   } as unknown as LlmService;
+  const embeddingService = {
+    init: vi.fn(async () => {
+      calls.push("embeddings.init");
+    }),
+  } as unknown as EmbeddingService;
   const secrets = {} as SecretsService;
   const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-  registerLlmReload(gitSync, soulLoader, llmService, secrets, logger);
-  return { gitSync, soulLoader, llmService, secrets, logger, calls, llmConfig };
+  registerLlmReload(gitSync, soulLoader, llmService, embeddingService, secrets, logger);
+  return { gitSync, soulLoader, llmService, embeddingService, secrets, logger, calls, llmConfig };
 }
 
 describe("registerLlmReload", () => {
-  it("reloads soul then re-inits the LLM service with the new config", async () => {
-    const { gitSync, soulLoader, llmService, secrets, logger, calls, llmConfig } = setup();
+  it("reloads soul then re-inits the LLM and embedding services with the new config", async () => {
+    const { gitSync, soulLoader, llmService, embeddingService, secrets, logger, calls, llmConfig } =
+      setup();
 
     gitSync.emit("soul.synced");
-    await vi.waitFor(() => expect(llmService.init).toHaveBeenCalled());
+    await vi.waitFor(() => expect(embeddingService.init).toHaveBeenCalled());
 
-    expect(calls).toEqual(["reload", "init"]);
+    expect(calls).toEqual(["reload", "init", "embeddings.init"]);
     expect(soulLoader.reload).toHaveBeenCalledOnce();
     expect(llmService.init).toHaveBeenCalledWith(llmConfig, secrets, logger);
+    expect(embeddingService.init).toHaveBeenCalledWith(llmConfig, secrets, logger);
     expect(logger.error).not.toHaveBeenCalled();
   });
 

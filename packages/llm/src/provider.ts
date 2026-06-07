@@ -6,7 +6,7 @@ import type { LanguageModelV1 } from "ai";
 import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import type { ProviderEntry } from "./config";
 
-async function resolveApiKey(
+export async function resolveApiKey(
   api_key_ref: string | undefined,
   secrets: SecretsService
 ): Promise<string | undefined> {
