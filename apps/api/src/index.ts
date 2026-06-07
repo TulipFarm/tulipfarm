@@ -9,6 +9,7 @@ import { MongoTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, RedisSessionStore } from "./auth/session-store";
 import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
 import { MongoConversationRepo } from "./chat/conversations";
+import { MongoMessageRepo } from "./chat/messages";
 import { connectDb } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { HookExecutor } from "./hooks/hook-executor";
@@ -63,6 +64,7 @@ async function boot() {
     const llmService = new LlmService();
     const embeddingService = new EmbeddingService();
     const conversationRepo = new MongoConversationRepo(db);
+    const messageRepo = new MongoMessageRepo(db);
 
     const app = await buildApp({
       sessionStore,
@@ -76,6 +78,7 @@ async function boot() {
       db,
       llmService,
       conversationRepo,
+      messageRepo,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.

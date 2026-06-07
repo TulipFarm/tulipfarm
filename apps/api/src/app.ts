@@ -15,6 +15,7 @@ import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
 import type { ConversationRepo } from "./chat/conversations";
+import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
 import type { HookExecutor } from "./hooks/hook-executor";
 import type { RateLimiter } from "./rate-limit";
@@ -35,6 +36,7 @@ export interface AppOptions {
   db?: Db;
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
+  messageRepo?: MessageRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -120,8 +122,14 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.db && opts.soulLoader) {
       registerResourceRoutes(app, opts.db, opts.soulLoader, requireAuth, opts.hookExecutor);
     }
-    if (opts.llmService && opts.conversationRepo) {
-      registerChatRoutes(app, opts.llmService, opts.conversationRepo, requireAuth);
+    if (opts.llmService && opts.conversationRepo && opts.messageRepo) {
+      registerChatRoutes(
+        app,
+        opts.llmService,
+        opts.conversationRepo,
+        opts.messageRepo,
+        requireAuth
+      );
     }
   }
 

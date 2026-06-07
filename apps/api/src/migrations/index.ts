@@ -6,6 +6,40 @@ export interface DataMigration {
   up: (db: Db) => Promise<void>;
 }
 
+interface EmbeddedMessage {
+  role: string;
+  content: unknown;
+  createdAt?: Date;
+}
+
+interface EmbeddedConv {
+  _id: string;
+  createdAt?: Date;
+  messages?: EmbeddedMessage[];
+}
+
+interface BackfilledMessageDoc {
+  _id: string;
+  conversationId: string;
+  role: string;
+  content: unknown;
+  createdAt: Date;
+}
+
+export function buildBackfillDocs(conv: EmbeddedConv): BackfilledMessageDoc[] {
+  const messages = conv.messages;
+  if (!messages || messages.length === 0) {
+    return [];
+  }
+  return messages.map((m, i) => ({
+    _id: `${conv._id}:${String(i).padStart(6, "0")}`,
+    conversationId: conv._id,
+    role: m.role,
+    content: m.content,
+    createdAt: m.createdAt ?? conv.createdAt ?? new Date(),
+  }));
+}
+
 export const DATA_MIGRATIONS: DataMigration[] = [
   {
     version: 1,
@@ -33,6 +67,27 @@ export const DATA_MIGRATIONS: DataMigration[] = [
     description: "Create index on conversations.userId",
     up: async (db) => {
       await db.collection("conversations").createIndex({ userId: 1 });
+    },
+  },
+  {
+    version: 5,
+    description: "messages collection: index + backfill from embedded conversation.messages",
+    up: async (db) => {
+      const messages = db.collection<BackfilledMessageDoc>("messages");
+      const conversations = db.collection<EmbeddedConv>("conversations");
+      await messages.createIndex({ conversationId: 1, createdAt: 1, _id: 1 });
+      const cursor = conversations.find({ messages: { $exists: true } });
+      try {
+        for await (const conv of cursor) {
+          const backfillDocs = buildBackfillDocs(conv);
+          for (const message of backfillDocs) {
+            await messages.replaceOne({ _id: message._id }, message, { upsert: true });
+          }
+          await conversations.updateOne({ _id: conv._id }, { $unset: { messages: "" } });
+        }
+      } finally {
+        await cursor.close();
+      }
     },
   },
 ];

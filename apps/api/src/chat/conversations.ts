@@ -1,19 +1,13 @@
 import type { Collection, Db } from "mongodb";
 
-export interface ConversationMessage {
-  role: "user" | "assistant";
-  content: string;
-  createdAt: Date;
-}
-
 export interface ConversationDoc {
   _id: string;
-  userId: string;
+  userId?: string;
+  agentId?: string;
   // Conversation-level configured default model (tier name or model id). The
   // per-turn `model` override bypasses this without mutating it.
   // TODO: agent-config-derived default model is deferred to a later ticket.
   model?: string;
-  messages: ConversationMessage[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -21,7 +15,14 @@ export interface ConversationDoc {
 export interface ConversationRepo {
   create(doc: ConversationDoc): Promise<void>;
   findById(id: string): Promise<ConversationDoc | null>;
-  appendMessage(id: string, message: ConversationMessage): Promise<void>;
+  touch(id: string): Promise<void>;
+}
+
+export class ConversationOwnerlessError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConversationOwnerlessError";
+  }
 }
 
 export class MongoConversationRepo implements ConversationRepo {
@@ -32,6 +33,9 @@ export class MongoConversationRepo implements ConversationRepo {
   }
 
   async create(doc: ConversationDoc): Promise<void> {
+    if (doc.userId == null && doc.agentId == null) {
+      throw new ConversationOwnerlessError("conversation must have a userId or agentId");
+    }
     await this.collection.insertOne(doc);
   }
 
@@ -39,10 +43,7 @@ export class MongoConversationRepo implements ConversationRepo {
     return this.collection.findOne({ _id: id });
   }
 
-  async appendMessage(id: string, message: ConversationMessage): Promise<void> {
-    await this.collection.updateOne(
-      { _id: id },
-      { $push: { messages: message }, $set: { updatedAt: new Date() } }
-    );
+  async touch(id: string): Promise<void> {
+    await this.collection.updateOne({ _id: id }, { $set: { updatedAt: new Date() } });
   }
 }

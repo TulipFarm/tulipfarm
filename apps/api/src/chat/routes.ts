@@ -4,7 +4,10 @@ import { type CoreMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import { parsePaginationQuery } from "../pagination";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
+import { type MessageRepo, fromAssistantText, fromUserText, toCoreMessage } from "./messages";
+import { MessageSchema } from "./schemas";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -12,6 +15,7 @@ interface ChatBody {
   conversationId?: string;
   message: { role: "user"; content: string };
   model?: string;
+  agentId?: string;
   autonomy?: "full" | "supervised" | "approval-required" | "manual";
   hasTools?: boolean;
   llmDecision?: boolean;
@@ -33,6 +37,7 @@ const ChatBodySchema = {
       },
     },
     model: { type: "string", minLength: 1, pattern: "^\\S+$" },
+    agentId: { type: "string", minLength: 1 },
     autonomy: { type: "string", enum: ["full", "supervised", "approval-required", "manual"] },
     hasTools: { type: "boolean" },
     llmDecision: { type: "boolean" },
@@ -68,6 +73,7 @@ export function registerChatRoutes(
   app: FastifyInstance,
   llmService: LlmService,
   repo: ConversationRepo,
+  messageRepo: MessageRepo,
   requireAuth: PreHandler
 ): void {
   app.post(
@@ -103,8 +109,8 @@ export function registerChatRoutes(
         convo = {
           _id: randomUUID(),
           userId: user._id,
+          agentId: body.agentId,
           model: undefined,
-          messages: [],
           createdAt: now,
           updatedAt: now,
         };
@@ -143,15 +149,13 @@ export function registerChatRoutes(
       );
 
       // 4. Build history + persist the user turn (survives an aborted stream).
+      const history = await messageRepo.listByConversation(convo._id, 1000);
       const messages: CoreMessage[] = [
-        ...convo.messages.map((m) => ({ role: m.role, content: m.content })),
+        ...history.items.map(toCoreMessage),
         { role: "user", content: body.message.content },
       ];
-      await repo.appendMessage(convo._id, {
-        role: "user",
-        content: body.message.content,
-        createdAt: new Date(),
-      });
+      await messageRepo.create(fromUserText(convo._id, body.message.content));
+      await repo.touch(convo._id);
 
       // 5. Stream the assistant reply; persist it only on successful finish.
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
@@ -164,9 +168,16 @@ export function registerChatRoutes(
           req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
         },
         onFinish: async ({ text, finishReason }) => {
-          if (finishReason === "error" || !text) return;
-          await repo
-            .appendMessage(convo._id, { role: "assistant", content: text, createdAt: new Date() })
+          if (finishReason === "error") return;
+          if (!text) {
+            req.log.info(
+              { conversationId: convo._id, finishReason },
+              "assistant turn produced no text — skipping persist"
+            );
+            return;
+          }
+          await messageRepo
+            .create(fromAssistantText(convo._id, text))
             .catch((e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"));
         },
       });
@@ -174,6 +185,109 @@ export function registerChatRoutes(
       result.pipeDataStreamToResponse(reply.raw, {
         getErrorMessage: (e) => (e instanceof Error ? e.message : "stream error"),
       });
+    }
+  );
+
+  app.get(
+    "/api/v1/conversations/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Fetch a conversation's metadata (tenant-open: any authenticated user).",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              userId: { type: ["string", "null"] },
+              agentId: { type: ["string", "null"] },
+              model: { type: ["string", "null"] },
+              createdAt: { type: "string" },
+              updatedAt: { type: "string" },
+            },
+            required: ["id", "createdAt", "updatedAt"],
+          },
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const convo = await repo.findById(id);
+      if (!convo) {
+        return reply.code(404).send({ error: "conversation not found" });
+      }
+      return reply.send({
+        id: convo._id,
+        userId: convo.userId ?? null,
+        agentId: convo.agentId ?? null,
+        model: convo.model ?? null,
+        createdAt: convo.createdAt,
+        updatedAt: convo.updatedAt,
+      });
+    }
+  );
+
+  app.get(
+    "/api/v1/conversations/:id/messages",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "List a conversation's messages, oldest→newest, cursor-paginated " +
+          "(tenant-open: any authenticated user).",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        querystring: {
+          type: "object",
+          properties: {
+            limit: { type: "integer", minimum: 1, maximum: 100 },
+            cursor: { type: "string" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              messages: { type: "array", items: MessageSchema },
+              nextCursor: { type: ["string", "null"] },
+            },
+            required: ["messages", "nextCursor"],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const convo = await repo.findById(id);
+      if (!convo) {
+        return reply.code(404).send({ error: "conversation not found" });
+      }
+
+      const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
+      const rawCursor = (req.query as Record<string, unknown>).cursor;
+      if (typeof rawCursor === "string" && rawCursor !== "" && after === undefined) {
+        return reply.code(400).send({ error: "invalid cursor" });
+      }
+
+      const result = await messageRepo.listByConversation(id, limit, after);
+      return reply.send({ messages: result.items, nextCursor: result.nextCursor });
     }
   );
 }

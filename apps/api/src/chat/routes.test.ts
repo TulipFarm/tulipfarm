@@ -9,11 +9,16 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { type UserDoc, type UserRepo, createUser } from "../auth/users";
-import type { PaginatedResult } from "../pagination";
-import type { ConversationDoc, ConversationMessage, ConversationRepo } from "./conversations";
+import { type PaginatedResult, encodeCursor } from "../pagination";
+import type { ConversationDoc, ConversationRepo } from "./conversations";
+import type { MessageDoc, MessageRepo } from "./messages";
 import { buildTurnLog } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
+
+// Captures the `prompt` (converted CoreMessages) that streamText hands the model
+// on each call, so history-rebuild assertions can inspect the outgoing messages.
+const capturedPrompts: unknown[][] = [];
 
 // ── Deterministic fake LanguageModelV1 (no network) ───────────────────────────
 // Yields v4 stream parts: one text-delta then a finish part, so streamText
@@ -59,7 +64,10 @@ function makeFakeModel(
     provider: "test",
     modelId,
     defaultObjectGenerationMode: undefined,
-    doStream: vi.fn(async () => stream()),
+    doStream: vi.fn(async (options: { prompt: unknown[] }) => {
+      capturedPrompts.push(options.prompt);
+      return stream();
+    }),
     doGenerate: vi.fn(async () => {
       throw new Error("doGenerate unused");
     }),
@@ -71,14 +79,54 @@ class FakeConversationRepo implements ConversationRepo {
   docs: Map<string, ConversationDoc> = new Map();
 
   async create(doc: ConversationDoc): Promise<void> {
-    this.docs.set(doc._id, { ...doc, messages: [...doc.messages] });
+    this.docs.set(doc._id, { ...doc });
   }
   async findById(id: string): Promise<ConversationDoc | null> {
     return this.docs.get(id) ?? null;
   }
-  async appendMessage(id: string, message: ConversationMessage): Promise<void> {
+  async touch(id: string): Promise<void> {
     const doc = this.docs.get(id);
-    if (doc) doc.messages.push(message);
+    if (doc) doc.updatedAt = new Date();
+  }
+}
+
+// ── Fake message repo ─────────────────────────────────────────────────────────
+class FakeMessageRepo implements MessageRepo {
+  messages: MessageDoc[] = [];
+
+  async create(doc: MessageDoc): Promise<void> {
+    this.messages.push(doc);
+  }
+
+  async listByConversation(
+    conversationId: string,
+    limit: number,
+    after?: { createdAt: Date; _id: string }
+  ): Promise<PaginatedResult<MessageDoc>> {
+    const sorted = this.messages
+      .filter((m) => m.conversationId === conversationId)
+      .sort((a, b) => {
+        const byTime = a.createdAt.getTime() - b.createdAt.getTime();
+        return byTime !== 0 ? byTime : a._id < b._id ? -1 : a._id > b._id ? 1 : 0;
+      });
+
+    const start = after
+      ? sorted.findIndex(
+          (m) =>
+            m.createdAt.getTime() > after.createdAt.getTime() ||
+            (m.createdAt.getTime() === after.createdAt.getTime() && m._id > after._id)
+        )
+      : 0;
+    const window = start === -1 ? [] : sorted.slice(start, start + limit + 1);
+
+    const hasMore = window.length > limit;
+    const items = hasMore ? window.slice(0, limit) : window;
+    const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : null;
+    return { items, nextCursor };
+  }
+
+  byConversation(conversationId: string): MessageDoc[] {
+    return this.messages.filter((m) => m.conversationId === conversationId);
   }
 }
 
@@ -130,6 +178,14 @@ async function waitFor(predicate: () => boolean, ms = 500): Promise<void> {
   }
 }
 
+function userMessage(conversationId: string, text: string, createdAt: Date): MessageDoc {
+  return { _id: randomUUID(), conversationId, role: "user", content: text, createdAt };
+}
+
+function assistantMessage(conversationId: string, text: string, createdAt: Date): MessageDoc {
+  return { _id: randomUUID(), conversationId, role: "assistant", content: text, createdAt };
+}
+
 // ── buildTurnLog unit (AC4) ───────────────────────────────────────────────────
 describe("buildTurnLog (AC4 observability)", () => {
   it("records the override and the resolved model id", () => {
@@ -164,26 +220,33 @@ describe("buildTurnLog (AC4 observability)", () => {
 });
 
 // ── Route tests ───────────────────────────────────────────────────────────────
-describe("POST /api/v1/chat", () => {
+describe("chat routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
   let userRepo: FakeUserRepo;
   let tokenRepo: FakeTokenRepo;
   let repo: FakeConversationRepo;
+  let messageRepo: FakeMessageRepo;
   let sid: string;
   let userId: string;
+  let otherSid: string;
   let select: ReturnType<typeof vi.fn>;
   let llmService: LlmService;
 
   beforeEach(async () => {
+    capturedPrompts.length = 0;
     store = new MemorySessionStore();
     userRepo = new FakeUserRepo();
     tokenRepo = new FakeTokenRepo();
     repo = new FakeConversationRepo();
+    messageRepo = new FakeMessageRepo();
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     userId = user._id;
     sid = await store.create(user._id);
+
+    const other = await createUser(userRepo, "other@example.com", "pass", "member");
+    otherSid = await store.create(other._id);
 
     select = vi.fn(() => makeFakeModel("claude-opus-4-8"));
     llmService = { select } as unknown as LlmService;
@@ -194,6 +257,7 @@ describe("POST /api/v1/chat", () => {
       tokenRepo,
       llmService,
       conversationRepo: repo,
+      messageRepo,
     });
   });
 
@@ -216,125 +280,289 @@ describe("POST /api/v1/chat", () => {
     return app.inject({ method: "POST", url: "/api/v1/chat", cookies, headers, payload });
   }
 
+  function get(
+    url: string,
+    opts: { session?: string | null } = {}
+  ): Promise<LightMyRequestResponse> {
+    const { session = sid } = opts;
+    const cookies: Record<string, string> = {};
+    if (session) cookies[SESSION_COOKIE] = session;
+    return app.inject({ method: "GET", url, cookies });
+  }
+
   const userMsg = (content: string) => ({ role: "user" as const, content });
 
-  it("401 without auth", async () => {
-    const res = await post({ message: userMsg("hi") }, { auth: false, csrf: false });
-    expect(res.statusCode).toBe(401);
-  });
-
-  it("403 when CSRF header missing (session auth)", async () => {
-    const res = await post({ message: userMsg("hi") }, { csrf: false });
-    expect(res.statusCode).toBe(403);
-  });
-
-  it("400 when message missing (body validation)", async () => {
-    const res = await post({ model: "claude-opus-4-8" });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("400 when message.role is not user", async () => {
-    const res = await post({ message: { role: "assistant", content: "hi" } });
-    expect(res.statusCode).toBe(400);
-  });
-
-  // AC1 — override applies for the turn
-  it("uses the overridden model and returns a new conversation id", async () => {
-    const res = await post({ message: userMsg("hi"), model: "claude-opus-4-8" });
-    expect(res.statusCode).toBe(200);
-    expect(select).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionModel: "claude-opus-4-8" })
-    );
-    expect(res.headers["x-conversation-id"]).toBeDefined();
-    expect(res.body).toContain("Hello");
-  });
-
-  // AC3 — unknown model id → 400, nothing persisted
-  it("returns 400 for an unknown model id and persists nothing", async () => {
-    select.mockImplementation(() => {
-      throw new UnknownModelError("bogus-model");
+  describe("POST /api/v1/chat", () => {
+    it("401 without auth", async () => {
+      const res = await post({ message: userMsg("hi") }, { auth: false, csrf: false });
+      expect(res.statusCode).toBe(401);
     });
-    const res = await post({ message: userMsg("hi"), model: "bogus-model" });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error).toMatch(/bogus-model/);
-    // New conversation may be created, but no assistant message persisted.
-    for (const doc of repo.docs.values()) {
-      expect(doc.messages.some((m) => m.role === "assistant")).toBe(false);
+
+    it("403 when CSRF header missing (session auth)", async () => {
+      const res = await post({ message: userMsg("hi") }, { csrf: false });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("400 when message missing (body validation)", async () => {
+      const res = await post({ model: "claude-opus-4-8" });
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("400 when message.role is not user", async () => {
+      const res = await post({ message: { role: "assistant", content: "hi" } });
+      expect(res.statusCode).toBe(400);
+    });
+
+    // AC1 — override applies for the turn
+    it("uses the overridden model and returns a new conversation id", async () => {
+      const res = await post({ message: userMsg("hi"), model: "claude-opus-4-8" });
+      expect(res.statusCode).toBe(200);
+      expect(select).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionModel: "claude-opus-4-8" })
+      );
+      expect(res.headers["x-conversation-id"]).toBeDefined();
+      expect(res.body).toContain("Hello");
+    });
+
+    // AC3 — unknown model id → 400, no assistant message persisted
+    it("returns 400 for an unknown model id and persists no assistant message", async () => {
+      select.mockImplementation(() => {
+        throw new UnknownModelError("bogus-model");
+      });
+      const res = await post({ message: userMsg("hi"), model: "bogus-model" });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/bogus-model/);
+      // A new conversation may be created, but no assistant message persisted.
+      expect(messageRepo.messages.some((m) => m.role === "assistant")).toBe(false);
+    });
+
+    it("returns 503 when the LLM is not configured", async () => {
+      select.mockImplementation(() => {
+        throw new LlmNotConfiguredError();
+      });
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(503);
+    });
+
+    // AC2 — next turn without model reverts; override never persisted
+    it("reverts to the configured/tier model on a turn without an override", async () => {
+      const convoId = randomUUID();
+      await repo.create({
+        _id: convoId,
+        userId,
+        model: undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const r1 = await post({ conversationId: convoId, message: userMsg("again") });
+      expect(r1.statusCode).toBe(200);
+      expect(select).toHaveBeenLastCalledWith(
+        expect.objectContaining({ sessionModel: undefined, model: undefined })
+      );
+
+      const r2 = await post({ conversationId: convoId, message: userMsg("now opus"), model: "x" });
+      expect(r2.statusCode).toBe(200);
+      expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ sessionModel: "x" }));
+
+      // Override never written back to the conversation's stored default.
+      expect(repo.docs.get(convoId)?.model).toBeUndefined();
+    });
+
+    // Persistence — user then assistant stored via the message repo
+    it("persists the user message then the assistant reply", async () => {
+      const res = await post({ message: userMsg("hi there") });
+      expect(res.statusCode).toBe(200);
+      const id = res.headers["x-conversation-id"] as string;
+      await waitFor(() => messageRepo.byConversation(id).length >= 2);
+      const msgs = messageRepo.byConversation(id);
+      expect(msgs[0]).toMatchObject({ role: "user", content: "hi there" });
+      expect(msgs[1]).toMatchObject({ role: "assistant", content: "Hello" });
+    });
+
+    it("persists agentId on a newly created conversation", async () => {
+      const res = await post({ message: userMsg("hi"), agentId: "agent-x" });
+      expect(res.statusCode).toBe(200);
+      const id = res.headers["x-conversation-id"] as string;
+      expect(repo.docs.get(id)?.agentId).toBe("agent-x");
+    });
+
+    it("touches an existing conversation's updatedAt", async () => {
+      const convoId = randomUUID();
+      const stale = new Date(Date.now() - 60_000);
+      await repo.create({
+        _id: convoId,
+        userId,
+        model: undefined,
+        createdAt: stale,
+        updatedAt: stale,
+      });
+      const res = await post({ conversationId: convoId, message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      const updatedAt = repo.docs.get(convoId)?.updatedAt;
+      expect(updatedAt?.getTime()).toBeGreaterThan(stale.getTime());
+    });
+
+    // History rebuild — stored turns are replayed to the model with the new user message.
+    it("rebuilds history from stored messages for the outgoing model prompt", async () => {
+      const convoId = randomUUID();
+      const base = new Date(Date.now() - 10_000);
+      await repo.create({
+        _id: convoId,
+        userId,
+        model: undefined,
+        createdAt: base,
+        updatedAt: base,
+      });
+      messageRepo.messages.push(userMessage(convoId, "earlier question", base));
+      messageRepo.messages.push(
+        assistantMessage(convoId, "earlier answer", new Date(base.getTime() + 1000))
+      );
+
+      const res = await post({ conversationId: convoId, message: userMsg("follow up") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      const texts = prompt.map((m) => JSON.stringify(m.content));
+      expect(texts.some((t) => t.includes("earlier question"))).toBe(true);
+      expect(texts.some((t) => t.includes("earlier answer"))).toBe(true);
+      expect(texts.some((t) => t.includes("follow up"))).toBe(true);
+    });
+
+    it("404 when conversationId is not found", async () => {
+      const res = await post({ conversationId: randomUUID(), message: userMsg("hi") });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("404 when conversation is owned by another user (owner-scoped write)", async () => {
+      const convoId = randomUUID();
+      await repo.create({
+        _id: convoId,
+        userId: "someone-else",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      const res = await post({ conversationId: convoId, message: userMsg("hi") });
+      expect(res.statusCode).toBe(404);
+      expect(messageRepo.byConversation(convoId).length).toBe(0);
+    });
+
+    // Aborted/errored stream — user persisted, assistant not (onFinish gating)
+    it("does not persist an assistant message when the stream errors", async () => {
+      select.mockImplementation(() => makeFakeModel("claude-opus-4-8", makeErrorStreamResult));
+      const res = await post({ message: userMsg("hi") });
+      const id = res.headers["x-conversation-id"] as string;
+      await waitFor(() => messageRepo.byConversation(id).length >= 1);
+      const msgs = messageRepo.byConversation(id);
+      expect(msgs.some((m) => m.role === "user")).toBe(true);
+      expect(msgs.some((m) => m.role === "assistant")).toBe(false);
+    });
+  });
+
+  describe("GET /api/v1/conversations/:id", () => {
+    it("401 without auth", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}`, { session: null });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("200 returns the conversation metadata for a seeded convo", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({
+        _id: convoId,
+        userId,
+        agentId: "agent-x",
+        model: "claude-opus-4-8",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const res = await get(`/api/v1/conversations/${convoId}`);
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        id: convoId,
+        userId,
+        agentId: "agent-x",
+        model: "claude-opus-4-8",
+      });
+      expect(res.json().createdAt).toBeDefined();
+      expect(res.json().updatedAt).toBeDefined();
+    });
+
+    it("404 for a missing conversation", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}`);
+      expect(res.statusCode).toBe(404);
+    });
+
+    // tenant-open: reads are NOT owner-scoped (distinct from the POST write path).
+    it("200 for a different authenticated user (tenant-open read)", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+      const res = await get(`/api/v1/conversations/${convoId}`, { session: otherSid });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().id).toBe(convoId);
+    });
+  });
+
+  describe("GET /api/v1/conversations/:id/messages", () => {
+    function seedMessages(convoId: string, n: number): void {
+      const base = Date.now();
+      for (let i = 0; i < n; i++) {
+        messageRepo.messages.push(userMessage(convoId, `m${i}`, new Date(base + i * 1000)));
+      }
     }
-  });
 
-  it("returns 503 when the LLM is not configured", async () => {
-    select.mockImplementation(() => {
-      throw new LlmNotConfiguredError();
-    });
-    const res = await post({ message: userMsg("hi") });
-    expect(res.statusCode).toBe(503);
-  });
-
-  // AC2 — next turn without model reverts; override never persisted
-  it("reverts to the configured/tier model on a turn without an override", async () => {
-    const convoId = randomUUID();
-    await repo.create({
-      _id: convoId,
-      userId,
-      model: undefined,
-      messages: [{ role: "user", content: "earlier", createdAt: new Date() }],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    it("401 without auth", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}/messages`, { session: null });
+      expect(res.statusCode).toBe(401);
     });
 
-    const r1 = await post({ conversationId: convoId, message: userMsg("again") });
-    expect(r1.statusCode).toBe(200);
-    expect(select).toHaveBeenLastCalledWith(
-      expect.objectContaining({ sessionModel: undefined, model: undefined })
-    );
-
-    const r2 = await post({ conversationId: convoId, message: userMsg("now opus"), model: "x" });
-    expect(r2.statusCode).toBe(200);
-    expect(select).toHaveBeenLastCalledWith(expect.objectContaining({ sessionModel: "x" }));
-
-    // Override never written back to the conversation's stored default.
-    expect(repo.docs.get(convoId)?.model).toBeUndefined();
-  });
-
-  // Persistence — user then assistant appended
-  it("persists the user message then the assistant reply", async () => {
-    const res = await post({ message: userMsg("hi there") });
-    expect(res.statusCode).toBe(200);
-    const id = res.headers["x-conversation-id"] as string;
-    await waitFor(() => (repo.docs.get(id)?.messages.length ?? 0) >= 2);
-    const msgs = repo.docs.get(id)?.messages ?? [];
-    expect(msgs[0]).toMatchObject({ role: "user", content: "hi there" });
-    expect(msgs[1]).toMatchObject({ role: "assistant", content: "Hello" });
-  });
-
-  it("404 when conversationId is not found", async () => {
-    const res = await post({ conversationId: randomUUID(), message: userMsg("hi") });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it("404 when conversation is owned by another user", async () => {
-    const convoId = randomUUID();
-    await repo.create({
-      _id: convoId,
-      userId: "someone-else",
-      messages: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    it("404 for a missing conversation", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}/messages`);
+      expect(res.statusCode).toBe(404);
     });
-    const res = await post({ conversationId: convoId, message: userMsg("hi") });
-    expect(res.statusCode).toBe(404);
-    expect(repo.docs.get(convoId)?.messages.length).toBe(0);
-  });
 
-  // Aborted stream — user persisted, assistant not (onFinish gating)
-  it("does not persist an assistant message when the stream errors", async () => {
-    select.mockImplementation(() => makeFakeModel("claude-opus-4-8", makeErrorStreamResult));
-    const res = await post({ message: userMsg("hi") });
-    const id = res.headers["x-conversation-id"] as string;
-    await waitFor(() => (repo.docs.get(id)?.messages.length ?? 0) >= 1);
-    const msgs = repo.docs.get(id)?.messages ?? [];
-    expect(msgs.some((m) => m.role === "user")).toBe(true);
-    expect(msgs.some((m) => m.role === "assistant")).toBe(false);
+    it("400 for a present-but-garbage cursor", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+      const res = await get(`/api/v1/conversations/${convoId}/messages?cursor=not-base64!!`);
+      expect(res.statusCode).toBe(400);
+    });
+
+    it("paginates with limit and follows nextCursor to page 2", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+      seedMessages(convoId, 5);
+
+      const page1 = await get(`/api/v1/conversations/${convoId}/messages?limit=2`);
+      expect(page1.statusCode).toBe(200);
+      const body1 = page1.json();
+      expect(body1.messages).toHaveLength(2);
+      expect(body1.nextCursor).not.toBeNull();
+      expect(body1.messages.map((m: MessageDoc) => m.content)).toEqual(["m0", "m1"]);
+
+      const page2 = await get(
+        `/api/v1/conversations/${convoId}/messages?limit=2&cursor=${encodeURIComponent(
+          body1.nextCursor
+        )}`
+      );
+      expect(page2.statusCode).toBe(200);
+      const body2 = page2.json();
+      expect(body2.messages.map((m: MessageDoc) => m.content)).toEqual(["m2", "m3"]);
+    });
+
+    // tenant-open: a different authenticated user can read the messages.
+    it("200 for a different authenticated user (tenant-open read)", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+      seedMessages(convoId, 2);
+      const res = await get(`/api/v1/conversations/${convoId}/messages`, { session: otherSid });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().messages).toHaveLength(2);
+    });
   });
 });
