@@ -1,0 +1,26 @@
+{
+  "name": "@tulipfarm/llm",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ai": "^4",
+    "@ai-sdk/anthropic": "^1",
+    "@ai-sdk/openai": "^1",
+    "@ai-sdk/openai-compatible": "^0",
+    "@sinclair/typebox": "^0.34",
+    "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/validation": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^22.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^3.2.4"
+  }
+}

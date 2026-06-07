@@ -3,6 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
+import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
@@ -27,6 +28,7 @@ export interface AppOptions {
   secretsService?: SecretsService;
   gitSync?: GitSyncService;
   soulLoader?: SoulLoader;
+  llmService?: LlmService;
   db?: Db;
 }
 

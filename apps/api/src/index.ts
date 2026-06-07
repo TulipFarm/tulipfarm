@@ -1,3 +1,4 @@
+import { LlmService } from "@tulipfarm/llm";
 import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
 import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
 import { Queue, Worker } from "bullmq";
@@ -144,6 +145,9 @@ async function boot() {
     const encryptionKeys = loadEncryptionKeys();
     const secretsService = new SecretsService(secretRepo, encryptionKeys);
 
+    const llmService = new LlmService();
+    await llmService.init(soulLoader.llmConfig, secretsService);
+
     const app = await buildApp({
       sessionStore,
       userRepo,
@@ -152,6 +156,7 @@ async function boot() {
       secretsService,
       gitSync,
       soulLoader,
+      llmService,
       db,
     });
     logEnvironmentStatus(app.log);
