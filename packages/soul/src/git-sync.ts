@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
 import type { Logger } from "./types";
@@ -15,8 +15,42 @@ export class GitSyncService extends EventEmitter {
     super();
   }
 
+  private ensured = false;
+
   get path(): string {
     return this.soulPath;
+  }
+
+  /**
+   * Guarantee `soulPath` is its OWN git repo before any commit. If it has no `.git` yet but sits
+   * inside another repository, we REFUSE — committing there would silently pollute the enclosing
+   * repo (e.g. a misconfigured relative SOUL_PATH landing inside the project tree). Otherwise we
+   * initialize a dedicated repo. Idempotent.
+   */
+  private async ensureRepo(): Promise<void> {
+    if (this.ensured) return;
+    mkdirSync(this.soulPath, { recursive: true });
+
+    if (!existsSync(join(this.soulPath, ".git"))) {
+      let enclosing: string | null = null;
+      try {
+        enclosing = (await simpleGit(this.soulPath).revparse(["--show-toplevel"])).trim();
+      } catch {
+        enclosing = null; // not inside any git repo — safe to init a fresh one
+      }
+      if (enclosing && resolve(enclosing) !== resolve(this.soulPath)) {
+        throw new Error(
+          `Soul: SOUL_PATH "${this.soulPath}" is inside another git repository (${enclosing}). Point SOUL_PATH at a dedicated directory outside the project repo (e.g. ~/.tulipfarm/soul).`
+        );
+      }
+      await simpleGit(this.soulPath).init();
+      this.logger.info(`Soul: initialized git repo at ${this.soulPath}`);
+    }
+
+    const git = simpleGit(this.soulPath);
+    await git.addConfig("user.name", BOT_GIT_NAME);
+    await git.addConfig("user.email", BOT_GIT_EMAIL);
+    this.ensured = true;
   }
 
   private authUrl(): string {
@@ -28,6 +62,7 @@ export class GitSyncService extends EventEmitter {
   async bootSync(): Promise<void> {
     if (!this.remoteUrl) {
       this.logger.info("Soul: no GIT_REMOTE_URL set, running in local-only mode");
+      await this.ensureRepo();
       return;
     }
     const url = this.authUrl();
@@ -88,9 +123,8 @@ export class GitSyncService extends EventEmitter {
   }
 
   async commit(message: string): Promise<{ sha: string; filesChanged: number }> {
+    await this.ensureRepo();
     const git = simpleGit(this.soulPath);
-    await git.addConfig("user.name", BOT_GIT_NAME);
-    await git.addConfig("user.email", BOT_GIT_EMAIL);
     await git.add("-A");
     const result = await git.commit(message);
     return { sha: result.commit, filesChanged: result.summary.changes };

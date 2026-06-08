@@ -1,14 +1,8 @@
-import type { MetaFunction } from "@remix-run/react";
-import { EmptyState } from "~/components/empty-state";
+import { type MetaFunction, Outlet } from "@remix-run/react";
 
 export const meta: MetaFunction = () => [{ title: "Resources · tulipfarm" }];
 
-export default function ResourcesPage() {
-  return (
-    <EmptyState
-      section="resources"
-      title="Resources"
-      hint="No resource types defined yet. Connect a soul to populate schema-driven CRUD."
-    />
-  );
+// Thin layout for the Resources subtree (index / :type / :type.:id). Each child owns its data.
+export default function ResourcesLayout() {
+  return <Outlet />;
 }

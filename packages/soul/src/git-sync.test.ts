@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("simple-git", () => ({ default: vi.fn() }));
-vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: vi.fn(), mkdirSync: vi.fn() }));
 
 import { existsSync } from "node:fs";
 import simpleGit from "simple-git";
@@ -23,6 +23,8 @@ function makeMockGit(overrides: Record<string, any> = {}) {
     push: vi.fn().mockResolvedValue(undefined),
     add: vi.fn().mockResolvedValue(undefined),
     addConfig: vi.fn().mockResolvedValue(undefined),
+    init: vi.fn().mockResolvedValue(undefined),
+    revparse: vi.fn().mockResolvedValue("/soul"),
     commit: vi.fn().mockResolvedValue({
       commit: "abc1234",
       summary: { changes: 2, insertions: 0, deletions: 0 },
@@ -55,12 +57,29 @@ describe("GitSyncService", () => {
     vi.clearAllMocks();
   });
 
-  describe("bootSync — no remote", () => {
-    it("skips all git ops in local-only mode", async () => {
+  describe("bootSync — no remote (local-only)", () => {
+    it("initializes a dedicated repo when soulPath is not yet a git repo", async () => {
+      mockExistsSync.mockReturnValue(false);
+      mockGit.revparse.mockRejectedValue(new Error("not a git repository"));
       const svc = new GitSyncService(SOUL, undefined, undefined, logger);
       await svc.bootSync();
-      expect(mockSimpleGit).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("local-only"));
+      expect(mockGit.init).toHaveBeenCalled();
+    });
+
+    it("refuses to operate when soulPath is inside another git repo (footgun guard)", async () => {
+      mockExistsSync.mockReturnValue(false); // soul has no .git of its own
+      mockGit.revparse.mockResolvedValue("/some/parent/repo"); // but an enclosing repo exists
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await expect(svc.bootSync()).rejects.toThrow(/inside another git repository/);
+      expect(mockGit.init).not.toHaveBeenCalled();
+    });
+
+    it("reuses an existing standalone repo without re-init", async () => {
+      mockExistsSync.mockReturnValue(true);
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.init).not.toHaveBeenCalled();
     });
   });
 
@@ -207,6 +226,10 @@ describe("GitSyncService", () => {
   });
 
   describe("commit", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true); // soul is its own repo — ensureRepo skips init
+    });
+
     it("sets bot identity, stages all, returns sha and filesChanged", async () => {
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
       const result = await svc.commit("chore: update soul");
