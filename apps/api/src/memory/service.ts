@@ -42,6 +42,11 @@ export class WorkingMemoryService {
     return this.repo.deleteByKey(userId, key); // idempotent: false if the key was already absent
   }
 
+  /** A user's entries, oldest-written first — the order the `<memory>` block renders. */
+  list(userId: string): Promise<WorkingMemoryDoc[]> {
+    return this.repo.listByUser(userId);
+  }
+
   /** Drop oldest-written entries until BOTH caps hold; never evict the just-written key. */
   private async evict(userId: string, keepKey: string): Promise<void> {
     let entries = await this.repo.listByUser(userId); // oldest-first

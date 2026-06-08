@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
+import type { SoulLoader } from "@tulipfarm/soul";
 import { type CoreMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import { assembleSystemPrompt } from "../context/assemble";
 import { DOMAIN_EVENTS } from "../domain-events";
 import { buildKnowledgeToolSet } from "../knowledge/ai-toolset";
-import { buildGovernanceBlock } from "../knowledge/governance";
 import type { KnowledgeService } from "../knowledge/service";
 import { buildMemoryToolSet } from "../memory/ai-toolset";
 import { MAX_TOOL_STEPS } from "../memory/limits";
@@ -144,6 +145,7 @@ export function registerChatRoutes(
   requireAuth: PreHandler,
   workingMemory?: WorkingMemoryService,
   knowledge?: KnowledgeService,
+  soulLoader?: SoulLoader,
   events?: EventEmitter
 ): void {
   app.post(
@@ -218,14 +220,23 @@ export function registerChatRoutes(
         "chat turn"
       );
 
-      // 4. Build history + persist the user turn (survives an aborted stream). Governance
-      //    knowledge (KN-V1-005) leads as a system block; tenant-wide for V1 (no turn domain).
+      // 4. Build history + persist the user turn (survives an aborted stream). The full system
+      //    prompt is reconstructed every turn from durable stores in a fixed block order
+      //    (CONTEXT-ENGINE §1), so the cacheable prefix is byte-stable across turns (AC-V1-001).
       const history = await messageRepo.listByConversation(convo._id, 1000);
       const messages: CoreMessage[] = [];
-      if (knowledge) {
-        const governance = buildGovernanceBlock(await knowledge.governanceDocuments());
-        if (governance) messages.push({ role: "system", content: governance });
-      }
+      const agent = convo.agentId ? soulLoader?.agents.get(convo.agentId) : undefined;
+      const agentDomain =
+        typeof agent?.frontmatter.domain === "string" ? agent.frontmatter.domain : null;
+      const system = assembleSystemPrompt({
+        agentId: convo.agentId,
+        domain: agentDomain,
+        tenantId: "default",
+        personality: agent?.body,
+        memory: workingMemory ? await workingMemory.list(user._id) : [],
+        governanceDocs: knowledge ? await knowledge.governanceDocuments() : [],
+      });
+      if (system) messages.push({ role: "system", content: system });
       messages.push(...history.items.map(toCoreMessage), {
         role: "user",
         content: body.message.content,

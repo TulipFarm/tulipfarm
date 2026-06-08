@@ -501,6 +501,27 @@ describe("chat routes", () => {
       expect(texts.some((t) => t.includes("follow up"))).toBe(true);
     });
 
+    // Context engine — the assembled system prompt (CONTEXT-ENGINE §1) leads the model prompt.
+    it("prepends the assembled system prompt carrying working memory", async () => {
+      const now = new Date();
+      await workingMemoryRepo.upsert({
+        _id: randomUUID(),
+        userId,
+        key: "plan",
+        value: "enterprise",
+        createdAt: now,
+        lastWrittenAt: now,
+      });
+
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      expect(prompt[0]?.role).toBe("system");
+      expect(JSON.stringify(prompt[0]?.content)).toContain("<memory>\\n- plan: enterprise");
+    });
+
     it("404 when conversationId is not found", async () => {
       const res = await post({ conversationId: randomUUID(), message: userMsg("hi") });
       expect(res.statusCode).toBe(404);

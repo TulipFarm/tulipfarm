@@ -154,6 +154,7 @@ export async function buildApp(opts: AppOptions = {}) {
         requireAuth,
         opts.workingMemoryService,
         opts.knowledgeService,
+        opts.soulLoader,
         opts.domainEventEmitter
       );
     }
