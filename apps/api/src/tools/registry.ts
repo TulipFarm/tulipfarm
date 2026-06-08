@@ -1,4 +1,5 @@
 import { type ToolSet, jsonSchema, tool } from "ai";
+import type { BatchCoordinator } from "./batch-executor";
 import { type RequestContext, type ToolCallResult, type ToolDef, err } from "./types";
 
 export const TOOL_TIMEOUT_MS = 30_000;
@@ -28,14 +29,17 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
-  buildToolSet(ctx: RequestContext): ToolSet {
+  buildToolSet(ctx: RequestContext, coordinator?: BatchCoordinator): ToolSet {
     return Object.fromEntries(
       this.getAll().map((t) => [
         t.name,
         tool({
           description: t.description,
           parameters: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
-          execute: (args: unknown) => withToolTimeout(t.execute(args, ctx)),
+          execute: coordinator
+            ? (args: unknown) =>
+                coordinator.schedule(() => withToolTimeout(t.execute(args, ctx)), t.mutating)
+            : (args: unknown) => withToolTimeout(t.execute(args, ctx)),
         }),
       ])
     );

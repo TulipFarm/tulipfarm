@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { BatchCoordinator } from "./batch-executor";
 import { TOOL_TIMEOUT_MS, ToolRegistry } from "./registry";
 import type { RequestContext, ToolDef } from "./types";
 
@@ -65,6 +66,92 @@ describe("ToolRegistry", () => {
       const ts = reg.buildToolSet(ctx);
       await ts.ctx_check.execute?.({}, { messages: [], toolCallId: "tc1" });
       expect(execute).toHaveBeenCalledWith({}, ctx);
+    });
+  });
+
+  describe("BatchCoordinator integration", () => {
+    it("read-only tools via coordinator run concurrently (both start before either ends)", async () => {
+      const log: string[] = [];
+      const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "read_a",
+          mutating: false,
+          execute: async () => {
+            log.push("a:start");
+            await delay(20);
+            log.push("a:end");
+            return { success: true as const, data: "a" };
+          },
+        })
+      );
+      reg.register(
+        makeTool({
+          name: "read_b",
+          mutating: false,
+          execute: async () => {
+            log.push("b:start");
+            await delay(20);
+            log.push("b:end");
+            return { success: true as const, data: "b" };
+          },
+        })
+      );
+
+      const coordinator = new BatchCoordinator();
+      const ts = reg.buildToolSet(ctx, coordinator);
+
+      // Simulate SDK: all execute() calls made synchronously before any await
+      await Promise.all([
+        ts.read_a.execute?.({}, { messages: [], toolCallId: "tc1" }),
+        ts.read_b.execute?.({}, { messages: [], toolCallId: "tc2" }),
+      ]);
+
+      expect(log[0]).toBe("a:start");
+      expect(log[1]).toBe("b:start"); // concurrent: b started before a ended
+    });
+
+    it("mutating tool via coordinator forces sequential batch", async () => {
+      const log: string[] = [];
+      const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "write_x",
+          mutating: true,
+          execute: async () => {
+            log.push("x:start");
+            await delay(20);
+            log.push("x:end");
+            return { success: true as const, data: "x" };
+          },
+        })
+      );
+      reg.register(
+        makeTool({
+          name: "read_y",
+          mutating: false,
+          execute: async () => {
+            log.push("y:start");
+            await delay(20);
+            log.push("y:end");
+            return { success: true as const, data: "y" };
+          },
+        })
+      );
+
+      const coordinator = new BatchCoordinator();
+      const ts = reg.buildToolSet(ctx, coordinator);
+
+      await Promise.all([
+        ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" }),
+        ts.read_y.execute?.({}, { messages: [], toolCallId: "tc2" }),
+      ]);
+
+      expect(log).toEqual(["x:start", "x:end", "y:start", "y:end"]);
     });
   });
 

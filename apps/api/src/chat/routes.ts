@@ -12,6 +12,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
+import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
@@ -276,9 +277,10 @@ export function registerChatRoutes(
       reply.hijack();
       hub.register(streamId);
 
+      const coordinator = new BatchCoordinator();
       const tools =
         toolRegistry && toolRegistry.getAll().length > 0
-          ? toolRegistry.buildToolSet({ userId: user._id, agentId: convo.agentId })
+          ? toolRegistry.buildToolSet({ userId: user._id, agentId: convo.agentId }, coordinator)
           : undefined;
 
       const result = streamText({
