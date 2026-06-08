@@ -6,6 +6,7 @@ import {
   type LucideIcon,
   MessageSquare,
   Plug,
+  Puzzle,
   Settings,
   Workflow,
 } from "lucide-react";
@@ -30,6 +31,7 @@ export const navItems: NavItem[] = [
   { to: "/", label: "Chat", icon: MessageSquare, group: "Workspace", end: true },
   { to: "/resources", label: "Resources", icon: Boxes, group: "Workspace" },
   { to: "/agents", label: "Agents", icon: Bot, group: "Workspace" },
+  { to: "/skills", label: "Skills", icon: Puzzle, group: "Workspace" },
   { to: "/routines", label: "Routines", icon: Workflow, group: "Workspace" },
   {
     to: "/approvals",

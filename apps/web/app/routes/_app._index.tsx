@@ -1,4 +1,5 @@
-import { Link, type MetaFunction } from "@remix-run/react";
+import { Link, type MetaFunction, useSearchParams } from "@remix-run/react";
+import { navItems } from "~/lib/nav";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -42,6 +43,11 @@ function Step({ label, hint, to }: { label: string; hint: string; to?: string })
 
 // Default view on session start (AC-V1-001): chat welcome + guided first steps.
 export default function ChatWelcome() {
+  // The Agents "Chat with" shortcut routes here with ?agent=<name>; surface it as the active agent
+  // until the chat input is wired (later ticket). Falls back to the default GeneralAssistant.
+  const [params] = useSearchParams();
+  const agent = params.get("agent") || "GeneralAssistant";
+
   return (
     <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 px-6 py-16">
       <div className="flex flex-col gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
@@ -60,11 +66,11 @@ export default function ChatWelcome() {
           <span aria-hidden className="text-border">
             ·
           </span>
-          <span>GeneralAssistant</span>
+          <span>{agent}</span>
           <span aria-hidden className="text-border">
             ·
           </span>
-          <span>8 sections</span>
+          <span>{navItems.length} sections</span>
         </p>
       </div>
 
@@ -81,9 +87,7 @@ export default function ChatWelcome() {
         <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[0.625rem] uppercase tracking-[0.15em]">
           soon
         </span>
-        <span className="rounded-sm border border-border px-2 py-0.5 text-xs">
-          GeneralAssistant
-        </span>
+        <span className="rounded-sm border border-border px-2 py-0.5 text-xs">{agent}</span>
       </div>
 
       <div className="flex flex-col gap-1 text-sm motion-safe:animate-in motion-safe:fade-in motion-safe:duration-500 [animation-delay:240ms] [animation-fill-mode:both]">

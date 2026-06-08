@@ -1,14 +1,8 @@
-import type { MetaFunction } from "@remix-run/react";
-import { EmptyState } from "~/components/empty-state";
+import { type MetaFunction, Outlet } from "@remix-run/react";
 
 export const meta: MetaFunction = () => [{ title: "Agents · tulipfarm" }];
 
-export default function AgentsPage() {
-  return (
-    <EmptyState
-      section="agents"
-      title="Agents"
-      hint="No agents registered. Agents load from your soul repo at startup."
-    />
-  );
+// Thin layout for the Agents subtree (index / :name). Each child owns its data.
+export default function AgentsLayout() {
+  return <Outlet />;
 }
