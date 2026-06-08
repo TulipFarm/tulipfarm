@@ -1,15 +1,23 @@
-import type { SoulAgent, SoulSkill } from "@tulipfarm/soul";
-import { describe, expect, it } from "vitest";
+import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
+import { describe, expect, it, vi } from "vitest";
 import {
   PLATFORM_TOOLS,
   type PlatformToolContext,
+  beginSoulBatchTool,
+  callSkillTool,
+  completeStateTool,
   composeViewTool,
   delegateToAgentTool,
+  endSoulBatchTool,
   loadSkillReferenceTool,
   loadSkillTool,
   presentChoicesTool,
+  routinePickerTool,
+  soulRepoCommitTool,
+  soulRepoPushTool,
   suggestAgentTool,
   transferToAgentTool,
+  triggerRoutineTool,
   validateArtifactTool,
 } from "./tools";
 
@@ -25,18 +33,47 @@ function makeAgent(name: string, displayName?: string): SoulAgent {
   };
 }
 
+function makeRoutine(name: string, title?: string, description?: string): SoulRoutine {
+  return {
+    name,
+    config: { title: title ?? name, ...(description ? { description } : {}) },
+    hasHooks: false,
+  };
+}
+
 function makeCtx(
   skills: Record<string, SoulSkill> = {},
   agents: Record<string, SoulAgent> = {},
-  soulPath?: string
+  soulPath?: string,
+  routines: Record<string, SoulRoutine> = {}
 ): PlatformToolContext {
   return {
     soulLoader: {
       skills: new Map(Object.entries(skills)),
       agents: new Map(Object.entries(agents)),
+      routines: new Map(Object.entries(routines)),
     },
     soulPath,
   };
+}
+
+function makeGitSync(opts: {
+  commitResult?: { sha: string; filesChanged: number };
+  pushResult?: boolean;
+  commitError?: string;
+  pushError?: string;
+}) {
+  return {
+    commit: opts.commitError
+      ? vi.fn().mockRejectedValue(new Error(opts.commitError))
+      : vi.fn().mockResolvedValue(opts.commitResult ?? { sha: "abc123", filesChanged: 2 }),
+    push: opts.pushError
+      ? vi.fn().mockRejectedValue(new Error(opts.pushError))
+      : vi.fn().mockResolvedValue(opts.pushResult ?? true),
+    withSync: opts.commitError
+      ? vi.fn().mockRejectedValue(new Error(opts.commitError))
+      : vi.fn().mockResolvedValue(opts.commitResult ?? { sha: "abc123", filesChanged: 2 }),
+  } as unknown as import("@tulipfarm/soul").GitSyncService;
 }
 
 // ── load_skill ────────────────────────────────────────────────────────────────
@@ -285,10 +322,257 @@ describe("delegateToAgentTool", () => {
   });
 });
 
+// ── trigger_routine ───────────────────────────────────────────────────────────
+
+describe("triggerRoutineTool", () => {
+  it("returns stub receipt for a known routine", async () => {
+    const ctx = makeCtx({}, {}, undefined, { "daily-digest": makeRoutine("daily-digest") });
+    const res = await triggerRoutineTool.handler({ name: "daily-digest" }, ctx);
+    expect(res).toEqual({
+      success: true,
+      data: { routineId: "daily-digest", status: "triggered", runId: null, inputs: null },
+    });
+  });
+
+  it("passes inputs through", async () => {
+    const ctx = makeCtx({}, {}, undefined, { notify: makeRoutine("notify") });
+    const res = await triggerRoutineTool.handler({ name: "notify", inputs: { userId: "u1" } }, ctx);
+    expect(res).toMatchObject({ success: true, data: { inputs: { userId: "u1" } } });
+  });
+
+  it("returns not_found for unknown routine", async () => {
+    const res = await triggerRoutineTool.handler({ name: "ghost" }, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("returns validation_error for missing name", async () => {
+    const res = await triggerRoutineTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── routine_picker ────────────────────────────────────────────────────────────
+
+describe("routinePickerTool", () => {
+  it("returns all routines with title and description", async () => {
+    const ctx = makeCtx({}, {}, undefined, {
+      "send-report": makeRoutine("send-report", "Send Report", "Sends a weekly report"),
+      "sync-crm": makeRoutine("sync-crm", "Sync CRM"),
+    });
+    const res = await routinePickerTool.handler({}, ctx);
+    expect(res).toMatchObject({ success: true });
+    if (!res.success) throw new Error("expected success");
+    const { routines } = res.data as { routines: unknown[] };
+    expect(routines).toHaveLength(2);
+  });
+
+  it("falls back to name as title when config has no title", async () => {
+    const ctx: PlatformToolContext = {
+      soulLoader: {
+        skills: new Map(),
+        agents: new Map(),
+        routines: new Map([["my-routine", { name: "my-routine", config: {}, hasHooks: false }]]),
+      },
+    };
+    const res = await routinePickerTool.handler({}, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { routines: [{ name: "my-routine", title: "my-routine", description: null }] },
+    });
+  });
+
+  it("returns empty list when no routines in soul", async () => {
+    const res = await routinePickerTool.handler({}, makeCtx());
+    expect(res).toEqual({ success: true, data: { routines: [] } });
+  });
+});
+
+// ── begin_soul_batch ──────────────────────────────────────────────────────────
+
+describe("beginSoulBatchTool", () => {
+  it("returns status open", async () => {
+    const res = await beginSoulBatchTool.handler({}, makeCtx());
+    expect(res).toEqual({ success: true, data: { status: "open" } });
+  });
+});
+
+// ── end_soul_batch ────────────────────────────────────────────────────────────
+
+describe("endSoulBatchTool", () => {
+  it("calls withSync and returns sha + filesChanged", async () => {
+    const gitSync = makeGitSync({ commitResult: { sha: "deadbeef", filesChanged: 3 } });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await endSoulBatchTool.handler({ message: "soul: batch write" }, ctx);
+    expect(res).toEqual({ success: true, data: { sha: "deadbeef", filesChanged: 3 } });
+    expect(gitSync.withSync).toHaveBeenCalledWith("soul: batch write");
+  });
+
+  it("returns internal_error when gitSync absent", async () => {
+    const res = await endSoulBatchTool.handler({ message: "batch" }, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("returns internal_error on withSync failure", async () => {
+    const gitSync = makeGitSync({ commitError: "git push failed" });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await endSoulBatchTool.handler({ message: "batch" }, ctx);
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: "git push failed" },
+    });
+  });
+
+  it("returns validation_error for missing message", async () => {
+    const res = await endSoulBatchTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── soul_repo_commit ──────────────────────────────────────────────────────────
+
+describe("soulRepoCommitTool", () => {
+  it("calls commit and returns sha + filesChanged", async () => {
+    const gitSync = makeGitSync({ commitResult: { sha: "c0ffee", filesChanged: 1 } });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await soulRepoCommitTool.handler({ message: "soul: add agent" }, ctx);
+    expect(res).toEqual({ success: true, data: { sha: "c0ffee", filesChanged: 1 } });
+    expect(gitSync.commit).toHaveBeenCalledWith("soul: add agent");
+  });
+
+  it("returns internal_error when gitSync absent", async () => {
+    const res = await soulRepoCommitTool.handler({ message: "x" }, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("returns internal_error on commit failure", async () => {
+    const gitSync = makeGitSync({ commitError: "nothing to commit" });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await soulRepoCommitTool.handler({ message: "x" }, ctx);
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: "nothing to commit" },
+    });
+  });
+
+  it("returns validation_error for missing message", async () => {
+    const res = await soulRepoCommitTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── soul_repo_push ────────────────────────────────────────────────────────────
+
+describe("soulRepoPushTool", () => {
+  it("calls push and returns pushed:true", async () => {
+    const gitSync = makeGitSync({ pushResult: true });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await soulRepoPushTool.handler({}, ctx);
+    expect(res).toEqual({ success: true, data: { pushed: true } });
+  });
+
+  it("returns pushed:false in local-only mode", async () => {
+    const gitSync = makeGitSync({ pushResult: false });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await soulRepoPushTool.handler({}, ctx);
+    expect(res).toEqual({ success: true, data: { pushed: false } });
+  });
+
+  it("returns internal_error when gitSync absent", async () => {
+    const res = await soulRepoPushTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("returns internal_error on push failure", async () => {
+    const gitSync = makeGitSync({ pushError: "authentication failed" });
+    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
+    const res = await soulRepoPushTool.handler({}, ctx);
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "internal_error", message: "authentication failed" },
+    });
+  });
+});
+
+// ── call_skill ────────────────────────────────────────────────────────────────
+
+describe("callSkillTool", () => {
+  const routineCtx = { routineId: "daily-digest", runId: "run-001" };
+
+  it("returns skill definition in routine context", async () => {
+    const ctx: PlatformToolContext = {
+      ...makeCtx({ summarize: makeSkill("summarize") }),
+      routineContext: routineCtx,
+    };
+    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
+    expect(res).toEqual({
+      success: true,
+      data: {
+        name: "summarize",
+        frontmatter: { version: "1.0" },
+        body: "# summarize\nDoes things.",
+        args: null,
+      },
+    });
+  });
+
+  it("passes args through", async () => {
+    const ctx: PlatformToolContext = {
+      ...makeCtx({ summarize: makeSkill("summarize") }),
+      routineContext: routineCtx,
+    };
+    const res = await callSkillTool.handler({ name: "summarize", args: { limit: 10 } }, ctx);
+    expect(res).toMatchObject({ success: true, data: { args: { limit: 10 } } });
+  });
+
+  it("returns internal_error when no routineContext", async () => {
+    const ctx = makeCtx({ summarize: makeSkill("summarize") });
+    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+
+  it("returns not_found for unknown skill in routine context", async () => {
+    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
+    const res = await callSkillTool.handler({ name: "ghost" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("returns validation_error for missing name", async () => {
+    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
+    const res = await callSkillTool.handler({}, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── complete_state ────────────────────────────────────────────────────────────
+
+describe("completeStateTool", () => {
+  const routineCtx = { routineId: "daily-digest", runId: "run-001" };
+
+  it("returns completion receipt with output", async () => {
+    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
+    const res = await completeStateTool.handler({ output: { sent: 5 } }, ctx);
+    expect(res).toEqual({
+      success: true,
+      data: { routineId: "daily-digest", runId: "run-001", completed: true, output: { sent: 5 } },
+    });
+  });
+
+  it("sets output to null when omitted", async () => {
+    const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
+    const res = await completeStateTool.handler({}, ctx);
+    expect(res).toMatchObject({ success: true, data: { completed: true, output: null } });
+  });
+
+  it("returns internal_error when no routineContext", async () => {
+    const res = await completeStateTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
+  });
+});
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 describe("PLATFORM_TOOLS registry", () => {
-  it("exports exactly 8 non-mutating platform tools", () => {
+  it("exports exactly 16 platform tools in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "load_skill",
@@ -299,7 +583,26 @@ describe("PLATFORM_TOOLS registry", () => {
       "validate_artifact",
       "transfer_to_agent",
       "delegate_to_agent",
+      "trigger_routine",
+      "routine_picker",
+      "begin_soul_batch",
+      "end_soul_batch",
+      "soul_repo_commit",
+      "soul_repo_push",
+      "call_skill",
+      "complete_state",
     ]);
-    expect(PLATFORM_TOOLS.every((t) => !t.mutating)).toBe(true);
+  });
+
+  it("marks mutating tools correctly", () => {
+    const byName = Object.fromEntries(PLATFORM_TOOLS.map((t) => [t.name, t.mutating]));
+    expect(byName.trigger_routine).toBe(true);
+    expect(byName.routine_picker).toBe(false);
+    expect(byName.begin_soul_batch).toBe(false);
+    expect(byName.end_soul_batch).toBe(true);
+    expect(byName.soul_repo_commit).toBe(true);
+    expect(byName.soul_repo_push).toBe(true);
+    expect(byName.call_skill).toBe(false);
+    expect(byName.complete_state).toBe(true);
   });
 });

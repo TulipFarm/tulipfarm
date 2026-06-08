@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { SoulAgent, SoulSkill } from "@tulipfarm/soul";
+import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
 import { type ToolCallResult, err, ok } from "./tool-result";
 
@@ -8,8 +8,11 @@ export interface PlatformToolContext {
   soulLoader?: {
     skills: Map<string, SoulSkill>;
     agents: Map<string, SoulAgent>;
+    routines?: Map<string, SoulRoutine>;
   };
   soulPath?: string;
+  gitSync?: GitSyncService;
+  routineContext?: { routineId: string; runId: string };
 }
 
 export interface PlatformTool {
@@ -331,6 +334,259 @@ export const delegateToAgentTool: PlatformTool = {
   },
 };
 
+// ── trigger_routine ───────────────────────────────────────────────────────────
+
+const TRIGGER_ROUTINE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name"],
+  properties: {
+    name: { type: "string", minLength: 1, description: "Soul name of the routine to trigger." },
+    inputs: {
+      type: "object",
+      description: "Optional key-value inputs matching the routine's x-inputs schema.",
+    },
+  },
+};
+const validateTriggerRoutine = ajv.compile(TRIGGER_ROUTINE_SCHEMA);
+
+export const triggerRoutineTool: PlatformTool = {
+  name: "trigger_routine",
+  description:
+    "Trigger a routine by name. V1 validates the routine exists and records intent, returning a stub receipt. Full async execution is available after Routines v0.11.",
+  mutating: true,
+  inputSchema: TRIGGER_ROUTINE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateTriggerRoutine(args))
+      return err("validation_error", firstError(validateTriggerRoutine.errors));
+    const { name, inputs } = args as { name: string; inputs?: Record<string, unknown> };
+    const routine = ctx.soulLoader?.routines?.get(name);
+    if (!routine) return err("not_found", `Routine "${name}" not found in soul.`);
+    return ok({ routineId: name, status: "triggered", runId: null, inputs: inputs ?? null });
+  },
+};
+
+// ── routine_picker ────────────────────────────────────────────────────────────
+
+const ROUTINE_PICKER_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+const validateRoutinePicker = ajv.compile(ROUTINE_PICKER_SCHEMA);
+
+export const routinePickerTool: PlatformTool = {
+  name: "routine_picker",
+  description:
+    "List all available routines from the soul so the user can pick one to trigger. Returns name, title, and description for each routine.",
+  mutating: false,
+  inputSchema: ROUTINE_PICKER_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateRoutinePicker(args))
+      return err("validation_error", firstError(validateRoutinePicker.errors));
+    const routines = ctx.soulLoader?.routines ?? new Map<string, SoulRoutine>();
+    const items = Array.from(routines.values()).map((r) => ({
+      name: r.name,
+      title: typeof r.config.title === "string" ? r.config.title : r.name,
+      description: typeof r.config.description === "string" ? r.config.description : null,
+    }));
+    return ok({ routines: items });
+  },
+};
+
+// ── begin_soul_batch ──────────────────────────────────────────────────────────
+
+const BEGIN_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+const validateBeginSoulBatch = ajv.compile(BEGIN_SOUL_BATCH_SCHEMA);
+
+export const beginSoulBatchTool: PlatformTool = {
+  name: "begin_soul_batch",
+  description:
+    "Open a soul-batch window. Multiple soul file writes performed after this call will be committed together by end_soul_batch. Call end_soul_batch to close the batch and commit.",
+  mutating: false,
+  inputSchema: BEGIN_SOUL_BATCH_SCHEMA,
+  handler: async (args, _ctx) => {
+    if (!validateBeginSoulBatch(args))
+      return err("validation_error", firstError(validateBeginSoulBatch.errors));
+    return ok({ status: "open" });
+  },
+};
+
+// ── end_soul_batch ────────────────────────────────────────────────────────────
+
+const END_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["message"],
+  properties: {
+    message: {
+      type: "string",
+      minLength: 1,
+      description: "Commit message for the batch of soul writes.",
+    },
+  },
+};
+const validateEndSoulBatch = ajv.compile(END_SOUL_BATCH_SCHEMA);
+
+export const endSoulBatchTool: PlatformTool = {
+  name: "end_soul_batch",
+  description:
+    "Close the soul-batch window and commit all pending soul writes as a single commit via withSync (commit + best-effort push).",
+  mutating: true,
+  inputSchema: END_SOUL_BATCH_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateEndSoulBatch(args))
+      return err("validation_error", firstError(validateEndSoulBatch.errors));
+    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
+    const { message } = args as { message: string };
+    try {
+      const result = await ctx.gitSync.withSync(message);
+      return ok({ sha: result.sha, filesChanged: result.filesChanged });
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+  },
+};
+
+// ── soul_repo_commit ──────────────────────────────────────────────────────────
+
+const SOUL_REPO_COMMIT_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["message"],
+  properties: {
+    message: {
+      type: "string",
+      minLength: 1,
+      description: "Commit message attributed to tulipfarm-bot.",
+    },
+  },
+};
+const validateSoulRepoCommit = ajv.compile(SOUL_REPO_COMMIT_SCHEMA);
+
+export const soulRepoCommitTool: PlatformTool = {
+  name: "soul_repo_commit",
+  description:
+    "Stage and commit all current soul changes locally (attributed to tulipfarm-bot). Does not push — use soul_repo_push or end_soul_batch to reach the remote.",
+  mutating: true,
+  inputSchema: SOUL_REPO_COMMIT_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateSoulRepoCommit(args))
+      return err("validation_error", firstError(validateSoulRepoCommit.errors));
+    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
+    const { message } = args as { message: string };
+    try {
+      const result = await ctx.gitSync.commit(message);
+      return ok({ sha: result.sha, filesChanged: result.filesChanged });
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+  },
+};
+
+// ── soul_repo_push ────────────────────────────────────────────────────────────
+
+const SOUL_REPO_PUSH_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {},
+};
+const validateSoulRepoPush = ajv.compile(SOUL_REPO_PUSH_SCHEMA);
+
+export const soulRepoPushTool: PlatformTool = {
+  name: "soul_repo_push",
+  description:
+    "Push committed soul changes to the configured git remote. Returns { pushed: false } when no remote is configured (local-only mode).",
+  mutating: true,
+  inputSchema: SOUL_REPO_PUSH_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateSoulRepoPush(args))
+      return err("validation_error", firstError(validateSoulRepoPush.errors));
+    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
+    try {
+      const pushed = await ctx.gitSync.push();
+      return ok({ pushed });
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+  },
+};
+
+// ── call_skill (routine-spawned only) ────────────────────────────────────────
+
+const CALL_SKILL_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name"],
+  properties: {
+    name: { type: "string", minLength: 1, description: "Skill name to invoke." },
+    args: {
+      type: "object",
+      description: "Optional arguments to pass to the skill.",
+    },
+  },
+};
+const validateCallSkill = ajv.compile(CALL_SKILL_SCHEMA);
+
+export const callSkillTool: PlatformTool = {
+  name: "call_skill",
+  description:
+    "Load and invoke a skill within the current routine execution context. Only callable from a routine-spawned agent turn.",
+  mutating: false,
+  inputSchema: CALL_SKILL_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateCallSkill(args))
+      return err("validation_error", firstError(validateCallSkill.errors));
+    if (!ctx.routineContext)
+      return err("internal_error", "call_skill is only callable from a routine context.");
+    const { name, args: skillArgs } = args as { name: string; args?: Record<string, unknown> };
+    const skill = ctx.soulLoader?.skills.get(name);
+    if (!skill) return err("not_found", `Skill "${name}" not found in soul.`);
+    return ok({
+      name: skill.name,
+      frontmatter: skill.frontmatter,
+      body: skill.body,
+      args: skillArgs ?? null,
+    });
+  },
+};
+
+// ── complete_state (routine-spawned only) ─────────────────────────────────────
+
+const COMPLETE_STATE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    output: { description: "Output data from the completed state." },
+  },
+};
+const validateCompleteState = ajv.compile(COMPLETE_STATE_SCHEMA);
+
+export const completeStateTool: PlatformTool = {
+  name: "complete_state",
+  description:
+    "Signal completion of the current routine state and emit its output. Only callable from a routine-spawned agent turn.",
+  mutating: true,
+  inputSchema: COMPLETE_STATE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateCompleteState(args))
+      return err("validation_error", firstError(validateCompleteState.errors));
+    if (!ctx.routineContext)
+      return err("internal_error", "complete_state is only callable from a routine context.");
+    const { output } = args as { output?: unknown };
+    return ok({
+      routineId: ctx.routineContext.routineId,
+      runId: ctx.routineContext.runId,
+      completed: true,
+      output: output ?? null,
+    });
+  },
+};
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 export const PLATFORM_TOOLS: PlatformTool[] = [
@@ -342,4 +598,12 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   validateArtifactTool,
   transferToAgentTool,
   delegateToAgentTool,
+  triggerRoutineTool,
+  routinePickerTool,
+  beginSoulBatchTool,
+  endSoulBatchTool,
+  soulRepoCommitTool,
+  soulRepoPushTool,
+  callSkillTool,
+  completeStateTool,
 ];
