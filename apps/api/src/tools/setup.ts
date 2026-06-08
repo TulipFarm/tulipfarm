@@ -4,7 +4,9 @@ import type { WorkingMemoryService } from "../memory/service";
 import { MEMORY_TOOLS } from "../memory/tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
+import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
+import { SKILL_TOOLS, type SkillToolContext } from "../soul/skills/tools.js";
 import { ToolRegistry } from "./registry";
 
 /**
@@ -17,6 +19,8 @@ export function buildToolRegistry(services: {
   knowledge?: KnowledgeService;
   resources?: ResourceServices;
   resourceTypes?: ResourceTypeToolContext;
+  agentTools?: AgentToolContext;
+  skillTools?: SkillToolContext;
   platform?: PlatformToolContext;
 }): ToolRegistry {
   const registry = new ToolRegistry();
@@ -66,6 +70,34 @@ export function buildToolRegistry(services: {
   if (services.resourceTypes) {
     const ctx = services.resourceTypes;
     for (const t of RESOURCE_TYPE_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "system",
+        mutating: t.mutating,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, _ctx) => t.handler(args, ctx),
+      });
+    }
+  }
+
+  if (services.agentTools) {
+    const ctx = services.agentTools;
+    for (const t of AGENT_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "system",
+        mutating: t.mutating,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, _ctx) => t.handler(args, ctx),
+      });
+    }
+  }
+
+  if (services.skillTools) {
+    const ctx = services.skillTools;
+    for (const t of SKILL_TOOLS) {
       registry.register({
         name: t.name,
         tier: "system",
