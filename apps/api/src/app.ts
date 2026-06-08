@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import type { LlmService } from "@tulipfarm/llm";
@@ -27,6 +28,8 @@ import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
+import { registerSetupRoutes } from "./setup/routes";
+import { isManagedMode } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
@@ -183,6 +186,39 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.knowledgeService) {
       registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);
     }
+
+    // First-run setup wizard (INST-003) — wizard mode only; managed mode leaves
+    // /api/v1/setup/* unregistered -> 404. Git/soul backup is env-driven
+    // (GIT_REMOTE_URL), so the wizard has no interactive git step.
+    if (!isManagedMode() && opts.secretsService && opts.gitSync) {
+      registerSetupRoutes(app, {
+        userRepo: opts.userRepo,
+        sessionStore: opts.sessionStore,
+        secretsService: opts.secretsService,
+        gitSync: opts.gitSync,
+        soulPath: process.env.SOUL_PATH as string,
+        requireAuth,
+        ttlSeconds: Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "604800", 10),
+      });
+    }
+  }
+
+  // Single-image SPA serving (ARCH-V1-006): serve the built client and fall back
+  // to index.html for client-side routes. API/docs/health take precedence.
+  const webDist = process.env.WEB_DIST;
+  if (webDist) {
+    await app.register(fastifyStatic, { root: webDist, prefix: "/", wildcard: false });
+    app.setNotFoundHandler((req, reply) => {
+      if (
+        req.method === "GET" &&
+        !req.url.startsWith("/api") &&
+        !req.url.startsWith("/docs") &&
+        !req.url.startsWith("/health")
+      ) {
+        return reply.type("text/html").sendFile("index.html");
+      }
+      return reply.code(404).send({ error: "not found" });
+    });
   }
 
   return app;

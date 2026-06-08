@@ -5,6 +5,7 @@ build/
 *.local
 .env*
 !.env.local.example
+!.env.example
 /soul/
 specs
 docs/plans

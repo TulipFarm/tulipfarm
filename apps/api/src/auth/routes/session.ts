@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { cookieSecure } from "../cookie-secure";
 import { generateCsrfToken, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
@@ -20,7 +21,7 @@ function cookieOptions(maxAge: number) {
   return {
     httpOnly: true,
     sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     path: "/",
     maxAge,
   };

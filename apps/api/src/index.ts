@@ -7,7 +7,7 @@ import PgBoss from "pg-boss";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
-import { PgUserRepo, bootstrapAdmin } from "./auth/users";
+import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { registerStreamGc } from "./chat/stream-gc";
@@ -32,6 +32,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { bootstrapFromEnv } from "./setup/bootstrap";
 import { registerSoulSync } from "./soul-sync";
 
 // Load .env.local (symlinked from root by setup script)
@@ -142,7 +143,14 @@ async function boot() {
     );
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
-    await bootstrapAdmin(userRepo, app.log);
+    // INST-003b: seed admin (+ business profile + LLM key) from env. Idempotent;
+    // generalizes the old bootstrapAdmin. Managed mode fails loud on missing env.
+    await bootstrapFromEnv({
+      userRepo,
+      secretsService,
+      soulPath: process.env.SOUL_PATH as string,
+      log: app.log,
+    });
 
     await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL);
     await registerStreamGc(boss, streamResumeRepo);
