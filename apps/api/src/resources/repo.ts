@@ -27,10 +27,15 @@ export interface ListOpts {
   includeDeleted?: boolean;
 }
 
+export interface SearchOpts extends ListOpts {
+  filter?: Record<string, unknown>;
+}
+
 export interface ResourceRepo {
   insert(doc: ResourceDoc): Promise<void>;
   findById(id: string): Promise<ResourceDoc | null>;
   list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>>;
+  search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>>;
   replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean>;
   appendHistory(entry: ResourceHistoryDoc): Promise<void>;
 }
@@ -86,6 +91,28 @@ export class PgResourceRepo implements ResourceRepo {
     if (opts.after) {
       params.push(opts.after.createdAt, opts.after._id);
       conditions.push(`(created_at, id) > ($${params.length - 1}, $${params.length})`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(opts.limit + 1);
+    const { rows } = await this.q.query(
+      `SELECT id, version, created_at, updated_at, deleted_at, data FROM ${this.table}
+       ${where} ORDER BY created_at, id LIMIT $${params.length}`,
+      params
+    );
+    return toPage(rows.map(rowToResourceDoc), opts.limit);
+  }
+
+  async search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (!opts.includeDeleted) conditions.push("deleted_at IS NULL");
+    if (opts.after) {
+      params.push(opts.after.createdAt, opts.after._id);
+      conditions.push(`(created_at, id) > ($${params.length - 1}, $${params.length})`);
+    }
+    if (opts.filter && Object.keys(opts.filter).length > 0) {
+      params.push(JSON.stringify(opts.filter));
+      conditions.push(`data @> $${params.length}::jsonb`);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     params.push(opts.limit + 1);

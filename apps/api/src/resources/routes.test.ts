@@ -18,6 +18,7 @@ import type {
   ResourceHistoryDoc,
   ResourceRepo,
   ResourceRepoFactory,
+  SearchOpts,
 } from "./repo";
 
 const TEST_CSRF = "a".repeat(64);
@@ -39,6 +40,17 @@ class FakeResourceRepo implements ResourceRepo {
   async list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>> {
     let items = Array.from(this.docs.values());
     if (!opts.includeDeleted) items = items.filter((d) => d.deletedAt == null);
+    const sliced = items.slice(0, opts.limit);
+    return { items: sliced, nextCursor: items.length > opts.limit ? "next" : null };
+  }
+
+  async search(opts: SearchOpts): Promise<PaginatedResult<ResourceDoc>> {
+    let items = Array.from(this.docs.values());
+    if (!opts.includeDeleted) items = items.filter((d) => d.deletedAt == null);
+    if (opts.filter && Object.keys(opts.filter).length > 0) {
+      const filter = opts.filter;
+      items = items.filter((d) => Object.entries(filter).every(([k, v]) => d[k] === v));
+    }
     const sliced = items.slice(0, opts.limit);
     return { items: sliced, nextCursor: items.length > opts.limit ? "next" : null };
   }

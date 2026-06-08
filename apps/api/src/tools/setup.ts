@@ -2,6 +2,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
 import type { WorkingMemoryService } from "../memory/service";
 import { MEMORY_TOOLS } from "../memory/tools";
+import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { ToolRegistry } from "./registry";
 
 /**
@@ -12,6 +13,7 @@ import { ToolRegistry } from "./registry";
 export function buildToolRegistry(services: {
   workingMemory?: WorkingMemoryService;
   knowledge?: KnowledgeService;
+  resources?: ResourceServices;
 }): ToolRegistry {
   const registry = new ToolRegistry();
 
@@ -39,6 +41,20 @@ export function buildToolRegistry(services: {
         description: t.description,
         inputSchema: t.inputSchema,
         execute: (args, { userId, agentId }) => t.handler(args, { userId, service: svc, agentId }),
+      });
+    }
+  }
+
+  if (services.resources) {
+    const res = services.resources;
+    for (const t of RESOURCE_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "system",
+        mutating: t.mutating,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, { userId, agentId }) => t.handler(args, { ...res, userId, agentId }),
       });
     }
   }
