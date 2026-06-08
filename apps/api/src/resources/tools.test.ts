@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SoulResource } from "@tulipfarm/soul";
+import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import type { PaginatedResult } from "../pagination.js";
 import type {
@@ -97,8 +97,9 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
     agentId: undefined,
     repoFactory: factory ?? new FakeRepoFactory(),
     counterStore: stubCounterStore,
-    soulLoader:
-      soulLoader ??
+    // The resource tools only read `soulLoader.resources`; cast the stub to the full type so the
+    // fixture satisfies ResourceToolContext (pre-existing typecheck gap, fixed alongside this work).
+    soulLoader: (soulLoader ??
       makeSoulLoader({
         ticket: {
           type: "object",
@@ -106,7 +107,7 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
           required: ["title"],
           additionalProperties: true,
         },
-      }),
+      })) as unknown as SoulLoader,
     hookExecutor: undefined,
     events: undefined,
   };

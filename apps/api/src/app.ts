@@ -27,8 +27,10 @@ import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
+import { registerAgentRoutes } from "./soul/agents/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
+import { registerSkillRoutes } from "./soul/skills/routes";
 import type { ToolRegistry } from "./tools/registry";
 import { buildToolRegistry } from "./tools/setup";
 
@@ -139,6 +141,10 @@ export async function buildApp(opts: AppOptions = {}) {
           requireAuth,
           opts.reconcileResources
         );
+        registerAgentRoutes(app, opts.soulLoader, requireAuth);
+        if (opts.llmService) {
+          registerSkillRoutes(app, opts.soulLoader, opts.gitSync, opts.llmService, requireAuth);
+        }
       }
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {

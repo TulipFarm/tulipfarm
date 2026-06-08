@@ -41,7 +41,7 @@ export type RecordPage = {
   nextCursor: string | null;
 };
 
-async function apiGet<T>(path: string): Promise<T> {
+export async function apiGet<T>(path: string): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
   applyAuth(headers);
 
@@ -52,7 +52,7 @@ async function apiGet<T>(path: string): Promise<T> {
 
 // Write client (POST/PUT). Mirrors apiGet's cookie-first auth, adds a JSON body, the optional
 // `If-Match` concurrency header, and the CSRF echo header (no-op when authed by Bearer token).
-async function apiWrite<T>(
+export async function apiWrite<T>(
   method: "POST" | "PUT",
   path: string,
   body: unknown,
