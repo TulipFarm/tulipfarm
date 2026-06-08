@@ -5,8 +5,8 @@
 <h1 align="center">TulipFarm</h1>
 
 <p align="center">
-  <strong>The AI-native business operating system.</strong><br/>
-  Replace 15+ SaaS tools with one platform where autonomous agents run your operations.
+  <strong>The business agent harness.</strong><br/>
+  Your business' control panel where autonomous agents run your operations.
 </p>
 
 ## Local Development
