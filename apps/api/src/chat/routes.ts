@@ -14,6 +14,7 @@ import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolRegistry } from "../tools/registry";
+import type { ToolCallResult } from "../tools/types";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
   type MessagePart,
@@ -278,9 +279,14 @@ export function registerChatRoutes(
       hub.register(streamId);
 
       const coordinator = new BatchCoordinator();
+      const fullResultCache = new Map<string, ToolCallResult>();
       const tools =
         toolRegistry && toolRegistry.getAll().length > 0
-          ? toolRegistry.buildToolSet({ userId: user._id, agentId: convo.agentId }, coordinator)
+          ? toolRegistry.buildToolSet(
+              { userId: user._id, agentId: convo.agentId },
+              coordinator,
+              fullResultCache
+            )
           : undefined;
 
       const result = streamText({
@@ -305,7 +311,12 @@ export function registerChatRoutes(
 
       // Attach this connection (live from seq 0) and start the detached producer.
       void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
-      void runChatStream(streamId, result.fullStream, { repo: streamRepo, hub, log: req.log });
+      void runChatStream(streamId, result.fullStream, {
+        repo: streamRepo,
+        hub,
+        log: req.log,
+        fullResultCache,
+      });
     }
   );
 

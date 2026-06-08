@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import type { ToolCallResult } from "../tools/types";
 import { writeSseEvent } from "./sse";
 import { type StreamEvent, type StreamHub, isTerminalEvent } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
@@ -13,7 +14,10 @@ interface MappedEvent {
  * `null` for internal parts (step boundaries, reasoning, tool-call deltas) the
  * client does not need. `finish`/`error` are the terminal events.
  */
-export function mapStreamPart(part: unknown): MappedEvent | null {
+export function mapStreamPart(
+  part: unknown,
+  fullResultCache?: Map<string, ToolCallResult>
+): MappedEvent | null {
   if (typeof part !== "object" || part === null || !("type" in part)) return null;
   const p = part as Record<string, unknown>;
   switch (p.type) {
@@ -24,11 +28,14 @@ export function mapStreamPart(part: unknown): MappedEvent | null {
         eventType: "tool-call",
         data: { toolCallId: p.toolCallId, toolName: p.toolName, args: p.args },
       };
-    case "tool-result":
+    case "tool-result": {
+      const toolCallId = p.toolCallId as string;
+      const result = fullResultCache?.get(toolCallId) ?? p.result;
       return {
         eventType: "tool-result",
-        data: { toolCallId: p.toolCallId, toolName: p.toolName, result: p.result },
+        data: { toolCallId, toolName: p.toolName, result },
       };
+    }
     case "finish":
       return { eventType: "finish", data: { reason: p.finishReason ?? "stop" } };
     case "error":
@@ -45,6 +52,7 @@ export interface StreamProducerDeps {
   repo: StreamResumeRepo;
   hub: StreamHub;
   log: { error: (obj: unknown, msg?: string) => void };
+  fullResultCache?: Map<string, ToolCallResult>;
 }
 
 /**
@@ -74,7 +82,7 @@ export async function runChatStream(
 
   try {
     for await (const part of fullStream) {
-      const mapped = mapStreamPart(part);
+      const mapped = mapStreamPart(part, deps.fullResultCache);
       if (!mapped) continue;
       await emit(mapped.eventType, mapped.data);
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;

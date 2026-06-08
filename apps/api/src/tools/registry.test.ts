@@ -199,6 +199,49 @@ describe("ToolRegistry", () => {
     });
   });
 
+  describe("result truncation + cache (TOOL-V1-010)", () => {
+    const bigList = Array.from({ length: 25 }, (_, i) => i);
+
+    it("stores full result in cache and returns truncated result to SDK", async () => {
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ execute: async () => ({ success: true as const, data: bigList }) }));
+      const cache = new Map<string, import("./types").ToolCallResult>();
+      const ts = reg.buildToolSet(ctx, undefined, cache);
+      const result = await ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc-full" });
+      expect((result as { success: true; data: { total_count: number } }).data.total_count).toBe(
+        25
+      );
+      expect(cache.get("tc-full")).toEqual({ success: true, data: bigList });
+    });
+
+    it("without cache: small result passes through unchanged", async () => {
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ execute: async () => ({ success: true as const, data: [1, 2] }) }));
+      const ts = reg.buildToolSet(ctx);
+      const result = await ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc-small" });
+      expect(result).toEqual({ success: true, data: [1, 2] });
+    });
+
+    it("cache not set when args are invalid (validation_error short-circuits)", async () => {
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "strict",
+          inputSchema: {
+            type: "object",
+            required: ["key"],
+            properties: { key: { type: "string" } },
+            additionalProperties: false,
+          },
+        })
+      );
+      const cache = new Map<string, import("./types").ToolCallResult>();
+      const ts = reg.buildToolSet(ctx, undefined, cache);
+      await ts.strict.execute?.({}, { messages: [], toolCallId: "tc-inv" });
+      expect(cache.has("tc-inv")).toBe(false);
+    });
+  });
+
   describe("timeout enforcement", () => {
     it("resolves normally when execute completes within timeout", async () => {
       const reg = new ToolRegistry();

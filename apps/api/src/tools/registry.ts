@@ -1,6 +1,7 @@
 import { ajv } from "@tulipfarm/validation";
 import { type ToolSet, jsonSchema, tool } from "ai";
 import type { BatchCoordinator } from "./batch-executor";
+import { truncateResult } from "./truncate";
 import { type RequestContext, type ToolCallResult, type ToolDef, err } from "./types";
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
@@ -41,29 +42,26 @@ export class ToolRegistry {
     return [...this.tools.values()];
   }
 
-  buildToolSet(ctx: RequestContext, coordinator?: BatchCoordinator): ToolSet {
+  buildToolSet(
+    ctx: RequestContext,
+    coordinator?: BatchCoordinator,
+    fullResultCache?: Map<string, ToolCallResult>
+  ): ToolSet {
     return Object.fromEntries(
       this.getAll().map((t) => [
         t.name,
         tool({
           description: t.description,
           parameters: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
-          execute: coordinator
-            ? (args: unknown) => {
-                const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
-                if (!v(args))
-                  return Promise.resolve(err("validation_error", firstArgError(v.errors)));
-                return coordinator.schedule(
-                  () => withToolTimeout(t.execute(args, ctx)),
-                  t.mutating
-                );
-              }
-            : (args: unknown) => {
-                const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
-                if (!v(args))
-                  return Promise.resolve(err("validation_error", firstArgError(v.errors)));
-                return withToolTimeout(t.execute(args, ctx));
-              },
+          execute: async (args: unknown, opts: { toolCallId: string }) => {
+            const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
+            if (!v(args)) return err("validation_error", firstArgError(v.errors));
+            const full = await (coordinator
+              ? coordinator.schedule(() => withToolTimeout(t.execute(args, ctx)), t.mutating)
+              : withToolTimeout(t.execute(args, ctx)));
+            fullResultCache?.set(opts.toolCallId, full);
+            return truncateResult(full);
+          },
         }),
       ])
     );

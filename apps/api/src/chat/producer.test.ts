@@ -83,6 +83,49 @@ describe("mapStreamPart", () => {
     expect(mapStreamPart(null)).toBeNull();
     expect(mapStreamPart("nope")).toBeNull();
   });
+
+  describe("tool-result full-result cache (TOOL-V1-010)", () => {
+    const truncated = {
+      success: true as const,
+      data: { items: [1], total_count: 25, truncated: true },
+    };
+    const full = { success: true as const, data: Array.from({ length: 25 }, (_, i) => i) };
+
+    it("uses cached full result when cache has the toolCallId", () => {
+      const cache = new Map([["c1", full]]);
+      expect(
+        mapStreamPart(
+          { type: "tool-result", toolCallId: "c1", toolName: "list_things", result: truncated },
+          cache
+        )
+      ).toEqual({
+        eventType: "tool-result",
+        data: { toolCallId: "c1", toolName: "list_things", result: full },
+      });
+    });
+
+    it("falls back to SDK result when cache has no entry for toolCallId", () => {
+      const cache = new Map<string, import("../tools/types").ToolCallResult>();
+      expect(
+        mapStreamPart(
+          { type: "tool-result", toolCallId: "c2", toolName: "list_things", result: truncated },
+          cache
+        )
+      ).toEqual({
+        eventType: "tool-result",
+        data: { toolCallId: "c2", toolName: "list_things", result: truncated },
+      });
+    });
+
+    it("without cache: uses SDK result directly", () => {
+      expect(
+        mapStreamPart({ type: "tool-result", toolCallId: "c3", toolName: "t", result: truncated })
+      ).toEqual({
+        eventType: "tool-result",
+        data: { toolCallId: "c3", toolName: "t", result: truncated },
+      });
+    });
+  });
 });
 
 describe("runChatStream", () => {
