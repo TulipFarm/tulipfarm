@@ -1,4 +1,5 @@
 import { ajv } from "@tulipfarm/validation";
+import { type ToolCallResult, err, ok } from "../tools/types";
 import type { KnowledgeService } from "./service";
 
 /** Per-request context a knowledge tool runs against (KN-V1-006). No ACL (KN-V1-001). */
@@ -8,22 +9,12 @@ export interface KnowledgeToolContext {
   agentId?: string;
 }
 
-export type ToolResult =
-  | { success: true; data: unknown }
-  | { success: false; error: { code: string; message: string } };
-
-const ok = (data: unknown): ToolResult => ({ success: true, data });
-const fail = (code: string, message: string): ToolResult => ({
-  success: false,
-  error: { code, message },
-});
-
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return validate.errors?.[0]?.message ?? "invalid input";
 }
 
-function reason(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+function reason(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export interface KnowledgeTool {
@@ -31,7 +22,7 @@ export interface KnowledgeTool {
   description: string;
   mutating: boolean;
   inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: KnowledgeToolContext) => Promise<ToolResult>;
+  handler: (args: unknown, ctx: KnowledgeToolContext) => Promise<ToolCallResult>;
 }
 
 const QUERY_SCHEMA = {
@@ -81,7 +72,7 @@ const queryKnowledge: KnowledgeTool = {
   mutating: false,
   inputSchema: QUERY_SCHEMA,
   handler: async (args, ctx) => {
-    if (!validateQuery(args)) return fail("validation_error", firstError(validateQuery));
+    if (!validateQuery(args)) return err("validation_error", firstError(validateQuery));
     const a = args as { query: string; domain?: string; tags?: string[]; limit?: number };
     try {
       const res = await ctx.service.search(
@@ -90,8 +81,8 @@ const queryKnowledge: KnowledgeTool = {
         Math.min(Math.max(a.limit ?? 10, 1), 50)
       );
       return ok({ results: res.results, warnings: res.warnings });
-    } catch (err) {
-      return fail("internal_error", reason(err));
+    } catch (e) {
+      return err("internal_error", reason(e));
     }
   },
 };
@@ -103,13 +94,13 @@ const createKnowledgeDocument: KnowledgeTool = {
   mutating: true,
   inputSchema: CREATE_DOC_SCHEMA,
   handler: async (args, ctx) => {
-    if (!validateCreateDoc(args)) return fail("validation_error", firstError(validateCreateDoc));
+    if (!validateCreateDoc(args)) return err("validation_error", firstError(validateCreateDoc));
     const a = args as { title: string; content: string; domain?: string; tags?: string[] };
     try {
       const doc = await ctx.service.createDocument(a);
       return ok({ id: doc._id, title: doc.title });
-    } catch (err) {
-      return fail("internal_error", reason(err));
+    } catch (e) {
+      return err("internal_error", reason(e));
     }
   },
 };
@@ -121,14 +112,14 @@ const createKnowledgeCollection: KnowledgeTool = {
   inputSchema: CREATE_COLLECTION_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateCreateCollection(args)) {
-      return fail("validation_error", firstError(validateCreateCollection));
+      return err("validation_error", firstError(validateCreateCollection));
     }
     const a = args as { name: string; description?: string };
     try {
       const c = await ctx.service.createCollection(a);
       return ok({ id: c._id, name: c.name });
-    } catch (err) {
-      return fail("internal_error", reason(err));
+    } catch (e) {
+      return err("internal_error", reason(e));
     }
   },
 };
@@ -149,8 +140,8 @@ const listKnowledgeCollections: KnowledgeTool = {
           domain: c.domain,
         })),
       });
-    } catch (err) {
-      return fail("internal_error", reason(err));
+    } catch (e) {
+      return err("internal_error", reason(e));
     }
   },
 };

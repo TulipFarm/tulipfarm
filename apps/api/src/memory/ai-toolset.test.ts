@@ -1,9 +1,8 @@
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
-import { buildMemoryToolSet } from "./ai-toolset";
+import { buildToolRegistry } from "../tools/setup";
 import { WorkingMemoryService } from "./service";
 import type { ToolCallResult } from "./tool-result";
-import type { ToolContext } from "./tools";
 import { type WorkingMemoryDoc, type WorkingMemoryRepo, assertValidEntry } from "./working-memory";
 
 class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
@@ -32,11 +31,11 @@ function exec(set: ToolSet, name: string, args: unknown): Promise<ToolCallResult
 
 function setup(): { set: ToolSet; repo: FakeWorkingMemoryRepo } {
   const repo = new FakeWorkingMemoryRepo();
-  const ctx: ToolContext = { userId: "u1", service: new WorkingMemoryService(repo) };
-  return { set: buildMemoryToolSet(ctx), repo };
+  const registry = buildToolRegistry({ workingMemory: new WorkingMemoryService(repo) });
+  return { set: registry.buildToolSet({ userId: "u1" }), repo };
 }
 
-describe("buildMemoryToolSet", () => {
+describe("memory tools via ToolRegistry", () => {
   it("exposes the two memory tools keyed by name", () => {
     const { set } = setup();
     expect(Object.keys(set).sort()).toEqual(["delete_memory", "update_memory"]);

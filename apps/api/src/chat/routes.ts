@@ -8,12 +8,11 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { assembleSystemPrompt } from "../context/assemble";
 import { DOMAIN_EVENTS } from "../domain-events";
-import { buildKnowledgeToolSet } from "../knowledge/ai-toolset";
 import type { KnowledgeService } from "../knowledge/service";
-import { buildMemoryToolSet } from "../memory/ai-toolset";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
+import type { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
   type MessagePart,
@@ -169,7 +168,8 @@ export function registerChatRoutes(
   workingMemory?: WorkingMemoryService,
   knowledge?: KnowledgeService,
   soulLoader?: SoulLoader,
-  events?: EventEmitter
+  events?: EventEmitter,
+  toolRegistry?: ToolRegistry
 ): void {
   app.post(
     "/api/v1/chat",
@@ -276,15 +276,10 @@ export function registerChatRoutes(
       reply.hijack();
       hub.register(streamId);
 
-      // Bind the per-user memory + knowledge tools for this turn; the SDK runs the tool loop.
-      const memoryTools = workingMemory
-        ? buildMemoryToolSet({ userId: user._id, service: workingMemory, agentId: convo.agentId })
-        : {};
-      const knowledgeTools = knowledge
-        ? buildKnowledgeToolSet({ userId: user._id, service: knowledge, agentId: convo.agentId })
-        : {};
-      const merged = { ...memoryTools, ...knowledgeTools };
-      const tools = Object.keys(merged).length > 0 ? merged : undefined;
+      const tools =
+        toolRegistry && toolRegistry.getAll().length > 0
+          ? toolRegistry.buildToolSet({ userId: user._id, agentId: convo.agentId })
+          : undefined;
 
       const result = streamText({
         model: selected,

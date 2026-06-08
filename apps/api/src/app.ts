@@ -29,6 +29,8 @@ import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
+import type { ToolRegistry } from "./tools/registry";
+import { buildToolRegistry } from "./tools/setup";
 
 export interface AppOptions {
   sessionStore?: SessionStore;
@@ -50,6 +52,7 @@ export interface AppOptions {
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
   knowledgeService?: KnowledgeService;
+  toolRegistry?: ToolRegistry;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -150,6 +153,12 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     if (opts.llmService && opts.conversationRepo && opts.messageRepo) {
+      const toolRegistry =
+        opts.toolRegistry ??
+        buildToolRegistry({
+          workingMemory: opts.workingMemoryService,
+          knowledge: opts.knowledgeService,
+        });
       registerChatRoutes(
         app,
         opts.llmService,
@@ -161,7 +170,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.workingMemoryService,
         opts.knowledgeService,
         opts.soulLoader,
-        opts.domainEventEmitter
+        opts.domainEventEmitter,
+        toolRegistry
       );
     }
     if (opts.knowledgeService) {
