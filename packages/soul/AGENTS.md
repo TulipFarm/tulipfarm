@@ -10,7 +10,8 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
 ## Public API (`src/index.ts`)
 
 - **`SoulLoader`** — reads artifacts from disk into in-memory maps; `load()` / reload.
-- **`GitSyncService`** — `bootSync`, `pull`, `commit`, `push`, periodic sync.
+- **`GitSyncService`** — `bootSync`, `pull`, `commit`, `push`, `withSync(message)` (commit +
+  best-effort push around a write — used by the API's soul-backed tools), periodic sync.
 - **`runSoulMigrations()`** + type `SoulMigration`.
 - Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
 

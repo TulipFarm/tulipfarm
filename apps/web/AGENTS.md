@@ -26,20 +26,34 @@ app/
   root.tsx              # document shell + no-flash theme script + HydrateFallback (becomes index.html)
   app.css               # Tailwind v4 import + oklch tokens (:root / [data-theme=dark]) + @theme inline
   globals.d.ts          # vite/client + fontsource module declarations
-  lib/{utils,nav,badges}.ts   # cn(); sidebar nav config; mocked badge counts
+  lib/
+    api.ts              # fetch-based API client (cookie+CSRF+Bearer), throws ApiError(status, msg, path)
+    schema.ts           # JSON-Schema helpers: formFields/listColumns/detailFields/renderValue
+    agents.ts  skills.ts  # typed wrappers over /api/v1/agents, /api/v1/skills (+ scan/audit/install)
+    utils.ts  nav.ts  badges.ts   # cn(); sidebar nav config; mocked badge counts
   components/
     app-sidebar.tsx     # persistent sidebar (8 sections, responsive mobile drawer)
     theme-toggle.tsx    # [data-theme] + localStorage toggle
-    empty-state.tsx     # shared bracket-marker empty state
-    ui/button.tsx       # vendored shadcn primitive (flat)
+    empty-state.tsx  states.tsx  resource-panel.tsx   # empty / error+not-found / header+breadcrumb
+    resource-form.tsx   # schema-driven create/edit form (write side)
+    schema-table.tsx  detail-view.tsx                 # schema-driven list / detail (read side)
+    link-combobox.tsx   # searchable combobox for x-links fields
+    markdown-view.tsx   # renders agent/skill markdown body
+    ui/*.tsx            # vendored shadcn primitives (flat)
   routes/
     _app.tsx            # pathless layout: sidebar + <Outlet/>
     _app._index.tsx     # Chat welcome (default /)
-    _app.<section>.tsx  # Resources/Agents/Routines/Approvals/Knowledge/Integrations/Settings
+    _app.resources.$type._index.tsx / .new.tsx / .$id.tsx / .$id.edit.tsx   # list/create/detail/edit
+    _app.agents._index.tsx / .$name.tsx     # agents list + detail (read-only)
+    _app.skills._index.tsx / .$name.tsx / .install.tsx   # skills list + detail + SkillAudit install
+    _app.<section>.tsx  # Routines/Approvals/Knowledge/Integrations/Settings (shell, still mocked)
 components.json         # shadcn config (rsc:false, css app/app.css, ~ aliases)
 vite.config.ts          # remix({ssr:false}) + tailwindcss() + ~ alias
 vitest.config.ts        # @vitejs/plugin-react (NOT the Remix plugin) + jsdom + ~ alias
 ```
+
+Resources, Agents, and Skills are wired to the real API. Routines/Approvals/Knowledge/
+Integrations/Settings are still shell placeholders. Badge counts remain mocked (`lib/badges.ts`).
 
 ## Adding a route / page
 
@@ -49,6 +63,33 @@ vitest.config.ts        # @vitejs/plugin-react (NOT the Remix plugin) + jsdom + 
 3. **SPA mode: no server `loader`/`action`.** For client data use `clientLoader` and read with
    `useLoaderData<typeof clientLoader>()`. Server-only Remix exports are unavailable.
 4. Navigate with Remix `<Link>` / `<NavLink>`, not raw `<a>`.
+
+## Data fetching (API client)
+
+All API calls go through `app/lib/api.ts` — never call `fetch` ad-hoc from a route.
+
+- `apiGet(path)` / `apiWrite(method, path, body, opts?)` wrap `fetch` with `credentials:"include"`
+  (session cookie), echo the non-httpOnly `csrf_token` cookie as the `x-csrf-token` header on
+  writes, and add `Authorization: Bearer` from `VITE_API_TOKEN` when set.
+- Failures throw `ApiError(status, message, path?)`. The `path` is the JSON Pointer from a 422
+  validation error — routes map it to per-field highlights; map 409 to a concurrency banner.
+- Fetch inside `clientLoader` (runs in the browser). Typed helpers live in `lib/api.ts`
+  (resource records/types), `lib/agents.ts`, and `lib/skills.ts` (scan / audit / install).
+
+## Schema-driven resource UI
+
+A resource type's list, detail, create, and edit screens are **zero-code** — driven entirely by
+the type's JSON Schema fetched from the API. The logic lives in `lib/schema.ts`:
+
+- `formFields` / `listColumns` / `detailFields` derive ordered field descriptors from the schema
+  (dropping system/auto-id/read-only fields as appropriate); `renderValue` formats a value for read.
+- `resource-form.tsx` renders inputs by JSON-Schema kind: string→text, number/integer→number,
+  boolean→checkbox, `enum`→select, `format: date`/`date-time`→date picker, array/object→JSON
+  textarea (parse-checked), and `x-links`→`LinkCombobox`. `x-immutable` fields lock in edit mode.
+- Validation is server-authoritative: render the API's 422 `path`/message, don't reimplement rules.
+
+**To support a new field kind:** add detection in `resolveKind` (`lib/schema.ts`), a render case in
+`resource-form.tsx`, and a `renderValue` case for the read side.
 
 ## Conventions
 
