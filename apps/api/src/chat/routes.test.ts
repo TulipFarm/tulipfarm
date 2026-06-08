@@ -18,7 +18,9 @@ import {
 import { type PaginatedResult, encodeCursor } from "../pagination";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
-import { buildTurnLog } from "./routes";
+import { buildTurnLog, parseLastEventId } from "./routes";
+import { StreamHub } from "./stream-hub";
+import { MemoryStreamResumeRepo } from "./stream-resume";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -287,6 +289,19 @@ describe("buildTurnLog (AC4 observability)", () => {
   });
 });
 
+describe("parseLastEventId", () => {
+  it("prefers a valid Last-Event-ID header", () => {
+    expect(parseLastEventId("5", undefined)).toBe(5);
+    expect(parseLastEventId(["7", "1"], undefined)).toBe(7);
+  });
+  it("falls back to the query, then to 0", () => {
+    expect(parseLastEventId(undefined, 3)).toBe(3);
+    expect(parseLastEventId(undefined, undefined)).toBe(0);
+    expect(parseLastEventId("", undefined)).toBe(0);
+    expect(parseLastEventId("garbage", undefined)).toBe(0);
+  });
+});
+
 // ── Route tests ───────────────────────────────────────────────────────────────
 describe("chat routes", () => {
   let app: FastifyInstance;
@@ -296,6 +311,8 @@ describe("chat routes", () => {
   let repo: FakeConversationRepo;
   let messageRepo: FakeMessageRepo;
   let workingMemoryRepo: FakeWorkingMemoryRepo;
+  let streamRepo: MemoryStreamResumeRepo;
+  let streamHub: StreamHub;
   let sid: string;
   let userId: string;
   let otherSid: string;
@@ -310,6 +327,8 @@ describe("chat routes", () => {
     repo = new FakeConversationRepo();
     messageRepo = new FakeMessageRepo();
     workingMemoryRepo = new FakeWorkingMemoryRepo();
+    streamRepo = new MemoryStreamResumeRepo();
+    streamHub = new StreamHub();
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     userId = user._id;
@@ -328,6 +347,8 @@ describe("chat routes", () => {
       llmService,
       conversationRepo: repo,
       messageRepo,
+      streamResumeRepo: streamRepo,
+      streamHub,
       workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
     });
   });
@@ -588,6 +609,80 @@ describe("chat routes", () => {
         key: "plan",
         value: "enterprise",
       });
+    });
+  });
+
+  describe("POST /api/v1/chat (SSE framing)", () => {
+    it("returns X-Stream-Id and streams id/event-framed SSE events", async () => {
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/event-stream");
+      expect(res.headers["x-stream-id"]).toBeDefined();
+      expect(res.body).toMatch(/id: 1\nevent: text\ndata: /);
+      expect(res.body).toContain("event: finish");
+    });
+
+    it("buffers the turn's events in the stream repo for replay", async () => {
+      const res = await post({ message: userMsg("hi") });
+      const streamId = res.headers["x-stream-id"] as string;
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"));
+      const events = await streamRepo.listAfter(streamId, 0);
+      expect(events[0].eventType).toBe("text");
+      expect(events.at(-1)?.eventType).toBe("finish");
+    });
+  });
+
+  describe("GET /api/v1/chat/streams/:streamId (resume)", () => {
+    function seedStream(streamId: string): void {
+      const now = new Date();
+      streamRepo.rows.push(
+        { streamId, seq: 1, eventType: "text", data: { delta: "a" }, createdAt: now },
+        { streamId, seq: 2, eventType: "text", data: { delta: "b" }, createdAt: now },
+        { streamId, seq: 3, eventType: "finish", data: { reason: "stop" }, createdAt: now }
+      );
+    }
+
+    it("401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: `/api/v1/chat/streams/${randomUUID()}` });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("404 for an unknown stream", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/chat/streams/${randomUUID()}`,
+        cookies: { [SESSION_COOKIE]: sid },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("replays events after Last-Event-ID then finishes", async () => {
+      const streamId = randomUUID();
+      seedStream(streamId);
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/chat/streams/${streamId}`,
+        cookies: { [SESSION_COOKIE]: sid },
+        headers: { "last-event-id": "1" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain("id: 2");
+      expect(res.body).toContain("id: 3");
+      expect(res.body).not.toMatch(/id: 1\n/);
+      expect(res.body).toContain("event: finish");
+    });
+
+    it("replays the whole buffer when no Last-Event-ID is given", async () => {
+      const streamId = randomUUID();
+      seedStream(streamId);
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/chat/streams/${streamId}`,
+        cookies: { [SESSION_COOKIE]: sid },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toMatch(/id: 1\n/);
+      expect(res.body).toContain("id: 3");
     });
   });
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge on PGlite", () => {
     await db.close();
   });
 
-  it("advances schema_version to the latest (2)", async () => {
+  it("advances schema_version to the latest (3)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([2]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([3]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -47,6 +47,7 @@ describe("runPgMigrations — 001_init + 002_knowledge on PGlite", () => {
       "schema_version",
       "secrets",
       "sessions",
+      "stream_resume",
       "users",
       "working_memory",
     ]);
@@ -71,11 +72,11 @@ describe("runPgMigrations — 001_init + 002_knowledge on PGlite", () => {
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 2", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 3", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([2]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([3]);
   });
 
   it("enforces the conversations owner CHECK", async () => {

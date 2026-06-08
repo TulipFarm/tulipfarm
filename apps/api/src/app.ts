@@ -17,6 +17,8 @@ import type { UserRepo } from "./auth/users";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
+import { StreamHub } from "./chat/stream-hub";
+import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
@@ -44,6 +46,8 @@ export interface AppOptions {
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
+  streamResumeRepo?: StreamResumeRepo;
+  streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
   knowledgeService?: KnowledgeService;
 }
@@ -151,6 +155,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.llmService,
         opts.conversationRepo,
         opts.messageRepo,
+        opts.streamResumeRepo ?? new MemoryStreamResumeRepo(),
+        opts.streamHub ?? new StreamHub(),
         requireAuth,
         opts.workingMemoryService,
         opts.knowledgeService,

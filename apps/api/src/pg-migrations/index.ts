@@ -154,6 +154,24 @@ const KNOWLEDGE_STATEMENTS: string[] = [
   )`,
 ];
 
+/**
+ * Durable SSE resume buffer (DB-V1 SSE resume). One row per streamed event, keyed by
+ * `(stream_id, seq)` so a reconnecting client can replay everything after its `Last-Event-ID`.
+ * Transient: a pg-boss job GCs rows past their TTL (durable messages persist separately in
+ * `messages`). `created_at` is indexed for the cutoff delete.
+ */
+const STREAM_RESUME_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS stream_resume (
+    stream_id  uuid    NOT NULL,
+    seq        integer NOT NULL,
+    event_type text    NOT NULL,
+    data       jsonb   NOT NULL,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (stream_id, seq)
+  )`,
+  "CREATE INDEX IF NOT EXISTS stream_resume_gc_idx ON stream_resume (created_at)",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -169,6 +187,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "knowledge: documents, chunks (pgvector + tsvector), collections, revisions",
     up: async (q) => {
       for (const sql of KNOWLEDGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 3,
+    description: "stream_resume: durable SSE replay buffer keyed by (stream_id, seq)",
+    up: async (q) => {
+      for (const sql of STREAM_RESUME_STATEMENTS) {
         await q.query(sql);
       }
     },

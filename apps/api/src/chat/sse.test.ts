@@ -1,0 +1,37 @@
+import type { ServerResponse } from "node:http";
+import { describe, expect, it, vi } from "vitest";
+import { formatSseEvent, writeSseEvent, writeSseHeaders } from "./sse";
+
+describe("formatSseEvent", () => {
+  it("frames id/event/data with a trailing blank line", () => {
+    const out = formatSseEvent({ seq: 7, eventType: "text", data: { delta: "Hi" } });
+    expect(out).toBe('id: 7\nevent: text\ndata: {"delta":"Hi"}\n\n');
+  });
+
+  it("serialises terminal events", () => {
+    expect(formatSseEvent({ seq: 9, eventType: "finish", data: { reason: "stop" } })).toBe(
+      'id: 9\nevent: finish\ndata: {"reason":"stop"}\n\n'
+    );
+  });
+});
+
+describe("writeSseEvent", () => {
+  it("writes the framed event to the raw response", () => {
+    const write = vi.fn();
+    writeSseEvent({ write } as unknown as ServerResponse, {
+      seq: 1,
+      eventType: "text",
+      data: { delta: "x" },
+    });
+    expect(write).toHaveBeenCalledWith('id: 1\nevent: text\ndata: {"delta":"x"}\n\n');
+  });
+});
+
+describe("writeSseHeaders", () => {
+  it("sets the event-stream headers plus any extras", () => {
+    const setHeader = vi.fn();
+    writeSseHeaders({ setHeader } as unknown as ServerResponse, { "X-Stream-Id": "abc" });
+    expect(setHeader).toHaveBeenCalledWith("Content-Type", "text/event-stream");
+    expect(setHeader).toHaveBeenCalledWith("X-Stream-Id", "abc");
+  });
+});

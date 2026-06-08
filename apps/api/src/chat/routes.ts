@@ -24,7 +24,11 @@ import {
   fromUserText,
   toCoreMessage,
 } from "./messages";
+import { attachToStream, runChatStream } from "./producer";
 import { MessageSchema } from "./schemas";
+import { writeSseHeaders } from "./sse";
+import type { StreamHub } from "./stream-hub";
+import type { StreamResumeRepo } from "./stream-resume";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -86,6 +90,23 @@ export function buildTurnLog(args: {
   };
 }
 
+/**
+ * Resolve the resume cursor: the `Last-Event-ID` header (set automatically by an
+ * `EventSource` on reconnect) takes precedence over the `?lastEventId=` query. A
+ * missing/invalid value means "from the start" (seq 0).
+ */
+export function parseLastEventId(
+  header: string | string[] | undefined,
+  query: number | undefined
+): number {
+  const raw = Array.isArray(header) ? header[0] : header;
+  if (raw !== undefined && raw !== "") {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return typeof query === "number" && query >= 0 ? query : 0;
+}
+
 /** The subset of an AI SDK `StepResult` that persistence needs. */
 interface PersistableStep {
   text: string;
@@ -142,6 +163,8 @@ export function registerChatRoutes(
   llmService: LlmService,
   repo: ConversationRepo,
   messageRepo: MessageRepo,
+  streamRepo: StreamResumeRepo,
+  hub: StreamHub,
   requireAuth: PreHandler,
   workingMemory?: WorkingMemoryService,
   knowledge?: KnowledgeService,
@@ -244,9 +267,14 @@ export function registerChatRoutes(
       await messageRepo.create(fromUserText(convo._id, body.message.content));
       await repo.touch(convo._id);
 
-      // 5. Stream the assistant reply; persist it only on successful finish.
+      // 5. Stream the assistant reply over SSE. Each event carries an `id` so a dropped
+      //    connection can reconnect via Last-Event-ID; the producer runs detached so the
+      //    turn finishes (and keeps buffering) even after the client disconnects.
+      const streamId = randomUUID();
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
+      writeSseHeaders(reply.raw, { "X-Stream-Id": streamId });
       reply.hijack();
+      hub.register(streamId);
 
       // Bind the per-user memory + knowledge tools for this turn; the SDK runs the tool loop.
       const memoryTools = workingMemory
@@ -278,9 +306,54 @@ export function registerChatRoutes(
           ),
       });
 
-      result.pipeDataStreamToResponse(reply.raw, {
-        getErrorMessage: (e) => (e instanceof Error ? e.message : "stream error"),
-      });
+      // Attach this connection (live from seq 0) and start the detached producer.
+      void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
+      void runChatStream(streamId, result.fullStream, { repo: streamRepo, hub, log: req.log });
+    }
+  );
+
+  app.get(
+    "/api/v1/chat/streams/:streamId",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Resume an in-flight or recently-finished chat stream over SSE. Send the last " +
+          "received event id as the `Last-Event-ID` header (or `?lastEventId=`): buffered " +
+          "events after it are replayed, then the connection attaches to the live tail.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["streamId"],
+          properties: { streamId: { type: "string" } },
+        },
+        querystring: {
+          type: "object",
+          properties: { lastEventId: { type: "integer", minimum: 0 } },
+        },
+        response: { 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { streamId } = req.params as { streamId: string };
+      const afterSeq = parseLastEventId(
+        req.headers["last-event-id"],
+        (req.query as { lastEventId?: number }).lastEventId
+      );
+
+      // Unknown stream (never existed or already GC'd) → 404. A live stream or any
+      // buffered row counts as known, even if the client already has every event.
+      if (!hub.isLive(streamId)) {
+        const existing = await streamRepo.listAfter(streamId, 0);
+        if (existing.length === 0) {
+          return reply.code(404).send({ error: "stream not found" });
+        }
+      }
+
+      writeSseHeaders(reply.raw);
+      reply.hijack();
+      await attachToStream(reply.raw, streamId, afterSeq, { repo: streamRepo, hub });
     }
   );
 

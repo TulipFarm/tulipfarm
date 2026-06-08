@@ -10,6 +10,9 @@ import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-stor
 import { PgUserRepo, bootstrapAdmin } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
+import { registerStreamGc } from "./chat/stream-gc";
+import { StreamHub } from "./chat/stream-hub";
+import { PgStreamResumeRepo } from "./chat/stream-resume";
 import { connectPg } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { HookExecutor } from "./hooks/hook-executor";
@@ -81,6 +84,8 @@ async function boot() {
     const embeddingService = new EmbeddingService();
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
+    const streamResumeRepo = new PgStreamResumeRepo(pool);
+    const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
@@ -117,6 +122,8 @@ async function boot() {
       llmService,
       conversationRepo,
       messageRepo,
+      streamResumeRepo,
+      streamHub,
       workingMemoryService,
       knowledgeService,
     });
@@ -138,6 +145,7 @@ async function boot() {
     await bootstrapAdmin(userRepo, app.log);
 
     await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL);
+    await registerStreamGc(boss, streamResumeRepo);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {
