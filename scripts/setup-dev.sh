@@ -88,38 +88,34 @@ else
   echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
 fi
 
-# Initialize soul directory structure
-if [ ! -d "soul" ]; then
-  echo "📁 Initializing soul directory..."
-  mkdir -p soul/{resources,routines,agents,skills,integrations}
+# Initialize the soul directory — a DEDICATED git repo OUTSIDE the project repo so its own commits
+# (resource schemas etc.) never touch the project tree. Lives at ~/.tulipfarm/soul.
+SOUL_DIR="$HOME/.tulipfarm/soul"
+if [ ! -d "$SOUL_DIR/.git" ]; then
+  echo "📁 Initializing soul directory at $SOUL_DIR..."
+  mkdir -p "$SOUL_DIR"/{resources,routines,agents,skills,integrations}
 
-  # Create stub files
-  cat > soul/llm.config.yaml << 'EOF'
-# LLM Configuration
-# To be populated via the UI setup wizard
-EOF
-
-  cat > soul/soul.yaml << 'EOF'
+  # Create stub files. NOTE: no llm.config.yaml stub — an empty/comment-only one fails LLM-config
+  # validation (requires `tiers`). Absent config = LLM features disabled until the UI wizard writes it.
+  cat > "$SOUL_DIR/soul.yaml" << 'EOF'
 # TulipFarm Soul Configuration
 # Root soul manifest — populated during UI setup
 EOF
 
-  cat > soul/skills-lock.json << 'EOF'
+  cat > "$SOUL_DIR/skills-lock.json" << 'EOF'
 {}
 EOF
 
-  # Initialize as git repo
-  cd soul
-  git init
-  git config user.email "tulipfarm@local"
-  git config user.name "TulipFarm Dev"
-  git add .
-  git commit -m "Initial soul structure"
-  cd ..
+  # Initialize as its own git repo
+  git -C "$SOUL_DIR" init
+  git -C "$SOUL_DIR" config user.email "tulipfarm@local"
+  git -C "$SOUL_DIR" config user.name "TulipFarm Dev"
+  git -C "$SOUL_DIR" add .
+  git -C "$SOUL_DIR" commit -m "Initial soul structure"
 
-  echo "✅ Soul directory initialized at ./soul"
+  echo "✅ Soul directory initialized at $SOUL_DIR"
 else
-  echo "✅ Soul directory already exists"
+  echo "✅ Soul directory already exists at $SOUL_DIR"
 fi
 
 # Copy .env.local.example to .env.local if not present
@@ -141,6 +137,13 @@ if [ ! -f ".env.local" ]; then
     sed -i "s|<generate: openssl rand -base64 32>|$ENCRYPTION_KEY|" .env.local
     sed -i "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$JWT_SECRET|;}" .env.local
     sed -i "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$WEBHOOK_SECRET|;}" .env.local
+  fi
+
+  # Expand SOUL_PATH to the absolute soul dir (dotenv does not expand ~).
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
+  else
+    sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
   fi
 
   echo "✅ .env.local created with generated secrets"
