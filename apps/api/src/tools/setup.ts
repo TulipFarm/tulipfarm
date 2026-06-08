@@ -2,6 +2,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
 import type { WorkingMemoryService } from "../memory/service";
 import { MEMORY_TOOLS } from "../memory/tools";
+import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
 import { ToolRegistry } from "./registry";
@@ -16,6 +17,7 @@ export function buildToolRegistry(services: {
   knowledge?: KnowledgeService;
   resources?: ResourceServices;
   resourceTypes?: ResourceTypeToolContext;
+  platform?: PlatformToolContext;
 }): ToolRegistry {
   const registry = new ToolRegistry();
 
@@ -67,6 +69,20 @@ export function buildToolRegistry(services: {
       registry.register({
         name: t.name,
         tier: "system",
+        mutating: t.mutating,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, _ctx) => t.handler(args, ctx),
+      });
+    }
+  }
+
+  if (services.platform !== undefined) {
+    const ctx = services.platform;
+    for (const t of PLATFORM_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "platform",
         mutating: t.mutating,
         description: t.description,
         inputSchema: t.inputSchema,
