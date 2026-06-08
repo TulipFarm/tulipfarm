@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { cookieSecure } from "./cookie-secure";
 import { SESSION_COOKIE } from "./middleware";
 
 export const CSRF_COOKIE = "csrf_token";
@@ -15,7 +16,7 @@ export function setCsrfCookie(reply: FastifyReply, token: string, maxAge?: numbe
   reply.setCookie(CSRF_COOKIE, token, {
     httpOnly: false,
     sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     path: "/",
     ...(maxAge !== undefined && { maxAge }),
   });

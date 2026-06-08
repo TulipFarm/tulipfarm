@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# Single TulipFarm app image (ARCH-V1-006): Fastify serves the API + the built
+# web SPA + in-process pg-boss workers. Multi-arch (amd64/arm64). Postgres-only.
+#
+# Slim runtime: the API + workspace TS packages are esbuild-bundled into one
+# server.cjs (no tsx, no source), and only the prod dependency closure (via
+# pnpm deploy) ships — the dev toolchain (vite/remix/turbo/typescript/biome/
+# vitest/esbuild) is left in the build stage.
+
+FROM node:24-slim AS builder
+WORKDIR /app
+ENV CI=true
+# Build toolchain for native deps (isolated-vm, @node-rs/argon2). git: the root
+# `prepare` lifecycle script runs `lefthook install`, which shells out to git.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git \
+  && rm -rf /var/lib/apt/lists/*
+RUN corepack enable
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @tulipfarm/web build
+# Bundle the API + workspace packages into one file. Native modules and packages
+# that read their own files at runtime (scalar UI assets) stay external and are
+# supplied by the prod deploy closure below. The datastore driver (pg) and queue
+# (pg-boss) are externalized too — they live in the prod node_modules closure.
+RUN pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
+  --bundle --platform=node --target=node24 --format=cjs --outfile=dist/server.cjs \
+  --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
+  --external:@scalar/fastify-api-reference
+# Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
+RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
+
+FROM node:24-slim AS runtime
+# git: soul backup/sync shells out to it.
+RUN apt-get update && apt-get install -y --no-install-recommends git \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=8080 \
+    SOUL_PATH=/opt/tulipfarm/soul \
+    WEB_DIST=/app/apps/web/build/client
+COPY --from=builder /deploy/node_modules ./node_modules
+COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
+COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
+RUN mkdir -p /opt/tulipfarm/soul
+EXPOSE 8080
+CMD ["node", "server.cjs"]

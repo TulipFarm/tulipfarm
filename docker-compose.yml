@@ -1,0 +1,62 @@
+name: tulipfarm
+
+# 2-service stack (ARCH-V1, Postgres-only). `app` is the single image (API + built
+# SPA + in-process pg-boss workers). Bundled `postgres` ships pgvector. Switch to a
+# managed datastore by setting EXTERNAL_DATASTORE=true and pointing DATABASE_URL at
+# it (and omit/stop the `postgres` service).
+services:
+  app:
+    image: ghcr.io/tulipfarm/app:${TULIPFARM_VERSION:-latest}
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
+      # Bundled mode: wired from POSTGRES_PASSWORD below. External/managed mode:
+      # set EXTERNAL_DATASTORE=true and override DATABASE_URL.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD}@postgres:5432/tulipfarm}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      SOUL_PATH: /opt/tulipfarm/soul
+      SETUP_MODE: ${SETUP_MODE:-wizard}
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - tulipfarm-soul:/opt/tulipfarm/soul
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tulipfarm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: tulipfarm
+    volumes:
+      - tulipfarm-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "tulipfarm", "-d", "tulipfarm"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  tulipfarm-postgres:
+  tulipfarm-soul:
