@@ -104,6 +104,21 @@ export class GitSyncService extends EventEmitter {
     return true;
   }
 
+  /** Commit then best-effort push (SOUL-V1-003). Push failure is logged, not thrown. */
+  async withSync(message: string): Promise<{ sha: string; filesChanged: number }> {
+    const result = await this.commit(message);
+    if (this.remoteUrl) {
+      try {
+        await this.push();
+      } catch (err) {
+        this.logger.warn(
+          `Soul: withSync push failed — ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+    return result;
+  }
+
   async syncOnce(): Promise<void> {
     if (!this.remoteUrl) return;
     try {
