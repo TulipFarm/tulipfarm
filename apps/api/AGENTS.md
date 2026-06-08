@@ -7,19 +7,25 @@ Each feature domain gets its own directory under `src/`:
 ```
 src/
   auth/           # session, CSRF, users, API tokens
-  chat/           # conversations, messages, streaming chat turn
-  resources/      # resource type + data CRUD, per-type Postgres tables
+  chat/           # conversations, messages, streaming chat turn + durable SSE resume
+  context/        # deterministic system-prompt assembly (assembleSystemPrompt)
+  resources/      # resource type + data CRUD, per-type Postgres tables, write-pipeline
+  tools/          # central ToolRegistry, batch executor, result truncation
+  platform/       # platform-tier tool implementations + tool-result helpers
   hooks/          # isolated-vm hook sandbox + worker
-  knowledge/      # RAG: documents, chunks, pgvector + tsvector search
+  knowledge/      # RAG: documents, chunks, pgvector + tsvector search; governance block
   memory/         # per-user working memory
   secrets/        # secret storage
-  soul/           # soul git operations (commit, push)
-    resource-types/ # resource type CRUD
+  soul/           # soul git ops (commit, push) + agents/, skills/, resource-types/ CRUD
   pg-migrations/  # Postgres schema migrations (applied on boot)
 ```
 
 All persistence is Postgres (`pg.Pool` in prod, PGlite in tests) via thin repos taking a
 `Queryable`; async work runs on in-process pg-boss. No other datastore.
+
+`soul/` now has one subdir per soul-backed resource (`agents/`, `skills/`, `resource-types/`),
+each with its own `routes.ts` (HTTP) **and** `tools.ts` (LLM tools). `skills/` also has
+`audit.ts` (SkillAudit LLM safety review for the install flow).
 
 ## Route Convention
 
@@ -51,3 +57,47 @@ Mock `node:fs` / `node:fs/promises` with `vi.mock` at the top of the test file w
 3. Add `routes.test.ts`
 4. Import + wire in `app.ts` → add optional dep to `AppOptions` if needed
 5. Pass dep from `index.ts` → `buildApp`
+
+## LLM Tools (`src/tools/`)
+
+The chat turn exposes capabilities to the model as tools. All tools flow through one central
+`ToolRegistry` (`tools/registry.ts`); per request `registry.buildToolSet(ctx)` produces the AI
+SDK `ToolSet`. Tools are defined as plain `ToolDef` objects (`tools/types.ts`):
+
+```ts
+interface ToolDef {
+  name: string;            // unique, snake_case (e.g. "resource_create")
+  tier: "system" | "platform" | "integration";
+  mutating: boolean;       // false = read (parallelizable), true = write (sequential)
+  description: string;     // LLM-facing
+  inputSchema: Record<string, unknown>;  // plain JSON Schema, AJV-validated at call time
+  execute: (args, ctx: RequestContext) => Promise<ToolCallResult>;
+}
+```
+
+- **Return contract:** never throw — return `ok(data)` or `err(code, message)` (`tools/types.ts`).
+  Error codes: `validation_error | oversize_value | not_found | internal_error`.
+- **Validation:** the registry AJV-compiles `inputSchema` and returns `err("validation_error")`
+  before `execute` runs — don't re-validate inside the handler.
+- **Batching** (`tools/batch-executor.ts`): tool calls in one model step run in parallel when all
+  are reads; if any is `mutating`, the whole batch runs sequentially. 30s per-call timeout.
+- **Truncation** (`tools/truncate.ts`): list-shaped results are capped (~20 items) for the LLM
+  context with `{ total_count, truncated: true }`; the full result is kept for the SSE UI event.
+- **Soul-backed writes:** tools that mutate the soul repo (`resources/`, `soul/*/tools.ts`) wrap
+  the write in `GitSyncService.withSync(commitMsg)` so each change is committed + pushed.
+
+**To add a tool:** define a `ToolDef` in the owning feature's `tools.ts`, then register it in
+`tools/setup.ts` (`buildToolRegistry`). Group module tool arrays by tier (e.g. `PLATFORM_TOOLS`).
+Existing tools by category: system resource/agent/skill/resource-type CRUD (`resources/`,
+`soul/*/`), platform UI/routing/soul-batch (`platform/tools.ts`), memory (`memory/tools.ts`),
+knowledge (`knowledge/tools.ts`).
+
+## Context & streaming
+
+- **System prompt** (`context/assemble.ts`): `assembleSystemPrompt(ctx)` is a pure, synchronous,
+  fixed-order block builder — the caller resolves every input (personality, memory, governance
+  docs…) and passes it in, so the rendered prefix is deterministic and prompt-cacheable. See
+  `context/README.md` for block order and budgets.
+- **Durable SSE** (`chat/`): the chat turn streams via an in-memory `StreamHub` (`stream-hub.ts`)
+  while persisting each event to the `stream_resume` table (`stream-resume.ts`). Reconnects replay
+  from `Last-Event-ID`; `stream-gc.ts` expires old buffers on pg-boss.
