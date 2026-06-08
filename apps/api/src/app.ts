@@ -1,3 +1,4 @@
+import type { EventEmitter } from "node:events";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -7,7 +8,6 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
-import type { Db } from "mongodb";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
@@ -18,8 +18,11 @@ import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
 import type { HookExecutor } from "./hooks/hook-executor";
+import { registerKnowledgeRoutes } from "./knowledge/routes";
+import type { KnowledgeService } from "./knowledge/service";
 import type { WorkingMemoryService } from "./memory/service";
 import type { RateLimiter } from "./rate-limit";
+import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
@@ -34,11 +37,15 @@ export interface AppOptions {
   gitSync?: GitSyncService;
   soulLoader?: SoulLoader;
   hookExecutor?: HookExecutor;
-  db?: Db;
+  resourceRepoFactory?: ResourceRepoFactory;
+  counterStore?: CounterStore;
+  reconcileResources?: () => Promise<void>;
+  domainEventEmitter?: EventEmitter;
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
   workingMemoryService?: WorkingMemoryService;
+  knowledgeService?: KnowledgeService;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -118,11 +125,25 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);
       if (opts.soulLoader) {
-        registerResourceTypeRoutes(app, opts.gitSync, opts.soulLoader, requireAuth);
+        registerResourceTypeRoutes(
+          app,
+          opts.gitSync,
+          opts.soulLoader,
+          requireAuth,
+          opts.reconcileResources
+        );
       }
     }
-    if (opts.db && opts.soulLoader) {
-      registerResourceRoutes(app, opts.db, opts.soulLoader, requireAuth, opts.hookExecutor);
+    if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
+      registerResourceRoutes(
+        app,
+        opts.resourceRepoFactory,
+        opts.counterStore,
+        opts.soulLoader,
+        requireAuth,
+        opts.hookExecutor,
+        opts.domainEventEmitter
+      );
     }
     if (opts.llmService && opts.conversationRepo && opts.messageRepo) {
       registerChatRoutes(
@@ -131,8 +152,13 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.conversationRepo,
         opts.messageRepo,
         requireAuth,
-        opts.workingMemoryService
+        opts.workingMemoryService,
+        opts.knowledgeService,
+        opts.domainEventEmitter
       );
+    }
+    if (opts.knowledgeService) {
+      registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);
     }
   }
 

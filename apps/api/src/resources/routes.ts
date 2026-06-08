@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { EventEmitter } from "node:events";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
 import {
   type CounterFn,
@@ -7,15 +8,15 @@ import {
   applyTransforms,
 } from "@tulipfarm/validation";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import type { Db } from "mongodb";
 import { ErrorSchema } from "../auth/schemas";
+import { DOMAIN_EVENTS } from "../domain-events";
 import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination";
 import {
-  MongoCounterStore,
-  MongoResourceRepo,
+  type CounterStore,
   type ResourceDoc,
   type ResourceRepo,
+  type ResourceRepoFactory,
   makeHistoryEntry,
   toApiRecord,
 } from "./repo";
@@ -103,14 +104,14 @@ function extractLinks(schema: Record<string, unknown>): Array<{ field: string; t
 async function validateLinks(
   links: Array<{ field: string; target: string }>,
   data: Record<string, unknown>,
-  db: Db,
+  repoFactory: ResourceRepoFactory,
   soulLoader: SoulLoader
 ): Promise<{ field: string; id: string } | null> {
   for (const { field, target } of links) {
     const id = data[field];
     if (id == null || typeof id !== "string") continue;
     if (!soulLoader.resources.has(target)) continue;
-    const targetRepo = new MongoResourceRepo(db, target);
+    const targetRepo = repoFactory.forType(target);
     const doc = await targetRepo.findById(id);
     if (!doc || doc.deletedAt != null) return { field, id };
   }
@@ -143,7 +144,7 @@ async function loadForWrite(
 async function validateAndLink(
   schema: Record<string, unknown>,
   data: Record<string, unknown>,
-  db: Db,
+  repoFactory: ResourceRepoFactory,
   soulLoader: SoulLoader
 ): Promise<WriteError<422> | null> {
   const validate = ajv.compile(schema);
@@ -158,7 +159,7 @@ async function validateAndLink(
       },
     };
   }
-  const linkErr = await validateLinks(extractLinks(schema), data, db, soulLoader);
+  const linkErr = await validateLinks(extractLinks(schema), data, repoFactory, soulLoader);
   if (linkErr) {
     return {
       code: 422,
@@ -178,7 +179,7 @@ async function transformAndValidate(
   schema: Record<string, unknown>,
   data: Record<string, unknown>,
   counter: CounterFn,
-  db: Db,
+  repoFactory: ResourceRepoFactory,
   soulLoader: SoulLoader
 ): Promise<{ ok: true; data: Record<string, unknown> } | { ok: false; err: WriteError<422> }> {
   let out = data;
@@ -193,7 +194,7 @@ async function transformAndValidate(
     }
     throw err;
   }
-  const err = await validateAndLink(schema, out, db, soulLoader);
+  const err = await validateAndLink(schema, out, repoFactory, soulLoader);
   if (err) return { ok: false, err };
   return { ok: true, data: out };
 }
@@ -239,12 +240,13 @@ async function maybeRunAfterHook(
 
 export function registerResourceRoutes(
   app: FastifyInstance,
-  db: Db,
+  repoFactory: ResourceRepoFactory,
+  counterStore: CounterStore,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
-  hookExecutor?: HookExecutor
+  hookExecutor?: HookExecutor,
+  events?: EventEmitter
 ): void {
-  const counterStore = new MongoCounterStore(db);
   const counter = counterStore.makeCounterFn();
 
   // ── POST /api/v1/resources/:type ────────────────────────────────────────────
@@ -277,7 +279,14 @@ export function registerResourceRoutes(
 
       let data = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
 
-      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      const prepared = await transformAndValidate(
+        type,
+        schema,
+        data,
+        counter,
+        repoFactory,
+        soulLoader
+      );
       if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
       data = prepared.data;
 
@@ -285,15 +294,20 @@ export function registerResourceRoutes(
       if (!before.ok) return reply.code(before.err.code).send(before.err.body);
       data = before.data;
       if (before.ran) {
-        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
         if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
       const doc = { _id: id, version: 1, createdAt: now, updatedAt: now, ...data };
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       await repo.insert(doc);
       await repo.appendHistory(makeHistoryEntry(id, "create", doc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(doc));
+      events?.emit(DOMAIN_EVENTS.RESOURCE_CREATED, {
+        resourceType: type,
+        resourceId: id,
+        record: toApiRecord(doc),
+      });
 
       return reply.code(201).send(toApiRecord(doc));
     }
@@ -341,7 +355,7 @@ export function registerResourceRoutes(
       const { limit, after } = parsePaginationQuery(query);
       const includeDeleted = query.includeDeleted === true || query.includeDeleted === "true";
 
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       const result = await repo.list({ limit, after, includeDeleted });
 
       return reply.send({
@@ -374,7 +388,7 @@ export function registerResourceRoutes(
         return reply.code(404).send({ error: `resource type not found: ${type}` });
       }
 
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       const doc = await repo.findById(id);
       if (!doc || doc.deletedAt != null) {
         return reply.code(404).send({ error: "not found" });
@@ -416,7 +430,7 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       const loaded = await loadForWrite(repo, id, ifMatch);
       if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
       const existing = loaded.doc;
@@ -428,7 +442,14 @@ export function registerResourceRoutes(
         stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>))
       );
 
-      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      const prepared = await transformAndValidate(
+        type,
+        schema,
+        data,
+        counter,
+        repoFactory,
+        soulLoader
+      );
       if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
       data = prepared.data;
 
@@ -436,7 +457,7 @@ export function registerResourceRoutes(
       if (!before.ok) return reply.code(before.err.code).send(before.err.body);
       data = before.data;
       if (before.ran) {
-        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
         if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
@@ -454,6 +475,11 @@ export function registerResourceRoutes(
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
+      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
+        resourceType: type,
+        resourceId: id,
+        record: toApiRecord(newDoc),
+      });
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -492,7 +518,7 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       const loaded = await loadForWrite(repo, id, ifMatch);
       if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
       const existing = loaded.doc;
@@ -510,7 +536,14 @@ export function registerResourceRoutes(
       const patch = stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>));
       let data = stripImmutable(schema, existingData, { ...existingData, ...patch });
 
-      const prepared = await transformAndValidate(type, schema, data, counter, db, soulLoader);
+      const prepared = await transformAndValidate(
+        type,
+        schema,
+        data,
+        counter,
+        repoFactory,
+        soulLoader
+      );
       if (!prepared.ok) return reply.code(prepared.err.code).send(prepared.err.body);
       data = prepared.data;
 
@@ -518,7 +551,7 @@ export function registerResourceRoutes(
       if (!before.ok) return reply.code(before.err.code).send(before.err.body);
       data = before.data;
       if (before.ran) {
-        const reErr = await validateAndLink(schema, data, db, soulLoader);
+        const reErr = await validateAndLink(schema, data, repoFactory, soulLoader);
         if (reErr) return reply.code(reErr.code).send(reErr.body);
       }
 
@@ -536,6 +569,11 @@ export function registerResourceRoutes(
 
       await repo.appendHistory(makeHistoryEntry(id, "update", newDoc));
       await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(newDoc));
+      events?.emit(DOMAIN_EVENTS.RESOURCE_UPDATED, {
+        resourceType: type,
+        resourceId: id,
+        record: toApiRecord(newDoc),
+      });
 
       return reply.send(toApiRecord(newDoc));
     }
@@ -573,7 +611,7 @@ export function registerResourceRoutes(
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
 
-      const repo = new MongoResourceRepo(db, type);
+      const repo = repoFactory.forType(type);
       const loaded = await loadForWrite(repo, id, ifMatch);
       if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
       const existing = loaded.doc;

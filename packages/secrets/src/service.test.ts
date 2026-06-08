@@ -22,7 +22,7 @@ class FakeRepo implements SecretRepo {
   async findByKey(key: string): Promise<SecretDoc | null> {
     this.findCalls += 1;
     if (this.throwOnFind) {
-      throw new Error("mongo unreachable");
+      throw new Error("datastore unreachable");
     }
     return this.docs.get(key) ?? null;
   }

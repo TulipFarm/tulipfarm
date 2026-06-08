@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { WorkingMemoryService } from "./service";
 import { type WorkingMemoryDoc, type WorkingMemoryRepo, assertValidEntry } from "./working-memory";
 
-// In-memory repo mirroring Mongo semantics (upsert by {userId,key}; list oldest-written first).
+// In-memory repo mirroring the store's semantics (upsert by {userId,key}; list oldest-written first).
 class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
   docs: WorkingMemoryDoc[] = [];
 

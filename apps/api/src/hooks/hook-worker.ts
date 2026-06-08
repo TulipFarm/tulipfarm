@@ -1,20 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { parentPort, workerData } from "node:worker_threads";
 import ivm from "isolated-vm";
-import { MongoClient } from "mongodb";
+import { Pool } from "pg";
+import { rowToResourceDoc, tableName } from "../resources/schema";
 import type { WorkerRequest, WorkerResponse } from "./types.js";
 
 const HOOK_TIMEOUT_MS = 2000;
 const MEMORY_LIMIT_MB = 128;
 
-let mongoClient: MongoClient | null = null;
+let pool: Pool | null = null;
 
-async function getDb() {
-  if (!mongoClient) {
-    mongoClient = new MongoClient(workerData.mongoUri as string);
-    await mongoClient.connect();
+function getPool(): Pool {
+  if (!pool) {
+    pool = new Pool({ connectionString: workerData.connectionString as string });
   }
-  return mongoClient.db(workerData.dbName as string);
+  return pool;
 }
 
 function docToRecord(doc: Record<string, unknown>): Record<string, unknown> {
@@ -58,15 +58,19 @@ async function runHook(req: WorkerRequest): Promise<WorkerResponse> {
       "__getResource__",
       new ivm.Callback(
         async (type: string, resId: string) => {
-          const db = await getDb();
-          const col = db.collection(type);
-          // biome-ignore lint/suspicious/noExplicitAny: _id is string in this schema
-          const doc = (await col.findOne({ _id: resId, deletedAt: null } as any)) as Record<
-            string,
-            unknown
-          > | null;
-          if (!doc) return null;
-          return new ivm.ExternalCopy(docToRecord(doc));
+          let table: string;
+          try {
+            table = tableName(type);
+          } catch {
+            return null; // unknown / invalid resource type
+          }
+          const { rows } = await getPool().query<Record<string, unknown>>(
+            `SELECT id, version, created_at, updated_at, deleted_at, data
+             FROM ${table} WHERE id = $1 AND deleted_at IS NULL`,
+            [resId]
+          );
+          if (!rows[0]) return null;
+          return new ivm.ExternalCopy(docToRecord(rowToResourceDoc(rows[0])));
         },
         { async: true }
       )
@@ -120,8 +124,8 @@ async function runHook(req: WorkerRequest): Promise<WorkerResponse> {
 }
 
 async function shutdown() {
-  if (mongoClient) {
-    await mongoClient.close().catch(() => {});
+  if (pool) {
+    await pool.end().catch(() => {});
   }
 }
 

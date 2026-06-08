@@ -18,7 +18,8 @@ export function registerLlmReload(
   llmService: LlmService,
   embeddingService: EmbeddingService,
   secrets: SecretsService,
-  logger: Logger
+  logger: Logger,
+  afterReload?: () => Promise<void>
 ): void {
   gitSync.on("soul.synced", () => {
     void (async () => {
@@ -26,6 +27,8 @@ export function registerLlmReload(
         await soulLoader.reload();
         await llmService.init(soulLoader.llmConfig, secrets, logger);
         await embeddingService.init(soulLoader.llmConfig, secrets, logger);
+        // Runs after re-init so a dimension change (consumePendingReindex) triggers a re-index.
+        await afterReload?.();
         logger.info("[llm] config reloaded after soul.synced");
       } catch (err) {
         logger.error(

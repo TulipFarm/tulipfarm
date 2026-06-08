@@ -13,7 +13,7 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 
 | Path | What |
 | --- | --- |
-| [`apps/api`](apps/api/AGENTS.md) | Fastify API server. MongoDB, migration-on-boot, soul git store. |
+| [`apps/api`](apps/api/AGENTS.md) | Fastify API server. PostgreSQL (pgvector + pg-boss), migration-on-boot, soul git store. |
 | [`apps/web`](apps/web/AGENTS.md) | Remix + React web UI. |
 | [`packages/llm`](packages/llm/AGENTS.md) | LLM provider abstraction + tiered fallback chains (`@tulipfarm/llm`). |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loader + git sync (`@tulipfarm/soul`). |
@@ -25,7 +25,7 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | [`packages/constants`](packages/constants/AGENTS.md) | Shared env-aware constants (`@tulipfarm/constants`). |
 | [`packages/tsconfig`](packages/tsconfig/AGENTS.md) | Shared `tsconfig` bases (`@tulipfarm/tsconfig`). |
 | `soul/` | Separate git repo created by `setup-dev.sh` (not part of this monorepo): resources, routines, agents, skills, integrations. |
-| `scripts/setup-dev.sh` | Bootstraps MongoDB + Redis + soul + `.env.local`. |
+| `scripts/setup-dev.sh` | Bootstraps PostgreSQL + pgvector + soul + `.env.local`. |
 
 Each app and package has its own `AGENTS.md` with local conventions — read the nearest one.
 

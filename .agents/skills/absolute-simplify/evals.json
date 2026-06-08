@@ -47,9 +47,7 @@
       "description": "Requesting a bug fix should NOT trigger simplification since it changes behavior",
       "prompt": "Fix the crash that happens when the user submits an empty form on line 42",
       "type": "explanation",
-      "assertions": [
-        { "type": "not_contains", "value": "Simplifying autonomously" }
-      ]
+      "assertions": [{ "type": "not_contains", "value": "Simplifying autonomously" }]
     },
     {
       "id": "core-scope-detection",

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { Redis } from "ioredis";
+import type { Queryable } from "../db";
 
 export interface SessionStore {
   create(userId: string): Promise<string>;
@@ -14,8 +14,6 @@ export const DEFAULT_SESSION_TTL_SECONDS = 604800;
 function newSid(): string {
   return randomBytes(32).toString("base64url");
 }
-
-const KEY_PREFIX = "sess:";
 
 // In-memory store for tests; ignores TTL. Not for production use.
 export class MemorySessionStore implements SessionStore {
@@ -36,24 +34,33 @@ export class MemorySessionStore implements SessionStore {
   }
 }
 
-// Production store backed by Redis with a configurable TTL (seconds).
-export class RedisSessionStore implements SessionStore {
+// Production store backed by Postgres (the `sessions` table) with a configurable TTL (seconds).
+export class PgSessionStore implements SessionStore {
   constructor(
-    private readonly redis: Redis,
+    private readonly q: Queryable,
     private readonly ttlSeconds: number
   ) {}
 
   async create(userId: string): Promise<string> {
     const sid = newSid();
-    await this.redis.set(`${KEY_PREFIX}${sid}`, userId, "EX", this.ttlSeconds);
+    const expiresAt = new Date(Date.now() + this.ttlSeconds * 1000);
+    await this.q.query("INSERT INTO sessions (sid, user_id, expires_at) VALUES ($1, $2, $3)", [
+      sid,
+      userId,
+      expiresAt,
+    ]);
     return sid;
   }
 
-  get(sid: string): Promise<string | null> {
-    return this.redis.get(`${KEY_PREFIX}${sid}`);
+  async get(sid: string): Promise<string | null> {
+    const { rows } = await this.q.query(
+      "SELECT user_id FROM sessions WHERE sid = $1 AND expires_at > now()",
+      [sid]
+    );
+    return rows.length > 0 ? (rows[0] as { user_id: string }).user_id : null;
   }
 
   async destroy(sid: string): Promise<void> {
-    await this.redis.del(`${KEY_PREFIX}${sid}`);
+    await this.q.query("DELETE FROM sessions WHERE sid = $1", [sid]);
   }
 }

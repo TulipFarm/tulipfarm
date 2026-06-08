@@ -1,6 +1,5 @@
-import { randomBytes } from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import type { Redis } from "ioredis";
+import type { Queryable } from "./db";
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -11,62 +10,6 @@ export interface RateLimitResult {
 
 export interface RateLimiter {
   check(key: string, limit: number, windowMs: number): Promise<RateLimitResult>;
-}
-
-// Lua script: atomic sliding window via ZSET.
-// Returns [allowed(0|1), limit, remaining, resetAt(ms)]
-const SLIDING_WINDOW_SCRIPT = `
-local key = KEYS[1]
-local now = tonumber(ARGV[1])
-local windowMs = tonumber(ARGV[2])
-local limit = tonumber(ARGV[3])
-local member = ARGV[4]
-local clearBefore = now - windowMs
-
-redis.call('ZREMRANGEBYSCORE', key, '-inf', clearBefore - 1)
-local count = redis.call('ZCARD', key)
-
-if count < limit then
-  redis.call('ZADD', key, now, member)
-  redis.call('PEXPIRE', key, windowMs)
-  return {1, limit, limit - count - 1, now + windowMs}
-else
-  local oldest = redis.call('ZRANGE', key, 0, 0, 'WITHSCORES')
-  local resetAt = tonumber(oldest[2]) + windowMs
-  return {0, limit, 0, resetAt}
-end
-`.trim();
-
-export class RedisRateLimiter implements RateLimiter {
-  constructor(
-    private readonly redis: Redis,
-    private readonly log: { warn: (msg: string) => void }
-  ) {}
-
-  async check(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
-    try {
-      const member = randomBytes(8).toString("hex");
-      const now = Date.now();
-      const result = (await this.redis.eval(
-        SLIDING_WINDOW_SCRIPT,
-        1,
-        key,
-        String(now),
-        String(windowMs),
-        String(limit),
-        member
-      )) as [number, number, number, number];
-      return {
-        allowed: result[0] === 1,
-        limit: result[1],
-        remaining: result[2],
-        resetAt: result[3],
-      };
-    } catch {
-      this.log.warn("rate-limit: Redis unavailable, allowing request");
-      return { allowed: true, limit, remaining: limit, resetAt: Date.now() + windowMs };
-    }
-  }
 }
 
 export class MemoryRateLimiter implements RateLimiter {
@@ -92,6 +35,34 @@ export class MemoryRateLimiter implements RateLimiter {
     const resetAt = timestamps[0] + windowMs;
     this.windows.set(key, timestamps);
     return { allowed: false, limit, remaining: 0, resetAt };
+  }
+}
+
+/**
+ * Production limiter backed by Postgres (the `rate_limits` table). Fixed-window
+ * counter (D7): one row per (key, window). Avoids the row-per-request bloat a
+ * sliding window would create at single-tenant scale.
+ */
+export class PgRateLimiter implements RateLimiter {
+  constructor(private readonly q: Queryable) {}
+
+  async check(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {
+    const now = Date.now();
+    const windowStartMs = Math.floor(now / windowMs) * windowMs;
+    const resetAt = windowStartMs + windowMs;
+    try {
+      const { rows } = await this.q.query(
+        `INSERT INTO rate_limits (key, window_start, count) VALUES ($1, $2, 1)
+         ON CONFLICT (key, window_start) DO UPDATE SET count = rate_limits.count + 1
+         RETURNING count`,
+        [key, new Date(windowStartMs)]
+      );
+      const count = Number((rows[0] as { count: number }).count);
+      return { allowed: count <= limit, limit, remaining: Math.max(0, limit - count), resetAt };
+    } catch {
+      // Fail-open if Postgres is unavailable (availability over strict enforcement).
+      return { allowed: true, limit, remaining: limit, resetAt };
+    }
   }
 }
 

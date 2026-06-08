@@ -35,7 +35,8 @@ export function registerResourceTypeRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
   soulLoader: SoulLoader,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  reconcile?: () => Promise<void>
 ): void {
   app.post(
     "/api/v1/resource-types",
@@ -117,6 +118,8 @@ export function registerResourceTypeRoutes(
 
       await gitSync.commit(`soul: add resource type ${name}`);
       await soulLoader.reload();
+      // Materialise the new type's Postgres table before the client can POST records to it.
+      await reconcile?.();
 
       return reply.code(201).send({ name, schema: schemaYaml, hasHooks: false });
     }

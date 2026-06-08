@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,7 +11,14 @@ import { MemorySessionStore } from "../auth/session-store";
 import { type UserDoc, type UserRepo, createUser } from "../auth/users";
 import { HookError, type HookExecutor } from "../hooks/hook-executor";
 import type { PaginatedResult } from "../pagination";
-import type { ListOpts, ResourceDoc, ResourceHistoryDoc, ResourceRepo } from "./repo";
+import type {
+  CounterStore,
+  ListOpts,
+  ResourceDoc,
+  ResourceHistoryDoc,
+  ResourceRepo,
+  ResourceRepoFactory,
+} from "./repo";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -47,31 +55,22 @@ class FakeResourceRepo implements ResourceRepo {
   }
 }
 
-// ── Fake DB that returns a FakeResourceRepo ───────────────────────────────────
+// ── Fake factory + counter store (injects a FakeResourceRepo per type) ────────
 
-function makeFakeDb(repo: FakeResourceRepo) {
-  return {
-    collection: vi.fn().mockReturnValue({
-      insertOne: vi.fn().mockResolvedValue({ insertedId: "mock" }),
-      findOne: vi.fn().mockImplementation(({ _id }) => Promise.resolve(repo.docs.get(_id) ?? null)),
-      find: vi.fn().mockReturnValue({
-        sort: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        toArray: vi.fn().mockImplementation(() => {
-          const items = Array.from(repo.docs.values()).filter((d) => d.deletedAt == null);
-          return Promise.resolve(items);
-        }),
-      }),
-      replaceOne: vi.fn().mockImplementation(({ _id, version }, doc) => {
-        const existing = repo.docs.get(_id);
-        if (!existing || existing.version !== version) return Promise.resolve({ matchedCount: 0 });
-        repo.docs.set(_id, { ...doc });
-        return Promise.resolve({ matchedCount: 1 });
-      }),
-      findOneAndUpdate: vi.fn().mockResolvedValue({ seq: 1 }),
-    }),
-  };
+class FakeResourceRepoFactory implements ResourceRepoFactory {
+  constructor(readonly repos: Map<string, FakeResourceRepo> = new Map()) {}
+
+  forType(type: string): ResourceRepo {
+    let repo = this.repos.get(type);
+    if (!repo) {
+      repo = new FakeResourceRepo();
+      this.repos.set(type, repo);
+    }
+    return repo;
+  }
 }
+
+const stubCounterStore: CounterStore = { makeCounterFn: () => async () => 1 };
 
 // ── Fake auth deps ────────────────────────────────────────────────────────────
 
@@ -158,8 +157,15 @@ describe("resource routes", () => {
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
 
-    const db = makeFakeDb(fakeRepo) as unknown as import("mongodb").Db;
-    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, soulLoader, db });
+    const factory = new FakeResourceRepoFactory(new Map([["ticket", fakeRepo]]));
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      soulLoader,
+      resourceRepoFactory: factory,
+      counterStore: stubCounterStore,
+    });
   });
 
   afterEach(async () => {
@@ -258,14 +264,14 @@ describe("resource routes", () => {
 
       const user = await createUser(hookUserRepo, "hook@example.com", "pass", "member");
       hookSid = await hookStore.create(user._id);
-      const db = makeFakeDb(new FakeResourceRepo()) as unknown as import("mongodb").Db;
       hookApp = await buildApp({
         sessionStore: hookStore,
         userRepo: hookUserRepo,
         tokenRepo: new FakeTokenRepo(),
         soulLoader: hookLoader,
         hookExecutor,
-        db,
+        resourceRepoFactory: new FakeResourceRepoFactory(),
+        counterStore: stubCounterStore,
       });
     });
 
@@ -629,46 +635,6 @@ const LINKED_SCHEMA = {
   required: ["title"],
 };
 
-function makeFakeDbMulti(repos: Map<string, FakeResourceRepo>) {
-  return {
-    collection: vi.fn().mockImplementation((name: string) => {
-      const baseType = name.replace(/_history$/, "");
-      const repo = repos.get(baseType);
-      return {
-        insertOne: vi.fn().mockImplementation((doc: ResourceDoc) => {
-          repo?.docs.set(doc._id, { ...doc });
-          return Promise.resolve({ insertedId: doc._id });
-        }),
-        findOne: vi
-          .fn()
-          .mockImplementation(({ _id }: { _id: string }) =>
-            Promise.resolve(repo?.docs.get(_id) ?? null)
-          ),
-        find: vi.fn().mockReturnValue({
-          sort: vi.fn().mockReturnThis(),
-          limit: vi.fn().mockReturnThis(),
-          toArray: vi.fn().mockImplementation(() => {
-            const items = Array.from(repo?.docs.values() ?? []).filter((d) => d.deletedAt == null);
-            return Promise.resolve(items);
-          }),
-        }),
-        replaceOne: vi
-          .fn()
-          .mockImplementation(
-            ({ _id, version }: { _id: string; version: number }, doc: ResourceDoc) => {
-              const existing = repo?.docs.get(_id);
-              if (!existing || existing.version !== version)
-                return Promise.resolve({ matchedCount: 0 });
-              repo?.docs.set(_id, { ...doc });
-              return Promise.resolve({ matchedCount: 1 });
-            }
-          ),
-        findOneAndUpdate: vi.fn().mockResolvedValue({ seq: 1 }),
-      };
-    }),
-  };
-}
-
 describe("x-links validate-on-write", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
@@ -698,13 +664,20 @@ describe("x-links validate-on-write", () => {
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
 
-    const db = makeFakeDbMulti(
+    const factory = new FakeResourceRepoFactory(
       new Map([
         ["ticket", ticketRepo],
         ["customer", customerRepo],
       ])
-    ) as unknown as import("mongodb").Db;
-    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, soulLoader, db });
+    );
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      soulLoader,
+      resourceRepoFactory: factory,
+      counterStore: stubCounterStore,
+    });
   });
 
   afterEach(async () => {
@@ -829,5 +802,45 @@ describe("x-links validate-on-write", () => {
     });
     expect(patch.statusCode).toBe(422);
     expect(patch.json<{ error: string }>().error).toMatch(/linked record not found/);
+  });
+});
+
+describe("resource domain events", () => {
+  it("emits resource.created on POST with the api record", async () => {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const tokenRepo = new FakeTokenRepo();
+    const soulLoader = makeFakeSoulLoader([
+      { name: "ticket", schema: TICKET_SCHEMA, hasHooks: false, hooksEnabled: true },
+    ]);
+    const user = await createUser(userRepo, "ev@example.com", "pass", "member");
+    const sid = await store.create(user._id);
+
+    const emitter = new EventEmitter();
+    const seen: Array<{ resourceType: string; resourceId: string; record: { id: string } }> = [];
+    emitter.on("resource.created", (p) => seen.push(p));
+
+    const app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      soulLoader,
+      resourceRepoFactory: new FakeResourceRepoFactory(),
+      counterStore: stubCounterStore,
+      domainEventEmitter: emitter,
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { title: "Bug" },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].resourceType).toBe("ticket");
+    expect(seen[0].resourceId).toBe(res.json<{ id: string }>().id);
+    await app.close();
   });
 });

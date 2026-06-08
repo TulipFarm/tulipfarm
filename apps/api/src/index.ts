@@ -1,23 +1,35 @@
+import { EventEmitter } from "node:events";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { MongoSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
+import { PgSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
 import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
-import { Queue, Worker } from "bullmq";
 import { config } from "dotenv";
-import Redis from "ioredis";
+import PgBoss from "pg-boss";
 import { buildApp } from "./app";
-import { MongoTokenRepo } from "./auth/api-tokens";
-import { DEFAULT_SESSION_TTL_SECONDS, RedisSessionStore } from "./auth/session-store";
-import { MongoUserRepo, bootstrapAdmin } from "./auth/users";
-import { MongoConversationRepo } from "./chat/conversations";
-import { MongoMessageRepo } from "./chat/messages";
-import { connectDb } from "./db";
+import { PgTokenRepo } from "./auth/api-tokens";
+import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
+import { PgUserRepo, bootstrapAdmin } from "./auth/users";
+import { PgConversationRepo } from "./chat/conversations";
+import { PgMessageRepo } from "./chat/messages";
+import { connectPg } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { HookExecutor } from "./hooks/hook-executor";
+import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
+import { subscribeKnowledgeIndexing } from "./knowledge/events";
+import { enqueueIndex, registerKnowledgeIndexing } from "./knowledge/indexing";
+import {
+  PgKnowledgeCollectionRepo,
+  PgKnowledgeDocumentRepo,
+  PgKnowledgeRevisionRepo,
+} from "./knowledge/repo";
+import { KnowledgeService } from "./knowledge/service";
 import { registerLlmReload } from "./llm-reload";
 import { WorkingMemoryService } from "./memory/service";
-import { MongoWorkingMemoryRepo } from "./memory/working-memory";
-import { runDataMigrations } from "./migrate";
-import { RedisRateLimiter } from "./rate-limit";
+import { PgWorkingMemoryRepo } from "./memory/working-memory";
+import { runPgMigrations } from "./pg-migrate";
+import { PgRateLimiter } from "./rate-limit";
+import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
+import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { registerSoulSync } from "./soul-sync";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -41,33 +53,53 @@ async function boot() {
     const soulLoader = new SoulLoader(process.env.SOUL_PATH as string, console);
     await soulLoader.load();
 
-    const { client, db } = await connectDb();
-    await runDataMigrations(db);
+    const pool = await connectPg();
+    await runPgMigrations(pool);
+    // Per-type resource tables can't be created lazily (no `db.collection(type)`):
+    // materialise them for every loaded soul type before serving.
+    await reconcileResourceTables(pool, soulLoader, console);
 
-    const redis = new Redis(process.env.REDIS_URL as string);
     const ttlSeconds = Number.parseInt(
       process.env.SESSION_TTL_SECONDS ?? String(DEFAULT_SESSION_TTL_SECONDS),
       10
     );
-    const sessionStore = new RedisSessionStore(redis, ttlSeconds);
-    const userRepo = new MongoUserRepo(db);
-    const tokenRepo = new MongoTokenRepo(db);
-    const rateLimiter = new RedisRateLimiter(redis, console);
+    const sessionStore = new PgSessionStore(pool, ttlSeconds);
+    const userRepo = new PgUserRepo(pool);
+    const tokenRepo = new PgTokenRepo(pool);
+    const rateLimiter = new PgRateLimiter(pool);
 
-    const secretRepo = new MongoSecretRepo(db);
+    const secretRepo = new PgSecretRepo(pool);
     const encryptionKeys = loadEncryptionKeys();
     const secretsService = new SecretsService(secretRepo, encryptionKeys);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
         ? undefined
-        : new HookExecutor(process.env.MONGODB_URI as string, db.databaseName);
+        : new HookExecutor(process.env.DATABASE_URL as string);
 
     const llmService = new LlmService();
     const embeddingService = new EmbeddingService();
-    const conversationRepo = new MongoConversationRepo(db);
-    const messageRepo = new MongoMessageRepo(db);
-    const workingMemoryService = new WorkingMemoryService(new MongoWorkingMemoryRepo(db));
+    const conversationRepo = new PgConversationRepo(pool);
+    const messageRepo = new PgMessageRepo(pool);
+    const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
+    const resourceRepoFactory = new PgResourceRepoFactory(pool);
+    const counterStore = new PgCounterStore(pool);
+    const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
+
+    // pg-boss starts before buildApp so the knowledge service's async-index callback can enqueue.
+    const domainEventEmitter = new EventEmitter();
+    const boss = new PgBoss({ connectionString: process.env.DATABASE_URL as string });
+    await boss.start();
+
+    const knowledgeService = new KnowledgeService({
+      documents: new PgKnowledgeDocumentRepo(pool),
+      chunks: new PgKnowledgeChunkRepo(pool),
+      collections: new PgKnowledgeCollectionRepo(pool),
+      revisions: new PgKnowledgeRevisionRepo(pool),
+      embeddings: embeddingService,
+      enqueueIndex: (documentId) =>
+        enqueueIndex(boss, { kind: "document", documentId }).then(() => undefined),
+    });
 
     const app = await buildApp({
       sessionStore,
@@ -78,37 +110,53 @@ async function boot() {
       gitSync,
       soulLoader,
       hookExecutor,
-      db,
+      resourceRepoFactory,
+      counterStore,
+      reconcileResources,
+      domainEventEmitter,
       llmService,
       conversationRepo,
       messageRepo,
       workingMemoryService,
+      knowledgeService,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
     await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
-    registerLlmReload(gitSync, soulLoader, llmService, embeddingService, secretsService, app.log);
+    registerLlmReload(
+      gitSync,
+      soulLoader,
+      llmService,
+      embeddingService,
+      secretsService,
+      app.log,
+      () => knowledgeService.runReindexIfPending().then(() => undefined)
+    );
+    registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 
-    let syncQueue: Queue | undefined;
-    let syncWorker: Worker | undefined;
+    await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL);
+    await registerKnowledgeIndexing(boss, {
+      service: knowledgeService,
+      loadConversationText: async (conversationId) => {
+        const { items } = await messageRepo.listByConversation(conversationId, 1000);
+        const text = items
+          .map((m) => (typeof m.content === "string" ? m.content : ""))
+          .filter((c) => c.length > 0)
+          .join("\n\n");
+        return text.trim().length > 0
+          ? { title: `Conversation ${conversationId}`, content: text }
+          : null;
+      },
+    });
+    subscribeKnowledgeIndexing(domainEventEmitter, boss);
 
     app.listen({ port, host: "0.0.0.0" }, (err) => {
       if (err) {
         app.log.error(err);
         process.exit(1);
-      }
-      if (process.env.GIT_REMOTE_URL) {
-        const bullConnection = { url: process.env.REDIS_URL as string };
-        syncQueue = new Queue("soul-sync", { connection: bullConnection });
-        syncWorker = new Worker("soul-sync", () => gitSync.syncOnce(), {
-          connection: bullConnection,
-        });
-        syncQueue
-          .upsertJobScheduler("soul-sync-periodic", { every: 5 * 60 * 1000 })
-          .catch((err) => app.log.error(`Soul: failed to register sync scheduler — ${err}`));
       }
     });
 
@@ -119,11 +167,9 @@ async function boot() {
       app.log.info(`Received ${signal} — shutting down gracefully`);
       try {
         await app.close();
-        await syncWorker?.close();
-        await syncQueue?.close();
+        await boss.stop();
         await hookExecutor?.close();
-        await redis.quit();
-        await client.close();
+        await pool.end();
       } catch (err) {
         app.log.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
       }

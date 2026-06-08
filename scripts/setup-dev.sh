@@ -12,25 +12,24 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     exit 1
   fi
 
-  if ! brew ls mongodb-community@8.0 &> /dev/null; then
-    echo "📦 Installing mongodb-community@8.0..."
-    brew tap mongodb/brew
-    brew install mongodb-community@8.0
+  if ! brew ls postgresql@17 &> /dev/null; then
+    echo "📦 Installing postgresql@17..."
+    brew install postgresql@17
   else
-    echo "✅ mongodb-community@8.0 already installed"
+    echo "✅ postgresql@17 already installed"
   fi
 
-  if ! brew ls redis &> /dev/null; then
-    echo "📦 Installing redis..."
-    brew install redis
+  if ! brew ls pgvector &> /dev/null; then
+    echo "📦 Installing pgvector..."
+    brew install pgvector
   else
-    echo "✅ redis already installed"
+    echo "✅ pgvector already installed"
   fi
 
-  echo "🔄 Starting MongoDB service..."
-  brew services start mongodb-community@8.0 || true
-  echo "🔄 Starting Redis service..."
-  brew services start redis || true
+  echo "🔄 Starting PostgreSQL service..."
+  brew services start postgresql@17 || true
+  # postgresql@17 is keg-only; expose its client tools (createdb/psql) for this script
+  export PATH="$(brew --prefix postgresql@17)/bin:$PATH"
 
 elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
   # Linux with apt or yum
@@ -38,46 +37,32 @@ elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "📦 Using apt to install dependencies..."
     sudo apt-get update
 
-    if ! command -v mongosh &> /dev/null; then
-      echo "📦 Installing MongoDB..."
-      sudo apt-get install -y mongodb
+    if ! command -v psql &> /dev/null; then
+      echo "📦 Installing PostgreSQL + pgvector..."
+      sudo apt-get install -y postgresql postgresql-contrib
+      sudo apt-get install -y postgresql-17-pgvector \
+        || sudo apt-get install -y postgresql-16-pgvector \
+        || echo "⚠ Install pgvector manually for your Postgres version"
     else
-      echo "✅ MongoDB already installed"
+      echo "✅ PostgreSQL already installed"
     fi
 
-    if ! command -v redis-cli &> /dev/null; then
-      echo "📦 Installing Redis..."
-      sudo apt-get install -y redis-server
-    else
-      echo "✅ Redis already installed"
-    fi
-
-    echo "🔄 Starting MongoDB service..."
-    sudo systemctl start mongodb || true
-    echo "🔄 Starting Redis service..."
-    sudo systemctl start redis-server || true
+    echo "🔄 Starting PostgreSQL service..."
+    sudo systemctl start postgresql || true
 
   elif command -v yum &> /dev/null; then
     echo "📦 Using yum to install dependencies..."
 
-    if ! command -v mongosh &> /dev/null; then
-      echo "📦 Installing MongoDB..."
-      sudo yum install -y mongodb-org
+    if ! command -v psql &> /dev/null; then
+      echo "📦 Installing PostgreSQL + pgvector..."
+      sudo yum install -y postgresql-server postgresql-contrib
+      sudo yum install -y pgvector || echo "⚠ Install pgvector manually for your Postgres version"
     else
-      echo "✅ MongoDB already installed"
+      echo "✅ PostgreSQL already installed"
     fi
 
-    if ! command -v redis-cli &> /dev/null; then
-      echo "📦 Installing Redis..."
-      sudo yum install -y redis
-    else
-      echo "✅ Redis already installed"
-    fi
-
-    echo "🔄 Starting MongoDB service..."
-    sudo systemctl start mongod || true
-    echo "🔄 Starting Redis service..."
-    sudo systemctl start redis || true
+    echo "🔄 Starting PostgreSQL service..."
+    sudo systemctl start postgresql || true
 
   else
     echo "❌ No supported package manager found (apt or yum required)"
@@ -91,6 +76,17 @@ fi
 
 # Give services a moment to start
 sleep 2
+
+# Create the Postgres database (idempotent)
+if command -v createdb &> /dev/null; then
+  if createdb tulipfarm 2>/dev/null; then
+    echo "✅ Created Postgres database 'tulipfarm'"
+  else
+    echo "✅ Postgres database 'tulipfarm' already exists"
+  fi
+else
+  echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
+fi
 
 # Initialize soul directory structure
 if [ ! -d "soul" ]; then
@@ -169,7 +165,6 @@ echo "  2. Run: pnpm dev"
 echo "  3. API will start on http://localhost:3001"
 echo "  4. Web UI will start on http://localhost:3000"
 echo ""
-echo "To verify MongoDB and Redis are running:"
-echo "  mongosh --eval 'db.version()'"
-echo "  redis-cli ping"
+echo "To verify the datastore is running:"
+echo "  psql tulipfarm -c 'select 1'"
 echo ""

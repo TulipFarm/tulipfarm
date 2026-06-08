@@ -152,9 +152,7 @@
       "description": "References the correct file for detailed landing page guidance",
       "prompt": "I need to build a SaaS landing page with hero section and pricing",
       "type": "explanation",
-      "assertions": [
-        { "type": "contains", "value": "references/landing-pages.md" }
-      ],
+      "assertions": [{ "type": "contains", "value": "references/landing-pages.md" }],
       "source": "domain-knowledge"
     },
     {

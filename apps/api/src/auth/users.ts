@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Collection, Db } from "mongodb";
+import type { Queryable } from "../db";
 import { hashPassword } from "./passwords";
 
 export type Role = "admin" | "member";
@@ -34,27 +34,41 @@ export interface UserRepo {
   insert(user: UserDoc): Promise<void>;
 }
 
-export class MongoUserRepo implements UserRepo {
-  private readonly collection: Collection<UserDoc>;
+function rowToUser(row: Record<string, unknown>): UserDoc {
+  return {
+    _id: row.id as string,
+    email: row.email as string,
+    passwordHash: row.password_hash as string,
+    role: row.role as Role,
+    createdAt: row.created_at as Date,
+  };
+}
 
-  constructor(db: Db) {
-    this.collection = db.collection<UserDoc>("users");
+export class PgUserRepo implements UserRepo {
+  constructor(private readonly q: Queryable) {}
+
+  async findByEmail(email: string): Promise<UserDoc | null> {
+    const { rows } = await this.q.query("SELECT * FROM users WHERE email = $1", [
+      normalizeEmail(email),
+    ]);
+    return rows.length > 0 ? rowToUser(rows[0]) : null;
   }
 
-  findByEmail(email: string): Promise<UserDoc | null> {
-    return this.collection.findOne({ email: normalizeEmail(email) });
+  async findById(id: string): Promise<UserDoc | null> {
+    const { rows } = await this.q.query("SELECT * FROM users WHERE id = $1", [id]);
+    return rows.length > 0 ? rowToUser(rows[0]) : null;
   }
 
-  findById(id: string): Promise<UserDoc | null> {
-    return this.collection.findOne({ _id: id });
-  }
-
-  count(): Promise<number> {
-    return this.collection.countDocuments();
+  async count(): Promise<number> {
+    const { rows } = await this.q.query("SELECT COUNT(*)::int AS count FROM users");
+    return Number((rows[0] as { count: number }).count);
   }
 
   async insert(user: UserDoc): Promise<void> {
-    await this.collection.insertOne(user);
+    await this.q.query(
+      "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
+      [user._id, user.email, user.passwordHash, user.role, user.createdAt]
+    );
   }
 }
 

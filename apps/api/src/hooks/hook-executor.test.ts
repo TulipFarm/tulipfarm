@@ -4,16 +4,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HookError, HookExecutor } from "./hook-executor.js";
 
 // HookExecutor needs a worker thread running hook-worker.ts via tsx.
-// Tests for AC-V1-003 (timeout) and AC-V1-004 (sandbox isolation) don't need MongoDB.
-// We pass a fake URI — the worker only connects when ctx.resources.get is called.
-const FAKE_MONGO_URI = "mongodb://localhost:27017";
-const FAKE_DB = "test";
+// Tests for AC-V1-003 (timeout) and AC-V1-004 (sandbox isolation) don't need a database.
+// We pass a fake connection string — the worker only connects when ctx.resources.get is called.
+const FAKE_DATABASE_URL = "postgresql://localhost:5432/test";
 
 describe("HookExecutor", () => {
   let executor: HookExecutor;
 
   beforeEach(() => {
-    executor = new HookExecutor(FAKE_MONGO_URI, FAKE_DB);
+    executor = new HookExecutor(FAKE_DATABASE_URL);
   });
 
   afterEach(async () => {
@@ -197,7 +196,7 @@ describe("HookExecutor", () => {
     const FAIL_HOOK = `({ async before() { throw new Error('deliberate'); } })`;
 
     beforeEach(() => {
-      cbExecutor = new HookExecutor(FAKE_MONGO_URI, FAKE_DB);
+      cbExecutor = new HookExecutor(FAKE_DATABASE_URL);
     });
 
     afterEach(async () => {

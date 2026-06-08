@@ -1,6 +1,3 @@
-import { randomUUID } from "node:crypto";
-import type { Collection, Db } from "mongodb";
-
 export type SecretType = "user-provided" | "auto-generated";
 
 export interface SecretDoc {
@@ -36,35 +33,64 @@ export interface SecretRepo {
   delete(key: string): Promise<void>;
 }
 
-export class MongoSecretRepo implements SecretRepo {
-  private readonly collection: Collection<SecretDoc>;
+/**
+ * Minimal SQL executor — the structural shape of `pg.Pool` (and the PGlite test client).
+ * Defined locally so this package depends on neither `pg` nor the app; the caller injects
+ * a real pool.
+ */
+export interface Queryable {
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+}
 
-  constructor(db: Db) {
-    this.collection = db.collection<SecretDoc>("secrets");
-  }
+function rowToSecret(row: Record<string, unknown>): SecretDoc {
+  return {
+    // `_id` is vestigial under Postgres (key is the identity); surface the key for any caller that reads it.
+    _id: row.key as string,
+    key: row.key as string,
+    encryptedValue: row.encrypted_value as string,
+    iv: row.iv as string,
+    authTag: row.auth_tag as string,
+    type: row.type as SecretType,
+    createdAt: row.created_at as Date,
+    updatedAt: row.updated_at as Date,
+  };
+}
+
+export class PgSecretRepo implements SecretRepo {
+  constructor(private readonly q: Queryable) {}
 
   async list(): Promise<SecretMeta[]> {
-    const docs = await this.collection.find({}).toArray();
-    return docs.map(({ key, type, createdAt, updatedAt }) => ({ key, type, createdAt, updatedAt }));
+    const { rows } = await this.q.query(
+      "SELECT key, type, created_at, updated_at FROM secrets ORDER BY key"
+    );
+    return rows.map((row) => ({
+      key: row.key as string,
+      type: row.type as SecretType,
+      createdAt: row.created_at as Date,
+      updatedAt: row.updated_at as Date,
+    }));
   }
 
-  findByKey(key: string): Promise<SecretDoc | null> {
-    return this.collection.findOne({ key });
+  async findByKey(key: string): Promise<SecretDoc | null> {
+    const { rows } = await this.q.query("SELECT * FROM secrets WHERE key = $1", [key]);
+    return rows.length > 0 ? rowToSecret(rows[0]) : null;
   }
 
   async upsert(key: string, fields: SecretEnvelopeFields): Promise<void> {
-    const now = new Date();
-    await this.collection.updateOne(
-      { key },
-      {
-        $set: { ...fields, updatedAt: now },
-        $setOnInsert: { _id: randomUUID(), key, createdAt: now },
-      },
-      { upsert: true }
+    await this.q.query(
+      `INSERT INTO secrets (key, encrypted_value, iv, auth_tag, type, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, now(), now())
+       ON CONFLICT (key) DO UPDATE SET
+         encrypted_value = EXCLUDED.encrypted_value,
+         iv = EXCLUDED.iv,
+         auth_tag = EXCLUDED.auth_tag,
+         type = EXCLUDED.type,
+         updated_at = now()`,
+      [key, fields.encryptedValue, fields.iv, fields.authTag, fields.type]
     );
   }
 
   async delete(key: string): Promise<void> {
-    await this.collection.deleteOne({ key });
+    await this.q.query("DELETE FROM secrets WHERE key = $1", [key]);
   }
 }

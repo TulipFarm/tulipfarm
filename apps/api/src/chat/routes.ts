@@ -1,9 +1,14 @@
 import { randomUUID } from "node:crypto";
+import type { EventEmitter } from "node:events";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
 import { type CoreMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import { DOMAIN_EVENTS } from "../domain-events";
+import { buildKnowledgeToolSet } from "../knowledge/ai-toolset";
+import { buildGovernanceBlock } from "../knowledge/governance";
+import type { KnowledgeService } from "../knowledge/service";
 import { buildMemoryToolSet } from "../memory/ai-toolset";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
@@ -137,7 +142,9 @@ export function registerChatRoutes(
   repo: ConversationRepo,
   messageRepo: MessageRepo,
   requireAuth: PreHandler,
-  workingMemory?: WorkingMemoryService
+  workingMemory?: WorkingMemoryService,
+  knowledge?: KnowledgeService,
+  events?: EventEmitter
 ): void {
   app.post(
     "/api/v1/chat",
@@ -211,12 +218,18 @@ export function registerChatRoutes(
         "chat turn"
       );
 
-      // 4. Build history + persist the user turn (survives an aborted stream).
+      // 4. Build history + persist the user turn (survives an aborted stream). Governance
+      //    knowledge (KN-V1-005) leads as a system block; tenant-wide for V1 (no turn domain).
       const history = await messageRepo.listByConversation(convo._id, 1000);
-      const messages: CoreMessage[] = [
-        ...history.items.map(toCoreMessage),
-        { role: "user", content: body.message.content },
-      ];
+      const messages: CoreMessage[] = [];
+      if (knowledge) {
+        const governance = buildGovernanceBlock(await knowledge.governanceDocuments());
+        if (governance) messages.push({ role: "system", content: governance });
+      }
+      messages.push(...history.items.map(toCoreMessage), {
+        role: "user",
+        content: body.message.content,
+      });
       await messageRepo.create(fromUserText(convo._id, body.message.content));
       await repo.touch(convo._id);
 
@@ -224,10 +237,15 @@ export function registerChatRoutes(
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
       reply.hijack();
 
-      // Bind the per-user memory tools for this turn; the SDK runs the tool loop (maxSteps).
-      const tools = workingMemory
+      // Bind the per-user memory + knowledge tools for this turn; the SDK runs the tool loop.
+      const memoryTools = workingMemory
         ? buildMemoryToolSet({ userId: user._id, service: workingMemory, agentId: convo.agentId })
-        : undefined;
+        : {};
+      const knowledgeTools = knowledge
+        ? buildKnowledgeToolSet({ userId: user._id, service: knowledge, agentId: convo.agentId })
+        : {};
+      const merged = { ...memoryTools, ...knowledgeTools };
+      const tools = Object.keys(merged).length > 0 ? merged : undefined;
 
       const result = streamText({
         model: selected,
@@ -236,6 +254,10 @@ export function registerChatRoutes(
         maxSteps: MAX_TOOL_STEPS,
         onError: ({ error }) => {
           req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
+        },
+        // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
+        onFinish: () => {
+          events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, { conversationId: convo._id });
         },
         // Persist each finished step (text and/or tool-call + tool-result) so the durable history
         // captures the whole tool loop, not just the final assistant text.

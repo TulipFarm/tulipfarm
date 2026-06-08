@@ -25,10 +25,10 @@ export class HookExecutor {
   >();
   private readonly breaker = new Map<string, { failures: number; disabled: boolean }>();
 
-  constructor(mongoUri: string, dbName: string) {
+  constructor(connectionString: string) {
     this.worker = new Worker(join(__dirname, "hook-worker.ts"), {
       execArgv: ["--import", "tsx"],
-      workerData: { mongoUri, dbName },
+      workerData: { connectionString },
     });
 
     this.worker.on("message", (res: WorkerResponse) => {

@@ -6,7 +6,7 @@
 ## Public API (`src/index.ts`)
 
 - **`SecretsService`** — high-level `get` / `set` / `list` / `delete` with an in-memory cache.
-- **`MongoSecretRepo`** (+ type `SecretRepo`) — persistence; the V1 store is MongoDB.
+- **`PgSecretRepo`** (+ type `SecretRepo`) — persistence; the V1 store is PostgreSQL (caller injects a `Queryable`).
 - **`encryptSecret` / `decryptSecret`** — AES-256-GCM envelope codec.
 - **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads keys from env.
 - **`assertValidSecretKey`** + `InvalidSecretKeyError` — key-name guard.
@@ -18,13 +18,13 @@
 - **Rotation:** `decryptSecret` tries the current key, then the previous key
   (`ENCRYPTION_KEY` + `ENCRYPTION_KEY_PREVIOUS`) — reads survive a key swap with no downtime;
   writes always use the current key.
-- **`SecretsService` cache:** TTL freshness plus a stale-grace window, so a brief Mongo blip
+- **`SecretsService` cache:** TTL freshness plus a stale-grace window, so a brief datastore blip
   still serves the last known value (logged when served stale).
 
 ## How to extend
 
 - **New backend:** implement the `SecretRepo` interface (`list` / `findByKey` / `upsert` /
-  `delete`); keep `MongoSecretRepo` as the reference.
+  `delete`); keep `PgSecretRepo` as the reference.
 - **Always** call `assertValidSecretKey()` before any write — it enforces the charset and blocks
   prototype-pollution names (`__proto__`, `prototype`, `constructor`).
 - Rotate by shifting env keys (`PREVIOUS` ← old, current ← new); reads fall through automatically.

@@ -1,5 +1,3 @@
-import type { Collection, Filter } from "mongodb";
-
 interface CursorState {
   createdAt: string;
   _id: string;
@@ -50,35 +48,17 @@ export function parsePaginationQuery(query: Record<string, unknown>): {
   return after ? { limit, after } : { limit };
 }
 
-export async function paginateCollection<T extends { createdAt: Date; _id: string }>(
-  collection: Collection<T>,
-  filter: Filter<T>,
-  limit: number,
-  after?: { createdAt: Date; _id: string }
-): Promise<PaginatedResult<T>> {
-  const query: Filter<T> = after
-    ? ({
-        $and: [
-          filter,
-          {
-            $or: [
-              { createdAt: { $gt: after.createdAt } },
-              { createdAt: after.createdAt, _id: { $gt: after._id } },
-            ],
-          },
-        ],
-      } as Filter<T>)
-    : filter;
-
-  const docs = (await collection
-    .find(query)
-    .sort({ createdAt: 1, _id: 1 })
-    .limit(limit + 1)
-    .toArray()) as T[];
-
-  const hasMore = docs.length > limit;
-  const items = hasMore ? docs.slice(0, limit) : docs;
+/**
+ * Build a keyset page from an over-fetched array. Callers `SELECT … LIMIT limit + 1`
+ * and pass the result here: if more than `limit` came back there's a next page, and the
+ * cursor is the last kept item. Pure — shared by the raw-SQL Pg repos.
+ */
+export function toPage<T extends { createdAt: Date; _id: string }>(
+  rows: T[],
+  limit: number
+): PaginatedResult<T> {
+  const hasMore = rows.length > limit;
+  const items = hasMore ? rows.slice(0, limit) : rows;
   const nextCursor = hasMore ? encodeCursor(items[items.length - 1]) : null;
-
   return { items, nextCursor };
 }

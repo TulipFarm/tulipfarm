@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeCursor, encodeCursor, parsePaginationQuery } from "./pagination";
+import { decodeCursor, encodeCursor, parsePaginationQuery, toPage } from "./pagination";
 
 const DOC = { createdAt: new Date("2024-01-15T10:00:00.000Z"), _id: "abc123" };
 
@@ -80,5 +80,41 @@ describe("parsePaginationQuery", () => {
   it("ignores empty cursor string", () => {
     const result = parsePaginationQuery({ cursor: "" });
     expect(result.after).toBeUndefined();
+  });
+});
+
+describe("toPage", () => {
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      createdAt: new Date(`2024-01-${String(i + 1).padStart(2, "0")}T00:00:00.000Z`),
+      _id: `id-${i}`,
+    }));
+
+  it("returns all rows and a null cursor when fewer than the limit", () => {
+    const page = toPage(rows(3), 5);
+    expect(page.items).toHaveLength(3);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("returns a null cursor at exactly the limit (no overflow row)", () => {
+    const page = toPage(rows(5), 5);
+    expect(page.items).toHaveLength(5);
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it("slices to limit and sets nextCursor from the last kept row when over-fetched", () => {
+    const all = rows(6); // limit 5 + 1 overflow
+    const page = toPage(all, 5);
+    expect(page.items).toHaveLength(5);
+    expect(page.nextCursor).not.toBeNull();
+    const decoded = decodeCursor(page.nextCursor as string);
+    expect(decoded?._id).toBe(all[4]._id);
+    expect(decoded?.createdAt.toISOString()).toBe(all[4].createdAt.toISOString());
+  });
+
+  it("handles an empty array", () => {
+    const page = toPage([], 5);
+    expect(page.items).toHaveLength(0);
+    expect(page.nextCursor).toBeNull();
   });
 });

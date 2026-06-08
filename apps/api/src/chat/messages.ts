@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { CoreMessage, TextPart, ToolCallPart, ToolResultPart } from "ai";
-import type { Collection, Db } from "mongodb";
-import { type PaginatedResult, paginateCollection } from "../pagination";
+import type { Queryable } from "../db";
+import { type PaginatedResult, toPage } from "../pagination";
 
 export type MessagePart =
   | { type: "text"; text: string }
@@ -168,23 +168,53 @@ export interface MessageRepo {
   ): Promise<PaginatedResult<MessageDoc>>;
 }
 
-export class MongoMessageRepo implements MessageRepo {
-  private readonly collection: Collection<MessageDoc>;
-
-  constructor(db: Db) {
-    this.collection = db.collection<MessageDoc>("messages");
+function rowToMessage(row: Record<string, unknown>): MessageDoc {
+  const doc: MessageDoc = {
+    _id: row.id as string,
+    conversationId: row.conversation_id as string,
+    role: row.role as MessageRole,
+    content: row.content as string | MessagePart[],
+    createdAt: row.created_at as Date,
+  };
+  if (row.metadata != null) {
+    doc.metadata = row.metadata as Record<string, unknown>;
   }
+  return doc;
+}
+
+export class PgMessageRepo implements MessageRepo {
+  constructor(private readonly q: Queryable) {}
 
   async create(doc: MessageDoc): Promise<void> {
     assertValidMessage(doc.role, doc.content);
-    await this.collection.insertOne(doc);
+    await this.q.query(
+      "INSERT INTO messages (id, conversation_id, role, content, metadata, created_at) VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6)",
+      [
+        doc._id,
+        doc.conversationId,
+        doc.role,
+        // jsonb: a string becomes a JSON string ("x"), an array becomes a JSON array.
+        JSON.stringify(doc.content),
+        doc.metadata == null ? null : JSON.stringify(doc.metadata),
+        doc.createdAt,
+      ]
+    );
   }
 
-  listByConversation(
+  async listByConversation(
     conversationId: string,
     limit: number,
     after?: { createdAt: Date; _id: string }
   ): Promise<PaginatedResult<MessageDoc>> {
-    return paginateCollection(this.collection, { conversationId }, limit, after);
+    const { rows } = after
+      ? await this.q.query(
+          "SELECT * FROM messages WHERE conversation_id = $1 AND (created_at, id) > ($2, $3) ORDER BY created_at, id LIMIT $4",
+          [conversationId, after.createdAt, after._id, limit + 1]
+        )
+      : await this.q.query(
+          "SELECT * FROM messages WHERE conversation_id = $1 ORDER BY created_at, id LIMIT $2",
+          [conversationId, limit + 1]
+        );
+    return toPage(rows.map(rowToMessage), limit);
   }
 }

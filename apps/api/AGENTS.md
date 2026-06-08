@@ -7,11 +7,19 @@ Each feature domain gets its own directory under `src/`:
 ```
 src/
   auth/           # session, CSRF, users, API tokens
+  chat/           # conversations, messages, streaming chat turn
+  resources/      # resource type + data CRUD, per-type Postgres tables
+  hooks/          # isolated-vm hook sandbox + worker
+  knowledge/      # RAG: documents, chunks, pgvector + tsvector search
+  memory/         # per-user working memory
   secrets/        # secret storage
   soul/           # soul git operations (commit, push)
     resource-types/ # resource type CRUD
-  migrations/     # data migrations
+  pg-migrations/  # Postgres schema migrations (applied on boot)
 ```
+
+All persistence is Postgres (`pg.Pool` in prod, PGlite in tests) via thin repos taking a
+`Queryable`; async work runs on in-process pg-boss. No other datastore.
 
 ## Route Convention
 

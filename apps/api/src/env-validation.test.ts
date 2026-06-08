@@ -10,8 +10,7 @@ function secret32(): string {
 /** Full valid env record for all required vars */
 function validEnv(): Record<string, string | undefined> {
   return {
-    MONGODB_URI: "mongodb://localhost:27017/tulipfarm",
-    REDIS_URL: "redis://localhost:6379",
+    DATABASE_URL: "postgres://localhost:5432/tulipfarm",
     SOUL_PATH: "./soul",
     ENCRYPTION_KEY: secret32(),
     JWT_SECRET: secret32(),
@@ -89,24 +88,21 @@ describe("validateEnvironment", () => {
     vi.restoreAllMocks();
   });
 
-  it("exits when MONGODB_URI has wrong prefix", () => {
+  it("exits when DATABASE_URL has wrong prefix", () => {
     const exit = vi.fn();
     const env = validEnv();
-    env.MONGODB_URI = "http://localhost:27017/tulipfarm";
+    env.DATABASE_URL = "mysql://localhost:5432/tulipfarm";
     vi.spyOn(console, "error").mockImplementation(() => {});
     validateEnvironment(env, exit);
     expect(exit).toHaveBeenCalledWith(1);
     vi.restoreAllMocks();
   });
 
-  it("exits when REDIS_URL has wrong prefix", () => {
+  it("passes when DATABASE_URL uses the postgresql:// prefix", () => {
     const exit = vi.fn();
-    const env = validEnv();
-    env.REDIS_URL = "http://localhost:6379";
-    vi.spyOn(console, "error").mockImplementation(() => {});
+    const env = { ...validEnv(), DATABASE_URL: "postgresql://localhost:5432/tulipfarm" };
     validateEnvironment(env, exit);
-    expect(exit).toHaveBeenCalledWith(1);
-    vi.restoreAllMocks();
+    expect(exit).not.toHaveBeenCalled();
   });
 
   it("exits when SESSION_TTL_SECONDS is not a number", () => {
@@ -179,15 +175,15 @@ describe("validateBase64Secret", () => {
 describe("validateUriPrefix", () => {
   it("passes with valid prefix", () => {
     const exit = vi.fn();
-    const env = { DB: "mongodb://localhost" };
-    validateUriPrefix("DB", ["mongodb://", "mongodb+srv://"], env, exit);
+    const env = { DB: "postgres://localhost" };
+    validateUriPrefix("DB", ["postgres://", "postgresql://"], env, exit);
     expect(exit).not.toHaveBeenCalled();
   });
 
-  it("passes with mongodb+srv:// prefix", () => {
+  it("passes with an alternate accepted prefix", () => {
     const exit = vi.fn();
-    const env = { DB: "mongodb+srv://cluster.example.com" };
-    validateUriPrefix("DB", ["mongodb://", "mongodb+srv://"], env, exit);
+    const env = { DB: "postgresql://cluster.example.com" };
+    validateUriPrefix("DB", ["postgres://", "postgresql://"], env, exit);
     expect(exit).not.toHaveBeenCalled();
   });
 
@@ -195,7 +191,7 @@ describe("validateUriPrefix", () => {
     const exit = vi.fn();
     const env = { DB: "http://localhost" };
     vi.spyOn(console, "error").mockImplementation(() => {});
-    validateUriPrefix("DB", ["mongodb://", "mongodb+srv://"], env, exit);
+    validateUriPrefix("DB", ["postgres://", "postgresql://"], env, exit);
     expect(exit).toHaveBeenCalledWith(1);
     vi.restoreAllMocks();
   });

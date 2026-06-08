@@ -1,4 +1,4 @@
-import type { Collection, Db } from "mongodb";
+import type { Queryable } from "../db";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
 
 /**
@@ -50,26 +50,58 @@ export interface WorkingMemoryRepo {
   listByUser(userId: string): Promise<WorkingMemoryDoc[]>;
 }
 
-export class MongoWorkingMemoryRepo implements WorkingMemoryRepo {
-  private readonly collection: Collection<WorkingMemoryDoc>;
-
-  constructor(db: Db) {
-    this.collection = db.collection<WorkingMemoryDoc>("working_memory");
+function rowToEntry(row: Record<string, unknown>): WorkingMemoryDoc {
+  const doc: WorkingMemoryDoc = {
+    // No id column under Postgres (PK is (user_id,key)); synthesize a stable, unused identifier.
+    _id: `${row.user_id as string}:${row.key as string}`,
+    userId: row.user_id as string,
+    key: row.key as string,
+    value: row.value as string,
+    createdAt: row.created_at as Date,
+    lastWrittenAt: row.last_written_at as Date,
+  };
+  if (row.written_by_agent_id != null) {
+    doc.writtenByAgentId = row.written_by_agent_id as string;
   }
+  return doc;
+}
+
+export class PgWorkingMemoryRepo implements WorkingMemoryRepo {
+  constructor(private readonly q: Queryable) {}
 
   async upsert(doc: WorkingMemoryDoc): Promise<void> {
     assertValidEntry(doc);
-    // Filter on {userId,key} (the unique index); the service supplies the existing _id on update,
-    // so the immutable _id never changes under us.
-    await this.collection.replaceOne({ userId: doc.userId, key: doc.key }, doc, { upsert: true });
+    await this.q.query(
+      `INSERT INTO working_memory (user_id, key, value, written_by_agent_id, created_at, last_written_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (user_id, key) DO UPDATE SET
+         value = EXCLUDED.value,
+         written_by_agent_id = EXCLUDED.written_by_agent_id,
+         last_written_at = EXCLUDED.last_written_at`,
+      [
+        doc.userId,
+        doc.key,
+        doc.value,
+        doc.writtenByAgentId ?? null,
+        doc.createdAt,
+        doc.lastWrittenAt,
+      ]
+    );
   }
 
   async deleteByKey(userId: string, key: string): Promise<boolean> {
-    const result = await this.collection.deleteOne({ userId, key });
-    return result.deletedCount > 0;
+    const { rows } = await this.q.query(
+      "DELETE FROM working_memory WHERE user_id = $1 AND key = $2 RETURNING key",
+      [userId, key]
+    );
+    return rows.length > 0;
   }
 
-  listByUser(userId: string): Promise<WorkingMemoryDoc[]> {
-    return this.collection.find({ userId }).sort({ lastWrittenAt: 1 }).toArray();
+  async listByUser(userId: string): Promise<WorkingMemoryDoc[]> {
+    const { rows } = await this.q.query(
+      "SELECT * FROM working_memory WHERE user_id = $1 ORDER BY last_written_at",
+      [userId]
+    );
+    return rows.map(rowToEntry);
   }
 }

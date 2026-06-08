@@ -8,8 +8,8 @@ facts the agent reads every turn and writes via two platform tools. Facts are ke
 ## Layers
 
 - **`working-memory.ts`** — `WorkingMemoryDoc`, the `WorkingMemoryRepo` interface, and
-  `MongoWorkingMemoryRepo` (collection `working_memory`). `assertValidEntry` is the hard write-time
-  guard. Mirrors `chat/messages.ts`.
+  `PgWorkingMemoryRepo` (table `working_memory`, PK `(user_id, key)`). `assertValidEntry` is the hard
+  write-time guard. Mirrors `chat/messages.ts`.
 - **`service.ts`** — `WorkingMemoryService` owns the write policy: oversize rejection, last-write
   LRU, and the dual cap (≤30 entries **and** ≤~2k total chars; oldest-written evicted first). The
   repo stays a dumb CRUD store.
@@ -27,7 +27,7 @@ toward `create_knowledge_document`), `MAX_TOTAL_CHARS=2048`, `MAX_TOOL_STEPS=25`
 
 ## Wiring
 
-`index.ts` builds `MongoWorkingMemoryRepo` + `WorkingMemoryService` and passes them into `buildApp`,
+`index.ts` builds `PgWorkingMemoryRepo` + `WorkingMemoryService` and passes them into `buildApp`,
 which threads the service into `registerChatRoutes`. The chat turn (`chat/routes.ts`) binds
 `buildMemoryToolSet(ctx)` as `streamText` `tools` and persists tool-call/tool-result steps via
 `onStepFinish`. Tools are scoped to the authenticated user (`user._id`).

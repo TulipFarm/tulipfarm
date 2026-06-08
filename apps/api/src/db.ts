@@ -1,15 +1,22 @@
-import { type Db, MongoClient } from "mongodb";
+import { Pool } from "pg";
 
-let client: MongoClient;
-let db: Db;
+let pool: Pool;
 
-export async function connectDb(): Promise<{ client: MongoClient; db: Db }> {
-  client = new MongoClient(process.env.MONGODB_URI as string);
-  await client.connect();
-  db = client.db();
-  return { client, db };
+/**
+ * Minimal query surface shared by `pg.Pool` (prod) and the PGlite test client,
+ * so the migration runner and repos run identical SQL in both environments.
+ */
+export interface Queryable {
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
 }
 
-export function getDb(): Db {
-  return db;
+export async function connectPg(): Promise<Pool> {
+  pool = new Pool({ connectionString: process.env.DATABASE_URL as string });
+  // Force a connection now so boot fails loud if Postgres is unreachable.
+  await pool.query("SELECT 1");
+  return pool;
+}
+
+export function getPool(): Pool {
+  return pool;
 }

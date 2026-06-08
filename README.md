@@ -16,7 +16,7 @@
 - **Node.js** (see `.node-version`)
 - **pnpm** (`npm install -g pnpm`)
 - **Homebrew** (for macOS)
-- **MongoDB 8.0** and **Redis** (installed and started via the setup script)
+- **PostgreSQL 17 + pgvector** (installed and started via the setup script)
 
 ### Quick Start
 
@@ -24,12 +24,11 @@
    ```bash
    bash scripts/setup-dev.sh
    ```
-   This installs MongoDB 8.0 and Redis via Homebrew, starts the services, creates the `./soul` directory, and generates a `.env.local` file with bootstrap secrets.
+   This installs PostgreSQL 17 + pgvector via Homebrew, starts the service, creates the `tulipfarm` database and the `./soul` directory, and generates a `.env.local` file with bootstrap secrets.
 
-2. **Verify services are running:**
+2. **Verify the datastore is running:**
    ```bash
-   mongosh --eval 'db.version()'
-   redis-cli ping
+   psql tulipfarm -c 'select 1'
    ```
 
 3. **Install dependencies and start development:**
@@ -54,12 +53,12 @@
 ### Environment Setup
 
 The `scripts/setup-dev.sh` script automatically:
-- Installs MongoDB Community Edition 8.0
-- Installs and starts Redis
+- Installs and starts PostgreSQL 17 + pgvector
+- Creates the `tulipfarm` database
 - Initializes a local `./soul` git repository with the required directory structure
 - Generates `.env.local` with random bootstrap secrets (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
 
-**Manual adjustments:** Edit `.env.local` to customize datastores or add optional variables like `GIT_REMOTE_URL` for syncing soul changes to a remote repository.
+**Manual adjustments:** Edit `.env.local` to customize the datastore or add optional variables like `GIT_REMOTE_URL` for syncing soul changes to a remote repository.
 
 ### Soul Repository
 
@@ -76,10 +75,9 @@ The `./soul` directory is a local git repository that stores your system configu
 
 ### Stopping Services
 
-To stop MongoDB and Redis:
+To stop PostgreSQL:
 ```bash
-brew services stop mongodb-community@8.0
-brew services stop redis
+brew services stop postgresql@17
 ```
 
 To stop the dev servers, press `Ctrl+C` in the terminal running `pnpm dev`.

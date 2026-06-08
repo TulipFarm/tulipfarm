@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { CounterFn } from "@tulipfarm/validation";
-import type { Collection, Db } from "mongodb";
-import { type PaginatedResult, paginateCollection } from "../pagination";
+import type { Queryable } from "../db";
+import { type PaginatedResult, toPage } from "../pagination";
+import { historyTableName, rowToResourceDoc, tableName } from "./schema";
 
 export interface ResourceDoc {
   _id: string;
@@ -34,64 +35,108 @@ export interface ResourceRepo {
   appendHistory(entry: ResourceHistoryDoc): Promise<void>;
 }
 
-export class MongoResourceRepo implements ResourceRepo {
-  private readonly col: Collection<ResourceDoc>;
-  private readonly historyCol: Collection<ResourceHistoryDoc>;
+/** Builds a `ResourceRepo` bound to a resource type's table (per-request, dynamic type). */
+export interface ResourceRepoFactory {
+  forType(type: string): ResourceRepo;
+}
 
-  constructor(db: Db, type: string) {
-    this.col = db.collection<ResourceDoc>(type);
-    this.historyCol = db.collection<ResourceHistoryDoc>(`${type}_history`);
+/** Display-id counter source (yields a `@tulipfarm/validation` `CounterFn`). */
+export interface CounterStore {
+  makeCounterFn(): CounterFn;
+}
+
+/**
+ * Postgres resource repo (D4/D9): one table per type in the `resources` schema. System
+ * fields are typed columns; all schema-driven fields live in `data jsonb`. The table is
+ * materialised by the reconciler (`reconcileResourceTables`), not here.
+ */
+export class PgResourceRepo implements ResourceRepo {
+  private readonly table: string;
+  private readonly historyTable: string;
+
+  constructor(
+    private readonly q: Queryable,
+    type: string
+  ) {
+    this.table = tableName(type);
+    this.historyTable = historyTableName(type);
   }
 
   async insert(doc: ResourceDoc): Promise<void> {
-    await this.col.insertOne(doc as ResourceDoc & { _id: string });
+    const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
+    await this.q.query(
+      `INSERT INTO ${this.table} (id, version, created_at, updated_at, deleted_at, data)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+      [_id, version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data)]
+    );
   }
 
   async findById(id: string): Promise<ResourceDoc | null> {
-    return this.col.findOne({ _id: id } as Parameters<
-      typeof this.col.findOne
-    >[0]) as Promise<ResourceDoc | null>;
+    const { rows } = await this.q.query(
+      `SELECT id, version, created_at, updated_at, deleted_at, data FROM ${this.table} WHERE id = $1`,
+      [id]
+    );
+    return rows[0] ? rowToResourceDoc(rows[0]) : null;
   }
 
   async list(opts: ListOpts): Promise<PaginatedResult<ResourceDoc>> {
-    type PageDoc = { createdAt: Date; _id: string };
-    const filter = opts.includeDeleted ? {} : { deletedAt: { $exists: false } };
-    const result = await paginateCollection(
-      this.col as unknown as Collection<PageDoc>,
-      filter as import("mongodb").Filter<PageDoc>,
-      opts.limit,
-      opts.after
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (!opts.includeDeleted) conditions.push("deleted_at IS NULL");
+    if (opts.after) {
+      params.push(opts.after.createdAt, opts.after._id);
+      conditions.push(`(created_at, id) > ($${params.length - 1}, $${params.length})`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    params.push(opts.limit + 1);
+    const { rows } = await this.q.query(
+      `SELECT id, version, created_at, updated_at, deleted_at, data FROM ${this.table}
+       ${where} ORDER BY created_at, id LIMIT $${params.length}`,
+      params
     );
-    return result as unknown as PaginatedResult<ResourceDoc>;
+    return toPage(rows.map(rowToResourceDoc), opts.limit);
   }
 
   async replaceOne(id: string, expectedVersion: number, doc: ResourceDoc): Promise<boolean> {
-    const result = await this.col.replaceOne(
-      { _id: id, version: expectedVersion } as Parameters<typeof this.col.replaceOne>[0],
-      doc as ResourceDoc & { _id: string }
+    const { _id, version, createdAt, updatedAt, deletedAt, ...data } = doc;
+    const { rows } = await this.q.query(
+      `UPDATE ${this.table}
+       SET version = $1, created_at = $2, updated_at = $3, deleted_at = $4, data = $5::jsonb
+       WHERE id = $6 AND version = $7
+       RETURNING id`,
+      [version, createdAt, updatedAt, deletedAt ?? null, JSON.stringify(data), id, expectedVersion]
     );
-    return result.matchedCount === 1;
+    return rows.length === 1;
   }
 
   async appendHistory(entry: ResourceHistoryDoc): Promise<void> {
-    await this.historyCol.insertOne(entry as ResourceHistoryDoc & { _id: string });
+    await this.q.query(
+      `INSERT INTO ${this.historyTable} (id, resource_id, operation, snapshot, at)
+       VALUES ($1, $2, $3, $4::jsonb, $5)`,
+      [entry._id, entry.resourceId, entry.operation, JSON.stringify(entry.snapshot), entry.at]
+    );
   }
 }
 
-export class MongoCounterStore {
-  private readonly col: Collection<{ _id: string; seq: number }>;
+export class PgResourceRepoFactory implements ResourceRepoFactory {
+  constructor(private readonly q: Queryable) {}
 
-  constructor(db: Db) {
-    this.col = db.collection<{ _id: string; seq: number }>("counters");
+  forType(type: string): ResourceRepo {
+    return new PgResourceRepo(this.q, type);
   }
+}
 
-  private async increment(resourceType: string): Promise<number> {
-    const result = await this.col.findOneAndUpdate(
-      { _id: resourceType },
-      { $inc: { seq: 1 } },
-      { upsert: true, returnDocument: "after" }
+export class PgCounterStore implements CounterStore {
+  constructor(private readonly q: Queryable) {}
+
+  private async increment(type: string): Promise<number> {
+    const { rows } = await this.q.query(
+      `INSERT INTO counters (type, seq) VALUES ($1, 1)
+       ON CONFLICT (type) DO UPDATE SET seq = counters.seq + 1
+       RETURNING seq`,
+      [type]
     );
-    return (result as { seq: number }).seq;
+    return Number((rows[0] as { seq: number | string }).seq);
   }
 
   makeCounterFn(): CounterFn {

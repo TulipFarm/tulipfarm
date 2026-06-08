@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { buildBackfillDocs } from "../migrations";
 import {
   InvalidMessageError,
   type MessageDoc,
@@ -214,74 +213,5 @@ describe("fromAssistantParts / fromToolResult", () => {
     expect(doc.content).toEqual(parts);
     expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
     expect(toCoreMessage(doc)).toEqual({ role: "tool", content: parts });
-  });
-});
-
-describe("buildBackfillDocs", () => {
-  it("returns [] for absent messages", () => {
-    expect(buildBackfillDocs({ _id: "conv1" })).toEqual([]);
-  });
-
-  it("returns [] for empty messages array", () => {
-    expect(buildBackfillDocs({ _id: "conv1", messages: [] })).toEqual([]);
-  });
-
-  it("produces deterministic padded ids", () => {
-    const docs = buildBackfillDocs({
-      _id: "conv1",
-      messages: [
-        { role: "user", content: "a" },
-        { role: "assistant", content: "b" },
-        { role: "user", content: "c" },
-      ],
-    });
-    expect(docs.map((d) => d._id)).toEqual(["conv1:000000", "conv1:000001", "conv1:000002"]);
-  });
-
-  it("falls back to conv.createdAt when a message has no createdAt", () => {
-    const convCreatedAt = new Date("2024-01-01T00:00:00.000Z");
-    const docs = buildBackfillDocs({
-      _id: "conv1",
-      createdAt: convCreatedAt,
-      messages: [{ role: "user", content: "a" }],
-    });
-    expect(docs[0].createdAt).toBe(convCreatedAt);
-  });
-
-  it("uses a Date when both message and conv createdAt are absent", () => {
-    const docs = buildBackfillDocs({
-      _id: "conv1",
-      messages: [{ role: "user", content: "a" }],
-    });
-    expect(docs[0].createdAt).toBeInstanceOf(Date);
-  });
-
-  it("preserves original array order under tied timestamps via sortable ids", () => {
-    const tied = new Date("2024-01-01T00:00:00.000Z");
-    const docs = buildBackfillDocs({
-      _id: "conv1",
-      messages: [
-        { role: "user", content: "first", createdAt: tied },
-        { role: "assistant", content: "second", createdAt: tied },
-        { role: "user", content: "third", createdAt: tied },
-      ],
-    });
-    const ids = docs.map((d) => d._id);
-    const sorted = [...ids].sort();
-    expect(ids).toEqual(["conv1:000000", "conv1:000001", "conv1:000002"]);
-    expect(ids).toEqual(sorted);
-  });
-
-  it("is deterministic across repeated runs (idempotency proxy)", () => {
-    const conv = {
-      _id: "conv1",
-      messages: [
-        { role: "user", content: "a" },
-        { role: "assistant", content: "b" },
-      ],
-    };
-    const first = buildBackfillDocs(conv).map((d) => d._id);
-    const second = buildBackfillDocs(conv).map((d) => d._id);
-    expect(first).toEqual(second);
   });
 });

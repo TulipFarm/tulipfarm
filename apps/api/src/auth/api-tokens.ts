@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import type { Collection, Db } from "mongodb";
-import { type PaginatedResult, paginateCollection } from "../pagination";
+import type { Queryable } from "../db";
+import { type PaginatedResult, toPage } from "../pagination";
 
 export interface TokenDoc {
   _id: string;
@@ -55,50 +55,84 @@ export interface TokenRepo {
   ): Promise<PaginatedResult<TokenDoc>>;
 }
 
-export class MongoTokenRepo implements TokenRepo {
-  private readonly collection: Collection<TokenDoc>;
+function rowToToken(row: Record<string, unknown>): TokenDoc {
+  return {
+    _id: row.id as string,
+    userId: row.user_id as string,
+    name: row.name as string,
+    tokenHash: row.token_hash as string,
+    prefix: row.prefix as string,
+    createdAt: row.created_at as Date,
+  };
+}
 
-  constructor(db: Db) {
-    this.collection = db.collection<TokenDoc>("api_tokens");
-  }
+export class PgTokenRepo implements TokenRepo {
+  constructor(private readonly q: Queryable) {}
 
   async create(token: TokenDoc): Promise<void> {
-    await this.collection.insertOne(token);
+    await this.q.query(
+      "INSERT INTO api_tokens (id, user_id, name, token_hash, prefix, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+      [token._id, token.userId, token.name, token.tokenHash, token.prefix, token.createdAt]
+    );
   }
 
-  findByHash(hash: string): Promise<TokenDoc | null> {
-    return this.collection.findOne({ tokenHash: hash });
+  async findByHash(hash: string): Promise<TokenDoc | null> {
+    const { rows } = await this.q.query("SELECT * FROM api_tokens WHERE token_hash = $1", [hash]);
+    return rows.length > 0 ? rowToToken(rows[0]) : null;
   }
 
-  findByUserId(userId: string): Promise<TokenDoc[]> {
-    return this.collection.find({ userId }).toArray();
+  async findByUserId(userId: string): Promise<TokenDoc[]> {
+    const { rows } = await this.q.query(
+      "SELECT * FROM api_tokens WHERE user_id = $1 ORDER BY created_at, id",
+      [userId]
+    );
+    return rows.map(rowToToken);
   }
 
-  findAll(): Promise<TokenDoc[]> {
-    return this.collection.find().toArray();
+  async findAll(): Promise<TokenDoc[]> {
+    const { rows } = await this.q.query("SELECT * FROM api_tokens ORDER BY created_at, id");
+    return rows.map(rowToToken);
   }
 
-  findById(id: string): Promise<TokenDoc | null> {
-    return this.collection.findOne({ _id: id });
+  async findById(id: string): Promise<TokenDoc | null> {
+    const { rows } = await this.q.query("SELECT * FROM api_tokens WHERE id = $1", [id]);
+    return rows.length > 0 ? rowToToken(rows[0]) : null;
   }
 
   async deleteById(id: string): Promise<void> {
-    await this.collection.deleteOne({ _id: id });
+    await this.q.query("DELETE FROM api_tokens WHERE id = $1", [id]);
   }
 
-  findAllPaginated(
+  async findAllPaginated(
     limit: number,
     after?: { createdAt: Date; _id: string }
   ): Promise<PaginatedResult<TokenDoc>> {
-    return paginateCollection(this.collection, {}, limit, after);
+    const { rows } = after
+      ? await this.q.query(
+          "SELECT * FROM api_tokens WHERE (created_at, id) > ($1, $2) ORDER BY created_at, id LIMIT $3",
+          [after.createdAt, after._id, limit + 1]
+        )
+      : await this.q.query("SELECT * FROM api_tokens ORDER BY created_at, id LIMIT $1", [
+          limit + 1,
+        ]);
+    return toPage(rows.map(rowToToken), limit);
   }
 
-  findByUserIdPaginated(
+  async findByUserIdPaginated(
     userId: string,
     limit: number,
     after?: { createdAt: Date; _id: string }
   ): Promise<PaginatedResult<TokenDoc>> {
-    return paginateCollection(this.collection, { userId }, limit, after);
+    const { rows } = after
+      ? await this.q.query(
+          "SELECT * FROM api_tokens WHERE user_id = $1 AND (created_at, id) > ($2, $3) ORDER BY created_at, id LIMIT $4",
+          [userId, after.createdAt, after._id, limit + 1]
+        )
+      : await this.q.query(
+          "SELECT * FROM api_tokens WHERE user_id = $1 ORDER BY created_at, id LIMIT $2",
+          [userId, limit + 1]
+        );
+    return toPage(rows.map(rowToToken), limit);
   }
 }
 

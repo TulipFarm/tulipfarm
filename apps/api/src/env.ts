@@ -37,8 +37,7 @@ export function validateEnvironment(
   exit: (code: number) => void = process.exit
 ): void {
   const required = [
-    "MONGODB_URI",
-    "REDIS_URL",
+    "DATABASE_URL",
     "SOUL_PATH",
     "ENCRYPTION_KEY",
     "JWT_SECRET",
@@ -59,8 +58,7 @@ export function validateEnvironment(
   }
 
   // Validate URI prefixes
-  validateUriPrefix("MONGODB_URI", ["mongodb://", "mongodb+srv://"], env, exit);
-  validateUriPrefix("REDIS_URL", ["redis://", "rediss://"], env, exit);
+  validateUriPrefix("DATABASE_URL", ["postgres://", "postgresql://"], env, exit);
 
   // Validate ENCRYPTION_KEY_PREVIOUS if set (optional, used for key rotation)
   if (env.ENCRYPTION_KEY_PREVIOUS !== undefined) {
@@ -79,8 +77,7 @@ export function validateEnvironment(
 
 export function logEnvironmentStatus(logger: { info: (msg: string) => void }): void {
   const vars = [
-    "MONGODB_URI",
-    "REDIS_URL",
+    "DATABASE_URL",
     "SOUL_PATH",
     "ENCRYPTION_KEY",
     "JWT_SECRET",
