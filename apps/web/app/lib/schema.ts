@@ -18,7 +18,10 @@ export type JsonSchemaProperty = {
   format?: string;
   enum?: unknown[];
   "x-links"?: { target: string };
-  // x-immutable / x-readOnly are write-side concerns and are intentionally ignored here.
+  // Write-side flags: surfaced on the descriptor so create/edit forms can honor them. The read
+  // projections (list/detail) ignore them; only `formFields` + the form components consume them.
+  "x-immutable"?: boolean;
+  "x-readOnly"?: boolean;
 };
 
 export type ResourceSchema = {
@@ -46,6 +49,11 @@ export type FieldDescriptor = {
   enumValues?: string[];
   isSystem: boolean;
   isIdField: boolean;
+  // Write-side metadata (populated for declared properties; false/undefined for synthesized fields).
+  required?: boolean;
+  immutable?: boolean;
+  readOnly?: boolean;
+  format?: string;
 };
 
 export type ParseResult = { ok: true; schema: ResourceSchema } | { ok: false; error: string };
@@ -101,7 +109,12 @@ function resolveKind(name: string, prop: JsonSchemaProperty): FieldKind {
   }
 }
 
-function describe(name: string, prop: JsonSchemaProperty, idField: string): FieldDescriptor {
+function describe(
+  name: string,
+  prop: JsonSchemaProperty,
+  idField: string,
+  required: ReadonlySet<string>
+): FieldDescriptor {
   const kind = resolveKind(name, prop);
   return {
     name,
@@ -110,6 +123,10 @@ function describe(name: string, prop: JsonSchemaProperty, idField: string): Fiel
     enumValues: kind === "enum" ? (prop.enum ?? []).map(String) : undefined,
     isSystem: (SYSTEM_FIELDS as readonly string[]).includes(name),
     isIdField: name === idField,
+    required: required.has(name),
+    immutable: prop["x-immutable"] === true,
+    readOnly: prop["x-readOnly"] === true,
+    format: prop.format,
   };
 }
 
@@ -117,7 +134,17 @@ function describe(name: string, prop: JsonSchemaProperty, idField: string): Fiel
 export function deriveFields(schema: ResourceSchema): FieldDescriptor[] {
   const idField = idFieldName(schema);
   const props = schema.properties ?? {};
-  return Object.keys(props).map((name) => describe(name, props[name], idField));
+  const required = new Set(schema.required ?? []);
+  return Object.keys(props).map((name) => describe(name, props[name], idField, required));
+}
+
+// Editable inputs for create/edit forms: declared properties minus the system block and minus any
+// `x-readOnly` field, and minus the id field when it's server-generated (x-id-strategy.sequence).
+// This is the write-side mirror of listColumns/detailFields — the AC-V1-002 zero-per-resource-code
+// pipeline for forms. `x-immutable` fields are kept (read-only on edit, editable on create).
+export function formFields(schema: ResourceSchema): FieldDescriptor[] {
+  const autoId = schema["x-id-strategy"]?.sequence === true ? idFieldName(schema) : null;
+  return deriveFields(schema).filter((f) => !f.isSystem && !f.readOnly && f.name !== autoId);
 }
 
 function syntheticDescriptor(name: string, kind: FieldKind, idField: string): FieldDescriptor {

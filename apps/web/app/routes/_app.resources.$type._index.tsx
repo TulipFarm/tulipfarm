@@ -1,5 +1,6 @@
 import {
   type ClientLoaderFunctionArgs,
+  Link,
   type MetaFunction,
   useLoaderData,
   useParams,
@@ -62,6 +63,11 @@ export default function ResourceList() {
 
   return (
     <ResourcePanel crumbs={crumbs} command={command}>
+      <div>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/resources/${encodeURIComponent(type)}/new`}>New {type}</Link>
+        </Button>
+      </div>
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : records.length === 0 ? (

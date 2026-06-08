@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import {
   deriveFields,
   detailFields,
+  formFields,
   formatIso,
   listColumns,
   parseSchema,
@@ -142,6 +143,40 @@ test("renderValue maps every kind to a presentational primitive", () => {
   expect(renderValue(fields.tags, ["a", "b"])).toEqual({ kind: "text", text: "a, b" });
   expect(renderValue(fields.tags, [])).toEqual({ kind: "muted", text: "—" });
   expect(renderValue(fields.meta, { a: 1 })).toEqual({ kind: "json", text: '{"a":1}' });
+});
+
+test("deriveFields populates write-side flags (required, immutable, readOnly, format)", () => {
+  const byName = Object.fromEntries(deriveFields(ticketSchema()).map((f) => [f.name, f]));
+  expect(byName.title.immutable).toBe(true); // x-immutable: true
+  expect(byName.title.required).toBe(true); // required: [title]
+  expect(byName.open.immutable).toBe(false);
+  expect(byName.open.required).toBe(false);
+  expect(byName.customerId.readOnly).toBe(false);
+});
+
+test("formFields drops the system block, the sequence-generated id, and x-readOnly fields", () => {
+  // TICKET_YAML uses x-id-strategy.sequence with field id → id is server-generated, not an input.
+  const names = formFields(ticketSchema()).map((f) => f.name);
+  expect(names).toEqual(["title", "customerId", "priority", "open", "tags", "meta"]);
+  expect(names).not.toContain("id"); // auto-generated
+});
+
+test("formFields excludes the system id and any x-readOnly field", () => {
+  const parsed = parseSchema(`
+type: object
+properties:
+  id: { type: string }
+  slug: { type: string, x-readOnly: true }
+  name: { type: string }
+`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  const names = formFields(parsed.schema).map((f) => f.name);
+  expect(names).toEqual(["name"]); // id is a system field, slug is x-readOnly
+});
+
+test("formFields keeps x-immutable fields (read-only handled by the form, not filtered out)", () => {
+  const titleField = formFields(ticketSchema()).find((f) => f.name === "title");
+  expect(titleField?.immutable).toBe(true);
 });
 
 test("formatIso renders a date and passes non-dates through unchanged", () => {

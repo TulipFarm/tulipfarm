@@ -9,11 +9,15 @@ const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
 
 export class ApiError extends Error {
   readonly status: number;
+  // JSON Pointer to the offending field on a 422 (`{path}` from the API), so forms can map a
+  // validation failure back onto the input that caused it. Undefined for non-validation errors.
+  readonly path?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, path?: string) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.path = path;
   }
 }
 
@@ -38,24 +42,71 @@ export type RecordPage = {
 };
 
 async function apiGet<T>(path: string): Promise<T> {
-  const token = import.meta.env.VITE_API_TOKEN;
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  applyAuth(headers);
 
   const res = await fetch(`${API_BASE}${path}`, { credentials: "include", headers });
-  if (!res.ok) throw new ApiError(res.status, await readError(res));
+  if (!res.ok) throw await readError(res);
   return (await res.json()) as T;
 }
 
-// Best-effort extraction of the API's `{ error }` body; falls back to the status text.
-async function readError(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: unknown };
-    if (typeof body.error === "string") return body.error;
-  } catch {
-    // non-JSON body — fall through to status text
+// Write client (POST/PUT). Mirrors apiGet's cookie-first auth, adds a JSON body, the optional
+// `If-Match` concurrency header, and the CSRF echo header (no-op when authed by Bearer token).
+async function apiWrite<T>(
+  method: "POST" | "PUT",
+  path: string,
+  body: unknown,
+  ifMatch?: number
+): Promise<T> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  applyAuth(headers);
+  const csrf = readCookie(CSRF_COOKIE);
+  if (csrf) headers["x-csrf-token"] = csrf;
+  if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    credentials: "include",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as T;
+}
+
+const CSRF_COOKIE = "csrf_token";
+
+function applyAuth(headers: Record<string, string>): void {
+  const token = import.meta.env.VITE_API_TOKEN;
+  if (token) headers.Authorization = `Bearer ${token}`;
+}
+
+// Reads a non-httpOnly cookie by name (the API sets `csrf_token` with httpOnly:false for this).
+function readCookie(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  for (const part of document.cookie.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
   }
-  return res.statusText || `request failed (${res.status})`;
+  return null;
+}
+
+// Best-effort extraction of the API's `{ error, path }` body into an ApiError; falls back to
+// status text. `path` (present on 422) lets forms highlight the offending field.
+async function readError(res: Response): Promise<ApiError> {
+  let message = res.statusText || `request failed (${res.status})`;
+  let path: string | undefined;
+  try {
+    const body = (await res.json()) as { error?: unknown; path?: unknown };
+    if (typeof body.error === "string") message = body.error;
+    if (typeof body.path === "string" && body.path.length > 0) path = body.path;
+  } catch {
+    // non-JSON body — keep the status-text fallback
+  }
+  return new ApiError(res.status, message, path);
 }
 
 export async function listResourceTypes(): Promise<ResourceTypeSummary[]> {
@@ -80,5 +131,29 @@ export async function listRecords(
 export async function getRecord(type: string, id: string): Promise<ResourceRecord> {
   return apiGet<ResourceRecord>(
     `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+  );
+}
+
+// Create a record. Returns the persisted record (201 body) including the server-assigned id/version.
+export async function createRecord(
+  type: string,
+  body: Record<string, unknown>
+): Promise<ResourceRecord> {
+  return apiWrite<ResourceRecord>("POST", `/api/v1/resources/${encodeURIComponent(type)}`, body);
+}
+
+// Full-replace update with optimistic concurrency. `version` is sent as the `If-Match` header; a
+// stale version yields ApiError(409). Returns the updated record (new version).
+export async function updateRecord(
+  type: string,
+  id: string,
+  version: number,
+  body: Record<string, unknown>
+): Promise<ResourceRecord> {
+  return apiWrite<ResourceRecord>(
+    "PUT",
+    `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
+    body,
+    version
   );
 }

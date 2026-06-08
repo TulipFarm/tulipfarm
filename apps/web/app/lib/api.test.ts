@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { ApiError, getRecord, listRecords, listResourceTypes } from "~/lib/api";
+import {
+  ApiError,
+  createRecord,
+  getRecord,
+  listRecords,
+  listResourceTypes,
+  updateRecord,
+} from "~/lib/api";
 
 function mockFetch(status: number, body: unknown) {
   const fn = vi.fn().mockResolvedValue({
@@ -79,4 +86,51 @@ test("throws ApiError carrying the status on 401 and 404", async () => {
 
   mockFetch(404, { error: "not found" });
   await expect(getRecord("ticket", "missing")).rejects.toBeInstanceOf(ApiError);
+});
+
+test("createRecord POSTs a JSON body with Content-Type and credentials:include", async () => {
+  const fetchFn = mockFetch(201, { id: "TICK-1", version: 1, createdAt: "", updatedAt: "" });
+  await createRecord("ticket", { title: "hi", open: true });
+  const [url, init] = fetchFn.mock.calls[0];
+  expect(url).toContain("/api/v1/resources/ticket");
+  expect(init.method).toBe("POST");
+  expect(init.credentials).toBe("include");
+  expect(init.headers["Content-Type"]).toBe("application/json");
+  expect(JSON.parse(init.body)).toEqual({ title: "hi", open: true });
+});
+
+test("updateRecord PUTs with a quoted If-Match version header and encodes the id", async () => {
+  const fetchFn = mockFetch(200, { id: "TICK-1", version: 5, createdAt: "", updatedAt: "" });
+  await updateRecord("ticket", "a/b", 4, { title: "edit" });
+  const [url, init] = fetchFn.mock.calls[0];
+  expect(url).toContain("/api/v1/resources/ticket/a%2Fb");
+  expect(init.method).toBe("PUT");
+  expect(init.headers["If-Match"]).toBe('"4"');
+});
+
+test("writes echo the csrf_token cookie as the x-csrf-token header", async () => {
+  document.cookie = "csrf_token=tok-123";
+  const fetchFn = mockFetch(201, { id: "x", version: 1, createdAt: "", updatedAt: "" });
+  await createRecord("ticket", { title: "hi" });
+  const [, init] = fetchFn.mock.calls[0];
+  expect(init.headers["x-csrf-token"]).toBe("tok-123");
+  // clear for other tests
+  document.cookie = "csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+});
+
+test("a 422 validation error surfaces the field path on the ApiError", async () => {
+  mockFetch(422, { error: "must be string", boundary: "resource", path: "/customerId" });
+  await expect(createRecord("ticket", {})).rejects.toMatchObject({
+    status: 422,
+    message: "must be string",
+    path: "/customerId",
+  });
+});
+
+test("a 409 version conflict throws ApiError with status 409", async () => {
+  mockFetch(409, { error: "version conflict" });
+  await expect(updateRecord("ticket", "TICK-1", 1, {})).rejects.toMatchObject({
+    status: 409,
+    message: "version conflict",
+  });
 });
