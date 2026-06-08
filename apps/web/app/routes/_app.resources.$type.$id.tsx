@@ -1,5 +1,6 @@
 import {
   type ClientLoaderFunctionArgs,
+  Link,
   type MetaFunction,
   useLoaderData,
   useParams,
@@ -8,6 +9,7 @@ import {
 import { DetailView } from "~/components/detail-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError, getRecord, listResourceTypes } from "~/lib/api";
 import { deriveFields, detailFields, parseSchema } from "~/lib/schema";
 
@@ -42,6 +44,13 @@ export default function ResourceDetail() {
 
   return (
     <ResourcePanel crumbs={crumbs} command={command}>
+      <div>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}/edit`}>
+            Edit
+          </Link>
+        </Button>
+      </div>
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : (
