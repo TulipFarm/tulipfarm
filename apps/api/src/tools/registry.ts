@@ -1,6 +1,16 @@
+import { ajv } from "@tulipfarm/validation";
 import { type ToolSet, jsonSchema, tool } from "ai";
 import type { BatchCoordinator } from "./batch-executor";
 import { type RequestContext, type ToolCallResult, type ToolDef, err } from "./types";
+
+type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
+
+function firstArgError(errors: AjvErrors): string {
+  const e = errors?.[0];
+  return e
+    ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
+    : "invalid arguments";
+}
 
 export const TOOL_TIMEOUT_MS = 30_000;
 
@@ -20,9 +30,11 @@ function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
+  private readonly validators = new Map<string, ReturnType<typeof ajv.compile>>();
 
   register(tool: ToolDef): void {
     this.tools.set(tool.name, tool);
+    this.validators.set(tool.name, ajv.compile(tool.inputSchema));
   }
 
   getAll(): ToolDef[] {
@@ -37,9 +49,21 @@ export class ToolRegistry {
           description: t.description,
           parameters: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
           execute: coordinator
-            ? (args: unknown) =>
-                coordinator.schedule(() => withToolTimeout(t.execute(args, ctx)), t.mutating)
-            : (args: unknown) => withToolTimeout(t.execute(args, ctx)),
+            ? (args: unknown) => {
+                const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
+                if (!v(args))
+                  return Promise.resolve(err("validation_error", firstArgError(v.errors)));
+                return coordinator.schedule(
+                  () => withToolTimeout(t.execute(args, ctx)),
+                  t.mutating
+                );
+              }
+            : (args: unknown) => {
+                const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
+                if (!v(args))
+                  return Promise.resolve(err("validation_error", firstArgError(v.errors)));
+                return withToolTimeout(t.execute(args, ctx));
+              },
         }),
       ])
     );

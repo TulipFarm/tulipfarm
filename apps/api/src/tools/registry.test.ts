@@ -155,6 +155,50 @@ describe("ToolRegistry", () => {
     });
   });
 
+  describe("validation (TOOL-V1-009 / AC-V1-001)", () => {
+    const schemaedTool = (overrides: Partial<ToolDef> = {}): ToolDef =>
+      makeTool({
+        inputSchema: {
+          type: "object",
+          required: ["key"],
+          properties: { key: { type: "string" } },
+          additionalProperties: false,
+        },
+        ...overrides,
+      });
+
+    it("bad args return validation_error result without calling execute", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "should not reach" }));
+      const reg = new ToolRegistry();
+      reg.register(schemaedTool({ name: "vt", execute }));
+      const ts = reg.buildToolSet(ctx);
+      const result = await ts.vt.execute?.({}, { messages: [], toolCallId: "tc1" });
+      expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("valid args pass through to execute", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "reached" }));
+      const reg = new ToolRegistry();
+      reg.register(schemaedTool({ name: "vt2", execute }));
+      const ts = reg.buildToolSet(ctx);
+      const result = await ts.vt2.execute?.({ key: "hello" }, { messages: [], toolCallId: "tc2" });
+      expect(result).toEqual({ success: true, data: "reached" });
+      expect(execute).toHaveBeenCalledWith({ key: "hello" }, ctx);
+    });
+
+    it("bad args with coordinator return validation_error (no coordinator scheduling)", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "nope" }));
+      const reg = new ToolRegistry();
+      reg.register(schemaedTool({ name: "vt3", execute }));
+      const coordinator = new BatchCoordinator();
+      const ts = reg.buildToolSet(ctx, coordinator);
+      const result = await ts.vt3.execute?.({ wrong: 123 }, { messages: [], toolCallId: "tc3" });
+      expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(execute).not.toHaveBeenCalled();
+    });
+  });
+
   describe("timeout enforcement", () => {
     it("resolves normally when execute completes within timeout", async () => {
       const reg = new ToolRegistry();
