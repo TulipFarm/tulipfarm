@@ -1,0 +1,79 @@
+name: native-app
+
+# Builds the native-lane app payload — server.cjs (esbuild bundle) + built SPA +
+# prod node_modules closure — as per-(os,arch) tarballs (node_modules holds
+# compiled native addons: isolated-vm, @node-rs/argon2). Published as release
+# assets the installer (scripts/get.tulipfarm.sh, fetch_app) downloads.
+#
+# NOTE: the build commands mirror the verified Dockerfile build stages.
+on:
+  push:
+    tags: ["native-app-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+          - { os: macos-14, target: darwin-arm64 }
+          - { os: macos-13, target: darwin-x64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @tulipfarm/web build
+      - name: Bundle the API to server.cjs (externals = native + datastore drivers)
+        run: |
+          pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
+            --bundle --platform=node --target=node24 --format=cjs \
+            --outfile=dist/server.cjs \
+            --external:isolated-vm --external:@node-rs/argon2 \
+            --external:pg --external:pg-boss \
+            --external:@scalar/fastify-api-reference
+      - name: Resolve prod dependency closure
+        run: pnpm --filter @tulipfarm/api deploy --prod --legacy "$RUNNER_TEMP/deploy"
+      - name: Assemble the app payload
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/app"
+          mkdir -p "$out/apps/web/build"
+          cp apps/api/dist/server.cjs "$out/server.cjs"
+          cp -R "$RUNNER_TEMP/deploy/node_modules" "$out/node_modules"
+          cp -R apps/web/build/client "$out/apps/web/build/client"
+          printf '%s\n' "${GITHUB_REF_NAME}" > "$out/APP_REVISION"
+          tar -C "$out" -czf "$RUNNER_TEMP/tulipfarm-app-${{ matrix.target }}.tar.gz" .
+      - name: Checksum
+        run: |
+          cd "$RUNNER_TEMP"
+          shasum -a 256 "tulipfarm-app-${{ matrix.target }}.tar.gz" > "tulipfarm-app-${{ matrix.target }}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/tulipfarm-app-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/tulipfarm-app-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*

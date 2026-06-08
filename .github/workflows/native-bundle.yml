@@ -1,0 +1,125 @@
+name: native-bundle
+
+# SPIKE-A + the native-lane Postgres bundle build. Produces a RELOCATABLE
+# PostgreSQL 17 + pgvector bundle per (os,arch), published as release assets the
+# installer (scripts/get.tulipfarm.sh, fetch_pg_bundle) downloads + verifies.
+#
+# Approach (per docs/plans/2026-06-08-postgres-only-install-design.md): take the
+# EnterpriseDB relocatable binaries (which bundle libssl/icu/readline and solve
+# relocatability) and compile pgvector against their pg_config; citext is contrib.
+#
+# >>> This workflow runs ONLY in CI / on real runners — it cannot be exercised in
+# the dev sandbox. The smoke-test step is the gate: if EDB's URL/arch coverage or
+# relocatability fails for a target, that job goes red and we fall back to a
+# from-source build for that arch (documented fallback). The EDB asset URLs below
+# are the first thing this run validates — adjust `edb_url` to EDB's current
+# catalog if a download 404s. <<<
+
+on:
+  push:
+    tags: ["native-bundle-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PG_MAJOR: "17"
+  PGVECTOR_REF: "v0.8.0"
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+            edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-linux-x64-binaries.tar.gz
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-linux-arm64-binaries.tar.gz
+          - os: macos-14
+            target: darwin-arm64
+            edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-osx-binaries.zip
+          - os: macos-13
+            target: darwin-x64
+            edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-osx-binaries.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Download EDB PostgreSQL binaries
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL "${{ matrix.edb_url }}" -o edb-archive
+          mkdir -p pgroot
+          case "${{ matrix.edb_url }}" in
+            *.zip) unzip -q edb-archive -d edb-extract ;;
+            *)     mkdir -p edb-extract && tar -xzf edb-archive -C edb-extract ;;
+          esac
+          # EDB archives unpack to a top-level `pgsql/` (or `pgsql.app` on macOS).
+          src="$(find edb-extract -maxdepth 2 -type d -name 'pgsql' | head -1)"
+          [ -n "$src" ] || { echo "could not locate pgsql/ in EDB archive"; exit 1; }
+          cp -R "$src/." pgroot/
+
+      - name: Relocation test (binaries must run from a moved prefix)
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          mv pgroot "$RUNNER_TEMP/relocated"
+          "$RUNNER_TEMP/relocated/bin/pg_config" --version
+          mv "$RUNNER_TEMP/relocated" pgroot
+
+      - name: Build + install pgvector against the bundle
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          git clone --depth 1 --branch "$PGVECTOR_REF" https://github.com/pgvector/pgvector.git
+          make -C pgvector PG_CONFIG="$RUNNER_TEMP/pgroot/bin/pg_config"
+          make -C pgvector PG_CONFIG="$RUNNER_TEMP/pgroot/bin/pg_config" install
+
+      - name: SMOKE — initdb on a socket, CREATE EXTENSION vector/citext, SELECT vector
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          export PGROOT="$RUNNER_TEMP/pgroot"
+          mkdir -p sock data
+          "$PGROOT/bin/initdb" -D data -U tulipfarm --auth-local=trust --encoding=UTF8
+          {
+            echo "listen_addresses = ''"
+            echo "unix_socket_directories = '$RUNNER_TEMP/sock'"
+          } >> data/postgresql.conf
+          "$PGROOT/bin/pg_ctl" -D data -w start
+          "$PGROOT/bin/psql" -h "$RUNNER_TEMP/sock" -U tulipfarm -d postgres -v ON_ERROR_STOP=1 -c \
+            "CREATE EXTENSION vector; CREATE EXTENSION citext; SELECT '[1,2,3]'::vector;"
+          "$PGROOT/bin/pg_ctl" -D data -w stop
+
+      - name: Package the bundle
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          printf '%s\n' "${GITHUB_REF_NAME}" > pgroot/BUNDLE_REVISION
+          out="tulipfarm-pg17-pgvector-${{ matrix.target }}.tar.gz"
+          tar -C pgroot -czf "$out" .
+          shasum -a 256 "$out" > "$out.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pg-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/tulipfarm-pg17-pgvector-${{ matrix.target }}.tar.gz
+            ${{ runner.temp }}/tulipfarm-pg17-pgvector-${{ matrix.target }}.tar.gz.sha256
+
+  release:
+    needs: bundle
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: dist/*
