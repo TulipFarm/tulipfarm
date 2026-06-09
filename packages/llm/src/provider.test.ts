@@ -18,10 +18,20 @@ vi.mock("@ai-sdk/openai-compatible", () => ({
   })),
 }));
 
+vi.mock("@ai-sdk/azure", () => ({
+  createAzure: vi.fn((opts: { resourceName?: string }) => (modelId: string) => ({
+    provider: "azure",
+    modelId,
+    resourceName: opts.resourceName,
+  })),
+}));
+
 const makeSecrets = (values: Record<string, string> = {}) => ({
   get: vi.fn((key: string) => {
     if (key in values) return Promise.resolve(values[key]);
-    return Promise.reject(new Error(`secret not found: ${key}`));
+    // Mirror the real SecretsService: an unavailable key throws SecretUnavailableError (so config
+    // lookups treat it as "unset" and required keys surface as LlmCredentialError).
+    return Promise.reject(new SecretUnavailableError(`secret not found: ${key}`));
   }),
 });
 
@@ -92,6 +102,63 @@ describe("createModel", () => {
     await expect(
       createModel({ provider: "openai-compatible", model: "llama3" }, secrets as never)
     ).rejects.toThrow(LlmConfigValidationError);
+  });
+
+  it("creates an azure model with resource_name + api_key_ref", async () => {
+    const secrets = makeSecrets({ "azure-openai-api-key": "az-test" });
+    const model = await createModel(
+      {
+        provider: "azure",
+        model: "gpt-4o",
+        api_key_ref: "azure-openai-api-key",
+        resource_name: "my-resource",
+      },
+      secrets as never
+    );
+    expect(model.provider).toBe("azure");
+    expect(model.modelId).toBe("gpt-4o");
+    // resourceName is passed through createAzure by the mock (not part of LanguageModelV1).
+    expect((model as unknown as { resourceName: string }).resourceName).toBe("my-resource");
+    expect(secrets.get).toHaveBeenCalledWith("azure-openai-api-key");
+  });
+
+  it("throws LlmConfigValidationError when azure has a key but no resource_name or base_url", async () => {
+    // Key present (so resolution gets past the api key) but no resource_name/base_url configured.
+    const secrets = makeSecrets({ "azure-openai-api-key": "az-test" });
+    await expect(
+      createModel({ provider: "azure", model: "gpt-4o" }, secrets as never)
+    ).rejects.toThrow("azure provider requires resource_name or base_url");
+  });
+
+  it("resolves anthropic's key from the registry when api_key_ref is omitted", async () => {
+    const secrets = makeSecrets({ "anthropic-api-key": "sk-ant" });
+    const model = await createModel(
+      { provider: "anthropic", model: "claude-haiku-4-5" },
+      secrets as never
+    );
+    expect(model.provider).toBe("anthropic");
+    expect(secrets.get).toHaveBeenCalledWith("anthropic-api-key");
+  });
+
+  it("resolves azure's key + resource_name from the registry store (row is just provider+model)", async () => {
+    const secrets = makeSecrets({
+      "azure-openai-api-key": "az-test",
+      "azure-openai-resource-name": "my-resource",
+    });
+    const model = await createModel({ provider: "azure", model: "gpt-4o" }, secrets as never);
+    expect(model.provider).toBe("azure");
+    expect((model as unknown as { resourceName: string }).resourceName).toBe("my-resource");
+    expect(secrets.get).toHaveBeenCalledWith("azure-openai-api-key");
+    expect(secrets.get).toHaveBeenCalledWith("azure-openai-resource-name");
+  });
+
+  it("resolves openai-compatible base_url from the registry store; keyless when no key stored", async () => {
+    const secrets = makeSecrets({ "openai-compatible-base-url": "http://localhost:11434/v1" });
+    const model = await createModel(
+      { provider: "openai-compatible", model: "llama3" },
+      secrets as never
+    );
+    expect(model.modelId).toBe("llama3");
   });
 
   it("wraps SecretUnavailableError as LlmCredentialError naming the key + hint (AC3)", async () => {

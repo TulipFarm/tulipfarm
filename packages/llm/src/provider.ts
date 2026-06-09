@@ -1,7 +1,13 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createAzure } from "@ai-sdk/azure";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import { SecretUnavailableError, type SecretsService } from "@tulipfarm/secrets";
+import {
+  SecretUnavailableError,
+  type SecretsService,
+  llmProviderById,
+  providerField,
+} from "@tulipfarm/secrets";
 import type { LanguageModelV1 } from "ai";
 import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import type { ProviderEntry } from "./config";
@@ -30,11 +36,46 @@ export async function resolveApiKey(
   }
 }
 
+// Reads a registry config field's stored value. Unlike an API key, a missing config value is normal
+// (optional / not-yet-set) rather than an error, so SecretUnavailableError maps to undefined.
+async function resolveStored(
+  key: string | undefined,
+  secrets: SecretsService
+): Promise<string | undefined> {
+  if (!key) return undefined;
+  try {
+    return await secrets.get(key);
+  } catch (err) {
+    if (err instanceof SecretUnavailableError) return undefined;
+    throw err;
+  }
+}
+
 export async function createModel(
   entry: ProviderEntry,
   secrets: SecretsService
 ): Promise<LanguageModelV1> {
-  const apiKey = await resolveApiKey(entry.api_key_ref, secrets);
+  const info = llmProviderById(entry.provider);
+
+  // API key: an explicit api_key_ref (incl. env://VAR escape) wins; otherwise the provider's
+  // registry secret field. An optional key (e.g. local openai-compatible) may legitimately be unset.
+  const apiKeyField = info ? providerField(info, "api_key") : undefined;
+  let apiKey: string | undefined;
+  if (entry.api_key_ref) {
+    apiKey = await resolveApiKey(entry.api_key_ref, secrets);
+  } else if (apiKeyField) {
+    apiKey = apiKeyField.optional
+      ? await resolveStored(apiKeyField.key, secrets)
+      : await resolveApiKey(apiKeyField.key, secrets);
+  }
+
+  // Config fields: an explicit entry value overrides; else the registry-keyed stored value.
+  const resourceName =
+    entry.resource_name ??
+    (info ? await resolveStored(providerField(info, "resource_name")?.key, secrets) : undefined);
+  const baseUrl =
+    entry.base_url ??
+    (info ? await resolveStored(providerField(info, "base_url")?.key, secrets) : undefined);
 
   switch (entry.provider) {
     case "anthropic": {
@@ -46,14 +87,17 @@ export async function createModel(
       return p(entry.model);
     }
     case "openai-compatible": {
-      if (!entry.base_url) {
+      if (!baseUrl) {
         throw new LlmConfigValidationError("openai-compatible provider requires base_url");
       }
-      const p = createOpenAICompatible({
-        baseURL: entry.base_url,
-        name: "openai-compatible",
-        apiKey,
-      });
+      const p = createOpenAICompatible({ baseURL: baseUrl, name: "openai-compatible", apiKey });
+      return p(entry.model);
+    }
+    case "azure": {
+      if (!resourceName && !baseUrl) {
+        throw new LlmConfigValidationError("azure provider requires resource_name or base_url");
+      }
+      const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
       return p(entry.model);
     }
     default:

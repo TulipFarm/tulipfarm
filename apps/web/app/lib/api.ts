@@ -77,6 +77,22 @@ export async function apiWrite<T>(
   return (await res.json()) as T;
 }
 
+// DELETE client. Mirrors apiWrite's cookie-first auth + CSRF echo, but sends no body and expects an
+// empty (204) response, so it returns void instead of parsing JSON.
+export async function apiDelete(path: string): Promise<void> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  applyAuth(headers);
+  const csrf = readCookie(CSRF_COOKIE);
+  if (csrf) headers["x-csrf-token"] = csrf;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    credentials: "include",
+    headers,
+  });
+  if (!res.ok) throw await readError(res);
+}
+
 const CSRF_COOKIE = "csrf_token";
 
 function applyAuth(headers: Record<string, string>): void {

@@ -28,6 +28,7 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerAgentRoutes } from "./soul/agents/routes";
+import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
 import { registerSkillRoutes } from "./soul/skills/routes";
@@ -58,7 +59,9 @@ export interface AppOptions {
 }
 
 export async function buildApp(opts: AppOptions = {}) {
-  const app = Fastify({ logger: true });
+  // forceCloseConnections: destroy lingering keep-alive / SSE (chat stream) connections on close,
+  // so `app.close()` frees the port immediately instead of hanging on an open EventSource.
+  const app = Fastify({ logger: true, forceCloseConnections: true });
 
   await app.register(swagger, {
     openapi: {
@@ -76,6 +79,10 @@ export async function buildApp(opts: AppOptions = {}) {
   await app.register(cors, {
     origin: process.env.CORS_ORIGIN ?? `http://localhost:${process.env.VITE_PORT ?? 4000}`,
     credentials: true,
+    // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
+    // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
+    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token", "If-Match"],
   });
 
   await app.register(helmet, {
@@ -144,6 +151,16 @@ export async function buildApp(opts: AppOptions = {}) {
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
         if (opts.llmService) {
           registerSkillRoutes(app, opts.soulLoader, opts.gitSync, opts.llmService, requireAuth);
+          if (opts.secretsService) {
+            registerLlmConfigRoutes(
+              app,
+              opts.soulLoader,
+              opts.gitSync,
+              opts.llmService,
+              opts.secretsService,
+              requireAuth
+            );
+          }
         }
       }
     }

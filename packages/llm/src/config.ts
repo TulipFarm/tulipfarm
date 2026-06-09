@@ -44,6 +44,7 @@ const ProviderEntrySchema = Type.Object({
   model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
   api_key_ref: Type.Optional(Type.String()),
   base_url: Type.Optional(Type.String()),
+  resource_name: Type.Optional(Type.String()),
 });
 
 const TierConfigSchema = Type.Object({

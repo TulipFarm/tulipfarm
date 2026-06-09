@@ -173,14 +173,22 @@ async function boot() {
       if (shuttingDown) return;
       shuttingDown = true;
       app.log.info(`Received ${signal} — shutting down gracefully`);
+      // Watchdog: never let a hung dependency (e.g. pg-boss waiting on jobs) keep the process
+      // alive holding the port — force exit if graceful shutdown overruns.
+      const force = setTimeout(() => {
+        app.log.error("Shutdown timed out after 5s — forcing exit");
+        process.exit(1);
+      }, 5000);
+      force.unref();
       try {
         await app.close();
-        await boss.stop();
+        await boss.stop({ graceful: false });
         await hookExecutor?.close();
         await pool.end();
       } catch (err) {
         app.log.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
       }
+      clearTimeout(force);
       process.exit(0);
     };
     for (const signal of ["SIGTERM", "SIGINT"] as const) {
