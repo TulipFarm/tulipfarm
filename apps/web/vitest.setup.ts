@@ -15,3 +15,14 @@ Object.defineProperty(window, "matchMedia", {
     dispatchEvent: () => false,
   }),
 });
+
+// jsdom does not implement ResizeObserver; <A2uiFrame> uses it to auto-size the iframe. The mock
+// is inert (no layout in jsdom) — the resize round-trip is covered in a real browser (Playwright).
+Object.defineProperty(window, "ResizeObserver", {
+  writable: true,
+  value: class {
+    observe = () => {};
+    unobserve = () => {};
+    disconnect = () => {};
+  },
+});

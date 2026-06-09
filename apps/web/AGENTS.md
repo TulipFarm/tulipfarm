@@ -31,6 +31,7 @@ app/
     schema.ts           # JSON-Schema helpers: formFields/listColumns/detailFields/renderValue
     agents.ts  skills.ts  # typed wrappers over /api/v1/agents, /api/v1/skills (+ scan/audit/install)
     utils.ts  nav.ts  badges.ts   # cn(); sidebar nav config; mocked badge counts
+    a2ui/               # A2UI security/rendering foundation (sandboxed iframe for agent HTML) — see lib/a2ui/README.md
   components/
     app-sidebar.tsx     # persistent sidebar (8 sections, responsive mobile drawer)
     theme-toggle.tsx    # [data-theme] + localStorage toggle
@@ -39,6 +40,7 @@ app/
     schema-table.tsx  detail-view.tsx                 # schema-driven list / detail (read side)
     link-combobox.tsx   # searchable combobox for x-links fields
     markdown-view.tsx   # renders agent/skill markdown body
+    a2ui-frame.tsx      # <A2uiFrame>: sandboxed-iframe renderer for agent HTML (A2UI foundation)
     ui/*.tsx            # vendored shadcn primitives (flat)
   routes/
     _app.tsx            # pathless layout: sidebar + <Outlet/>
