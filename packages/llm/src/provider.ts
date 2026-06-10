@@ -84,7 +84,10 @@ export async function createModel(
     }
     case "openai": {
       const p = createOpenAI({ apiKey });
-      return p(entry.model);
+      // structuredOutputs:false → tools are sent non-strict, so schemas with optional
+      // properties are accepted (strict mode requires every property in `required`).
+      // Tool args are still validated at runtime by the ToolRegistry (ajv).
+      return p(entry.model, { structuredOutputs: false });
     }
     case "openai-compatible": {
       if (!baseUrl) {
@@ -98,7 +101,8 @@ export async function createModel(
         throw new LlmConfigValidationError("azure provider requires resource_name or base_url");
       }
       const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
-      return p(entry.model);
+      // See openai case: disable strict tool schemas so optional properties are allowed.
+      return p(entry.model, { structuredOutputs: false });
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);
