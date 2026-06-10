@@ -32,7 +32,7 @@
     "@electric-sql/pglite": "^0.2.0",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/pg": "^8.11.0",
-    "@vitest/coverage-v8": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.8",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^3.2.4"
