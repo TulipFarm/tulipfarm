@@ -766,6 +766,55 @@ describe("chat routes", () => {
       const d = await decide(randomUUID(), "approve");
       expect(d.statusCode).toBe(404);
     });
+
+    describe("GET /api/v1/chat/approvals", () => {
+      it("401 without a session", async () => {
+        const res = await get("/api/v1/chat/approvals", { session: null });
+        expect(res.statusCode).toBe(401);
+      });
+
+      it("returns an empty list when nothing is pending", async () => {
+        const res = await get("/api/v1/chat/approvals");
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({ items: [] });
+      });
+
+      it("lists a live pending approval with intact args", async () => {
+        // Fire WITHOUT awaiting — the stream suspends on the gate until we decide.
+        const chat = post({ message: userMsg("write it"), autonomy: "approval-required" });
+        await waitFor(() => streamRepo.rows.some((r) => r.eventType === "approval-request"), 2000);
+
+        const res = await get("/api/v1/chat/approvals");
+        expect(res.statusCode).toBe(200);
+        const { items } = res.json() as { items: Array<Record<string, unknown>> };
+        expect(items).toHaveLength(1);
+        expect(items[0]).toMatchObject({
+          approvalId: bufferedApprovalId(),
+          toolCallId: "call_1",
+          toolName: "write_thing",
+          args: { value: "x" }, // schemaless `args` must round-trip an object intact
+        });
+        expect(typeof items[0]?.expiresAt).toBe("string");
+        expect(typeof items[0]?.createdAt).toBe("string");
+
+        // Drain the suspended stream so the next beforeEach's app.close() doesn't hang.
+        await decide(bufferedApprovalId(), "approve");
+        await chat;
+        await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+      });
+
+      it("drops the approval from the list once it is decided", async () => {
+        const chat = post({ message: userMsg("write it"), autonomy: "approval-required" });
+        await waitFor(() => streamRepo.rows.some((r) => r.eventType === "approval-request"), 2000);
+        await decide(bufferedApprovalId(), "approve");
+        await chat;
+        await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+        const res = await get("/api/v1/chat/approvals");
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({ items: [] });
+      });
+    });
   });
 
   describe("GET /api/v1/chat/streams/:streamId (resume)", () => {

@@ -10,6 +10,22 @@ interface PendingApproval {
   timer: ReturnType<typeof setTimeout>;
   emitter: StreamEmitter;
   toolCallId: string;
+  // Retained so listPending() can project a row without re-deriving from the (per-stream) emitter.
+  approvalId: string;
+  toolName: string;
+  args: unknown;
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** A serializable projection of one in-flight approval, for the list endpoint + sidebar badge. */
+export interface PendingApprovalSummary {
+  approvalId: string;
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+  expiresAt: string;
+  createdAt: string;
 }
 
 /**
@@ -25,13 +41,24 @@ export class ApprovalRegistry {
   /** Suspend a gated tool call until a human (or the timeout) decides. */
   request(emitter: StreamEmitter, info: ApprovalRequestInfo): Promise<ApprovalDecision> {
     const approvalId = randomUUID();
+    const createdAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + APPROVAL_TIMEOUT_MS).toISOString();
     const decision = new Promise<ApprovalDecision>((resolve) => {
       const timer = setTimeout(
         () => this.settle(approvalId, { outcome: "timeout", reason: "approval request timed out" }),
         APPROVAL_TIMEOUT_MS
       );
-      this.pending.set(approvalId, { resolve, timer, emitter, toolCallId: info.toolCallId });
+      this.pending.set(approvalId, {
+        resolve,
+        timer,
+        emitter,
+        toolCallId: info.toolCallId,
+        approvalId,
+        toolName: info.toolName,
+        args: info.args,
+        expiresAt,
+        createdAt,
+      });
     });
     void emitter.emit("approval-request", {
       approvalId,
@@ -53,6 +80,20 @@ export class ApprovalRegistry {
         : { outcome: "denied", reason: "denied by operator" }
     );
     return true;
+  }
+
+  /** Snapshot all in-flight approvals, oldest first. Ephemeral — empties on API restart. */
+  listPending(): PendingApprovalSummary[] {
+    return [...this.pending.values()]
+      .map((e) => ({
+        approvalId: e.approvalId,
+        toolCallId: e.toolCallId,
+        toolName: e.toolName,
+        args: e.args,
+        expiresAt: e.expiresAt,
+        createdAt: e.createdAt,
+      }))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   private settle(approvalId: string, decision: ApprovalDecision): void {
