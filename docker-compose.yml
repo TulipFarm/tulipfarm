@@ -6,8 +6,9 @@ name: tulipfarm
 # it (and omit/stop the `postgres` service).
 services:
   app:
+    # Shipped to the install dir, which has no build context — pull the published image only.
+    # (For local image builds use a docker-compose.override.yml with `build: .`.)
     image: ghcr.io/tulipfarm/app:${TULIPFARM_VERSION:-latest}
-    build: .
     restart: unless-stopped
     depends_on:
       postgres:
