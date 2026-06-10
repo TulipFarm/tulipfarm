@@ -12,6 +12,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
+import { resolveAgent } from "../soul/agents/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
@@ -250,14 +251,14 @@ export function registerChatRoutes(
       //    (CONTEXT-ENGINE §1), so the cacheable prefix is byte-stable across turns (AC-V1-001).
       const history = await messageRepo.listByConversation(convo._id, 1000);
       const messages: CoreMessage[] = [];
-      const agent = convo.agentId ? soulLoader?.agents.get(convo.agentId) : undefined;
+      const agent = resolveAgent(soulLoader, convo.agentId);
       const agentDomain =
-        typeof agent?.frontmatter.domain === "string" ? agent.frontmatter.domain : null;
+        typeof agent.frontmatter.domain === "string" ? agent.frontmatter.domain : null;
       const system = assembleSystemPrompt({
-        agentId: convo.agentId,
+        agentId: agent.name,
         domain: agentDomain,
         tenantId: "default",
-        personality: agent?.body,
+        personality: agent.body,
         memory: workingMemory ? await workingMemory.list(user._id) : [],
         governanceDocs: knowledge ? await knowledge.governanceDocuments() : [],
       });
@@ -283,7 +284,7 @@ export function registerChatRoutes(
       const tools =
         toolRegistry && toolRegistry.getAll().length > 0
           ? toolRegistry.buildToolSet(
-              { userId: user._id, agentId: convo.agentId },
+              { userId: user._id, agentId: agent.name },
               coordinator,
               fullResultCache
             )

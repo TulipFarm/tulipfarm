@@ -121,11 +121,17 @@ describe("agents routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("lists agents with frontmatter-derived summary fields (no body)", async () => {
+    it("lists the built-in GeneralAssistant first, then soul agents (frontmatter only, no body)", async () => {
       const res = await app.inject(authed("/api/v1/agents"));
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         agents: [
+          {
+            name: "GeneralAssistant",
+            label: "General Assistant",
+            description:
+              "The default TulipFarm assistant — answers when no soul agent is selected.",
+          },
           {
             name: "sprint-planner",
             label: "Sprint Planner",
@@ -140,6 +146,14 @@ describe("agents routes", () => {
   });
 
   describe("GET /api/v1/agents/:name", () => {
+    it("serves the built-in GeneralAssistant detail by name", async () => {
+      const res = await app.inject(authed("/api/v1/agents/GeneralAssistant"));
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.name).toBe("GeneralAssistant");
+      expect(body.body.length).toBeGreaterThan(0);
+    });
+
     it("returns the full agent including its markdown body", async () => {
       const res = await app.inject(authed("/api/v1/agents/sprint-planner"));
       expect(res.statusCode).toBe(200);
