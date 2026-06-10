@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { BatchCoordinator } from "./batch-executor";
 import { TOOL_TIMEOUT_MS, ToolRegistry } from "./registry";
-import type { RequestContext, ToolDef } from "./types";
+import type {
+  ApprovalDecision,
+  ApprovalGate,
+  ApprovalRequestInfo,
+  RequestContext,
+  ToolDef,
+} from "./types";
 
 function makeTool(overrides: Partial<ToolDef> = {}): ToolDef {
   return {
@@ -268,6 +274,122 @@ describe("ToolRegistry", () => {
         error: { code: "internal_error", message: "tool execution timed out" },
       });
       vi.useRealTimers();
+    });
+  });
+
+  describe("approval gate (mode-gated mutating tools)", () => {
+    function controllableGate(): {
+      gate: ApprovalGate;
+      calls: ApprovalRequestInfo[];
+      resolve: (d: ApprovalDecision) => void;
+    } {
+      const calls: ApprovalRequestInfo[] = [];
+      let resolveFn!: (d: ApprovalDecision) => void;
+      const gate: ApprovalGate = {
+        request: (info) => {
+          calls.push(info);
+          return new Promise<ApprovalDecision>((r) => {
+            resolveFn = r;
+          });
+        },
+      };
+      return { gate, calls, resolve: (d) => resolveFn(d) };
+    }
+
+    const approvalCtx: RequestContext = { ...ctx, autonomy: "approval-required" };
+
+    it("approval-required + mutating: suspends until approved, then runs the tool", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "ran" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "write_x", mutating: true, execute }));
+      const { gate, calls, resolve } = controllableGate();
+      const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
+
+      const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      await Promise.resolve();
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ toolCallId: "tc1", toolName: "write_x" });
+      expect(execute).not.toHaveBeenCalled();
+
+      resolve({ outcome: "approved" });
+      expect(await p).toEqual({ success: true, data: "ran" });
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("approval-required + mutating: deny returns internal_error, never runs the tool, caches denial", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "ran" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "write_x", mutating: true, execute }));
+      const { gate, resolve } = controllableGate();
+      const cache = new Map<string, import("./types").ToolCallResult>();
+      const ts = reg.buildToolSet(approvalCtx, undefined, cache, gate);
+
+      const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      resolve({ outcome: "denied", reason: "denied by operator" });
+      const result = await p;
+
+      expect(execute).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "internal_error", message: "denied by operator" },
+      });
+      expect(cache.get("tc1")).toMatchObject({ success: false, error: { code: "internal_error" } });
+    });
+
+    it("read-only tool under approval-required: no gate, runs directly", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "read" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "read_x", mutating: false, execute }));
+      const { gate, calls } = controllableGate();
+      const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
+
+      expect(await ts.read_x.execute?.({}, { messages: [], toolCallId: "tc1" })).toEqual({
+        success: true,
+        data: "read",
+      });
+      expect(calls).toHaveLength(0);
+    });
+
+    it("mutating tool but autonomy=full: no gate, runs directly", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "ran" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "write_x", mutating: true, execute }));
+      const { gate, calls } = controllableGate();
+      const ts = reg.buildToolSet({ ...ctx, autonomy: "full" }, undefined, undefined, gate);
+
+      await ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      expect(calls).toHaveLength(0);
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("no gate wired: approval-required + mutating still runs (gate optional)", async () => {
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "write_x", mutating: true }));
+      const ts = reg.buildToolSet(approvalCtx);
+      expect(await ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" })).toEqual({
+        success: true,
+        data: "ok",
+      });
+    });
+
+    it("the approval wait is NOT subject to the 30s tool timeout (gate is outside withToolTimeout)", async () => {
+      vi.useFakeTimers();
+      try {
+        const execute = vi.fn(async () => ({ success: true as const, data: "ran" }));
+        const reg = new ToolRegistry();
+        reg.register(makeTool({ name: "write_x", mutating: true, execute }));
+        const { gate, resolve } = controllableGate();
+        const ts = reg.buildToolSet(approvalCtx, new BatchCoordinator(), undefined, gate);
+
+        const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+        await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_MS * 3);
+        expect(execute).not.toHaveBeenCalled(); // still pending, not timed out
+
+        resolve({ outcome: "approved" });
+        expect(await p).toEqual({ success: true, data: "ran" });
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachToStream, mapStreamPart, runChatStream } from "./producer";
+import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
 
@@ -151,7 +152,7 @@ describe("runChatStream", () => {
         { type: "text-delta", textDelta: "llo" },
         { type: "finish", finishReason: "stop" },
       ]),
-      { repo, hub, log }
+      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
     );
 
     const rows = await repo.listAfter(streamId, 0);
@@ -162,7 +163,7 @@ describe("runChatStream", () => {
 
   it("synthesises a finish when the stream ends without a terminal", async () => {
     await runChatStream(streamId, fromArray([{ type: "text-delta", textDelta: "x" }]), {
-      repo,
+      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
       hub,
       log,
     });
@@ -175,7 +176,11 @@ describe("runChatStream", () => {
       yield { type: "text-delta", textDelta: "partial" };
       throw new Error("provider exploded");
     }
-    await runChatStream(streamId, boom(), { repo, hub, log });
+    await runChatStream(streamId, boom(), {
+      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+      hub,
+      log,
+    });
     const rows = await repo.listAfter(streamId, 0);
     expect(rows.map((r) => r.eventType)).toEqual(["text", "error"]);
     expect(rows.at(-1)?.data).toEqual({ message: "provider exploded" });
@@ -238,7 +243,11 @@ describe("attachToStream", () => {
       yield { type: "text-delta", textDelta: "three" };
       yield { type: "finish", finishReason: "stop" };
     }
-    void runChatStream(streamId, gated(), { repo, hub, log });
+    void runChatStream(streamId, gated(), {
+      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+      hub,
+      log,
+    });
 
     // First connection: receive events 1 & 2, then the client drops.
     const res1 = new FakeRes();

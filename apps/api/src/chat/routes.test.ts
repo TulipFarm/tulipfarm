@@ -16,6 +16,7 @@ import {
   assertValidEntry,
 } from "../memory/working-memory";
 import { type PaginatedResult, encodeCursor } from "../pagination";
+import { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { buildTurnLog, parseLastEventId } from "./routes";
@@ -622,13 +623,148 @@ describe("chat routes", () => {
       expect(res.body).toContain("event: finish");
     });
 
+    // reply.hijack() bypasses @fastify/cors, so the SSE response must carry CORS headers itself or a
+    // cross-origin browser fetch is blocked (and X-Conversation-Id is unreadable without expose-headers).
+    it("carries CORS headers on the hijacked SSE response for a cross-origin request", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/chat",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, origin: "http://localhost:4000" },
+        payload: { message: userMsg("hi") },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:4000");
+      expect(res.headers["access-control-allow-credentials"]).toBe("true");
+      expect(String(res.headers["access-control-expose-headers"])).toMatch(/x-conversation-id/i);
+    });
+
     it("buffers the turn's events in the stream repo for replay", async () => {
       const res = await post({ message: userMsg("hi") });
       const streamId = res.headers["x-stream-id"] as string;
-      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"));
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
       const events = await streamRepo.listAfter(streamId, 0);
       expect(events[0].eventType).toBe("text");
       expect(events.at(-1)?.eventType).toBe("finish");
+    });
+  });
+
+  // ── Live tool-approval round-trip: approval-required + a mutating tool suspends the stream until
+  //    a decide POST resolves it. App is rebuilt with a custom registry holding one mutating tool. ──
+  describe("POST /api/v1/chat (live approval round-trip)", () => {
+    beforeEach(async () => {
+      await app.close();
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "write_thing",
+        tier: "platform",
+        mutating: true,
+        description: "writes a thing",
+        inputSchema: {
+          type: "object",
+          properties: { value: { type: "string" } },
+          additionalProperties: false,
+        },
+        execute: async () => ({ success: true as const, data: "wrote" }),
+      });
+      select.mockImplementation(() =>
+        makeToolThenTextModel(
+          [{ toolCallId: "call_1", toolName: "write_thing", args: { value: "x" } }],
+          "done"
+        )
+      );
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        toolRegistry: reg,
+      });
+    });
+
+    function decide(
+      approvalId: string,
+      decision: "approve" | "deny"
+    ): Promise<LightMyRequestResponse> {
+      return app.inject({
+        method: "POST",
+        url: `/api/v1/chat/approvals/${approvalId}/decide`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { decision },
+      });
+    }
+
+    const bufferedApprovalId = (): string =>
+      (
+        streamRepo.rows.find((r) => r.eventType === "approval-request")?.data as {
+          approvalId: string;
+        }
+      ).approvalId;
+
+    it("emits approval-request, resumes on approve, and runs the tool", async () => {
+      // Fire WITHOUT awaiting — a suspended stream won't let app.inject resolve until decide lands.
+      const chat = post({ message: userMsg("write it"), autonomy: "approval-required" });
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "approval-request"), 2000);
+
+      const approvalId = bufferedApprovalId();
+      expect(typeof approvalId).toBe("string");
+
+      const d = await decide(approvalId, "approve");
+      expect(d.statusCode).toBe(200);
+      expect(d.json()).toMatchObject({ status: "approve" });
+
+      const res = await chat;
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+      const types = streamRepo.rows.map((r) => r.eventType);
+      expect(types).toContain("approval-request");
+      expect(types).toContain("approval-resolved");
+      expect(types).toContain("tool-result");
+
+      const resolved = streamRepo.rows.find((r) => r.eventType === "approval-resolved");
+      expect((resolved?.data as { outcome: string }).outcome).toBe("approved");
+      const toolResult = streamRepo.rows.find((r) => r.eventType === "tool-result");
+      expect((toolResult?.data as { result: { success: boolean } }).result.success).toBe(true);
+    });
+
+    it("deny resumes the stream with an internal_error tool-result", async () => {
+      const chat = post({ message: userMsg("write it"), autonomy: "approval-required" });
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "approval-request"), 2000);
+
+      const d = await decide(bufferedApprovalId(), "deny");
+      expect(d.statusCode).toBe(200);
+
+      const res = await chat;
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+      const resolved = streamRepo.rows.find((r) => r.eventType === "approval-resolved");
+      expect((resolved?.data as { outcome: string }).outcome).toBe("denied");
+      const toolResult = streamRepo.rows.find((r) => r.eventType === "tool-result");
+      expect(
+        (toolResult?.data as { result: { success: boolean; error?: { code: string } } }).result
+      ).toMatchObject({ success: false, error: { code: "internal_error" } });
+    });
+
+    it("does not gate when autonomy is not approval-required", async () => {
+      const res = await post({ message: userMsg("write it"), autonomy: "full" });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+      const types = streamRepo.rows.map((r) => r.eventType);
+      expect(types).not.toContain("approval-request");
+      expect(types).toContain("tool-result");
+    });
+
+    it("404 for an unknown approval id", async () => {
+      const d = await decide(randomUUID(), "approve");
+      expect(d.statusCode).toBe(404);
     });
   });
 

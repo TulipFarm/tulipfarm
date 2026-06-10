@@ -1,6 +1,7 @@
 import type { ServerResponse } from "node:http";
 import type { ToolCallResult } from "../tools/types";
 import { writeSseEvent } from "./sse";
+import type { StreamEmitter } from "./stream-emitter";
 import { type StreamEvent, type StreamHub, isTerminalEvent } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
 
@@ -49,7 +50,7 @@ export function mapStreamPart(
 }
 
 export interface StreamProducerDeps {
-  repo: StreamResumeRepo;
+  emitter: StreamEmitter;
   hub: StreamHub;
   log: { error: (obj: unknown, msg?: string) => void };
   fullResultCache?: Map<string, ToolCallResult>;
@@ -57,41 +58,33 @@ export interface StreamProducerDeps {
 
 /**
  * Detached turn producer: consumes `fullStream` to completion (independent of any
- * client socket), assigning a monotonic `seq` to each event, persisting it to
- * `stream_resume`, and publishing it to the hub for live subscribers. Always emits
- * a terminal (`finish`|`error`) and finishes the hub so reconnects never hang.
- * Never throws — failures are logged.
+ * client socket), emitting each mapped event through the shared `StreamEmitter`
+ * (seq + `stream_resume` persist + hub publish). Always emits a terminal
+ * (`finish`|`error`) and finishes the hub so reconnects never hang. Never throws —
+ * failures are logged. The same emitter is shared with the approval gate so
+ * out-of-band approval events stay on one monotonic seq.
  */
 export async function runChatStream(
   streamId: string,
   fullStream: AsyncIterable<unknown>,
   deps: StreamProducerDeps
 ): Promise<void> {
-  let seq = 0;
   let sawTerminal = false;
-
-  const emit = async (eventType: string, data: unknown): Promise<void> => {
-    seq += 1;
-    try {
-      await deps.repo.append({ streamId, seq, eventType, data, createdAt: new Date() });
-    } catch (err) {
-      deps.log.error({ err, streamId }, "stream_resume append failed");
-    }
-    deps.hub.publish(streamId, { seq, eventType, data });
-  };
 
   try {
     for await (const part of fullStream) {
       const mapped = mapStreamPart(part, deps.fullResultCache);
       if (!mapped) continue;
-      await emit(mapped.eventType, mapped.data);
+      await deps.emitter.emit(mapped.eventType, mapped.data);
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }
-    if (!sawTerminal) await emit("finish", { reason: "stop" });
+    if (!sawTerminal) await deps.emitter.emit("finish", { reason: "stop" });
   } catch (err) {
     deps.log.error({ err, streamId }, "chat stream producer failed");
     if (!sawTerminal) {
-      await emit("error", { message: err instanceof Error ? err.message : "stream error" });
+      await deps.emitter.emit("error", {
+        message: err instanceof Error ? err.message : "stream error",
+      });
     }
   } finally {
     deps.hub.finish(streamId);

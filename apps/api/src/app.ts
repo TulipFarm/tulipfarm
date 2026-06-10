@@ -14,6 +14,7 @@ import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
+import { ApprovalRegistry } from "./chat/approvals";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
@@ -56,6 +57,7 @@ export interface AppOptions {
   workingMemoryService?: WorkingMemoryService;
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
+  approvalRegistry?: ApprovalRegistry;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -83,6 +85,8 @@ export async function buildApp(opts: AppOptions = {}) {
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token", "If-Match"],
+    // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
+    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id"],
   });
 
   await app.register(helmet, {
@@ -194,7 +198,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.knowledgeService,
         opts.soulLoader,
         opts.domainEventEmitter,
-        toolRegistry
+        toolRegistry,
+        opts.approvalRegistry ?? new ApprovalRegistry()
       );
     }
     if (opts.knowledgeService) {

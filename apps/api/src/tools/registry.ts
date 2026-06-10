@@ -2,7 +2,13 @@ import { ajv } from "@tulipfarm/validation";
 import { type ToolSet, jsonSchema, tool } from "ai";
 import type { BatchCoordinator } from "./batch-executor";
 import { truncateResult } from "./truncate";
-import { type RequestContext, type ToolCallResult, type ToolDef, err } from "./types";
+import {
+  type ApprovalGate,
+  type RequestContext,
+  type ToolCallResult,
+  type ToolDef,
+  err,
+} from "./types";
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
@@ -45,7 +51,8 @@ export class ToolRegistry {
   buildToolSet(
     ctx: RequestContext,
     coordinator?: BatchCoordinator,
-    fullResultCache?: Map<string, ToolCallResult>
+    fullResultCache?: Map<string, ToolCallResult>,
+    approvalGate?: ApprovalGate
   ): ToolSet {
     return Object.fromEntries(
       this.getAll().map((t) => [
@@ -56,6 +63,21 @@ export class ToolRegistry {
           execute: async (args: unknown, opts: { toolCallId: string }) => {
             const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
             if (!v(args)) return err("validation_error", firstArgError(v.errors));
+            // Mode-gated approval: a mutating tool under approval-required suspends here until a human
+            // decides. Deliberately OUTSIDE coordinator + withToolTimeout — the wait can be minutes, and
+            // sibling approval requests must not serialize behind each other or auto-fail at 30s.
+            if (ctx.autonomy === "approval-required" && t.mutating && approvalGate) {
+              const decision = await approvalGate.request({
+                toolCallId: opts.toolCallId,
+                toolName: t.name,
+                args,
+              });
+              if (decision.outcome !== "approved") {
+                const denied = err("internal_error", decision.reason);
+                fullResultCache?.set(opts.toolCallId, denied);
+                return truncateResult(denied);
+              }
+            }
             const full = await (coordinator
               ? coordinator.schedule(() => withToolTimeout(t.execute(args, ctx)), t.mutating)
               : withToolTimeout(t.execute(args, ctx)));

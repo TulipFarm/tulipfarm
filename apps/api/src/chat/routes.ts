@@ -16,6 +16,7 @@ import { resolveAgent } from "../soul/agents/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
+import { ApprovalRegistry, makeApprovalGate } from "./approvals";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
   type MessagePart,
@@ -29,6 +30,7 @@ import {
 import { attachToStream, runChatStream } from "./producer";
 import { MessageSchema } from "./schemas";
 import { writeSseHeaders } from "./sse";
+import { makeStreamEmitter } from "./stream-emitter";
 import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
 
@@ -160,6 +162,25 @@ export async function persistStep(
   }
 }
 
+// @fastify/cors adds CORS headers on the normal reply path, but `reply.hijack()` (used for the SSE
+// stream) bypasses it — so a cross-origin browser `fetch` is blocked and X-Conversation-Id is unreadable.
+// Copy the headers the cors hook already set onto the raw response.
+function corsPassthrough(reply: FastifyReply): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of [
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-expose-headers",
+    "vary",
+  ]) {
+    const value = reply.getHeader(name);
+    if (typeof value === "string") out[name] = value;
+    else if (typeof value === "number") out[name] = String(value);
+    else if (Array.isArray(value)) out[name] = value.join(", ");
+  }
+  return out;
+}
+
 export function registerChatRoutes(
   app: FastifyInstance,
   llmService: LlmService,
@@ -172,8 +193,13 @@ export function registerChatRoutes(
   knowledge?: KnowledgeService,
   soulLoader?: SoulLoader,
   events?: EventEmitter,
-  toolRegistry?: ToolRegistry
+  toolRegistry?: ToolRegistry,
+  approvals?: ApprovalRegistry
 ): void {
+  // One in-process approval registry shared by the chat turn (which suspends gated tools) and the
+  // decide route (which resolves them). Single-instance V1 — see chat/approvals.ts.
+  const approvalRegistry = approvals ?? new ApprovalRegistry();
+
   app.post(
     "/api/v1/chat",
     {
@@ -275,18 +301,22 @@ export function registerChatRoutes(
       //    turn finishes (and keeps buffering) even after the client disconnects.
       const streamId = randomUUID();
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
-      writeSseHeaders(reply.raw, { "X-Stream-Id": streamId });
+      writeSseHeaders(reply.raw, { "X-Stream-Id": streamId, ...corsPassthrough(reply) });
       reply.hijack();
       hub.register(streamId);
+      // Shared per-turn emitter: the producer loop AND the approval gate emit through it, so
+      // out-of-band approval events stay on one monotonic, serialized seq (see stream-emitter.ts).
+      const emitter = makeStreamEmitter(streamId, { repo: streamRepo, hub, log: req.log });
 
       const coordinator = new BatchCoordinator();
       const fullResultCache = new Map<string, ToolCallResult>();
       const tools =
         toolRegistry && toolRegistry.getAll().length > 0
           ? toolRegistry.buildToolSet(
-              { userId: user._id, agentId: agent.name },
+              { userId: user._id, agentId: agent.name, autonomy: body.autonomy },
               coordinator,
-              fullResultCache
+              fullResultCache,
+              makeApprovalGate(approvalRegistry, emitter)
             )
           : undefined;
 
@@ -313,11 +343,58 @@ export function registerChatRoutes(
       // Attach this connection (live from seq 0) and start the detached producer.
       void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
       void runChatStream(streamId, result.fullStream, {
-        repo: streamRepo,
+        emitter,
         hub,
         log: req.log,
         fullResultCache,
       });
+    }
+  );
+
+  app.post(
+    "/api/v1/chat/approvals/:approvalId/decide",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Approve or deny a pending tool-execution approval. Resumes the suspended chat stream " +
+          "with the tool result (approve) or an error result the model sees (deny).",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["approvalId"],
+          properties: { approvalId: { type: "string", minLength: 1 } },
+        },
+        body: {
+          type: "object",
+          required: ["decision"],
+          additionalProperties: false,
+          properties: { decision: { type: "string", enum: ["approve", "deny"] } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { status: { type: "string" } },
+            required: ["status"],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { approvalId } = req.params as { approvalId: string };
+      const { decision } = req.body as { decision: "approve" | "deny" };
+      const resolved = approvalRegistry.decide(
+        approvalId,
+        decision === "approve" ? "approved" : "denied"
+      );
+      if (!resolved) {
+        return reply.code(404).send({ error: "approval not found or already resolved" });
+      }
+      return reply.send({ status: decision });
     }
   );
 
@@ -360,7 +437,7 @@ export function registerChatRoutes(
         }
       }
 
-      writeSseHeaders(reply.raw);
+      writeSseHeaders(reply.raw, corsPassthrough(reply));
       reply.hijack();
       await attachToStream(reply.raw, streamId, afterSeq, { repo: streamRepo, hub });
     }

@@ -13,10 +13,14 @@ export const err = (code: ToolErrorCode, message: string): ToolCallResult => ({
   error: { code, message },
 });
 
+/** Chat autonomy mode for a turn (mirrors the POST /chat request field). */
+export type ChatAutonomy = "full" | "supervised" | "approval-required" | "manual";
+
 /** Per-request caller identity. Service references are closed over at registration time. */
 export interface RequestContext {
   userId: string;
   agentId?: string;
+  autonomy?: ChatAutonomy;
 }
 
 /** Canonical tool shape for the ToolRegistry (TOOL-V1). */
@@ -29,4 +33,20 @@ export interface ToolDef {
   inputSchema: Record<string, unknown>;
   execute: (args: unknown, ctx: RequestContext) => Promise<ToolCallResult>;
   requiresApproval?: boolean;
+}
+
+/** Outcome of a human approval for a gated (mutating + approval-required) tool call. */
+export type ApprovalDecision =
+  | { outcome: "approved" }
+  | { outcome: "denied" | "timeout"; reason: string };
+
+export interface ApprovalRequestInfo {
+  toolCallId: string;
+  toolName: string;
+  args: unknown;
+}
+
+/** Per-turn gate the tool wrapper calls to suspend a mutating tool until a human decides. */
+export interface ApprovalGate {
+  request(info: ApprovalRequestInfo): Promise<ApprovalDecision>;
 }

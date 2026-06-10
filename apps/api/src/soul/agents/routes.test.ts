@@ -131,6 +131,7 @@ describe("agents routes", () => {
             label: "General Assistant",
             description:
               "The default TulipFarm assistant — answers when no soul agent is selected.",
+            model: "standard",
           },
           {
             name: "sprint-planner",

@@ -5,7 +5,7 @@
  * routes can branch on 401 (auth) vs 404 (not found).
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
+export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
 
 export class ApiError extends Error {
   readonly status: number;
@@ -58,13 +58,7 @@ export async function apiWrite<T>(
   body: unknown,
   ifMatch?: number
 ): Promise<T> {
-  const headers: Record<string, string> = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-  };
-  applyAuth(headers);
-  const csrf = readCookie(CSRF_COOKIE);
-  if (csrf) headers["x-csrf-token"] = csrf;
+  const headers = mutationHeaders();
   if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -94,6 +88,20 @@ export async function apiDelete(path: string): Promise<void> {
 }
 
 const CSRF_COOKIE = "csrf_token";
+
+// Headers shared by JSON-body mutations (apiWrite's POST/PUT and the chat stream POST): JSON Accept
+// + Content-Type, cookie-first auth, and the CSRF echo header (a no-op when authed by Bearer
+// token). Callers add request-specific headers (e.g. `If-Match`) onto the returned object.
+export function mutationHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+  applyAuth(headers);
+  const csrf = readCookie(CSRF_COOKIE);
+  if (csrf) headers["x-csrf-token"] = csrf;
+  return headers;
+}
 
 function applyAuth(headers: Record<string, string>): void {
   const token = import.meta.env.VITE_API_TOKEN;

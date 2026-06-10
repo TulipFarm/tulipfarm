@@ -1,0 +1,129 @@
+/*
+ * React hook that owns the chat timeline: a `useReducer` wired to the SSE client. `send` pushes the
+ * user message, opens the stream, and dispatches each typed event; `approve` posts an approval
+ * verdict. The local action type unions the wire `ChatEvent`s with a `"user"` action so user turns
+ * and assistant events share one dispatch while `chatReducer` stays pure over `ChatEvent`.
+ * `conversationId` is mirrored into a ref so `send` reads the latest id without re-subscribing
+ * (stale-closure guard). Cross-reload rehydration and reconnect are intentionally out of scope.
+ */
+
+import { useCallback, useReducer, useRef } from "react";
+import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
+import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
+import type { ChatStreamMeta } from "~/lib/chat/sse-client";
+import type { Autonomy, ChatEvent, ChatState, ModelTier } from "~/lib/chat/types";
+
+export type SendOptions = { model?: ModelTier; autonomy?: Autonomy; agentId?: string };
+
+// Wire events plus two hook-local actions: a user turn and the one-shot stream metadata. Keeping
+// these out of `chatReducer` lets that reducer stay pure over the `ChatEvent` wire contract.
+type ChatAction =
+  | ChatEvent
+  | { type: "user"; text: string }
+  | { type: "meta"; meta: ChatStreamMeta }
+  | { type: "regenerate" }
+  | { type: "reset" };
+
+function reducer(state: ChatState, action: ChatAction): ChatState {
+  if (action.type === "user") return appendUserMessage(state, action.text);
+  if (action.type === "reset") return initialChatState;
+  if (action.type === "regenerate") {
+    // Drop the trailing assistant turn so the re-streamed events fold onto a fresh one (the prior user
+    // message stays — no duplicate bubble). The server still records a new turn: V1 has no true
+    // server-side regenerate, but with no history rehydration the local view stays clean.
+    const messages = state.messages.slice();
+    while (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+      messages.pop();
+    }
+    return { ...state, messages, status: "submitted", error: undefined };
+  }
+  if (action.type === "meta") {
+    return {
+      ...state,
+      conversationId: action.meta.conversationId ?? state.conversationId,
+      streamId: action.meta.streamId ?? state.streamId,
+    };
+  }
+  return chatReducer(state, action);
+}
+
+export function useChatStream() {
+  const [state, dispatch] = useReducer(reducer, initialChatState);
+  // Latest conversation id + state + last send options, read inside callbacks without re-subscribing.
+  const conversationIdRef = useRef<string | undefined>(undefined);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const lastOptsRef = useRef<SendOptions | undefined>(undefined);
+
+  // Open the stream for `text` and fold its events into the timeline. Shared by send + regenerate.
+  const runStream = useCallback(async (text: string, opts?: SendOptions) => {
+    try {
+      await postChat(
+        {
+          message: { role: "user", content: text },
+          conversationId: conversationIdRef.current,
+          model: opts?.model,
+          autonomy: opts?.autonomy,
+          agentId: opts?.agentId,
+        },
+        {
+          onMeta: (meta) => {
+            if (meta.conversationId) conversationIdRef.current = meta.conversationId;
+            dispatch({ type: "meta", meta });
+          },
+          onEvent: (event) => dispatch(event),
+        }
+      );
+    } catch (err) {
+      // Transport-layer failure (auth, 5xx, network) before/while streaming: surface it so the
+      // composer leaves its busy state instead of spinning on the loader forever.
+      dispatch({
+        type: "error",
+        data: { message: err instanceof Error ? err.message : "stream failed" },
+      });
+    }
+  }, []);
+
+  const send = useCallback(
+    async (text: string, opts?: SendOptions) => {
+      dispatch({ type: "user", text });
+      lastOptsRef.current = opts;
+      await runStream(text, opts);
+    },
+    [runStream]
+  );
+
+  // Re-run the most recent user turn with the same options. Only meaningful on the last assistant msg.
+  const regenerate = useCallback(async () => {
+    const lastUser = [...stateRef.current.messages].reverse().find((m) => m.role === "user");
+    const text = lastUser?.parts.map((p) => (p.kind === "text" ? p.text : "")).join("") ?? "";
+    if (!text) return;
+    dispatch({ type: "regenerate" });
+    await runStream(text, lastOptsRef.current);
+  }, [runStream]);
+
+  const approve = useCallback(async (approvalId: string, decision: "approve" | "deny") => {
+    try {
+      await sendApprovalDecision(approvalId, decision);
+    } catch {
+      // The approval-resolved SSE event is the source of truth for the card state; a failed decide
+      // (e.g. a 404 race with the auto-deny timeout) needs no separate UI handling in V1.
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    conversationIdRef.current = undefined;
+    dispatch({ type: "reset" });
+  }, []);
+
+  return {
+    messages: state.messages,
+    pendingApprovals: state.pendingApprovals,
+    status: state.status,
+    error: state.error,
+    send,
+    approve,
+    regenerate,
+    reset,
+  };
+}

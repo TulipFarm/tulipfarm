@@ -21,6 +21,7 @@ export const GENERAL_ASSISTANT: SoulAgent = {
   frontmatter: {
     label: "General Assistant",
     description: "The default TulipFarm assistant — answers when no soul agent is selected.",
+    model: "standard",
   },
   // V1 slice of the GeneralAssistant persona. Routing/transfer and resource/skill tooling from the
   // original POC are intentionally omitted until those tools land — the agent must not claim
