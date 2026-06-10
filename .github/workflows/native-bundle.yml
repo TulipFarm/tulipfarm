@@ -39,6 +39,12 @@ jobs:
           - os: ubuntu-24.04-arm
             target: linux-arm64
             edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-linux-arm64-binaries.tar.gz
+          # KNOWN-BROKEN: EDB ships macOS binaries x86_64-only, so on the macos-14 (arm64)
+          # runner pgvector compiles arm64 objects against an x86_64 server and the SMOKE
+          # step fails — no darwin-arm64 asset is published, and the installer fails fast
+          # with a "use the container lane" message (scripts/get.tulipfarm.sh fetch_pg_bundle).
+          # TODO(INST): publish a real arm64 bundle (from-source PG17 build) or drop this
+          # target. Until then Apple Silicon users take the OCI/Podman lane.
           - os: macos-14
             target: darwin-arm64
             edb_url: https://get.enterprisedb.com/postgresql/postgresql-17.2-1-osx-binaries.zip
