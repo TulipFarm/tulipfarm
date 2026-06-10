@@ -20,7 +20,7 @@
     "@biomejs/biome": "^1.9",
     "lefthook": "^1",
     "lint-staged": "^15",
-    "turbo": "^2.9.16",
+    "turbo": "^2.9.17",
     "typescript": "^6.0.3",
     "vitest": "^3"
   }
