@@ -66,16 +66,26 @@ download_verified() {
   log "Downloading $(basename "$dest")…"
   $SUDO curl -fsSL "$url" -o "$dest" || die "download failed: $url"
   want="$(curl -fsSL "${url}.sha256" 2>/dev/null | awk '{print $1}' || true)"
-  if [ -n "$want" ]; then
-    [ "$(sha256_of "$dest")" = "$want" ] || die "checksum mismatch for $(basename "$dest")"
-  else
-    warn "no .sha256 sidecar for $(basename "$dest") — skipping integrity check"
-  fi
+  # Verification is mandatory — CI always publishes the sidecar. Failing open would let
+  # anyone who can drop the .sha256 (compromised asset, redirect, MITM proxy) ship an
+  # unverified tarball that we then extract as root.
+  [ -n "$want" ] || die "no .sha256 sidecar for $(basename "$dest") — refusing to install an unverified download"
+  [ "$(sha256_of "$dest")" = "$want" ] || die "checksum mismatch for $(basename "$dest")"
 }
 
-# Run a command as the service user (root drops privileges; non-root assumed = that user).
+# Run a command as the service user. As root we drop privileges with runuser (Linux) or
+# sudo -u (macOS, where runuser is absent); a non-root invoker is assumed to already be the
+# right user and runs directly. NB: `$SUDO` is empty when root, so it cannot be used here.
 as_service_user() {
-  if [ "$(id -u)" -eq 0 ]; then $SUDO -u "$SERVICE_USER" "$@"; else "$@"; fi
+  if [ "$(id -u)" -eq 0 ]; then
+    if command -v runuser >/dev/null 2>&1; then
+      runuser -u "$SERVICE_USER" -- "$@"
+    else
+      sudo -u "$SERVICE_USER" -- "$@"
+    fi
+  else
+    "$@"
+  fi
 }
 
 # Fetch a repo file into place — from a local checkout (TF_LOCAL_SRC, for dev/CI)
@@ -217,22 +227,33 @@ ensure_engine() {
 }
 
 write_env_oci() {
-  if $SUDO test -f "${INSTALL_DIR}/.env"; then
+  # Only treat an existing .env as a real prior install when .lane also exists. A bare .env
+  # with no .lane is leftover from a failed/aborted attempt (possibly the OTHER lane) — its
+  # shape would be wrong for this lane, so regenerate rather than "preserve".
+  if $SUDO test -f "${INSTALL_DIR}/.env" && $SUDO test -f "${INSTALL_DIR}/.lane"; then
     log "Existing .env found — preserving secrets (update mode)"
     return
   fi
+  command -v openssl >/dev/null 2>&1 || die "the OCI lane needs 'openssl' on PATH to generate secrets"
   detect_public_url
+  # Generate into vars first (separate decl+assign) so `set -e` catches a failed openssl —
+  # inside the heredoc a command-substitution failure is masked by tee's exit status.
+  local pw enc jwt webhook
+  pw="$(gen_pw)"; enc="$(gen_secret)"; jwt="$(gen_secret)"; webhook="$(gen_secret)"
   log "Generating secrets + .env (PUBLIC_URL=${PUBLIC_URL})"
+  # Create the file 600 BEFORE writing so secrets are never briefly world-readable; tee then
+  # truncates-in-place and keeps the mode.
+  $SUDO install -m 600 /dev/null "${INSTALL_DIR}/.env"
   $SUDO tee "${INSTALL_DIR}/.env" >/dev/null <<EOF
 PUBLIC_URL=${PUBLIC_URL}
 HOST_PORT=${PORT}
-POSTGRES_PASSWORD=$(gen_pw)
-ENCRYPTION_KEY=$(gen_secret)
-JWT_SECRET=$(gen_secret)
-WEBHOOK_SIGNING_SECRET=$(gen_secret)
+POSTGRES_PASSWORD=${pw}
+DATABASE_URL=postgresql://tulipfarm:${pw}@postgres:5432/tulipfarm
+ENCRYPTION_KEY=${enc}
+JWT_SECRET=${jwt}
+WEBHOOK_SIGNING_SECRET=${webhook}
 SETUP_MODE=wizard
 EOF
-  $SUDO chmod 600 "${INSTALL_DIR}/.env"
 }
 
 run_oci_lane() {
@@ -244,7 +265,12 @@ run_oci_lane() {
   fetch_file .env.example "${INSTALL_DIR}/.env.example" || true
   write_env_oci
   log "Pulling images and starting the stack…"
-  ( cd "${INSTALL_DIR}" && $SUDO $COMPOSE pull 2>/dev/null || true )
+  # Don't hide pull failures (rate limit, image not yet published): a swallowed error here
+  # otherwise surfaces later as a confusing "up" failure. Non-fatal — up may still find a
+  # cached image — but the operator sees why.
+  # shellcheck disable=SC2086  # $SUDO may be empty and $COMPOSE is "<engine> compose" — both must word-split
+  ( cd "${INSTALL_DIR}" && $SUDO $COMPOSE pull ) || warn "image pull failed — trying to start with any cached images"
+  # shellcheck disable=SC2086  # same: intentional word-splitting of $SUDO/$COMPOSE
   ( cd "${INSTALL_DIR}" && $SUDO $COMPOSE up -d ) || die "compose up failed"
   wait_health
 }
@@ -307,6 +333,10 @@ fetch_pg_bundle() {
   $SUDO mkdir -p "$(NATIVE_RUNTIME).new"
   $SUDO tar -xzf "${tmp}/pg.tgz" -C "$(NATIVE_RUNTIME).new" --strip-components=0
   printf '%s\n' "$want_rev" | $SUDO tee "$(NATIVE_RUNTIME).new/BUNDLE_REVISION" >/dev/null
+  # Guard the major-version BEFORE destroying the old runtime: check the freshly-extracted
+  # bundle against the existing PGDATA. On a mismatch we die with the old runtime still
+  # intact, so its pg_dumpall remains usable for the backup the message asks for.
+  guard_pg_major "$(NATIVE_RUNTIME).new/bin/postgres"
   # Preserve a sibling node/ install across bundle swaps.
   [ -d "$(NATIVE_RUNTIME)/node" ] && $SUDO mv "$(NATIVE_RUNTIME)/node" "$(NATIVE_RUNTIME).new/node"
   $SUDO rm -rf "$(NATIVE_RUNTIME)"
@@ -326,7 +356,8 @@ fetch_node() {
   tmp="$(mktemp -d)"
   $SUDO curl -fsSL "$url" -o "${tmp}/node.tgz" || die "node download failed: $url"
   want="$(curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/SHASUMS256.txt" 2>/dev/null | awk -v f="$tarball" '$2==f{print $1}')"
-  [ -n "$want" ] && { [ "$(sha256_of "${tmp}/node.tgz")" = "$want" ] || die "node checksum mismatch"; }
+  [ -n "$want" ] || die "could not fetch Node checksum from nodejs.org — refusing unverified install"
+  [ "$(sha256_of "${tmp}/node.tgz")" = "$want" ] || die "node checksum mismatch"
   $SUDO rm -rf "$nodedir"; $SUDO mkdir -p "$nodedir"
   $SUDO tar -xzf "${tmp}/node.tgz" -C "$nodedir" --strip-components=1
   rm -rf "$tmp"
@@ -348,10 +379,11 @@ fetch_app() {
 # Refuse to run an existing PGDATA against a different Postgres major version
 # (INST-010 fail-loud — never auto-pg_upgrade, never risk corruption).
 guard_pg_major() {
+  local pg_bin="${1:-$(NATIVE_RUNTIME)/bin/postgres}"
   $SUDO test -f "$(NATIVE_DATA)/PG_VERSION" || return 0
   local data_major bundle_major
   data_major="$($SUDO cat "$(NATIVE_DATA)/PG_VERSION")"
-  bundle_major="$("$(NATIVE_RUNTIME)/bin/postgres" --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
+  bundle_major="$("$pg_bin" --version 2>/dev/null | grep -oE '[0-9]+' | head -1)"
   if [ -n "$bundle_major" ] && [ "$data_major" != "$bundle_major" ]; then
     die "PGDATA is PostgreSQL ${data_major} but the bundle is ${bundle_major}.
 A major-version upgrade is required and is NOT done automatically. Back up first:
@@ -376,30 +408,42 @@ init_pgdata() {
 listen_addresses = ''
 unix_socket_directories = '$(NATIVE_RUN)'
 EOF
+
+  # Create the app database now, against a transient socket-only server — the supervisors
+  # (and the app) aren't running yet, and the app does not self-create its database. Only
+  # runs on fresh init (guarded above by PG_VERSION), so it never races the live server.
+  log "Creating the application database…"
+  as_service_user "$(NATIVE_RUNTIME)/bin/pg_ctl" -D "$(NATIVE_DATA)" \
+    -o "-c listen_addresses='' -k $(NATIVE_RUN)" -w start >/dev/null
+  as_service_user "$(NATIVE_RUNTIME)/bin/createdb" -h "$(NATIVE_RUN)" "$SERVICE_USER"
+  as_service_user "$(NATIVE_RUNTIME)/bin/pg_ctl" -D "$(NATIVE_DATA)" -w stop >/dev/null
 }
 
 write_env_native() {
-  if $SUDO test -f "${INSTALL_DIR}/.env"; then
+  # See write_env_oci: only preserve when a prior install actually completed (.lane present).
+  if $SUDO test -f "${INSTALL_DIR}/.env" && $SUDO test -f "${INSTALL_DIR}/.lane"; then
     log "Existing .env found — preserving secrets (update mode)"; return
   fi
   detect_public_url
-  local sockenc; sockenc="$(urlencode "$(NATIVE_RUN)")"
+  local sockenc enc jwt webhook
+  sockenc="$(urlencode "$(NATIVE_RUN)")"
+  enc="$(gen_secret)"; jwt="$(gen_secret)"; webhook="$(gen_secret)"
   log "Generating secrets + .env (PUBLIC_URL=${PUBLIC_URL})"
+  $SUDO install -m 600 /dev/null "${INSTALL_DIR}/.env"
   $SUDO tee "${INSTALL_DIR}/.env" >/dev/null <<EOF
 PUBLIC_URL=${PUBLIC_URL}
 PORT=${PORT}
 DATABASE_URL=postgresql://${SERVICE_USER}@/${SERVICE_USER}?host=${sockenc}
-ENCRYPTION_KEY=$(gen_secret)
-JWT_SECRET=$(gen_secret)
-WEBHOOK_SIGNING_SECRET=$(gen_secret)
+ENCRYPTION_KEY=${enc}
+JWT_SECRET=${jwt}
+WEBHOOK_SIGNING_SECRET=${webhook}
 SOUL_PATH=${INSTALL_DIR}/soul
 WEB_DIST=$(NATIVE_APP)/apps/web/build/client
 NODE_ENV=production
 SETUP_MODE=wizard
 EOF
-  $SUDO chmod 600 "${INSTALL_DIR}/.env"
-  # The app must create the app database on first boot if absent.
-  as_service_user "$(NATIVE_RUNTIME)/bin/createdb" -h "$(NATIVE_RUN)" "$SERVICE_USER" 2>/dev/null || true
+  # NB: the app database is created in init_pgdata via a transient server (Postgres isn't
+  # running yet at this point), not here.
 }
 
 # An env-loading wrapper so systemd and launchd share one start mechanism.
@@ -414,6 +458,9 @@ EOF
 
 chown_tree() {
   $SUDO chown -R "$SERVICE_USER" "$(NATIVE_DATA)" "$(NATIVE_RUN)" "$INSTALL_DIR/soul" 2>/dev/null || true
+  # The service runs as $SERVICE_USER and sources .env in run-app.sh; it must be able to
+  # read the root-written, mode-600 file. (chmod 600 + owner=service user → owner can read.)
+  $SUDO chown "$SERVICE_USER" "${INSTALL_DIR}/.env" 2>/dev/null || true
 }
 
 install_supervisors_linux() {
@@ -444,8 +491,12 @@ Restart=always
 WantedBy=multi-user.target
 EOF
   $SUDO systemctl daemon-reload
-  $SUDO systemctl enable --now tulipfarm-postgres.service
-  $SUDO systemctl enable --now tulipfarm-app.service
+  $SUDO systemctl enable tulipfarm-postgres.service tulipfarm-app.service
+  # restart (not `enable --now`): on a re-run/update the units are already active, and
+  # `enable --now` is a no-op for a running service — it would keep executing the replaced
+  # binaries until reboot. restart starts-or-restarts so updates take effect immediately.
+  $SUDO systemctl restart tulipfarm-postgres.service
+  $SUDO systemctl restart tulipfarm-app.service
 }
 
 install_supervisors_macos() {
@@ -479,12 +530,17 @@ EOF
 
 run_native_lane() {
   require_native_tools
-  $SUDO mkdir -p "$INSTALL_DIR" "$(NATIVE_RUN)" "$INSTALL_DIR/soul"
+  # Create data/ and run/ up front and hand them to the service user BEFORE initdb/pg_ctl —
+  # those run as $SERVICE_USER and can't mkdir inside the root-owned install dir otherwise.
+  $SUDO mkdir -p "$INSTALL_DIR" "$(NATIVE_DATA)" "$(NATIVE_RUN)" "$INSTALL_DIR/soul"
   ensure_service_user
-  fetch_pg_bundle
+  $SUDO chown "$SERVICE_USER" "$(NATIVE_DATA)" "$(NATIVE_RUN)" "$INSTALL_DIR/soul"
+  # 0700 socket dir: the default 0755 + Postgres' 0777 socket lets ANY local user connect
+  # as the trust-auth superuser. Only the service user (app + pg) needs the socket.
+  $SUDO chmod 700 "$(NATIVE_RUN)"
+  fetch_pg_bundle   # guards the PG major against existing PGDATA before swapping the runtime
   fetch_node
   fetch_app
-  guard_pg_major
   init_pgdata
   write_env_native
   write_app_wrapper
@@ -496,7 +552,9 @@ run_native_lane() {
 # ────────────────────────────── health wait ───────────────────────────────────
 wait_health() {
   local host_port url
-  host_port="$($SUDO grep -E '^HOST_PORT=' "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2- || echo "${PORT}")"
+  # OCI writes HOST_PORT=, native writes PORT= — accept either (first match wins) so a
+  # custom TF_PORT install is probed on the right port instead of the 8080 default.
+  host_port="$($SUDO grep -hE '^(HOST_PORT|PORT)=' "${INSTALL_DIR}/.env" 2>/dev/null | head -1 | cut -d= -f2- || echo "${PORT}")"
   url="$($SUDO grep -E '^PUBLIC_URL=' "${INSTALL_DIR}/.env" 2>/dev/null | cut -d= -f2- || echo "http://localhost:${PORT}")"
   log "Waiting for TulipFarm to become healthy…"
   local _

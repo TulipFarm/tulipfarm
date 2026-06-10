@@ -149,6 +149,17 @@ if [ ! -f ".env.local" ]; then
   echo "✅ .env.local created with generated secrets"
 else
   echo "✅ .env.local already exists"
+  # Pre-existing dev setups may carry an in-repo SOUL_PATH (e.g. ./soul) from before the
+  # soul dir moved out of the project tree. The boot-time guard now refuses an in-repo path,
+  # so detect and migrate it to the out-of-repo dir rather than letting the app fail to start.
+  if grep -qE '^SOUL_PATH=\.?/?soul/?$|^SOUL_PATH=\./' .env.local 2>/dev/null; then
+    echo "⚠️  .env.local has an in-repo SOUL_PATH — migrating it to $SOUL_DIR"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
+    else
+      sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
+    fi
+  fi
 fi
 
 # Symlink .env.local to apps/api for turbo dev (turbo runs from package dir)

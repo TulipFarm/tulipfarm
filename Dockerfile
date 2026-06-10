@@ -42,5 +42,9 @@ COPY --from=builder /deploy/node_modules ./node_modules
 COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 RUN mkdir -p /opt/tulipfarm/soul
+# Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
+# node:24-slim ships a `node` user; give it the app + soul dirs it writes to.
+RUN chown -R node:node /app /opt/tulipfarm
+USER node
 EXPOSE 8080
 CMD ["node", "server.cjs"]
