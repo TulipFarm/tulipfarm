@@ -17,8 +17,8 @@ lazily fetched) makes the rendered prefix deterministic and therefore prompt-cac
 <agent-personality>       AGENT.md body
 <memory>                  per-user working memory, ≤ MAX_TOTAL_CHARS (drop whole on overflow)
 <governance-knowledge>    alwaysLoadForAgents docs (reuses knowledge/governance.ts, 4k/16k caps)
-<skills>                  "" — deferred (Skills v0.10)
-<available-skills>        "" — deferred (Skills v0.10)
+<skills>                  "" — eager bodies deferred (all-lazy V1; no agent eager-skill election yet)
+<available-skills>        lazy skill L1 — one `- name: description` per soul skill, 8k cap, drop-whole
 <soul-context>            "" — deferred (soul L1 snapshot builder)
 <available-tools>         "" — deferred (Tools v0.8)
 ```
@@ -27,6 +27,11 @@ Each block renders to a string or `""`. Empty blocks are **omitted entirely** (f
 the `\n` join), matching `buildGovernanceBlock`'s precedent — so the prefix stays byte-identical
 across turns when soul/memory don't change. No `<harness-typed-state>` block is ever emitted
 (deferred MEM-V1-005).
+
+`<available-skills>` is fed by the **SkillRegistry** (`../soul/skills/registry.ts` → `listAvailableSkills`),
+which projects every soul skill to its sorted L1 `{ name, description }`. All-lazy V1: the body (L2) and
+reference files (L3) load on demand via the `load_skill` / `load_skill_reference` platform tools; eager
+`<skills>` bodies are deferred.
 
 ## Why deterministic order matters
 
