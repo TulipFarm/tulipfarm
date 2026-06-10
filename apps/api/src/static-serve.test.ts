@@ -10,7 +10,12 @@ let app: FastifyInstance;
 
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "webdist-"));
-  await fs.writeFile(path.join(dir, "index.html"), "<!doctype html><title>TulipFarm SPA</title>");
+  // Mirror the real build output: an inline <script> (theme init / Remix bootstrap) whose
+  // execution the CSP must permit, or the served SPA silently fails to hydrate in a browser.
+  await fs.writeFile(
+    path.join(dir, "index.html"),
+    "<!doctype html><title>TulipFarm SPA</title><script>window.__x=1</script>"
+  );
   await fs.writeFile(path.join(dir, "app.js"), "console.log('spa')");
   vi.stubEnv("WEB_DIST", dir);
   app = await buildApp();
@@ -63,11 +68,15 @@ describe("static SPA serving (WEB_DIST)", () => {
     expect(res.statusCode).toBe(200);
   });
 
-  it("sets a SPA-compatible CSP (self origin, allows connect, no UIR)", async () => {
+  it("sets a SPA-compatible CSP (self origin, allows connect + inline scripts, no UIR)", async () => {
     const res = await app.inject({ method: "GET", url: "/" });
-    const csp = res.headers["content-security-policy"] ?? "";
+    const csp = String(res.headers["content-security-policy"] ?? "");
     expect(csp).toContain("default-src 'self'");
     expect(csp).toContain("connect-src 'self'");
     expect(csp).not.toContain("upgrade-insecure-requests");
+    // The built index.html ships inline scripts (theme init + Remix bootstrap); the policy
+    // must allow them or the SPA won't hydrate. Assert script-src permits inline execution.
+    const scriptSrc = csp.split(";").find((d) => d.trim().startsWith("script-src")) ?? "";
+    expect(scriptSrc).toContain("'unsafe-inline'");
   });
 });

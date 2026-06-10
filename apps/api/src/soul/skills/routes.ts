@@ -469,19 +469,29 @@ export function registerSkillRoutes(
       }
       await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
+      let sync: Awaited<ReturnType<typeof gitSync.withSync>>;
       try {
-        const sync = await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
-        await soulLoader.reload();
-        // `pushed` lets the UI distinguish a durable install from one committed locally that a
-        // later sync may hard-reset away (SOUL-V1-004). undefined in local-only mode.
-        return { installed, pushed: sync.pushed };
+        sync = await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
       } catch (e) {
+        // The commit didn't happen — roll the working tree back so no half-installed skill
+        // is left on disk to load on next boot. (Only delete dirs we created; restore the lock.)
         await Promise.all(createdDirs.map((d) => rm(d, { recursive: true, force: true })));
         if (priorLock === null) await rm(lockPath, { force: true });
         else await writeFile(lockPath, priorLock, "utf8");
-        app.log.error(`skills: install failed, rolled back — ${String(e)}`);
+        app.log.error(`skills: install commit failed, rolled back — ${String(e)}`);
         return reply.code(500).send({ error: "install failed" });
       }
+      // Committed (and maybe pushed). A reload failure here is non-fatal — the files are
+      // committed; do NOT roll back (that would diverge the tree from the commit). The next
+      // load/boot picks them up.
+      try {
+        await soulLoader.reload();
+      } catch (e) {
+        app.log.warn(`skills: installed + committed but soul reload failed — ${String(e)}`);
+      }
+      // `pushed` lets the UI distinguish a durable install from one committed locally that a
+      // later sync may hard-reset away (SOUL-V1-004). undefined in local-only mode.
+      return { installed, pushed: sync.pushed };
     }
   );
 }
