@@ -6,3 +6,5 @@ export { validate } from "./validate";
 export { applyTransforms, validateResourceSchema } from "./transforms";
 export type { CounterFn } from "./transforms";
 export { NORMALIZER_KEYS, COMPUTED_FN_KEYS } from "./transforms";
+export { AUTONOMY_VALUES, validateAgentFrontmatter } from "./agent";
+export type { AgentFrontmatter } from "./agent";

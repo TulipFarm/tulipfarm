@@ -110,6 +110,42 @@ describe("agent_create", () => {
     const res = await createTool.handler({ name: "agent-x" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
+
+  it("rejects invalid frontmatter (bad autonomy) without writing or committing", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      { name: "reviewer", body: "You review.", frontmatter: { autonomy: "banana" } },
+      ctx
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects unknown frontmatter keys (strict)", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      { name: "reviewer", body: "b", frontmatter: { autonimy: "full" } },
+      ctx
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+  });
+
+  it("accepts valid frontmatter and writes", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      {
+        name: "reviewer",
+        body: "You review.",
+        frontmatter: { domain: "engineering", autonomy: "full", suggestions: ["Plan"] },
+      },
+      ctx
+    );
+    expect(res.success).toBe(true);
+    expect(writeFile).toHaveBeenCalled();
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent reviewer");
+  });
 });
 
 // ── agent_update ──────────────────────────────────────────────────────────────
@@ -158,13 +194,13 @@ describe("agent_update", () => {
   it("updates both body and frontmatter", async () => {
     const ctx = makeCtx([existingAgent]);
     const res = await updateTool.handler(
-      { name: "task-planner", body: "New.", frontmatter: { version: "2" } },
+      { name: "task-planner", body: "New.", frontmatter: { label: "Sprint Planner" } },
       ctx
     );
 
     expect(res).toMatchObject({
       success: true,
-      data: { name: "task-planner", frontmatter: { version: "2" }, body: "New." },
+      data: { name: "task-planner", frontmatter: { label: "Sprint Planner" }, body: "New." },
     });
   });
 
@@ -179,6 +215,31 @@ describe("agent_update", () => {
     const ctx = makeCtx([existingAgent]);
     const res = await updateTool.handler({ name: "task-planner" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("rejects invalid frontmatter on update without committing", async () => {
+    const ctx = makeCtx([existingAgent]);
+    const res = await updateTool.handler(
+      { name: "task-planner", frontmatter: { autonomy: "nope" } },
+      ctx
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+  });
+
+  it("allows a body-only update over arbitrary existing frontmatter (no retro-validation)", async () => {
+    const legacy: SoulAgent = {
+      name: "task-planner",
+      frontmatter: { custom: "kept-as-is", autonomy: "legacy-bad" },
+      body: "Old body.",
+    };
+    const ctx = makeCtx([legacy]);
+    const res = await updateTool.handler({ name: "task-planner", body: "New body." }, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: "task-planner", frontmatter: { custom: "kept-as-is" }, body: "New body." },
+    });
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner");
   });
 });
 

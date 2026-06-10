@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { ajv } from "@tulipfarm/validation";
+import { TulipFarmValidationError, ajv, validateAgentFrontmatter } from "@tulipfarm/validation";
 import { stringify } from "yaml";
 import { type ToolCallResult, err, ok } from "../../tools/types.js";
 
@@ -36,6 +36,20 @@ function serializeAgent(frontmatter: Record<string, unknown>, body: string): str
   return `---\n${stringify(frontmatter)}---\n${body}`;
 }
 
+// Write-time meta-schema gate (AGT-V1-005 / VAL-V1-010). Returns a validation_error
+// result on invalid frontmatter, or null when it passes.
+function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult | null {
+  try {
+    validateAgentFrontmatter(frontmatter);
+    return null;
+  } catch (e) {
+    if (e instanceof TulipFarmValidationError) {
+      return err("validation_error", `${e.path} ${e.message}`.trim());
+    }
+    throw e;
+  }
+}
+
 // ── agent_create ──────────────────────────────────────────────────────────────
 
 const CREATE_SCHEMA = {
@@ -51,7 +65,8 @@ const CREATE_SCHEMA = {
     body: { type: "string", description: "Markdown system-prompt body." },
     frontmatter: {
       type: "object",
-      description: "Optional YAML frontmatter fields (arbitrary key-value pairs).",
+      description:
+        "Optional frontmatter. Allowed keys: label, domain, description, model, autonomy (full|supervised|approval-required|manual), placeholder (string[]), suggestions (string[]). Unknown keys are rejected.",
     },
   },
 } as const;
@@ -77,6 +92,9 @@ const agentCreate: AgentTool = {
     };
 
     if (!NAME_RE.test(name)) return err("validation_error", "invalid agent name");
+
+    const fmError = frontmatterError(frontmatter);
+    if (fmError) return fmError;
 
     const agentDir = join(ctx.gitSync.path, "agents", name);
     if (existsSync(agentDir)) return err("validation_error", "agent already exists");
@@ -115,7 +133,8 @@ const UPDATE_SCHEMA = {
     body: { type: "string", description: "New markdown body (replaces existing)." },
     frontmatter: {
       type: "object",
-      description: "New frontmatter (replaces existing). Omit to keep current.",
+      description:
+        "New frontmatter (replaces existing; omit to keep current). Same allowed keys as agent_create; unknown keys are rejected.",
     },
   },
   anyOf: [{ required: ["body"] }, { required: ["frontmatter"] }],
@@ -139,6 +158,11 @@ const agentUpdate: AgentTool = {
 
     const existing = ctx.soulLoader.agents.get(name);
     if (!existing) return err("not_found", `agent not found: ${name}`);
+
+    if (frontmatter !== undefined) {
+      const fmError = frontmatterError(frontmatter);
+      if (fmError) return fmError;
+    }
 
     const newBody = body ?? existing.body;
     const newFm = frontmatter ?? existing.frontmatter;
