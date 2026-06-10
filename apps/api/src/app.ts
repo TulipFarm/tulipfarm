@@ -112,6 +112,13 @@ export async function buildApp(opts: AppOptions = {}) {
   // CSP would block the SPA's own scripts/styles and every fetch/SSE back to /api/v1/*,
   // and helmet's default `upgrade-insecure-requests` breaks plain-http installs. Use a
   // self-origin policy for that mode; keep the strict lockdown for API-only deployments.
+  //
+  // scriptSrc/styleSrc include 'unsafe-inline' because the built index.html ships two
+  // inline scripts (the no-flash theme init and Remix's window.__remixContext hydration
+  // bootstrap); a static file server can't inject a per-response nonce. This is an
+  // acceptable trade-off here — the page shell is immutable build output and user content
+  // is rendered escaped (react-markdown, no raw HTML), so nothing untrusted reaches an
+  // inline-script context.
   const servingWeb = Boolean(process.env.WEB_DIST);
   await app.register(helmet, {
     contentSecurityPolicy: servingWeb
@@ -119,7 +126,7 @@ export async function buildApp(opts: AppOptions = {}) {
           useDefaults: false,
           directives: {
             defaultSrc: ["'self'"],
-            scriptSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:"],
             connectSrc: ["'self'"],
