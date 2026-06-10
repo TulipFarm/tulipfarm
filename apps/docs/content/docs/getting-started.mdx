@@ -1,0 +1,158 @@
+---
+title: Get started
+description: Install TulipFarm, run it, log in, and define your first resource type.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Callout } from "fumadocs-ui/components/callout";
+
+In this guide you install TulipFarm on your own machine, sign in as the admin, and
+define your first resource type. By the end you will have a running instance with a
+custom data type you can create records against.
+
+This guide targets macOS and Linux. You need a terminal and about ten minutes.
+
+## Before you begin
+
+Install these first:
+
+- **Node.js 24** (the version pinned in `.node-version`)
+- **pnpm** — `npm install -g pnpm`
+- **Homebrew** (macOS only) — the setup script uses it to install PostgreSQL
+
+The setup script installs **PostgreSQL 17 + pgvector** for you.
+
+<Steps>
+
+<Step>
+
+### Clone the repository and run the setup script
+
+```bash
+git clone https://github.com/TulipFarm/tulipfarm.git
+cd tulipfarm
+bash scripts/setup-dev.sh
+```
+
+The script installs PostgreSQL 17 + pgvector, starts the database service, creates the
+`tulipfarm` database, initializes your soul repository at `~/.tulipfarm/soul`, and
+generates a `.env.local` file with random bootstrap secrets (`ENCRYPTION_KEY`,
+`JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`).
+
+</Step>
+
+<Step>
+
+### Set your admin credentials
+
+Open `.env.local` and set a password for the bootstrap admin. The first user is created
+on boot from these values:
+
+```bash title=".env.local"
+ADMIN_EMAIL=admin@tulipfarm.dev
+ADMIN_PASSWORD=choose-a-strong-password
+```
+
+<Callout type="warn">
+`ADMIN_EMAIL` must be a real email format. An address with no TLD such as
+`admin@localhost` is rejected, and the admin would never be able to log in.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Install dependencies and start TulipFarm
+
+```bash
+pnpm install
+pnpm dev
+```
+
+This starts two services:
+
+- the **API** on `http://localhost:4010`
+- the **web UI** on `http://localhost:4000`
+
+Confirm the API is healthy:
+
+```bash
+curl http://localhost:4010/health
+```
+
+You should see:
+
+```json
+{ "status": "ok" }
+```
+
+</Step>
+
+<Step>
+
+### Log in
+
+Open `http://localhost:4000` and sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD`
+you set. You land on the workspace: a sidebar with Chat, Resources, Agents, Skills, and
+Settings.
+
+<Callout title="Chat is coming">
+The chat composer is visible but not yet wired — it is flagged `soon`. For now you drive
+your instance through the workspace sections and the soul repo, which is what the rest of
+this guide does.
+</Callout>
+
+</Step>
+
+<Step>
+
+### Define your first resource type
+
+A resource type is a JSON Schema stored in your soul repo. Create one for a simple
+`customer` type:
+
+```bash
+mkdir -p ~/.tulipfarm/soul/resources/customer
+cat > ~/.tulipfarm/soul/resources/customer/schema.yml <<'YAML'
+type: object
+properties:
+  name:
+    type: string
+  email:
+    type: string
+    format: email
+required:
+  - name
+YAML
+```
+
+Commit it to the soul repo so the change is recorded:
+
+```bash
+git -C ~/.tulipfarm/soul add .
+git -C ~/.tulipfarm/soul commit -m "Add customer resource type"
+```
+
+Restart `pnpm dev`. On boot, TulipFarm reconciles the soul: it reads
+`resources/customer/schema.yml` and materializes a `customer` table.
+
+</Step>
+
+<Step>
+
+### Create a record
+
+In the web UI, open **Resources**. You now see `customer` in the list. Open it, choose
+**New**, fill in a name and email, and save.
+
+You have a running TulipFarm instance with a custom resource type and your first record.
+
+</Step>
+
+</Steps>
+
+## Next steps
+
+- Read how the [soul](/docs/concepts/soul) and [resources](/docs/concepts/resources) work.
+- [Configure an LLM provider](/docs/guides/configure-llm-providers) so agents can run.
+- [Install a skill](/docs/guides/install-a-skill) from a git repository.

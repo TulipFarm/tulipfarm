@@ -1,0 +1,74 @@
+---
+title: Define a resource type
+description: Author a schema in the soul repo and have TulipFarm materialize it.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide creates a new resource type by writing its schema into the
+[soul repo](/docs/concepts/soul). It assumes a running instance and shell access to the
+soul directory (`~/.tulipfarm/soul` by default).
+
+A resource type's name must start with a lowercase letter and contain only lowercase
+letters, digits, and hyphens.
+
+## Write the schema
+
+Create a directory for the type and a `schema.yml` inside it. The schema is JSON Schema,
+written in YAML:
+
+```bash
+mkdir -p ~/.tulipfarm/soul/resources/ticket
+cat > ~/.tulipfarm/soul/resources/ticket/schema.yml <<'YAML'
+type: object
+properties:
+  ref:
+    type: string
+  subject:
+    type: string
+  status:
+    type: string
+    enum: [open, closed]
+  customerId:
+    type: string
+    "x-links":
+      target: customer
+required:
+  - subject
+"x-id-strategy":
+  field: ref
+  prefix: "TICK-"
+  sequence: true
+YAML
+```
+
+This declares a `ticket` type whose `ref` field is auto-assigned as `TICK-1`, `TICK-2`,
+and so on, and whose `customerId` links to a `customer` record.
+
+<Callout type="info">
+A field's `x-links.target` must name a resource type that exists, and on write the linked
+record must exist too — see [Resources](/docs/concepts/resources).
+</Callout>
+
+## Commit the change
+
+The soul is a git repository. Commit so the change is recorded:
+
+```bash
+git -C ~/.tulipfarm/soul add .
+git -C ~/.tulipfarm/soul commit -m "Add ticket resource type"
+```
+
+## Reconcile
+
+Restart the instance. On boot, TulipFarm reads the new schema and materializes a table
+for it:
+
+```bash
+pnpm dev
+```
+
+## Verify
+
+Open **Resources** in the web UI. The `ticket` type now appears in the list, showing its
+field count. From here you can [work with records](/docs/guides/work-with-records).

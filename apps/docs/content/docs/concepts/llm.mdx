@@ -1,0 +1,50 @@
+---
+title: LLM tiers
+description: How TulipFarm chooses a model and falls back across providers.
+---
+
+TulipFarm talks to language models through a single adapter (the Vercel AI SDK), so the
+same configuration works across 55+ providers. You do not wire a model into each agent.
+Instead you define **tiers**, and the runtime picks a tier per turn.
+
+## Three tiers
+
+Every instance configures three tiers, from cheapest and fastest to most capable:
+
+| Tier | Default model |
+|---|---|
+| `quick` | `claude-haiku-4-5` |
+| `standard` | `claude-sonnet-4-6` |
+| `complex` | `claude-opus-4-8` |
+
+The tier configuration lives in `soul/llm.config.yaml` and is edited through
+**Settings → LLM** in the web UI. Each tier is an *ordered list* of providers — and the
+order is the fallback chain.
+
+## Fallback chains
+
+A tier can list more than one provider. The runtime tries the first; if that provider
+fails, it walks down the list to the next. This is why a tier is an ordered list rather
+than a single model: you can put a primary provider first and a backup beneath it, and a
+provider outage degrades to the backup instead of failing the turn.
+
+## Automatic tier selection
+
+A turn does not have to name a tier. With `model: auto`, TulipFarm picks one from
+context:
+
+- An agent's [autonomy](/docs/concepts/agents) maps to a tier — for example,
+  `supervised` selects `standard`.
+- Tasks flagged as decisions escalate to `complex`.
+- A `quick` turn is bumped to `standard` when tools are in scope.
+
+A single request can also override the model for that turn without changing the stored
+configuration.
+
+## Credentials
+
+A provider entry references its API key by a logical secret name (for example,
+`anthropic-api-key`), resolved at runtime from the [secrets store](/docs/concepts/secrets)
+and cached after first use. Keys never live in the LLM config file itself. To run, a
+provider must be configured in **Settings → Secrets** before it can be selected in a
+tier — see [Configure LLM providers](/docs/guides/configure-llm-providers).

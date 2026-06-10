@@ -1,0 +1,60 @@
+---
+title: Agents
+description: The actors that run turns, each defined by an AGENT.md file.
+---
+
+An agent is an actor that runs turns against an LLM with access to TulipFarm's tools.
+Every instance ships with one built-in agent, **GeneralAssistant**, and you can define
+more in the [soul](/docs/concepts/soul).
+
+## Defined by AGENT.md
+
+A soul agent is a single `AGENT.md` file: YAML frontmatter plus a markdown body. The body
+is the agent's system prompt; the frontmatter is its metadata.
+
+```markdown title="agents/support/AGENT.md"
+---
+label: Support
+domain: customer-success
+description: Handles inbound customer questions.
+model: auto
+autonomy: supervised
+---
+
+You are the support agent. You answer customer questions using the
+knowledge base and create tickets as resources when follow-up is needed.
+```
+
+Names are flat and kebab-cased. `domain` is display-only — it groups agents in the UI but
+grants no special access. Agents are loaded into the registry at startup, with
+GeneralAssistant listed first.
+
+## Autonomy: how much an agent can do unsupervised
+
+The `autonomy` field controls when an agent must pause for human approval before taking a
+real-world or data action. It takes one of four values:
+
+| Autonomy | Behavior |
+|---|---|
+| `full` | Acts without pausing. |
+| `supervised` | Acts, but surfaces what it does. |
+| `approval-required` | Pauses for explicit human approval before a gated action. |
+| `manual` | Driven step by step. |
+
+When an `approval-required` agent calls a tool that requires approval, the turn pauses
+and emits an approval request; it resumes only once a human resolves it. This is the
+oversight mechanism that makes autonomous operation safe.
+
+Autonomy also influences model selection: see [LLM tiers](/docs/concepts/llm).
+
+## What agents may touch
+
+Editing the soul — creating or changing an agent, skill, or schema — is never gated. The
+`autonomy` gate applies only to actions on the outside world and your data. In V1 every
+agent has access to the full tool set; there is no per-agent tool restriction yet.
+
+## Creating agents
+
+Agents are created and edited through agent tools and forges, which write the `AGENT.md`
+directly and commit it to the soul — no approval step. The web UI lists agents and shows
+each one's prompt, but does not yet edit them.
