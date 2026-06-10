@@ -15,7 +15,7 @@ export class GitSyncService extends EventEmitter {
     super();
   }
 
-  private ensured = false;
+  private ensuring: Promise<void> | undefined;
 
   get path(): string {
     return this.soulPath;
@@ -28,7 +28,17 @@ export class GitSyncService extends EventEmitter {
    * initialize a dedicated repo. Idempotent.
    */
   private async ensureRepo(): Promise<void> {
-    if (this.ensured) return;
+    // Cache the in-flight init so concurrent commit()/withSync() calls don't both run
+    // `git init` + addConfig (the previous boolean flag was set only after the awaits,
+    // so two callers could race past it). On failure, clear the cache so a later call retries.
+    this.ensuring ??= this.doEnsureRepo().catch((err) => {
+      this.ensuring = undefined;
+      throw err;
+    });
+    return this.ensuring;
+  }
+
+  private async doEnsureRepo(): Promise<void> {
     mkdirSync(this.soulPath, { recursive: true });
 
     if (!existsSync(join(this.soulPath, ".git"))) {
@@ -50,7 +60,6 @@ export class GitSyncService extends EventEmitter {
     const git = simpleGit(this.soulPath);
     await git.addConfig("user.name", BOT_GIT_NAME);
     await git.addConfig("user.email", BOT_GIT_EMAIL);
-    this.ensured = true;
   }
 
   private authUrl(): string {
@@ -138,19 +147,26 @@ export class GitSyncService extends EventEmitter {
     return true;
   }
 
-  /** Commit then best-effort push (SOUL-V1-003). Push failure is logged, not thrown. */
-  async withSync(message: string): Promise<{ sha: string; filesChanged: number }> {
+  /**
+   * Commit then best-effort push (SOUL-V1-003). Push failure is logged, not thrown, but is
+   * surfaced via `pushed` so callers/UI can distinguish a durable change from one committed
+   * locally that a later `syncOnce()` may hard-reset away on genuine divergence (SOUL-V1-004).
+   * `pushed` is `undefined` in local-only mode (no remote), `true`/`false` otherwise.
+   */
+  async withSync(
+    message: string
+  ): Promise<{ sha: string; filesChanged: number; pushed?: boolean }> {
     const result = await this.commit(message);
-    if (this.remoteUrl) {
-      try {
-        await this.push();
-      } catch (err) {
-        this.logger.warn(
-          `Soul: withSync push failed — ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
+    if (!this.remoteUrl) return result;
+    try {
+      await this.push();
+      return { ...result, pushed: true };
+    } catch (err) {
+      this.logger.warn(
+        `Soul: withSync push failed — ${err instanceof Error ? err.message : String(err)}`
+      );
+      return { ...result, pushed: false };
     }
-    return result;
   }
 
   async syncOnce(): Promise<void> {

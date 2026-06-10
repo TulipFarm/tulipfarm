@@ -60,6 +60,22 @@ export interface AppOptions {
   toolRegistry?: ToolRegistry;
 }
 
+const DEFAULT_SESSION_TTL_SECONDS = 604800;
+
+// Parse SESSION_TTL_SECONDS, falling back to the default when missing or malformed — a
+// NaN/≤0 maxAge makes the cookie serializer throw and turns POST /setup/admin into a 500.
+function parseTtlSeconds(raw: string | undefined): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_SESSION_TTL_SECONDS;
+}
+
+// Client-routing paths the SPA fallback must NOT swallow — they belong to the API/docs/
+// health surfaces. Matched as a whole path or a path prefixed with the segment + "/".
+function isServerPath(url: string): boolean {
+  const path = url.split("?")[0];
+  return ["/api", "/docs", "/health"].some((p) => path === p || path.startsWith(`${p}/`));
+}
+
 export async function buildApp(opts: AppOptions = {}) {
   const app = Fastify({ logger: true });
 
@@ -81,10 +97,30 @@ export async function buildApp(opts: AppOptions = {}) {
     credentials: true,
   });
 
+  // When this image also serves the built SPA (WEB_DIST set), a `default-src 'none'`
+  // CSP would block the SPA's own scripts/styles and every fetch/SSE back to /api/v1/*,
+  // and helmet's default `upgrade-insecure-requests` breaks plain-http installs. Use a
+  // self-origin policy for that mode; keep the strict lockdown for API-only deployments.
+  const servingWeb = Boolean(process.env.WEB_DIST);
   await app.register(helmet, {
-    contentSecurityPolicy: {
-      directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
-    },
+    contentSecurityPolicy: servingWeb
+      ? {
+          useDefaults: false,
+          directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:"],
+            connectSrc: ["'self'"],
+            fontSrc: ["'self'", "data:"],
+            frameAncestors: ["'none'"],
+            objectSrc: ["'none'"],
+            baseUri: ["'self'"],
+          },
+        }
+      : {
+          directives: { defaultSrc: ["'none'"], frameAncestors: ["'none'"] },
+        },
   });
 
   await app.register(cookie);
@@ -198,7 +234,7 @@ export async function buildApp(opts: AppOptions = {}) {
         gitSync: opts.gitSync,
         soulPath: process.env.SOUL_PATH as string,
         requireAuth,
-        ttlSeconds: Number.parseInt(process.env.SESSION_TTL_SECONDS ?? "604800", 10),
+        ttlSeconds: parseTtlSeconds(process.env.SESSION_TTL_SECONDS),
       });
     }
   }
@@ -209,12 +245,7 @@ export async function buildApp(opts: AppOptions = {}) {
   if (webDist) {
     await app.register(fastifyStatic, { root: webDist, prefix: "/", wildcard: false });
     app.setNotFoundHandler((req, reply) => {
-      if (
-        req.method === "GET" &&
-        !req.url.startsWith("/api") &&
-        !req.url.startsWith("/docs") &&
-        !req.url.startsWith("/health")
-      ) {
+      if ((req.method === "GET" || req.method === "HEAD") && !isServerPath(req.url)) {
         return reply.type("text/html").sendFile("index.html");
       }
       return reply.code(404).send({ error: "not found" });

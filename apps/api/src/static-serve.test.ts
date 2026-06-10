@@ -51,4 +51,23 @@ describe("static SPA serving (WEB_DIST)", () => {
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: "ok" });
   });
+
+  it("serves the SPA for a client path that merely starts with 'api' (not /api/)", async () => {
+    const res = await app.inject({ method: "GET", url: "/apidocs-guide" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("TulipFarm SPA");
+  });
+
+  it("falls back to index.html for a HEAD request to a client route", async () => {
+    const res = await app.inject({ method: "HEAD", url: "/setup" });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("sets a SPA-compatible CSP (self origin, allows connect, no UIR)", async () => {
+    const res = await app.inject({ method: "GET", url: "/" });
+    const csp = res.headers["content-security-policy"] ?? "";
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).not.toContain("upgrade-insecure-requests");
+  });
 });

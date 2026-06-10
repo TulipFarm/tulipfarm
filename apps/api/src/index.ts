@@ -6,6 +6,7 @@ import { config } from "dotenv";
 import PgBoss from "pg-boss";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
+import { cookieSecure } from "./auth/cookie-secure";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
@@ -33,6 +34,7 @@ import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { bootstrapFromEnv } from "./setup/bootstrap";
+import { isManagedMode } from "./setup/service";
 import { registerSoulSync } from "./soul-sync";
 
 // Load .env.local (symlinked from root by setup script)
@@ -151,6 +153,21 @@ async function boot() {
       soulPath: process.env.SOUL_PATH as string,
       log: app.log,
     });
+
+    // Security boot warnings (INST-003c). The first-admin endpoint is open until an
+    // account exists; on a public-IP install the window is claimable, so warn loudly.
+    if (!isManagedMode() && (await userRepo.count()) === 0) {
+      app.log.warn(
+        "Setup is OPEN: anyone who can reach this port can claim the first admin account. Complete /setup now and front it with TLS for production."
+      );
+    }
+    // The Secure cookie flag is derived from PUBLIC_URL's scheme; warn if we're in
+    // production but shipping non-Secure cookies (PUBLIC_URL is http/unset).
+    if (process.env.NODE_ENV === "production" && !cookieSecure()) {
+      app.log.warn(
+        "Session/CSRF cookies are NOT marked Secure (PUBLIC_URL is not https). Set an https PUBLIC_URL behind TLS for production."
+      );
+    }
 
     await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL);
     await registerStreamGc(boss, streamResumeRepo);

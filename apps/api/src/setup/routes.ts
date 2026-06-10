@@ -6,7 +6,7 @@ import { generateCsrfToken, setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import type { SessionStore } from "../auth/session-store";
-import { type UserRepo, createUser, toPublicUser } from "../auth/users";
+import { type UserRepo, createFirstAdmin, toPublicUser } from "../auth/users";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -107,7 +107,12 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       if (!email || password.length < 8) {
         return reply.code(400).send({ error: "email and a password (min 8 chars) are required" });
       }
-      const user = await createUser(userRepo, email, password, "admin");
+      // Atomic create: closes the race between requireSetupOpen's count() and the insert,
+      // so two concurrent first-admin requests can't both create an admin.
+      const user = await createFirstAdmin(userRepo, email, password);
+      if (!user) {
+        return reply.code(403).send({ error: "setup already complete" });
+      }
       const sid = await sessionStore.create(user._id);
       setSessionCookies(reply, sid, ttlSeconds);
       return reply.code(201).send({ user: toPublicUser(user) });
@@ -138,7 +143,9 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         return reply.code(400).send({ error: "name is required" });
       }
       await patchSoulConfig(soulPath, { businessName: name, businessDescription: description });
-      await gitSync.commit("chore: set business profile").catch(() => {});
+      await gitSync
+        .commit("chore: set business profile")
+        .catch((e) => app.log.warn(`setup: soul commit failed — ${String(e)}`));
       return reply.code(204).send();
     }
   );
@@ -187,7 +194,9 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     },
     async (_req, reply) => {
       await patchSoulConfig(soulPath, { setupComplete: true });
-      await gitSync.commit("chore: complete setup").catch(() => {});
+      await gitSync
+        .commit("chore: complete setup")
+        .catch((e) => app.log.warn(`setup: soul commit failed — ${String(e)}`));
       return reply.code(204).send();
     }
   );

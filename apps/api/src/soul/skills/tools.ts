@@ -60,6 +60,10 @@ const validateCreate = ajv.compile(CREATE_SCHEMA);
 
 const skillCreate: SkillTool = {
   name: "skill_create",
+  // No approval gate by design: this system-tier tool lets an agent author skills
+  // autonomously. That intentionally differs from the operator-facing HTTP install flow
+  // (POST /api/v1/skills/install), which requires a SkillAudit because it pulls THIRD-PARTY
+  // skills from a git source; authoring first-party skills here does not.
   description:
     "Create a new skill in the soul repo by writing its SKILL.md. Commits and pushes via withSync. No approval gate.",
   mutating: true,
@@ -88,8 +92,9 @@ const skillCreate: SkillTool = {
       return err("internal_error", reason(e));
     }
 
+    let pushed: boolean | undefined;
     try {
-      await ctx.gitSync.withSync(`soul: add skill ${name}`);
+      ({ pushed } = await ctx.gitSync.withSync(`soul: add skill ${name}`));
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -100,7 +105,9 @@ const skillCreate: SkillTool = {
       return err("internal_error", reason(e));
     }
 
-    return ok({ name, frontmatter, body });
+    // `pushed` surfaces whether the commit reached the remote (false = committed locally
+    // only; a later sync may hard-reset it away on genuine divergence).
+    return ok({ name, frontmatter, body, pushed });
   },
 };
 

@@ -5,7 +5,10 @@
  * routes can branch on 401 (auth) vs 404 (not found).
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
+// Same-origin by default: in production the SPA is served by the API from one origin
+// (ARCH-V1-006), so an empty base keeps requests on-origin (and CSRF cookies readable).
+// Set VITE_API_URL for split-origin dev (the Vite server proxies /api otherwise).
+const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 export class ApiError extends Error {
   readonly status: number;

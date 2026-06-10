@@ -32,6 +32,11 @@ export interface UserRepo {
   findById(id: string): Promise<UserDoc | null>;
   count(): Promise<number>;
   insert(user: UserDoc): Promise<void>;
+  // Atomic "first admin wins": insert only if the users table is empty. Returns true
+  // when this call created the row, false when another row already existed (race lost).
+  // Optional so test fakes need not implement it; createFirstAdmin falls back to
+  // count()+insert when absent (single-process tests don't race).
+  insertIfFirst?(user: UserDoc): Promise<boolean>;
 }
 
 function rowToUser(row: Record<string, unknown>): UserDoc {
@@ -70,6 +75,19 @@ export class PgUserRepo implements UserRepo {
       [user._id, user.email, user.passwordHash, user.role, user.createdAt]
     );
   }
+
+  async insertIfFirst(user: UserDoc): Promise<boolean> {
+    // Conditional insert: the WHERE NOT EXISTS makes "no users yet" and the insert one
+    // atomic statement, so two concurrent first-admin requests can't both succeed.
+    // RETURNING + rows.length is portable across pg (rowCount) and PGlite (affectedRows).
+    const { rows } = await this.q.query(
+      `INSERT INTO users (id, email, password_hash, role, created_at)
+       SELECT $1, $2, $3, $4, $5 WHERE NOT EXISTS (SELECT 1 FROM users)
+       RETURNING id`,
+      [user._id, user.email, user.passwordHash, user.role, user.createdAt]
+    );
+    return rows.length > 0;
+  }
 }
 
 export async function createUser(
@@ -85,6 +103,31 @@ export async function createUser(
     role,
     createdAt: new Date(),
   };
+  await repo.insert(user);
+  return user;
+}
+
+// Atomically create the first admin: succeeds only when no users exist yet. Returns the
+// created user, or null when another account already exists (lost the first-admin race or
+// setup is already done). Used by the open setup-wizard endpoint to close the TOCTOU
+// window between the "is setup open?" check and the insert.
+export async function createFirstAdmin(
+  repo: UserRepo,
+  email: string,
+  password: string
+): Promise<UserDoc | null> {
+  const user: UserDoc = {
+    _id: randomUUID(),
+    email: normalizeEmail(email),
+    passwordHash: await hashPassword(password),
+    role: "admin",
+    createdAt: new Date(),
+  };
+  if (repo.insertIfFirst) {
+    return (await repo.insertIfFirst(user)) ? user : null;
+  }
+  // Fallback for repos without the atomic path (test fakes; no real concurrency).
+  if ((await repo.count()) > 0) return null;
   await repo.insert(user);
   return user;
 }

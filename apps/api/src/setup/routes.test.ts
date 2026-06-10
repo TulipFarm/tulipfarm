@@ -35,6 +35,11 @@ class FakeUserRepo implements UserRepo {
   async insert(u: UserDoc) {
     this.users.push(u);
   }
+  async insertIfFirst(u: UserDoc) {
+    if (this.users.length > 0) return false;
+    this.users.push(u);
+    return true;
+  }
 }
 
 class StubTokenRepo implements TokenRepo {

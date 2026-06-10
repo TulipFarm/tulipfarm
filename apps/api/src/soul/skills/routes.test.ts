@@ -105,6 +105,9 @@ describe("skills routes", () => {
   const temps: string[] = [];
 
   beforeEach(async () => {
+    // The scan/install flow tests clone local fixture repos via file:// URLs, which are
+    // gated behind this dev opt-in (file:// is disabled by default for SSRF/local-read safety).
+    vi.stubEnv("TF_ALLOW_LOCAL_SKILL_SOURCES", "1");
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
@@ -113,7 +116,7 @@ describe("skills routes", () => {
 
     soulPath = await mkdtemp(join(tmpdir(), "skill-soul-"));
     temps.push(soulPath);
-    withSync = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 2 });
+    withSync = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 2, pushed: true });
     reload = vi.fn().mockResolvedValue(undefined);
 
     soulLoader = {
@@ -157,6 +160,7 @@ describe("skills routes", () => {
   afterEach(async () => {
     await app.close();
     for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
+    vi.unstubAllEnvs();
   });
 
   // `sid` is assigned in beforeEach, so read it lazily per-request (not captured at describe time).
@@ -253,6 +257,18 @@ describe("skills routes", () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toMatch(/owner\/repo|http/);
     });
+
+    it("rejects a file:// source when the dev opt-in is off", async () => {
+      vi.stubEnv("TF_ALLOW_LOCAL_SKILL_SOURCES", "0");
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${join(tmpdir(), "whatever")}` },
+      });
+      expect(res.statusCode).toBe(400);
+    });
   });
 
   describe("scan → audit → install flow", () => {
@@ -306,7 +322,8 @@ describe("skills routes", () => {
         payload: { scanId, names: ["demo-skill"] },
       });
       expect(installRes.statusCode).toBe(200);
-      expect(installRes.json()).toEqual({ installed: ["demo-skill"] });
+      // pushed surfaces whether the commit reached the remote (here the mock reports true).
+      expect(installRes.json()).toEqual({ installed: ["demo-skill"], pushed: true });
 
       const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
       expect(written).toContain("Do the demo.");
@@ -351,6 +368,48 @@ describe("skills routes", () => {
       expect(installRes.statusCode).toBe(409);
       expect(withSync).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+    });
+
+    it("rolls back partial writes when the commit fails (5xx, nothing left on disk)", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const lockBefore = await readFile(join(soulPath, "skills-lock.json"), "utf8");
+      withSync.mockRejectedValueOnce(new Error("git commit blew up"));
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "ok",
+        toolsReach: [],
+        findings: [],
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(installRes.statusCode).toBe(500);
+      // The newly-written skill dir is gone and the lock file is byte-restored — no
+      // half-installed skill survives to be loaded on next boot.
+      await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+      expect(await readFile(join(soulPath, "skills-lock.json"), "utf8")).toBe(lockBefore);
     });
   });
 });

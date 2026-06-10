@@ -31,8 +31,17 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
   const email = process.env.ADMIN_EMAIL;
   const password = process.env.ADMIN_PASSWORD;
   if (email && password && (await deps.userRepo.count()) === 0) {
-    await createUser(deps.userRepo, email, password, "admin");
-    deps.log?.info(`Bootstrapped admin user ${normalizeEmail(email)}`);
+    // Mirror the wizard's min-8 policy on the env path: fail loud in managed mode,
+    // warn + skip in wizard mode (the operator can still finish via the UI).
+    if (password.length < 8) {
+      if (isManagedMode()) {
+        throw new Error("ADMIN_PASSWORD must be at least 8 characters");
+      }
+      deps.log?.info("Skipping admin bootstrap: ADMIN_PASSWORD is shorter than 8 characters");
+    } else {
+      await createUser(deps.userRepo, email, password, "admin");
+      deps.log?.info(`Bootstrapped admin user ${normalizeEmail(email)}`);
+    }
   }
 
   if (process.env.BUSINESS_NAME) {

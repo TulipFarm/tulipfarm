@@ -47,6 +47,10 @@ export type FieldDescriptor = {
   kind: FieldKind;
   linkTarget?: string;
   enumValues?: string[];
+  // The declared JSON type of an enum's members, so the form can coerce the <select>'s
+  // string value back to a number/boolean before submit (otherwise `enum: [1,2,3]` is
+  // sent as "1" and the server's schema validation 422s with no way to fix it).
+  enumType?: JsonSchemaProperty["type"];
   isSystem: boolean;
   isIdField: boolean;
   // Write-side metadata (populated for declared properties; false/undefined for synthesized fields).
@@ -121,6 +125,7 @@ function describe(
     kind,
     linkTarget: kind === "link" ? prop["x-links"]?.target : undefined,
     enumValues: kind === "enum" ? (prop.enum ?? []).map(String) : undefined,
+    enumType: kind === "enum" ? prop.type : undefined,
     isSystem: (SYSTEM_FIELDS as readonly string[]).includes(name),
     isIdField: name === idField,
     required: required.has(name),

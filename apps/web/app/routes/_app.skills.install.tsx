@@ -28,6 +28,13 @@ const SEVERITY_CLASS: Record<SkillAuditReport["findings"][number]["severity"], s
   critical: "text-destructive",
 };
 
+// The API response is trusted but not type-checked at runtime; fall back to a neutral class
+// for an unexpected rating/severity so we never emit `className="… undefined"`.
+const NEUTRAL_CLASS = "border-border text-muted-foreground";
+const riskClass = (r: SkillAuditReport["riskRating"]): string => RISK_CLASS[r] ?? NEUTRAL_CLASS;
+const severityClass = (s: SkillAuditReport["findings"][number]["severity"]): string =>
+  SEVERITY_CLASS[s] ?? "text-muted-foreground";
+
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return e instanceof Error ? e.message : "request failed";
@@ -39,7 +46,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
       <div className="flex items-center gap-2">
         <span className="font-medium text-foreground">{name}</span>
         <span
-          className={`ml-auto rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[report.riskRating]}`}
+          className={`ml-auto rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${riskClass(report.riskRating)}`}
         >
           {report.riskRating} risk
         </span>
@@ -55,7 +62,7 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
         <ul className="flex flex-col gap-1 text-sm">
           {report.findings.map((f, i) => (
             <li key={`${f.category}-${i}`} className="flex gap-2">
-              <span aria-hidden className={SEVERITY_CLASS[f.severity]}>
+              <span aria-hidden className={severityClass(f.severity)}>
                 ◆
               </span>
               <span className="text-muted-foreground">

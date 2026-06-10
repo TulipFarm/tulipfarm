@@ -60,6 +60,9 @@ const validateCreate = ajv.compile(CREATE_SCHEMA);
 
 const agentCreate: AgentTool = {
   name: "agent_create",
+  // No approval gate by design: this system-tier tool lets an agent author agents
+  // autonomously (first-party). The operator audit gate only guards the third-party
+  // skill install flow (POST /api/v1/skills/install), not authoring here.
   description:
     "Create a new agent in the soul repo by writing its AGENT.md. Commits and pushes via withSync. No approval gate.",
   mutating: true,
@@ -88,8 +91,9 @@ const agentCreate: AgentTool = {
       return err("internal_error", reason(e));
     }
 
+    let pushed: boolean | undefined;
     try {
-      await ctx.gitSync.withSync(`soul: add agent ${name}`);
+      ({ pushed } = await ctx.gitSync.withSync(`soul: add agent ${name}`));
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -100,7 +104,8 @@ const agentCreate: AgentTool = {
       return err("internal_error", reason(e));
     }
 
-    return ok({ name, frontmatter, body });
+    // `pushed` surfaces whether the commit reached the remote (false = local-only).
+    return ok({ name, frontmatter, body, pushed });
   },
 };
 

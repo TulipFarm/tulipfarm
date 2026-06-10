@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
@@ -63,6 +63,19 @@ function pruneScans(now: number): void {
   }
 }
 
+// Fetch a scan entry only if it hasn't passed its TTL. pruneScans runs only on new scans,
+// so without this an expired scanId stays usable for audit/install until an unrelated scan
+// happens to prune it — this enforces the documented TTL on every consumer.
+function liveScan(scanId: string, now: number): ScanEntry | undefined {
+  const entry = scans.get(scanId);
+  if (!entry) return undefined;
+  if (entry.expires <= now) {
+    scans.delete(scanId);
+    return undefined;
+  }
+  return entry;
+}
+
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
@@ -75,10 +88,14 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
 }
 
 // Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
-// http(s)/file URL. ssh:// and scp-style (git@host:path) sources are rejected to avoid the operator's
-// clone reaching internal hosts (SSRF). Single-trust V1; a tighter allowlist is a post-V1 hardening.
+// http(s) URL. ssh:// and scp-style (git@host:path) sources are rejected to avoid the operator's
+// clone reaching internal hosts. `file://` lets an authenticated operator read any local git repo
+// on the server host, so it is disabled by default and gated behind an explicit dev opt-in.
+// (http(s) SSRF to internal hosts remains a single-trust V1 risk; a host allowlist is post-V1.)
 function isAllowedSource(source: string): boolean {
-  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^(https?|file):\/\//.test(source);
+  if (/^[\w.-]+\/[\w.-]+$/.test(source) || /^https?:\/\//.test(source)) return true;
+  if (/^file:\/\//.test(source)) return process.env.TF_ALLOW_LOCAL_SKILL_SOURCES === "1";
+  return false;
 }
 
 // Normalize an allowed source into something `git clone` accepts. A bare "owner/repo" becomes a
@@ -350,7 +367,7 @@ export function registerSkillRoutes(
     },
     async (req, reply) => {
       const { scanId, name } = req.body as { scanId: string; name: string };
-      const entry = scans.get(scanId);
+      const entry = liveScan(scanId, Date.now());
       const skill = entry?.skills.find((s) => s.name === name);
       if (!entry || !skill)
         return reply.code(404).send({ error: "scanned skill not found (scan may have expired)" });
@@ -387,18 +404,22 @@ export function registerSkillRoutes(
           200: {
             type: "object",
             required: ["installed"],
-            properties: { installed: { type: "array", items: { type: "string" } } },
+            properties: {
+              installed: { type: "array", items: { type: "string" } },
+              pushed: { type: "boolean" },
+            },
           },
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
       const { scanId, names } = req.body as { scanId: string; names: string[] };
-      const entry = scans.get(scanId);
+      const entry = liveScan(scanId, Date.now());
       if (!entry) return reply.code(404).send({ error: "scan not found (it may have expired)" });
 
       const unique = [...new Set(names)];
@@ -415,10 +436,23 @@ export function registerSkillRoutes(
           .code(409)
           .send({ error: `audit required before install: ${unaudited.join(", ")}` });
 
+      // Snapshot what we touch so a commit/reload failure rolls back cleanly instead of
+      // leaving half-installed skills that load on next boot. We only delete skill dirs we
+      // newly created (never an existing one we'd be re-installing over) and restore the
+      // prior lock file verbatim.
+      const lockPath = join(gitSync.path, "skills-lock.json");
+      const priorLock = await readFile(lockPath, "utf8").catch(() => null);
+      const createdDirs: string[] = [];
+
       const installed: string[] = [];
       for (const skill of chosen as DiscoveredSkill[]) {
         const dir = join(gitSync.path, "skills", skill.name);
+        const existed = await stat(dir).then(
+          () => true,
+          () => false
+        );
         await mkdir(dir, { recursive: true });
+        if (!existed) createdDirs.push(dir);
         await writeFile(join(dir, "SKILL.md"), skill.content, "utf8");
         installed.push(skill.name);
       }
@@ -433,15 +467,21 @@ export function registerSkillRoutes(
           computedHash: createHash("sha256").update(skill.content).digest("hex"),
         };
       }
-      await writeFile(
-        join(gitSync.path, "skills-lock.json"),
-        `${JSON.stringify(lock, null, 2)}\n`,
-        "utf8"
-      );
+      await writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`, "utf8");
 
-      await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
-      await soulLoader.reload();
-      return { installed };
+      try {
+        const sync = await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
+        await soulLoader.reload();
+        // `pushed` lets the UI distinguish a durable install from one committed locally that a
+        // later sync may hard-reset away (SOUL-V1-004). undefined in local-only mode.
+        return { installed, pushed: sync.pushed };
+      } catch (e) {
+        await Promise.all(createdDirs.map((d) => rm(d, { recursive: true, force: true })));
+        if (priorLock === null) await rm(lockPath, { force: true });
+        else await writeFile(lockPath, priorLock, "utf8");
+        app.log.error(`skills: install failed, rolled back — ${String(e)}`);
+        return reply.code(500).send({ error: "install failed" });
+      }
     }
   );
 }

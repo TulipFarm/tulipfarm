@@ -61,4 +61,14 @@ describe("PgUserRepo", () => {
     await repo.insert(makeUser({ email: "dup@example.com" }));
     await expect(repo.insert(makeUser({ email: "dup@example.com" }))).rejects.toThrow();
   });
+
+  it("insertIfFirst creates the first user and refuses once one exists", async () => {
+    expect(await repo.insertIfFirst(makeUser({ email: "first@example.com" }))).toBe(true);
+    // A second insertIfFirst is a no-op: the WHERE NOT EXISTS guard makes the
+    // empty-check + insert one atomic statement, so the row is never created.
+    const second = makeUser({ email: "second@example.com" });
+    expect(await repo.insertIfFirst(second)).toBe(false);
+    expect(await repo.count()).toBe(1);
+    expect(await repo.findByEmail("second@example.com")).toBeNull();
+  });
 });

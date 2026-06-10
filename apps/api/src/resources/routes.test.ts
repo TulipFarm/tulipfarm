@@ -142,6 +142,8 @@ const TICKET_SCHEMA = {
   properties: {
     title: { type: "string" },
     priority: { type: "string", enum: ["low", "high"] },
+    // Read-only: clients can't set it, but a full-replace PUT must not drop it either.
+    ref: { type: "string", "x-readOnly": true },
   },
   required: ["title"],
 };
@@ -510,6 +512,29 @@ describe("resource routes", () => {
       const body = res.json<{ version: number; title: string }>();
       expect(body.version).toBe(2);
       expect(body.title).toBe("Updated bug");
+    });
+
+    it("preserves a read-only field across a full-replace PUT", async () => {
+      const id = randomUUID();
+      fakeRepo.docs.set(id, {
+        _id: id,
+        version: 1,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        title: "Bug",
+        ref: "TKT-001", // server-owned read-only value
+      });
+
+      const res = await app.inject({
+        method: "PUT",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": "1" },
+        // Client omits ref (it's read-only); the server must carry it over, not drop it.
+        payload: { title: "Updated bug" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json<{ ref: string }>().ref).toBe("TKT-001");
     });
   });
 
