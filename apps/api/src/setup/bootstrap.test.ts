@@ -99,4 +99,20 @@ describe("bootstrapFromEnv", () => {
     vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
     await expect(bootstrapFromEnv(deps())).rejects.toThrow(/requires env vars/);
   });
+
+  it("managed mode rejects a too-short ADMIN_PASSWORD", async () => {
+    vi.stubEnv("SETUP_MODE", "managed");
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "short");
+    vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
+    await expect(bootstrapFromEnv(deps())).rejects.toThrow(/at least 8/);
+  });
+
+  it("wizard mode skips (not crashes) a too-short ADMIN_PASSWORD", async () => {
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "short");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    expect(await d.userRepo.count()).toBe(0);
+  });
 });

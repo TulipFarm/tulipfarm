@@ -22,8 +22,11 @@ properties:
   title: { type: string, x-immutable: true }
   customerId: { type: string, x-links: { target: customer } }
   priority: { type: string, enum: [low, high] }
+  level: { type: integer, enum: [1, 2, 3] }
   count: { type: integer }
   open: { type: boolean }
+  due: { type: string, format: date }
+  at: { type: string, format: date-time }
   tags: { type: array }
 required: [title]
 `);
@@ -111,6 +114,72 @@ test("submit coerces typed values and omits empty optional fields", () => {
   fireEvent.click(screen.getByRole("button", { name: "Create" }));
   expect(onSubmit).toHaveBeenCalledTimes(1);
   expect(onSubmit).toHaveBeenCalledWith({ title: "Hello", count: 5, open: true });
+});
+
+test("coerces a numeric enum back to a number on submit (not a string)", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  fireEvent.change(container.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "T" },
+  });
+  fireEvent.change(container.querySelector("select#level") as HTMLSelectElement, {
+    target: { value: "2" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ level: 2 }));
+});
+
+test("does not force-submit an untouched optional boolean on create", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="create"
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  fireEvent.change(container.querySelector("input#title") as HTMLInputElement, {
+    target: { value: "T" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Create" }));
+  // `open` was never touched — omit it so the server's default applies (not a forced false).
+  expect(onSubmit).toHaveBeenCalledWith({ title: "T" });
+});
+
+test("date/date-time fields round-trip: stored ISO displays in input form, submits back as ISO", () => {
+  const onSubmit = vi.fn();
+  const { container } = renderForm(
+    <ResourceForm
+      fields={fields}
+      mode="edit"
+      initial={{ title: "T", due: "2026-01-02", at: "2026-01-02T03:04:00.000Z" }}
+      onSubmit={onSubmit}
+      submitting={false}
+      cancelTo="/"
+    />
+  );
+  // The date input shows YYYY-MM-DD (not the raw stored string with any time part).
+  const due = container.querySelector("input#due") as HTMLInputElement;
+  expect(due.value).toBe("2026-01-02");
+  // datetime-local shows YYYY-MM-DDTHH:mm with no trailing Z (else the control blanks).
+  const at = container.querySelector("input#at") as HTMLInputElement;
+  expect(at.value).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const payload = onSubmit.mock.calls[0][0] as Record<string, unknown>;
+  expect(payload.due).toBe("2026-01-02"); // plain date passes through
+  // datetime-local is promoted back to a full ISO instant equal to what was loaded.
+  expect(new Date(payload.at as string).toISOString()).toBe("2026-01-02T03:04:00.000Z");
 });
 
 test("invalid JSON in an array/object field blocks submit and shows an inline error", () => {

@@ -64,6 +64,8 @@ export default function ResourceCreate() {
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : (
         <ResourceForm
+          // Remount when switching to a different type so the empty seeds reset.
+          key={type}
           fields={fields}
           mode="create"
           onSubmit={onSubmit}

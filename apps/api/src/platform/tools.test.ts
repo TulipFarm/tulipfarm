@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -131,6 +134,41 @@ describe("loadSkillReferenceTool", () => {
   it("returns validation_error for missing args", async () => {
     const res = await loadSkillReferenceTool.handler({ skill: "foo" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("rejects a non-kebab skill name (traversal attempt)", async () => {
+    const res = await loadSkillReferenceTool.handler(
+      { skill: "../../..", reference: "x.md" },
+      makeCtx({}, {}, "/tmp/soul")
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("does not read files outside the references dir via a traversing reference", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "soul-trav-"));
+    // Plant a secret one level above what the references dir would be.
+    writeFileSync(join(dir, "secret.txt"), "TOP SECRET", "utf8");
+    const res = await loadSkillReferenceTool.handler(
+      { skill: "demo", reference: "../../../../secret.txt" },
+      makeCtx({}, {}, dir)
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+    if (res.success) throw new Error("expected failure");
+    expect(JSON.stringify(res)).not.toContain("TOP SECRET");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("reads a legitimate reference within the skill's references dir", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "soul-ref-"));
+    const refDir = join(dir, "skills", "demo", "references");
+    mkdirSync(refDir, { recursive: true });
+    writeFileSync(join(refDir, "playbook.md"), "# Playbook", "utf8");
+    const res = await loadSkillReferenceTool.handler(
+      { skill: "demo", reference: "playbook.md" },
+      makeCtx({}, {}, dir)
+    );
+    expect(res).toMatchObject({ success: true, data: { content: "# Playbook" } });
+    rmSync(dir, { recursive: true, force: true });
   });
 });
 

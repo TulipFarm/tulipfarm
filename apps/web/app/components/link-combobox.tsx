@@ -42,6 +42,12 @@ export function LinkCombobox({
   const blurTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
+    // A malformed `x-links` (missing target) would make us list the whole resource root —
+    // skip the fetch and surface a clear error instead of a confusing raw load failure.
+    if (!target) {
+      setLoadError("link target not configured");
+      return;
+    }
     let active = true;
     listRecords(target)
       .then((page) => {

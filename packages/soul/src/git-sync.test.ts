@@ -280,6 +280,33 @@ describe("GitSyncService", () => {
     });
   });
 
+  describe("withSync (commit + best-effort push)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it("reports pushed:true when the push succeeds", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const result = await svc.withSync("soul: change");
+      expect(result).toEqual({ sha: "abc1234", filesChanged: 2, pushed: true });
+    });
+
+    it("reports pushed:false (not throwing) when the push fails", async () => {
+      mockGit.push.mockRejectedValue(new Error("permission denied"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const result = await svc.withSync("soul: change");
+      expect(result).toMatchObject({ sha: "abc1234", filesChanged: 2, pushed: false });
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("push failed"));
+    });
+
+    it("omits pushed (undefined) in local-only mode", async () => {
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const result = await svc.withSync("soul: change");
+      expect(result.pushed).toBeUndefined();
+      expect(mockGit.push).not.toHaveBeenCalled();
+    });
+  });
+
   describe("syncOnce", () => {
     beforeEach(() => {
       mockExistsSync.mockReturnValue(true);

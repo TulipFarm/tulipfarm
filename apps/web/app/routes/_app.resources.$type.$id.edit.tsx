@@ -69,6 +69,9 @@ export default function ResourceEdit() {
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : (
         <ResourceForm
+          // Remount on a different record so the form's useState seeds reset to the new
+          // record — React Router reuses this component across param changes (back/forward).
+          key={`${type}/${id}`}
           fields={fields}
           mode="edit"
           initial={record}

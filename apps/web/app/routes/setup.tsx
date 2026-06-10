@@ -46,6 +46,10 @@ export default function SetupWizard() {
       const res = await call();
       if (res.ok) setStep(next);
       else setError(res.error ?? "something went wrong");
+    } catch (e) {
+      // A network-level failure (server restarting mid-setup on a first-run box) rejects
+      // the fetch; without this the button just silently re-enables with no feedback.
+      setError(e instanceof Error ? e.message : "network error — please retry");
     } finally {
       setBusy(false);
     }

@@ -250,7 +250,7 @@ export function registerResourceRoutes(
       let data = stripImmutable(
         schema,
         existing,
-        stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>))
+        stripReadOnly(schema, stripSystemFields(req.body as Record<string, unknown>), existing)
       );
 
       const prepared = await transformAndValidate(

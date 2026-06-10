@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
 import { type ToolCallResult, err, ok } from "./tool-result";
@@ -78,6 +78,11 @@ const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
 };
 const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_SCHEMA);
 
+// Skill names are kebab-case slugs (matches the soul agent/skill NAME_RE) — anything
+// else can only be a path-traversal attempt, since this tool is LLM-callable and thus
+// reachable via prompt injection or a malicious skill body.
+const SKILL_NAME_RE = /^[a-z][a-z0-9-]*$/;
+
 export const loadSkillReferenceTool: PlatformTool = {
   name: "load_skill_reference",
   description:
@@ -88,9 +93,18 @@ export const loadSkillReferenceTool: PlatformTool = {
     if (!validateLoadSkillRef(args))
       return err("validation_error", firstError(validateLoadSkillRef.errors));
     const { skill, reference } = args as { skill: string; reference: string };
+    if (!SKILL_NAME_RE.test(skill))
+      return err("validation_error", "skill must be a kebab-case name");
+    if (reference.includes("\0"))
+      return err("validation_error", "reference must be a plain filename");
     if (!ctx.soulPath)
       return err("not_found", `Skill "${skill}" references directory not available.`);
-    const refPath = join(ctx.soulPath, "skills", skill, "references", reference);
+    // Resolve and assert containment: a `..` or absolute `reference` would escape the
+    // skill's references/ dir and read arbitrary files (secrets, .env, host files).
+    const baseDir = resolve(ctx.soulPath, "skills", skill, "references");
+    const refPath = resolve(baseDir, reference);
+    if (refPath !== baseDir && !refPath.startsWith(baseDir + sep))
+      return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
     try {
       const content = await readFile(refPath, "utf8");
       return ok({ skill, reference, content });

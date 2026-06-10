@@ -9,14 +9,21 @@ export function stripSystemFields(data: Record<string, unknown>): Record<string,
   return rest;
 }
 
+// Drop client-supplied values for x-readOnly fields. On UPDATE (existing provided) the
+// stored value is carried over instead of deleted — otherwise a full-replace PUT would
+// silently drop read-only fields that aren't recomputed by a transform. On CREATE
+// (no existing) there's nothing to preserve, so the field is simply removed.
 export function stripReadOnly(
   schema: Record<string, unknown>,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  existing?: Record<string, unknown>
 ): Record<string, unknown> {
   const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   const out = { ...data };
   for (const [field, propSchema] of Object.entries(props)) {
-    if (propSchema["x-readOnly"] === true) delete out[field];
+    if (propSchema["x-readOnly"] !== true) continue;
+    if (existing && existing[field] !== undefined) out[field] = existing[field];
+    else delete out[field];
   }
   return out;
 }
