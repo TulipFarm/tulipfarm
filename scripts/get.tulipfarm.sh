@@ -327,6 +327,14 @@ fetch_pg_bundle() {
   want_rev="$PG_BUNDLE_TAG"
   have_rev="$($SUDO cat "$(NATIVE_RUNTIME)/BUNDLE_REVISION" 2>/dev/null || true)"
   if [ "$have_rev" = "$want_rev" ]; then log "Postgres bundle ${want_rev} already installed"; return; fi
+  # Apple Silicon: the relocatable PG17 bundle is not yet published for darwin-arm64 (the
+  # upstream macOS binaries are x86_64-only), so the asset may be absent. Probe first and, if
+  # missing, fail fast with a real path forward instead of an opaque "download failed". The
+  # HEAD check means a future darwin-arm64 bundle just works — no code change needed.
+  if [ "$OS" = darwin ] && [ "$ARCH" = arm64 ] && ! curl -fsI "$url" >/dev/null 2>&1; then
+    die "the native Postgres bundle isn't available for Apple Silicon (darwin-arm64) yet.
+Use the container lane instead: install Docker or Podman and re-run, or set TF_RUNTIME=podman."
+  fi
   tmp="$(mktemp -d)"
   download_verified "$url" "${tmp}/pg.tgz"
   $SUDO rm -rf "$(NATIVE_RUNTIME).new"
