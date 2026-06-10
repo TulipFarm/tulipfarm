@@ -372,6 +372,23 @@ describe("ToolRegistry", () => {
       });
     });
 
+    it("soul mutation (requiresApproval:false) under approval-required: no gate, runs directly (AGT-V1-001)", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "soul-ran" }));
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({ name: "agent_create", mutating: true, requiresApproval: false, execute })
+      );
+      const { gate, calls } = controllableGate();
+      const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
+
+      expect(await ts.agent_create.execute?.({}, { messages: [], toolCallId: "tc-soul" })).toEqual({
+        success: true,
+        data: "soul-ran",
+      });
+      expect(calls).toHaveLength(0);
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
     it("the approval wait is NOT subject to the 30s tool timeout (gate is outside withToolTimeout)", async () => {
       vi.useFakeTimers();
       try {
