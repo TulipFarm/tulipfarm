@@ -21,7 +21,7 @@
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/validation": "workspace:*",
     "ai": "^4",
-    "dotenv": "^16.4.5",
+    "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "isolated-vm": "^7.0.0",
     "pg": "^8.13.0",
