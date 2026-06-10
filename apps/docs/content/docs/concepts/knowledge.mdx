@@ -1,0 +1,52 @@
+---
+title: Knowledge
+description: The searchable corpus agents draw on, backed by vector search.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The knowledge base is the searchable body of text your agents draw on. It is built from
+documents, organized into collections, indexed in the background, and queried by vector
+search.
+
+## How knowledge gets in
+
+Knowledge is populated from a few sources, not by file upload:
+
+- **Authored documents** — markdown text created through the knowledge API or by an
+  agent tool.
+- **Resource records** — your resource data is indexed so agents can search it.
+- **Agent conversations** — completed conversations are indexed as knowledge.
+
+There is no file upload in V1, so authored content is markdown text only. Documents carry
+revisions, so edits are tracked over time.
+
+<Callout type="info">
+A knowledge authoring UI is still on the way. Today, documents are created through the
+API or by agents; the web UI shows indexed knowledge once it exists.
+</Callout>
+
+## Indexing and search
+
+When a document changes, a background job re-indexes it: it splits the document into
+chunks, embeds each chunk, and stores the vectors. Search then ranks chunks by vector
+similarity and returns the best matches. Indexing is idempotent and retries on failure,
+so a transient error does not leave the index half-written.
+
+## Embeddings degrade gracefully
+
+TulipFarm picks an embedding strategy in priority order, so search works whether or not
+you have configured a cloud provider:
+
+1. **Cloud** — OpenAI `text-embedding-3-small`, used when an embedding key is configured.
+2. **Local** — Ollama, requiring no external key.
+3. **Lexical fallback** — full-text matching when no embedding backend is available.
+   Results come back flagged with an `embedding-unavailable` warning so you know you are
+   in fallback mode.
+
+## Governance knowledge
+
+A document flagged to always load is injected into every agent's context as a
+governance block — your operating rules and policies, available to every turn without the
+agent having to search for them. Injection respects size caps; content that would
+overflow the budget is skipped rather than truncated mid-document.

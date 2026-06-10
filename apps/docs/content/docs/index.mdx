@@ -1,0 +1,35 @@
+---
+title: TulipFarm
+description: The AI-native business operating system — install it, give it a soul, put it to work.
+---
+
+import { Cards, Card } from "fumadocs-ui/components/card";
+
+TulipFarm is a self-hosted control panel where autonomous agents run your business
+operations. You define your business as data and configuration — resources, agents,
+skills, knowledge — and TulipFarm gives those agents the tools to act on it.
+
+It runs on your own machine. A single command sets up the datastore, generates your
+secrets, and boots the API and web UI. The first account you create is the admin.
+
+## The mental model
+
+A TulipFarm instance has two halves:
+
+- **The soul** — a git-backed configuration store. Your resource schemas, agents, and
+  skills live here as files. Editing the soul is how you change what your instance
+  knows and can do.
+- **The runtime** — the API and workers that load the soul, store your records, index
+  your knowledge, and run agent turns against your configured LLM providers.
+
+Everything you configure is a file in the soul; everything your business produces is a
+record in the datastore. Read [Concepts](/docs/concepts) for the full picture.
+
+## Where to start
+
+<Cards>
+  <Card title="Get started" href="/docs/getting-started" description="Install TulipFarm, run it, and define your first resource type." />
+  <Card title="Concepts" href="/docs/concepts" description="How the soul, resources, agents, skills, knowledge, and LLM tiers fit together." />
+  <Card title="Guides" href="/docs/guides" description="Task recipes: define a resource, install a skill, configure providers." />
+  <Card title="Reference" href="/docs/reference" description="Environment variables and the commands that run the project." />
+</Cards>

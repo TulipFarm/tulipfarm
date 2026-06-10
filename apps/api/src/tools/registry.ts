@@ -66,7 +66,12 @@ export class ToolRegistry {
             // Mode-gated approval: a mutating tool under approval-required suspends here until a human
             // decides. Deliberately OUTSIDE coordinator + withToolTimeout — the wait can be minutes, and
             // sibling approval requests must not serialize behind each other or auto-fail at 30s.
-            if (ctx.autonomy === "approval-required" && t.mutating && approvalGate) {
+            if (
+              ctx.autonomy === "approval-required" &&
+              t.mutating &&
+              t.requiresApproval !== false &&
+              approvalGate
+            ) {
               const decision = await approvalGate.request({
                 toolCallId: opts.toolCallId,
                 toolName: t.name,

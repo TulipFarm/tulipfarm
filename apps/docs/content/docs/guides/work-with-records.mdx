@@ -1,0 +1,33 @@
+---
+title: Work with records
+description: Create, edit, and delete records of an existing resource type in the web UI.
+---
+
+This guide manages records through the web UI. It assumes the resource type already
+exists — if it does not, [define it first](/docs/guides/define-a-resource-type).
+
+## Open a resource type
+
+In the sidebar, choose **Resources**. The list shows every type your soul defines, with
+each type's field count. Select a type to see its records.
+
+## Create a record
+
+Choose **New**. TulipFarm renders a form from the type's schema — one input per field,
+with required fields marked. Fill it in and save.
+
+The values are validated against the schema before they are stored. If a field is
+invalid, the form shows the error inline and the record is not created. On success you
+land on the new record's detail page.
+
+## Edit a record
+
+Open a record and choose **Edit**. The form is pre-filled with the current values. Make
+your changes and save. Edits are validated the same way as creates.
+
+## Delete a record
+
+From a record's detail page, choose delete. Deletes are soft: the record is removed from
+the live list but retained in history. Other records that link to it are not blocked and
+are not cascaded — their link simply stops resolving to a live record. See
+[Resources](/docs/concepts/resources) for how relationships behave.

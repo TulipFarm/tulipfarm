@@ -1,0 +1,50 @@
+---
+title: Skills
+description: Reusable instructions agents load on demand, audited before they land.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A skill is a packaged set of instructions an agent can load when it needs them. Skills
+follow the Claude agent-skills format: a `SKILL.md` with a `name`, a `description`, and a
+markdown body, optionally accompanied by reference files.
+
+## Progressive disclosure
+
+Skills are loaded in layers so an agent only pays for what it uses:
+
+- **Level 1** — the name and description, always visible so the agent knows the skill
+  exists.
+- **Level 2** — the `SKILL.md` body, loaded when the agent decides to use the skill.
+- **Level 3** — reference files, loaded on demand from within the skill.
+
+This keeps the agent's context lean while still giving it deep material when a task calls
+for it.
+
+## Installing from a git repository
+
+The skill marketplace installs skills straight from a git URL. The flow has three steps:
+**scan** a repository for installable skills, **audit** the ones you select, then
+**confirm** the install. An installed skill is written to `soul/skills/{name}/`,
+committed, and recorded in `skills-lock.json` with its source URL, ref, and hash.
+
+See [Install a skill](/docs/guides/install-a-skill) for the walkthrough.
+
+## SkillAudit: advisory, not a boundary
+
+Every skill — whether installed from a repository or authored locally — is reviewed by a
+built-in **SkillAudit** agent before it lands. SkillAudit produces a safety report: what
+tools and data the skill would steer an agent toward, any suspicious instructions
+(exfiltration, destructive actions, prompt-injection patterns), and an overall risk
+rating of low, medium, or high.
+
+<Callout type="warn">
+SkillAudit is advisory, not a guarantee. A skill is natural-language instruction, not
+code, so it cannot be sandboxed — it may read benign yet behave badly in conversation,
+and injection can be obscured. A "low risk" rating does not auto-install anything.
+</Callout>
+
+Because the audit is advisory, **you confirm every install yourself** after reading the
+report. And because there is no per-skill tool restriction yet, an installed skill runs
+with the agent's full tool reach. Risk in V1 is bounded by *audit report → human
+confirm*, not by a sandbox.

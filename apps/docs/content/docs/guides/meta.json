@@ -1,0 +1,11 @@
+{
+  "title": "Guides",
+  "pages": [
+    "define-a-resource-type",
+    "work-with-records",
+    "install-a-skill",
+    "configure-llm-providers",
+    "store-a-secret",
+    "issue-an-api-token"
+  ]
+}

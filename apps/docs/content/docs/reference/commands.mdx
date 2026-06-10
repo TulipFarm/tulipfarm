@@ -1,0 +1,43 @@
+---
+title: Commands
+description: The scripts that set up, run, and check a TulipFarm checkout.
+---
+
+TulipFarm is a pnpm + Turborepo monorepo. Run these from the repository root unless
+noted. The package manager is `pnpm` — do not substitute npm or yarn.
+
+## Setup
+
+| Command | What it does |
+|---|---|
+| `bash scripts/setup-dev.sh` | Installs PostgreSQL 17 + pgvector, starts the database, creates the `tulipfarm` database, initializes the soul repo at `~/.tulipfarm/soul`, and writes `.env.local` with generated secrets. |
+| `pnpm install` | Installs workspace dependencies. Use `--frozen-lockfile` in CI. |
+
+## Run
+
+| Command | What it does |
+|---|---|
+| `pnpm dev` | Starts the API (`:4010`) and web UI (`:4000`) together. |
+| `pnpm dev:api` | Starts only the API. |
+| `pnpm dev:web` | Starts only the web UI. |
+| `pnpm dev:docs` | Starts this documentation site (`:4020`). |
+| `curl http://localhost:4010/health` | Checks API health; returns `{ "status": "ok" }`. |
+
+## Build and check
+
+| Command | What it does |
+|---|---|
+| `pnpm build` | Builds every workspace through Turbo. |
+| `pnpm lint` | Runs Biome across all workspaces. |
+| `pnpm typecheck` | Runs `tsc --noEmit` across all workspaces. |
+| `pnpm test` | Runs the Vitest suites. |
+
+## Single workspace
+
+Target one workspace with a filter:
+
+```bash
+pnpm --filter @tulipfarm/api dev
+pnpm --filter @tulipfarm/web test
+pnpm --filter @tulipfarm/docs build
+```

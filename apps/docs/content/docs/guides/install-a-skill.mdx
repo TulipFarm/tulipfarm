@@ -1,0 +1,43 @@
+---
+title: Install a skill
+description: Scan a git repository for skills, audit them, and confirm the install.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide installs a [skill](/docs/concepts/skills) from a git repository through the
+web UI. The flow is always scan, then audit, then confirm.
+
+## Open the installer
+
+In the sidebar, choose **Skills**, then **Install**.
+
+## Scan a repository
+
+Enter a git URL — either a full `https://github.com/owner/repo` URL or the short
+`owner/repo` form — and choose **Scan**. TulipFarm inspects the repository and lists the
+installable skills it found, each with its description.
+
+## Select and audit
+
+Every discovered skill starts selected; uncheck any you do not want. Choose **Run
+SkillAudit** to review the selected skills.
+
+SkillAudit returns a report per skill: a risk rating (low, medium, or high), a summary,
+the tools the skill would steer an agent toward, and any specific findings. The rating
+appears next to each skill name.
+
+<Callout type="warn">
+SkillAudit is advisory, not a guarantee. A skill is natural-language instruction and
+cannot be sandboxed — it may read benign yet behave badly in context, and injection can
+be obscured. Installed skills run with full tool access. Read the report before you
+confirm.
+</Callout>
+
+## Confirm the install
+
+Once every selected skill has been audited, choose **Confirm install**. The skills are
+written into your soul repo under `skills/{name}/`, committed, and recorded in
+`skills-lock.json` with their source.
+
+You return to the skills list, where the newly installed skills now appear.

@@ -147,3 +147,4 @@ curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens?limit=2&cursor=
 
 - Never `git commit` unless explicitly asked.
 - Work on the current branch.
+- PR titles must follow Conventional Commits (CI-enforced): `type(scope): subject` — type ∈ `feat|fix|chore|docs|refactor|perf|test|build|ci|style|revert` (e.g. `feat(approvals): add live badge`).

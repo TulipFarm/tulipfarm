@@ -1,0 +1,22 @@
+name: "Setup pnpm + Node"
+description: "Install pnpm and Node, restore the pnpm store cache, and run a frozen install"
+
+runs:
+  using: "composite"
+  steps:
+    # pnpm MUST be installed before setup-node: `cache: pnpm` makes setup-node
+    # shell out to `pnpm store path`, which requires pnpm to already exist.
+    - name: Install pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        version: 11.1.3
+
+    - name: Setup Node
+      uses: actions/setup-node@v6
+      with:
+        node-version: "24"
+        cache: "pnpm"
+
+    - name: Install dependencies
+      shell: bash
+      run: pnpm install --frozen-lockfile

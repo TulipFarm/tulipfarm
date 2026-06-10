@@ -1,0 +1,66 @@
+---
+title: Soul
+description: The git-backed configuration store that defines a TulipFarm instance.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The soul is your instance's configuration, stored as a git repository. It holds the
+definitions that make your TulipFarm what it is: resource schemas, agents, and skills.
+A fresh instance creates the soul at `~/.tulipfarm/soul`, controlled by the `SOUL_PATH`
+environment variable.
+
+## Why a git repository
+
+TulipFarm treats the soul as a configuration database that happens to sync over git.
+That choice buys three things at once:
+
+- **History is the audit trail.** Every change to an agent or schema is a commit. You
+  can see what changed, when, and why, with ordinary git tooling.
+- **Agents and humans edit the same store.** An agent that creates a resource type
+  writes the same `schema.yml` you would write by hand, then commits it.
+- **Durability and portability.** Point the soul at a remote and your configuration is
+  backed up and movable between machines.
+
+## What lives in the soul
+
+The repository has a fixed layout:
+
+```text
+soul/
+  resources/{name}/    schema.yml (+ optional hooks.ts)
+  agents/{name}/       AGENT.md
+  skills/{name}/       SKILL.md (+ references/)
+  routines/{name}/     routine definitions
+  integrations/{name}/ connection config
+  llm.config.yaml      LLM provider tiers
+  soul.yaml            root manifest
+  skills-lock.json     installed-skill provenance
+```
+
+Records, knowledge, and conversations are **not** in the soul — those are data, and
+they live in the datastore.
+
+## How the soul syncs
+
+The soul is loaded into the runtime at startup. If you set `GIT_REMOTE_URL`, the
+instance clones the remote on first boot and pulls from it on a periodic schedule;
+`main` wins when histories genuinely diverge, but local commits that are merely ahead
+and un-pushed are preserved and retried, never discarded.
+
+With no remote set, the soul is local-only. Writes still commit locally, and your
+configuration is captured by backups of the soul directory.
+
+<Callout type="info">
+Setting a remote is strongly recommended. It turns your soul into a backed-up,
+portable record of your whole instance.
+</Callout>
+
+## Soul writes are never gated
+
+Editing the soul — creating an agent, a schema, or a skill — is a direct write and
+commit. There is no approval step. The git history *is* the review record.
+
+This is distinct from what an agent does at runtime. When an agent takes a real-world or
+data action, that can be gated by its [autonomy level](/docs/concepts/agents). The rule
+is: **soul = database, no gate; actions on the world = gated.** Do not conflate the two.

@@ -1,0 +1,44 @@
+---
+title: Configure LLM providers
+description: Add a provider's credentials, then point your tiers at its models.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide gets your agents running by configuring a model provider. There are two steps,
+in order: store the provider's credentials, then assign its models to the
+[tiers](/docs/concepts/llm). Both live under **Settings**, and both require admin.
+
+## Add the provider's credentials
+
+Open **Settings → Secrets**. Under *Configure a provider*, pick your provider from the
+dropdown (or choose **Custom…** for one not listed). The form shows the fields that
+provider needs — typically an API key, sometimes a base URL or resource name. Fill them
+in and choose **Save provider**.
+
+Saved provider credentials are stored encrypted; their values are never shown again, only
+listed as set. See [Store a secret](/docs/guides/store-a-secret) for more on the secrets
+store.
+
+## Assign models to tiers
+
+Open **Settings → LLM**. You see the three tiers — `quick`, `standard`, and `complex` —
+each an ordered list of provider rows.
+
+For each tier, choose a configured provider and type the model id to use, for example
+`claude-sonnet-4-6`. A provider only becomes selectable once its credentials are saved;
+unconfigured providers are disabled with a "configure first" note.
+
+<Callout type="info">
+The order of rows in a tier is its fallback chain — the top provider is tried first, and
+the runtime falls through to the next on failure. Add a second provider to a tier with
+**+ Add provider** to give it a backup.
+</Callout>
+
+Each tier needs at least one provider with a model. Choose **Save**; the LLM service
+reloads with the new configuration, written to `soul/llm.config.yaml`.
+
+## Verify
+
+After saving you see a "Saved · LLM service reloaded" confirmation. Your agents now run
+against the providers you configured.

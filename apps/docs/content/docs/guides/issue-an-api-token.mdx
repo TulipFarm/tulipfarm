@@ -1,0 +1,74 @@
+---
+title: Issue an API token
+description: Create a bearer token for programmatic access to your instance.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide creates an API token you can use to call TulipFarm programmatically, instead
+of authenticating with a session cookie each time. It uses `curl` against a running
+instance on the default port `4010`.
+
+## Log in and capture the session
+
+Log in, saving the session and CSRF cookies to a jar:
+
+```bash
+curl -c /tmp/tf-cookies.txt -X POST http://localhost:4010/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@tulipfarm.dev","password":"your-password"}'
+```
+
+Cookie-authenticated writes require a CSRF header that matches the cookie the login set.
+Read it from the jar into a variable:
+
+```bash
+CSRF=$(grep csrf_token /tmp/tf-cookies.txt | awk '{print $NF}')
+```
+
+## Create the token
+
+```bash
+curl -b /tmp/tf-cookies.txt -X POST http://localhost:4010/api/v1/auth/tokens \
+  -H "Content-Type: application/json" \
+  -H "x-csrf-token: $CSRF" \
+  -d '{"name":"my-integration"}'
+```
+
+The response includes the raw token under `token`, alongside the token's name and
+metadata:
+
+```json
+{ "token": "tf_...", "name": "my-integration" }
+```
+
+<Callout type="warn">
+The raw token value is shown once, in this response only. Copy it now — you cannot
+retrieve it again. If you lose it, delete the token and create a new one.
+</Callout>
+
+## Use the token
+
+Send it as a bearer token. Bearer-authenticated requests skip the CSRF check, so no
+cookie or CSRF header is needed:
+
+```bash
+curl http://localhost:4010/api/v1/auth/tokens \
+  -H "Authorization: Bearer tf_..."
+```
+
+## List and revoke tokens
+
+List your tokens (admins see all; members see their own):
+
+```bash
+curl -b /tmp/tf-cookies.txt http://localhost:4010/api/v1/auth/tokens
+```
+
+Revoke one by id:
+
+```bash
+curl -b /tmp/tf-cookies.txt -X DELETE \
+  -H "x-csrf-token: $CSRF" \
+  http://localhost:4010/api/v1/auth/tokens/<id>
+```

@@ -2,7 +2,8 @@ import { NavLink } from "@remix-run/react";
 import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "~/components/theme-toggle";
-import { badgeCounts } from "~/lib/badges";
+import { useApprovals } from "~/lib/approvals-context";
+import type { BadgeKey } from "~/lib/badges";
 import { type NavItem, navGroups, navItems } from "~/lib/nav";
 import { cn } from "~/lib/utils";
 
@@ -30,7 +31,10 @@ function NavRow({
   onNavigate: () => void;
 }) {
   const { to, label, icon: Icon, end, badgeKey } = item;
-  const count = badgeKey ? badgeCounts[badgeKey] : 0;
+  // Live badge counts from the shared ApprovalsProvider (inert 0 when no provider is mounted).
+  const { count: approvalsCount } = useApprovals();
+  const liveCounts: Partial<Record<BadgeKey, number>> = { approvals: approvalsCount };
+  const count = badgeKey ? (liveCounts[badgeKey] ?? 0) : 0;
   return (
     <NavLink
       to={to}
