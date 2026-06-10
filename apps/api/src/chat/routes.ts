@@ -399,6 +399,52 @@ export function registerChatRoutes(
   );
 
   app.get(
+    "/api/v1/chat/approvals",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "List all in-flight (pending) tool-execution approvals. Single-trust V1: not scoped " +
+          "per-user. Ephemeral — the set empties on API restart. Poll to drive the Approvals view + badge.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: false,
+            required: ["items"],
+            properties: {
+              items: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["approvalId", "toolCallId", "toolName", "expiresAt", "createdAt"],
+                  properties: {
+                    approvalId: { type: "string" },
+                    toolCallId: { type: "string" },
+                    toolName: { type: "string" },
+                    // `args` is arbitrary tool input — declared schemaless (and omitted from
+                    // `required`) so fast-json-stringify passes any JSON value through intact. A
+                    // typed `args` would silently drop/coerce non-object shapes (arrays, scalars).
+                    args: {},
+                    expiresAt: { type: "string" },
+                    createdAt: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      return reply.send({ items: approvalRegistry.listPending() });
+    }
+  );
+
+  app.get(
     "/api/v1/chat/streams/:streamId",
     {
       preHandler: requireAuth,

@@ -81,3 +81,71 @@ describe("ApprovalRegistry", () => {
     }
   });
 });
+
+describe("ApprovalRegistry.listPending", () => {
+  it("is empty with nothing in flight", () => {
+    expect(new ApprovalRegistry().listPending()).toEqual([]);
+  });
+
+  it("projects an in-flight request into a listable row", () => {
+    const reg = new ApprovalRegistry();
+    const { events, emitter } = fakeEmitter();
+    void reg.request(emitter, { toolCallId: "c1", toolName: "write_x", args: { a: 1 } });
+
+    const rows = reg.listPending();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ toolCallId: "c1", toolName: "write_x", args: { a: 1 } });
+    expect(rows[0]?.approvalId).toBe(reqId(events));
+    expect(typeof rows[0]?.expiresAt).toBe("string");
+    expect(typeof rows[0]?.createdAt).toBe("string");
+  });
+
+  it("drops an entry once it is decided", async () => {
+    const reg = new ApprovalRegistry();
+    const { events, emitter } = fakeEmitter();
+    const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
+    expect(reg.listPending()).toHaveLength(1);
+
+    reg.decide(reqId(events), "approved");
+    expect(reg.listPending()).toEqual([]);
+    await p;
+  });
+
+  it("drops an entry once it times out", async () => {
+    vi.useFakeTimers();
+    try {
+      const reg = new ApprovalRegistry();
+      const { emitter } = fakeEmitter();
+      const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
+      expect(reg.listPending()).toHaveLength(1);
+
+      await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
+      expect(reg.listPending()).toEqual([]);
+      await p;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("lists multiple entries oldest-first", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const reg = new ApprovalRegistry();
+      const { events, emitter } = fakeEmitter();
+      void reg.request(emitter, { toolCallId: "c1", toolName: "first", args: {} });
+      vi.advanceTimersByTime(1000);
+      void reg.request(emitter, { toolCallId: "c2", toolName: "second", args: {} });
+
+      const ids = events
+        .filter((e) => e.type === "approval-request")
+        .map((e) => e.data.approvalId as string);
+      const rows = reg.listPending();
+      expect(rows.map((r) => r.approvalId)).toEqual(ids);
+      expect(rows.map((r) => r.toolName)).toEqual(["first", "second"]);
+      expect((rows[0]?.createdAt ?? "") <= (rows[1]?.createdAt ?? "")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

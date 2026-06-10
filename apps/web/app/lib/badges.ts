@@ -1,9 +1,3 @@
-/*
- * Mocked badge counts for the V1 shell scaffold. Real counts wire to the API in downstream
- * tickets (e.g. Approvals → GET /api/v1/approvals). A pill renders only when the count is > 0.
- */
+// Maps a sidebar nav row to a live badge source. Counts come from context (see useApprovals() in
+// app-sidebar.tsx). A pill renders only when the count is > 0.
 export type BadgeKey = "approvals";
-
-export const badgeCounts: Record<BadgeKey, number> = {
-  approvals: 3,
-};
