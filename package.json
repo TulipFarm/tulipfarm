@@ -4,8 +4,9 @@
   "packageManager": "pnpm@11.1.3",
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev",
+    "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web",
     "dev:api": "turbo dev --filter=@tulipfarm/api",
+    "dev:docs": "turbo dev --filter=@tulipfarm/docs",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",

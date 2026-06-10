@@ -1,0 +1,32 @@
+---
+title: Environment variables
+description: Every variable TulipFarm reads from .env.local, with defaults.
+---
+
+TulipFarm reads configuration from `.env.local`. The setup script generates this file and
+fills the random secrets; the table below documents every variable, its default, and
+whether it is required.
+
+## Required
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgres://localhost:5432/tulipfarm` | PostgreSQL connection string. The single datastore (pgvector + pg-boss). |
+| `SOUL_PATH` | `~/.tulipfarm/soul` | Absolute path to the soul git repository. Must be outside the project repo — a relative or in-repo path is rejected at boot. |
+| `ENCRYPTION_KEY` | — | Base64 key for encrypting application secrets. Must be 32 bytes; startup fails fast if it is not. Generate with `openssl rand -base64 32`. |
+| `JWT_SECRET` | — | Signing secret for tokens. Generate with `openssl rand -base64 32`. |
+| `WEBHOOK_SIGNING_SECRET` | — | Secret for signing webhooks. Generate with `openssl rand -base64 32`. |
+| `ADMIN_EMAIL` | `admin@tulipfarm.dev` | Email of the bootstrap admin, created on first boot if no users exist. Must be a valid email format (an address with no TLD is rejected). |
+| `ADMIN_PASSWORD` | — | Password for the bootstrap admin. |
+
+## Optional
+
+| Variable | Default | Description |
+|---|---|---|
+| `SESSION_TTL_SECONDS` | `604800` | Session cookie lifetime in seconds (7 days). |
+| `PORT` | `4010` | Port the API listens on. |
+| `VITE_PORT` | `4000` | Port the web UI listens on. |
+| `CORS_ORIGIN` | `http://localhost:4000` | Allowed browser origin for the API. Defaults to the web UI on `VITE_PORT`. |
+| `GIT_REMOTE_URL` | — | Remote for the soul repo. When set, the instance syncs the soul to and from it. |
+| `GIT_CREDENTIALS` | — | Credentials for pushing to `GIT_REMOTE_URL`. |
+| `ENCRYPTION_KEY_PREVIOUS` | — | The prior `ENCRYPTION_KEY` during a key rotation. Decryption tries the current key, then this one. See [Secrets](/docs/concepts/secrets). |

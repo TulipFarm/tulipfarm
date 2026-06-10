@@ -1,0 +1,31 @@
+---
+title: Concepts
+description: How TulipFarm's parts fit together — soul, resources, agents, skills, knowledge, LLM tiers, and secrets.
+---
+
+import { Cards, Card } from "fumadocs-ui/components/card";
+
+TulipFarm models a business as **configuration** and **data**, and lets agents act on
+both. The separation is deliberate, and it is the single idea that explains everything
+else:
+
+- **Definitions live in the soul** (a git repository): resource schemas, agents,
+  skills. These are files you can read, diff, and version.
+- **Data lives in the datastore** (PostgreSQL): the records your resources hold, your
+  knowledge base, conversations, and secrets.
+
+Editing the soul changes what your instance *is*. Writing to the datastore changes what
+it *knows*. Agents do both — but the two are governed differently. Soul writes are never
+gated; real-world actions an agent takes are gated by its autonomy level.
+
+## The parts
+
+<Cards>
+  <Card title="Soul" href="/docs/concepts/soul" description="The git-backed configuration store that defines your instance." />
+  <Card title="Resources" href="/docs/concepts/resources" description="Schema-defined data types and the records that fill them." />
+  <Card title="Agents" href="/docs/concepts/agents" description="The actors that run turns, defined by an AGENT.md file." />
+  <Card title="Skills" href="/docs/concepts/skills" description="Reusable instructions agents load on demand, audited before install." />
+  <Card title="Knowledge" href="/docs/concepts/knowledge" description="The searchable corpus agents draw on, backed by vector search." />
+  <Card title="LLM tiers" href="/docs/concepts/llm" description="How TulipFarm chooses and falls back across model providers." />
+  <Card title="Secrets" href="/docs/concepts/secrets" description="Encrypted storage for the credentials your instance needs." />
+</Cards>

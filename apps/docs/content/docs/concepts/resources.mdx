@@ -1,0 +1,77 @@
+---
+title: Resources
+description: Schema-defined data types and the records that fill them.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A resource is a data type you define with a JSON Schema. A resource *type* is the schema;
+a *record* is one instance of that type. Define a `customer` type once, and you get
+validated storage and a CRUD interface for customer records.
+
+## Two halves: schema and data
+
+The schema lives in the [soul](/docs/concepts/soul) as
+`resources/{name}/schema.yml`. The records live in the datastore. When TulipFarm boots,
+it reads each schema and materializes a table for it — this is called reconciliation. Add
+a schema, restart, and the type is ready to hold records.
+
+A schema is plain JSON Schema written in YAML:
+
+```yaml title="resources/customer/schema.yml"
+type: object
+properties:
+  name:
+    type: string
+  email:
+    type: string
+    format: email
+required:
+  - name
+```
+
+Every write is validated against the schema before it is stored.
+
+## Identifiers
+
+Each record has a system `id` that is a UUID — stable, internal, and used for linking.
+Human-friendly identifiers like `TICK-123` are a separate field, produced by the
+`x-id-strategy` extension and never the primary `id`:
+
+```yaml
+properties:
+  ref:
+    type: string
+"x-id-strategy":
+  field: ref
+  prefix: "TICK-"
+  sequence: true
+```
+
+## Relationships with `x-links`
+
+A field can declare that it points at another resource using `x-links`. On write,
+TulipFarm verifies the target record exists; a link to a missing record is rejected.
+This catches the common case of an agent inventing a `customerId` that was never real.
+
+Deletes are soft and do not cascade. If you delete a record that others link to, the
+referencing records remain — their link simply no longer resolves to a live record, and
+the UI surfaces it as unresolved rather than blocking the delete.
+
+## Computed and normalized fields
+
+Beyond identifiers and links, schemas support declarative transforms applied before a
+write:
+
+- `x-computed` — derive a field's value from others
+- `x-normalize` — clean a value into canonical form
+
+These cover the common before-write cases without code. For arbitrary logic, a resource
+type can include a `hooks.ts` file, executed in a sandboxed environment.
+
+<Callout type="info">
+Resource types are authored in the soul today — there is no in-app form to create a new
+type yet. See [Define a resource type](/docs/guides/define-a-resource-type) for the
+workflow, and [Work with records](/docs/guides/work-with-records) to manage data once a
+type exists.
+</Callout>
