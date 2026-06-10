@@ -1,0 +1,31 @@
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    name: Conventional Commits title
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const title = context.payload.pull_request.title || "";
+            // type(optional scope)(optional !): subject — matches the repo's commit history.
+            const re =
+              /^(feat|fix|chore|docs|refactor|perf|test|build|ci|style|revert)(\([^)]+\))?!?: .+/;
+            if (re.test(title)) {
+              core.info(`PR title OK: ${title}`);
+            } else {
+              core.setFailed(
+                `PR title "${title}" must follow Conventional Commits, ` +
+                  `e.g. "feat(approvals): add live badge". ` +
+                  `Allowed types: feat, fix, chore, docs, refactor, perf, test, build, ci, style, revert.`
+              );
+            }
