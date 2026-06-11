@@ -8,6 +8,7 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
+import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
@@ -188,6 +189,7 @@ export async function buildApp(opts: AppOptions = {}) {
           workingMemory: opts.workingMemoryService,
           knowledge: opts.knowledgeService,
         });
+      const approvalRegistry = opts.approvalRegistry ?? new ApprovalRegistry();
       registerChatRoutes(
         app,
         opts.llmService,
@@ -201,9 +203,10 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.soulLoader,
         opts.domainEventEmitter,
         toolRegistry,
-        opts.approvalRegistry ?? new ApprovalRegistry(),
+        approvalRegistry,
         opts.guardrailsService
       );
+      registerApprovalRoutes(app, approvalRegistry, requireAuth);
     }
     if (opts.knowledgeService) {
       registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);

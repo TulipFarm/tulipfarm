@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ApprovalsRepo } from "../approvals/repo";
 import type { ApprovalDecision, ApprovalGate, ApprovalRequestInfo } from "../tools/types";
 import type { StreamEmitter } from "./stream-emitter";
 
@@ -34,9 +35,12 @@ export interface PendingApprovalSummary {
  * `APPROVAL_TIMEOUT_MS`. The decide route resolves it; either path emits `approval-resolved` (queued on
  * the same serialized emitter, so it always precedes the tool-result). Ephemeral — nothing is persisted
  * beyond the generic `stream_resume` buffer, so an API restart drops pending entries.
+ * An optional `ApprovalsRepo` receives fire-and-forget writes for audit and future routine support.
  */
 export class ApprovalRegistry {
   private readonly pending = new Map<string, PendingApproval>();
+
+  constructor(private readonly repo?: ApprovalsRepo) {}
 
   /** Suspend a gated tool call until a human (or the timeout) decides. */
   request(emitter: StreamEmitter, info: ApprovalRequestInfo): Promise<ApprovalDecision> {
@@ -66,6 +70,12 @@ export class ApprovalRegistry {
       toolName: info.toolName,
       args: info.args,
       expiresAt,
+    });
+    void this.repo?.insert({
+      id: approvalId,
+      kind: "tool_call",
+      payload: { toolCallId: info.toolCallId, toolName: info.toolName, args: info.args },
+      expiresAt: new Date(expiresAt),
     });
     return decision;
   }
@@ -106,6 +116,14 @@ export class ApprovalRegistry {
       toolCallId: entry.toolCallId,
       outcome: decision.outcome,
     });
+    void this.repo?.settle(
+      approvalId,
+      decision.outcome === "approved"
+        ? "approved"
+        : decision.outcome === "denied"
+          ? "denied"
+          : "timeout"
+    );
     entry.resolve(decision);
   }
 }

@@ -849,7 +849,7 @@ describe("chat routes", () => {
     ): Promise<LightMyRequestResponse> {
       return app.inject({
         method: "POST",
-        url: `/api/v1/chat/approvals/${approvalId}/decide`,
+        url: `/api/v1/approvals/${approvalId}/decide`,
         cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
         headers: { [CSRF_HEADER]: TEST_CSRF },
         payload: { decision },
@@ -923,14 +923,14 @@ describe("chat routes", () => {
       expect(d.statusCode).toBe(404);
     });
 
-    describe("GET /api/v1/chat/approvals", () => {
+    describe("GET /api/v1/approvals", () => {
       it("401 without a session", async () => {
-        const res = await get("/api/v1/chat/approvals", { session: null });
+        const res = await get("/api/v1/approvals", { session: null });
         expect(res.statusCode).toBe(401);
       });
 
       it("returns an empty list when nothing is pending", async () => {
-        const res = await get("/api/v1/chat/approvals");
+        const res = await get("/api/v1/approvals");
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({ items: [] });
       });
@@ -940,7 +940,7 @@ describe("chat routes", () => {
         const chat = post({ message: userMsg("write it"), autonomy: "approval-required" });
         await waitFor(() => streamRepo.rows.some((r) => r.eventType === "approval-request"), 2000);
 
-        const res = await get("/api/v1/chat/approvals");
+        const res = await get("/api/v1/approvals");
         expect(res.statusCode).toBe(200);
         const { items } = res.json() as { items: Array<Record<string, unknown>> };
         expect(items).toHaveLength(1);
@@ -966,7 +966,7 @@ describe("chat routes", () => {
         await chat;
         await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
 
-        const res = await get("/api/v1/chat/approvals");
+        const res = await get("/api/v1/approvals");
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({ items: [] });
       });
