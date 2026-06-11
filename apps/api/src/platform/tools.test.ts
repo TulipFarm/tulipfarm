@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -131,6 +134,50 @@ describe("loadSkillReferenceTool", () => {
   it("returns validation_error for missing args", async () => {
     const res = await loadSkillReferenceTool.handler({ skill: "foo" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("rejects a reference that escapes the references directory (path traversal)", async () => {
+    const res = await loadSkillReferenceTool.handler(
+      { skill: "foo", reference: "../../../../../../../../etc/passwd" },
+      makeCtx({}, {}, "/some/soul")
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("rejects an unsafe skill name (path traversal)", async () => {
+    const res = await loadSkillReferenceTool.handler(
+      { skill: "../evil", reference: "guide.md" },
+      makeCtx({}, {}, "/some/soul")
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("loads a reference contained in the skill's references/ directory (incl. sub-paths)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "skill-ref-"));
+    await mkdir(join(dir, "skills", "research", "references", "sub"), { recursive: true });
+    await writeFile(join(dir, "skills", "research", "references", "guide.md"), "top guide", "utf8");
+    await writeFile(
+      join(dir, "skills", "research", "references", "sub", "deep.md"),
+      "deep guide",
+      "utf8"
+    );
+    try {
+      const top = await loadSkillReferenceTool.handler(
+        { skill: "research", reference: "guide.md" },
+        makeCtx({}, {}, dir)
+      );
+      expect(top).toEqual({
+        success: true,
+        data: { skill: "research", reference: "guide.md", content: "top guide" },
+      });
+      const deep = await loadSkillReferenceTool.handler(
+        { skill: "research", reference: "sub/deep.md" },
+        makeCtx({}, {}, dir)
+      );
+      expect(deep).toMatchObject({ success: true, data: { content: "deep guide" } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

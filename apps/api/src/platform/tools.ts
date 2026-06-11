@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
 import { err, ok, type ToolCallResult } from "./tool-result";
@@ -67,7 +67,12 @@ const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
   additionalProperties: false,
   required: ["skill", "reference"],
   properties: {
-    skill: { type: "string", minLength: 1, description: "Skill name." },
+    skill: {
+      type: "string",
+      minLength: 1,
+      pattern: "^[a-z][a-z0-9-]*$",
+      description: "Skill name (kebab-case, as registered in the soul).",
+    },
     reference: {
       type: "string",
       minLength: 1,
@@ -90,7 +95,16 @@ export const loadSkillReferenceTool: PlatformTool = {
     const { skill, reference } = args as { skill: string; reference: string };
     if (!ctx.soulPath)
       return err("not_found", `Skill "${skill}" references directory not available.`);
-    const refPath = join(ctx.soulPath, "skills", skill, "references", reference);
+    // Contain the read to the skill's references/ dir — `reference` is LLM-controlled, so a
+    // `../`-escape (e.g. driven by a malicious skill) must not read outside the soul (SKL-V1-002).
+    const base = resolve(ctx.soulPath, "skills", skill, "references");
+    const refPath = resolve(base, reference);
+    const rel = relative(base, refPath);
+    if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+      return err(
+        "validation_error",
+        `Reference "${reference}" escapes the skill references directory.`
+      );
     try {
       const content = await readFile(refPath, "utf8");
       return ok({ skill, reference, content });

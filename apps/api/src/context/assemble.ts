@@ -123,10 +123,10 @@ function renderAvailableSkills(ctx: AssembleContext): string {
 /**
  * Assemble the agent system prompt from the 9 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
  * and synchronous. Each block renders to a string or "" (when empty, over budget, or deferred);
- * empty blocks are omitted entirely so the prefix stays byte-stable across turns. `<available-skills>`
- * renders the lazy skill L1 index (all-lazy V1); the still-deferred blocks — `<skills>` (eager bodies),
- * `<soul-context>`, `<available-tools>` — emit empty until eager skills, the soul L1 snapshot, and Tools
- * land. No `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005, AC-V1-003).
+ * empty blocks are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders
+ * eager skill bodies and `<available-skills>` the lazy skill L1 index; the still-deferred blocks —
+ * `<soul-context>`, `<available-tools>` — emit empty until the soul L1 snapshot and Tools land. No
+ * `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005, AC-V1-003).
  */
 export function assembleSystemPrompt(ctx: AssembleContext): string {
   const blocks = [
