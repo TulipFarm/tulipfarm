@@ -24,15 +24,15 @@
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "isolated-vm": "^7.0.0",
-    "pg": "^8.13.0",
-    "pg-boss": "^10.0.0",
+    "pg": "^8.21.0",
+    "pg-boss": "^12.18.3",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3",
     "@electric-sql/pglite": "^0.2.0",
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/pg": "^8.11.0",
+    "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^4.1.8",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",

@@ -8,3 +8,5 @@ allowBuilds:
   lefthook: true
   msgpackr-extract: true
   sharp: true
+minimumReleaseAgeExclude:
+  - pg-boss@12.18.3

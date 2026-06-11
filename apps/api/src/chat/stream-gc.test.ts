@@ -1,4 +1,4 @@
-import type PgBoss from "pg-boss";
+import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
 import {
   STREAM_GC_CRON,

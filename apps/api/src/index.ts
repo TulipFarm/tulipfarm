@@ -3,7 +3,7 @@ import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import { PgSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
 import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
 import { config } from "dotenv";
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";

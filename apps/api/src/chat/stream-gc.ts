@@ -1,4 +1,4 @@
-import type PgBoss from "pg-boss";
+import type { PgBoss } from "pg-boss";
 import type { StreamResumeRepo } from "./stream-resume";
 
 export const STREAM_GC_QUEUE = "stream-resume-gc";
