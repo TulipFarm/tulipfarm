@@ -1,4 +1,4 @@
-import { apiGet, apiWrite } from "./api";
+import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
  * Client for the skills API (SKILLS / SKL-V1-001..003). Skills are SKILL.md files in the soul repo.
@@ -19,8 +19,23 @@ export type SkillSummary = {
 
 export type SkillDetail = SkillSummary & { body: string };
 
-export type ScannedSkill = { name: string; description?: string };
+// `installed` / `updateAvailable` come from the server cross-referencing the discovered SKILL.md
+// against the soul repo + skills-lock hash, so the UI can badge already-installed and stale skills.
+export type SkillInstallStatus = { installed: boolean; updateAvailable: boolean };
+
+export type ScannedSkill = { name: string; description?: string } & SkillInstallStatus;
 export type ScanResult = { scanId: string; skills: ScannedSkill[] };
+
+export type MarketplaceSkill = {
+  name: string;
+  skillId?: string;
+  description?: string;
+  installs?: number;
+} & SkillInstallStatus;
+
+// The official curated catalog (SKL-V1-005). The scanId plugs into the same audit/install flow as a
+// manual git-URL scan, so the operator-confirm gate applies unchanged.
+export type MarketplaceCatalog = { scanId: string; source: string; skills: MarketplaceSkill[] };
 
 export type SkillAuditFinding = {
   severity: "info" | "warning" | "critical";
@@ -64,4 +79,12 @@ export async function installSkills(
   names: string[]
 ): Promise<{ installed: string[] }> {
   return apiWrite<{ installed: string[] }>("POST", "/api/v1/skills/install", { scanId, names });
+}
+
+export async function marketplaceSkills(): Promise<MarketplaceCatalog> {
+  return apiGet<MarketplaceCatalog>("/api/v1/skills/marketplace");
+}
+
+export async function removeSkill(name: string): Promise<void> {
+  return apiDelete(`/api/v1/skills/${encodeURIComponent(name)}`);
 }

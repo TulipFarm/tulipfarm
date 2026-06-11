@@ -1,9 +1,17 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
+
+vi.mock("~/lib/skills", async (orig) => {
+  const actual = await orig<typeof import("~/lib/skills")>();
+  return { ...actual, removeSkill: vi.fn() };
+});
+
+import { removeSkill } from "~/lib/skills";
 import SkillsIndex from "./_app.skills._index";
 import SkillDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.skills.$name";
 
@@ -28,7 +36,7 @@ function renderError(node: ReactElement, error: unknown) {
   render(node);
 }
 
-test("index lists skills with provenance and an Install-from-git entry", () => {
+test("index lists skills with provenance, tab nav, and a marketplace entry", () => {
   renderWithData(<SkillsIndex />, {
     skills: [
       {
@@ -46,16 +54,26 @@ test("index lists skills with provenance and an Install-from-git entry", () => {
     "/skills/demo-skill"
   );
   expect(screen.getByText("marketplace")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /install from git/i })).toHaveAttribute(
+  // Tab nav to both panes.
+  expect(screen.getByRole("link", { name: /^Installed$/ })).toHaveAttribute("href", "/skills");
+  expect(screen.getByRole("link", { name: /^Marketplace$/ })).toHaveAttribute(
     "href",
-    "/skills/install"
+    "/skills/marketplace"
+  );
+  expect(screen.getByRole("link", { name: /browse marketplace/i })).toHaveAttribute(
+    "href",
+    "/skills/marketplace"
   );
 });
 
-test("index with no skills shows the empty state with an install entry", () => {
+test("index with no skills shows the empty message and a marketplace entry", () => {
   renderWithData(<SkillsIndex />, { skills: [] });
-  expect(screen.getByText("0 results")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /install from git/i })).toBeInTheDocument();
+  expect(screen.getByText("0 skills")).toBeInTheDocument();
+  expect(screen.getByText(/no skills installed yet/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /browse marketplace/i })).toHaveAttribute(
+    "href",
+    "/skills/marketplace"
+  );
 });
 
 test("detail renders the SKILL.md body and provenance/source", () => {
@@ -70,6 +88,26 @@ test("detail renders the SKILL.md body and provenance/source", () => {
   });
   expect(screen.getByText("Does the demo.")).toBeInTheDocument();
   expect(screen.getByText("owner/repo")).toBeInTheDocument();
+});
+
+test("detail Remove requires a second confirming click before deleting", async () => {
+  const user = userEvent.setup();
+  vi.mocked(removeSkill).mockResolvedValue(undefined);
+  renderWithData(<SkillDetail />, {
+    skill: {
+      name: "demo-skill",
+      provenance: "marketplace",
+      source: "owner/repo",
+      body: "# Demo",
+    },
+  });
+
+  await user.click(screen.getByRole("button", { name: /^remove$/i }));
+  // First click only arms the confirm — nothing deleted yet.
+  expect(removeSkill).not.toHaveBeenCalled();
+
+  await user.click(screen.getByRole("button", { name: /confirm remove/i }));
+  expect(removeSkill).toHaveBeenCalledWith("demo-skill");
 });
 
 test("detail ErrorBoundary renders 404 not found for a missing skill", () => {

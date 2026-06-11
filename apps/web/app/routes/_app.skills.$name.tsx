@@ -2,14 +2,17 @@ import {
   type ClientLoaderFunctionArgs,
   type MetaFunction,
   useLoaderData,
+  useNavigate,
   useParams,
   useRouteError,
 } from "@remix-run/react";
+import { useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import { getSkill } from "~/lib/skills";
+import { getSkill, removeSkill } from "~/lib/skills";
 
 export const meta: MetaFunction = () => [{ title: "Skills · tulipfarm" }];
 
@@ -22,12 +25,39 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 export default function SkillDetail() {
   const { skill } = useLoaderData<typeof clientLoader>();
+  const navigate = useNavigate();
+  // Two-click inline confirm — removal commits to the soul repo, so it needs an explicit confirm.
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onRemove() {
+    if (!confirming) {
+      setConfirming(true);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await removeSkill(skill.name);
+      navigate("/skills");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "remove failed");
+      setBusy(false);
+      setConfirming(false);
+    }
+  }
 
   return (
     <ResourcePanel
       crumbs={[{ label: "skills", to: "/skills" }, { label: skill.name }]}
       command={`tulipfarm skills show ${skill.name}`}
     >
+      {error ? (
+        <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive">
+          error: {error}
+        </p>
+      ) : null}
       {skill.description ? <p className="text-muted-foreground">{skill.description}</p> : null}
 
       <dl className="flex flex-col rounded-sm border border-border">
@@ -42,6 +72,16 @@ export default function SkillDetail() {
           </div>
         ) : null}
       </dl>
+
+      <Button
+        size="sm"
+        variant={confirming ? "destructive" : "outline"}
+        className="self-start"
+        disabled={busy}
+        onClick={() => void onRemove()}
+      >
+        {busy ? "Removing…" : confirming ? "Confirm remove" : "Remove"}
+      </Button>
 
       <div className="border-t border-border pt-4">
         <MarkdownView>{skill.body}</MarkdownView>
