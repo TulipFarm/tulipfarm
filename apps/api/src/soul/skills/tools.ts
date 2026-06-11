@@ -1,16 +1,19 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { LlmNotConfiguredError, type LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
 import { stringify } from "yaml";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
+import { buildAudit } from "./audit.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 export interface SkillToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
+  llmService?: LlmService;
 }
 
 export interface SkillTool {
@@ -61,7 +64,7 @@ const validateCreate = ajv.compile(CREATE_SCHEMA);
 const skillCreate: SkillTool = {
   name: "skill_create",
   description:
-    "Create a new skill in the soul repo by writing its SKILL.md. Commits and pushes via withSync. No approval gate.",
+    "Create a new skill in the soul repo. Writes SKILL.md (pending audit), commits via withSync, runs SkillAudit synchronously, and returns the audit report. The skill is not active in prompt assembly until confirmed via skill_activate.",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
   handler: async (args, ctx) => {
@@ -81,9 +84,31 @@ const skillCreate: SkillTool = {
     const skillDir = join(ctx.gitSync.path, "skills", name);
     if (existsSync(skillDir)) return err("validation_error", "skill already exists");
 
+    // Fail fast before writing: SkillAudit requires a working LLM (AC-V1-002).
+    if (!ctx.llmService) {
+      return err(
+        "audit_required",
+        "LLM service not available — configure a provider before creating skills"
+      );
+    }
+    let model: ReturnType<typeof ctx.llmService.select>;
+    try {
+      model = ctx.llmService.select({ model: "standard" });
+    } catch (e) {
+      if (e instanceof LlmNotConfiguredError) {
+        return err(
+          "audit_required",
+          "LLM not configured — configure a provider before creating skills"
+        );
+      }
+      return err("internal_error", reason(e));
+    }
+
+    // Write with _pendingAudit marker so the skill is committed but inactive until operator confirms.
+    const pendingFm = { ...frontmatter, _pendingAudit: true };
     try {
       await mkdir(skillDir, { recursive: true });
-      await writeFile(join(skillDir, "SKILL.md"), serializeSkill(frontmatter, body), "utf8");
+      await writeFile(join(skillDir, "SKILL.md"), serializeSkill(pendingFm, body), "utf8");
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -100,7 +125,21 @@ const skillCreate: SkillTool = {
       return err("internal_error", reason(e));
     }
 
-    return ok({ name, frontmatter, body });
+    // Run SkillAudit synchronously. Skill is already committed; surface errors but keep it pending.
+    let auditReport: Awaited<ReturnType<typeof buildAudit>>;
+    try {
+      auditReport = await buildAudit(model, {
+        name,
+        description:
+          typeof frontmatter.description === "string" ? frontmatter.description : undefined,
+        body,
+      });
+    } catch (e) {
+      return err("internal_error", `skill committed as pending but audit failed: ${reason(e)}`);
+    }
+
+    // Return user-supplied frontmatter (without the internal _pendingAudit marker).
+    return ok({ name, frontmatter, body, auditReport });
   },
 };
 
@@ -266,10 +305,64 @@ const skillDelete: SkillTool = {
   },
 };
 
+// ── skill_activate ────────────────────────────────────────────────────────────
+
+const ACTIVATE_SCHEMA = {
+  type: "object",
+  required: ["name"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Skill name to activate." },
+  },
+} as const;
+
+const validateActivate = ajv.compile(ACTIVATE_SCHEMA);
+
+const skillActivate: SkillTool = {
+  name: "skill_activate",
+  description:
+    "Activate a forge-created skill after the operator has reviewed its SkillAudit report. Removes the _pendingAudit marker, commits, and reloads — making the skill available in prompt assembly.",
+  mutating: true,
+  inputSchema: ACTIVATE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateActivate(args)) return err("validation_error", firstError(validateActivate));
+    const { name } = args as { name: string };
+
+    const skill = ctx.soulLoader.skills.get(name);
+    if (!skill) return err("not_found", `skill not found: ${name}`);
+    if (!skill.frontmatter._pendingAudit) {
+      return err("validation_error", `skill '${name}' is already active`);
+    }
+
+    const { _pendingAudit: _removed, ...activeFm } = skill.frontmatter;
+    const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
+    try {
+      await writeFile(skillFile, serializeSkill(activeFm, skill.body), "utf8");
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.gitSync.withSync(`soul: activate skill ${name}`);
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({ name, activated: true });
+  },
+};
+
 export const SKILL_TOOLS: SkillTool[] = [
   skillCreate,
   skillUpdate,
   skillGet,
   skillList,
   skillDelete,
+  skillActivate,
 ];

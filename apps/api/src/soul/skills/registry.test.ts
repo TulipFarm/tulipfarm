@@ -45,6 +45,16 @@ describe("listAvailableSkills", () => {
     expect(out).toEqual<AvailableSkill[]>([{ name: "lazy-skill", description: "Lazy." }]);
   });
 
+  it("excludes skills with _pendingAudit: true (not yet activated by operator)", () => {
+    const out = listAvailableSkills(
+      makeSoulLoader([
+        skill("active-skill", { description: "Active." }),
+        skill("pending-skill", { _pendingAudit: true, description: "Pending." }),
+      ])
+    );
+    expect(out).toEqual<AvailableSkill[]>([{ name: "active-skill", description: "Active." }]);
+  });
+
   it("sorts by name for a deterministic prompt-cache prefix (AC-V1-001)", () => {
     const out = listAvailableSkills(
       makeSoulLoader([skill("zebra"), skill("alpha"), skill("mango")])
@@ -85,6 +95,16 @@ describe("listEagerSkills", () => {
 
   it("returns [] when no skills are eager", () => {
     expect(listEagerSkills(makeSoulLoader([skill("lazy", { description: "x" })]))).toEqual([]);
+  });
+
+  it("excludes eager skills with _pendingAudit: true", () => {
+    const out = listEagerSkills(
+      makeSoulLoader([
+        skill("active-eager", { eager: true }, "active body"),
+        skill("pending-eager", { eager: true, _pendingAudit: true }, "pending body"),
+      ])
+    );
+    expect(out).toEqual<EagerSkill[]>([{ name: "active-eager", body: "active body" }]);
   });
 
   it("returns [] when the soul loader is absent", () => {

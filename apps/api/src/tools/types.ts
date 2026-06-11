@@ -1,6 +1,11 @@
 export type ToolTier = "system" | "platform" | "integration";
 
-export type ToolErrorCode = "validation_error" | "oversize_value" | "not_found" | "internal_error";
+export type ToolErrorCode =
+  | "validation_error"
+  | "oversize_value"
+  | "not_found"
+  | "internal_error"
+  | "audit_required";
 
 export type ToolCallResult =
   | { success: true; data: unknown }

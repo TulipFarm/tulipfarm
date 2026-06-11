@@ -1,3 +1,5 @@
+import type { LlmService } from "@tulipfarm/llm";
+import { LlmNotConfiguredError } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SKILL_TOOLS, type SkillTool, type SkillToolContext } from "./tools";
@@ -9,8 +11,22 @@ vi.mock("node:fs/promises", () => ({
   rm: vi.fn().mockResolvedValue(undefined),
 }));
 
+// Mock buildAudit so tests don't hit a real LLM.
+const mockBuildAudit = vi.fn();
+vi.mock("./audit", async (orig) => {
+  const actual = await orig<typeof import("./audit")>();
+  return { ...actual, buildAudit: (...args: unknown[]) => mockBuildAudit(...args) };
+});
+
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+
+const FAKE_REPORT = {
+  riskRating: "low" as const,
+  summary: "Benign skill.",
+  toolsReach: [],
+  findings: [],
+};
 
 function makeGitSync(soulPath = "/fake/soul"): GitSyncService {
   return {
@@ -26,14 +42,28 @@ function makeSoulLoader(skills: SoulSkill[] = []): SoulLoader {
   } as unknown as SoulLoader;
 }
 
-function makeCtx(skills: SoulSkill[] = []): SkillToolContext & {
+function makeLlmService(configured = true): LlmService {
+  return {
+    select: configured
+      ? vi.fn().mockReturnValue({})
+      : vi.fn().mockImplementation(() => {
+          throw new LlmNotConfiguredError();
+        }),
+  } as unknown as LlmService;
+}
+
+function makeCtx(
+  skills: SoulSkill[] = [],
+  llmService?: LlmService
+): SkillToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
 } {
-  return { gitSync: makeGitSync(), soulLoader: makeSoulLoader(skills) };
+  return { gitSync: makeGitSync(), soulLoader: makeSoulLoader(skills), llmService };
 }
 
 const createTool = SKILL_TOOLS.find((t) => t.name === "skill_create") as SkillTool;
+const activateTool = SKILL_TOOLS.find((t) => t.name === "skill_activate") as SkillTool;
 const updateTool = SKILL_TOOLS.find((t) => t.name === "skill_update") as SkillTool;
 const getTool = SKILL_TOOLS.find((t) => t.name === "skill_get") as SkillTool;
 const listTool = SKILL_TOOLS.find((t) => t.name === "skill_list") as SkillTool;
@@ -45,10 +75,11 @@ describe("skill_create", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(existsSync).mockReturnValue(false);
+    mockBuildAudit.mockResolvedValue(FAKE_REPORT);
   });
 
-  it("creates SKILL.md, commits via withSync, reloads", async () => {
-    const ctx = makeCtx();
+  it("writes SKILL.md with _pendingAudit marker, commits, reloads, returns auditReport", async () => {
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler(
       { name: "code-review", body: "Review code carefully." },
       ctx
@@ -56,22 +87,27 @@ describe("skill_create", () => {
 
     expect(res).toEqual({
       success: true,
-      data: { name: "code-review", frontmatter: {}, body: "Review code carefully." },
+      data: {
+        name: "code-review",
+        frontmatter: {},
+        body: "Review code carefully.",
+        auditReport: FAKE_REPORT,
+      },
     });
     expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("skills/code-review"), {
       recursive: true,
     });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("SKILL.md"),
-      "Review code carefully.",
-      "utf8"
-    );
+    // Written content must include _pendingAudit marker.
+    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    expect(content).toContain("_pendingAudit: true");
+    expect(content).toContain("Review code carefully.");
     expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add skill code-review");
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(mockBuildAudit).toHaveBeenCalledOnce();
   });
 
-  it("includes frontmatter block when provided", async () => {
-    const ctx = makeCtx();
+  it("includes user frontmatter in SKILL.md alongside _pendingAudit", async () => {
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler(
       { name: "planner", body: "Plan tasks.", frontmatter: { tags: ["planning"] } },
       ctx
@@ -81,25 +117,43 @@ describe("skill_create", () => {
     const content = vi.mocked(writeFile).mock.calls[0][1] as string;
     expect(content).toMatch(/^---\n/);
     expect(content).toContain("planning");
+    expect(content).toContain("_pendingAudit: true");
     expect(content).toContain("Plan tasks.");
+    // Returned frontmatter excludes _pendingAudit (internal marker not surfaced to caller).
+    const data = (res as { success: true; data: { frontmatter: unknown } }).data;
+    expect(data.frontmatter).toEqual({ tags: ["planning"] });
+  });
+
+  it("returns audit_required if llmService absent from context", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  it("returns audit_required if LlmNotConfiguredError thrown by llmService.select", async () => {
+    const ctx = makeCtx([], makeLlmService(false));
+    const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
+    expect(mkdir).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid name (uppercase)", async () => {
-    const ctx = makeCtx();
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler({ name: "CodeReview", body: "body" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
     expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for name starting with digit", async () => {
-    const ctx = makeCtx();
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler({ name: "1skill", body: "body" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
   it("returns validation_error if skill dir already exists", async () => {
     vi.mocked(existsSync).mockReturnValue(true);
-    const ctx = makeCtx();
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
     expect(res).toMatchObject({
       success: false,
@@ -109,8 +163,56 @@ describe("skill_create", () => {
   });
 
   it("returns validation_error for missing required args", async () => {
-    const ctx = makeCtx();
+    const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler({ name: "skill-x" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── skill_activate ────────────────────────────────────────────────────────────
+
+describe("skill_activate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const pendingSkill: SoulSkill = {
+    name: "code-review",
+    frontmatter: { _pendingAudit: true, tags: ["review"] },
+    body: "Review code.",
+  };
+
+  it("removes _pendingAudit, rewrites SKILL.md, commits, reloads", async () => {
+    const ctx = makeCtx([pendingSkill]);
+    const res = await activateTool.handler({ name: "code-review" }, ctx);
+
+    expect(res).toEqual({ success: true, data: { name: "code-review", activated: true } });
+    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    expect(content).not.toContain("_pendingAudit");
+    expect(content).toContain("review"); // user frontmatter preserved
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: activate skill code-review");
+    expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+  });
+
+  it("returns validation_error if skill is already active (no _pendingAudit)", async () => {
+    const ctx = makeCtx([{ name: "code-review", frontmatter: {}, body: "body" }]);
+    const res = await activateTool.handler({ name: "code-review" }, ctx);
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("already active") },
+    });
+    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+  });
+
+  it("returns not_found for unknown skill", async () => {
+    const ctx = makeCtx();
+    const res = await activateTool.handler({ name: "ghost" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("returns validation_error for missing name", async () => {
+    const ctx = makeCtx();
+    const res = await activateTool.handler({}, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
@@ -274,13 +376,14 @@ describe("skill_delete", () => {
 // ── SKILL_TOOLS export ────────────────────────────────────────────────────────
 
 describe("SKILL_TOOLS", () => {
-  it("exports 5 tools with correct mutating flags", () => {
-    expect(SKILL_TOOLS).toHaveLength(5);
+  it("exports 6 tools with correct mutating flags", () => {
+    expect(SKILL_TOOLS).toHaveLength(6);
     const byName = Object.fromEntries(SKILL_TOOLS.map((t) => [t.name, t]));
     expect(byName.skill_create.mutating).toBe(true);
     expect(byName.skill_update.mutating).toBe(true);
     expect(byName.skill_get.mutating).toBe(false);
     expect(byName.skill_list.mutating).toBe(false);
     expect(byName.skill_delete.mutating).toBe(true);
+    expect(byName.skill_activate.mutating).toBe(true);
   });
 });

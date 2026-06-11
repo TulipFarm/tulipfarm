@@ -29,7 +29,7 @@ export interface EagerSkill {
 export function listEagerSkills(soulLoader: SoulLoader | undefined): EagerSkill[] {
   if (!soulLoader) return [];
   return Array.from(soulLoader.skills.values())
-    .filter((skill) => skill.frontmatter.eager === true)
+    .filter((skill) => skill.frontmatter.eager === true && !skill.frontmatter._pendingAudit)
     .map((skill) => ({ name: skill.name, body: skill.body }))
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
@@ -42,7 +42,7 @@ export function listEagerSkills(soulLoader: SoulLoader | undefined): EagerSkill[
 export function listAvailableSkills(soulLoader: SoulLoader | undefined): AvailableSkill[] {
   if (!soulLoader) return [];
   return Array.from(soulLoader.skills.values())
-    .filter((skill) => skill.frontmatter.eager !== true)
+    .filter((skill) => skill.frontmatter.eager !== true && !skill.frontmatter._pendingAudit)
     .map((skill) => ({
       name: skill.name,
       description:
