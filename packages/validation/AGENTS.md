@@ -11,6 +11,10 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
 - **`applyTransforms`** + **`validateResourceSchema`** — resource `x-*` keyword handling.
 - **`BOUNDARIES`** (+ type `ValidationBoundary`), **`NORMALIZER_KEYS`**, **`COMPUTED_FN_KEYS`**,
   type `CounterFn`.
+- **`validateGuardrailsConfig`** (+ types `GuardrailsConfig`, `PromptInjectionConfig`,
+  `ToolBlocklistConfig`, `ContentFilterConfig`) — validates a guardrails policy
+  (`soul/guardrails.yaml`): a TypeBox meta-schema with strict per-stage guard unions, so a
+  wrong-stage/unknown guard or bad enum is rejected. Consumed by the API's `GuardrailsService`.
 
 ## Boundaries
 

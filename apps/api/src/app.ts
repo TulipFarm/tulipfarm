@@ -20,6 +20,7 @@ import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
 import { StreamHub } from "./chat/stream-hub";
 import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
+import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
@@ -58,6 +59,7 @@ export interface AppOptions {
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
   approvalRegistry?: ApprovalRegistry;
+  guardrailsService?: GuardrailsService;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -199,7 +201,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.soulLoader,
         opts.domainEventEmitter,
         toolRegistry,
-        opts.approvalRegistry ?? new ApprovalRegistry()
+        opts.approvalRegistry ?? new ApprovalRegistry(),
+        opts.guardrailsService
       );
     }
     if (opts.knowledgeService) {

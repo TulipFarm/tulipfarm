@@ -227,6 +227,22 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       };
     }
 
+    case "guardrail_block": {
+      const { messages, target } = ensureAssistant(state.messages);
+      const part: TimelinePart = {
+        kind: "guardrail",
+        stage: event.data.stage,
+        guard: event.data.guard,
+        reason: event.data.reason,
+        message: event.data.message,
+      };
+      return {
+        ...state,
+        status: "streaming",
+        messages: withParts(messages, target, [...target.parts, part]),
+      };
+    }
+
     case "finish": {
       const { messages, target } = ensureAssistant(state.messages);
       const sealed = withParts(messages, target, target.parts).map((m) =>

@@ -40,6 +40,7 @@ describe("SoulLoader", () => {
       expect(loader.routines.size).toBe(0);
       expect(loader.integrations.size).toBe(0);
       expect(loader.llmConfig).toBeNull();
+      expect(loader.guardrailsConfig).toBeNull();
       expect(loader.manifest).toBeNull();
     });
   });
@@ -250,6 +251,29 @@ describe("SoulLoader", () => {
       await loader.load();
       expect(loader.llmConfig).toBeNull();
       expect(loader.manifest).toBeNull();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("guardrailsConfig", () => {
+    it("parses guardrails.yaml", async () => {
+      await write(
+        join(TMP, "guardrails.yaml"),
+        "input:\n  - name: pii-redactor\noutput:\n  - name: tone-check\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.guardrailsConfig).toEqual({
+        input: [{ name: "pii-redactor" }],
+        output: [{ name: "tone-check" }],
+      });
+    });
+
+    it("returns null for missing guardrails.yaml without warn", async () => {
+      const logger = makeLogger();
+      const loader = new SoulLoader(TMP, logger);
+      await loader.load();
+      expect(loader.guardrailsConfig).toBeNull();
       expect(logger.warn).not.toHaveBeenCalled();
     });
   });

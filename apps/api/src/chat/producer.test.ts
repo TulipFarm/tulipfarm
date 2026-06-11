@@ -187,6 +187,137 @@ describe("runChatStream", () => {
     expect(hub.isLive(streamId)).toBe(false);
     expect(log.error).toHaveBeenCalled();
   });
+
+  // ── Output guard: buffer-then-scan (AC-V1-003 stream side) ──────────────────
+  describe("scanOutput buffer-then-scan", () => {
+    type Emitted = { eventType: string; data: unknown };
+    const captureEmitter = (sink: Emitted[]): import("./stream-emitter").StreamEmitter => ({
+      emit: (eventType, data) => {
+        sink.push({ eventType, data });
+        return Promise.resolve();
+      },
+    });
+
+    it("flushes buffered text as one scanned `text` event before finish (pass)", async () => {
+      const emitted: Emitted[] = [];
+      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: "He" },
+          { type: "text-delta", text: "llo" },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log, scanOutput }
+      );
+
+      // Single scan of the concatenated buffer; one merged text event, then finish.
+      expect(scanOutput).toHaveBeenCalledTimes(1);
+      expect(scanOutput).toHaveBeenCalledWith("Hello");
+      expect(emitted).toEqual([
+        { eventType: "text", data: { delta: "Hello" } },
+        { eventType: "finish", data: { reason: "stop" } },
+      ]);
+      expect(hub.isLive(streamId)).toBe(false);
+    });
+
+    it("emits the scanned (transformed) text when scanOutput rewrites it", async () => {
+      const emitted: Emitted[] = [];
+      const scanOutput = vi.fn(async () => ({ blocked: false as const, text: "[redacted]" }));
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: "secret" },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log, scanOutput }
+      );
+      expect(emitted).toEqual([
+        { eventType: "text", data: { delta: "[redacted]" } },
+        { eventType: "finish", data: { reason: "stop" } },
+      ]);
+    });
+
+    it("blocks on the buffered text: guardrail_block + finish, no text, suppresses rest", async () => {
+      const emitted: Emitted[] = [];
+      const scanOutput = vi.fn(async () => ({
+        blocked: true as const,
+        guard: "content_filter",
+        reason: "credit_card",
+        message: "blocked",
+      }));
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: "card 4111111111111111" },
+          // A tool-call after the blocked flush must be suppressed.
+          { type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log, scanOutput }
+      );
+
+      expect(scanOutput).toHaveBeenCalledTimes(1);
+      expect(emitted).toEqual([
+        {
+          eventType: "guardrail_block",
+          data: {
+            stage: "output",
+            guard: "content_filter",
+            reason: "credit_card",
+            message: "blocked",
+          },
+        },
+        { eventType: "finish", data: { reason: "guardrail_block" } },
+      ]);
+      // No `text`, no suppressed tool-call, no synthesised stop finish.
+      expect(emitted.some((e) => e.eventType === "text")).toBe(false);
+      expect(emitted.some((e) => e.eventType === "tool-call")).toBe(false);
+      expect(hub.isLive(streamId)).toBe(false);
+    });
+
+    it("flushes buffered text before a non-text event (tool-call), then continues", async () => {
+      const emitted: Emitted[] = [];
+      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: "before" },
+          { type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } },
+          { type: "text-delta", text: "after" },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log, scanOutput }
+      );
+
+      // Two flushes: one before the tool-call, one before finish.
+      expect(scanOutput.mock.calls.map((c) => c[0])).toEqual(["before", "after"]);
+      expect(emitted).toEqual([
+        { eventType: "text", data: { delta: "before" } },
+        { eventType: "tool-call", data: { toolCallId: "c1", toolName: "t", args: { a: 1 } } },
+        { eventType: "text", data: { delta: "after" } },
+        { eventType: "finish", data: { reason: "stop" } },
+      ]);
+    });
+
+    it("without scanOutput: text deltas emit live exactly as before", async () => {
+      const emitted: Emitted[] = [];
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: "He" },
+          { type: "text-delta", text: "llo" },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log }
+      );
+      expect(emitted).toEqual([
+        { eventType: "text", data: { delta: "He" } },
+        { eventType: "text", data: { delta: "llo" } },
+        { eventType: "finish", data: { reason: "stop" } },
+      ]);
+    });
+  });
 });
 
 describe("attachToStream", () => {

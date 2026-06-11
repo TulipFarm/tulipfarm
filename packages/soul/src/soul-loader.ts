@@ -46,6 +46,7 @@ export class SoulLoader {
   routines: Map<string, SoulRoutine> = new Map();
   integrations: Map<string, SoulIntegration> = new Map();
   llmConfig: Record<string, unknown> | null = null;
+  guardrailsConfig: Record<string, unknown> | null = null;
   manifest: Record<string, unknown> | null = null;
 
   constructor(
@@ -54,16 +55,25 @@ export class SoulLoader {
   ) {}
 
   async load(): Promise<void> {
-    const [agents, skills, resources, routines, integrations, llmConfig, manifest] =
-      await Promise.all([
-        this.loadAgents(),
-        this.loadSkills(),
-        this.loadResources(),
-        this.loadRoutines(),
-        this.loadIntegrations(),
-        this.loadYamlFile(join(this.soulPath, "llm.config.yaml"), "llm.config.yaml"),
-        this.loadYamlFile(join(this.soulPath, "soul.yaml"), "soul.yaml"),
-      ]);
+    const [
+      agents,
+      skills,
+      resources,
+      routines,
+      integrations,
+      llmConfig,
+      guardrailsConfig,
+      manifest,
+    ] = await Promise.all([
+      this.loadAgents(),
+      this.loadSkills(),
+      this.loadResources(),
+      this.loadRoutines(),
+      this.loadIntegrations(),
+      this.loadYamlFile(join(this.soulPath, "llm.config.yaml"), "llm.config.yaml"),
+      this.loadYamlFile(join(this.soulPath, "guardrails.yaml"), "guardrails.yaml"),
+      this.loadYamlFile(join(this.soulPath, "soul.yaml"), "soul.yaml"),
+    ]);
 
     this.agents = agents;
     this.skills = skills;
@@ -71,6 +81,7 @@ export class SoulLoader {
     this.routines = routines;
     this.integrations = integrations;
     this.llmConfig = llmConfig;
+    this.guardrailsConfig = guardrailsConfig;
     this.manifest = manifest;
 
     this.logger.info(

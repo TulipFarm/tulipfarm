@@ -21,6 +21,7 @@ const KNOWN_EVENT_TYPES = new Set<ChatEventType>([
   "sources",
   "agent-handoff",
   "a2ui",
+  "guardrail_block",
   "finish",
   "error",
 ]);
