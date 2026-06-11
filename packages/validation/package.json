@@ -9,12 +9,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.0",
-    "ajv": "^8.17.1"
+    "@sinclair/typebox": "^0.34.49",
+    "ajv": "^8.20.0"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
-    "@types/node": "^22.0.0",
+    "@types/node": "^22.19.20",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
   }
