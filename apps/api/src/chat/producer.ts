@@ -49,11 +49,23 @@ export function mapStreamPart(
   }
 }
 
+/** Output guard verdict over one buffered text segment (block, or pass-through/transform). */
+export type OutputScan =
+  | { blocked: true; guard: string; reason: string; message?: string }
+  | { blocked: false; text: string };
+
 export interface StreamProducerDeps {
   emitter: StreamEmitter;
   hub: StreamHub;
   log: { error: (obj: unknown, msg?: string) => void };
   fullResultCache?: Map<string, ToolCallResult>;
+  /**
+   * Optional output guard. When set, the producer buffers `text` deltas and scans
+   * each segment before emitting: a `block` drops the text and emits
+   * `guardrail_block` + `finish`; otherwise the (possibly transformed) text is
+   * emitted as one `text` event. When unset, text deltas emit live unchanged.
+   */
+  scanOutput?: (text: string) => Promise<OutputScan>;
 }
 
 /**
@@ -70,15 +82,51 @@ export async function runChatStream(
   deps: StreamProducerDeps
 ): Promise<void> {
   let sawTerminal = false;
+  // Output-guard state (only used when `deps.scanOutput` is set).
+  const scanOutput = deps.scanOutput;
+  let textBuffer = "";
+  let blocked = false;
+
+  // Scan + emit the buffered text segment as one `text` event. A block emits
+  // `guardrail_block` + `finish` and suppresses all further emission.
+  const flushText = async (scan: (text: string) => Promise<OutputScan>): Promise<void> => {
+    if (blocked || textBuffer.length === 0) return;
+    const buf = textBuffer;
+    textBuffer = "";
+    const verdict = await scan(buf);
+    if (verdict.blocked) {
+      await deps.emitter.emit("guardrail_block", {
+        stage: "output",
+        guard: verdict.guard,
+        reason: verdict.reason,
+        message: verdict.message,
+      });
+      await deps.emitter.emit("finish", { reason: "guardrail_block" });
+      blocked = true;
+      sawTerminal = true;
+      return;
+    }
+    await deps.emitter.emit("text", { delta: verdict.text });
+  };
 
   try {
     for await (const part of fullStream) {
+      if (blocked) continue;
       const mapped = mapStreamPart(part, deps.fullResultCache);
       if (!mapped) continue;
+      if (scanOutput && mapped.eventType === "text") {
+        textBuffer += (mapped.data as { delta: string }).delta;
+        continue;
+      }
+      if (scanOutput) {
+        await flushText(scanOutput);
+        if (blocked) continue;
+      }
       await deps.emitter.emit(mapped.eventType, mapped.data);
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }
-    if (!sawTerminal) await deps.emitter.emit("finish", { reason: "stop" });
+    if (scanOutput) await flushText(scanOutput);
+    if (!sawTerminal && !blocked) await deps.emitter.emit("finish", { reason: "stop" });
   } catch (err) {
     deps.log.error({ err, streamId }, "chat stream producer failed");
     if (!sawTerminal) {

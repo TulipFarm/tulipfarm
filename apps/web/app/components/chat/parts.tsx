@@ -169,6 +169,13 @@ export function MessagePartView({
           {part.reason ? <span> · {part.reason}</span> : null}
         </p>
       );
+    case "guardrail":
+      return (
+        <div className="rounded-sm border border-primary/60 bg-secondary px-3 py-2 text-sm">
+          <span className="text-xs uppercase tracking-[0.15em] text-primary">[guardrail]</span>{" "}
+          <span className="text-foreground">{part.message ?? part.reason}</span>
+        </div>
+      );
     case "a2ui":
       return <A2uiFrame html={part.html} className="w-full rounded-sm border border-border" />;
   }

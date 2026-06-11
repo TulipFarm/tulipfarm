@@ -11,6 +11,7 @@ src/
   context/        # deterministic system-prompt assembly (assembleSystemPrompt)
   resources/      # resource type + data CRUD, per-type Postgres tables, write-pipeline
   tools/          # central ToolRegistry, batch executor, result truncation
+  guardrails/     # 3-stage guard framework (input/tool-call/output) + pattern guards — see guardrails/README.md
   platform/       # platform-tier tool implementations + tool-result helpers
   hooks/          # isolated-vm hook sandbox + worker
   knowledge/      # RAG: documents, chunks, pgvector + tsvector search; governance block
@@ -101,3 +102,21 @@ knowledge (`knowledge/tools.ts`).
 - **Durable SSE** (`chat/`): the chat turn streams via an in-memory `StreamHub` (`stream-hub.ts`)
   while persisting each event to the `stream_resume` table (`stream-resume.ts`). Reconnects replay
   from `Last-Event-ID`; `stream-gc.ts` expires old buffers on pg-boss.
+
+## Guardrails (`src/guardrails/`)
+
+Three guard stages wrap the chat turn (GR-V1-001/002) — **input** (`chat/routes.ts`, before
+`streamText`), **tool-call** (`tools/registry.ts` `buildToolSet` callback, before the approval
+gate), **output** (`chat/producer.ts`, buffer-then-scan each assistant text segment). Guards
+return `pass | transform | block`, run in array order, first `block` short-circuits, each bounded
+by a 5s timeout (timeout/throw → skip-as-pass + log). Input/output blocks emit a `guardrail_block`
+SSE event + `finish`; a tool-call block returns a denial the LLM sees (the turn continues).
+
+`GuardrailsService` (`service.ts`) is built from `soul/guardrails.yaml` (validated by
+`@tulipfarm/validation` `validateGuardrailsConfig`); an absent **or invalid** config falls back to
+`DEFAULT_GUARDRAILS` (`default-policy.ts`) — fail-safe, never unguarded, never crashing. Wired in
+`index.ts` (construct → `init` after `buildApp` → `registerGuardrailsReload` on `soul.synced`) and
+passed through `AppOptions.guardrailsService`. Built-in guards (`guards/`): `prompt_injection`
+(input), `content_filter` (output), `tool_blocklist` (tool-call) — all pattern-only (no LLM). The
+config schema lives in `@tulipfarm/validation` (apps/api can't import TypeBox). See
+`guardrails/README.md`.

@@ -21,6 +21,7 @@ export type ChatEventType =
   | "sources"
   | "agent-handoff"
   | "a2ui"
+  | "guardrail_block"
   | "finish"
   | "error";
 
@@ -55,6 +56,10 @@ export type ChatEvent =
   | { type: "sources"; data: { sources: SourceRef[] } }
   | { type: "agent-handoff"; data: { from?: string; to: string; reason?: string } }
   | { type: "a2ui"; data: { html: string } }
+  | {
+      type: "guardrail_block";
+      data: { stage: "input" | "output"; guard: string; reason: string; message?: string };
+    }
   | { type: "finish"; data: { reason: string } }
   | { type: "error"; data: { message: string } };
 
@@ -96,7 +101,14 @@ export type TimelinePart =
   | { kind: "task"; taskId: string; label: string; status: StepStatus }
   | { kind: "sources"; sources: SourceRef[] }
   | { kind: "agent-handoff"; to: string; from?: string; reason?: string }
-  | { kind: "a2ui"; html: string };
+  | { kind: "a2ui"; html: string }
+  | {
+      kind: "guardrail";
+      stage: "input" | "output";
+      guard: string;
+      reason: string;
+      message?: string;
+    };
 
 export type ChatMessage = {
   id: string;

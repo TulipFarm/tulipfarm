@@ -171,6 +171,31 @@ test("finish seals the assistant message and returns status to idle", () => {
   expect(state.messages.find((m) => m.role === "assistant")?.sealed).toBe(true);
 });
 
+test("guardrail_block appends a guardrail part, then finish seals it and returns to idle", () => {
+  const state = fold([
+    {
+      type: "guardrail_block",
+      data: {
+        stage: "input",
+        guard: "prompt-injection",
+        reason: "injection detected",
+        message: "Request blocked by a safety guard.",
+      },
+    },
+    { type: "finish", data: { reason: "guardrail_block" } },
+  ]);
+  expect(state.status).toBe("idle");
+  const assistant = state.messages.find((m) => m.role === "assistant");
+  expect(assistant?.sealed).toBe(true);
+  expect(assistant?.parts).toContainEqual({
+    kind: "guardrail",
+    stage: "input",
+    guard: "prompt-injection",
+    reason: "injection detected",
+    message: "Request blocked by a safety guard.",
+  });
+});
+
 test("error sets status error and records the message", () => {
   const state = fold([{ type: "error", data: { message: "boom" } }]);
   expect(state.status).toBe("error");

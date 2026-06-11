@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BatchCoordinator } from "./batch-executor";
-import { TOOL_TIMEOUT_MS, ToolRegistry } from "./registry";
+import { type RunToolCallGuard, TOOL_TIMEOUT_MS, ToolRegistry } from "./registry";
 import type {
   ApprovalDecision,
   ApprovalGate,
@@ -407,6 +407,133 @@ describe("ToolRegistry", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+  });
+
+  describe("tool-call guard (AC-V1-002 denial path)", () => {
+    it("blocked guard returns denial result, caches it, never runs the tool", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "should not reach" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "guarded", execute }));
+      const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: true, reason: "x" }));
+      const cache = new Map<string, import("./types").ToolCallResult>();
+      const ts = reg.buildToolSet(ctx, undefined, cache, undefined, guard);
+
+      const result = await ts.guarded.execute?.({}, { messages: [], toolCallId: "tc1" });
+
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "internal_error", message: "blocked by guardrail: x" },
+      });
+      expect(execute).not.toHaveBeenCalled();
+      expect(cache.get("tc1")).toMatchObject({
+        success: false,
+        error: { code: "internal_error", message: "blocked by guardrail: x" },
+      });
+    });
+
+    // A tool whose schema accepts a `key` string — lets us exercise arg transform/forwarding
+    // without tripping the (correct) pre-guard arg-validation on the default empty schema.
+    const keyTool = (overrides: Partial<ToolDef> = {}): ToolDef =>
+      makeTool({
+        inputSchema: {
+          type: "object",
+          properties: { key: { type: "string" } },
+          additionalProperties: false,
+        },
+        ...overrides,
+      });
+
+    it("guard receives the tool, args, ctx, and toolCallId", async () => {
+      const reg = new ToolRegistry();
+      reg.register(keyTool({ name: "inspected" }));
+      const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: false, args: { key: "a" } }));
+      const ts = reg.buildToolSet(ctx, undefined, undefined, undefined, guard);
+
+      await ts.inspected.execute?.({ key: "a" }, { messages: [], toolCallId: "tc-i" });
+
+      expect(guard).toHaveBeenCalledWith({
+        tool: expect.objectContaining({ name: "inspected" }),
+        args: { key: "a" },
+        ctx,
+        toolCallId: "tc-i",
+      });
+    });
+
+    it("not-blocked guard runs the tool with the (possibly transformed) args", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "ran" }));
+      const reg = new ToolRegistry();
+      reg.register(keyTool({ name: "passing", execute }));
+      const guard = vi.fn<RunToolCallGuard>(async () => ({
+        blocked: false,
+        args: { key: "swapped" },
+      }));
+      const ts = reg.buildToolSet(ctx, undefined, undefined, undefined, guard);
+
+      const result = await ts.passing.execute?.(
+        { key: "original" },
+        {
+          messages: [],
+          toolCallId: "tc2",
+        }
+      );
+
+      expect(result).toEqual({ success: true, data: "ran" });
+      // effectiveArgs (the guard's returned args) are forwarded to the tool, not the originals.
+      expect(execute).toHaveBeenCalledWith({ key: "swapped" }, ctx);
+    });
+
+    it("no guard passed: tool executes unchanged", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "direct" }));
+      const reg = new ToolRegistry();
+      reg.register(keyTool({ name: "unguarded", execute }));
+      const ts = reg.buildToolSet(ctx);
+
+      const result = await ts.unguarded.execute?.(
+        { key: "v" },
+        { messages: [], toolCallId: "tc3" }
+      );
+
+      expect(result).toEqual({ success: true, data: "direct" });
+      expect(execute).toHaveBeenCalledWith({ key: "v" }, ctx);
+    });
+
+    it("blocked guard runs AFTER arg-validation (invalid args short-circuit before the guard)", async () => {
+      const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: true, reason: "x" }));
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "strict_guarded",
+          inputSchema: {
+            type: "object",
+            required: ["key"],
+            properties: { key: { type: "string" } },
+            additionalProperties: false,
+          },
+        })
+      );
+      const ts = reg.buildToolSet(ctx, undefined, undefined, undefined, guard);
+
+      const result = await ts.strict_guarded.execute?.({}, { messages: [], toolCallId: "tc4" });
+
+      expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(guard).not.toHaveBeenCalled();
+    });
+
+    it("blocked guard works through the coordinator branch too (denial, tool not scheduled)", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "nope" }));
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "coord_guarded", mutating: true, execute }));
+      const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: true, reason: "blocklist" }));
+      const ts = reg.buildToolSet(ctx, new BatchCoordinator(), undefined, undefined, guard);
+
+      const result = await ts.coord_guarded.execute?.({}, { messages: [], toolCallId: "tc5" });
+
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "internal_error", message: "blocked by guardrail: blocklist" },
+      });
+      expect(execute).not.toHaveBeenCalled();
     });
   });
 });

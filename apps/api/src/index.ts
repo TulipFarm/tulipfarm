@@ -15,6 +15,8 @@ import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
 import { connectPg } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
+import { GuardrailsService } from "./guardrails";
+import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { subscribeKnowledgeIndexing } from "./knowledge/events";
@@ -81,6 +83,7 @@ async function boot() {
         : new HookExecutor(process.env.DATABASE_URL as string);
 
     const llmService = new LlmService();
+    const guardrailsService = new GuardrailsService();
     const embeddingService = new EmbeddingService();
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
@@ -120,6 +123,7 @@ async function boot() {
       reconcileResources,
       domainEventEmitter,
       llmService,
+      guardrailsService,
       conversationRepo,
       messageRepo,
       streamResumeRepo,
@@ -130,6 +134,7 @@ async function boot() {
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
+    guardrailsService.init(soulLoader.guardrailsConfig, app.log);
     await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
     registerLlmReload(
       gitSync,
@@ -140,6 +145,7 @@ async function boot() {
       app.log,
       () => knowledgeService.runReindexIfPending().then(() => undefined)
     );
+    registerGuardrailsReload(gitSync, soulLoader, guardrailsService, app.log);
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);

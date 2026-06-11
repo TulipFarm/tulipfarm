@@ -8,6 +8,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { assembleSystemPrompt } from "../context/assemble";
 import { DOMAIN_EVENTS } from "../domain-events";
+import type { GuardContext, GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
@@ -15,7 +16,7 @@ import { parsePaginationQuery } from "../pagination";
 import { resolveAgent } from "../soul/agents/registry";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
-import type { ToolRegistry } from "../tools/registry";
+import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
 import { ApprovalRegistry, makeApprovalGate } from "./approvals";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
@@ -28,7 +29,7 @@ import {
   type MessageRepo,
   toModelMessage,
 } from "./messages";
-import { attachToStream, runChatStream } from "./producer";
+import { attachToStream, type OutputScan, runChatStream } from "./producer";
 import { MessageSchema } from "./schemas";
 import { writeSseHeaders } from "./sse";
 import { makeStreamEmitter } from "./stream-emitter";
@@ -195,7 +196,8 @@ export function registerChatRoutes(
   soulLoader?: SoulLoader,
   events?: EventEmitter,
   toolRegistry?: ToolRegistry,
-  approvals?: ApprovalRegistry
+  approvals?: ApprovalRegistry,
+  guardrails?: GuardrailsService
 ): void {
   // One in-process approval registry shared by the chat turn (which suspends gated tools) and the
   // decide route (which resolves them). Single-instance V1 — see chat/approvals.ts.
@@ -311,15 +313,57 @@ export function registerChatRoutes(
       // out-of-band approval events stay on one monotonic, serialized seq (see stream-emitter.ts).
       const emitter = makeStreamEmitter(streamId, { repo: streamRepo, hub, log: req.log });
 
+      // 6. Guardrails (GR-V1-001). Captured into `gr` so the tool-call/output closures narrow
+      //    cleanly. The input stage runs after the emitter exists (so a block can persist its
+      //    events for resume) and before tool build / streamText. The persisted user turn keeps the
+      //    original text; only the messages sent to the LLM see a transform.
+      const gr = guardrails;
+      const guardCtx: GuardContext = {
+        userId: user._id,
+        agentId: agent.name,
+        conversationId: convo._id,
+        autonomy: body.autonomy,
+      };
+      if (gr) {
+        const inResult = await gr.runInput(body.message.content, guardCtx);
+        if (inResult.blocked) {
+          await emitter.emit("guardrail_block", {
+            stage: "input",
+            guard: inResult.guard,
+            reason: inResult.reason,
+            message: inResult.message,
+          });
+          await emitter.emit("finish", { reason: "guardrail_block" });
+          hub.finish(streamId);
+          void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
+          return;
+        }
+        messages[messages.length - 1] = { role: "user", content: inResult.value };
+      }
+
       const coordinator = new BatchCoordinator();
       const fullResultCache = new Map<string, ToolCallResult>();
+      // Tool-call stage (AC-V1-002): a block returns a denial the LLM sees (the turn continues),
+      // not a `guardrail_block` SSE. Undefined guardrails → byte-identical to before.
+      const runToolCallGuard: RunToolCallGuard | undefined = gr
+        ? async ({ tool, args }) => {
+            const r = await gr.runToolCall(
+              { toolName: tool.name, tier: tool.tier, args },
+              guardCtx
+            );
+            return r.blocked
+              ? { blocked: true, reason: `${r.guard}: ${r.reason}` }
+              : { blocked: false, args: r.value.args };
+          }
+        : undefined;
       const tools =
         toolRegistry && toolRegistry.getAll().length > 0
           ? toolRegistry.buildToolSet(
               { userId: user._id, agentId: agent.name, autonomy: body.autonomy },
               coordinator,
               fullResultCache,
-              makeApprovalGate(approvalRegistry, emitter)
+              makeApprovalGate(approvalRegistry, emitter),
+              runToolCallGuard
             )
           : undefined;
 
@@ -343,6 +387,17 @@ export function registerChatRoutes(
           ),
       });
 
+      // Output stage (AC-V1-003): the producer buffers text segments and scans each before
+      // emitting; a block drops the text and emits `guardrail_block` + `finish`.
+      const scanOutput = gr
+        ? async (text: string): Promise<OutputScan> => {
+            const r = await gr.runOutput(text, guardCtx);
+            return r.blocked
+              ? { blocked: true, guard: r.guard, reason: r.reason, message: r.message }
+              : { blocked: false, text: r.value };
+          }
+        : undefined;
+
       // Attach this connection (live from seq 0) and start the detached producer.
       void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
       void runChatStream(streamId, result.fullStream, {
@@ -350,6 +405,7 @@ export function registerChatRoutes(
         hub,
         log: req.log,
         fullResultCache,
+        scanOutput,
       });
     }
   );
