@@ -1,4 +1,4 @@
-import type PgBoss from "pg-boss";
+import type { PgBoss } from "pg-boss";
 import type { KnowledgeService } from "./service";
 
 export const KNOWLEDGE_INDEX_QUEUE = "knowledge-index";
