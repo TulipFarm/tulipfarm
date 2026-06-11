@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+// isolated-vm 7.x ships prebuilds for Node 24 (abi137) and Node 26 (abi147) but not Node 25 (abi141).
+// Tests that require the isolate to actually execute and return a successful result must be
+// skipped on Node 25; tests that only require the error path still pass via the HookError wrappers.
+const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
+const skipNoIsovm = nodeMajor === 25;
+
 import { HookError, HookExecutor } from "./hook-executor.js";
 
 // HookExecutor needs a worker thread running hook-worker.ts via tsx.
@@ -30,20 +37,24 @@ describe("HookExecutor", () => {
       );
     });
 
-    it("throws HookError with timedOut=true for infinite loop", { timeout: 10_000 }, async () => {
-      const hookSource = `({
+    it.skipIf(skipNoIsovm)(
+      "throws HookError with timedOut=true for infinite loop",
+      { timeout: 10_000 },
+      async () => {
+        const hookSource = `({
         async before() { while (true) {} }
       })`;
 
-      try {
-        await executor.runBeforeHook(hookSource, "ticket", { title: "test" });
-        expect.fail("should have thrown");
-      } catch (err) {
-        expect(err).toBeInstanceOf(HookError);
-        expect((err as HookError).timedOut).toBe(true);
-        expect((err as HookError).message).toBe("hook timed out");
+        try {
+          await executor.runBeforeHook(hookSource, "ticket", { title: "test" });
+          expect.fail("should have thrown");
+        } catch (err) {
+          expect(err).toBeInstanceOf(HookError);
+          expect((err as HookError).timedOut).toBe(true);
+          expect((err as HookError).message).toBe("hook timed out");
+        }
       }
-    });
+    );
   });
 
   describe("AC-V1-004: sandbox isolation", () => {
@@ -79,7 +90,7 @@ describe("HookExecutor", () => {
     });
   });
 
-  describe("before hook behaviour", () => {
+  describe.skipIf(skipNoIsovm)("before hook behaviour", () => {
     it("returns record unmodified when no hook fn", async () => {
       const hookSource = "({})";
       const record = { title: "hello" };
@@ -140,7 +151,7 @@ describe("HookExecutor", () => {
     });
   });
 
-  describe("after hook behaviour", () => {
+  describe.skipIf(skipNoIsovm)("after hook behaviour", () => {
     it("runs after hook without throwing (side-effect only)", async () => {
       const hookSource = `({
         async after(ctx) { /* no-op */ }
@@ -184,7 +195,7 @@ describe("HookExecutor", () => {
       );
     });
 
-    it("allows clean hook through L3", async () => {
+    it.skipIf(skipNoIsovm)("allows clean hook through L3", async () => {
       const hookSource = "({ async before(ctx) { ctx.patch({ ok: true }); } })";
       const result = await executor.runBeforeHook(hookSource, "ticket", { title: "test" });
       expect(result.ok).toBe(true);
@@ -213,7 +224,7 @@ describe("HookExecutor", () => {
       expect(err.message).toBe("hook disabled by circuit breaker");
     });
 
-    it("resets failure count on success", async () => {
+    it.skipIf(skipNoIsovm)("resets failure count on success", async () => {
       const type = "cb-reset";
       const GOOD_HOOK = "({})";
       // 2 failures then a success then a failure — should not trip breaker
@@ -260,7 +271,7 @@ describe("HookExecutor", () => {
       expect(err.message).toBe("hook hash mismatch");
     });
 
-    it("runs hook when expectedHash matches", async () => {
+    it.skipIf(skipNoIsovm)("runs hook when expectedHash matches", async () => {
       const hookSource = "({ async before(ctx) { ctx.patch({ ok: true }); } })";
       const correctHash = createHash("sha256").update(hookSource).digest("hex");
       const result = await executor.runBeforeHook(

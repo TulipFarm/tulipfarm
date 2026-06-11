@@ -24,6 +24,7 @@ export class HookExecutor {
     { resolve: (r: WorkerResponse) => void; reject: (e: Error) => void }
   >();
   private readonly breaker = new Map<string, { failures: number; disabled: boolean }>();
+  private workerError: Error | null = null;
 
   constructor(connectionString: string) {
     this.worker = new Worker(join(__dirname, "hook-worker.ts"), {
@@ -38,15 +39,22 @@ export class HookExecutor {
       p.resolve(res);
     });
 
+    // Wrap raw worker errors as HookError so callers can handle them uniformly.
+    // Also record the error so future send() calls reject immediately instead of hanging.
     this.worker.on("error", (err) => {
+      this.workerError = err;
+      const hookErr = new HookError(`hook worker error: ${err.message}`);
       for (const [id, p] of this.pending) {
-        p.reject(err);
+        p.reject(hookErr);
         this.pending.delete(id);
       }
     });
   }
 
   private send(req: Omit<WorkerRequest, "id">): Promise<WorkerResponse> {
+    if (this.workerError) {
+      return Promise.reject(new HookError(`hook worker error: ${this.workerError.message}`));
+    }
     const id = ++this.reqId;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
@@ -109,7 +117,15 @@ export class HookExecutor {
     const guardErr = this.checkGuards(hookSource, resourceType, expectedHash);
     if (guardErr) throw guardErr;
 
-    const res = await this.send({ hookType: "before", hookSource, resourceType, record });
+    let res: WorkerResponse;
+    try {
+      res = await this.send({ hookType: "before", hookSource, resourceType, record });
+    } catch (err) {
+      this.recordFailure(resourceType);
+      throw err instanceof HookError
+        ? err
+        : new HookError(`hook worker error: ${(err as Error).message}`);
+    }
     if (!res.ok) {
       this.recordFailure(resourceType);
       throw new HookError(
