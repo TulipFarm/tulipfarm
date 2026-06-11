@@ -172,6 +172,24 @@ const STREAM_RESUME_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS stream_resume_gc_idx ON stream_resume (created_at)",
 ];
 
+/**
+ * Approval requests (AGT-V1-002). Shared by tool-call approvals (kind='tool_call') and future
+ * routine human_approval states (kind='routine_state'). Tool approvals are ephemeral in-memory
+ * (the DB is for audit + routines v0.11); the status index supports pending-list queries.
+ */
+const APPROVALS_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS approvals (
+    id          uuid PRIMARY KEY,
+    kind        text NOT NULL,
+    status      text NOT NULL DEFAULT 'pending',
+    payload     jsonb NOT NULL,
+    expires_at  timestamptz NOT NULL,
+    created_at  timestamptz NOT NULL,
+    resolved_at timestamptz
+  )`,
+  "CREATE INDEX IF NOT EXISTS approvals_status_expires_idx ON approvals (status, expires_at)",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -196,6 +214,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "stream_resume: durable SSE replay buffer keyed by (stream_id, seq)",
     up: async (q) => {
       for (const sql of STREAM_RESUME_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 4,
+    description: "approvals: approval-gate table for tool-call and routine human_approval states",
+    up: async (q) => {
+      for (const sql of APPROVALS_STATEMENTS) {
         await q.query(sql);
       }
     },
