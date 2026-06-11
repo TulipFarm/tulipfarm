@@ -598,6 +598,58 @@ describe("chat routes", () => {
       );
     });
 
+    // Progressive disclosure — eager soul skills (eager: true) surface as full bodies in the
+    // <skills> block without a load_skill call, and are excluded from the lazy <available-skills>
+    // index (CONTEXT-ENGINE §1; SKILLS.md L1/L2/L3).
+    it("renders eager soul skills in <skills> and omits them from <available-skills>", async () => {
+      await app.close();
+      const soulLoader = {
+        agents: new Map(),
+        skills: new Map([
+          [
+            "code-review",
+            {
+              name: "code-review",
+              frontmatter: { eager: true, description: "Review code for bugs." },
+              body: "Review carefully.",
+            },
+          ],
+          [
+            "data-export",
+            {
+              name: "data-export",
+              frontmatter: { description: "Export data." },
+              body: "Export rows.",
+            },
+          ],
+        ]),
+      } as unknown as SoulLoader;
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        soulLoader,
+      });
+
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      const system = JSON.stringify(prompt[0]?.content);
+      // Eager body renders in <skills> (no load_skill needed).
+      expect(system).toContain("<skills>\\n## code-review\\nReview carefully.");
+      // Lazy skill stays in the L1 index; the eager one does not leak into it.
+      expect(system).toContain("<available-skills>\\n- data-export: Export data.");
+      expect(system).not.toContain("- code-review");
+    });
+
     it("404 when conversationId is not found", async () => {
       const res = await post({ conversationId: randomUUID(), message: userMsg("hi") });
       expect(res.statusCode).toBe(404);
