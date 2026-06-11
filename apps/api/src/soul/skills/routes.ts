@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import type { LlmService } from "@tulipfarm/llm";
+import { LlmNotConfiguredError, type LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";
@@ -41,6 +41,8 @@ export interface DiscoveredSkill {
 
 interface ScanEntry {
   source: string;
+  // HEAD commit sha of the cloned repo at scan time — recorded as `ref` in skills-lock.json.
+  ref: string;
   skills: DiscoveredSkill[];
   // Names that have been through SkillAudit — install is gated on this (AC-V1-003).
   audited: Set<string>;
@@ -125,29 +127,34 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
   return out;
 }
 
-async function cloneToTemp(source: string): Promise<string> {
+async function cloneToTemp(source: string): Promise<{ dir: string; ref: string }> {
   const dir = await mkdtemp(join(tmpdir(), "skill-scan-"));
   await execFileP("git", ["clone", "--depth", "1", normalizeGitUrl(source), dir], {
     timeout: CLONE_TIMEOUT_MS,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
   });
-  return dir;
+  const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], { cwd: dir });
+  return { dir, ref: stdout.trim() };
+}
+
+// Per-skill lock entries follow spec SKL-V1-001: provenance is (sourceUrl, ref, hash), plus
+// sourceType and skillPath for the audit trail.
+interface LockEntry {
+  sourceUrl?: string;
+  sourceType?: string;
+  skillPath?: string;
+  ref?: string;
+  hash?: string;
 }
 
 async function readLock(soulPath: string): Promise<{
   version: number;
-  skills: Record<
-    string,
-    { source?: string; sourceType?: string; skillPath?: string; computedHash?: string }
-  >;
+  skills: Record<string, LockEntry>;
 }> {
   try {
     const parsed = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8")) as {
       version?: number;
-      skills?: Record<
-        string,
-        { source?: string; sourceType?: string; skillPath?: string; computedHash?: string }
-      >;
+      skills?: Record<string, LockEntry>;
     };
     // A freshly-initialized lock may be `{}` (no `skills` key) — normalize so callers can always
     // index `lock.skills`.
@@ -171,8 +178,80 @@ function toSkillSummary(
     name: skill.name,
     description: asString(skill.frontmatter.description),
     provenance: locked ? "marketplace" : "user",
-    source: locked?.source,
+    source: locked?.sourceUrl,
   };
+}
+
+// Cross-reference a discovered skill against what is installed: `installed` is true when the soul
+// repo already holds it, `updateAvailable` when its lock hash (sha256 of the installed SKILL.md,
+// recorded on install) differs from the freshly-cloned content. User-authored skills have no lock
+// hash, so update status is unknowable for them and reported as false.
+function installStatus(
+  skill: DiscoveredSkill,
+  lock: Awaited<ReturnType<typeof readLock>>,
+  soulLoader: SoulLoader
+): { installed: boolean; updateAvailable: boolean } {
+  const installed = soulLoader.skills.has(skill.name);
+  const lockedHash = lock.skills[skill.name]?.hash;
+  const updateAvailable =
+    installed &&
+    !!lockedHash &&
+    lockedHash !== createHash("sha256").update(skill.content).digest("hex");
+  return { installed, updateAvailable };
+}
+
+// Curated-catalog manifest at the marketplace repo root (skills.sh shape). Discovery stays
+// authoritative — the manifest only enriches discovered skills; entries without a SKILL.md on
+// disk are ignored.
+interface MarketplaceManifestEntry {
+  skillId?: string;
+  name?: string;
+  description?: string;
+  installs?: number;
+}
+
+// Read at request time (not module load) so the env override is honored per-request and in tests.
+function marketplaceSource(): string {
+  return process.env.MARKETPLACE_SOURCE ?? "tulipfarm/skills";
+}
+
+interface MarketplaceResponse {
+  scanId: string;
+  source: string;
+  skills: {
+    name: string;
+    skillId?: string;
+    description?: string;
+    installs?: number;
+    installed: boolean;
+    updateAvailable: boolean;
+  }[];
+}
+
+// Keyed by source so an env change never serves a stale catalog. Entries are only valid while the
+// matching scan entry is still alive (pruning/cap can evict it independently).
+const marketplaceCache = new Map<
+  string,
+  { scanId: string; expires: number; response: MarketplaceResponse }
+>();
+
+async function readManifest(dir: string): Promise<Map<string, MarketplaceManifestEntry>> {
+  const byName = new Map<string, MarketplaceManifestEntry>();
+  try {
+    const parsed = JSON.parse(await readFile(join(dir, "marketplace.json"), "utf8")) as {
+      skills?: MarketplaceManifestEntry[];
+    };
+    for (const entry of Array.isArray(parsed.skills) ? parsed.skills : []) {
+      // Index under both skillId and name — the lookup key is the DISCOVERED skill's frontmatter
+      // name, which manifest authors may have recorded in either field.
+      for (const key of [asString(entry.skillId), asString(entry.name)]) {
+        if (key && !byName.has(key)) byName.set(key, entry);
+      }
+    }
+  } catch {
+    // Missing or invalid manifest is fine — the catalog is just the bare discovered list.
+  }
+  return byName;
 }
 
 const SummaryProps = {
@@ -224,6 +303,96 @@ export function registerSkillRoutes(
   );
 
   app.get(
+    "/api/v1/skills/marketplace",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Browse the official skills marketplace (TulipFarm/skills). Returns a scanId usable with the audit and install endpoints.",
+        tags: ["skills"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["scanId", "source", "skills"],
+            properties: {
+              scanId: { type: "string" },
+              source: { type: "string" },
+              skills: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["name", "installed", "updateAvailable"],
+                  properties: {
+                    name: { type: "string" },
+                    skillId: { type: "string" },
+                    description: { type: "string" },
+                    installs: { type: "number" },
+                    installed: { type: "boolean" },
+                    updateAvailable: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+          502: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      // The catalog clone creates server-side scan state, so never let intermediaries cache it.
+      reply.header("cache-control", "no-store");
+      const source = marketplaceSource();
+      const now = Date.now();
+      const cached = marketplaceCache.get(source);
+      if (cached && cached.expires > now && scans.has(cached.scanId)) return cached.response;
+
+      let dir: string | undefined;
+      try {
+        const clone = await cloneToTemp(source);
+        dir = clone.dir;
+        const discovered = await discoverSkills(dir);
+        const manifest = await readManifest(dir);
+        const lock = await readLock(gitSync.path);
+        const scanId = randomUUID();
+        pruneScans(now);
+        // A real scan entry so the existing audit → operator-confirm install flow (and its 409
+        // audit gate, AC-V1-003) applies to marketplace installs unchanged.
+        scans.set(scanId, {
+          source,
+          ref: clone.ref,
+          skills: discovered,
+          audited: new Set(),
+          expires: now + SCAN_TTL_MS,
+        });
+        const response: MarketplaceResponse = {
+          scanId,
+          source,
+          skills: discovered.map((s) => {
+            const meta = manifest.get(s.name);
+            return {
+              name: s.name,
+              skillId: asString(meta?.skillId),
+              description: s.description ?? asString(meta?.description),
+              installs: typeof meta?.installs === "number" ? meta.installs : undefined,
+              ...installStatus(s, lock, soulLoader),
+            };
+          }),
+        };
+        marketplaceCache.set(source, { scanId, expires: now + SCAN_TTL_MS, response });
+        return response;
+      } catch (e) {
+        return reply.code(502).send({
+          error: `marketplace unavailable: ${e instanceof Error ? e.message : String(e)}`,
+        });
+      } finally {
+        if (dir) await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  app.get(
     "/api/v1/skills/:name",
     {
       preHandler: requireAuth,
@@ -252,6 +421,38 @@ export function registerSkillRoutes(
     }
   );
 
+  app.delete(
+    "/api/v1/skills/:name",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Remove an installed skill from the soul repo (and its skills-lock entry).",
+        tags: ["skills"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      // NAME_RE also guards the rm path below against traversal, same as install.
+      if (!NAME_RE.test(name) || !soulLoader.skills.get(name)) {
+        return reply.code(404).send({ error: `skill not found: ${name}` });
+      }
+      await rm(join(gitSync.path, "skills", name), { recursive: true, force: true });
+      const lock = await readLock(gitSync.path);
+      delete lock.skills[name];
+      await writeFile(
+        join(gitSync.path, "skills-lock.json"),
+        `${JSON.stringify(lock, null, 2)}\n`,
+        "utf8"
+      );
+      await gitSync.withSync(`soul: remove skill ${name}`);
+      await soulLoader.reload();
+      return reply.code(204).send();
+    }
+  );
+
   app.post(
     "/api/v1/skills/scan",
     {
@@ -276,8 +477,13 @@ export function registerSkillRoutes(
                 type: "array",
                 items: {
                   type: "object",
-                  required: ["name"],
-                  properties: { name: { type: "string" }, description: { type: "string" } },
+                  required: ["name", "installed", "updateAvailable"],
+                  properties: {
+                    name: { type: "string" },
+                    description: { type: "string" },
+                    installed: { type: "boolean" },
+                    updateAvailable: { type: "boolean" },
+                  },
                 },
               },
             },
@@ -296,22 +502,29 @@ export function registerSkillRoutes(
       }
       let dir: string | undefined;
       try {
-        dir = await cloneToTemp(source);
+        const clone = await cloneToTemp(source);
+        dir = clone.dir;
         const discovered = await discoverSkills(dir);
         if (discovered.length === 0) {
           return reply.code(400).send({ error: "no SKILL.md files found in repo" });
         }
+        const lock = await readLock(gitSync.path);
         const scanId = randomUUID();
         pruneScans(Date.now());
         scans.set(scanId, {
           source,
+          ref: clone.ref,
           skills: discovered,
           audited: new Set(),
           expires: Date.now() + SCAN_TTL_MS,
         });
         return {
           scanId,
-          skills: discovered.map((s) => ({ name: s.name, description: s.description })),
+          skills: discovered.map((s) => ({
+            name: s.name,
+            description: s.description,
+            ...installStatus(s, lock, soulLoader),
+          })),
         };
       } catch (e) {
         return reply
@@ -345,6 +558,8 @@ export function registerSkillRoutes(
           },
           401: ErrorSchema,
           404: ErrorSchema,
+          422: ErrorSchema,
+          502: ErrorSchema,
         },
       },
     },
@@ -355,11 +570,25 @@ export function registerSkillRoutes(
       if (!entry || !skill)
         return reply.code(404).send({ error: "scanned skill not found (scan may have expired)" });
       const { body } = parseFrontmatter(skill.content);
-      const report = await buildAudit(llmService.select({ model: "standard" }), {
-        name: skill.name,
-        description: skill.description,
-        body,
-      });
+      let report: Awaited<ReturnType<typeof buildAudit>>;
+      try {
+        report = await buildAudit(llmService.select({ model: "standard" }), {
+          name: skill.name,
+          description: skill.description,
+          body,
+        });
+      } catch (e) {
+        // SkillAudit needs a working LLM. Surface an actionable message instead of a bare 500: a
+        // missing provider is a config problem (422), any other failure is an upstream error (502).
+        if (e instanceof LlmNotConfiguredError) {
+          return reply.code(422).send({
+            error: "SkillAudit needs an LLM provider — configure one in Settings → LLM.",
+          });
+        }
+        return reply
+          .code(502)
+          .send({ error: `SkillAudit failed: ${e instanceof Error ? e.message : String(e)}` });
+      }
       // Record that the operator has seen an audit for this skill; install is gated on it.
       entry.audited.add(name);
       return { report };
@@ -427,10 +656,11 @@ export function registerSkillRoutes(
       const lock = await readLock(gitSync.path);
       for (const skill of chosen as DiscoveredSkill[]) {
         lock.skills[skill.name] = {
-          source: entry.source,
+          sourceUrl: entry.source,
           sourceType: sourceType(entry.source),
           skillPath: skill.skillPath,
-          computedHash: createHash("sha256").update(skill.content).digest("hex"),
+          ref: entry.ref,
+          hash: createHash("sha256").update(skill.content).digest("hex"),
         };
       }
       await writeFile(

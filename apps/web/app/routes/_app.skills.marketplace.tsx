@@ -1,0 +1,393 @@
+import { Link, type MetaFunction, useLoaderData } from "@remix-run/react";
+import { useState } from "react";
+import { ResourcePanel } from "~/components/resource-panel";
+import { SkillsTabs } from "~/components/skills-tabs";
+import { Button } from "~/components/ui/button";
+import { ApiError } from "~/lib/api";
+import {
+  auditSkill,
+  installSkills,
+  type MarketplaceCatalog,
+  marketplaceSkills,
+  type ScannedSkill,
+  type ScanResult,
+  type SkillAuditReport,
+  type SkillInstallStatus,
+  scanSkills,
+} from "~/lib/skills";
+
+export const meta: MetaFunction = () => [{ title: "Marketplace · tulipfarm" }];
+
+// Status pill for a discovered/catalog skill: stale installs surface an update, current installs read
+// as installed, and not-yet-installed skills get no pill (install happens via the review pipeline).
+function InstallBadge({ installed, updateAvailable }: SkillInstallStatus) {
+  if (updateAvailable) {
+    return (
+      <span className="shrink-0 rounded-sm border border-primary px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-primary">
+        update available
+      </span>
+    );
+  }
+  if (installed) {
+    return (
+      <span className="shrink-0 rounded-sm border border-border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-muted-foreground">
+        installed ✓
+      </span>
+    );
+  }
+  return null;
+}
+
+// The official catalog is a nicety — when the marketplace repo is unreachable the manual git-URL
+// scan must still work, so failures collapse to `null` instead of breaking the page.
+export async function clientLoader() {
+  return { catalog: await marketplaceSkills().catch(() => null) };
+}
+
+const inputClass =
+  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
+
+const RISK_CLASS: Record<SkillAuditReport["riskRating"], string> = {
+  low: "border-border text-muted-foreground",
+  medium: "border-primary text-primary",
+  high: "border-destructive text-destructive",
+};
+
+const SEVERITY_CLASS: Record<SkillAuditReport["findings"][number]["severity"], string> = {
+  info: "text-muted-foreground",
+  warning: "text-primary",
+  critical: "text-destructive",
+};
+
+function errMessage(e: unknown): string {
+  if (e instanceof ApiError) return e.message;
+  return e instanceof Error ? e.message : "request failed";
+}
+
+function AuditReportCard({ name, report }: { name: string; report: SkillAuditReport }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
+      <div className="flex items-center gap-2">
+        <span className="font-medium text-foreground">{name}</span>
+        <span
+          className={`ml-auto rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[report.riskRating]}`}
+        >
+          {report.riskRating} risk
+        </span>
+      </div>
+      <p className="text-muted-foreground">{report.summary}</p>
+      {report.toolsReach.length > 0 ? (
+        <p className="text-xs text-muted-foreground">
+          <span className="uppercase tracking-[0.15em]">tool reach:</span>{" "}
+          {report.toolsReach.join(", ")}
+        </p>
+      ) : null}
+      {report.findings.length > 0 ? (
+        <ul className="flex flex-col gap-1 text-sm">
+          {report.findings.map((f, i) => (
+            <li key={`${f.category}-${i}`} className="flex gap-2">
+              <span aria-hidden className={SEVERITY_CLASS[f.severity]}>
+                ◆
+              </span>
+              <span className="text-muted-foreground">
+                <span className="text-foreground">{f.category}</span> — {f.detail}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-muted-foreground">No specific findings.</p>
+      )}
+    </div>
+  );
+}
+
+export default function SkillsMarketplace() {
+  const { catalog } = useLoaderData<typeof clientLoader>() as {
+    catalog: MarketplaceCatalog | null;
+  };
+  const [source, setSource] = useState("");
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [reports, setReports] = useState<Record<string, SkillAuditReport>>({});
+  const [busy, setBusy] = useState<null | "scan" | "audit" | "install">(null);
+  const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState<string[] | null>(null);
+
+  const selectedNames = [...selected];
+  const allAudited = selectedNames.length > 0 && selectedNames.every((n) => reports[n]);
+
+  // Load one or more catalog skills into the select → audit → confirm pipeline (the audit gate runs
+  // unchanged). Used by the per-row Install/Update buttons and the "Review all" button.
+  function loadIntoPipeline(scanId: string, skills: ScannedSkill[]) {
+    setError(null);
+    setReports({});
+    setInstalled(null);
+    setScan({ scanId, skills });
+    setSelected(new Set(skills.map((s) => s.name)));
+  }
+
+  async function onScan() {
+    if (!source.trim()) return;
+    setBusy("scan");
+    setError(null);
+    setReports({});
+    setInstalled(null);
+    // Clear any prior scan so stale results aren't shown/interactive during the new scan.
+    setScan(null);
+    setSelected(new Set());
+    try {
+      const result = await scanSkills(source.trim());
+      setScan(result);
+      setSelected(new Set(result.skills.map((s) => s.name)));
+    } catch (e) {
+      setScan(null);
+      setError(errMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function toggle(name: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  async function onAudit() {
+    if (!scan || selectedNames.length === 0) return;
+    setBusy("audit");
+    setError(null);
+    // Audit each selected skill independently so one failure does not discard the others' reports.
+    const settled = await Promise.allSettled(
+      selectedNames.map((name) => auditSkill(scan.scanId, name))
+    );
+    const next: Record<string, SkillAuditReport> = {};
+    const failures: string[] = [];
+    settled.forEach((result, i) => {
+      if (result.status === "fulfilled") next[selectedNames[i]] = result.value;
+      else failures.push(`${selectedNames[i]}: ${errMessage(result.reason)}`);
+    });
+    setReports(next);
+    setError(failures.length > 0 ? failures.join("; ") : null);
+    setBusy(null);
+  }
+
+  async function onInstall() {
+    if (!scan || !allAudited) return;
+    setBusy("install");
+    setError(null);
+    try {
+      const res = await installSkills(scan.scanId, selectedNames);
+      setInstalled(res.installed);
+    } catch (e) {
+      setError(errMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <ResourcePanel crumbs={[{ label: "skills", to: "/skills" }, { label: "marketplace" }]}>
+      <SkillsTabs />
+      {error ? (
+        <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive">
+          error: {error}
+        </p>
+      ) : null}
+
+      {installed ? (
+        <div className="flex flex-col gap-3">
+          <p className="text-foreground">
+            <span aria-hidden className="text-primary">
+              ✓{" "}
+            </span>
+            Installed {installed.join(", ")}.
+          </p>
+          <Button asChild size="sm" className="self-start">
+            <Link to="/skills">Back to skills</Link>
+          </Button>
+        </div>
+      ) : (
+        <>
+          {/* Official marketplace catalog (SKL-V1-005) — reviewing feeds the same select → audit →
+              confirm pipeline as a manual scan. Hidden once a scan is active. */}
+          {catalog && catalog.skills.length > 0 && !scan ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  official marketplace · {catalog.source}
+                </p>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy !== null}
+                  onClick={() => loadIntoPipeline(catalog.scanId, catalog.skills)}
+                >
+                  Review all ({catalog.skills.length})
+                </Button>
+              </div>
+              {/* List scrolls within the panel so the page itself does not grow with the catalog. */}
+              <ul className="flex max-h-96 flex-col divide-y divide-border overflow-y-auto rounded-sm border border-border">
+                {catalog.skills.map((s) => (
+                  <li key={s.name} className="flex items-center gap-3 px-3 py-2">
+                    <span className="font-medium text-foreground">{s.name}</span>
+                    {s.description ? (
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                        {s.description}
+                      </span>
+                    ) : (
+                      <span className="flex-1" />
+                    )}
+                    {s.installs !== undefined ? (
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {s.installs} installs
+                      </span>
+                    ) : null}
+                    {s.installed && !s.updateAvailable ? (
+                      <InstallBadge installed updateAvailable={false} />
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant={s.updateAvailable ? "default" : "outline"}
+                        className="shrink-0"
+                        disabled={busy !== null}
+                        onClick={() => loadIntoPipeline(catalog.scanId, [s])}
+                      >
+                        {s.updateAvailable ? "Update" : "Install"}
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="border-t border-border pt-4 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                or install from any git repo
+              </p>
+            </div>
+          ) : null}
+
+          {/* Step 1 — scan a git repo for installable skills. */}
+          <form
+            className="flex flex-col gap-2"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void onScan();
+            }}
+          >
+            <label
+              htmlFor="source"
+              className="text-xs uppercase tracking-[0.2em] text-muted-foreground"
+            >
+              git url
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="source"
+                className={inputClass}
+                placeholder="https://github.com/owner/repo  or  owner/repo"
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                disabled={busy !== null}
+              />
+              <Button type="submit" size="sm" disabled={busy !== null || !source.trim()}>
+                {busy === "scan" ? "Scanning…" : "Scan"}
+              </Button>
+            </div>
+          </form>
+
+          {/* Step 2 — pick which discovered skills to review. */}
+          {scan ? (
+            <div className="flex flex-col gap-3 border-t border-border pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {scan.skills.length} discovered — select skills to review
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    setScan(null);
+                    setSelected(new Set());
+                    setReports({});
+                  }}
+                >
+                  ← Back
+                </Button>
+              </div>
+              <ul className="flex max-h-96 flex-col divide-y divide-border overflow-y-auto rounded-sm border border-border">
+                {scan.skills.map((s) => (
+                  <li key={s.name}>
+                    <label className="flex cursor-pointer items-baseline gap-2 px-3 py-2 hover:bg-accent">
+                      <input
+                        type="checkbox"
+                        className="accent-primary"
+                        checked={selected.has(s.name)}
+                        onChange={() => toggle(s.name)}
+                        disabled={busy !== null}
+                      />
+                      <span className="font-medium text-foreground">{s.name}</span>
+                      {s.description ? (
+                        <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                          {s.description}
+                        </span>
+                      ) : (
+                        <span className="flex-1" />
+                      )}
+                      <span className="ml-auto flex shrink-0 items-baseline gap-2">
+                        <InstallBadge installed={s.installed} updateAvailable={s.updateAvailable} />
+                        {reports[s.name] ? (
+                          <span
+                            className={`rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${RISK_CLASS[reports[s.name].riskRating]}`}
+                          >
+                            {reports[s.name].riskRating}
+                          </span>
+                        ) : null}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                size="sm"
+                variant="outline"
+                className="self-start"
+                onClick={() => void onAudit()}
+                disabled={busy !== null || selectedNames.length === 0}
+              >
+                {busy === "audit" ? "Auditing…" : `Run SkillAudit (${selectedNames.length})`}
+              </Button>
+            </div>
+          ) : null}
+
+          {/* Step 3 — advisory reports + explicit operator confirm. */}
+          {allAudited ? (
+            <div className="flex flex-col gap-3 border-t border-border pt-4">
+              {selectedNames.map((name) => (
+                <AuditReportCard key={name} name={name} report={reports[name]} />
+              ))}
+              <p className="rounded-sm border border-border bg-muted px-3 py-2 text-xs text-muted-foreground">
+                SkillAudit is <span className="text-foreground">advisory, not a guarantee</span>. A
+                skill is natural-language instruction and cannot be sandboxed — it may read benign
+                yet behave badly in context, and injection can be obscured. Installed skills run
+                with full tool access (no per-skill ACL in V1). Confirming installs these skills
+                into your soul repo.
+              </p>
+              <Button
+                size="sm"
+                className="self-start"
+                onClick={() => void onInstall()}
+                disabled={busy !== null}
+              >
+                {busy === "install" ? "Installing…" : `Confirm install (${selectedNames.length})`}
+              </Button>
+            </div>
+          ) : null}
+        </>
+      )}
+    </ResourcePanel>
+  );
+}

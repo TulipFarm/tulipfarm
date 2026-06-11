@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { LlmNotConfiguredError } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,8 +77,9 @@ const skill = (name: string, description: string): SoulSkill => ({
 });
 
 // Build a throwaway local git repo containing one installable skill — `git clone <path>` reads it
-// offline, so the scan flow is exercised without any network.
-async function makeRemoteRepo(): Promise<string> {
+// offline, so the scan flow is exercised without any network. Optionally writes a root
+// marketplace.json (the curated-catalog manifest read by GET /api/v1/skills/marketplace).
+async function makeRemoteRepo(manifest?: unknown): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "skill-remote-"));
   const skillDir = join(dir, "skills", "demo-skill");
   await mkdir(skillDir, { recursive: true });
@@ -85,6 +88,9 @@ async function makeRemoteRepo(): Promise<string> {
     "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo.",
     "utf8"
   );
+  if (manifest !== undefined) {
+    await writeFile(join(dir, "marketplace.json"), JSON.stringify(manifest), "utf8");
+  }
   const git = (args: string[]) => execFileP("git", args, { cwd: dir });
   await git(["init", "-q"]);
   await git(["config", "user.email", "t@t.t"]);
@@ -92,6 +98,11 @@ async function makeRemoteRepo(): Promise<string> {
   await git(["add", "-A"]);
   await git(["commit", "-q", "-m", "init"]);
   return dir;
+}
+
+async function headOf(dir: string): Promise<string> {
+  const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], { cwd: dir });
+  return stdout.trim();
 }
 
 describe("skills routes", () => {
@@ -137,7 +148,7 @@ describe("skills routes", () => {
       join(soulPath, "skills-lock.json"),
       JSON.stringify({
         version: 1,
-        skills: { "installed-skill": { source: "owner/repo", sourceType: "github" } },
+        skills: { "installed-skill": { sourceUrl: "owner/repo", sourceType: "github" } },
       }),
       "utf8"
     );
@@ -253,6 +264,47 @@ describe("skills routes", () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toMatch(/owner\/repo|http/);
     });
+
+    it("flags an installed skill and an available update against the lock", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const fileUrl = `file://${remote}`;
+      const content = "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo.";
+      const hash = createHash("sha256").update(content).digest("hex");
+
+      // Pretend demo-skill is already installed from this source.
+      soulLoader.skills.set("demo-skill", skill("demo-skill", "A demo skill."));
+
+      const scan = (url: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/skills/scan",
+          cookies: auth(),
+          headers,
+          payload: { source: url },
+        });
+
+      // Lock hash matches the upstream content → installed, no update.
+      await writeFile(
+        join(soulPath, "skills-lock.json"),
+        JSON.stringify({ version: 1, skills: { "demo-skill": { sourceUrl: fileUrl, hash } } }),
+        "utf8"
+      );
+      const current = await scan(fileUrl);
+      expect(current.json().skills[0]).toMatchObject({ installed: true, updateAvailable: false });
+
+      // Lock hash no longer matches → update available.
+      await writeFile(
+        join(soulPath, "skills-lock.json"),
+        JSON.stringify({
+          version: 1,
+          skills: { "demo-skill": { sourceUrl: fileUrl, hash: "0".repeat(64) } },
+        }),
+        "utf8"
+      );
+      const stale = await scan(fileUrl);
+      expect(stale.json().skills[0]).toMatchObject({ installed: true, updateAvailable: true });
+    });
   });
 
   describe("scan → audit → install flow", () => {
@@ -272,7 +324,14 @@ describe("skills routes", () => {
       });
       expect(scanRes.statusCode).toBe(200);
       const { scanId, skills } = scanRes.json();
-      expect(skills).toEqual([{ name: "demo-skill", description: "A demo skill." }]);
+      expect(skills).toEqual([
+        {
+          name: "demo-skill",
+          description: "A demo skill.",
+          installed: false,
+          updateAvailable: false,
+        },
+      ]);
       // Nothing written to the soul repo by scanning.
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
 
@@ -311,8 +370,14 @@ describe("skills routes", () => {
       const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
       expect(written).toContain("Do the demo.");
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
-      expect(lock.skills["demo-skill"]).toMatchObject({ source: fileUrl, sourceType: "git" });
-      expect(lock.skills["demo-skill"].computedHash).toMatch(/^[0-9a-f]{64}$/);
+      // Spec SKL-V1-001: provenance is recorded as (sourceUrl, ref, hash).
+      expect(lock.skills["demo-skill"]).toMatchObject({
+        sourceUrl: fileUrl,
+        sourceType: "git",
+        skillPath: join("skills", "demo-skill", "SKILL.md"),
+      });
+      expect(lock.skills["demo-skill"].hash).toMatch(/^[0-9a-f]{64}$/);
+      expect(lock.skills["demo-skill"].ref).toBe(await headOf(remote));
       expect(withSync).toHaveBeenCalledOnce();
       expect(reload).toHaveBeenCalledOnce();
     });
@@ -326,6 +391,54 @@ describe("skills routes", () => {
         payload: { scanId: "nope", name: "demo-skill" },
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    it("returns 422 with guidance when the LLM is not configured", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+
+      buildAudit.mockRejectedValue(new LlmNotConfiguredError());
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toMatch(/Settings → LLM/);
+    });
+
+    it("returns 502 when the audit model call fails", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+
+      buildAudit.mockRejectedValue(new Error("upstream 529"));
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+      expect(res.statusCode).toBe(502);
+      expect(res.json().error).toMatch(/SkillAudit failed: upstream 529/);
     });
 
     it("refuses to install a skill that has not been audited (409) and writes nothing", async () => {
@@ -351,6 +464,219 @@ describe("skills routes", () => {
       expect(installRes.statusCode).toBe(409);
       expect(withSync).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+    });
+  });
+
+  describe("DELETE /api/v1/skills/:name", () => {
+    // Seed the skill's directory on disk — the loader-backed map alone is not enough to remove.
+    async function seedSkillDir(name: string): Promise<string> {
+      const dir = join(soulPath, "skills", name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "SKILL.md"), `---\nname: ${name}\n---\nBody.`, "utf8");
+      return dir;
+    }
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "DELETE", url: "/api/v1/skills/installed-skill" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("removes the skill dir and its lock entry, commits, and reloads", async () => {
+      const dir = await seedSkillDir("installed-skill");
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/skills/installed-skill",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(204);
+      await expect(access(dir)).rejects.toThrow();
+      const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
+      expect(lock.skills["installed-skill"]).toBeUndefined();
+      expect(withSync).toHaveBeenCalledWith("soul: remove skill installed-skill");
+      expect(reload).toHaveBeenCalledOnce();
+    });
+
+    it("removes a hand-authored skill (no lock entry) without touching other entries", async () => {
+      await seedSkillDir("my-skill");
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/skills/my-skill",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(204);
+      const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
+      expect(lock.skills["installed-skill"]).toBeDefined();
+    });
+
+    it("returns 404 for an unknown skill and commits nothing", async () => {
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/skills/ghost",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(404);
+      expect(withSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("GET /api/v1/skills/marketplace", () => {
+    afterEach(() => {
+      delete process.env.MARKETPLACE_SOURCE;
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/skills/marketplace" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("merges marketplace.json metadata onto discovered skills (discovery authoritative)", async () => {
+      const remote = await makeRemoteRepo({
+        version: 1,
+        skills: [
+          {
+            id: "tulipfarm/skills/demo-skill",
+            skillId: "demo-skill",
+            name: "demo-skill",
+            description: "Manifest description.",
+            installs: 42,
+            source: "tulipfarm/skills",
+          },
+          // Manifest-only entry with no SKILL.md on disk — must NOT appear in the response.
+          { id: "tulipfarm/skills/ghost", skillId: "ghost", name: "ghost", installs: 9 },
+        ],
+      });
+      temps.push(remote);
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.source).toBe(`file://${remote}`);
+      expect(typeof body.scanId).toBe("string");
+      // Frontmatter description wins over the manifest's.
+      expect(body.skills).toEqual([
+        {
+          name: "demo-skill",
+          skillId: "demo-skill",
+          description: "A demo skill.",
+          installs: 42,
+          installed: false,
+          updateAvailable: false,
+        },
+      ]);
+    });
+
+    it("works without a marketplace.json (bare discovered list)", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills).toEqual([
+        {
+          name: "demo-skill",
+          description: "A demo skill.",
+          installed: false,
+          updateAvailable: false,
+        },
+      ]);
+    });
+
+    it("caches the catalog: repeated GETs reuse the same scanId without re-cloning", async () => {
+      const remote = await makeRemoteRepo();
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+
+      const first = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(first.statusCode).toBe(200);
+
+      // Remove the remote — a second GET can only succeed if it is served from the cache.
+      await rm(remote, { recursive: true, force: true });
+      const second = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(second.statusCode).toBe(200);
+      expect(second.json().scanId).toBe(first.json().scanId);
+    });
+
+    it("returns 502 when the marketplace repo cannot be cloned", async () => {
+      process.env.MARKETPLACE_SOURCE = `file://${join(tmpdir(), "no-such-marketplace-xyz")}`;
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(502);
+    });
+
+    it("keeps the audit gate: install via the marketplace scanId still requires audit", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+
+      const catalog = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      const { scanId } = catalog.json();
+
+      const blocked = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(blocked.statusCode).toBe(409);
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "Benign.",
+        toolsReach: [],
+        findings: [],
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installed = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(installed.statusCode).toBe(200);
+      const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
+      expect(lock.skills["demo-skill"].sourceUrl).toBe(`file://${remote}`);
     });
   });
 });

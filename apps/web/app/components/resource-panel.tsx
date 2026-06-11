@@ -15,7 +15,7 @@ export function ResourcePanel({
   children,
 }: {
   crumbs: Crumb[];
-  command: string;
+  command?: string;
   children: ReactNode;
 }) {
   return (
@@ -43,12 +43,14 @@ export function ResourcePanel({
           </span>
         </div>
         <div className="flex flex-col gap-4 px-4 py-6 text-sm">
-          <p className="text-muted-foreground">
-            <span aria-hidden className="text-primary">
-              ${" "}
-            </span>
-            {command}
-          </p>
+          {command ? (
+            <p className="text-muted-foreground">
+              <span aria-hidden className="text-primary">
+                ${" "}
+              </span>
+              {command}
+            </p>
+          ) : null}
           {children}
         </div>
       </div>
