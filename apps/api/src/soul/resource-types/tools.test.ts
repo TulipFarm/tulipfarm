@@ -146,7 +146,7 @@ describe("create_resource_type", () => {
 
   it("does not call reconcile when not provided", async () => {
     const ctx = makeCtx();
-    ctx.reconcile = undefined as unknown as ReturnType<typeof vi.fn>;
+    (ctx as { reconcile: undefined }).reconcile = undefined;
     const res = await createTool.handler({ name: "ticket", schema: VALID_SCHEMA_YAML }, ctx);
     expect(res.success).toBe(true);
   });
