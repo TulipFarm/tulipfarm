@@ -20,7 +20,7 @@
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/validation": "workspace:*",
-    "ai": "^6.0.199",
+    "ai": "^6.0.201",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "isolated-vm": "^7.0.0",
@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.10",
-    "@electric-sql/pglite": "^0.4.6",
+    "@electric-sql/pglite": "^0.5.1",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
