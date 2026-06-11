@@ -226,12 +226,60 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
   });
 });
 
+describe("assembleSystemPrompt — skills (eager L2)", () => {
+  it("renders a ## section per eager skill in <skills>", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        eagerSkills: [
+          { name: "code-review", body: "Review code carefully." },
+          { name: "data-export", body: "Export to CSV." },
+        ],
+      })
+    );
+    expect(out).toContain(
+      "<skills>\n## code-review\nReview code carefully.\n\n## data-export\nExport to CSV.\n</skills>"
+    );
+  });
+
+  it("omits the block when eagerSkills is unset or empty", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<skills>");
+    expect(assembleSystemPrompt(baseCtx({ eagerSkills: [] }))).not.toContain("<skills>");
+  });
+
+  it("drops the whole block when over the char budget (never half-rendered)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ eagerSkills: [{ name: "big", body: "x".repeat(33000) }] })
+    );
+    expect(out).not.toContain("<skills>");
+  });
+
+  it("renders before <available-skills> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        eagerSkills: [{ name: "eager", body: "eager body" }],
+        availableSkills: [{ name: "lazy", description: "lazy desc" }],
+      })
+    );
+    expect(out.indexOf("<skills>")).toBeLessThan(out.indexOf("<available-skills>"));
+  });
+
+  it("renders after <governance-knowledge> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        governanceDocs: [govDoc("Policy", "Be compliant.")],
+        eagerSkills: [{ name: "eager", body: "eager body" }],
+      })
+    );
+    expect(out.indexOf("<governance-knowledge>")).toBeLessThan(out.indexOf("<skills>"));
+  });
+});
+
 describe("assembleSystemPrompt — deferred + typed-state (AC-V1-003)", () => {
-  it("omits the deferred skills/tools/soul-context blocks entirely", () => {
+  it("omits the still-deferred soul-context and tools blocks", () => {
     const out = assembleSystemPrompt(
       baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
     );
-    for (const tag of ["<skills>", "<soul-context>", "<available-tools>"]) {
+    for (const tag of ["<soul-context>", "<available-tools>"]) {
       expect(out).not.toContain(tag);
     }
   });

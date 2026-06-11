@@ -2,7 +2,7 @@ import { buildGovernanceBlock } from "../knowledge/governance";
 import type { KnowledgeDocument } from "../knowledge/types";
 import { MAX_TOTAL_CHARS } from "../memory/limits";
 import type { WorkingMemoryDoc } from "../memory/working-memory";
-import type { AvailableSkill } from "../soul/skills/registry";
+import type { AvailableSkill, EagerSkill } from "../soul/skills/registry";
 
 /**
  * Resolved inputs for one turn's system prompt. `assembleSystemPrompt` is pure — the caller
@@ -27,9 +27,14 @@ export interface AssembleContext {
   /** Active `alwaysLoadForAgents` knowledge docs (KN-V1-005). */
   governanceDocs: KnowledgeDocument[];
   /**
-   * Lazy skill L1 index for `<available-skills>` — every soul skill's name + description, from the
-   * SkillRegistry (`soul/skills/registry.ts`). All-lazy V1: the agent pulls a skill's body (L2) on
-   * demand via `load_skill`. Eager `<skills>` bodies are deferred. Unset → block omitted.
+   * Eager skill bodies for `<skills>` — skills with `eager: true` in their SKILL.md frontmatter.
+   * Their full body is included in the prompt so the agent can apply them without a `load_skill`
+   * call. Unset or empty → block omitted.
+   */
+  eagerSkills?: EagerSkill[];
+  /**
+   * Lazy skill L1 index for `<available-skills>` — non-eager soul skills projected to name +
+   * description. The agent pulls a skill's body (L2) on demand via `load_skill`. Unset → block omitted.
    */
   availableSkills?: AvailableSkill[];
 }
@@ -68,6 +73,27 @@ function renderMemory(ctx: AssembleContext): string {
   if (total > MAX_TOTAL_CHARS) return "";
   const body = ctx.memory.map((e) => `- ${e.key}: ${e.value}`).join("\n");
   return block("memory", body);
+}
+
+/**
+ * `<skills>` budget — total chars across all eager skill `name`+`body` pairs. Over this the whole
+ * block is dropped (never half-rendered). Skill bodies can be large (multi-page playbooks), so the
+ * budget is generous; drop-whole prevents a partial-body from reaching the agent.
+ */
+const MAX_EAGER_SKILLS_CHARS = 32000;
+
+/**
+ * `<skills>` block (CONTEXT-ENGINE §1). Renders eager skill bodies so the agent can apply them
+ * without a `load_skill` call. One `## name\nbody` section per skill, in sorted order.
+ * Omitted when no eager skills are supplied; dropped whole when over budget.
+ */
+function renderEagerSkills(ctx: AssembleContext): string {
+  const skills = ctx.eagerSkills ?? [];
+  if (skills.length === 0) return "";
+  const total = skills.reduce((n, s) => n + s.name.length + s.body.length, 0);
+  if (total > MAX_EAGER_SKILLS_CHARS) return "";
+  const body = skills.map((s) => `## ${s.name}\n${s.body}`).join("\n\n");
+  return block("skills", body);
 }
 
 /**
@@ -111,7 +137,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     // V1: governance is tenant-wide. `domain` is display-only on the agent (AGT-V1-007), so it
     // feeds <agent-identity> but does NOT scope governance — preserving prior behavior.
     buildGovernanceBlock(ctx.governanceDocs, null),
-    "", // <skills> — eager bodies deferred (all-lazy V1; no agent eager-skill election yet)
+    renderEagerSkills(ctx),
     renderAvailableSkills(ctx),
     "", // <soul-context> — deferred (soul L1 snapshot builder)
     "", // <available-tools> — deferred (Tools v0.8)
