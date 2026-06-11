@@ -178,12 +178,60 @@ describe("assembleSystemPrompt — governance", () => {
   });
 });
 
+describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
+  it("renders one `- name: description` line per skill, in given order", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        availableSkills: [
+          { name: "code-review", description: "Review code for bugs." },
+          { name: "data-export", description: "Export resources to CSV." },
+        ],
+      })
+    );
+    expect(out).toContain(
+      "<available-skills>\n- code-review: Review code for bugs.\n- data-export: Export resources to CSV.\n</available-skills>"
+    );
+  });
+
+  it("renders just `- name` when a skill has no description", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ availableSkills: [{ name: "bare", description: "" }] })
+    );
+    expect(out).toContain("<available-skills>\n- bare\n</available-skills>");
+  });
+
+  it("omits the block when there are no skills (unset or empty)", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<available-skills>");
+    expect(assembleSystemPrompt(baseCtx({ availableSkills: [] }))).not.toContain(
+      "<available-skills>"
+    );
+  });
+
+  it("drops the whole block when over the char budget (never half-rendered)", () => {
+    const huge = "x".repeat(9000);
+    const out = assembleSystemPrompt(
+      baseCtx({ availableSkills: [{ name: "big", description: huge }] })
+    );
+    expect(out).not.toContain("<available-skills>");
+  });
+
+  it("renders after <governance-knowledge> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        governanceDocs: [govDoc("Policy", "Be compliant.")],
+        availableSkills: [{ name: "code-review", description: "Review code." }],
+      })
+    );
+    expect(out.indexOf("<governance-knowledge>")).toBeLessThan(out.indexOf("<available-skills>"));
+  });
+});
+
 describe("assembleSystemPrompt — deferred + typed-state (AC-V1-003)", () => {
   it("omits the deferred skills/tools/soul-context blocks entirely", () => {
     const out = assembleSystemPrompt(
       baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
     );
-    for (const tag of ["<skills>", "<available-skills>", "<soul-context>", "<available-tools>"]) {
+    for (const tag of ["<skills>", "<soul-context>", "<available-tools>"]) {
       expect(out).not.toContain(tag);
     }
   });

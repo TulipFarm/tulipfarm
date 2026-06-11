@@ -13,6 +13,7 @@ import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
 import { resolveAgent } from "../soul/agents/registry";
+import { listAvailableSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
@@ -287,6 +288,7 @@ export function registerChatRoutes(
         personality: agent.body,
         memory: workingMemory ? await workingMemory.list(user._id) : [],
         governanceDocs: knowledge ? await knowledge.governanceDocuments() : [],
+        availableSkills: listAvailableSkills(soulLoader),
       });
       if (system) messages.push({ role: "system", content: system });
       messages.push(...history.items.map(toCoreMessage), {

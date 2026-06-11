@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
+import type { SoulLoader } from "@tulipfarm/soul";
 import type { LanguageModelV1 } from "ai";
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -542,6 +543,46 @@ describe("chat routes", () => {
       const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
       expect(prompt[0]?.role).toBe("system");
       expect(JSON.stringify(prompt[0]?.content)).toContain("<memory>\\n- plan: enterprise");
+    });
+
+    // Skills milestone — soul skills surface as the lazy L1 <available-skills> block (all-lazy V1).
+    it("lists soul skills in the assembled <available-skills> block", async () => {
+      await app.close();
+      const soulLoader = {
+        agents: new Map(),
+        skills: new Map([
+          [
+            "code-review",
+            {
+              name: "code-review",
+              frontmatter: { description: "Review code for bugs." },
+              body: "Review carefully.",
+            },
+          ],
+        ]),
+      } as unknown as SoulLoader;
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        soulLoader,
+      });
+
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      expect(prompt[0]?.role).toBe("system");
+      expect(JSON.stringify(prompt[0]?.content)).toContain(
+        "<available-skills>\\n- code-review: Review code for bugs."
+      );
     });
 
     it("404 when conversationId is not found", async () => {
