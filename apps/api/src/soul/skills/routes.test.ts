@@ -194,12 +194,34 @@ describe("skills routes", () => {
         description: "From the marketplace.",
         provenance: "marketplace",
         source: "owner/repo",
+        pendingAudit: false,
       });
       expect(skills).toContainEqual({
         name: "my-skill",
         description: "Authored by hand.",
         provenance: "user",
+        pendingAudit: false,
       });
+    });
+
+    it("marks forge-created skills with pendingAudit: true", async () => {
+      // Add a pending skill to the soul loader.
+      (soulLoader.skills as Map<string, SoulSkill>).set("pending-skill", {
+        name: "pending-skill",
+        frontmatter: { _pendingAudit: true, description: "Pending." },
+        body: "Pending body.",
+      });
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      const { skills } = res.json();
+      expect(skills).toContainEqual(
+        expect.objectContaining({ name: "pending-skill", pendingAudit: true })
+      );
     });
 
     it("does not crash when skills-lock.json is an empty object", async () => {

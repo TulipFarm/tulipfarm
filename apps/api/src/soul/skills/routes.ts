@@ -172,6 +172,7 @@ function toSkillSummary(
   description?: string;
   provenance: "builtin" | "marketplace" | "user";
   source?: string;
+  pendingAudit: boolean;
 } {
   const locked = lock.skills[skill.name];
   return {
@@ -179,6 +180,7 @@ function toSkillSummary(
     description: asString(skill.frontmatter.description),
     provenance: locked ? "marketplace" : "user",
     source: locked?.sourceUrl,
+    pendingAudit: skill.frontmatter._pendingAudit === true,
   };
 }
 
@@ -259,6 +261,7 @@ const SummaryProps = {
   description: { type: "string" },
   provenance: { type: "string", enum: ["builtin", "marketplace", "user"] },
   source: { type: "string" },
+  pendingAudit: { type: "boolean" },
 } as const;
 
 export function registerSkillRoutes(
@@ -285,7 +288,7 @@ export function registerSkillRoutes(
                 type: "array",
                 items: {
                   type: "object",
-                  required: ["name", "provenance"],
+                  required: ["name", "provenance", "pendingAudit"],
                   properties: SummaryProps,
                 },
               },
@@ -404,7 +407,7 @@ export function registerSkillRoutes(
         response: {
           200: {
             type: "object",
-            required: ["name", "provenance", "body"],
+            required: ["name", "provenance", "body", "pendingAudit"],
             properties: { ...SummaryProps, body: { type: "string" } },
           },
           401: ErrorSchema,
