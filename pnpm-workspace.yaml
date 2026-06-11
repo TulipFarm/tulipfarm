@@ -13,3 +13,14 @@ minimumReleaseAgeExclude:
   - fumadocs-core@16.10.0
   - fumadocs-mdx@15.0.12
   - fumadocs-ui@16.10.0
+  - '@ai-sdk/azure@3.0.72'
+  - '@ai-sdk/deepseek@2.0.36'
+  - '@turbo/darwin-64@2.9.18'
+  - '@turbo/darwin-arm64@2.9.18'
+  - '@turbo/linux-64@2.9.18'
+  - '@turbo/linux-arm64@2.9.18'
+  - '@turbo/windows-64@2.9.18'
+  - '@turbo/windows-arm64@2.9.18'
+  - ai@6.0.201
+  - dompurify@3.4.9
+  - turbo@2.9.18
