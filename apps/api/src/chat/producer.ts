@@ -23,15 +23,15 @@ export function mapStreamPart(
   const p = part as Record<string, unknown>;
   switch (p.type) {
     case "text-delta":
-      return { eventType: "text", data: { delta: p.textDelta } };
+      return { eventType: "text", data: { delta: p.text } };
     case "tool-call":
       return {
         eventType: "tool-call",
-        data: { toolCallId: p.toolCallId, toolName: p.toolName, args: p.args },
+        data: { toolCallId: p.toolCallId, toolName: p.toolName, args: p.input },
       };
     case "tool-result": {
       const toolCallId = p.toolCallId as string;
-      const result = fullResultCache?.get(toolCallId) ?? p.result;
+      const result = fullResultCache?.get(toolCallId) ?? p.output;
       return {
         eventType: "tool-result",
         data: { toolCallId, toolName: p.toolName, result },

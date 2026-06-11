@@ -2,13 +2,13 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import {
   SecretUnavailableError,
   type SecretsService,
   llmProviderById,
   providerField,
 } from "@tulipfarm/secrets";
-import type { LanguageModelV1 } from "ai";
 import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import type { ProviderEntry } from "./config";
 
@@ -54,7 +54,7 @@ async function resolveStored(
 export async function createModel(
   entry: ProviderEntry,
   secrets: SecretsService
-): Promise<LanguageModelV1> {
+): Promise<LanguageModelV3> {
   const info = llmProviderById(entry.provider);
 
   // API key: an explicit api_key_ref (incl. env://VAR escape) wins; otherwise the provider's
@@ -84,10 +84,7 @@ export async function createModel(
     }
     case "openai": {
       const p = createOpenAI({ apiKey });
-      // structuredOutputs:false → tools are sent non-strict, so schemas with optional
-      // properties are accepted (strict mode requires every property in `required`).
-      // Tool args are still validated at runtime by the ToolRegistry (ajv).
-      return p(entry.model, { structuredOutputs: false });
+      return p(entry.model);
     }
     case "openai-compatible": {
       if (!baseUrl) {
@@ -101,8 +98,7 @@ export async function createModel(
         throw new LlmConfigValidationError("azure provider requires resource_name or base_url");
       }
       const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
-      // See openai case: disable strict tool schemas so optional properties are allowed.
-      return p(entry.model, { structuredOutputs: false });
+      return p(entry.model);
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);

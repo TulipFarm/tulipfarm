@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CoreMessage, TextPart, ToolCallPart, ToolResultPart } from "ai";
+import type { ModelMessage, TextPart, ToolCallPart, ToolResultPart } from "ai";
 import type { Queryable } from "../db";
 import { type PaginatedResult, toPage } from "../pagination";
 
@@ -28,7 +28,7 @@ export class InvalidMessageError extends Error {
 
 /**
  * Enforces the per-role content constraints from the design spec (§3) so that no
- * document that cannot round-trip to a `CoreMessage` is ever persisted.
+ * document that cannot round-trip to a `ModelMessage` is ever persisted.
  */
 export function assertValidMessage(role: MessageRole, content: string | MessagePart[]): void {
   const isString = typeof content === "string";
@@ -68,11 +68,11 @@ export function assertValidMessage(role: MessageRole, content: string | MessageP
 }
 
 /**
- * Maps a stored `MessageDoc` to the AI SDK's `CoreMessage`, resolving the SDK's
+ * Maps a stored `MessageDoc` to the AI SDK's `ModelMessage`, resolving the SDK's
  * per-role content rules (spec §6.1). Relies on the write-time validation above
  * so it never meets an illegal state.
  */
-export function toCoreMessage(doc: MessageDoc): CoreMessage {
+export function toModelMessage(doc: MessageDoc): ModelMessage {
   const { role, content } = doc;
 
   if (role === "system" || role === "user") {
@@ -93,7 +93,7 @@ export function toCoreMessage(doc: MessageDoc): CoreMessage {
           type: "tool-call",
           toolCallId: part.toolCallId,
           toolName: part.toolName,
-          args: part.args,
+          input: part.args,
         });
       }
     }
@@ -109,7 +109,7 @@ export function toCoreMessage(doc: MessageDoc): CoreMessage {
           type: "tool-result",
           toolCallId: part.toolCallId,
           toolName: part.toolName,
-          result: part.result,
+          output: { type: "json" as const, value: part.result as import("ai").JSONValue },
         });
       }
     }

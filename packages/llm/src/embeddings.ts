@@ -15,7 +15,7 @@ export interface EmbeddingLogger {
 
 interface ActiveEmbedder {
   entry: EmbeddingProviderEntry;
-  model: EmbeddingModel<string>;
+  model: EmbeddingModel;
   dimension: number | null;
 }
 

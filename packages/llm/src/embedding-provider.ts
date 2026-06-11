@@ -14,7 +14,7 @@ import { resolveApiKey } from "./provider";
 export async function createEmbeddingModel(
   entry: EmbeddingProviderEntry,
   secrets: SecretsService
-): Promise<EmbeddingModel<string>> {
+): Promise<EmbeddingModel> {
   const apiKey = await resolveApiKey(entry.api_key_ref, secrets);
 
   switch (entry.provider) {

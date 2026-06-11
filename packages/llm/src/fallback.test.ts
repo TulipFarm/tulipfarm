@@ -1,13 +1,9 @@
-import {
-  APICallError,
-  type LanguageModelV1,
-  type LanguageModelV1CallOptions,
-  LoadAPIKeyError,
-} from "ai";
+import type { LanguageModelV3, LanguageModelV3CallOptions } from "@ai-sdk/provider";
+import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { FallbackModel, isHardFailure } from "./fallback";
 
-const opts = {} as LanguageModelV1CallOptions;
+const opts = {} as LanguageModelV3CallOptions;
 
 function apiError(statusCode: number, isRetryable: boolean): APICallError {
   return new APICallError({
@@ -20,16 +16,17 @@ function apiError(statusCode: number, isRetryable: boolean): APICallError {
 }
 
 function makeModel(
-  overrides: Partial<Pick<LanguageModelV1, "doGenerate" | "doStream">> = {}
-): LanguageModelV1 {
+  overrides: Partial<Pick<LanguageModelV3, "doGenerate" | "doStream">> = {}
+): LanguageModelV3 {
   return {
+    specificationVersion: "v3",
     provider: "test",
     modelId: "test-model",
-    defaultObjectGenerationMode: "json",
+    supportedUrls: {},
     doGenerate: vi.fn().mockRejectedValue(new Error("not implemented")),
     doStream: vi.fn().mockRejectedValue(new Error("not implemented")),
     ...overrides,
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModelV3;
 }
 
 function makeStreamResult(chunks: unknown[], failAfterChunks?: number) {
@@ -104,7 +101,7 @@ describe("FallbackModel.doStream", () => {
     const result = await fallback.doStream(opts);
     const reader = result.stream.getReader();
     const { value } = await reader.read();
-    expect((value as { textDelta: string }).textDelta).toBe("hi");
+    expect((value as unknown as { textDelta: string }).textDelta).toBe("hi");
   });
 
   it("falls back when first model doStream rejects before any chunk", async () => {
@@ -115,7 +112,7 @@ describe("FallbackModel.doStream", () => {
     const result = await fallback.doStream(opts);
     const reader = result.stream.getReader();
     const { value } = await reader.read();
-    expect((value as { textDelta: string }).textDelta).toBe("fallback");
+    expect((value as unknown as { textDelta: string }).textDelta).toBe("fallback");
   });
 
   it("does not fall back after first chunk received", async () => {
@@ -159,7 +156,7 @@ describe("FallbackModel.doStream", () => {
     const result = await fallback.doStream(opts);
     const reader = result.stream.getReader();
     const { value } = await reader.read();
-    expect((value as { textDelta: string }).textDelta).toBe("ok");
+    expect((value as unknown as { textDelta: string }).textDelta).toBe("ok");
   });
 });
 

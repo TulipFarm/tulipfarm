@@ -58,12 +58,12 @@ const log = { error: vi.fn() };
 
 describe("mapStreamPart", () => {
   it("maps the client-relevant parts", () => {
-    expect(mapStreamPart({ type: "text-delta", textDelta: "Hi" })).toEqual({
+    expect(mapStreamPart({ type: "text-delta", text: "Hi" })).toEqual({
       eventType: "text",
       data: { delta: "Hi" },
     });
     expect(
-      mapStreamPart({ type: "tool-call", toolCallId: "c1", toolName: "t", args: { a: 1 } })
+      mapStreamPart({ type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } })
     ).toEqual({
       eventType: "tool-call",
       data: { toolCallId: "c1", toolName: "t", args: { a: 1 } },
@@ -96,7 +96,7 @@ describe("mapStreamPart", () => {
       const cache = new Map([["c1", full]]);
       expect(
         mapStreamPart(
-          { type: "tool-result", toolCallId: "c1", toolName: "list_things", result: truncated },
+          { type: "tool-result", toolCallId: "c1", toolName: "list_things", output: truncated },
           cache
         )
       ).toEqual({
@@ -109,7 +109,7 @@ describe("mapStreamPart", () => {
       const cache = new Map<string, import("../tools/types").ToolCallResult>();
       expect(
         mapStreamPart(
-          { type: "tool-result", toolCallId: "c2", toolName: "list_things", result: truncated },
+          { type: "tool-result", toolCallId: "c2", toolName: "list_things", output: truncated },
           cache
         )
       ).toEqual({
@@ -120,7 +120,7 @@ describe("mapStreamPart", () => {
 
     it("without cache: uses SDK result directly", () => {
       expect(
-        mapStreamPart({ type: "tool-result", toolCallId: "c3", toolName: "t", result: truncated })
+        mapStreamPart({ type: "tool-result", toolCallId: "c3", toolName: "t", output: truncated })
       ).toEqual({
         eventType: "tool-result",
         data: { toolCallId: "c3", toolName: "t", result: truncated },
@@ -148,8 +148,8 @@ describe("runChatStream", () => {
     await runChatStream(
       streamId,
       fromArray([
-        { type: "text-delta", textDelta: "He" },
-        { type: "text-delta", textDelta: "llo" },
+        { type: "text-delta", text: "He" },
+        { type: "text-delta", text: "llo" },
         { type: "finish", finishReason: "stop" },
       ]),
       { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
@@ -162,7 +162,7 @@ describe("runChatStream", () => {
   });
 
   it("synthesises a finish when the stream ends without a terminal", async () => {
-    await runChatStream(streamId, fromArray([{ type: "text-delta", textDelta: "x" }]), {
+    await runChatStream(streamId, fromArray([{ type: "text-delta", text: "x" }]), {
       emitter: makeStreamEmitter(streamId, { repo, hub, log }),
       hub,
       log,
@@ -173,7 +173,7 @@ describe("runChatStream", () => {
 
   it("emits a terminal error and finishes the hub when iteration throws", async () => {
     async function* boom(): AsyncIterable<unknown> {
-      yield { type: "text-delta", textDelta: "partial" };
+      yield { type: "text-delta", text: "partial" };
       throw new Error("provider exploded");
     }
     await runChatStream(streamId, boom(), {
@@ -237,10 +237,10 @@ describe("attachToStream", () => {
     hub.register(streamId);
     const gate = deferred();
     async function* gated(): AsyncIterable<unknown> {
-      yield { type: "text-delta", textDelta: "one" };
-      yield { type: "text-delta", textDelta: "two" };
+      yield { type: "text-delta", text: "one" };
+      yield { type: "text-delta", text: "two" };
       await gate.promise;
-      yield { type: "text-delta", textDelta: "three" };
+      yield { type: "text-delta", text: "three" };
       yield { type: "finish", finishReason: "stop" };
     }
     void runChatStream(streamId, gated(), {

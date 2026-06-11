@@ -59,7 +59,7 @@ export class ToolRegistry {
         t.name,
         tool({
           description: t.description,
-          parameters: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
+          inputSchema: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
           execute: async (args: unknown, opts: { toolCallId: string }) => {
             const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
             if (!v(args)) return err("validation_error", firstArgError(v.errors));

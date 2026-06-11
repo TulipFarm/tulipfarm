@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { type CoreMessage, streamText } from "ai";
+import { type ModelMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
@@ -26,7 +26,7 @@ import {
   fromAssistantText,
   fromToolResult,
   fromUserText,
-  toCoreMessage,
+  toModelMessage,
 } from "./messages";
 import { attachToStream, runChatStream } from "./producer";
 import { MessageSchema } from "./schemas";
@@ -116,8 +116,8 @@ export function parseLastEventId(
 interface PersistableStep {
   text: string;
   finishReason: string;
-  toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; args: unknown }>;
-  toolResults: ReadonlyArray<{ toolCallId: string; toolName: string; result: unknown }>;
+  toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>;
+  toolResults: ReadonlyArray<{ toolCallId: string; toolName: string; output: unknown }>;
 }
 
 /**
@@ -141,7 +141,7 @@ export async function persistStep(
         type: "tool-call",
         toolCallId: tc.toolCallId,
         toolName: tc.toolName,
-        args: tc.args,
+        args: tc.input,
       });
     }
     await messageRepo.create(fromAssistantParts(conversationId, parts)).catch(onError);
@@ -151,7 +151,7 @@ export async function persistStep(
         type: "tool-result",
         toolCallId: tr.toolCallId,
         toolName: tr.toolName,
-        result: tr.result,
+        result: tr.output,
       }));
       await messageRepo.create(fromToolResult(conversationId, resultParts)).catch(onError);
     }
@@ -267,7 +267,7 @@ export function registerChatRoutes(
           conversationId: convo._id,
           userId: user._id,
           requestedModel: body.model,
-          resolvedModelId: selected.modelId,
+          resolvedModelId: (selected as { modelId?: string }).modelId ?? "",
           isNewConversation: isNew,
         }),
         "chat turn"
@@ -277,7 +277,7 @@ export function registerChatRoutes(
       //    prompt is reconstructed every turn from durable stores in a fixed block order
       //    (CONTEXT-ENGINE §1), so the cacheable prefix is byte-stable across turns (AC-V1-001).
       const history = await messageRepo.listByConversation(convo._id, 1000);
-      const messages: CoreMessage[] = [];
+      const messages: ModelMessage[] = [];
       const agent = resolveAgent(soulLoader, convo.agentId);
       const agentDomain =
         typeof agent.frontmatter.domain === "string" ? agent.frontmatter.domain : null;
@@ -291,7 +291,7 @@ export function registerChatRoutes(
         availableSkills: listAvailableSkills(soulLoader),
       });
       if (system) messages.push({ role: "system", content: system });
-      messages.push(...history.items.map(toCoreMessage), {
+      messages.push(...history.items.map(toModelMessage), {
         role: "user",
         content: body.message.content,
       });
@@ -326,7 +326,7 @@ export function registerChatRoutes(
         model: selected,
         messages,
         tools,
-        maxSteps: MAX_TOOL_STEPS,
+        stopWhen: ({ steps }) => steps.length >= MAX_TOOL_STEPS,
         onError: ({ error }) => {
           req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
         },
