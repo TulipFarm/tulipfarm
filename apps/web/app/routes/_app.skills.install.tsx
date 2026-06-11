@@ -4,10 +4,10 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import {
-  type ScanResult,
-  type SkillAuditReport,
   auditSkill,
   installSkills,
+  type ScanResult,
+  type SkillAuditReport,
   scanSkills,
 } from "~/lib/skills";
 

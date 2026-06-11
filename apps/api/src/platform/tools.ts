@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
-import { type ToolCallResult, err, ok } from "./tool-result";
+import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
   soulLoader?: {

@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { SecretsService } from "@tulipfarm/secrets";
 import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
+import { SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app";

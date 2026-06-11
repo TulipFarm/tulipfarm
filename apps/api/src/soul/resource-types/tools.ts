@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { TulipFarmValidationError, ajv, validateResourceSchema } from "@tulipfarm/validation";
+import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { type ToolCallResult, err, ok } from "../../tools/types.js";
+import { err, ok, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 

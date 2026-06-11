@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { HookAnalysisError, analyzeHook } from "./hook-analyzer.js";
+import { analyzeHook, HookAnalysisError } from "./hook-analyzer.js";
 import type { WorkerRequest, WorkerResponse } from "./types.js";
 
 export class HookError extends Error {

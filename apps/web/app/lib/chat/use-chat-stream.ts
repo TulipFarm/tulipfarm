@@ -9,8 +9,8 @@
 
 import { useCallback, useReducer, useRef } from "react";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
-import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
+import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
 import type { Autonomy, ChatEvent, ChatState, ModelTier } from "~/lib/chat/types";
 
 export type SendOptions = { model?: ModelTier; autonomy?: Autonomy; agentId?: string };

@@ -1,4 +1,5 @@
 import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
+import Image from "next/image";
 import { appName, gitConfig } from "./shared";
 
 export function baseOptions(): BaseLayoutProps {
@@ -6,7 +7,7 @@ export function baseOptions(): BaseLayoutProps {
     nav: {
       title: (
         <>
-          <img src="/logo-128.png" alt="" width={24} height={24} className="size-6 rounded-sm" />
+          <Image src="/logo-128.png" alt="" width={24} height={24} className="size-6 rounded-sm" />
           {appName}
         </>
       ),

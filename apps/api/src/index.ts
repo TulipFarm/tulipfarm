@@ -1,13 +1,13 @@
 import { EventEmitter } from "node:events";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { PgSecretRepo, SecretsService, loadEncryptionKeys } from "@tulipfarm/secrets";
-import { GitSyncService, SoulLoader, runSoulMigrations } from "@tulipfarm/soul";
+import { loadEncryptionKeys, PgSecretRepo, SecretsService } from "@tulipfarm/secrets";
+import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
-import { PgUserRepo, bootstrapAdmin } from "./auth/users";
+import { bootstrapAdmin, PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { registerStreamGc } from "./chat/stream-gc";

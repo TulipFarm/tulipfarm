@@ -3,8 +3,8 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { EmbeddingModel } from "ai";
-import { LlmConfigValidationError } from "./config";
 import type { EmbeddingProviderEntry } from "./config";
+import { LlmConfigValidationError } from "./config";
 import { resolveApiKey } from "./provider";
 
 /**

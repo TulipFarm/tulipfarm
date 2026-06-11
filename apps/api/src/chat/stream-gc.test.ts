@@ -1,10 +1,10 @@
 import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
 import {
+  registerStreamGc,
   STREAM_GC_CRON,
   STREAM_GC_QUEUE,
   STREAM_RESUME_TTL_MS,
-  registerStreamGc,
 } from "./stream-gc";
 import { MemoryStreamResumeRepo } from "./stream-resume";
 

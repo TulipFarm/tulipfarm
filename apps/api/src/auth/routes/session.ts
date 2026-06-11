@@ -4,7 +4,7 @@ import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../session-store";
-import { type UserRepo, toPublicUser } from "../users";
+import { toPublicUser, type UserRepo } from "../users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).

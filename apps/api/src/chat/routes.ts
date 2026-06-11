@@ -20,12 +20,12 @@ import type { ToolCallResult } from "../tools/types";
 import { ApprovalRegistry, makeApprovalGate } from "./approvals";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
-  type MessagePart,
-  type MessageRepo,
   fromAssistantParts,
   fromAssistantText,
   fromToolResult,
   fromUserText,
+  type MessagePart,
+  type MessageRepo,
   toModelMessage,
 } from "./messages";
 import { attachToStream, runChatStream } from "./producer";

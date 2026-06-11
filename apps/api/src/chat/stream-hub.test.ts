@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { type StreamEvent, StreamHub, isTerminalEvent } from "./stream-hub";
+import { isTerminalEvent, type StreamEvent, StreamHub } from "./stream-hub";
 
 const ev = (seq: number, eventType = "text"): StreamEvent => ({ seq, eventType, data: { seq } });
 

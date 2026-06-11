@@ -1,5 +1,5 @@
+import type { SecretsService, SecretType } from "@tulipfarm/secrets";
 import { InvalidSecretKeyError } from "@tulipfarm/secrets";
-import type { SecretType, SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";

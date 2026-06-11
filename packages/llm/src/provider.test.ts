@@ -56,7 +56,6 @@ describe("createModel", () => {
     );
     expect(model.provider).toBe("openai");
     expect(secrets.get).not.toHaveBeenCalled();
-    // biome-ignore lint/performance/noDelete: must remove env var to avoid polluting other tests
     delete process.env.OPENAI_API_KEY;
   });
 
@@ -80,7 +79,6 @@ describe("createModel", () => {
   });
 
   it("throws LlmConfigValidationError when env:// var is not set", async () => {
-    // biome-ignore lint/performance/noDelete: must ensure env var is absent for this test
     delete process.env.MISSING_VAR;
     const secrets = makeSecrets();
     await expect(

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
-import { type PaginatedResult, encodeCursor } from "../pagination";
+import { encodeCursor, type PaginatedResult } from "../pagination";
 import { MemoryRateLimiter } from "../rate-limit";
 import type { TokenDoc, TokenRepo } from "./api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "./csrf";
 import { SESSION_COOKIE } from "./routes";
 import { MemorySessionStore } from "./session-store";
-import { type UserDoc, type UserRepo, createUser } from "./users";
+import { createUser, type UserDoc, type UserRepo } from "./users";
 
 const TEST_CSRF = "a".repeat(64);
 

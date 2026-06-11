@@ -5,8 +5,8 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
-import * as settings from "~/lib/settings";
 import type { LlmProviderInfo } from "~/lib/settings";
+import * as settings from "~/lib/settings";
 import SettingsLlm from "./_app.settings.llm";
 import SettingsSecrets from "./_app.settings.secrets";
 

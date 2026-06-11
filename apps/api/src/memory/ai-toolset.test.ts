@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildToolRegistry } from "../tools/setup";
 import { WorkingMemoryService } from "./service";
 import type { ToolCallResult } from "./tool-result";
-import { type WorkingMemoryDoc, type WorkingMemoryRepo, assertValidEntry } from "./working-memory";
+import { assertValidEntry, type WorkingMemoryDoc, type WorkingMemoryRepo } from "./working-memory";
 
 class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
   docs: WorkingMemoryDoc[] = [];

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";
-import { MemoryStreamResumeRepo } from "./stream-resume";
 import type { StreamEventRow, StreamResumeRepo } from "./stream-resume";
+import { MemoryStreamResumeRepo } from "./stream-resume";
 
 const log = { error: vi.fn() };
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));

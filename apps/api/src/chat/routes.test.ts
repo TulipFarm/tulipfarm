@@ -9,14 +9,14 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
-import { type UserDoc, type UserRepo, createUser } from "../auth/users";
+import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { WorkingMemoryService } from "../memory/service";
 import {
+  assertValidEntry,
   type WorkingMemoryDoc,
   type WorkingMemoryRepo,
-  assertValidEntry,
 } from "../memory/working-memory";
-import { type PaginatedResult, encodeCursor } from "../pagination";
+import { encodeCursor, type PaginatedResult } from "../pagination";
 import { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";

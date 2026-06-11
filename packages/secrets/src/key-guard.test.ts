@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { InvalidSecretKeyError, assertValidSecretKey } from "./key-guard";
+import { assertValidSecretKey, InvalidSecretKeyError } from "./key-guard";
 
 describe("assertValidSecretKey", () => {
   it("accepts valid keys", () => {

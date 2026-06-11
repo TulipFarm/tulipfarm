@@ -4,9 +4,9 @@ import { LlmConfigForm } from "~/components/llm-config-form";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
 import {
-  type LlmConfig,
   getLlmConfig,
   isProviderConfigured,
+  type LlmConfig,
   listProviders,
   listSecrets,
   putLlmConfig,

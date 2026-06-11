@@ -1,5 +1,5 @@
 import { TulipFarmValidationError } from "../error";
-import { type ComputedFnKey, type CounterFn, applyComputedFn } from "./computed";
+import { applyComputedFn, type ComputedFnKey, type CounterFn } from "./computed";
 import { applyNormalizer, isNormalizerKey } from "./normalizers";
 
 interface IdStrategy {

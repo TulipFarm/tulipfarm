@@ -2,7 +2,7 @@ import type { ServerResponse } from "node:http";
 import type { ToolCallResult } from "../tools/types";
 import { writeSseEvent } from "./sse";
 import type { StreamEmitter } from "./stream-emitter";
-import { type StreamEvent, type StreamHub, isTerminalEvent } from "./stream-hub";
+import { isTerminalEvent, type StreamEvent, type StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
 
 interface MappedEvent {

@@ -1,4 +1,4 @@
-import { type ToolCallResult, ok } from "./types";
+import { ok, type ToolCallResult } from "./types";
 
 export const RESULT_CAP = 20;
 

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { DecryptError } from "./crypto";
 import type { EncryptionKeys } from "./keys";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
-import { SecretUnavailableError, SecretsService } from "./service";
+import { SecretsService, SecretUnavailableError } from "./service";
 
 class FakeRepo implements SecretRepo {
   readonly docs = new Map<string, SecretDoc>();

@@ -4,13 +4,13 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import {
-  SecretUnavailableError,
-  type SecretsService,
   llmProviderById,
   providerField,
+  type SecretsService,
+  SecretUnavailableError,
 } from "@tulipfarm/secrets";
-import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import type { ProviderEntry } from "./config";
+import { LlmConfigValidationError, LlmCredentialError } from "./config";
 
 export async function resolveApiKey(
   api_key_ref: string | undefined,

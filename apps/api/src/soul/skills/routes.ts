@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
@@ -9,7 +9,7 @@ import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
-import { SKILL_AUDIT_REPORT_SCHEMA, buildAudit } from "./audit";
+import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 
 /*
  * Skills HTTP surface (SKILLS / SKL-V1-001..003). Read endpoints over the SoulLoader, plus the

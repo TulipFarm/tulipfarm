@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
-import { type LlmConfig, type LlmProviderInfo, isProviderConfigured } from "~/lib/settings";
+import { isProviderConfigured, type LlmConfig, type LlmProviderInfo } from "~/lib/settings";
 
 /*
  * Structured editor for soul/llm.config.yaml (UI-V1-003 / LLM-V1-003). Each tier is an ordered list

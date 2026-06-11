@@ -5,9 +5,9 @@ import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
 import { deriveFields, detailFields, listColumns, parseSchema } from "~/lib/schema";
-import ResourceDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.resources.$type.$id";
-import ResourceList, { ErrorBoundary as ListErrorBoundary } from "./_app.resources.$type._index";
 import ResourcesIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.resources._index";
+import ResourceList, { ErrorBoundary as ListErrorBoundary } from "./_app.resources.$type._index";
+import ResourceDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.resources.$type.$id";
 
 /*
  * Route smoke tests. A stub `loader` triggers a real data navigation whose AbortSignal jsdom's

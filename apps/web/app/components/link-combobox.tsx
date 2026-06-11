@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { type ResourceRecord, listRecords } from "~/lib/api";
+import { listRecords, type ResourceRecord } from "~/lib/api";
 
 /*
  * Searchable combobox for an `x-links` field (AC-V1-002). Loads the first page of the target type's

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { WorkingMemoryService } from "./service";
-import { MEMORY_TOOLS, type ToolContext, deleteMemoryTool, updateMemoryTool } from "./tools";
-import { type WorkingMemoryDoc, type WorkingMemoryRepo, assertValidEntry } from "./working-memory";
+import { deleteMemoryTool, MEMORY_TOOLS, type ToolContext, updateMemoryTool } from "./tools";
+import { assertValidEntry, type WorkingMemoryDoc, type WorkingMemoryRepo } from "./working-memory";
 
 class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
   docs: WorkingMemoryDoc[] = [];
