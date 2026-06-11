@@ -8,7 +8,7 @@ vi.mock("ai", async (orig) => {
   return { ...actual, generateObject: (...args: unknown[]) => generateObject(...args) };
 });
 
-import { AUDIT_SYSTEM_PROMPT, SKILL_AUDIT_REPORT_SCHEMA, buildAudit } from "./audit";
+import { AUDIT_SYSTEM_PROMPT, buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 
 const VALID_REPORT = {
   riskRating: "medium",

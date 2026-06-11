@@ -27,7 +27,7 @@ function docToRecord(doc: Record<string, unknown>): Record<string, unknown> {
 }
 
 async function runHook(req: WorkerRequest): Promise<WorkerResponse> {
-  const { id, hookType, hookSource, resourceType, record } = req;
+  const { id, hookType, hookSource, record } = req;
   const patchData: Record<string, unknown> = {};
 
   const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });

@@ -1,6 +1,6 @@
 import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
-import { SOUL_SYNC_CRON, SOUL_SYNC_QUEUE, registerSoulSync } from "./soul-sync";
+import { registerSoulSync, SOUL_SYNC_CRON, SOUL_SYNC_QUEUE } from "./soul-sync";
 
 function makeFakeBoss() {
   let workHandler: (() => Promise<void>) | undefined;

@@ -6,7 +6,7 @@ import { ErrorSchema } from "../auth/schemas";
 import { DOMAIN_EVENTS } from "../domain-events";
 import type { HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination";
-import { type CounterStore, type ResourceRepoFactory, makeHistoryEntry, toApiRecord } from "./repo";
+import { type CounterStore, makeHistoryEntry, type ResourceRepoFactory, toApiRecord } from "./repo";
 import {
   loadForWrite,
   maybeRunAfterHook,

@@ -127,7 +127,6 @@ export function BootSequence() {
       </div>
       <pre className="min-h-[16.5rem] overflow-x-auto rounded-md border border-fd-border bg-fd-background p-4 text-[13px] leading-6">
         {LINES.slice(0, done).map((line, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: static transcript, order never changes
           <FinishedLine key={i} line={line} />
         ))}
         {next?.kind === "cmd" && (

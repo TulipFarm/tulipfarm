@@ -1,13 +1,13 @@
 import {
-  type ReactNode,
   createContext,
+  type ReactNode,
   useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
-import { type PendingApproval, listPendingApprovals } from "~/lib/approvals";
+import { listPendingApprovals, type PendingApproval } from "~/lib/approvals";
 
 /*
  * Single source of truth for app-wide pending approvals. Mounted once in the `_app` shell, it polls

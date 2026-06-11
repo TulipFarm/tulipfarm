@@ -1,7 +1,7 @@
 import { ajv } from "@tulipfarm/validation";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
 import type { WorkingMemoryService } from "./service";
-import { type ToolCallResult, err, ok } from "./tool-result";
+import { err, ok, type ToolCallResult } from "./tool-result";
 
 /** Per-request context a memory tool handler runs against (closes over the authenticated user). */
 export interface ToolContext {

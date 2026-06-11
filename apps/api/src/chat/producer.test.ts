@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { attachToStream, mapStreamPart, runChatStream } from "./producer";
 import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";

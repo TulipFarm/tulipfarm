@@ -1,4 +1,4 @@
-import { type SecretEnvelope, decryptSecret, encryptSecret } from "./crypto";
+import { decryptSecret, encryptSecret, type SecretEnvelope } from "./crypto";
 import { assertValidSecretKey } from "./key-guard";
 import type { EncryptionKeys } from "./keys";
 import type { SecretMeta, SecretRepo, SecretType } from "./repo";

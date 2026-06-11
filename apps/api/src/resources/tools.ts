@@ -4,11 +4,11 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
 import type { HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination.js";
-import { type ToolCallResult, err, ok } from "../tools/types.js";
+import { err, ok, type ToolCallResult } from "../tools/types.js";
 import {
   type CounterStore,
-  type ResourceRepoFactory,
   makeHistoryEntry,
+  type ResourceRepoFactory,
   toApiRecord,
 } from "./repo.js";
 import {

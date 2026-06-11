@@ -1,13 +1,13 @@
 import { ajv } from "@tulipfarm/validation";
-import { type ToolSet, jsonSchema, tool } from "ai";
+import { jsonSchema, type ToolSet, tool } from "ai";
 import type { BatchCoordinator } from "./batch-executor";
 import { truncateResult } from "./truncate";
 import {
   type ApprovalGate,
+  err,
   type RequestContext,
   type ToolCallResult,
   type ToolDef,
-  err,
 } from "./types";
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];

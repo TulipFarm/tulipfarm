@@ -7,13 +7,12 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
-import { EmptyState } from "~/components/empty-state";
 import { ResourcePanel } from "~/components/resource-panel";
 import { SchemaTable } from "~/components/schema-table";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
-import { ApiError, type ResourceRecord, listRecords, listResourceTypes } from "~/lib/api";
-import { type FieldDescriptor, deriveFields, listColumns, parseSchema } from "~/lib/schema";
+import { ApiError, listRecords, listResourceTypes, type ResourceRecord } from "~/lib/api";
+import { deriveFields, type FieldDescriptor, listColumns, parseSchema } from "~/lib/schema";
 
 export const meta: MetaFunction = () => [{ title: "Resources · tulipfarm" }];
 

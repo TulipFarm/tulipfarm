@@ -52,7 +52,6 @@ describe("createEmbeddingModel", () => {
     );
     expect(model).toMatchObject({ provider: "openai" });
     expect(secrets.get).not.toHaveBeenCalled();
-    // biome-ignore lint/performance/noDelete: must remove env var to avoid polluting other tests
     delete process.env.OPENAI_API_KEY;
   });
 

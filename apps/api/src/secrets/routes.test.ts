@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { SecretsService } from "@tulipfarm/secrets";
 import type { SecretDoc, SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
+import { SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app";
@@ -8,7 +8,7 @@ import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
-import { type UserDoc, type UserRepo, createUser } from "../auth/users";
+import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 
 const TEST_CSRF = "a".repeat(64);

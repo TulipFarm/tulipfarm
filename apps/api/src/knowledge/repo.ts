@@ -200,9 +200,10 @@ export interface KnowledgeCollectionRepo {
   insert(c: KnowledgeCollection): Promise<void>;
   getById(id: string): Promise<KnowledgeCollection | null>;
   getByName(name: string): Promise<KnowledgeCollection | null>;
-  list(opts: { limit: number; after?: { createdAt: Date; _id: string } }): Promise<
-    PaginatedResult<KnowledgeCollection>
-  >;
+  list(opts: {
+    limit: number;
+    after?: { createdAt: Date; _id: string };
+  }): Promise<PaginatedResult<KnowledgeCollection>>;
   replaceOne(id: string, expectedVersion: number, c: KnowledgeCollection): Promise<boolean>;
   delete(id: string): Promise<boolean>;
   addDocument(collectionId: string, documentId: string): Promise<void>;

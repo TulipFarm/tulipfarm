@@ -11,7 +11,7 @@ import type { TokenDoc, TokenRepo } from "../../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../../auth/csrf";
 import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
-import { type UserDoc, type UserRepo, createUser } from "../../auth/users";
+import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
 
 // Keep the report schema real (used in the route's response schema); mock only the LLM call.

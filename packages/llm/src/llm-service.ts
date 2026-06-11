@@ -3,7 +3,7 @@ import type { LanguageModel } from "ai";
 import { LlmNotConfiguredError, UnknownModelError, validateLlmConfig } from "./config";
 import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
-import { type ModelSelector, type SelectionContext, resolveTier } from "./selection";
+import { type ModelSelector, resolveTier, type SelectionContext } from "./selection";
 
 export type Tier = "quick" | "standard" | "complex";
 

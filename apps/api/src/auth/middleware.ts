@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { type TokenRepo, hashToken } from "./api-tokens";
+import { hashToken, type TokenRepo } from "./api-tokens";
 import type { SessionStore } from "./session-store";
 import type { UserDoc, UserRepo } from "./users";
 

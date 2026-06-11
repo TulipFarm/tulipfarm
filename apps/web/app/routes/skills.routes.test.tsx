@@ -4,8 +4,8 @@ import { render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
-import SkillDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.skills.$name";
 import SkillsIndex from "./_app.skills._index";
+import SkillDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.skills.$name";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");

@@ -4,8 +4,8 @@ import { render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
-import AgentDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.agents.$name";
 import AgentsIndex, { ErrorBoundary as IndexErrorBoundary } from "./_app.agents._index";
+import AgentDetail, { ErrorBoundary as DetailErrorBoundary } from "./_app.agents.$name";
 
 /*
  * Agents route smoke tests. Same approach as resources.routes.test.tsx: mock the loader/error hooks

@@ -1,5 +1,5 @@
 import { ajv } from "@tulipfarm/validation";
-import { type ToolCallResult, err, ok } from "../tools/types";
+import { err, ok, type ToolCallResult } from "../tools/types";
 import type { KnowledgeService } from "./service";
 
 /** Per-request context a knowledge tool runs against (KN-V1-006). No ACL (KN-V1-001). */

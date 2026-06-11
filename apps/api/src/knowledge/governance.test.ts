@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BLOCK_CHAR_CAP, PER_DOC_CHAR_CAP, buildGovernanceBlock } from "./governance";
+import { BLOCK_CHAR_CAP, buildGovernanceBlock, PER_DOC_CHAR_CAP } from "./governance";
 import type { KnowledgeDocument } from "./types";
 
 function gdoc(over: Partial<KnowledgeDocument>): KnowledgeDocument {

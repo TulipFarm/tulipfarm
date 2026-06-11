@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { TulipFarmValidationError, ajv, validateResourceSchema } from "@tulipfarm/validation";
+import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/validation";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";

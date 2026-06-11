@@ -187,7 +187,7 @@ export function registerKnowledgeRoutes(
     async (req, reply) => {
       const { id } = req.params as { id: string };
       const doc = await service.getDocument(id);
-      if (!doc || !doc.active) return reply.code(404).send({ error: "not found" });
+      if (!doc?.active) return reply.code(404).send({ error: "not found" });
       return reply.send(toApiDocument(doc));
     }
   );

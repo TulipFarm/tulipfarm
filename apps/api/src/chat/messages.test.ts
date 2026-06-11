@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
-  InvalidMessageError,
-  type MessageDoc,
-  type MessagePart,
   assertValidMessage,
   fromAssistantParts,
   fromAssistantText,
   fromToolResult,
   fromUserText,
+  InvalidMessageError,
+  type MessageDoc,
+  type MessagePart,
   toModelMessage,
 } from "./messages";
 

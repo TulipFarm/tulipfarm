@@ -109,12 +109,14 @@ test("updateRecord PUTs with a quoted If-Match version header and encodes the id
 });
 
 test("writes echo the csrf_token cookie as the x-csrf-token header", async () => {
+  // biome-ignore lint/suspicious/noDocumentCookie: test verifies CSRF cookie → header wiring
   document.cookie = "csrf_token=tok-123";
   const fetchFn = mockFetch(201, { id: "x", version: 1, createdAt: "", updatedAt: "" });
   await createRecord("ticket", { title: "hi" });
   const [, init] = fetchFn.mock.calls[0];
   expect(init.headers["x-csrf-token"]).toBe("tok-123");
   // clear for other tests
+  // biome-ignore lint/suspicious/noDocumentCookie: clearing test cookie
   document.cookie = "csrf_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT";
 });
 

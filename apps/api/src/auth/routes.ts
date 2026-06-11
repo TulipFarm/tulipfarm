@@ -1,1 +1,1 @@
-export { SESSION_COOKIE, registerAuthRoutes } from "./routes/index";
+export { registerAuthRoutes, SESSION_COOKIE } from "./routes/index";

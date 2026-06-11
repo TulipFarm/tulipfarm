@@ -1,8 +1,8 @@
+import Link from "next/link";
 import { BootSequence } from "@/components/home/boot-sequence";
 import { Reveal } from "@/components/home/reveal";
 import { TulipField } from "@/components/home/tulip-field";
 import { gitConfig } from "@/lib/shared";
-import Link from "next/link";
 
 const seeAlso = [
   {

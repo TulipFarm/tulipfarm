@@ -1,8 +1,6 @@
 import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import {
-  PLATFORM_TOOLS,
-  type PlatformToolContext,
   beginSoulBatchTool,
   callSkillTool,
   completeStateTool,
@@ -11,6 +9,8 @@ import {
   endSoulBatchTool,
   loadSkillReferenceTool,
   loadSkillTool,
+  PLATFORM_TOOLS,
+  type PlatformToolContext,
   presentChoicesTool,
   routinePickerTool,
   soulRepoCommitTool,
