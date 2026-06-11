@@ -1,4 +1,5 @@
-import { APICallError, type LanguageModelV1, type LanguageModelV1CallOptions } from "ai";
+import type { LanguageModelV3, LanguageModelV3CallOptions } from "@ai-sdk/provider";
+import { APICallError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { LlmConfigValidationError, LlmNotConfiguredError, UnknownModelError } from "./config";
 import { LlmService } from "./llm-service";
@@ -7,12 +8,13 @@ import { createModel } from "./provider";
 vi.mock("./provider", () => ({
   createModel: vi.fn((entry: { provider: string; model: string }) =>
     Promise.resolve({
+      specificationVersion: "v3",
       provider: entry.provider,
       modelId: entry.model,
-      defaultObjectGenerationMode: "json",
+      supportedUrls: {},
       doGenerate: vi.fn(),
       doStream: vi.fn(),
-    } as unknown as LanguageModelV1)
+    } as unknown as LanguageModelV3)
   ),
 }));
 
@@ -79,12 +81,13 @@ describe("LlmService", () => {
     });
     const rejecting = (entry: { provider: string; model: string }) =>
       Promise.resolve({
+        specificationVersion: "v3",
         provider: entry.provider,
         modelId: entry.model,
-        defaultObjectGenerationMode: "json",
+        supportedUrls: {},
         doGenerate: vi.fn().mockRejectedValue(transient),
         doStream: vi.fn(),
-      } as unknown as LanguageModelV1);
+      } as unknown as LanguageModelV3);
     // Only the two quick-tier providers reject; standard/complex use the default mock.
     vi.mocked(createModel).mockImplementationOnce(rejecting).mockImplementationOnce(rejecting);
 
@@ -104,9 +107,9 @@ describe("LlmService", () => {
     const logger = { warn: vi.fn() };
     const svc = new LlmService();
     await svc.init(twoProviderConfig, fakeSecrets, logger);
-    await expect(svc.getModel("quick").doGenerate({} as LanguageModelV1CallOptions)).rejects.toBe(
-      transient
-    );
+    await expect(
+      (svc.getModel("quick") as LanguageModelV3).doGenerate({} as LanguageModelV3CallOptions)
+    ).rejects.toBe(transient);
     expect(logger.warn).toHaveBeenCalled();
   });
 });
@@ -120,24 +123,30 @@ describe("LlmService.select", () => {
 
   it("model auto + supervised resolves to standard (AC-V1-001)", async () => {
     const svc = await init();
-    expect(svc.select({ model: "auto", autonomy: "supervised" }).modelId).toBe("claude-sonnet-4-6");
+    expect((svc.select({ model: "auto", autonomy: "supervised" }) as LanguageModelV3).modelId).toBe(
+      "claude-sonnet-4-6"
+    );
   });
 
   it("explicit tier overrides auto rules (AC3)", async () => {
     const svc = await init();
-    expect(svc.select({ model: "complex", autonomy: "full" }).modelId).toBe("claude-opus-4-8");
+    expect((svc.select({ model: "complex", autonomy: "full" }) as LanguageModelV3).modelId).toBe(
+      "claude-opus-4-8"
+    );
   });
 
   it("session model overrides configured tier for the turn (AC4)", async () => {
     const svc = await init();
-    expect(svc.select({ model: "complex", sessionModel: "quick" }).modelId).toBe(
-      "claude-haiku-4-5"
-    );
+    expect(
+      (svc.select({ model: "complex", sessionModel: "quick" }) as LanguageModelV3).modelId
+    ).toBe("claude-haiku-4-5");
   });
 
   it("raw model id bypasses tiers via getModelById", async () => {
     const svc = await init();
-    expect(svc.select({ model: "claude-opus-4-8" }).modelId).toBe("claude-opus-4-8");
+    expect((svc.select({ model: "claude-opus-4-8" }) as LanguageModelV3).modelId).toBe(
+      "claude-opus-4-8"
+    );
   });
 
   it("unknown raw model id throws UnknownModelError", async () => {
@@ -147,7 +156,7 @@ describe("LlmService.select", () => {
 
   it("defaults to auto → standard when no model given", async () => {
     const svc = await init();
-    expect(svc.select({}).modelId).toBe("claude-sonnet-4-6");
+    expect((svc.select({}) as LanguageModelV3).modelId).toBe("claude-sonnet-4-6");
   });
 
   it("select before init throws LlmNotConfiguredError", () => {

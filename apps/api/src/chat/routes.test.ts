@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
-import type { LanguageModelV1 } from "ai";
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -30,14 +30,28 @@ const TEST_CSRF = "a".repeat(64);
 // on each call, so history-rebuild assertions can inspect the outgoing messages.
 const capturedPrompts: unknown[][] = [];
 
-// ── Deterministic fake LanguageModelV1 (no network) ───────────────────────────
-// Yields v4 stream parts: one text-delta then a finish part, so streamText
+const V3_USAGE = {
+  inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
+  outputTokens: { total: 1, reasoning: undefined },
+};
+
+// ── Deterministic fake LanguageModelV3 (no network) ───────────────────────────
+// Yields V3 stream parts: text-start/delta/end then a finish part, so streamText
 // produces text "Hello" and onFinish fires with { text: "Hello" }.
 function makeStreamResult(textDeltas: string[]) {
-  const chunks = [
-    ...textDeltas.map((textDelta) => ({ type: "text-delta", textDelta })),
-    { type: "finish", finishReason: "stop", usage: { promptTokens: 1, completionTokens: 1 } },
-  ];
+  const chunks: unknown[] = [];
+  textDeltas.forEach((delta, idx) => {
+    chunks.push(
+      { type: "text-start", id: `t${idx}` },
+      { type: "text-delta", id: `t${idx}`, delta },
+      { type: "text-end", id: `t${idx}` }
+    );
+  });
+  chunks.push({
+    type: "finish",
+    finishReason: { unified: "stop", raw: undefined },
+    usage: V3_USAGE,
+  });
   let i = 0;
   const stream = new ReadableStream({
     pull(controller) {
@@ -45,14 +59,14 @@ function makeStreamResult(textDeltas: string[]) {
       else controller.close();
     },
   });
-  return { stream, rawCall: { rawPrompt: null, rawSettings: {} } };
+  return { stream };
 }
 
-// Stream that emits one delta then an error part — how a v4 provider signals a
-// mid-stream failure (finishReason "error"); proves the assistant reply is not persisted.
+// Stream that emits one delta then an error part — proves the assistant reply is not persisted.
 function makeErrorStreamResult() {
-  const chunks = [
-    { type: "text-delta", textDelta: "partial" },
+  const chunks: unknown[] = [
+    { type: "text-start", id: "t0" },
+    { type: "text-delta", id: "t0", delta: "partial" },
     { type: "error", error: new Error("provider exploded") },
   ];
   let i = 0;
@@ -62,26 +76,25 @@ function makeErrorStreamResult() {
       else controller.close();
     },
   });
-  return { stream, rawCall: { rawPrompt: null, rawSettings: {} } };
+  return { stream };
 }
 
-// Stream that emits provider-level tool-call parts (args is a JSON string) then a tool-calls finish,
+// Stream that emits provider-level tool-call parts then a tool-calls finish,
 // so streamText invokes the bound tool's execute and (with maxSteps>1) requests a continuation.
 function makeToolCallStreamResult(
   toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>
 ) {
-  const chunks = [
+  const chunks: unknown[] = [
     ...toolCalls.map((tc) => ({
       type: "tool-call",
-      toolCallType: "function",
       toolCallId: tc.toolCallId,
       toolName: tc.toolName,
-      args: JSON.stringify(tc.args),
+      input: JSON.stringify(tc.args),
     })),
     {
       type: "finish",
-      finishReason: "tool-calls",
-      usage: { promptTokens: 1, completionTokens: 1 },
+      finishReason: { unified: "tool-calls", raw: undefined },
+      usage: V3_USAGE,
     },
   ];
   let i = 0;
@@ -91,18 +104,18 @@ function makeToolCallStreamResult(
       else controller.close();
     },
   });
-  return { stream, rawCall: { rawPrompt: null, rawSettings: {} } };
+  return { stream };
 }
 
 function makeFakeModel(
   modelId: string,
   stream: () => ReturnType<typeof makeStreamResult> = () => makeStreamResult(["Hello"])
-): LanguageModelV1 {
+): LanguageModelV3 {
   return {
-    specificationVersion: "v1",
+    specificationVersion: "v3",
     provider: "test",
     modelId,
-    defaultObjectGenerationMode: undefined,
+    supportedUrls: {},
     doStream: vi.fn(async (options: { prompt: unknown[] }) => {
       capturedPrompts.push(options.prompt);
       return stream();
@@ -110,14 +123,14 @@ function makeFakeModel(
     doGenerate: vi.fn(async () => {
       throw new Error("doGenerate unused");
     }),
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModelV3;
 }
 
 // Model that calls a tool on its first step, then returns text on the continuation step.
 function makeToolThenTextModel(
   toolCalls: Array<{ toolCallId: string; toolName: string; args: unknown }>,
   followupText: string
-): LanguageModelV1 {
+): LanguageModelV3 {
   let call = 0;
   return makeFakeModel("claude-opus-4-8", () => {
     call += 1;

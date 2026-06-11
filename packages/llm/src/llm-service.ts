@@ -1,5 +1,5 @@
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { LanguageModelV1 } from "ai";
+import type { LanguageModel } from "ai";
 import { LlmNotConfiguredError, UnknownModelError, validateLlmConfig } from "./config";
 import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
@@ -17,8 +17,8 @@ export type SelectRequest = SelectionContext & {
 };
 
 export class LlmService {
-  private models: Map<Tier, LanguageModelV1> | null = null;
-  private byModelId: Map<string, LanguageModelV1> = new Map();
+  private models: Map<Tier, LanguageModel> | null = null;
+  private byModelId: Map<string, LanguageModel> = new Map();
 
   async init(
     rawConfig: unknown,
@@ -31,8 +31,8 @@ export class LlmService {
     }
 
     const config = validateLlmConfig(rawConfig);
-    const models = new Map<Tier, LanguageModelV1>();
-    const byModelId = new Map<string, LanguageModelV1>();
+    const models = new Map<Tier, LanguageModel>();
+    const byModelId = new Map<string, LanguageModel>();
 
     for (const tier of TIERS) {
       const { providers } = config.tiers[tier];
@@ -49,14 +49,14 @@ export class LlmService {
     this.byModelId = byModelId;
   }
 
-  getModel(tier: Tier): LanguageModelV1 {
+  getModel(tier: Tier): LanguageModel {
     if (!this.models) throw new LlmNotConfiguredError();
     const model = this.models.get(tier);
     if (!model) throw new LlmNotConfiguredError();
     return model;
   }
 
-  getModelById(id: string): LanguageModelV1 {
+  getModelById(id: string): LanguageModel {
     if (!this.models) throw new LlmNotConfiguredError();
     const model = this.byModelId.get(id);
     if (!model) throw new UnknownModelError(id);
@@ -69,7 +69,7 @@ export class LlmService {
    * fallback chain; `auto` runs the rule-based selection; any other string is a
    * raw provider model id that bypasses tiers (single model, no fallback).
    */
-  select(req: SelectRequest): LanguageModelV1 {
+  select(req: SelectRequest): LanguageModel {
     const selector = req.sessionModel ?? req.model ?? "auto";
     if (selector === "auto") return this.getModel(resolveTier(req));
     if (isTier(selector)) return this.getModel(selector);

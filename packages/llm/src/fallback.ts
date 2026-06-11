@@ -1,12 +1,9 @@
-import {
-  APICallError,
-  type LanguageModelV1,
-  type LanguageModelV1CallOptions,
-  type LanguageModelV1StreamPart,
-  LoadAPIKeyError,
-} from "ai";
-
-type ObjectGenerationMode = "json" | "tool" | undefined;
+import type {
+  LanguageModelV3,
+  LanguageModelV3CallOptions,
+  LanguageModelV3StreamPart,
+} from "@ai-sdk/provider";
+import { APICallError, LoadAPIKeyError } from "ai";
 
 /** Minimal logger surface for fallback events (pino/console compatible). */
 export interface FallbackLogger {
@@ -39,27 +36,22 @@ function errorReason(err: unknown): string {
   return String(err);
 }
 
-export class FallbackModel implements LanguageModelV1 {
-  readonly specificationVersion = "v1" as const;
+export class FallbackModel implements LanguageModelV3 {
+  readonly specificationVersion = "v3" as const;
   readonly provider = "fallback";
   readonly modelId: string;
-  readonly defaultObjectGenerationMode: ObjectGenerationMode;
-  readonly supportsImageUrls?: boolean;
-  readonly supportsStructuredOutputs?: boolean;
+  readonly supportedUrls: Record<string, RegExp[]> = {};
 
   constructor(
-    private readonly models: LanguageModelV1[],
+    private readonly models: LanguageModelV3[],
     private readonly logger: FallbackLogger = noopLogger
   ) {
     const primary = models[0];
     if (!primary) throw new Error("FallbackModel requires at least one model");
     this.modelId = models.map((m) => m.modelId).join("|");
-    this.defaultObjectGenerationMode = primary.defaultObjectGenerationMode;
-    this.supportsImageUrls = primary.supportsImageUrls;
-    this.supportsStructuredOutputs = primary.supportsStructuredOutputs;
   }
 
-  async doGenerate(options: LanguageModelV1CallOptions) {
+  async doGenerate(options: LanguageModelV3CallOptions) {
     let lastError: unknown;
     for (const model of this.models) {
       try {
@@ -74,10 +66,10 @@ export class FallbackModel implements LanguageModelV1 {
     throw lastError;
   }
 
-  async doStream(options: LanguageModelV1CallOptions) {
+  async doStream(options: LanguageModelV3CallOptions) {
     let lastError: unknown;
     for (const model of this.models) {
-      let result: Awaited<ReturnType<LanguageModelV1["doStream"]>>;
+      let result: Awaited<ReturnType<LanguageModelV3["doStream"]>>;
       try {
         result = await model.doStream(options);
       } catch (err) {
@@ -100,7 +92,7 @@ export class FallbackModel implements LanguageModelV1 {
       }
 
       // First chunk received — stream is committed, reconstruct with remaining
-      const stream = new ReadableStream<LanguageModelV1StreamPart>({
+      const stream = new ReadableStream<LanguageModelV3StreamPart>({
         async start(controller) {
           if (!firstChunk.done) controller.enqueue(firstChunk.value);
           try {
@@ -125,7 +117,7 @@ export class FallbackModel implements LanguageModelV1 {
     throw lastError;
   }
 
-  private logFallback(model: LanguageModelV1, err: unknown): void {
+  private logFallback(model: LanguageModelV3, err: unknown): void {
     this.logger.warn(
       `[llm] fallback provider=${model.provider} model=${model.modelId} reason=${errorReason(err)}`
     );

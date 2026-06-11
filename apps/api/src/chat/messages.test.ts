@@ -8,7 +8,7 @@ import {
   fromAssistantText,
   fromToolResult,
   fromUserText,
-  toCoreMessage,
+  toModelMessage,
 } from "./messages";
 
 describe("assertValidMessage — legal cases", () => {
@@ -105,22 +105,22 @@ describe("assertValidMessage — illegal cases", () => {
   });
 });
 
-describe("toCoreMessage", () => {
+describe("toModelMessage", () => {
   const base = { _id: "m1", conversationId: "conv1", createdAt: new Date() };
 
   it("maps user string → { role, content: string }", () => {
     const doc: MessageDoc = { ...base, role: "user", content: "hi" };
-    expect(toCoreMessage(doc)).toEqual({ role: "user", content: "hi" });
+    expect(toModelMessage(doc)).toEqual({ role: "user", content: "hi" });
   });
 
   it("maps system string → { role, content: string }", () => {
     const doc: MessageDoc = { ...base, role: "system", content: "be nice" };
-    expect(toCoreMessage(doc)).toEqual({ role: "system", content: "be nice" });
+    expect(toModelMessage(doc)).toEqual({ role: "system", content: "be nice" });
   });
 
   it("maps assistant string → assistant message", () => {
     const doc: MessageDoc = { ...base, role: "assistant", content: "Hello" };
-    expect(toCoreMessage(doc)).toEqual({ role: "assistant", content: "Hello" });
+    expect(toModelMessage(doc)).toEqual({ role: "assistant", content: "Hello" });
   });
 
   it("maps assistant [text, tool-call] → assistant with matching parts", () => {
@@ -132,11 +132,11 @@ describe("toCoreMessage", () => {
         { type: "tool-call", toolCallId: "c1", toolName: "search", args: { q: "x" } },
       ],
     };
-    expect(toCoreMessage(doc)).toEqual({
+    expect(toModelMessage(doc)).toEqual({
       role: "assistant",
       content: [
         { type: "text", text: "let me look" },
-        { type: "tool-call", toolCallId: "c1", toolName: "search", args: { q: "x" } },
+        { type: "tool-call", toolCallId: "c1", toolName: "search", input: { q: "x" } },
       ],
     });
   });
@@ -149,10 +149,15 @@ describe("toCoreMessage", () => {
         { type: "tool-result", toolCallId: "c1", toolName: "search", result: { ok: true } },
       ],
     };
-    expect(toCoreMessage(doc)).toEqual({
+    expect(toModelMessage(doc)).toEqual({
       role: "tool",
       content: [
-        { type: "tool-result", toolCallId: "c1", toolName: "search", result: { ok: true } },
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "search",
+          output: { type: "json", value: { ok: true } },
+        },
       ],
     });
   });
@@ -196,7 +201,13 @@ describe("fromAssistantParts / fromToolResult", () => {
     expect(doc.role).toBe("assistant");
     expect(doc.content).toEqual(parts);
     expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
-    expect(toCoreMessage(doc)).toEqual({ role: "assistant", content: parts });
+    expect(toModelMessage(doc)).toEqual({
+      role: "assistant",
+      content: [
+        { type: "text", text: "saving that" },
+        { type: "tool-call", toolCallId: "c1", toolName: "update_memory", input: { key: "plan" } },
+      ],
+    });
   });
 
   it("fromToolResult builds a valid tool turn that round-trips", () => {
@@ -212,6 +223,16 @@ describe("fromAssistantParts / fromToolResult", () => {
     expect(doc.role).toBe("tool");
     expect(doc.content).toEqual(parts);
     expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
-    expect(toCoreMessage(doc)).toEqual({ role: "tool", content: parts });
+    expect(toModelMessage(doc)).toEqual({
+      role: "tool",
+      content: [
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "update_memory",
+          output: { type: "json", value: { success: true } },
+        },
+      ],
+    });
   });
 });
