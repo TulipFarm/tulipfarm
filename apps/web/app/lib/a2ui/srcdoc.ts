@@ -1,3 +1,4 @@
+import { A2UI_COMPONENT_CSS } from "~/lib/a2ui/components";
 import { A2UI_RUNTIME } from "~/lib/a2ui/runtime";
 
 /**
@@ -41,6 +42,7 @@ export function buildSrcdoc(input: {
 <meta http-equiv="Content-Security-Policy" content="${csp}">
 <style>${tokensCss}</style>
 <style>${RESET}</style>
+<style>${A2UI_COMPONENT_CSS}</style>
 <script nonce="${nonce}">${A2UI_RUNTIME}</script>
 </head>
 <body>${sanitizedHtml}</body>
