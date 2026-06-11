@@ -30,7 +30,7 @@
   },
   "devDependencies": {
     "@ai-sdk/provider": "^3.0.10",
-    "@electric-sql/pglite": "^0.4.6",
+    "@electric-sql/pglite": "^0.5.1",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/pg": "^8.20.0",
