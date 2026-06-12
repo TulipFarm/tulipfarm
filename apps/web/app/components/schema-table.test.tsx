@@ -1,9 +1,9 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
-import { expect, test } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, test, vi } from "vitest";
 import { SchemaTable } from "~/components/schema-table";
 import type { ResourceRecord } from "~/lib/api";
-import { deriveFields, listColumns, parseSchema } from "~/lib/schema";
+import { deriveFields, listColumns, parseSchema, type SortState } from "~/lib/schema";
 
 const parsed = parseSchema(`
 type: object
@@ -76,4 +76,50 @@ test("booleans render ✓/✗ and null cells render a muted dash", () => {
   expect(screen.getByText("✓")).toBeInTheDocument();
   expect(screen.getByText("✗")).toBeInTheDocument();
   expect(screen.getAllByText("—").length).toBeGreaterThan(0); // null customerId on row 2
+});
+
+function renderSortable(sort?: SortState, onToggleSort?: (c: string) => void) {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <SchemaTable
+          columns={columns}
+          records={records}
+          type="ticket"
+          sort={sort}
+          onToggleSort={onToggleSort}
+        />
+      ),
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+}
+
+test("without onToggleSort, headers are plain text (no sort buttons)", () => {
+  renderTable();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
+test("with onToggleSort, clicking a header fires the callback with the column name", () => {
+  const onToggleSort = vi.fn();
+  renderSortable(undefined, onToggleSort);
+  fireEvent.click(screen.getByRole("button", { name: /title/ }));
+  expect(onToggleSort).toHaveBeenCalledWith("title");
+});
+
+test("the active sort column carries aria-sort and a direction glyph", () => {
+  renderSortable({ field: "title", dir: "asc" }, vi.fn());
+  const header = screen.getByRole("columnheader", { name: /title/ });
+  expect(header).toHaveAttribute("aria-sort", "ascending");
+  expect(header.textContent).toContain("↑");
+  // a non-active column has no aria-sort
+  expect(screen.getByRole("columnheader", { name: /^id/ })).not.toHaveAttribute("aria-sort");
+});
+
+test("descending sort reflects aria-sort=descending and the ↓ glyph", () => {
+  renderSortable({ field: "title", dir: "desc" }, vi.fn());
+  const header = screen.getByRole("columnheader", { name: /title/ });
+  expect(header).toHaveAttribute("aria-sort", "descending");
+  expect(header.textContent).toContain("↓");
 });

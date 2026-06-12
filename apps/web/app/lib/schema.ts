@@ -227,3 +227,81 @@ export function renderValue(field: FieldDescriptor, value: unknown): RenderedCel
       return { kind: "text", text: String(value) };
   }
 }
+
+// ── Client sort / filter (shell list interactivity) ───────────────────────────────────────────────
+// Pure and schema-aware, mirroring renderValue's kind switch. The shell list page composes these over
+// the in-memory record set; tf-data-table renders the same schema-shaped columns presentationally.
+
+export type SortState = { field: string; dir: "asc" | "desc" };
+
+// Treats null/undefined/"" as absent — the same "empty" renderValue shows as an em dash.
+function isBlank(value: unknown): boolean {
+  return value === null || value === undefined || value === "";
+}
+
+// Lowercased text used for substring filtering. Mirrors renderValue's per-kind formatting so the
+// filter matches what the user sees (date → formatted, link → label, bool → true/false).
+export function cellText(field: FieldDescriptor, value: unknown): string {
+  if (isBlank(value)) return "";
+  switch (field.kind) {
+    case "boolean":
+      return value ? "true" : "false";
+    case "date":
+      return formatIso(String(value)).toLowerCase();
+    case "array": {
+      const arr = Array.isArray(value) ? value : [value];
+      return arr.map(String).join(", ").toLowerCase();
+    }
+    case "object":
+      return JSON.stringify(value).toLowerCase();
+    default:
+      return String(value).toLowerCase();
+  }
+}
+
+// Keep a record when any column's text contains the query. Blank query → unchanged input.
+export function filterRecords<T extends Record<string, unknown>>(
+  records: T[],
+  columns: FieldDescriptor[],
+  query: string
+): T[] {
+  const q = query.trim().toLowerCase();
+  if (q === "") return records;
+  return records.filter((record) =>
+    columns.some((col) => cellText(col, record[col.name]).includes(q))
+  );
+}
+
+// Compares two NON-blank values by kind (blanks are handled by sortRecords so they sort last in both
+// directions). Numeric and chronological kinds compare by value, not string; everything else lexically.
+export function compareValues(field: FieldDescriptor, a: unknown, b: unknown): number {
+  switch (field.kind) {
+    case "number":
+      return Number(a) - Number(b);
+    case "date":
+      return new Date(String(a)).getTime() - new Date(String(b)).getTime();
+    case "boolean":
+      return (a === true ? 1 : 0) - (b === true ? 1 : 0);
+    default:
+      return String(a).localeCompare(String(b));
+  }
+}
+
+// Stable sort into a new array. Blank values always trail, regardless of direction.
+export function sortRecords<T extends Record<string, unknown>>(
+  records: T[],
+  field: FieldDescriptor,
+  dir: "asc" | "desc"
+): T[] {
+  const sign = dir === "desc" ? -1 : 1;
+  return [...records].sort((ra, rb) => {
+    const a = ra[field.name];
+    const b = rb[field.name];
+    const aBlank = isBlank(a);
+    const bBlank = isBlank(b);
+    if (aBlank && bBlank) return 0;
+    if (aBlank) return 1;
+    if (bBlank) return -1;
+    return sign * compareValues(field, a, b);
+  });
+}

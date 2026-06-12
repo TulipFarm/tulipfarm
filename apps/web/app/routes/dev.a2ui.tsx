@@ -72,6 +72,25 @@ const SAMPLE_HTML = `
   </dl>
 </tf-detail-view>
 
+<tf-data-table>
+  <table>
+    <thead>
+      <tr>
+        <th aria-sort="ascending">id</th>
+        <th>name</th>
+        <th>status</th>
+        <th>priority</th>
+        <th>updatedAt</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td><a href="#">TICK-1042</a></td><td>Login 500 on Safari</td><td>open</td><td>high</td><td>Jun 08, 2026</td></tr>
+      <tr><td><a href="#">TICK-1043</a></td><td>Export CSV timeout</td><td>open</td><td>low</td><td>Jun 07, 2026</td></tr>
+      <tr><td><a href="#">TICK-1044</a></td><td>Stale avatar cache</td><td>closed</td><td>low</td><td>Jun 05, 2026</td></tr>
+    </tbody>
+  </table>
+</tf-data-table>
+
 <tf-empty-state>
   <span data-slot="title">No results found</span>
   Run a query to see data here.
