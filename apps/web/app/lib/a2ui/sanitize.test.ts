@@ -185,3 +185,13 @@ test("preserves tf-schema-form + native form controls with data-* config and slo
   // style= is still stripped even amid the form markup
   expect(out).not.toContain("style=");
 });
+
+test("data-a2ui-send postback attribute survives on tf-* controls", () => {
+  const out = sanitizeAgentHtml(
+    '<tf-card><tf-button data-a2ui-send=\'{"kind":"choice","value":"a"}\'>A</tf-button></tf-card>'
+  );
+  expect(out).toContain("<tf-button");
+  // The attribute survives; DOMPurify entity-encodes the quotes (the browser decodes on getAttribute).
+  expect(out).toContain("data-a2ui-send=");
+  expect(out).toContain("&quot;kind&quot;:&quot;choice&quot;");
+});

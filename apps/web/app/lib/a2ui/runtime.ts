@@ -32,6 +32,22 @@ export const A2UI_RUNTIME = `(function () {
     document.dispatchEvent(new CustomEvent("a2ui:message", { detail: event.data }));
   });
 
+  // Interactivity bridge: tf-* controls are static (DOMPurify strips inline handlers), so clicks are
+  // delegated here. A click on (or inside) an element carrying data-a2ui-send posts its JSON payload
+  // out through the "agent" channel — the host turns it into a follow-up turn. Malformed JSON no-ops.
+  document.addEventListener("click", function (event) {
+    var node = event.target;
+    while (node && node !== document) {
+      if (node.nodeType === 1 && node.hasAttribute("data-a2ui-send")) {
+        try {
+          window.__a2ui.send("agent", JSON.parse(node.getAttribute("data-a2ui-send")));
+        } catch (_e) {}
+        return;
+      }
+      node = node.parentNode;
+    }
+  });
+
   // Auto-size: report content height, rAF-batched (outer-height only ⇒ no feedback loop).
   var pending = false;
   function reportHeight() {

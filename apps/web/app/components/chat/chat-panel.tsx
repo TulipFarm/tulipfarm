@@ -49,7 +49,8 @@ export function ChatPanel({
   agentId?: string;
   defaultModel?: ModelTier;
 }) {
-  const { messages, status, error, send, approve, regenerate, reset } = useChatStream();
+  const { messages, status, error, send, approve, regenerate, reset, sendA2uiAgent } =
+    useChatStream();
   const busy = status === "submitted" || status === "streaming";
   const agent = agentId || "GeneralAssistant";
   const hasMessages = messages.length > 0;
@@ -75,6 +76,7 @@ export function ChatPanel({
           status={status}
           onApprove={approve}
           onRegenerate={regenerate}
+          onA2uiAgent={sendA2uiAgent}
         />
       ) : (
         <EmptyState agent={agent} onPick={(text) => send(text, { model: defaultModel, agentId })} />

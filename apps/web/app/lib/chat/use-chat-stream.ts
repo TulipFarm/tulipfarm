@@ -24,6 +24,26 @@ type ChatAction =
   | { type: "regenerate" }
   | { type: "reset" };
 
+/**
+ * Map an A2UI bridge `agent` payload (posted by a tf-* control click via the iframe runtime) into a
+ * follow-up user turn. `choice` submits the chosen label (falling back to its value); `suggest_agent`
+ * submits a prompt and switches the active agent. Unknown/malformed payloads are ignored.
+ */
+export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOptions } | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const p = payload as Record<string, unknown>;
+  if (p.kind === "choice") {
+    const text = typeof p.label === "string" ? p.label : typeof p.value === "string" ? p.value : "";
+    return text ? { text } : null;
+  }
+  if (p.kind === "suggest_agent") {
+    const text = typeof p.label === "string" ? p.label : "";
+    const agentId = typeof p.agentId === "string" ? p.agentId : undefined;
+    return text ? { text, opts: agentId ? { agentId } : undefined } : null;
+  }
+  return null;
+}
+
 function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "user") return appendUserMessage(state, action.text);
   if (action.type === "reset") return initialChatState;
@@ -116,6 +136,15 @@ export function useChatStream() {
     dispatch({ type: "reset" });
   }, []);
 
+  // Bridge postback from an A2UI tf-* control: turn the `agent` payload into a follow-up user turn.
+  const sendA2uiAgent = useCallback(
+    (payload: unknown) => {
+      const mapped = a2uiAgentToSend(payload);
+      if (mapped) void send(mapped.text, mapped.opts);
+    },
+    [send]
+  );
+
   return {
     messages: state.messages,
     pendingApprovals: state.pendingApprovals,
@@ -125,5 +154,6 @@ export function useChatStream() {
     approve,
     regenerate,
     reset,
+    sendA2uiAgent,
   };
 }

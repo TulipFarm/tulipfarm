@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import type { ToolCallResult } from "../tools/types";
+import { renderA2uiHtml } from "./a2ui-render";
 import { writeSseEvent } from "./sse";
 import type { StreamEmitter } from "./stream-emitter";
 import { isTerminalEvent, type StreamEvent, type StreamHub } from "./stream-hub";
@@ -123,6 +124,14 @@ export async function runChatStream(
         if (blocked) continue;
       }
       await deps.emitter.emit(mapped.eventType, mapped.data);
+      // A view/terminal tool (compose_view, present_choices, suggest_agent) result also emits a
+      // follow-on `a2ui` event carrying the rendered tf-* block; the tool-result stays intact so the
+      // model still reads the structured data. Non-view tools render `null` → no a2ui event.
+      if (mapped.eventType === "tool-result") {
+        const { toolName, result } = mapped.data as { toolName: string; result: ToolCallResult };
+        const html = renderA2uiHtml(toolName, result);
+        if (html) await deps.emitter.emit("a2ui", { html });
+      }
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }
     if (scanOutput) await flushText(scanOutput);

@@ -59,12 +59,14 @@ function Message({
   isLast,
   onApprove,
   onRegenerate,
+  onA2uiAgent,
 }: {
   message: ChatMessage;
   status: ChatStatus;
   isLast: boolean;
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
+  onA2uiAgent?: (payload: unknown) => void;
 }) {
   if (message.role === "user") {
     return (
@@ -90,6 +92,7 @@ function Message({
           part={part}
           streaming={streaming && i === lastIndex && part.kind === "text"}
           onApprove={onApprove}
+          onA2uiAgent={onA2uiAgent}
         />
       ))}
       {message.sealed && text ? <Actions text={text} onRegenerate={canRegenerate} /> : null}
@@ -114,11 +117,13 @@ export function Transcript({
   status,
   onApprove,
   onRegenerate,
+  onA2uiAgent,
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
+  onA2uiAgent?: (payload: unknown) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -145,6 +150,7 @@ export function Transcript({
             isLast={i === messages.length - 1}
             onApprove={onApprove}
             onRegenerate={onRegenerate}
+            onA2uiAgent={onA2uiAgent}
           />
         ))}
         {status === "submitted" ? <Loader /> : null}

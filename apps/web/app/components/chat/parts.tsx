@@ -110,10 +110,12 @@ export function MessagePartView({
   part,
   streaming,
   onApprove,
+  onA2uiAgent,
 }: {
   part: TimelinePart;
   streaming?: boolean;
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+  onA2uiAgent?: (payload: unknown) => void;
 }) {
   switch (part.kind) {
     case "text":
@@ -177,6 +179,12 @@ export function MessagePartView({
         </div>
       );
     case "a2ui":
-      return <A2uiFrame html={part.html} className="w-full rounded-sm border border-border" />;
+      return (
+        <A2uiFrame
+          html={part.html}
+          onAgent={onA2uiAgent}
+          className="w-full rounded-sm border border-border"
+        />
+      );
   }
 }
