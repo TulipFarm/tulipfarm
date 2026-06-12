@@ -17,6 +17,12 @@ html → sanitizeAgentHtml (DOMPurify) → buildSrcdoc (CSP + tokens + runtime) 
 - **`runtime.ts`** — audited **string** injected into the frame: `window.__a2ui.send(channel, payload)`
   for future `tf-*` components, rAF-batched resize, `ready`, and re-dispatch of host messages as
   `document` `CustomEvent("a2ui:message")`.
+- **`chart-source.ts`** — GENERATED (`scripts/gen-chart-source.mjs`, committed): the Chart.js UMD as a
+  string const. Inlined as a nonce'd `<script>` because the CSP forbids a CDN. Re-run
+  `pnpm gen:chart-source` on a chart.js bump.
+- **`chart-bootstrap.ts`** — audited **string** (injected after Chart.js, only when the body contains a
+  `tf-chart-` element): scans `tf-chart-bar`/`tf-chart-line`, parses `data-labels`/`data-datasets`,
+  draws into a canvas it creates, colors from CSS tokens. One bad chart is isolated in try/catch.
 - **`../../components/a2ui-frame.tsx`** — `<A2uiFrame>` React component: the sandboxed iframe + the
   parent bridge. **Pure transport** — relays to `onAgent`/`onApi`/`onNavigate`; never calls the API
   or navigates. `ref.send(msg)` pushes a message into the frame.
@@ -37,5 +43,5 @@ const ref = useRef<A2uiFrameHandle>(null);
 `/dev/a2ui` (DEV only) is the live harness used for Playwright validation.
 
 ## Not here (separate tickets)
-`tf-*` web components (A2UI-V1-002) · Chart.js (AC-V1-003) · chat message renderer + SSE wiring +
-mounting into the real chat route (A2UI-V1-001).
+`tf-*` web components (A2UI-V1-002) · chat message renderer + SSE wiring + mounting into the real
+chat route (A2UI-V1-001).

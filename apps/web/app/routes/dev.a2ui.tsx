@@ -91,6 +91,14 @@ const SAMPLE_HTML = `
   </table>
 </tf-data-table>
 
+<tf-heading>Charts (Chart.js, in-iframe, CSP)</tf-heading>
+<tf-chart-bar
+  data-labels='["Jan","Feb","Mar","Apr","May"]'
+  data-datasets='[{"label":"Records indexed","data":[820,932,901,1290,1284]}]'></tf-chart-bar>
+<tf-chart-line
+  data-labels='["Mon","Tue","Wed","Thu","Fri"]'
+  data-datasets='[{"label":"Signups","data":[3,7,5,9,6]},{"label":"Churn","data":[1,0,2,1,2]}]'></tf-chart-line>
+
 <tf-heading>Schema form</tf-heading>
 <tf-schema-form>
   <div data-slot="field">

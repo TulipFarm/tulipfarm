@@ -195,3 +195,28 @@ test("data-a2ui-send postback attribute survives on tf-* controls", () => {
   expect(out).toContain("data-a2ui-send=");
   expect(out).toContain("&quot;kind&quot;:&quot;choice&quot;");
 });
+
+test("preserves tf-chart-* with JSON data-labels/data-datasets (recoverable after entity-encoding)", () => {
+  const labels = ["Jan", "Feb", "Mar"];
+  const datasets = [{ label: "Sales", data: [12, 19, 7] }];
+  const html =
+    `<tf-chart-bar data-labels='${JSON.stringify(labels)}' ` +
+    `data-datasets='${JSON.stringify(datasets)}'></tf-chart-bar>` +
+    `<tf-chart-line data-labels='${JSON.stringify(labels)}' ` +
+    `data-datasets='${JSON.stringify(datasets)}'></tf-chart-line>`;
+  const out = sanitizeAgentHtml(html);
+
+  expect(out).toContain("<tf-chart-bar");
+  expect(out).toContain("<tf-chart-line");
+
+  // DOMPurify HTML-entity-encodes the JSON values, so we recover them through the DOM exactly as the
+  // in-iframe bootstrap does (getAttribute decodes entities) rather than asserting raw quotes.
+  const doc = new DOMParser().parseFromString(out, "text/html");
+  const bar = doc.querySelector("tf-chart-bar");
+  expect(bar).not.toBeNull();
+  expect(JSON.parse(bar?.getAttribute("data-labels") ?? "null")).toEqual(labels);
+  expect(JSON.parse(bar?.getAttribute("data-datasets") ?? "null")).toEqual(datasets);
+
+  const line = doc.querySelector("tf-chart-line");
+  expect(JSON.parse(line?.getAttribute("data-datasets") ?? "null")).toEqual(datasets);
+});
