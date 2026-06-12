@@ -4,6 +4,9 @@
 
 export type KnowledgeSource = "authored" | "resource" | "conversation";
 
+/** Per-document index state derived from its chunks (read-only; not persisted). */
+export type IndexingStatus = "indexed" | "lexical-only" | "pending";
+
 export interface KnowledgeDocument {
   _id: string;
   title: string;

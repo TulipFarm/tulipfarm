@@ -11,6 +11,7 @@ import type {
 import { search } from "./search-service";
 import type {
   EmbeddingPort,
+  IndexingStatus,
   KnowledgeCollection,
   KnowledgeDocument,
   KnowledgeRevision,
@@ -112,6 +113,16 @@ export class KnowledgeService {
 
   listDocuments(opts: DocumentListOpts): Promise<PaginatedResult<KnowledgeDocument>> {
     return this.deps.documents.list(opts);
+  }
+
+  /** Derived read-only index state for a document (from its chunks). */
+  getIndexingStatus(documentId: string): Promise<IndexingStatus> {
+    return this.deps.chunks.getIndexingStatus(documentId);
+  }
+
+  /** Batch index states keyed by document id (for list responses). */
+  getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>> {
+    return this.deps.chunks.getIndexingStatuses(documentIds);
   }
 
   async updateDocument(
@@ -233,7 +244,8 @@ export class KnowledgeService {
 
   async addToCollection(collectionId: string, documentId: string): Promise<AddToCollectionResult> {
     if (!(await this.deps.collections.getById(collectionId))) return "collection_not_found";
-    if (!(await this.deps.documents.getById(documentId))) return "document_not_found";
+    const doc = await this.deps.documents.getById(documentId);
+    if (!doc?.active) return "document_not_found";
     await this.deps.collections.addDocument(collectionId, documentId);
     return "ok";
   }

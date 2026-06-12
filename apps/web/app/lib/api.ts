@@ -71,6 +71,26 @@ export async function apiWrite<T>(
   return (await res.json()) as T;
 }
 
+// Like apiWrite (cookie-first auth, CSRF echo, optional If-Match) but for endpoints that return
+// 204 No Content — sends a JSON body and parses nothing, so it returns void.
+export async function apiSend(
+  method: "POST" | "PUT",
+  path: string,
+  body: unknown,
+  ifMatch?: number
+): Promise<void> {
+  const headers = mutationHeaders();
+  if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method,
+    credentials: "include",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res);
+}
+
 // DELETE client. Mirrors apiWrite's cookie-first auth + CSRF echo, but sends no body and expects an
 // empty (204) response, so it returns void instead of parsing JSON.
 export async function apiDelete(path: string): Promise<void> {

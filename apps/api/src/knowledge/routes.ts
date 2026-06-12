@@ -3,6 +3,7 @@ import { ErrorSchema } from "../auth/schemas";
 import { parsePaginationQuery } from "../pagination";
 import type { KnowledgeService } from "./service";
 import type {
+  IndexingStatus,
   KnowledgeCollection,
   KnowledgeDocument,
   KnowledgeRevision,
@@ -20,7 +21,7 @@ function parseIfMatch(req: FastifyRequest): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
-function toApiDocument(d: KnowledgeDocument): Record<string, unknown> {
+function toApiDocument(d: KnowledgeDocument, status?: IndexingStatus): Record<string, unknown> {
   return {
     id: d._id,
     title: d.title,
@@ -34,6 +35,7 @@ function toApiDocument(d: KnowledgeDocument): Record<string, unknown> {
     version: d.version,
     createdAt: d.createdAt.toISOString(),
     updatedAt: d.updatedAt.toISOString(),
+    ...(status !== undefined ? { indexingStatus: status } : {}),
   };
 }
 
@@ -139,7 +141,8 @@ export function registerKnowledgeRoutes(
         alwaysLoadForAgents?: boolean;
       };
       const doc = await service.createDocument(b);
-      return reply.code(201).send(toApiDocument(doc));
+      const status = await service.getIndexingStatus(doc._id);
+      return reply.code(201).send(toApiDocument(doc, status));
     }
   );
 
@@ -168,7 +171,11 @@ export function registerKnowledgeRoutes(
       const q = req.query as Record<string, unknown>;
       const { limit, after } = parsePaginationQuery(q);
       const page = await service.listDocuments({ limit, after, ...filtersFromQuery(q) });
-      return reply.send({ items: page.items.map(toApiDocument), nextCursor: page.nextCursor });
+      const statuses = await service.getIndexingStatuses(page.items.map((d) => d._id));
+      return reply.send({
+        items: page.items.map((d) => toApiDocument(d, statuses.get(d._id) ?? "pending")),
+        nextCursor: page.nextCursor,
+      });
     }
   );
 
@@ -188,7 +195,8 @@ export function registerKnowledgeRoutes(
       const { id } = req.params as { id: string };
       const doc = await service.getDocument(id);
       if (!doc?.active) return reply.code(404).send({ error: "not found" });
-      return reply.send(toApiDocument(doc));
+      const status = await service.getIndexingStatus(doc._id);
+      return reply.send(toApiDocument(doc, status));
     }
   );
 
@@ -225,7 +233,8 @@ export function registerKnowledgeRoutes(
           ? reply.code(404).send({ error: "not found" })
           : reply.code(409).send({ error: "version conflict" });
       }
-      return reply.send(toApiDocument(outcome.value));
+      const status = await service.getIndexingStatus(id);
+      return reply.send(toApiDocument(outcome.value, status));
     }
   );
 
@@ -389,6 +398,26 @@ export function registerKnowledgeRoutes(
       const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
       const page = await service.listCollections({ limit, after });
       return reply.send({ items: page.items.map(toApiCollection), nextCursor: page.nextCursor });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/collections/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Get one knowledge collection.",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: { 200: DocumentSchema, 404: ErrorSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const c = await service.getCollection(id);
+      if (!c) return reply.code(404).send({ error: "not found" });
+      return reply.send(toApiCollection(c));
     }
   );
 

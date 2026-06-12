@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
-import type { ChunkInput, KnowledgeSource, SearchFilters, SearchHit } from "./types";
+import type {
+  ChunkInput,
+  IndexingStatus,
+  KnowledgeSource,
+  SearchFilters,
+  SearchHit,
+} from "./types";
 
 /** Push `d.*` filter conditions onto `params` and return the SQL fragments. */
 function docFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
@@ -43,6 +49,10 @@ export interface KnowledgeChunkRepo {
   ): Promise<SearchHit[]>;
   /** Lexical fallback via `websearch_to_tsquery` + `ts_rank`. */
   searchLexical(query: string, limit: number, filters: SearchFilters): Promise<SearchHit[]>;
+  /** Derived per-doc index state: pending (no chunks) | lexical-only (chunks, null embeddings) | indexed. */
+  getIndexingStatus(documentId: string): Promise<IndexingStatus>;
+  /** Batch variant — one grouped query; ids absent from the result default to "pending". */
+  getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>>;
 }
 
 export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
@@ -109,5 +119,28 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
       params
     );
     return rows.map((r) => rowToHit(r, Number((r as { rank: number }).rank)));
+  }
+
+  async getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>> {
+    const result = new Map<string, IndexingStatus>();
+    if (documentIds.length === 0) return result;
+    for (const id of documentIds) result.set(id, "pending");
+    const { rows } = await this.q.query(
+      `SELECT document_id,
+              CASE WHEN bool_and(embedding IS NOT NULL) THEN 'indexed' ELSE 'lexical-only' END AS status
+       FROM knowledge_chunks
+       WHERE document_id = ANY($1::uuid[])
+       GROUP BY document_id`,
+      [documentIds]
+    );
+    for (const r of rows as Array<{ document_id: string; status: IndexingStatus }>) {
+      result.set(r.document_id, r.status);
+    }
+    return result;
+  }
+
+  async getIndexingStatus(documentId: string): Promise<IndexingStatus> {
+    const statuses = await this.getIndexingStatuses([documentId]);
+    return statuses.get(documentId) ?? "pending";
   }
 }
