@@ -356,4 +356,134 @@ tf-data-table a {
 tf-data-table a:hover {
   text-decoration: underline;
 }
+
+/* tf-schema-form + form inputs — DISPLAY-ONLY skins over native controls (no iframe JS until
+   A2UI-V1-001; CSP blocks submit). Contract: <tf-schema-form> holds [data-slot="field"] rows, each a
+   caption (data-slot="label", with data-slot="req" for the * marker) + a native control wrapped in
+   its tf-* skin + optional data-slot="error". Field identity rides data-name, never name/id (DOMPurify
+   SANITIZE_DOM strips colliding name/id). x-immutable on edit = native disabled + a data-slot="meta"
+   "(immutable)" note. */
+tf-schema-form { display: block; }
+tf-schema-form [data-slot="field"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+tf-schema-form [data-slot="label"] { font-size: 0.75rem; color: var(--muted-foreground); }
+tf-schema-form [data-slot="req"] { color: var(--primary); }
+tf-schema-form [data-slot="meta"] { opacity: 0.6; }
+tf-schema-form [data-slot="error"] { font-size: 0.75rem; color: var(--destructive); }
+
+/* shared control base — tf-input/textarea/select/combobox/calendar each wrap a full-width native control */
+tf-input,
+tf-textarea,
+tf-select,
+tf-combobox,
+tf-calendar { display: block; }
+tf-input input,
+tf-textarea textarea,
+tf-select select,
+tf-combobox input,
+tf-calendar input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  font: inherit;
+  font-size: 0.875rem;
+  background: var(--background);
+  color: var(--foreground);
+}
+tf-input input:focus-visible,
+tf-textarea textarea:focus-visible,
+tf-select select:focus-visible,
+tf-combobox input:focus-visible,
+tf-calendar input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+tf-input input:disabled,
+tf-textarea textarea:disabled,
+tf-select select:disabled,
+tf-combobox input:disabled,
+tf-calendar input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+tf-textarea textarea { min-height: 5rem; resize: vertical; }
+
+/* checkbox + radio-group — native accent, inline label carrying the option text */
+tf-checkbox,
+tf-switch { display: inline-flex; align-items: center; }
+tf-radio-group { display: flex; flex-direction: column; gap: 6px; }
+tf-checkbox label,
+tf-switch label,
+tf-radio-group label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--foreground);
+}
+tf-checkbox input[type="checkbox"],
+tf-radio-group input[type="radio"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+/* switch — CSS-only toggle built from a native checkbox (flat 2px radius; off=secondary, on=primary) */
+tf-switch input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--secondary);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+tf-switch input[type="checkbox"]::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  background: var(--background);
+  border-radius: 1px;
+  transition: left 120ms ease;
+}
+tf-switch input[type="checkbox"]:checked { background: var(--primary); }
+tf-switch input[type="checkbox"]:checked::after { left: 17px; }
+tf-switch input[type="checkbox"]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+/* combobox — search input + a static options listbox (skinned like tf-list) + a ▾ affordance */
+tf-combobox { position: relative; }
+tf-combobox input { padding-right: 28px; }
+tf-combobox::after {
+  content: "▾";
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+tf-combobox ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  background: var(--background);
+  font-size: 0.875rem;
+}
+tf-combobox li { padding: 6px 12px; color: var(--foreground); }
+tf-combobox li + li { border-top: 1px solid var(--border); }
+tf-combobox li:hover,
+tf-combobox li[aria-selected="true"] { background: var(--accent); color: var(--accent-foreground); }
 `;

@@ -91,6 +91,58 @@ const SAMPLE_HTML = `
   </table>
 </tf-data-table>
 
+<tf-heading>Schema form</tf-heading>
+<tf-schema-form>
+  <div data-slot="field">
+    <span data-slot="label">email <span data-slot="req">*</span></span>
+    <tf-input><input type="email" data-name="email" value="ada@example.com" placeholder="you@example.com"></tf-input>
+  </div>
+  <div data-slot="field">
+    <span data-slot="label">bio</span>
+    <tf-textarea><textarea data-name="bio" rows="3">Computing pioneer.</textarea></tf-textarea>
+  </div>
+  <div data-slot="field">
+    <span data-slot="label">status</span>
+    <tf-select><select data-name="status"><option>open</option><option selected>closed</option></select></tf-select>
+  </div>
+  <div data-slot="field">
+    <span data-slot="label">priority</span>
+    <tf-radio-group>
+      <label><input type="radio" name="priority" checked> low</label>
+      <label><input type="radio" name="priority"> high</label>
+    </tf-radio-group>
+  </div>
+  <div data-slot="field">
+    <tf-checkbox><label><input type="checkbox" data-name="subscribed" checked> subscribed</label></tf-checkbox>
+  </div>
+  <div data-slot="field">
+    <tf-switch><label><input type="checkbox" data-name="notify" checked> notify by email</label></tf-switch>
+  </div>
+  <div data-slot="field">
+    <span data-slot="label">customer (x-links)</span>
+    <tf-combobox>
+      <input data-name="customerId" value="Acme Corp" placeholder="Search customer">
+      <ul>
+        <li aria-selected="true">Acme Corp</li>
+        <li>Globex</li>
+        <li>Initech</li>
+      </ul>
+    </tf-combobox>
+  </div>
+  <div data-slot="field">
+    <span data-slot="label">due date</span>
+    <tf-calendar><input type="date" data-name="due" value="2026-06-12"></tf-calendar>
+  </div>
+  <div data-slot="field" data-immutable>
+    <span data-slot="label">id <span data-slot="meta">(immutable)</span></span>
+    <tf-input><input data-name="id" value="USER-1042" disabled></tf-input>
+  </div>
+  <p>
+    <tf-button>Save</tf-button>
+    <tf-button data-variant="outline">Cancel</tf-button>
+  </p>
+</tf-schema-form>
+
 <tf-empty-state>
   <span data-slot="title">No results found</span>
   Run a query to see data here.

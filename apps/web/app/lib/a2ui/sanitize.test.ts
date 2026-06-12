@@ -106,3 +106,82 @@ test("preserves the v1 tf-* component set with data-* config and slot/semantic c
   // style= is still stripped even amid tf-* content
   expect(out).not.toContain("style=");
 });
+
+test("preserves tf-schema-form + native form controls with data-* config and slot children", () => {
+  const html = `
+    <tf-schema-form>
+      <div data-slot="field">
+        <span data-slot="label">email <span data-slot="req">*</span></span>
+        <tf-input><input type="email" data-name="email" placeholder="you@ex.com"></tf-input>
+        <span data-slot="error">required</span>
+      </div>
+      <div data-slot="field">
+        <tf-textarea><textarea data-name="bio" rows="4"></textarea></tf-textarea>
+      </div>
+      <div data-slot="field">
+        <tf-select><select data-name="status"><option>open</option><option selected>closed</option></select></tf-select>
+      </div>
+      <div data-slot="field">
+        <tf-radio-group><label><input type="radio" name="priority" checked> low</label><label><input type="radio" name="priority"> high</label></tf-radio-group>
+      </div>
+      <div data-slot="field">
+        <tf-checkbox><label><input type="checkbox" data-name="active" checked> active</label></tf-checkbox>
+      </div>
+      <div data-slot="field">
+        <tf-switch><label><input type="checkbox" data-name="notify" checked> notify</label></tf-switch>
+      </div>
+      <div data-slot="field">
+        <tf-combobox><input data-name="customerId" placeholder="Search customer" value="Acme Corp"><ul><li aria-selected="true">Acme Corp</li><li>Globex</li></ul></tf-combobox>
+      </div>
+      <div data-slot="field">
+        <tf-calendar><input type="date" data-name="due" value="2026-06-12"></tf-calendar>
+      </div>
+      <div data-slot="field" data-immutable>
+        <span data-slot="label">id <span data-slot="meta">(immutable)</span></span>
+        <tf-input><input data-name="id" value="TICK-1042" disabled></tf-input>
+      </div>
+      <tf-button>Save</tf-button>
+    </tf-schema-form>`;
+  const out = sanitizeAgentHtml(html);
+
+  // every new tf-* form wrapper survives
+  for (const tag of [
+    "tf-schema-form",
+    "tf-input",
+    "tf-textarea",
+    "tf-select",
+    "tf-radio-group",
+    "tf-checkbox",
+    "tf-switch",
+    "tf-combobox",
+    "tf-calendar",
+  ]) {
+    expect(out).toContain(`<${tag}`);
+  }
+
+  // native form controls survive (DOMPurify default allowlist)
+  for (const tag of ["<input", "<textarea", "<select", "<option", "<ul>", "<li"]) {
+    expect(out).toContain(tag);
+  }
+
+  // control config attributes the skins / future runtime rely on survive
+  expect(out).toContain('type="email"');
+  expect(out).toContain('type="date"');
+  expect(out).toContain('type="radio"');
+  expect(out).toContain('type="checkbox"');
+  expect(out).toContain('placeholder="you@ex.com"');
+  expect(out).toContain('value="2026-06-12"');
+  expect(out).toContain("checked");
+  expect(out).toContain("disabled");
+  expect(out).toContain("selected");
+
+  // identity + slot markers ride the always-safe data-/aria- channel (never name/id — SANITIZE_DOM)
+  expect(out).toContain('data-name="email"');
+  expect(out).toContain('data-slot="field"');
+  expect(out).toContain('data-slot="error"');
+  expect(out).toContain("data-immutable");
+  expect(out).toContain('aria-selected="true"');
+
+  // style= is still stripped even amid the form markup
+  expect(out).not.toContain("style=");
+});
