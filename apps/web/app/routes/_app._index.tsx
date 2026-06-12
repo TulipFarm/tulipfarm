@@ -2,6 +2,7 @@ import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from 
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { getAgent } from "~/lib/agents";
 import type { ModelTier } from "~/lib/chat/types";
+import { listOnboardingSuggestions } from "~/lib/onboarding";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -19,10 +20,13 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   } catch {
     // Unknown agent / transient API error — keep the standard default rather than break the page.
   }
-  return { agentId, defaultModel };
+  // Adaptive onboarding suggestions (ONB-V1-002/003). Non-blocking (AC-V1-001): a failed fetch
+  // resolves to [] so chat always renders (mirrors the agent lookup above — no hard dependency).
+  const suggestions = await listOnboardingSuggestions().catch(() => []);
+  return { agentId, defaultModel, suggestions };
 }
 
 export default function ChatRoute() {
-  const { agentId, defaultModel } = useLoaderData<typeof clientLoader>();
-  return <ChatPanel agentId={agentId} defaultModel={defaultModel} />;
+  const { agentId, defaultModel, suggestions } = useLoaderData<typeof clientLoader>();
+  return <ChatPanel agentId={agentId} defaultModel={defaultModel} suggestions={suggestions} />;
 }

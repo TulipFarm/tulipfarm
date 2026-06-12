@@ -26,6 +26,7 @@ import type { HookExecutor } from "./hooks/hook-executor";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import type { WorkingMemoryService } from "./memory/service";
+import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
@@ -156,6 +157,7 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.reconcileResources
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
+        registerOnboardingRoutes(app, opts.soulLoader, requireAuth);
         if (opts.llmService) {
           registerSkillRoutes(app, opts.soulLoader, opts.gitSync, opts.llmService, requireAuth);
           if (opts.secretsService) {
