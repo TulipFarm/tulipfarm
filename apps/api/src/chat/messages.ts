@@ -8,7 +8,13 @@ export type MessagePart =
   | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
   | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown };
 
-export type MessageRole = "system" | "user" | "assistant" | "tool";
+export type MessageRole = "system" | "user" | "assistant" | "tool" | "summary";
+
+/** Cutoff marker on a `summary` row: the newest original turn it replaces (CTX-V1-001). */
+export interface CompactionCutoff {
+  createdAt: Date;
+  _id: string;
+}
 
 export interface MessageDoc {
   _id: string;
@@ -33,7 +39,7 @@ export class InvalidMessageError extends Error {
 export function assertValidMessage(role: MessageRole, content: string | MessagePart[]): void {
   const isString = typeof content === "string";
 
-  if (role === "system" || role === "user") {
+  if (role === "system" || role === "user" || role === "summary") {
     if (!isString) {
       throw new InvalidMessageError(`${role} message content must be a string`);
     }
@@ -74,6 +80,12 @@ export function assertValidMessage(role: MessageRole, content: string | MessageP
  */
 export function toModelMessage(doc: MessageDoc): ModelMessage {
   const { role, content } = doc;
+
+  // A `summary` row is a compaction artifact (CTX-V1-001); it enters the prompt as a
+  // system message carrying the summary of the oldest turns it replaced.
+  if (role === "summary") {
+    return { role: "system", content: typeof content === "string" ? content : "" };
+  }
 
   if (role === "system" || role === "user") {
     const text = typeof content === "string" ? content : "";
@@ -134,6 +146,27 @@ export function fromAssistantText(conversationId: string, text: string): Message
     role: "assistant",
     content: text,
     createdAt: new Date(),
+  };
+}
+
+/**
+ * Build the durable `summary` row that replaces the oldest turns during compaction
+ * (CTX-V1-001). `createdAt` is pinned to the cutoff turn's time so natural
+ * `(created_at, id)` ordering places the summary right before the first kept verbatim
+ * turn; `compactedThrough` records the newest original turn it covers.
+ */
+export function fromSummary(
+  conversationId: string,
+  text: string,
+  compactedThrough: CompactionCutoff
+): MessageDoc {
+  return {
+    _id: randomUUID(),
+    conversationId,
+    role: "summary",
+    content: text,
+    metadata: { compactedThrough },
+    createdAt: compactedThrough.createdAt,
   };
 }
 
