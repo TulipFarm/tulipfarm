@@ -308,4 +308,52 @@ tf-button[data-size="lg"] {
   padding: 8px 24px;
   font-size: 1rem;
 }
+
+/* tf-data-table — schema-shaped rows on a native <table>, styled flat to match schema-table.tsx.
+   DISPLAY-ONLY: the sort glyph reflects the aria-sort the agent sets; real sort/filter/paginate lives
+   in the shell list page (no iframe JS until A2UI-V1-001). */
+tf-data-table {
+  display: block;
+  border: 1px solid var(--border);
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+tf-data-table table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+tf-data-table thead tr {
+  border-bottom: 1px solid var(--border);
+}
+tf-data-table th {
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+}
+tf-data-table th[aria-sort="ascending"]::after { content: " ↑"; }
+tf-data-table th[aria-sort="descending"]::after { content: " ↓"; }
+tf-data-table td {
+  padding: 8px 12px;
+  vertical-align: top;
+  white-space: nowrap;
+  color: var(--foreground);
+}
+tf-data-table tbody tr + tr {
+  border-top: 1px solid var(--border);
+}
+tf-data-table tbody tr:hover {
+  background: var(--accent);
+}
+tf-data-table a {
+  color: var(--primary);
+  text-decoration: none;
+}
+tf-data-table a:hover {
+  text-decoration: underline;
+}
 `;

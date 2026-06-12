@@ -1,12 +1,17 @@
 import { expect, test } from "vitest";
 import {
+  cellText,
+  compareValues,
   deriveFields,
   detailFields,
+  type FieldDescriptor,
+  filterRecords,
   formatIso,
   formFields,
   listColumns,
   parseSchema,
   renderValue,
+  sortRecords,
 } from "~/lib/schema";
 
 // The mock `ticket` schema used throughout — exercises every x-* extension in a read view.
@@ -182,6 +187,95 @@ test("formFields keeps x-immutable fields (read-only handled by the form, not fi
 test("formatIso renders a date and passes non-dates through unchanged", () => {
   expect(formatIso("2026-06-08T14:03:00Z")).toContain("2026");
   expect(formatIso("not-a-date")).toBe("not-a-date");
+});
+
+// ── Client sort / filter helpers (shell list interactivity; shared schema→UI mapping) ──────────────
+
+// A schema exercising every comparable kind: string, number, date, boolean, enum, link.
+const ROW_YAML = `
+type: object
+properties:
+  id: { type: string }
+  name: { type: string }
+  count: { type: integer }
+  due: { type: string, format: date }
+  active: { type: boolean }
+  priority: { type: string, enum: [low, high] }
+  customerId: { type: string, x-links: { target: customer } }
+`;
+function rowFields(): Record<string, FieldDescriptor> {
+  const parsed = parseSchema(ROW_YAML);
+  if (!parsed.ok) throw new Error(parsed.error);
+  return Object.fromEntries(deriveFields(parsed.schema).map((f) => [f.name, f]));
+}
+const ROWS = [
+  { id: "a", name: "apple", count: 3, due: "2026-01-02", active: true, priority: "low" },
+  { id: "b", name: "cherry", count: 10, due: "2026-03-01", active: false, priority: "high" },
+  { id: "c", name: "banana", count: 1, due: "2026-02-01", active: true, priority: "low" },
+];
+
+test("cellText derives lowercased searchable text per kind", () => {
+  const f = rowFields();
+  expect(cellText(f.name, "Apple")).toBe("apple"); // lowercased
+  expect(cellText(f.count, 3)).toBe("3");
+  expect(cellText(f.active, true)).toBe("true");
+  expect(cellText(f.active, false)).toBe("false");
+  expect(cellText(f.priority, "high")).toBe("high");
+  expect(cellText(f.customerId, "CUST-88")).toBe("cust-88");
+  expect(cellText(f.due, "2026-01-02")).toContain("2026");
+  expect(cellText(f.name, null)).toBe(""); // nullish → empty
+  expect(cellText(f.name, "")).toBe("");
+});
+
+test("compareValues orders by kind: numeric, chronological, boolean, lexical", () => {
+  const f = rowFields();
+  expect(compareValues(f.count, 3, 10)).toBeLessThan(0); // numeric, not string "3" vs "10"
+  expect(compareValues(f.due, "2026-01-02", "2026-03-01")).toBeLessThan(0); // chronological
+  expect(compareValues(f.active, false, true)).toBeLessThan(0); // false < true
+  expect(compareValues(f.name, "apple", "banana")).toBeLessThan(0); // lexical
+  expect(compareValues(f.priority, "high", "low")).toBeLessThan(0); // enum → lexical
+});
+
+test("sortRecords asc/desc by kind, returning a new array (input untouched)", () => {
+  const f = rowFields();
+  const byCountAsc = sortRecords(ROWS, f.count, "asc").map((r) => r.id);
+  expect(byCountAsc).toEqual(["c", "a", "b"]); // 1, 3, 10
+  const byCountDesc = sortRecords(ROWS, f.count, "desc").map((r) => r.id);
+  expect(byCountDesc).toEqual(["b", "a", "c"]);
+  const byDueAsc = sortRecords(ROWS, f.due, "asc").map((r) => r.id);
+  expect(byDueAsc).toEqual(["a", "c", "b"]); // Jan, Feb, Mar
+  const byNameAsc = sortRecords(ROWS, f.name, "asc").map((r) => r.id);
+  expect(byNameAsc).toEqual(["a", "c", "b"]); // apple, banana, cherry
+  expect(ROWS.map((r) => r.id)).toEqual(["a", "b", "c"]); // original unmutated
+});
+
+test("sortRecords keeps nullish values last in BOTH directions and is stable", () => {
+  const f = rowFields();
+  const rows = [
+    { id: "x", count: 5 },
+    { id: "y", count: null },
+    { id: "z", count: 2 },
+    { id: "w", count: undefined },
+  ];
+  expect(sortRecords(rows, f.count, "asc").map((r) => r.id)).toEqual(["z", "x", "y", "w"]);
+  // desc: non-null reversed, nullish still trailing; y before w preserved (stable)
+  expect(sortRecords(rows, f.count, "desc").map((r) => r.id)).toEqual(["x", "z", "y", "w"]);
+});
+
+test("filterRecords does case-insensitive substring match across all columns", () => {
+  const f = rowFields();
+  const cols = [f.id, f.name, f.priority];
+  expect(filterRecords(ROWS, cols, "apple").map((r) => r.id)).toEqual(["a"]);
+  expect(filterRecords(ROWS, cols, "APPLE").map((r) => r.id)).toEqual(["a"]); // case-insensitive
+  expect(filterRecords(ROWS, cols, "high").map((r) => r.id)).toEqual(["b"]); // matches priority col
+  expect(filterRecords(ROWS, cols, "an").map((r) => r.id)).toEqual(["c"]); // "banana"
+  expect(filterRecords(ROWS, cols, "zzz")).toEqual([]); // no match
+});
+
+test("filterRecords returns all records for a blank/whitespace query", () => {
+  const f = rowFields();
+  expect(filterRecords(ROWS, [f.name], "")).toHaveLength(3);
+  expect(filterRecords(ROWS, [f.name], "   ")).toHaveLength(3);
 });
 
 // AC-V1-002 (read subset): a valid schema.yml yields a working list + detail with ZERO per-resource

@@ -46,6 +46,7 @@ test("embeds the tf-* component stylesheet", () => {
   const doc = buildSrcdoc(base);
   expect(doc).toContain("tf-card");
   expect(doc).toContain("tf-metric-card");
+  expect(doc).toContain("tf-data-table");
 });
 
 test("orders styles before the runtime script (reset, then components, then script)", () => {

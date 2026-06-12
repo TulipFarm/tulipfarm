@@ -35,6 +35,19 @@ test("preserves an unknown tf-* element (it renders empty later — deferring is
   expect(out).toContain("<tf-kanban>");
 });
 
+test("preserves tf-data-table wrapping a native <table> with aria-sort headers", () => {
+  const html =
+    '<tf-data-table><table><thead><tr><th aria-sort="ascending">name</th><th>status</th></tr></thead>' +
+    "<tbody><tr><td>Item A</td><td>active</td></tr></tbody></table></tf-data-table>";
+  const out = sanitizeAgentHtml(html);
+  expect(out).toContain("<tf-data-table>");
+  for (const tag of ["<table>", "<thead>", "<tbody>", "<tr>", "<th", "<td>"]) {
+    expect(out).toContain(tag);
+  }
+  expect(out).toContain('aria-sort="ascending"'); // presentational sort glyph hook survives
+  expect(out).toContain("Item A");
+});
+
 test("preserves safe formatting markup", () => {
   const out = sanitizeAgentHtml("<p><strong>bold</strong> and <em>italic</em></p>");
   expect(out).toContain("<strong>bold</strong>");

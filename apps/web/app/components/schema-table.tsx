@@ -1,6 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { ResourceRecord } from "~/lib/api";
-import { type FieldDescriptor, type RenderedCell, renderValue } from "~/lib/schema";
+import { type FieldDescriptor, type RenderedCell, renderValue, type SortState } from "~/lib/schema";
 
 /*
  * Schema-driven record list. Columns come from `listColumns` — no per-resource code. The id column
@@ -37,21 +37,50 @@ export function SchemaTable({
   columns,
   records,
   type,
+  sort,
+  onToggleSort,
 }: {
   columns: FieldDescriptor[];
   records: ResourceRecord[];
   type: string;
+  // Controlled sort. When `onToggleSort` is provided, headers become sort buttons; otherwise static.
+  sort?: SortState;
+  onToggleSort?: (column: string) => void;
 }) {
   return (
     <div className="overflow-x-auto rounded-sm border border-border">
       <table className="w-full border-collapse text-left text-sm">
         <thead>
           <tr className="border-b border-border text-xs uppercase tracking-[0.15em] text-muted-foreground">
-            {columns.map((col) => (
-              <th key={col.name} scope="col" className="whitespace-nowrap px-3 py-2 font-medium">
-                {col.name}
-              </th>
-            ))}
+            {columns.map((col) => {
+              const active = sort?.field === col.name;
+              const ariaSort = active
+                ? sort.dir === "asc"
+                  ? "ascending"
+                  : "descending"
+                : undefined;
+              return (
+                <th
+                  key={col.name}
+                  scope="col"
+                  aria-sort={ariaSort}
+                  className="whitespace-nowrap px-3 py-2 font-medium"
+                >
+                  {onToggleSort ? (
+                    <button
+                      type="button"
+                      onClick={() => onToggleSort(col.name)}
+                      className="inline-flex items-center gap-1 hover:text-foreground"
+                    >
+                      {col.name}
+                      {active ? <span aria-hidden>{sort.dir === "asc" ? "↑" : "↓"}</span> : null}
+                    </button>
+                  ) : (
+                    col.name
+                  )}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
