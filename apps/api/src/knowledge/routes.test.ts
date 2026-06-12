@@ -131,6 +131,43 @@ describe("knowledge routes", () => {
     expect(body.warnings).toEqual([]);
   });
 
+  it("reports indexingStatus=indexed on get + list when embeddings are available", async () => {
+    const id = await createDoc();
+    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+    expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("indexed");
+
+    const list = await app.inject({ method: "GET", url: `${base}/documents` });
+    expect(list.json<{ items: { indexingStatus: string }[] }>().items[0].indexingStatus).toBe(
+      "indexed"
+    );
+  });
+
+  it("reports indexingStatus=pending when a document has no chunks", async () => {
+    const id = await createDoc();
+    await new PgKnowledgeChunkRepo(db).deleteByDocument(id);
+    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+    expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("pending");
+  });
+
+  it("reports indexingStatus=lexical-only when no embedding provider is available", async () => {
+    const db2 = await makePglite();
+    await runPgMigrations(db2);
+    const app2 = await buildKnowledgeApp(db2, false);
+    try {
+      const res = await app2.inject({
+        method: "POST",
+        url: `${base}/documents`,
+        payload: { title: "x", content: "lexical only body" },
+      });
+      const id = res.json<{ id: string }>().id;
+      const got = await app2.inject({ method: "GET", url: `${base}/documents/${id}` });
+      expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("lexical-only");
+    } finally {
+      await app2.close();
+      await db2.close();
+    }
+  });
+
   it("manages collections and membership", async () => {
     const docId = await createDoc();
     const colRes = await app.inject({
@@ -159,6 +196,40 @@ describe("knowledge routes", () => {
       url: `${base}/collections/${colId}/documents/${docId}`,
     });
     expect(remove.statusCode).toBe(204);
+  });
+
+  it("gets a collection by id and 404s a missing one", async () => {
+    const colRes = await app.inject({
+      method: "POST",
+      url: `${base}/collections`,
+      payload: { name: "kb2", description: "desc" },
+    });
+    const colId = colRes.json<{ id: string }>().id;
+    const got = await app.inject({ method: "GET", url: `${base}/collections/${colId}` });
+    expect(got.statusCode).toBe(200);
+    expect(got.json<{ name: string }>().name).toBe("kb2");
+    const missing = await app.inject({
+      method: "GET",
+      url: `${base}/collections/00000000-0000-0000-0000-000000000000`,
+    });
+    expect(missing.statusCode).toBe(404);
+  });
+
+  it("refuses to add a soft-deleted document to a collection", async () => {
+    const docId = await createDoc();
+    const colRes = await app.inject({
+      method: "POST",
+      url: `${base}/collections`,
+      payload: { name: "kb3" },
+    });
+    const colId = colRes.json<{ id: string }>().id;
+    await app.inject({ method: "DELETE", url: `${base}/documents/${docId}` });
+    const add = await app.inject({
+      method: "POST",
+      url: `${base}/collections/${colId}/documents`,
+      payload: { documentId: docId },
+    });
+    expect(add.statusCode).toBe(404);
   });
 
   it("404s adding to a missing collection", async () => {
