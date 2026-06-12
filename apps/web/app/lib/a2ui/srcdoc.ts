@@ -1,3 +1,5 @@
+import { A2UI_CHART_BOOTSTRAP } from "~/lib/a2ui/chart-bootstrap";
+import { CHART_JS_SOURCE } from "~/lib/a2ui/chart-source";
 import { A2UI_COMPONENT_CSS } from "~/lib/a2ui/components";
 import { A2UI_RUNTIME } from "~/lib/a2ui/runtime";
 
@@ -23,6 +25,16 @@ export function buildSrcdoc(input: {
 }): string {
   const { sanitizedHtml, tokensCss, theme, nonce } = input;
 
+  // Chart.js (~206KB UMD) + the chart bootstrap are *injected into the srcdoc* only when a chart
+  // element is present, so chart-free frames stay lean at render time. (The CHART_JS_SOURCE module is
+  // still statically bundled; code-splitting it behind a dynamic import is deferred — see board.) Both
+  // carry the per-render nonce; Chart.js must come first (the bootstrap depends on the `window.Chart`
+  // it sets).
+  const chartScripts = sanitizedHtml.includes("tf-chart-")
+    ? `<script nonce="${nonce}">${CHART_JS_SOURCE}</script>` +
+      `<script nonce="${nonce}">${A2UI_CHART_BOOTSTRAP}</script>`
+    : "";
+
   const csp = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
@@ -43,7 +55,7 @@ export function buildSrcdoc(input: {
 <style>${tokensCss}</style>
 <style>${RESET}</style>
 <style>${A2UI_COMPONENT_CSS}</style>
-<script nonce="${nonce}">${A2UI_RUNTIME}</script>
+<script nonce="${nonce}">${A2UI_RUNTIME}</script>${chartScripts}
 </head>
 <body>${sanitizedHtml}</body>
 </html>`;

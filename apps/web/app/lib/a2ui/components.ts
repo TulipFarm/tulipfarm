@@ -486,4 +486,18 @@ tf-combobox li { padding: 6px 12px; color: var(--foreground); }
 tf-combobox li + li { border-top: 1px solid var(--border); }
 tf-combobox li:hover,
 tf-combobox li[aria-selected="true"] { background: var(--accent); color: var(--accent-foreground); }
+
+/* tf-chart-bar / tf-chart-line — fixed-height box for the Chart.js canvas. The fixed height lets
+   maintainAspectRatio:false fill a stable box, so the canvas cannot grow into the runtime's
+   ResizeObserver height report (no feedback loop). Series/axis colors are set by the chart bootstrap
+   from CSS tokens (palette-honest, no green/amber). */
+tf-chart-bar,
+tf-chart-line {
+  display: block;
+  position: relative;
+  height: 320px;
+  margin: 12px 0;
+}
+tf-chart-bar > canvas,
+tf-chart-line > canvas { display: block; }
 `;

@@ -70,3 +70,22 @@ test("keeps the component stylesheet inside a <style>, not a script", () => {
   expect(styleOpen).toBeGreaterThan(-1);
   expect(styleClose).toBeGreaterThan(styleOpen);
 });
+
+test("does NOT inject Chart.js or the chart bootstrap for chart-free content", () => {
+  const doc = buildSrcdoc(base); // base body = <tf-card>, no tf-chart-
+  expect(doc).not.toContain("Chart.js v4"); // Chart.js UMD banner
+  expect(doc).not.toContain("[a2ui] chart skipped:"); // chart-bootstrap-unique string
+});
+
+test("injects nonce'd Chart.js + chart bootstrap when a tf-chart-* element is present", () => {
+  const doc = buildSrcdoc({
+    ...base,
+    sanitizedHtml: "<tf-chart-bar data-labels='[]' data-datasets='[]'></tf-chart-bar>",
+  });
+  expect(doc).toContain("Chart.js v4"); // bundled Chart.js source present
+  expect(doc).toContain("[a2ui] chart skipped:"); // bootstrap present
+  // Chart.js must precede the bootstrap (bootstrap depends on window.Chart it defines).
+  expect(doc.indexOf("Chart.js v4")).toBeLessThan(doc.indexOf("[a2ui] chart skipped:"));
+  // Both ride the per-render nonce; no unnonced <script> is introduced.
+  expect(doc).not.toMatch(/<script(?!\s+nonce=)/);
+});
