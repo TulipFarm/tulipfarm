@@ -3,6 +3,7 @@ import {
   assertValidMessage,
   fromAssistantParts,
   fromAssistantText,
+  fromSummary,
   fromToolResult,
   fromUserText,
   InvalidMessageError,
@@ -22,6 +23,10 @@ describe("assertValidMessage — legal cases", () => {
 
   it("accepts assistant + string", () => {
     expect(() => assertValidMessage("assistant", "hi there")).not.toThrow();
+  });
+
+  it("accepts summary + string", () => {
+    expect(() => assertValidMessage("summary", "earlier: user asked about X")).not.toThrow();
   });
 
   it("accepts assistant + [text part]", () => {
@@ -62,6 +67,11 @@ describe("assertValidMessage — illegal cases", () => {
   it("rejects user + [parts]", () => {
     const content: MessagePart[] = [{ type: "text", text: "no" }];
     expect(() => assertValidMessage("user", content)).toThrow(InvalidMessageError);
+  });
+
+  it("rejects summary + [parts]", () => {
+    const content: MessagePart[] = [{ type: "text", text: "no" }];
+    expect(() => assertValidMessage("summary", content)).toThrow(InvalidMessageError);
   });
 
   it("rejects assistant + [tool-result]", () => {
@@ -121,6 +131,11 @@ describe("toModelMessage", () => {
   it("maps assistant string → assistant message", () => {
     const doc: MessageDoc = { ...base, role: "assistant", content: "Hello" };
     expect(toModelMessage(doc)).toEqual({ role: "assistant", content: "Hello" });
+  });
+
+  it("maps summary → system message (compaction artifact enters as system)", () => {
+    const doc: MessageDoc = { ...base, role: "summary", content: "earlier turns summarized" };
+    expect(toModelMessage(doc)).toEqual({ role: "system", content: "earlier turns summarized" });
   });
 
   it("maps assistant [text, tool-call] → assistant with matching parts", () => {
@@ -188,6 +203,26 @@ describe("fromUserText / fromAssistantText", () => {
     const a = fromUserText("conv1", "x");
     const b = fromUserText("conv1", "x");
     expect(a._id).not.toBe(b._id);
+  });
+});
+
+describe("fromSummary", () => {
+  it("builds a summary row pinned to the cutoff time, with compactedThrough metadata", () => {
+    const cutoff = { createdAt: new Date("2026-06-12T10:00:00Z"), _id: "row-42" };
+    const doc = fromSummary("conv1", "the gist of earlier turns", cutoff);
+    expect(doc.role).toBe("summary");
+    expect(doc.content).toBe("the gist of earlier turns");
+    expect(doc.conversationId).toBe("conv1");
+    expect(doc.createdAt).toEqual(cutoff.createdAt); // pinned so it orders before the verbatim region
+    expect(doc.metadata).toEqual({ compactedThrough: cutoff });
+    expect(doc._id.length).toBeGreaterThan(0);
+  });
+
+  it("round-trips through assertValidMessage + toModelMessage", () => {
+    const cutoff = { createdAt: new Date(), _id: "row-1" };
+    const doc = fromSummary("conv1", "summary text", cutoff);
+    expect(() => assertValidMessage(doc.role, doc.content)).not.toThrow();
+    expect(toModelMessage(doc)).toEqual({ role: "system", content: "summary text" });
   });
 });
 

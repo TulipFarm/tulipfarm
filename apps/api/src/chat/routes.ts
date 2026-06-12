@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
-import { type ModelMessage, streamText } from "ai";
+import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
@@ -19,6 +19,7 @@ import { BatchCoordinator } from "../tools/batch-executor";
 import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
 import { ApprovalRegistry, makeApprovalGate } from "./approvals";
+import { compactHistory, estimateTokens } from "./compaction";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import {
   fromAssistantParts,
@@ -37,6 +38,12 @@ import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** Instruction prefix for the quick-tier compaction summarizer (CTX-V1-001). */
+const SUMMARY_PROMPT =
+  "Summarize the earlier portion of this conversation transcript into a concise, " +
+  "information-dense recap. Preserve facts, decisions, names, numbers, and any open " +
+  "tasks the assistant must remember to continue. Write only the summary.";
 
 interface ChatBody {
   conversationId?: string;
@@ -293,8 +300,24 @@ export function registerChatRoutes(
         availableSkills: listAvailableSkills(soulLoader),
         eagerSkills: listEagerSkills(soulLoader),
       });
+      // Compaction (CTX-V1-001/002): over budget → summarize the oldest turns once into a durable
+      // `summary` row; recent turns stay verbatim. Best-effort — a summarize failure falls back to
+      // the full (filtered) history so the turn still runs. Statelessness preserved: this only
+      // changes which history rows are rendered, not the per-turn reconstruction.
+      const rendered = await compactHistory({
+        docs: history.items,
+        conversationId: convo._id,
+        extraTokens: estimateTokens(system) + estimateTokens(body.message.content),
+        messageRepo,
+        summarize: (transcript) =>
+          generateText({
+            model: llmService.getModel("quick"),
+            prompt: `${SUMMARY_PROMPT}\n\n${transcript}`,
+          }).then((r) => r.text),
+        log: req.log,
+      });
       if (system) messages.push({ role: "system", content: system });
-      messages.push(...history.items.map(toModelMessage), {
+      messages.push(...rendered.map(toModelMessage), {
         role: "user",
         content: body.message.content,
       });

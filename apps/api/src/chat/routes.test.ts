@@ -11,6 +11,7 @@ import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { GuardrailsService } from "../guardrails";
+import { MAX_HISTORY_TOKENS } from "../memory/limits";
 import { WorkingMemoryService } from "../memory/service";
 import {
   assertValidEntry,
@@ -139,6 +140,25 @@ function makeToolThenTextModel(
       ? (makeToolCallStreamResult(toolCalls) as ReturnType<typeof makeStreamResult>)
       : makeStreamResult([followupText]);
   });
+}
+
+// Non-streaming model for the quick-tier compaction summarizer: doGenerate returns fixed text.
+function makeQuickModel(text: string): LanguageModelV3 {
+  return {
+    specificationVersion: "v3",
+    provider: "test",
+    modelId: "quick-model",
+    supportedUrls: {},
+    doStream: vi.fn(async () => {
+      throw new Error("doStream unused on quick model");
+    }),
+    doGenerate: vi.fn(async () => ({
+      content: [{ type: "text", text }],
+      finishReason: { unified: "stop", raw: undefined },
+      usage: V3_USAGE,
+      warnings: [],
+    })),
+  } as unknown as LanguageModelV3;
 }
 
 // ── Fake conversation repo ────────────────────────────────────────────────────
@@ -536,6 +556,94 @@ describe("chat routes", () => {
       expect(texts.some((t) => t.includes("earlier question"))).toBe(true);
       expect(texts.some((t) => t.includes("earlier answer"))).toBe(true);
       expect(texts.some((t) => t.includes("follow up"))).toBe(true);
+    });
+
+    // Compaction (CTX-V1-001/002) — an over-budget conversation summarizes its oldest turns once
+    // into a durable `summary` row, keeps recent turns verbatim, and reuses the summary next turn.
+    it("summarizes oldest turns when over budget, keeps recent verbatim, and reuses next turn", async () => {
+      const convoId = randomUUID();
+      const base = new Date(Date.now() - 100_000);
+      await repo.create({
+        _id: convoId,
+        userId,
+        model: undefined,
+        createdAt: base,
+        updatedAt: base,
+      });
+      // One huge oldest user turn pushes the conversation over MAX_HISTORY_TOKENS.
+      messageRepo.messages.push(userMessage(convoId, "X".repeat(MAX_HISTORY_TOKENS * 4), base));
+      messageRepo.messages.push(
+        assistantMessage(convoId, "old answer", new Date(base.getTime() + 1000))
+      );
+      messageRepo.messages.push(
+        userMessage(convoId, "recent question", new Date(base.getTime() + 2000))
+      );
+      messageRepo.messages.push(
+        assistantMessage(convoId, "recent answer", new Date(base.getTime() + 3000))
+      );
+
+      const quick = makeQuickModel("EARLIER SUMMARY");
+      const getModel = vi.fn(() => quick);
+      (llmService as unknown as { getModel: () => LanguageModelV3 }).getModel = getModel;
+
+      // Turn 1 — overflow → one summarization pass.
+      const r1 = await post({ conversationId: convoId, message: userMsg("follow up") });
+      expect(r1.statusCode).toBe(200);
+      expect(r1.body).toContain("Hello"); // run continues
+      await waitFor(() => messageRepo.byConversation(convoId).some((m) => m.role === "summary"));
+
+      const summaries = messageRepo.byConversation(convoId).filter((m) => m.role === "summary");
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0].content).toBe("EARLIER SUMMARY");
+      expect(
+        (summaries[0].metadata as { compactedThrough?: unknown }).compactedThrough
+      ).toBeDefined();
+
+      // Outgoing model prompt: summary leads, recent turns verbatim, oldest turns gone.
+      await waitFor(() => capturedPrompts.length >= 1);
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      const texts = prompt.map((m) => JSON.stringify(m.content));
+      expect(texts.some((t) => t.includes("EARLIER SUMMARY"))).toBe(true);
+      expect(texts.some((t) => t.includes("recent question"))).toBe(true);
+      expect(texts.some((t) => t.includes("follow up"))).toBe(true);
+      expect(texts.some((t) => t.includes("old answer"))).toBe(false); // summarized away
+
+      // Turn 2 — history is now under budget (summary + small turns) → no second pass (CTX-V1-001).
+      const r2 = await post({ conversationId: convoId, message: userMsg("third") });
+      expect(r2.statusCode).toBe(200);
+      expect(getModel).toHaveBeenCalledTimes(1); // exactly one summarization pass total
+      expect(messageRepo.byConversation(convoId).filter((m) => m.role === "summary")).toHaveLength(
+        1
+      );
+
+      // The durable summary row surfaces in the messages list (schema enum includes "summary").
+      const list = await get(`/api/v1/conversations/${convoId}/messages?limit=100`);
+      expect(list.statusCode).toBe(200);
+      expect(list.json().messages.some((m: MessageDoc) => m.role === "summary")).toBe(true);
+    });
+
+    // Graceful skip — if summarization is unavailable, the turn still runs with full history.
+    it("falls back to full history when the summarizer is unavailable (no summary row)", async () => {
+      const convoId = randomUUID();
+      const base = new Date(Date.now() - 100_000);
+      await repo.create({
+        _id: convoId,
+        userId,
+        model: undefined,
+        createdAt: base,
+        updatedAt: base,
+      });
+      messageRepo.messages.push(userMessage(convoId, "Y".repeat(MAX_HISTORY_TOKENS * 4), base));
+      messageRepo.messages.push(
+        userMessage(convoId, "still here", new Date(base.getTime() + 1000))
+      );
+      // llmService has no getModel in the default harness → summarize throws → graceful skip.
+
+      const res = await post({ conversationId: convoId, message: userMsg("next") });
+      expect(res.statusCode).toBe(200);
+      expect(res.body).toContain("Hello");
+      await waitFor(() => capturedPrompts.length >= 1);
+      expect(messageRepo.byConversation(convoId).some((m) => m.role === "summary")).toBe(false);
     });
 
     // Context engine — the assembled system prompt (CONTEXT-ENGINE §1) leads the model prompt.

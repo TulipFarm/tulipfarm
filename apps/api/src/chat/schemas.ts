@@ -3,7 +3,7 @@ export const MessageSchema = {
   properties: {
     _id: { type: "string" },
     conversationId: { type: "string" },
-    role: { type: "string", enum: ["system", "user", "assistant", "tool"] },
+    role: { type: "string", enum: ["system", "user", "assistant", "tool", "summary"] },
     content: {
       oneOf: [
         { type: "string" },
