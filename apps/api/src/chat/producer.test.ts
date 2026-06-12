@@ -401,3 +401,59 @@ describe("attachToStream", () => {
     expect(res2.ended).toBe(true);
   });
 });
+
+// ── A2UI follow-on emission for view/terminal tools ───────────────────────────
+describe("runChatStream a2ui follow-on", () => {
+  type Emitted = { eventType: string; data: unknown };
+  const captureEmitter = (sink: Emitted[]): import("./stream-emitter").StreamEmitter => ({
+    emit: (eventType, data) => {
+      sink.push({ eventType, data });
+      return Promise.resolve();
+    },
+  });
+
+  it("emits both tool-result and a2ui for a present_choices result", async () => {
+    const hub = new StreamHub();
+    const sid = randomUUID();
+    const emitted: Emitted[] = [];
+    await runChatStream(
+      sid,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "present_choices",
+          output: {
+            success: true,
+            data: { question: "Pick", choices: [{ label: "A", value: "a" }] },
+          },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: captureEmitter(emitted), hub, log }
+    );
+    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "a2ui", "finish"]);
+    const a2ui = emitted.find((e) => e.eventType === "a2ui");
+    expect((a2ui?.data as { html: string }).html).toContain("data-a2ui-send");
+  });
+
+  it("emits only tool-result for a non-view tool", async () => {
+    const hub = new StreamHub();
+    const sid = randomUUID();
+    const emitted: Emitted[] = [];
+    await runChatStream(
+      sid,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c2",
+          toolName: "list_things",
+          output: { success: true, data: { items: [] } },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: captureEmitter(emitted), hub, log }
+    );
+    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "finish"]);
+  });
+});
