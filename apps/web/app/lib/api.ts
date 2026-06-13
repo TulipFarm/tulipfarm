@@ -92,12 +92,14 @@ export async function apiSend(
 }
 
 // DELETE client. Mirrors apiWrite's cookie-first auth + CSRF echo, but sends no body and expects an
-// empty (204) response, so it returns void instead of parsing JSON.
-export async function apiDelete(path: string): Promise<void> {
+// empty (204) response, so it returns void instead of parsing JSON. `ifMatch` (the record version)
+// is sent as the optimistic-concurrency header for endpoints that require it (resource records).
+export async function apiDelete(path: string, ifMatch?: number): Promise<void> {
   const headers: Record<string, string> = { Accept: "application/json" };
   applyAuth(headers);
   const csrf = readCookie(CSRF_COOKIE);
   if (csrf) headers["x-csrf-token"] = csrf;
+  if (ifMatch !== undefined) headers["If-Match"] = `"${ifMatch}"`;
 
   const res = await fetch(`${API_BASE}${path}`, {
     method: "DELETE",
@@ -153,6 +155,33 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, path);
 }
 
+// Create a resource type. `schema` is a JSON Schema serialised as a string (JSON is valid YAML, so
+// the API's YAML parser accepts it). Returns the persisted summary; 409 if the type already exists.
+export async function createResourceType(
+  name: string,
+  schema: string
+): Promise<ResourceTypeSummary> {
+  return apiWrite<ResourceTypeSummary>("POST", "/api/v1/resource-types", { name, schema });
+}
+
+// Replace a resource type's schema (full schema string, JSON or YAML). 404 if the type is gone.
+export async function updateResourceType(
+  name: string,
+  schema: string
+): Promise<ResourceTypeSummary> {
+  return apiWrite<ResourceTypeSummary>(
+    "PUT",
+    `/api/v1/resource-types/${encodeURIComponent(name)}`,
+    { schema }
+  );
+}
+
+// Remove a resource type's definition from the soul. Non-destructive: the Postgres table (records)
+// is left intact. Returns 204 (void).
+export async function deleteResourceType(name: string): Promise<void> {
+  return apiDelete(`/api/v1/resource-types/${encodeURIComponent(name)}`);
+}
+
 export async function listResourceTypes(): Promise<ResourceTypeSummary[]> {
   const body = await apiGet<{ types: ResourceTypeSummary[] }>("/api/v1/resource-types");
   return body.types;
@@ -198,6 +227,15 @@ export async function updateRecord(
     "PUT",
     `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     body,
+    version
+  );
+}
+
+// Soft-delete a record with optimistic concurrency. `version` is sent as `If-Match`; a stale version
+// yields ApiError(409). The API soft-deletes (history preserved); returns 204 (void).
+export async function deleteRecord(type: string, id: string, version: number): Promise<void> {
+  return apiDelete(
+    `/api/v1/resources/${encodeURIComponent(type)}/${encodeURIComponent(id)}`,
     version
   );
 }

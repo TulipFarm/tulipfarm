@@ -121,7 +121,7 @@ describe("agents routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("lists the built-in GeneralAssistant first, then soul agents (frontmatter only, no body)", async () => {
+    it("lists the platform agents first, then soul agents (frontmatter only, no body)", async () => {
       const res = await app.inject(authed("/api/v1/agents"));
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
@@ -130,8 +130,15 @@ describe("agents routes", () => {
             name: "GeneralAssistant",
             label: "General Assistant",
             description:
-              "The default TulipFarm assistant — answers when no soul agent is selected.",
+              "Front desk for TulipFarm — answers questions, reads resources and knowledge, and routes creation work to the Information Architect.",
             model: "standard",
+          },
+          {
+            name: "InformationArchitect",
+            label: "Information Architect",
+            description:
+              "Creation specialist — builds and edits resource types, skills, and agents and runs onboarding, using the inbuilt forge skills.",
+            model: "complex",
           },
           {
             name: "sprint-planner",

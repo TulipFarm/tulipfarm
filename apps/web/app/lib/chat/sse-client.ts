@@ -168,7 +168,7 @@ export function sendApprovalDecision(
 ): Promise<{ status: string }> {
   return apiWrite<{ status: string }>(
     "POST",
-    `/api/v1/chat/approvals/${encodeURIComponent(approvalId)}/decide`,
+    `/api/v1/approvals/${encodeURIComponent(approvalId)}/decide`,
     { decision }
   );
 }

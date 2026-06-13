@@ -73,6 +73,29 @@ describe("ToolRegistry", () => {
       await ts.ctx_check.execute?.({}, { messages: [], toolCallId: "tc1" });
       expect(execute).toHaveBeenCalledWith({}, ctx);
     });
+
+    it("allowedToolNames scopes the set to the per-agent allowlist", () => {
+      const reg = new ToolRegistry();
+      for (const name of ["read_a", "create_resource_type", "write_b"]) {
+        reg.register(makeTool({ name }));
+      }
+      const ts = reg.buildToolSet(
+        ctx,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        new Set(["read_a"])
+      );
+      expect(Object.keys(ts)).toEqual(["read_a"]);
+    });
+
+    it("allowedToolNames undefined keeps the default ALLOW_ALL behavior", () => {
+      const reg = new ToolRegistry();
+      reg.register(makeTool({ name: "alpha" }));
+      reg.register(makeTool({ name: "beta" }));
+      expect(Object.keys(reg.buildToolSet(ctx))).toEqual(["alpha", "beta"]);
+    });
   });
 
   describe("BatchCoordinator integration", () => {

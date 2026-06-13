@@ -4,6 +4,8 @@ import {
   GENERAL_ASSISTANT,
   GENERAL_ASSISTANT_NAME,
   getAgent,
+  INFORMATION_ARCHITECT,
+  INFORMATION_ARCHITECT_NAME,
   listAgents,
   resolveAgent,
 } from "./registry";
@@ -33,6 +35,21 @@ describe("agent registry", () => {
     });
   });
 
+  describe("INFORMATION_ARCHITECT built-in", () => {
+    it("has the reserved PascalCase name, a label, and a non-empty body", () => {
+      expect(INFORMATION_ARCHITECT.name).toBe(INFORMATION_ARCHITECT_NAME);
+      expect(INFORMATION_ARCHITECT_NAME).toBe("InformationArchitect");
+      expect(INFORMATION_ARCHITECT.frontmatter.label).toBeTruthy();
+      expect(INFORMATION_ARCHITECT.body.length).toBeGreaterThan(0);
+    });
+
+    it("surfaces the inbuilt forge skills it can load", () => {
+      expect(INFORMATION_ARCHITECT.forgeSkills).toEqual(
+        expect.arrayContaining(["resource-forge", "skill-forge", "agent-forge", "onboarding"])
+      );
+    });
+  });
+
   describe("resolveAgent", () => {
     it("falls back to GeneralAssistant on a fresh install (undefined soulLoader)", () => {
       expect(resolveAgent(undefined, undefined)).toBe(GENERAL_ASSISTANT);
@@ -55,25 +72,41 @@ describe("agent registry", () => {
     it("resolves a loaded soul agent by id", () => {
       expect(resolveAgent(makeSoulLoader([PLANNER]), "sprint-planner")).toBe(PLANNER);
     });
+
+    it("resolves the InformationArchitect name to the built-in specialist", () => {
+      expect(resolveAgent(makeSoulLoader([PLANNER]), INFORMATION_ARCHITECT_NAME)).toBe(
+        INFORMATION_ARCHITECT
+      );
+    });
   });
 
   describe("listAgents", () => {
-    it("lists GeneralAssistant first on a fresh install", () => {
-      expect(listAgents(makeSoulLoader([]))).toEqual([GENERAL_ASSISTANT]);
+    it("lists the platform agents first on a fresh install", () => {
+      expect(listAgents(makeSoulLoader([]))).toEqual([GENERAL_ASSISTANT, INFORMATION_ARCHITECT]);
     });
 
-    it("lists GeneralAssistant first, then loaded soul agents", () => {
-      expect(listAgents(makeSoulLoader([PLANNER]))).toEqual([GENERAL_ASSISTANT, PLANNER]);
+    it("lists the platform agents first, then loaded soul agents", () => {
+      expect(listAgents(makeSoulLoader([PLANNER]))).toEqual([
+        GENERAL_ASSISTANT,
+        INFORMATION_ARCHITECT,
+        PLANNER,
+      ]);
     });
 
     it("handles an undefined soulLoader", () => {
-      expect(listAgents(undefined)).toEqual([GENERAL_ASSISTANT]);
+      expect(listAgents(undefined)).toEqual([GENERAL_ASSISTANT, INFORMATION_ARCHITECT]);
     });
   });
 
   describe("getAgent", () => {
     it("returns the built-in by its reserved name", () => {
       expect(getAgent(makeSoulLoader([PLANNER]), GENERAL_ASSISTANT_NAME)).toBe(GENERAL_ASSISTANT);
+    });
+
+    it("returns the InformationArchitect by its reserved name", () => {
+      expect(getAgent(makeSoulLoader([PLANNER]), INFORMATION_ARCHITECT_NAME)).toBe(
+        INFORMATION_ARCHITECT
+      );
     });
 
     it("returns a loaded soul agent by name", () => {

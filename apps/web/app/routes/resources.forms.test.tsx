@@ -5,7 +5,7 @@ import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
 import { ApiError, createRecord, updateRecord } from "~/lib/api";
 import { formFields, parseSchema } from "~/lib/schema";
-import ResourceEdit from "./_app.resources.$type.$id.edit";
+import ResourceEdit from "./_app.resources.$type.$id_.edit";
 import ResourceCreate from "./_app.resources.$type.new";
 
 /*

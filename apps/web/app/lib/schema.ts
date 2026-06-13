@@ -198,18 +198,38 @@ export function formatIso(value: string): string {
   });
 }
 
+// Best human label for a target record: a hinted field, else the first non-system string, else id.
+// Shared by the x-links combobox (picker) and the detail link (so both show "Acme Corp", not a UUID).
+const LABEL_HINTS = ["name", "title", "label", "summary"];
+const LABEL_SYSTEM = new Set(["id", "version", "createdAt", "updatedAt", "deletedAt"]);
+export function recordLabel(record: Record<string, unknown>): string {
+  for (const hint of LABEL_HINTS) {
+    const v = record[hint];
+    if (typeof v === "string" && v) return v;
+  }
+  for (const [k, v] of Object.entries(record)) {
+    if (!LABEL_SYSTEM.has(k) && typeof v === "string" && v) return v;
+  }
+  return String(record.id ?? "");
+}
+
 // Raw value → presentational primitive. The single source of truth for how each kind renders.
-export function renderValue(field: FieldDescriptor, value: unknown): RenderedCell {
+// `linkLabels` (value→display name) resolves an x-links id to the target record's label when known.
+export function renderValue(
+  field: FieldDescriptor,
+  value: unknown,
+  linkLabels?: Record<string, string>
+): RenderedCell {
   if (value === null || value === undefined || value === "") return { kind: "muted", text: "—" };
 
   switch (field.kind) {
     case "link": {
-      const label = String(value);
-      if (!field.linkTarget) return { kind: "text", text: label };
+      const raw = String(value);
+      if (!field.linkTarget) return { kind: "text", text: raw };
       return {
         kind: "link",
-        to: `/resources/${encodeURIComponent(field.linkTarget)}/${encodeURIComponent(label)}`,
-        label,
+        to: `/resources/${encodeURIComponent(field.linkTarget)}/${encodeURIComponent(raw)}`,
+        label: linkLabels?.[raw] ?? raw,
       };
     }
     case "boolean":

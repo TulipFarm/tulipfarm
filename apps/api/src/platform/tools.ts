@@ -13,6 +13,14 @@ export interface PlatformToolContext {
   soulPath?: string;
   gitSync?: GitSyncService;
   routineContext?: { routineId: string; runId: string };
+  /**
+   * Inbuilt forge skills (resource-forge / skill-forge / agent-forge / onboarding) bundled with the
+   * app, not present in the soul. `load_skill` falls back to these by name so the Information
+   * Architect can pull a forge body on demand.
+   */
+  builtinSkills?: ReadonlyMap<string, { name: string; description: string; body: string }>;
+  /** Reserved names of the code-defined platform agents, valid `transfer_to_agent` targets. */
+  platformAgentNames?: ReadonlySet<string>;
 }
 
 export interface PlatformTool {
@@ -47,7 +55,7 @@ const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
 export const loadSkillTool: PlatformTool = {
   name: "load_skill",
   description:
-    "Load a skill's frontmatter and body from the soul by name. Returns the skill definition so the agent can apply its instructions. Graceful not_found when the skill is absent.",
+    "Load a skill's frontmatter and body by name so the agent can apply its instructions. Resolves soul skills and the inbuilt forge skills (resource-forge, skill-forge, agent-forge, onboarding). Graceful not_found when the skill is absent.",
   mutating: false,
   inputSchema: LOAD_SKILL_SCHEMA,
   handler: async (args, ctx) => {
@@ -55,8 +63,16 @@ export const loadSkillTool: PlatformTool = {
       return err("validation_error", firstError(validateLoadSkill.errors));
     const { name } = args as { name: string };
     const skill = ctx.soulLoader?.skills.get(name);
-    if (!skill) return err("not_found", `Skill "${name}" not found in soul.`);
-    return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
+    if (skill) return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
+    // Fall back to the bundled forge skills (not in the soul).
+    const builtin = ctx.builtinSkills?.get(name);
+    if (builtin)
+      return ok({
+        name: builtin.name,
+        frontmatter: { description: builtin.description },
+        body: builtin.body,
+      });
+    return err("not_found", `Skill "${name}" not found.`);
   },
 };
 
@@ -293,15 +309,18 @@ const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
 export const transferToAgentTool: PlatformTool = {
   name: "transfer_to_agent",
   description:
-    "Hand the conversation off to another agent. The UI surfaces a handoff card and future turns are handled by the target agent. Validates that the target agent exists in the soul.",
+    "Hand the conversation off to another agent (e.g. the InformationArchitect for any create/edit of a resource type, skill, or agent). The conversation's active agent switches and future turns are handled by the target until it completes. Validates that the target is a known platform or soul agent.",
   mutating: false,
   inputSchema: TRANSFER_TO_AGENT_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateTransfer(args))
       return err("validation_error", firstError(validateTransfer.errors));
     const { agentId, message } = args as { agentId: string; message?: string };
+    if (ctx.platformAgentNames?.has(agentId)) {
+      return ok({ agentId, agentName: agentId, status: "transferred", message: message ?? null });
+    }
     const agent = ctx.soulLoader?.agents.get(agentId);
-    if (!agent) return err("not_found", `Agent "${agentId}" not found in soul.`);
+    if (!agent) return err("not_found", `Agent "${agentId}" not found.`);
     const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
     return ok({ agentId, agentName, status: "transferred", message: message ?? null });
   },
@@ -601,6 +620,54 @@ export const completeStateTool: PlatformTool = {
   },
 };
 
+// ── complete_task ─────────────────────────────────────────────────────────────
+
+const COMPLETE_TASK_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status"],
+  properties: {
+    status: {
+      type: "string",
+      enum: ["success", "failed", "cancelled"],
+      description: "Outcome of the delegated work.",
+    },
+    summary: { type: "string", description: "One-line summary of what was built / what happened." },
+    result: {
+      type: "object",
+      description:
+        "Optional structured result, e.g. { resources, skills, agents } counts or names.",
+    },
+    error: { type: "string", description: "Specific reason when status is 'failed'." },
+  },
+};
+const validateCompleteTask = ajv.compile(COMPLETE_TASK_SCHEMA);
+
+export const completeTaskTool: PlatformTool = {
+  name: "complete_task",
+  description:
+    "Signal that the delegated work is finished and hand control back to the front-desk agent. Call this when a creation/onboarding session is done (success), cannot proceed (failed), or was abandoned (cancelled).",
+  mutating: false,
+  inputSchema: COMPLETE_TASK_SCHEMA,
+  handler: async (args) => {
+    if (!validateCompleteTask(args))
+      return err("validation_error", firstError(validateCompleteTask.errors));
+    const { status, summary, result, error } = args as {
+      status: "success" | "failed" | "cancelled";
+      summary?: string;
+      result?: Record<string, unknown>;
+      error?: string;
+    };
+    return ok({
+      status,
+      summary: summary ?? null,
+      result: result ?? null,
+      error: error ?? null,
+      completed: true,
+    });
+  },
+};
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 export const PLATFORM_TOOLS: PlatformTool[] = [
@@ -620,4 +687,5 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   soulRepoPushTool,
   callSkillTool,
   completeStateTool,
+  completeTaskTool,
 ];

@@ -7,6 +7,7 @@ import {
   beginSoulBatchTool,
   callSkillTool,
   completeStateTool,
+  completeTaskTool,
   composeViewTool,
   delegateToAgentTool,
   endSoulBatchTool,
@@ -106,8 +107,46 @@ describe("loadSkillTool", () => {
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
+  it("falls back to a bundled forge skill when not in the soul", async () => {
+    const ctx: PlatformToolContext = {
+      builtinSkills: new Map([
+        ["resource-forge", { name: "resource-forge", description: "Forge a type", body: "# RF" }],
+      ]),
+    };
+    const res = await loadSkillTool.handler({ name: "resource-forge" }, ctx);
+    expect(res).toEqual({
+      success: true,
+      data: { name: "resource-forge", frontmatter: { description: "Forge a type" }, body: "# RF" },
+    });
+  });
+
   it("returns validation_error for missing name", async () => {
     const res = await loadSkillTool.handler({}, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+});
+
+// ── complete_task ─────────────────────────────────────────────────────────────
+
+describe("completeTaskTool", () => {
+  it("returns the structured completion result handed back to the front desk", async () => {
+    const res = await completeTaskTool.handler(
+      { status: "success", summary: "built invoices", result: { resources: 1 } },
+      {}
+    );
+    expect(res).toMatchObject({
+      success: true,
+      data: {
+        status: "success",
+        summary: "built invoices",
+        result: { resources: 1 },
+        completed: true,
+      },
+    });
+  });
+
+  it("returns validation_error for an invalid status", async () => {
+    const res = await completeTaskTool.handler({ status: "weird" }, {});
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
@@ -328,6 +367,20 @@ describe("transferToAgentTool", () => {
   it("returns not_found for unknown agent", async () => {
     const res = await transferToAgentTool.handler({ agentId: "ghost" }, makeCtx());
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("accepts a code-defined platform agent (InformationArchitect) as a transfer target", async () => {
+    const ctx: PlatformToolContext = {
+      platformAgentNames: new Set(["InformationArchitect"]),
+    };
+    const res = await transferToAgentTool.handler(
+      { agentId: "InformationArchitect", message: "build an invoices resource" },
+      ctx
+    );
+    expect(res).toMatchObject({
+      success: true,
+      data: { agentId: "InformationArchitect", status: "transferred" },
+    });
   });
 });
 
@@ -619,7 +672,7 @@ describe("completeStateTool", () => {
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 describe("PLATFORM_TOOLS registry", () => {
-  it("exports exactly 16 platform tools in order", () => {
+  it("exports exactly 17 platform tools in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "load_skill",
@@ -638,6 +691,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "soul_repo_push",
       "call_skill",
       "complete_state",
+      "complete_task",
     ]);
   });
 

@@ -37,7 +37,8 @@ describe("Transcript renders each part from its SSE event", () => {
     expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("a tool call and its result", () => {
+  it("a tool call and its result (collapsed by default, expandable)", async () => {
+    const user = userEvent.setup();
     renderTranscript(
       fold([
         { type: "tool-call", data: { toolCallId: "c1", toolName: "write_thing", args: { x: 1 } } },
@@ -48,6 +49,10 @@ describe("Transcript renders each part from its SSE event", () => {
       ])
     );
     expect(screen.getByText("[tool: write_thing]")).toBeInTheDocument();
+    // Collapsed: args + result are hidden until the accordion is expanded.
+    expect(screen.queryByText(/"x": 1/)).toBeNull();
+    expect(screen.queryByText(/"ok": true/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: /tool: write_thing/i }));
     expect(screen.getByText(/"x": 1/)).toBeInTheDocument();
     expect(screen.getByText(/"ok": true/)).toBeInTheDocument();
   });

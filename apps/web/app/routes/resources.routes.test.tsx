@@ -73,9 +73,10 @@ test("index lists resource types with field counts and a hooks pill", () => {
   expect(screen.getByText("hooks")).toBeInTheDocument();
 });
 
-test("index with no types shows the empty state", () => {
+test("index with no types shows a create prompt with a New type link", () => {
   renderWithData(<ResourcesIndex />, { rows: [] });
-  expect(screen.getByText("0 results")).toBeInTheDocument();
+  expect(screen.getByText(/No resource types defined yet/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /New type/i })).toHaveAttribute("href", "/resources/new");
 });
 
 test("index ErrorBoundary surfaces 401 as authentication required", () => {

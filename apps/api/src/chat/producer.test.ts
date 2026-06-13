@@ -188,8 +188,8 @@ describe("runChatStream", () => {
     expect(log.error).toHaveBeenCalled();
   });
 
-  // ── Output guard: buffer-then-scan (AC-V1-003 stream side) ──────────────────
-  describe("scanOutput buffer-then-scan", () => {
+  // ── Output guard: window-stream-then-scan (AC-V1-003 stream side) ───────────
+  describe("scanOutput window-stream-then-scan", () => {
     type Emitted = { eventType: string; data: unknown };
     const captureEmitter = (sink: Emitted[]): import("./stream-emitter").StreamEmitter => ({
       emit: (eventType, data) => {
@@ -298,6 +298,30 @@ describe("runChatStream", () => {
         { eventType: "text", data: { delta: "after" } },
         { eventType: "finish", data: { reason: "stop" } },
       ]);
+    });
+
+    it("streams a long run progressively, holding back only a trailing window", async () => {
+      const emitted: Emitted[] = [];
+      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
+      // Two 50-char deltas (100 chars total) — well past the 64-char safety window, so the first
+      // safe prefix is released mid-stream instead of all-at-once at finish.
+      const a = "a".repeat(50);
+      const b = "b".repeat(50);
+      await runChatStream(
+        streamId,
+        fromArray([
+          { type: "text-delta", text: a },
+          { type: "text-delta", text: b },
+          { type: "finish", finishReason: "stop" },
+        ]),
+        { emitter: captureEmitter(emitted), hub, log, scanOutput }
+      );
+
+      const textEvents = emitted.filter((e) => e.eventType === "text");
+      // Released progressively (≥2 text events), and the concatenation is the full, intact run.
+      expect(textEvents.length).toBeGreaterThanOrEqual(2);
+      expect(textEvents.map((e) => (e.data as { delta: string }).delta).join("")).toBe(a + b);
+      expect(emitted.at(-1)).toEqual({ eventType: "finish", data: { reason: "stop" } });
     });
 
     it("without scanOutput: text deltas emit live exactly as before", async () => {

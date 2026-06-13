@@ -1,7 +1,7 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { EmptyState } from "~/components/empty-state";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError, listResourceTypes } from "~/lib/api";
 import { deriveFields, parseSchema } from "~/lib/schema";
 
@@ -27,19 +27,27 @@ export default function ResourcesIndex() {
 
   if (rows.length === 0) {
     return (
-      <EmptyState
-        section="resources"
-        title="Resources"
-        hint="No resource types defined yet. Connect a soul to populate schema-driven CRUD."
-      />
+      <ResourcePanel crumbs={[{ label: "resources" }]} command="tulipfarm resources --list">
+        <p className="text-sm text-muted-foreground">
+          No resource types defined yet. Create one here, or ask the assistant to build one in chat.
+        </p>
+        <Button asChild variant="outline" size="sm" className="self-start">
+          <Link to="/resources/new">+ New type</Link>
+        </Button>
+      </ResourcePanel>
     );
   }
 
   return (
     <ResourcePanel crumbs={[{ label: "resources" }]} command="tulipfarm resources --list">
-      <p className="text-xs text-muted-foreground">
-        {rows.length} {rows.length === 1 ? "type" : "types"}
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">
+          {rows.length} {rows.length === 1 ? "type" : "types"}
+        </p>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/resources/new">+ New type</Link>
+        </Button>
+      </div>
       <ul className="flex flex-col rounded-sm border border-border divide-y divide-border">
         {rows.map((row) => (
           <li key={row.name}>

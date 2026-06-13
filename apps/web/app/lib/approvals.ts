@@ -4,7 +4,7 @@ import { apiGet } from "./api";
 export { sendApprovalDecision } from "./chat/sse-client";
 
 /*
- * Read-only client for the pending-approvals list (GET /api/v1/chat/approvals). Ephemeral,
+ * Read-only client for the pending-approvals list (GET /api/v1/approvals). Ephemeral,
  * single-trust V1: returns ALL pending tool approvals (no per-user filter). Mirrors lib/agents.ts
  * conventions (cookie-first auth, ApiError on non-2xx). The sidebar badge and the Approvals page
  * both poll this via the shared ApprovalsProvider.
@@ -20,6 +20,6 @@ export type PendingApproval = {
 };
 
 export async function listPendingApprovals(): Promise<PendingApproval[]> {
-  const body = await apiGet<{ items: PendingApproval[] }>("/api/v1/chat/approvals");
+  const body = await apiGet<{ items: PendingApproval[] }>("/api/v1/approvals");
   return body.items;
 }
