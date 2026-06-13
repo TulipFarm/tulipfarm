@@ -175,6 +175,13 @@ class FakeConversationRepo implements ConversationRepo {
     const doc = this.docs.get(id);
     if (doc) doc.updatedAt = new Date();
   }
+  async setAgent(id: string, agentId: string): Promise<void> {
+    const doc = this.docs.get(id);
+    if (doc) {
+      doc.agentId = agentId;
+      doc.updatedAt = new Date();
+    }
+  }
 }
 
 // ── Fake message repo ─────────────────────────────────────────────────────────
@@ -1078,6 +1085,132 @@ describe("chat routes", () => {
         expect(res.statusCode).toBe(200);
         expect(res.json()).toEqual({ items: [] });
       });
+    });
+  });
+
+  // ── Same-turn agent handoff: the front desk calls transfer_to_agent, the loop switches the active
+  //    agent (persisting it) and the target continues in the SAME SSE stream; complete_task hands
+  //    control back to the GeneralAssistant. ──
+  describe("POST /api/v1/chat (agent handoff / delegation)", () => {
+    function registerControlTools(): ToolRegistry {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "transfer_to_agent",
+        tier: "platform",
+        mutating: false,
+        description: "hand off",
+        inputSchema: {
+          type: "object",
+          properties: { agentId: { type: "string" } },
+          required: ["agentId"],
+          additionalProperties: true,
+        },
+        execute: async (args) => ({
+          success: true as const,
+          data: { agentId: (args as { agentId: string }).agentId, status: "transferred" },
+        }),
+      });
+      reg.register({
+        name: "complete_task",
+        tier: "platform",
+        mutating: false,
+        description: "complete",
+        inputSchema: {
+          type: "object",
+          properties: { status: { type: "string" } },
+          required: ["status"],
+          additionalProperties: true,
+        },
+        execute: async () => ({
+          success: true as const,
+          data: { status: "success", completed: true },
+        }),
+      });
+      return reg;
+    }
+
+    it("transfers GeneralAssistant → InformationArchitect in one turn and persists the active agent", async () => {
+      await app.close();
+      select.mockImplementation(() =>
+        makeToolThenTextModel(
+          [
+            {
+              toolCallId: "c1",
+              toolName: "transfer_to_agent",
+              args: { agentId: "InformationArchitect" },
+            },
+          ],
+          "Information Architect here — building it now."
+        )
+      );
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        toolRegistry: registerControlTools(),
+      });
+
+      const res = await post({ message: userMsg("create an invoices resource") });
+      expect(res.statusCode).toBe(200);
+      const convoId = res.headers["x-conversation-id"] as string;
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+      const types = streamRepo.rows.map((r) => r.eventType);
+      // The front desk's transfer tool-result AND the architect's follow-up text are on one stream,
+      // closed by exactly one finish.
+      expect(types.filter((t) => t === "finish")).toHaveLength(1);
+      const toolResult = streamRepo.rows.find((r) => r.eventType === "tool-result");
+      expect((toolResult?.data as { toolName: string }).toolName).toBe("transfer_to_agent");
+      const text = streamRepo.rows
+        .filter((r) => r.eventType === "text")
+        .map((r) => (r.data as { delta: string }).delta)
+        .join("");
+      expect(text).toContain("Information Architect here");
+      // The active agent is persisted as the architect (it did not complete_task this turn).
+      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+    });
+
+    it("complete_task hands control back to the GeneralAssistant", async () => {
+      await app.close();
+      select.mockImplementation(() =>
+        makeToolThenTextModel(
+          [{ toolCallId: "c1", toolName: "complete_task", args: { status: "success" } }],
+          "Done."
+        )
+      );
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        toolRegistry: registerControlTools(),
+      });
+
+      const res = await post({ message: userMsg("that's all"), agentId: "InformationArchitect" });
+      expect(res.statusCode).toBe(200);
+      const convoId = res.headers["x-conversation-id"] as string;
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
+      // After complete_task the front desk streams a brief closing confirmation (the model's 2nd
+      // call), so the turn never ends on a silent tool result.
+      const closing = streamRepo.rows
+        .filter((r) => r.eventType === "text")
+        .map((r) => (r.data as { delta: string }).delta)
+        .join("");
+      expect(closing).toContain("Done.");
+      expect(streamRepo.rows.filter((r) => r.eventType === "finish")).toHaveLength(1);
     });
   });
 

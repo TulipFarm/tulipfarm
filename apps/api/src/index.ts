@@ -34,7 +34,10 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { PLATFORM_AGENTS } from "./soul/agents/platform-agents";
+import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
 import { registerSoulSync } from "./soul-sync";
+import { buildToolRegistry } from "./tools/setup";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -109,6 +112,32 @@ async function boot() {
         enqueueIndex(boss, { kind: "document", documentId }).then(() => undefined),
     });
 
+    // Full chat tool registry: memory + knowledge (platform) plus every forge family
+    // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
+    // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
+    // (which tools each agent may actually call) are applied per-turn in the chat route.
+    const toolRegistry = buildToolRegistry({
+      workingMemory: workingMemoryService,
+      knowledge: knowledgeService,
+      resources: {
+        repoFactory: resourceRepoFactory,
+        counterStore,
+        soulLoader,
+        hookExecutor,
+        events: domainEventEmitter,
+      },
+      resourceTypes: { gitSync, soulLoader, reconcile: reconcileResources },
+      agentTools: { gitSync, soulLoader },
+      skillTools: { gitSync, soulLoader, llmService },
+      platform: {
+        soulLoader,
+        soulPath: process.env.SOUL_PATH,
+        gitSync,
+        builtinSkills: BUILTIN_SKILLS,
+        platformAgentNames: new Set(PLATFORM_AGENTS.map((a) => a.name)),
+      },
+    });
+
     const app = await buildApp({
       sessionStore,
       userRepo,
@@ -130,6 +159,7 @@ async function boot() {
       streamHub,
       workingMemoryService,
       knowledgeService,
+      toolRegistry,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.

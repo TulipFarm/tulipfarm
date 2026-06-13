@@ -124,6 +124,8 @@ const agentCreate: AgentTool = {
 
 // ── agent_update ──────────────────────────────────────────────────────────────
 
+// NOTE: no top-level `anyOf` — OpenAI-family models reject tool parameter schemas with a top-level
+// anyOf/oneOf/allOf/enum/not. The "at least one of body/frontmatter" rule is enforced in the handler.
 const UPDATE_SCHEMA = {
   type: "object",
   required: ["name"],
@@ -134,10 +136,9 @@ const UPDATE_SCHEMA = {
     frontmatter: {
       type: "object",
       description:
-        "New frontmatter (replaces existing; omit to keep current). Same allowed keys as agent_create; unknown keys are rejected.",
+        "New frontmatter (replaces existing; omit to keep current). Same allowed keys as agent_create; unknown keys are rejected. At least one of body or frontmatter must be provided.",
     },
   },
-  anyOf: [{ required: ["body"] }, { required: ["frontmatter"] }],
 } as const;
 
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
@@ -155,6 +156,8 @@ const agentUpdate: AgentTool = {
       body?: string;
       frontmatter?: Record<string, unknown>;
     };
+    if (body === undefined && frontmatter === undefined)
+      return err("validation_error", "at least one of body or frontmatter must be provided");
 
     const existing = ctx.soulLoader.agents.get(name);
     if (!existing) return err("not_found", `agent not found: ${name}`);

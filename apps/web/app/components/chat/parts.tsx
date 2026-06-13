@@ -24,6 +24,73 @@ function Json({ value }: { value: unknown }) {
   );
 }
 
+/**
+ * One tool call, collapsed by default. While the call is in-flight (no result yet, message still
+ * streaming) the header shows a pulsing dot + "running…"; once it resolves it becomes a click-to-
+ * expand accordion exposing the args + result. An attached approval card stays always-visible
+ * (outside the collapse) because it needs the user to act.
+ */
+function ToolPart({
+  toolName,
+  args,
+  result,
+  approval,
+  streaming,
+  onApprove,
+}: {
+  toolName: string;
+  args: unknown;
+  result: unknown;
+  approval: Extract<TimelinePart, { kind: "tool" }>["approval"];
+  streaming?: boolean;
+  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const running = result === undefined && !!streaming;
+  const hasDetails = args != null || result !== undefined;
+
+  return (
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={() => hasDetails && setOpen((o) => !o)}
+        aria-expanded={hasDetails ? open : undefined}
+        disabled={!hasDetails}
+        className="flex w-full items-center gap-2 text-left disabled:cursor-default"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "size-1.5 rounded-full",
+            running ? "bg-primary motion-safe:animate-pulse" : "bg-muted-foreground"
+          )}
+        />
+        <Label text={`[tool: ${toolName}]`} />
+        {running ? (
+          <span className="text-xs text-muted-foreground">running…</span>
+        ) : hasDetails ? (
+          <span aria-hidden className="text-xs text-muted-foreground">
+            {open ? "▾" : "▸"}
+          </span>
+        ) : null}
+      </button>
+      {open && hasDetails ? (
+        <div className="space-y-1.5">
+          {args != null ? <Json value={args} /> : null}
+          {result !== undefined ? <Json value={result} /> : null}
+        </div>
+      ) : null}
+      {approval ? (
+        <ApprovalCard
+          toolName={toolName}
+          approval={approval}
+          onDecide={(d) => onApprove(approval.approvalId, d)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
 function ReasoningPart({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
@@ -122,34 +189,17 @@ export function MessagePartView({
       return <Response text={part.text} streaming={streaming} />;
     case "reasoning":
       return <ReasoningPart text={part.text} />;
-    case "tool": {
-      const approval = part.approval;
+    case "tool":
       return (
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <span
-              aria-hidden
-              className={cn(
-                "size-1.5 rounded-full",
-                part.status === "done"
-                  ? "bg-muted-foreground"
-                  : "bg-primary motion-safe:animate-pulse"
-              )}
-            />
-            <Label text={`[tool: ${part.toolName}]`} />
-          </div>
-          {part.args != null ? <Json value={part.args} /> : null}
-          {approval ? (
-            <ApprovalCard
-              toolName={part.toolName}
-              approval={approval}
-              onDecide={(d) => onApprove(approval.approvalId, d)}
-            />
-          ) : null}
-          {part.result !== undefined ? <Json value={part.result} /> : null}
-        </div>
+        <ToolPart
+          toolName={part.toolName}
+          args={part.args}
+          result={part.result}
+          approval={part.approval}
+          streaming={streaming}
+          onApprove={onApprove}
+        />
       );
-    }
     case "plan":
       return <PlanPart title={part.title} steps={part.steps} />;
     case "task":

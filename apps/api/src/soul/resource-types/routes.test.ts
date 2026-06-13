@@ -13,10 +13,11 @@ vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
+  rm: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -333,6 +334,87 @@ x-computed:
       expect(ticket?.schema).toContain("type: object");
       expect(customer?.hasHooks).toBe(true);
       expect(customer?.schema).toContain("type: object");
+    });
+  });
+
+  // ── PUT /api/v1/resource-types/:name ──────────────────────────────────────
+
+  describe("PUT /api/v1/resource-types/:name", () => {
+    const put = (payload: { schema: string }) => ({
+      method: "PUT" as const,
+      url: "/api/v1/resource-types/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload,
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/resource-types/ticket",
+        payload: { schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 when the type does not exist", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("updates the schema — writes YAML, commits, reloads", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject(put({ schema: VALID_SCHEMA_YAML }));
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ name: "ticket", schema: VALID_SCHEMA_YAML });
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("schema.yml"),
+        VALID_SCHEMA_YAML,
+        "utf8"
+      );
+      expect(gitSync.commit).toHaveBeenCalledWith("soul: update resource type ticket");
+      expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("returns 422 for a schema that is not a YAML object", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject(put({ schema: "- a\n- b\n" }));
+      expect(res.statusCode).toBe(422);
+    });
+  });
+
+  // ── DELETE /api/v1/resource-types/:name ───────────────────────────────────
+
+  describe("DELETE /api/v1/resource-types/:name", () => {
+    const del = () => ({
+      method: "DELETE" as const,
+      url: "/api/v1/resource-types/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "DELETE", url: "/api/v1/resource-types/ticket" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 when the type does not exist", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      const res = await app.inject(del());
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("removes the type dir, commits, and reloads (Postgres table left intact)", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject(del());
+      expect(res.statusCode).toBe(204);
+      expect(rm).toHaveBeenCalledWith(expect.stringContaining("resources/ticket"), {
+        recursive: true,
+        force: true,
+      });
+      expect(gitSync.commit).toHaveBeenCalledWith("soul: remove resource type ticket");
+      expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
   });
 });

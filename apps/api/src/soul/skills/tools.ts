@@ -145,6 +145,8 @@ const skillCreate: SkillTool = {
 
 // ── skill_update ──────────────────────────────────────────────────────────────
 
+// NOTE: no top-level `anyOf` — OpenAI-family models reject tool parameter schemas with a top-level
+// anyOf/oneOf/allOf/enum/not. The "at least one of body/frontmatter" rule is enforced in the handler.
 const UPDATE_SCHEMA = {
   type: "object",
   required: ["name"],
@@ -154,10 +156,10 @@ const UPDATE_SCHEMA = {
     body: { type: "string", description: "New markdown body (replaces existing)." },
     frontmatter: {
       type: "object",
-      description: "New frontmatter (replaces existing). Omit to keep current.",
+      description:
+        "New frontmatter (replaces existing). Omit to keep current. At least one of body or frontmatter must be provided.",
     },
   },
-  anyOf: [{ required: ["body"] }, { required: ["frontmatter"] }],
 } as const;
 
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
@@ -175,6 +177,8 @@ const skillUpdate: SkillTool = {
       body?: string;
       frontmatter?: Record<string, unknown>;
     };
+    if (body === undefined && frontmatter === undefined)
+      return err("validation_error", "at least one of body or frontmatter must be provided");
 
     const existing = ctx.soulLoader.skills.get(name);
     if (!existing) return err("not_found", `skill not found: ${name}`);

@@ -3,6 +3,7 @@ import {
   Link,
   type MetaFunction,
   useLoaderData,
+  useNavigate,
   useParams,
   useRouteError,
 } from "@remix-run/react";
@@ -11,7 +12,13 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { SchemaTable } from "~/components/schema-table";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
-import { ApiError, listRecords, listResourceTypes, type ResourceRecord } from "~/lib/api";
+import {
+  ApiError,
+  deleteResourceType,
+  listRecords,
+  listResourceTypes,
+  type ResourceRecord,
+} from "~/lib/api";
 import {
   deriveFields,
   type FieldDescriptor,
@@ -47,10 +54,28 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 export default function ResourceList() {
   const { type, columns, schemaError, items, nextCursor } = useLoaderData<typeof clientLoader>();
+  const navigate = useNavigate();
   const [records, setRecords] = useState<ResourceRecord[]>(items);
   const [cursor, setCursor] = useState<string | null>(nextCursor);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [typeError, setTypeError] = useState<string | null>(null);
+
+  async function onDeleteType() {
+    if (
+      !window.confirm(
+        `Delete the "${type}" resource type? Its records are kept in the database but the type is removed.`
+      )
+    )
+      return;
+    setTypeError(null);
+    try {
+      await deleteResourceType(type);
+      navigate("/resources");
+    } catch (err) {
+      setTypeError(err instanceof ApiError ? err.message : "failed to delete type");
+    }
+  }
 
   // Client view over the loaded set: filter → sort → page. "Load more" feeds more server rows in.
   const [query, setQuery] = useState("");
@@ -102,11 +127,18 @@ export default function ResourceList() {
 
   return (
     <ResourcePanel crumbs={crumbs} command={command}>
-      <div>
+      <div className="flex flex-wrap items-center gap-2">
         <Button asChild variant="outline" size="sm">
           <Link to={`/resources/${encodeURIComponent(type)}/new`}>New {type}</Link>
         </Button>
+        <Button asChild variant="outline" size="sm">
+          <Link to={`/resources/${encodeURIComponent(type)}/schema`}>Edit type</Link>
+        </Button>
+        <Button variant="destructive" size="sm" onClick={onDeleteType}>
+          Delete type
+        </Button>
       </div>
+      {typeError ? <p className="text-destructive">error: {typeError}</p> : null}
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : records.length === 0 ? (

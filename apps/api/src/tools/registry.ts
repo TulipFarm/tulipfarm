@@ -64,10 +64,17 @@ export class ToolRegistry {
     coordinator?: BatchCoordinator,
     fullResultCache?: Map<string, ToolCallResult>,
     approvalGate?: ApprovalGate,
-    runToolCallGuard?: RunToolCallGuard
+    runToolCallGuard?: RunToolCallGuard,
+    allowedToolNames?: ReadonlySet<string>
   ): ToolSet {
+    // Per-agent tool scoping: when `allowedToolNames` is given, expose only those tools (the
+    // Information Architect's allowlist, or every-tool-minus-the-IA-exclusive-set for the front
+    // desk). Undefined → all registered tools (unchanged default).
+    const exposed = allowedToolNames
+      ? this.getAll().filter((t) => allowedToolNames.has(t.name))
+      : this.getAll();
     return Object.fromEntries(
-      this.getAll().map((t) => [
+      exposed.map((t) => [
         t.name,
         tool({
           description: t.description,

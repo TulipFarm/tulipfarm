@@ -13,7 +13,13 @@ import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
-import { resolveAgent } from "../soul/agents/registry";
+import {
+  EXCLUSIVE_SOUL_WRITE_TOOLS,
+  GENERAL_ASSISTANT_NAME,
+  getPlatformAgent,
+  resolveAgent,
+} from "../soul/agents/registry";
+import { BUILTIN_SKILLS } from "../soul/skills/builtin-skills";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
@@ -288,18 +294,32 @@ export function registerChatRoutes(
       const history = await messageRepo.listByConversation(convo._id, 1000);
       const messages: ModelMessage[] = [];
       const agent = resolveAgent(soulLoader, convo.agentId);
-      const agentDomain =
-        typeof agent.frontmatter.domain === "string" ? agent.frontmatter.domain : null;
-      const system = assembleSystemPrompt({
-        agentId: agent.name,
-        domain: agentDomain,
-        tenantId: "default",
-        personality: agent.body,
-        memory: workingMemory ? await workingMemory.list(user._id) : [],
-        governanceDocs: knowledge ? await knowledge.governanceDocuments() : [],
-        availableSkills: listAvailableSkills(soulLoader),
-        eagerSkills: listEagerSkills(soulLoader),
-      });
+      const platformAgent = getPlatformAgent(agent.name);
+      // Memory + governance + soul skills are conversation-scoped, so fetch once and reuse for both
+      // the front desk and any handoff target. `buildSystemFor` assembles a per-agent system prompt:
+      // the agent's body + its inbuilt forge skills (frontmatter only; bodies pulled on demand via
+      // load_skill). Only the Information Architect carries forge skills today.
+      const memoryList = workingMemory ? await workingMemory.list(user._id) : [];
+      const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
+      const soulAvailableSkills = listAvailableSkills(soulLoader);
+      const soulEagerSkills = listEagerSkills(soulLoader);
+      const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string => {
+        const forgeAvailable = (pa?.forgeSkills ?? [])
+          .map((n) => BUILTIN_SKILLS.get(n))
+          .filter((s): s is NonNullable<typeof s> => s !== undefined)
+          .map((s) => ({ name: s.name, description: s.description }));
+        return assembleSystemPrompt({
+          agentId: a.name,
+          domain: typeof a.frontmatter.domain === "string" ? a.frontmatter.domain : null,
+          tenantId: "default",
+          personality: a.body,
+          memory: memoryList,
+          governanceDocs,
+          availableSkills: [...soulAvailableSkills, ...forgeAvailable],
+          eagerSkills: soulEagerSkills,
+        });
+      };
+      const system = buildSystemFor(agent, platformAgent);
       // Compaction (CTX-V1-001/002): over budget → summarize the oldest turns once into a durable
       // `summary` row; recent turns stay verbatim. Best-effort — a summarize failure falls back to
       // the full (filtered) history so the turn still runs. Statelessness preserved: this only
@@ -379,37 +399,6 @@ export function registerChatRoutes(
               : { blocked: false, args: r.value.args };
           }
         : undefined;
-      const tools =
-        toolRegistry && toolRegistry.getAll().length > 0
-          ? toolRegistry.buildToolSet(
-              { userId: user._id, agentId: agent.name, autonomy: body.autonomy },
-              coordinator,
-              fullResultCache,
-              makeApprovalGate(approvalRegistry, emitter),
-              runToolCallGuard
-            )
-          : undefined;
-
-      const result = streamText({
-        model: selected,
-        messages,
-        tools,
-        stopWhen: ({ steps }) => steps.length >= MAX_TOOL_STEPS,
-        onError: ({ error }) => {
-          req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
-        },
-        // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
-        onFinish: () => {
-          events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, { conversationId: convo._id });
-        },
-        // Persist each finished step (text and/or tool-call + tool-result) so the durable history
-        // captures the whole tool loop, not just the final assistant text.
-        onStepFinish: (step) =>
-          persistStep(messageRepo, convo._id, step as unknown as PersistableStep, (e) =>
-            req.log.error({ err: e, conversationId: convo._id }, "persist failed")
-          ),
-      });
-
       // Output stage (AC-V1-003): the producer buffers text segments and scans each before
       // emitting; a block drops the text and emits `guardrail_block` + `finish`.
       const scanOutput = gr
@@ -421,9 +410,163 @@ export function registerChatRoutes(
           }
         : undefined;
 
-      // Attach this connection (live from seq 0) and start the detached producer.
+      // Per-agent tool scoping: the Information Architect is filtered to its forge allowlist; every
+      // other agent (the GeneralAssistant front desk + user soul agents) gets all registered tools
+      // EXCEPT the IA-exclusive soul writes — so only the IA can author/edit soul artifacts.
+      const computeAllowed = (pa: typeof platformAgent): ReadonlySet<string> | undefined => {
+        if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
+        if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
+        return new Set(
+          toolRegistry
+            .getAll()
+            .map((t) => t.name)
+            .filter((n) => !EXCLUSIVE_SOUL_WRITE_TOOLS.has(n))
+        );
+      };
+
+      // The user's (guarded) request — handed to a transfer target as a clean slate so the front
+      // desk's framed history doesn't read as prompt injection (the target's own prompt says who it
+      // is, mirroring the canary handoff).
+      const lastContent = messages[messages.length - 1]?.content;
+      const userContent = typeof lastContent === "string" ? lastContent : body.message.content;
+
+      // Same-turn agent loop (delegation): the active agent runs first; if it calls
+      // `transfer_to_agent` the conversation's active agent switches (persisted) and the target
+      // continues IN THE SAME SSE stream; `complete_task` hands control back to the GeneralAssistant.
+      // Each agent gets its own streamText tool loop; we suppress the per-agent `finish` part and
+      // emit exactly one synthetic finish after the chain ends.
+      const MAX_HANDOFF_DEPTH = 4;
+      async function* agentTurnStream(): AsyncGenerator<unknown> {
+        let activeAgent = agent;
+        let activePlatform = platformAgent;
+        let turnMessages = messages;
+        // Set once we've queued the GeneralAssistant's closing confirmation after a `complete_task`,
+        // so the next iteration runs that wrap-up turn and then ends.
+        let closingTurn = false;
+
+        for (let depth = 0; depth < MAX_HANDOFF_DEPTH; depth++) {
+          const turnTools =
+            toolRegistry && toolRegistry.getAll().length > 0
+              ? toolRegistry.buildToolSet(
+                  { userId: user._id, agentId: activeAgent.name, autonomy: body.autonomy },
+                  coordinator,
+                  fullResultCache,
+                  makeApprovalGate(approvalRegistry, emitter),
+                  runToolCallGuard,
+                  computeAllowed(activePlatform)
+                )
+              : undefined;
+
+          const result = streamText({
+            model: selected,
+            messages: turnMessages,
+            tools: turnTools,
+            // Stop the agent's own loop at the step budget, or as soon as it hands off / completes —
+            // so control returns to this loop without the agent rambling after the control tool.
+            stopWhen: ({ steps }) => {
+              if (steps.length >= MAX_TOOL_STEPS) return true;
+              const last = steps[steps.length - 1];
+              return (last?.toolCalls ?? []).some(
+                (c) => c.toolName === "transfer_to_agent" || c.toolName === "complete_task"
+              );
+            },
+            onError: ({ error }) => {
+              req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
+            },
+            // Persist each finished step (text and/or tool-call + tool-result) so the durable history
+            // captures the whole tool loop across every agent in the chain.
+            onStepFinish: (step) =>
+              persistStep(messageRepo, convo._id, step as unknown as PersistableStep, (e) =>
+                req.log.error({ err: e, conversationId: convo._id }, "persist failed")
+              ),
+          });
+
+          let control:
+            | { type: "transfer"; target: string; reason?: string }
+            | { type: "complete"; summary?: string }
+            | undefined;
+          let errored = false;
+          for await (const part of result.fullStream) {
+            const p = part as { type?: string; toolName?: string; toolCallId?: string };
+            // Suppress each agent's own terminal `finish`; one synthetic finish closes the whole turn.
+            if (p.type === "finish") continue;
+            if (p.type === "error") errored = true;
+            if (
+              p.type === "tool-result" &&
+              (p.toolName === "transfer_to_agent" || p.toolName === "complete_task")
+            ) {
+              const full = fullResultCache.get(p.toolCallId as string);
+              if (full?.success) {
+                const data = full.data as Record<string, unknown>;
+                control =
+                  p.toolName === "transfer_to_agent"
+                    ? {
+                        type: "transfer",
+                        target: String(data.agentId),
+                        reason: data.message ? String(data.message) : undefined,
+                      }
+                    : {
+                        type: "complete",
+                        summary: data.summary ? String(data.summary) : undefined,
+                      };
+              }
+            }
+            yield part;
+          }
+
+          if (errored) return; // a terminal `error` was already yielded by the producer
+          if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
+          if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
+            await repo.setAgent(convo._id, control.target);
+            activeAgent = resolveAgent(soulLoader, control.target);
+            activePlatform = getPlatformAgent(activeAgent.name);
+            const handoffUser = control.reason
+              ? `${userContent}\n\n(Handoff context: ${control.reason})`
+              : userContent;
+            // Clean slate for the target: its own system prompt + the user's original request.
+            turnMessages = [
+              { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
+              { role: "user", content: handoffUser },
+            ];
+            continue;
+          }
+          if (control?.type === "complete" && depth < MAX_HANDOFF_DEPTH - 1) {
+            // Control returns to the front desk, which streams a brief confirmation of what the
+            // specialist just did — otherwise the turn ends on a silent (collapsed) tool result.
+            await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
+            activeAgent = resolveAgent(soulLoader, GENERAL_ASSISTANT_NAME);
+            activePlatform = getPlatformAgent(activeAgent.name);
+            const summary = control.summary ?? "completed the requested work";
+            turnMessages = [
+              { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
+              { role: "user", content: userContent },
+              {
+                role: "assistant",
+                content: `(Internal note — the Information Architect handled that and reported: ${summary})`,
+              },
+              {
+                role: "user",
+                content:
+                  "In one short, friendly sentence, confirm what was just created or done, and suggest one relevant next step. Do not call any tools.",
+              },
+            ];
+            closingTurn = true;
+            continue;
+          }
+          if (control?.type === "complete") {
+            await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
+          }
+          break;
+        }
+
+        // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
+        events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, { conversationId: convo._id });
+        yield { type: "finish", finishReason: "stop" };
+      }
+
+      // Attach this connection (live from seq 0) and start the detached producer over the loop.
       void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
-      void runChatStream(streamId, result.fullStream, {
+      void runChatStream(streamId, agentTurnStream(), {
         emitter,
         hub,
         log: req.log,

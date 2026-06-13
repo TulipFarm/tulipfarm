@@ -16,6 +16,8 @@ export interface ConversationRepo {
   create(doc: ConversationDoc): Promise<void>;
   findById(id: string): Promise<ConversationDoc | null>;
   touch(id: string): Promise<void>;
+  /** Persist the conversation's active agent (the GeneralAssistant ↔ InformationArchitect handoff). */
+  setAgent(id: string, agentId: string): Promise<void>;
 }
 
 export class ConversationOwnerlessError extends Error {
@@ -71,5 +73,12 @@ export class PgConversationRepo implements ConversationRepo {
 
   async touch(id: string): Promise<void> {
     await this.q.query("UPDATE conversations SET updated_at = now() WHERE id = $1", [id]);
+  }
+
+  async setAgent(id: string, agentId: string): Promise<void> {
+    await this.q.query("UPDATE conversations SET agent_id = $2, updated_at = now() WHERE id = $1", [
+      id,
+      agentId,
+    ]);
   }
 }

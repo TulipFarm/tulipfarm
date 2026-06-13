@@ -61,10 +61,12 @@ export interface StreamProducerDeps {
   log: { error: (obj: unknown, msg?: string) => void };
   fullResultCache?: Map<string, ToolCallResult>;
   /**
-   * Optional output guard. When set, the producer buffers `text` deltas and scans
-   * each segment before emitting: a `block` drops the text and emits
-   * `guardrail_block` + `finish`; otherwise the (possibly transformed) text is
-   * emitted as one `text` event. When unset, text deltas emit live unchanged.
+   * Optional output guard. When set, the producer streams `text` progressively but holds back a
+   * trailing safety window: it releases each prefix only after scanning the accumulated text (with
+   * full forward context) so no sensitive pattern is emitted before it is seen. A `block` drops all
+   * unsent text and emits `guardrail_block` + `finish`. A short run (under the window) is scanned
+   * once and emitted as a single event, honouring any whole-text transform. When unset, text
+   * deltas emit live unchanged.
    */
   scanOutput?: (text: string) => Promise<OutputScan>;
 }
@@ -83,18 +85,35 @@ export async function runChatStream(
   deps: StreamProducerDeps
 ): Promise<void> {
   let sawTerminal = false;
-  // Output-guard state (only used when `deps.scanOutput` is set).
+  // Output-guard streaming state (only used when `deps.scanOutput` is set). We keep the FULL
+  // accumulated text of the current run plus an `emitted` offset (rather than draining the buffer),
+  // so every scan sees full forward context and we can release a safe prefix while still holding
+  // back a trailing window.
   const scanOutput = deps.scanOutput;
   let textBuffer = "";
+  let emitted = 0;
   let blocked = false;
 
-  // Scan + emit the buffered text segment as one `text` event. A block emits
-  // `guardrail_block` + `finish` and suppresses all further emission.
-  const flushText = async (scan: (text: string) => Promise<OutputScan>): Promise<void> => {
-    if (blocked || textBuffer.length === 0) return;
-    const buf = textBuffer;
-    textBuffer = "";
-    const verdict = await scan(buf);
+  // Hold back at least this many trailing characters before releasing text, so a sensitive pattern
+  // (card, SSN, email, typical API key — all shorter than this) is always fully scanned before any
+  // of its characters reach the client. The content guard BLOCKS rather than redacts, so a token
+  // once emitted can't be retracted; this window is what lets us stream progressively without
+  // leaking a pattern. (An unusually long secret could still partially precede the block — the
+  // price of streaming a block-style guard; switch the guard to redaction to remove that edge.)
+  const SAFE_TAIL = 64;
+
+  // Scan the accumulated run text and release the portion now safe to emit. `final` flushes
+  // everything (end of a text run or of the stream); otherwise everything except the trailing
+  // SAFE_TAIL. A block drops all unsent text and emits `guardrail_block` + `finish`, suppressing
+  // the rest of the turn.
+  const drainText = async (
+    scan: (text: string) => Promise<OutputScan>,
+    final: boolean
+  ): Promise<void> => {
+    if (blocked) return;
+    const releaseTo = final ? textBuffer.length : textBuffer.length - SAFE_TAIL;
+    if (releaseTo <= emitted) return;
+    const verdict = await scan(textBuffer);
     if (verdict.blocked) {
       await deps.emitter.emit("guardrail_block", {
         stage: "output",
@@ -107,7 +126,25 @@ export async function runChatStream(
       sawTerminal = true;
       return;
     }
-    await deps.emitter.emit("text", { delta: verdict.text });
+    // Single-shot run (nothing emitted yet, flushing the whole thing): emit the scanned text so a
+    // whole-text transform is honoured. Progressive chunks are emitted verbatim — the output guards
+    // in use only block or pass, never transform a partial slice.
+    if (emitted === 0 && final) {
+      if (verdict.text.length > 0) await deps.emitter.emit("text", { delta: verdict.text });
+      emitted = textBuffer.length;
+      return;
+    }
+    const chunk = textBuffer.slice(emitted, releaseTo);
+    if (chunk.length > 0) {
+      await deps.emitter.emit("text", { delta: chunk });
+      emitted = releaseTo;
+    }
+  };
+
+  // Reset the run accumulator once a run is fully flushed (e.g. before a tool event).
+  const resetText = (): void => {
+    textBuffer = "";
+    emitted = 0;
   };
 
   try {
@@ -117,10 +154,12 @@ export async function runChatStream(
       if (!mapped) continue;
       if (scanOutput && mapped.eventType === "text") {
         textBuffer += (mapped.data as { delta: string }).delta;
+        await drainText(scanOutput, false);
         continue;
       }
       if (scanOutput) {
-        await flushText(scanOutput);
+        await drainText(scanOutput, true);
+        resetText();
         if (blocked) continue;
       }
       await deps.emitter.emit(mapped.eventType, mapped.data);
@@ -134,7 +173,7 @@ export async function runChatStream(
       }
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }
-    if (scanOutput) await flushText(scanOutput);
+    if (scanOutput) await drainText(scanOutput, true);
     if (!sawTerminal && !blocked) await deps.emitter.emit("finish", { reason: "stop" });
   } catch (err) {
     deps.log.error({ err, streamId }, "chat stream producer failed");

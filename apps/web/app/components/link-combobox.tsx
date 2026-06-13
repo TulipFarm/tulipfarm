@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { listRecords, type ResourceRecord } from "~/lib/api";
+import { listRecords } from "~/lib/api";
+import { recordLabel } from "~/lib/schema";
 
 /*
  * Searchable combobox for an `x-links` field (AC-V1-002). Loads the first page of the target type's
@@ -7,20 +8,6 @@ import { listRecords, type ResourceRecord } from "~/lib/api";
  * `record.id` — exactly what the API's link validation (findById) consumes and what the read-side
  * detail link points at. Large target sets are truncated to one page (server-side search deferred).
  */
-
-const SYSTEM = new Set(["id", "version", "createdAt", "updatedAt", "deletedAt"]);
-const LABEL_HINTS = ["name", "title", "label", "summary"];
-
-// Best human label for a target record: a hinted field, else the first non-system string, else id.
-function labelFor(record: ResourceRecord): string {
-  for (const hint of LABEL_HINTS) {
-    if (typeof record[hint] === "string" && record[hint]) return record[hint] as string;
-  }
-  for (const [k, v] of Object.entries(record)) {
-    if (!SYSTEM.has(k) && typeof v === "string" && v) return v;
-  }
-  return record.id;
-}
 
 type Option = { id: string; label: string };
 
@@ -45,7 +32,7 @@ export function LinkCombobox({
     let active = true;
     listRecords(target)
       .then((page) => {
-        if (active) setOptions(page.items.map((r) => ({ id: r.id, label: labelFor(r) })));
+        if (active) setOptions(page.items.map((r) => ({ id: r.id, label: recordLabel(r) })));
       })
       .catch((err) => {
         if (active) setLoadError(err instanceof Error ? err.message : "failed to load options");
