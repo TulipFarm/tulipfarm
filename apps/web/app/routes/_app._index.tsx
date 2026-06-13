@@ -1,7 +1,9 @@
 import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from "@remix-run/react";
+import { useCallback } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { getAgent } from "~/lib/agents";
 import type { ModelTier } from "~/lib/chat/types";
+import { useConversations } from "~/lib/conversations-context";
 import { listOnboardingSuggestions } from "~/lib/onboarding";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
@@ -28,5 +30,32 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
 
 export default function ChatRoute() {
   const { agentId, defaultModel, suggestions } = useLoaderData<typeof clientLoader>();
-  return <ChatPanel agentId={agentId} defaultModel={defaultModel} suggestions={suggestions} />;
+  const { refresh, setActiveChatId, newChatNonce } = useConversations();
+  // First turn of a fresh chat: refresh the Recent chats sidebar AND reflect the new conversation in
+  // the URL so a reload restores it. We use `history.replaceState` rather than a router navigate so the
+  // in-flight stream keeps streaming on this mounted route — no remount, no message re-fetch race.
+  // `setActiveChatId` shallow-syncs the sidebar highlight (the router location stays "/"). The
+  // `pathname === "/"` guard makes it a one-shot (the follow-up `finish` callback is then a no-op here).
+  const onConversationChange = useCallback(
+    (id: string | undefined) => {
+      void refresh();
+      if (id && window.location.pathname === "/") {
+        window.history.replaceState(null, "", `/chat/${id}`);
+        setActiveChatId(id);
+      }
+    },
+    [refresh, setActiveChatId]
+  );
+  return (
+    // `key` is bumped by startNewChat ("+ new chat") to force a fresh transcript even when the router
+    // location is unchanged (a shallow-routed chat at "/"). It never changes mid-turn, so the live
+    // stream is safe.
+    <ChatPanel
+      key={newChatNonce}
+      agentId={agentId}
+      defaultModel={defaultModel}
+      suggestions={suggestions}
+      onConversationChange={onConversationChange}
+    />
+  );
 }

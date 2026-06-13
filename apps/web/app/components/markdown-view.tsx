@@ -55,7 +55,7 @@ const components: Components = {
     </li>
   ),
   blockquote: ({ node: _n, children, ...p }) => (
-    <blockquote className="my-3 border-l-2 border-primary pl-3 text-muted-foreground" {...p}>
+    <blockquote className="my-3 border-l border-border pl-3 text-muted-foreground" {...p}>
       {children}
     </blockquote>
   ),

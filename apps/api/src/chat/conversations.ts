@@ -8,6 +8,8 @@ export interface ConversationDoc {
   // per-turn `model` override bypasses this without mutating it.
   // TODO: agent-config-derived default model is deferred to a later ticket.
   model?: string;
+  // Quick-model title derived from the first message; null until the async generator fills it in.
+  title?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,6 +20,10 @@ export interface ConversationRepo {
   touch(id: string): Promise<void>;
   /** Persist the conversation's active agent (the GeneralAssistant ↔ InformationArchitect handoff). */
   setAgent(id: string, agentId: string): Promise<void>;
+  /** Persist the generated title. Does not bump `updated_at` (it lands after the turn, out of band). */
+  setTitle(id: string, title: string): Promise<void>;
+  /** A user's conversations, newest-first, for the Recent chats sidebar. */
+  list(userId: string, limit: number): Promise<ConversationDoc[]>;
 }
 
 export class ConversationOwnerlessError extends Error {
@@ -33,6 +39,7 @@ function rowToConversation(row: Record<string, unknown>): ConversationDoc {
     userId: (row.user_id as string | null) ?? undefined,
     agentId: (row.agent_id as string | null) ?? undefined,
     model: (row.model as string | null) ?? undefined,
+    title: (row.title as string | null) ?? undefined,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -80,5 +87,17 @@ export class PgConversationRepo implements ConversationRepo {
       id,
       agentId,
     ]);
+  }
+
+  async setTitle(id: string, title: string): Promise<void> {
+    await this.q.query("UPDATE conversations SET title = $2 WHERE id = $1", [id, title]);
+  }
+
+  async list(userId: string, limit: number): Promise<ConversationDoc[]> {
+    const { rows } = await this.q.query(
+      "SELECT * FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2",
+      [userId, limit]
+    );
+    return rows.map(rowToConversation);
   }
 }

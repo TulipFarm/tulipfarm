@@ -42,6 +42,7 @@ import { writeSseHeaders } from "./sse";
 import { makeStreamEmitter } from "./stream-emitter";
 import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
+import { buildAndStoreTitle } from "./title";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -256,6 +257,16 @@ export function registerChatRoutes(
         };
         await repo.create(convo);
         isNew = true;
+        // Best-effort, off the turn's critical path: derive a title from the first message via the
+        // quick tier and persist it asynchronously. The stream below is never blocked on this, and a
+        // failure (quick tier down, persistence error) degrades to a truncated-prompt fallback.
+        void buildAndStoreTitle({
+          repo,
+          getModel: () => llmService.getModel("quick"),
+          id: convo._id,
+          prompt: body.message.content,
+          log: req.log,
+        });
       }
 
       // 2. Resolve the model synchronously so a bad request returns before headers go out.
@@ -622,6 +633,54 @@ export function registerChatRoutes(
   );
 
   app.get(
+    "/api/v1/conversations",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "List the authenticated user's conversations, newest-first (Recent chats).",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              conversations: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "string" },
+                    title: { type: ["string", "null"] },
+                    agentId: { type: ["string", "null"] },
+                    createdAt: { type: "string" },
+                    updatedAt: { type: "string" },
+                  },
+                  required: ["id", "title", "agentId", "createdAt", "updatedAt"],
+                },
+              },
+            },
+            required: ["conversations"],
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const user = req.user as UserDoc;
+      const convos = await repo.list(user._id, 50);
+      return reply.send({
+        conversations: convos.map((c) => ({
+          id: c._id,
+          title: c.title ?? null,
+          agentId: c.agentId ?? null,
+          createdAt: c.createdAt,
+          updatedAt: c.updatedAt,
+        })),
+      });
+    }
+  );
+
+  app.get(
     "/api/v1/conversations/:id",
     {
       preHandler: requireAuth,
@@ -642,6 +701,7 @@ export function registerChatRoutes(
               userId: { type: ["string", "null"] },
               agentId: { type: ["string", "null"] },
               model: { type: ["string", "null"] },
+              title: { type: ["string", "null"] },
               createdAt: { type: "string" },
               updatedAt: { type: "string" },
             },
@@ -663,6 +723,7 @@ export function registerChatRoutes(
         userId: convo.userId ?? null,
         agentId: convo.agentId ?? null,
         model: convo.model ?? null,
+        title: convo.title ?? null,
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
       });

@@ -11,9 +11,34 @@ import { useCallback, useReducer, useRef } from "react";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
-import type { Autonomy, ChatEvent, ChatState, ModelTier } from "~/lib/chat/types";
+import type { Autonomy, ChatEvent, ChatMessage, ChatState, ModelTier } from "~/lib/chat/types";
 
 export type SendOptions = { model?: ModelTier; autonomy?: Autonomy; agentId?: string };
+
+export type UseChatStreamOptions = {
+  // Seed a restored conversation (the `/chat/:id` route) so its transcript renders and follow-up
+  // turns reuse the same id; absent for a fresh chat.
+  initialConversationId?: string;
+  initialMessages?: ChatMessage[];
+  // Fired when a brand-new conversation id arrives and again on each turn's `finish`, so the sidebar
+  // can refresh — picking up the new chat and its async-generated title.
+  onConversationChange?: (conversationId: string | undefined) => void;
+};
+
+// Build the initial reducer state: a seeded transcript for a restored chat, else the empty timeline.
+export function seedState(opts?: UseChatStreamOptions): ChatState {
+  if (opts?.initialMessages && opts.initialMessages.length > 0) {
+    return {
+      messages: opts.initialMessages,
+      pendingApprovals: {},
+      status: "idle",
+      conversationId: opts.initialConversationId,
+    };
+  }
+  return opts?.initialConversationId
+    ? { ...initialChatState, conversationId: opts.initialConversationId }
+    : initialChatState;
+}
 
 // Wire events plus two hook-local actions: a user turn and the one-shot stream metadata. Keeping
 // these out of `chatReducer` lets that reducer stay pure over the `ChatEvent` wire contract.
@@ -67,13 +92,16 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
   return chatReducer(state, action);
 }
 
-export function useChatStream() {
-  const [state, dispatch] = useReducer(reducer, initialChatState);
+export function useChatStream(opts?: UseChatStreamOptions) {
+  const [state, dispatch] = useReducer(reducer, opts, seedState);
   // Latest conversation id + state + last send options, read inside callbacks without re-subscribing.
-  const conversationIdRef = useRef<string | undefined>(undefined);
+  const conversationIdRef = useRef<string | undefined>(opts?.initialConversationId);
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
+  // Mirror the latest refresh callback so the stable `runStream` closure always calls the current one.
+  const onConversationChangeRef = useRef(opts?.onConversationChange);
+  onConversationChangeRef.current = opts?.onConversationChange;
 
   // Open the stream for `text` and fold its events into the timeline. Shared by send + regenerate.
   const runStream = useCallback(async (text: string, opts?: SendOptions) => {
@@ -88,10 +116,19 @@ export function useChatStream() {
         },
         {
           onMeta: (meta) => {
-            if (meta.conversationId) conversationIdRef.current = meta.conversationId;
+            if (meta.conversationId) {
+              conversationIdRef.current = meta.conversationId;
+              // First turn of a fresh chat: surface the new conversation to the sidebar immediately.
+              onConversationChangeRef.current?.(meta.conversationId);
+            }
             dispatch({ type: "meta", meta });
           },
-          onEvent: (event) => dispatch(event),
+          onEvent: (event) => {
+            dispatch(event);
+            // On completion the async title has usually landed — refresh so the sidebar shows it.
+            if (event.type === "finish")
+              onConversationChangeRef.current?.(conversationIdRef.current);
+          },
         }
       );
     } catch (err) {

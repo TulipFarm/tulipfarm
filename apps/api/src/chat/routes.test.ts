@@ -182,6 +182,16 @@ class FakeConversationRepo implements ConversationRepo {
       doc.updatedAt = new Date();
     }
   }
+  async setTitle(id: string, title: string): Promise<void> {
+    const doc = this.docs.get(id);
+    if (doc) doc.title = title;
+  }
+  async list(userId: string, limit: number): Promise<ConversationDoc[]> {
+    return [...this.docs.values()]
+      .filter((d) => d.userId === userId)
+      .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+      .slice(0, limit);
+  }
 }
 
 // ── Fake message repo ─────────────────────────────────────────────────────────
@@ -1268,10 +1278,60 @@ describe("chat routes", () => {
     });
   });
 
+  describe("GET /api/v1/conversations (Recent chats list)", () => {
+    it("401 without auth", async () => {
+      const res = await get("/api/v1/conversations", { session: null });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns the caller's conversations newest-first with titles, scoped to the user", async () => {
+      const older = randomUUID();
+      const newer = randomUUID();
+      await repo.create({
+        _id: older,
+        userId,
+        createdAt: new Date("2021-01-01"),
+        updatedAt: new Date("2021-01-01"),
+      });
+      await repo.create({
+        _id: newer,
+        userId,
+        createdAt: new Date("2022-01-01"),
+        updatedAt: new Date("2022-01-01"),
+      });
+      await repo.setTitle(newer, "Inventory Planning");
+      // A different user's conversation must not leak into the list.
+      await repo.create({
+        _id: randomUUID(),
+        userId: randomUUID(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const res = await get("/api/v1/conversations");
+      expect(res.statusCode).toBe(200);
+      const { conversations } = res.json() as {
+        conversations: Array<{ id: string; title: string | null }>;
+      };
+      expect(conversations.map((c) => c.id)).toEqual([newer, older]);
+      expect(conversations[0].title).toBe("Inventory Planning");
+      expect(conversations[1].title).toBeNull();
+    });
+  });
+
   describe("GET /api/v1/conversations/:id", () => {
     it("401 without auth", async () => {
       const res = await get(`/api/v1/conversations/${randomUUID()}`, { session: null });
       expect(res.statusCode).toBe(401);
+    });
+
+    it("includes the title (null until generated)", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+      await repo.setTitle(convoId, "Budget Review");
+      const res = await get(`/api/v1/conversations/${convoId}`);
+      expect(res.json().title).toBe("Budget Review");
     });
 
     it("200 returns the conversation metadata for a seeded convo", async () => {

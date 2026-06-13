@@ -93,7 +93,7 @@ export function LinkCombobox({
       {open ? (
         <ul
           id={listId}
-          className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-sm border border-border bg-card text-sm shadow-sm"
+          className="absolute z-10 mt-1 max-h-60 w-full overflow-y-auto rounded-sm border border-border bg-card text-sm"
         >
           {filtered.length === 0 ? (
             <li className="px-3 py-2 text-muted-foreground">no {target} records</li>
