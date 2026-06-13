@@ -62,4 +62,35 @@ describe("PgConversationRepo", () => {
   it("returns null for an unknown id", async () => {
     expect(await repo.findById(randomUUID())).toBeNull();
   });
+
+  it("setTitle persists the title without bumping updated_at", async () => {
+    const old = new Date("2020-01-01T00:00:00.000Z");
+    const conv = makeConv({ createdAt: old, updatedAt: old });
+    await repo.create(conv);
+    await repo.setTitle(conv._id, "Inventory Planning");
+    const found = await repo.findById(conv._id);
+    expect(found?.title).toBe("Inventory Planning");
+    expect(found?.updatedAt.getTime()).toBe(old.getTime());
+  });
+
+  it("list returns a user's conversations newest-first, scoped to that user", async () => {
+    const userId = randomUUID();
+    const older = makeConv({ userId, updatedAt: new Date("2021-01-01T00:00:00.000Z") });
+    const newer = makeConv({ userId, updatedAt: new Date("2022-01-01T00:00:00.000Z") });
+    const other = makeConv({ userId: randomUUID() });
+    await repo.create(older);
+    await repo.create(newer);
+    await repo.create(other);
+
+    const list = await repo.list(userId, 10);
+    expect(list.map((c) => c._id)).toEqual([newer._id, older._id]);
+  });
+
+  it("list honors the limit", async () => {
+    const userId = randomUUID();
+    for (let i = 0; i < 3; i++) {
+      await repo.create(makeConv({ userId, updatedAt: new Date(2020 + i, 0, 1) }));
+    }
+    expect(await repo.list(userId, 2)).toHaveLength(2);
+  });
 });

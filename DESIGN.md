@@ -101,10 +101,13 @@ attribute. Wiring (`apps/web/app/root.tsx`):
 
 ## Component patterns
 
-- **Sidebar** (`app-sidebar.tsx`): `Workspace` / `System` groups; active row = ruby left-border +
-  `bg-sidebar-accent` + medium weight; collapsible icon rail (`md:w-60 ↔ md:w-14`, persisted) that
-  hides labels and shows a ruby dot for badges; pinned footer (synced theme toggle + instance label);
-  responsive mobile drawer with Escape/focus a11y.
+- **Sidebar** (`app-sidebar.tsx`): a compact, dense, **headerless** nav — a ruby-`[+]` "New chat" row
+  at the top, then the Workspace + System items as one flat list (clusters separated by a subtle gap,
+  no `WORKSPACE`/`SYSTEM` labels); active row = `bg-sidebar-accent` + ruby title + medium weight (no
+  side-stripe — selection is a quiet tint, never a colored left-border); a full-bleed hairline below
+  the nav opens the **session zone** (the scrollable "Recent chats" list); collapsible icon rail
+  (`md:w-60 ↔ md:w-14`, persisted) that hides labels and shows a ruby dot for badges; pinned footer
+  (synced theme toggle + instance label); responsive mobile drawer with Escape/focus a11y.
 - **Empty state** (`empty-state.tsx`): a terminal-window card — `[section]` title bar →
   `$ tulipfarm <section> --list` → `0 results` → title + hint. Depth from border + `--card`.
 - **Chat welcome** (`_app._index.tsx`): the signature moment — blinking ruby block-cursor wordmark,

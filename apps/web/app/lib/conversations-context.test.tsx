@@ -1,0 +1,137 @@
+import { createRemixStub } from "@remix-run/testing";
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, expect, test, vi } from "vitest";
+import type { ConversationSummary } from "~/lib/conversations";
+import * as conversations from "~/lib/conversations";
+import { ConversationsProvider, useConversations } from "./conversations-context";
+
+vi.mock("~/lib/conversations", () => ({ listConversations: vi.fn() }));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
+const summary = (id: string): ConversationSummary => ({
+  id,
+  title: id,
+  agentId: null,
+  createdAt: "t",
+  updatedAt: "t",
+});
+
+afterEach(() => vi.clearAllMocks());
+
+function Consumer() {
+  const { conversations: list, refresh } = useConversations();
+  return (
+    <>
+      <span data-testid="count">{list.length}</span>
+      <button type="button" onClick={() => void refresh()}>
+        refresh
+      </button>
+    </>
+  );
+}
+
+function renderProvider() {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <ConversationsProvider>
+          <Consumer />
+        </ConversationsProvider>
+      ),
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+}
+
+function ActiveConsumer() {
+  const { activeChatId, setActiveChatId } = useConversations();
+  return (
+    <>
+      <span data-testid="active">{activeChatId ?? "none"}</span>
+      <button type="button" onClick={() => setActiveChatId("shallow-1")}>
+        shallow
+      </button>
+    </>
+  );
+}
+
+function renderActiveAt(path: string) {
+  const provider = (
+    <ConversationsProvider>
+      <ActiveConsumer />
+    </ConversationsProvider>
+  );
+  const Stub = createRemixStub([
+    { path: "/", Component: () => provider },
+    { path: "/chat/:id", Component: () => provider },
+  ]);
+  render(<Stub initialEntries={[path]} />);
+}
+
+test("derives activeChatId from a /chat/:id route", () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([]);
+  renderActiveAt("/chat/abc-1");
+  expect(screen.getByTestId("active").textContent).toBe("abc-1");
+});
+
+test("activeChatId is null on the new-chat surface, and a shallow setter overrides it", () => {
+  vi.mocked(conversations.listConversations).mockResolvedValue([]);
+  renderActiveAt("/");
+  expect(screen.getByTestId("active").textContent).toBe("none");
+  // Mirrors the index route after replaceState (router location stays "/").
+  act(() => {
+    fireEvent.click(screen.getByText("shallow"));
+  });
+  expect(screen.getByTestId("active").textContent).toBe("shallow-1");
+});
+
+test("fetches once on mount and exposes the list", async () => {
+  const d = deferred<ConversationSummary[]>();
+  vi.mocked(conversations.listConversations).mockReturnValue(d.promise);
+  renderProvider();
+  expect(conversations.listConversations).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    d.resolve([summary("c1"), summary("c2")]);
+  });
+  expect(screen.getByTestId("count").textContent).toBe("2");
+});
+
+test("coalesces refreshes requested during an in-flight fetch into one trailing fetch", async () => {
+  const ds: Array<ReturnType<typeof deferred<ConversationSummary[]>>> = [];
+  vi.mocked(conversations.listConversations).mockImplementation(() => {
+    const d = deferred<ConversationSummary[]>();
+    ds.push(d);
+    return d.promise;
+  });
+
+  renderProvider();
+  // Mount fetch is in flight.
+  expect(conversations.listConversations).toHaveBeenCalledTimes(1);
+
+  // Two refreshes while the first fetch is still pending → both coalesced, no new fetch yet.
+  await act(async () => {
+    fireEvent.click(screen.getByText("refresh"));
+    fireEvent.click(screen.getByText("refresh"));
+  });
+  expect(conversations.listConversations).toHaveBeenCalledTimes(1);
+
+  // Resolving the first fetch triggers exactly one trailing fetch (the coalesced refresh).
+  await act(async () => {
+    ds[0].resolve([summary("c1")]);
+  });
+  expect(conversations.listConversations).toHaveBeenCalledTimes(2);
+
+  await act(async () => {
+    ds[1].resolve([summary("c1"), summary("c2")]);
+  });
+  expect(conversations.listConversations).toHaveBeenCalledTimes(2);
+  expect(screen.getByTestId("count").textContent).toBe("2");
+});

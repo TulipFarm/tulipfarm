@@ -1,4 +1,4 @@
-import type { ModelTier } from "~/lib/chat/types";
+import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import type { Suggestion } from "~/lib/onboarding";
 import { Composer } from "./composer";
@@ -53,13 +53,22 @@ export function ChatPanel({
   agentId,
   defaultModel = "standard",
   suggestions = [],
+  initialConversationId,
+  initialMessages,
+  onConversationChange,
 }: {
   agentId?: string;
   defaultModel?: ModelTier;
   suggestions?: Suggestion[];
+  initialConversationId?: string;
+  initialMessages?: ChatMessage[];
+  onConversationChange?: (conversationId: string | undefined) => void;
 }) {
-  const { messages, status, error, send, approve, regenerate, reset, sendA2uiAgent } =
-    useChatStream();
+  const { messages, status, error, send, approve, regenerate, sendA2uiAgent } = useChatStream({
+    initialConversationId,
+    initialMessages,
+    onConversationChange,
+  });
   const busy = status === "submitted" || status === "streaming";
   const agent = agentId || "GeneralAssistant";
   const hasMessages = messages.length > 0;
@@ -70,13 +79,6 @@ export function ChatPanel({
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2.5">
           <span aria-hidden className="size-1.5 rounded-full bg-primary" />
           <span className="text-xs text-muted-foreground">{agent}</span>
-          <button
-            type="button"
-            onClick={reset}
-            className="ml-auto inline-flex items-center gap-1 rounded-sm border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
-          >
-            <span aria-hidden>+</span> new chat
-          </button>
         </header>
       ) : null}
       {hasMessages ? (

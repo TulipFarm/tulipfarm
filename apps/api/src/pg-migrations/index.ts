@@ -190,6 +190,16 @@ const APPROVALS_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS approvals_status_expires_idx ON approvals (status, expires_at)",
 ];
 
+/**
+ * Conversation titles (UUID-chat persistence). A nullable `title` filled in asynchronously by the
+ * quick-tier title generator after the first turn, plus a `(user_id, updated_at)` index backing the
+ * newest-first "Recent chats" sidebar list. Idempotent `ALTER`/`CREATE` so re-runs are safe.
+ */
+const CONVERSATION_TITLE_STATEMENTS: string[] = [
+  "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS title text",
+  "CREATE INDEX IF NOT EXISTS conversations_user_updated_idx ON conversations (user_id, updated_at)",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -223,6 +233,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "approvals: approval-gate table for tool-call and routine human_approval states",
     up: async (q) => {
       for (const sql of APPROVALS_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 5,
+    description: "conversations.title + (user_id, updated_at) index for the Recent chats list",
+    up: async (q) => {
+      for (const sql of CONVERSATION_TITLE_STATEMENTS) {
         await q.query(sql);
       }
     },
