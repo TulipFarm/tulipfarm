@@ -116,6 +116,11 @@ export type ChatMessage = {
   parts: TimelinePart[];
   // True once a terminal `finish` has been folded in; a sealed message takes no more deltas.
   sealed: boolean;
+  // The persisted message id (assistant turns): from the X-Message-Id header live, or `_id` on
+  // restore. Distinct from the React-key `id` (kept stable to avoid a remount). Feedback targets it.
+  serverId?: string;
+  // The caller's current thumbs vote on this reply, if any (persisted, see message_feedback).
+  feedback?: "up" | "down";
 };
 
 export type ChatStatus = "idle" | "submitted" | "streaming" | "error";
@@ -127,5 +132,8 @@ export type ChatState = {
   status: ChatStatus;
   conversationId?: string;
   streamId?: string;
+  // The server's id for the in-flight reply (X-Message-Id, delivered via meta before any text);
+  // stamped onto the assistant message as `serverId` when the turn's `finish` seals it.
+  pendingServerId?: string;
   error?: string;
 };

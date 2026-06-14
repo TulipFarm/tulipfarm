@@ -50,3 +50,10 @@ Object.defineProperty(window, "ResizeObserver", {
     disconnect = () => {};
   },
 });
+
+// jsdom does not implement elementFromPoint; ProseMirror's posAtCoords (reached by Tiptap's
+// Placeholder viewport tracking when the rich-text composer mounts) calls it. Return null — callers
+// treat "no element at point" as a no-op. The editor's interactive behavior is covered in Playwright.
+if (!document.elementFromPoint) {
+  document.elementFromPoint = () => null;
+}

@@ -4,6 +4,7 @@ import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tuli
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { assembleSystemPrompt } from "../context/assemble";
@@ -20,7 +21,7 @@ import {
   resolveAgent,
 } from "../soul/agents/registry";
 import { BUILTIN_SKILLS } from "../soul/skills/builtin-skills";
-import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
+import { type EagerSkill, listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
@@ -32,6 +33,7 @@ import {
   fromAssistantText,
   fromToolResult,
   fromUserText,
+  type MessageDoc,
   type MessagePart,
   type MessageRepo,
   toModelMessage,
@@ -60,6 +62,11 @@ interface ChatBody {
   autonomy?: "full" | "supervised" | "approval-required" | "manual";
   hasTools?: boolean;
   llmDecision?: boolean;
+  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, like `model`). Skill names
+  // get their body eagerly injected into `<skills>`; resource type names get their schema injected
+  // into `<eager-resources>` — for THIS turn only. Unknown names are ignored.
+  skills?: string[];
+  resources?: string[];
 }
 
 const ChatBodySchema = {
@@ -82,6 +89,8 @@ const ChatBodySchema = {
     autonomy: { type: "string", enum: ["full", "supervised", "approval-required", "manual"] },
     hasTools: { type: "boolean" },
     llmDecision: { type: "boolean" },
+    skills: { type: "array", items: { type: "string", minLength: 1 } },
+    resources: { type: "array", items: { type: "string", minLength: 1 } },
   },
 } as const;
 
@@ -140,11 +149,32 @@ interface PersistableStep {
  * tool-call parts (plus any text) followed by a tool message holding the results; a final text step
  * yields a plain assistant message. Errored or empty steps persist nothing. Exported for tests.
  */
+/**
+ * Producing-context stamped onto each assistant message's metadata so a down-vote (which references a
+ * message id) can later be traced to what generated it — the model tier is per-turn ephemeral and the
+ * conversation's agent_id is mutated by handoffs, so neither is recoverable from the message alone.
+ */
+export interface MessageProvenance {
+  model?: string;
+  agentId: string;
+}
+
+// Attach provenance to an assistant `MessageDoc` (tool messages aren't rated, so they're left bare).
+function withProvenance(doc: MessageDoc, provenance?: MessageProvenance): MessageDoc {
+  if (provenance) doc.metadata = { ...doc.metadata, provenance };
+  return doc;
+}
+
 export async function persistStep(
   messageRepo: MessageRepo,
   conversationId: string,
   step: PersistableStep,
-  onError: (err: unknown) => void
+  onError: (err: unknown) => void,
+  // The turn's pre-generated reply id, claimed once by the first final-text message so the live
+  // reply (and the row feedback references) share an id. Tool-call steps keep their own ids.
+  replyIdHolder?: { id?: string },
+  // The model + agent that produced this step, stamped into the assistant message's metadata.
+  provenance?: MessageProvenance
 ): Promise<void> {
   if (step.finishReason === "error") return;
 
@@ -159,7 +189,9 @@ export async function persistStep(
         args: tc.input,
       });
     }
-    await messageRepo.create(fromAssistantParts(conversationId, parts)).catch(onError);
+    await messageRepo
+      .create(withProvenance(fromAssistantParts(conversationId, parts), provenance))
+      .catch(onError);
 
     if (step.toolResults.length > 0) {
       const resultParts: MessagePart[] = step.toolResults.map((tr) => ({
@@ -174,7 +206,13 @@ export async function persistStep(
   }
 
   if (step.text) {
-    await messageRepo.create(fromAssistantText(conversationId, step.text)).catch(onError);
+    // Claim the pre-generated reply id for this (final-text) message, once per turn; later text
+    // steps fall back to a fresh id.
+    const id = replyIdHolder?.id;
+    if (replyIdHolder) replyIdHolder.id = undefined;
+    await messageRepo
+      .create(withProvenance(fromAssistantText(conversationId, step.text, id), provenance))
+      .catch(onError);
   }
 }
 
@@ -286,6 +324,9 @@ export function registerChatRoutes(
           return reply.code(503).send({ error: err.message });
         throw err;
       }
+      // The concrete model id that served this turn — stamped into each assistant message's
+      // provenance (the tier is otherwise ephemeral: never persisted on the conversation).
+      const resolvedModelId = (selected as { modelId?: string }).modelId;
 
       // 3. Per-turn observability log (AC4).
       req.log.info(
@@ -293,7 +334,7 @@ export function registerChatRoutes(
           conversationId: convo._id,
           userId: user._id,
           requestedModel: body.model,
-          resolvedModelId: (selected as { modelId?: string }).modelId ?? "",
+          resolvedModelId: resolvedModelId ?? "",
           isNewConversation: isNew,
         }),
         "chat turn"
@@ -314,6 +355,31 @@ export function registerChatRoutes(
       const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
       const soulAvailableSkills = listAvailableSkills(soulLoader);
       const soulEagerSkills = listEagerSkills(soulLoader);
+      // Per-turn `/skill` + `#resource` tags (ephemeral). Resolve names → bodies / schemas once and
+      // eagerly inject; unknown names are dropped (the composer only offers real ones). Tagged skills
+      // are merged with the soul's own eager skills, deduped by name so an already-eager skill isn't
+      // injected twice. Resource schemas render to YAML, matching the resource-types API surface.
+      const turnEagerSkills: EagerSkill[] = (body.skills ?? [])
+        .map((name) => soulLoader?.skills.get(name))
+        .filter(
+          (s): s is NonNullable<typeof s> => s != null && s.frontmatter._pendingAudit !== true
+        )
+        .map((s) => ({ name: s.name, body: s.body }));
+      // Keep the soul's sorted eager-skill prefix intact (AC-V1-001 cache stability) and append only
+      // the genuinely-new turn-tagged skills, deduped — a tagged skill that is already eager neither
+      // duplicates nor shifts position.
+      const seenSkillNames = new Set(soulEagerSkills.map((s) => s.name));
+      const extraTurnSkills: EagerSkill[] = [];
+      for (const skill of turnEagerSkills) {
+        if (seenSkillNames.has(skill.name)) continue;
+        seenSkillNames.add(skill.name);
+        extraTurnSkills.push(skill);
+      }
+      const mergedEagerSkills = [...soulEagerSkills, ...extraTurnSkills];
+      const turnTaggedResources = (body.resources ?? [])
+        .map((type) => soulLoader?.resources.get(type))
+        .filter((r): r is NonNullable<typeof r> => r != null)
+        .map((r) => ({ name: r.name, schema: stringifyYaml(r.schema) }));
       const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string => {
         const forgeAvailable = (pa?.forgeSkills ?? [])
           .map((n) => BUILTIN_SKILLS.get(n))
@@ -327,7 +393,8 @@ export function registerChatRoutes(
           memory: memoryList,
           governanceDocs,
           availableSkills: [...soulAvailableSkills, ...forgeAvailable],
-          eagerSkills: soulEagerSkills,
+          eagerSkills: mergedEagerSkills,
+          taggedResources: turnTaggedResources,
         });
       };
       const system = buildSystemFor(agent, platformAgent);
@@ -359,8 +426,17 @@ export function registerChatRoutes(
       //    connection can reconnect via Last-Event-ID; the producer runs detached so the
       //    turn finishes (and keeps buffering) even after the client disconnects.
       const streamId = randomUUID();
+      // Pre-generate the reply's message id and hand it to the client up front (X-Message-Id, like
+      // X-Stream-Id), so a thumbs up/down on the just-streamed reply can reference a server-known id.
+      // `persistStep` writes the final-text message under it (see the holder below).
+      const replyMessageId = randomUUID();
+      const replyIdHolder: { id?: string } = { id: replyMessageId };
       if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
-      writeSseHeaders(reply.raw, { "X-Stream-Id": streamId, ...corsPassthrough(reply) });
+      writeSseHeaders(reply.raw, {
+        "X-Stream-Id": streamId,
+        "X-Message-Id": replyMessageId,
+        ...corsPassthrough(reply),
+      });
       reply.hijack();
       hub.register(streamId);
       // Shared per-turn emitter: the producer loop AND the approval gate emit through it, so
@@ -485,10 +561,16 @@ export function registerChatRoutes(
               req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
             },
             // Persist each finished step (text and/or tool-call + tool-result) so the durable history
-            // captures the whole tool loop across every agent in the chain.
+            // captures the whole tool loop across every agent in the chain. `activeAgent.name` is the
+            // agent that produced THIS step (it changes across handoffs), recorded as provenance.
             onStepFinish: (step) =>
-              persistStep(messageRepo, convo._id, step as unknown as PersistableStep, (e) =>
-                req.log.error({ err: e, conversationId: convo._id }, "persist failed")
+              persistStep(
+                messageRepo,
+                convo._id,
+                step as unknown as PersistableStep,
+                (e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"),
+                replyIdHolder,
+                { model: resolvedModelId, agentId: activeAgent.name }
               ),
           });
 
@@ -637,9 +719,18 @@ export function registerChatRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "List the authenticated user's conversations, newest-first (Recent chats).",
+        description:
+          "List the authenticated user's conversations, newest-first (Recent chats + Chats page). " +
+          "`q` filters by title (case-insensitive substring); `limit` defaults to 50 (max 200).",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            q: { type: "string" },
+            limit: { type: "integer", minimum: 1, maximum: 200 },
+          },
+        },
         response: {
           200: {
             type: "object",
@@ -652,10 +743,11 @@ export function registerChatRoutes(
                     id: { type: "string" },
                     title: { type: ["string", "null"] },
                     agentId: { type: ["string", "null"] },
+                    starred: { type: "boolean" },
                     createdAt: { type: "string" },
                     updatedAt: { type: "string" },
                   },
-                  required: ["id", "title", "agentId", "createdAt", "updatedAt"],
+                  required: ["id", "title", "agentId", "starred", "createdAt", "updatedAt"],
                 },
               },
             },
@@ -667,15 +759,93 @@ export function registerChatRoutes(
     },
     async (req, reply) => {
       const user = req.user as UserDoc;
-      const convos = await repo.list(user._id, 50);
+      const { q, limit } = req.query as { q?: string; limit?: number };
+      const convos = await repo.list(user._id, Math.min(limit ?? 50, 200), q?.trim() || undefined);
       return reply.send({
         conversations: convos.map((c) => ({
           id: c._id,
           title: c.title ?? null,
           agentId: c.agentId ?? null,
+          starred: c.starred ?? false,
           createdAt: c.createdAt,
           updatedAt: c.updatedAt,
         })),
+      });
+    }
+  );
+
+  app.put(
+    "/api/v1/conversations/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Update a conversation's title (rename) and/or starred flag. Owner-only. At least one " +
+          "field is required.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          minProperties: 1,
+          properties: {
+            title: { type: "string", minLength: 1, maxLength: 200 },
+            starred: { type: "boolean" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              id: { type: "string" },
+              title: { type: ["string", "null"] },
+              agentId: { type: ["string", "null"] },
+              starred: { type: "boolean" },
+              createdAt: { type: "string" },
+              updatedAt: { type: "string" },
+            },
+            required: ["id", "title", "agentId", "starred", "createdAt", "updatedAt"],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const user = req.user as UserDoc;
+      const { id } = req.params as { id: string };
+      const body = req.body as { title?: string; starred?: boolean };
+
+      // Owner-only mutation (unlike the tenant-open reads): a non-owner — or a missing id — is a 404.
+      const convo = await repo.findById(id);
+      if (!convo || convo.userId !== user._id) {
+        return reply.code(404).send({ error: "conversation not found" });
+      }
+
+      if (body.title !== undefined) {
+        const title = body.title.trim();
+        if (title === "") return reply.code(400).send({ error: "title must not be blank" });
+        await repo.setTitle(id, title);
+      }
+      if (body.starred !== undefined) await repo.setStarred(id, body.starred);
+
+      const updated = await repo.findById(id);
+      if (!updated) {
+        return reply.code(404).send({ error: "conversation not found" });
+      }
+      return reply.send({
+        id: updated._id,
+        title: updated.title ?? null,
+        agentId: updated.agentId ?? null,
+        starred: updated.starred ?? false,
+        createdAt: updated.createdAt,
+        updatedAt: updated.updatedAt,
       });
     }
   );
@@ -702,6 +872,7 @@ export function registerChatRoutes(
               agentId: { type: ["string", "null"] },
               model: { type: ["string", "null"] },
               title: { type: ["string", "null"] },
+              starred: { type: "boolean" },
               createdAt: { type: "string" },
               updatedAt: { type: "string" },
             },
@@ -724,6 +895,7 @@ export function registerChatRoutes(
         agentId: convo.agentId ?? null,
         model: convo.model ?? null,
         title: convo.title ?? null,
+        starred: convo.starred ?? false,
         createdAt: convo.createdAt,
         updatedAt: convo.updatedAt,
       });

@@ -40,6 +40,7 @@ test("clientLoader hydrates the conversation transcript", async () => {
     agentId: "GeneralAssistant",
     userId: "u1",
     model: null,
+    starred: false,
     createdAt: "t",
     updatedAt: "t",
   });

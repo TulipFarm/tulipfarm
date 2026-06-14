@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (5)", async () => {
+  it("advances schema_version to the latest (7)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([5]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([7]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -43,6 +43,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "knowledge_documents",
       "knowledge_documents_collections",
       "knowledge_revisions",
+      "message_feedback",
       "messages",
       "rate_limits",
       "schema_version",
@@ -73,11 +74,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 5", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 7", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([5]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([7]);
   });
 
   it("adds the conversations.title column and the user/updated_at index (005)", async () => {
@@ -90,6 +91,15 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "SELECT indexname FROM pg_indexes WHERE indexname = 'conversations_user_updated_idx'"
     );
     expect(idx.rows.map((r) => r.indexname)).toEqual(["conversations_user_updated_idx"]);
+  });
+
+  it("adds the conversations.starred column defaulting to false (007)", async () => {
+    await runPgMigrations(db);
+    const col = await db.query<{ column_name: string; column_default: string }>(
+      "SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'conversations' AND column_name = 'starred'"
+    );
+    expect(col.rows.map((r) => r.column_name)).toEqual(["starred"]);
+    expect(col.rows[0]?.column_default).toContain("false");
   });
 
   it("enforces the conversations owner CHECK", async () => {

@@ -207,3 +207,21 @@ test("a user message then a stream produces user + assistant messages in order",
   const state = fold([{ type: "text", data: { delta: "yo" } }], afterUser);
   expect(state.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
 });
+
+test("finish stamps the assistant message serverId from pendingServerId, leaving id unchanged", () => {
+  const from: ChatState = { ...initialChatState, pendingServerId: "srv-1" };
+  const state = fold(
+    [
+      { type: "text", data: { delta: "hi" } },
+      { type: "finish", data: { reason: "stop" } },
+    ],
+    from
+  );
+  const msg = state.messages.find((m) => m.role === "assistant");
+  expect(msg?.sealed).toBe(true);
+  expect(msg?.serverId).toBe("srv-1");
+  // The React-key id stays the client uuid — swapping it would remount the message.
+  expect(msg?.id).not.toBe("srv-1");
+  // ...and the pending id is consumed so it can't leak onto a later turn's reply.
+  expect(state.pendingServerId).toBeUndefined();
+});

@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getConversation, getConversationMessages, listConversations } from "./conversations";
+import {
+  getConversation,
+  getConversationMessages,
+  listConversations,
+  renameConversation,
+  setConversationStarred,
+} from "./conversations";
 
 type Call = { url: string; init: RequestInit };
 
@@ -21,14 +27,60 @@ describe("conversations client", () => {
   it("listConversations GETs the list and unwraps `conversations`", async () => {
     const calls = mockFetch(() => ({
       conversations: [
-        { id: "c1", title: "Inventory", agentId: null, createdAt: "t", updatedAt: "t" },
+        {
+          id: "c1",
+          title: "Inventory",
+          agentId: null,
+          starred: false,
+          createdAt: "t",
+          updatedAt: "t",
+        },
       ],
     }));
     const out = await listConversations();
-    expect(calls[0].url).toContain("/api/v1/conversations");
+    expect(calls[0].url).toMatch(/\/api\/v1\/conversations$/);
     expect(calls[0].init.method ?? "GET").toBe("GET");
     expect(out).toHaveLength(1);
     expect(out[0].title).toBe("Inventory");
+  });
+
+  it("listConversations encodes `q` and `limit` into the query string", async () => {
+    const calls = mockFetch(() => ({ conversations: [] }));
+    await listConversations({ q: "budget review", limit: 200 });
+    expect(calls[0].url).toContain("q=budget+review");
+    expect(calls[0].url).toContain("limit=200");
+  });
+
+  it("renameConversation PUTs the new title to the conversation", async () => {
+    const calls = mockFetch(() => ({
+      id: "c1",
+      title: "Renamed",
+      agentId: null,
+      starred: false,
+      createdAt: "t",
+      updatedAt: "t",
+    }));
+    const out = await renameConversation("c1", "Renamed");
+    expect(calls[0].url).toContain("/api/v1/conversations/c1");
+    expect(calls[0].init.method).toBe("PUT");
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ title: "Renamed" });
+    expect(out.title).toBe("Renamed");
+  });
+
+  it("setConversationStarred PUTs the starred flag to the conversation", async () => {
+    const calls = mockFetch(() => ({
+      id: "c1",
+      title: "Inventory",
+      agentId: null,
+      starred: true,
+      createdAt: "t",
+      updatedAt: "t",
+    }));
+    const out = await setConversationStarred("c1", true);
+    expect(calls[0].url).toContain("/api/v1/conversations/c1");
+    expect(calls[0].init.method).toBe("PUT");
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ starred: true });
+    expect(out.starred).toBe(true);
   });
 
   it("getConversation GETs a single conversation by id", async () => {

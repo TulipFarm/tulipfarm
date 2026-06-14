@@ -274,6 +274,46 @@ describe("assembleSystemPrompt — skills (eager L2)", () => {
   });
 });
 
+describe("assembleSystemPrompt — eager-resources (#resource)", () => {
+  it("renders a ## section per tagged resource type in <eager-resources>", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        taggedResources: [
+          { name: "tickets", schema: "title: string\nbody: string" },
+          { name: "invoices", schema: "amount: number" },
+        ],
+      })
+    );
+    expect(out).toContain(
+      "<eager-resources>\n## tickets\ntitle: string\nbody: string\n\n## invoices\namount: number\n</eager-resources>"
+    );
+  });
+
+  it("omits the block when taggedResources is unset or empty", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<eager-resources>");
+    expect(assembleSystemPrompt(baseCtx({ taggedResources: [] }))).not.toContain(
+      "<eager-resources>"
+    );
+  });
+
+  it("drops the whole block when over the char budget (never half-rendered)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ taggedResources: [{ name: "big", schema: "x".repeat(17000) }] })
+    );
+    expect(out).not.toContain("<eager-resources>");
+  });
+
+  it("renders after <available-skills> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        availableSkills: [{ name: "lazy", description: "lazy desc" }],
+        taggedResources: [{ name: "tickets", schema: "title: string" }],
+      })
+    );
+    expect(out.indexOf("<available-skills>")).toBeLessThan(out.indexOf("<eager-resources>"));
+  });
+});
+
 describe("assembleSystemPrompt — deferred + typed-state (AC-V1-003)", () => {
   it("omits the still-deferred soul-context and tools blocks", () => {
     const out = assembleSystemPrompt(

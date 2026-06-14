@@ -37,6 +37,12 @@ export interface AssembleContext {
    * description. The agent pulls a skill's body (L2) on demand via `load_skill`. Unset → block omitted.
    */
   availableSkills?: AvailableSkill[];
+  /**
+   * Per-turn tagged resource types (`#resource` in the composer). Each entry is a resource type's
+   * name + its schema text, injected verbatim into `<eager-resources>` so the agent can create or
+   * reason over records of that type without a tool round-trip. Ephemeral — set per turn, never cached.
+   */
+  taggedResources?: { name: string; schema: string }[];
 }
 
 function block(tag: string, body: string): string {
@@ -121,6 +127,26 @@ function renderAvailableSkills(ctx: AssembleContext): string {
 }
 
 /**
+ * `<eager-resources>` budget — total chars across all tagged resource `name`+`schema` pairs. Over
+ * this the whole block is dropped (never half-rendered), mirroring the other block budgets.
+ */
+const MAX_TAGGED_RESOURCES_CHARS = 16000;
+
+/**
+ * `<eager-resources>` block — resource-type definitions the user tagged with `#` in the composer.
+ * One `## name\nschema` section per type, in supplied order, so the agent has the type's shape in
+ * front of it for this turn. Omitted when none supplied; dropped whole when over budget.
+ */
+function renderTaggedResources(ctx: AssembleContext): string {
+  const resources = ctx.taggedResources ?? [];
+  if (resources.length === 0) return "";
+  const total = resources.reduce((n, r) => n + r.name.length + r.schema.length, 0);
+  if (total > MAX_TAGGED_RESOURCES_CHARS) return "";
+  const body = resources.map((r) => `## ${r.name}\n${r.schema}`).join("\n\n");
+  return block("eager-resources", body);
+}
+
+/**
  * Assemble the agent system prompt from the 9 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
  * and synchronous. Each block renders to a string or "" (when empty, over budget, or deferred);
  * empty blocks are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders
@@ -139,6 +165,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     buildGovernanceBlock(ctx.governanceDocs, null),
     renderEagerSkills(ctx),
     renderAvailableSkills(ctx),
+    renderTaggedResources(ctx),
     "", // <soul-context> — deferred (soul L1 snapshot builder)
     "", // <available-tools> — deferred (Tools v0.8)
   ];

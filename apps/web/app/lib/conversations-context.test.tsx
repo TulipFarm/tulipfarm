@@ -19,6 +19,7 @@ const summary = (id: string): ConversationSummary => ({
   id,
   title: id,
   agentId: null,
+  starred: false,
   createdAt: "t",
   updatedAt: "t",
 });

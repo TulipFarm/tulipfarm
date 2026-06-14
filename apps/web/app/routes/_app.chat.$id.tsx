@@ -11,6 +11,7 @@ import { messagesToTimeline } from "~/lib/chat/hydrate";
 import type { ModelTier } from "~/lib/chat/types";
 import { getConversation, getConversationMessages } from "~/lib/conversations";
 import { useConversations } from "~/lib/conversations-context";
+import { getConversationFeedback } from "~/lib/feedback";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -29,6 +30,16 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
     throw err;
   }
 
+  // Best-effort: the caller's prior thumbs votes seed the transcript. A failure (feedback API hiccup)
+  // just means no votes are shown — never block the chat restore on it.
+  let votes: Map<string, "up" | "down"> | undefined;
+  try {
+    const feedback = await getConversationFeedback(id);
+    votes = new Map(feedback.map((f) => [f.messageId, f.rating]));
+  } catch {
+    votes = undefined;
+  }
+
   const agentId = convo.agentId ?? undefined;
   let defaultModel: ModelTier = "standard";
   try {
@@ -43,7 +54,7 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
     title: convo.title,
     agentId,
     defaultModel,
-    messages: messagesToTimeline(messages),
+    messages: messagesToTimeline(messages, votes),
   };
 }
 

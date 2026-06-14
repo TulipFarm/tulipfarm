@@ -1,4 +1,4 @@
-import { apiGet } from "./api";
+import { apiGet, apiWrite } from "./api";
 
 /*
  * Read-only client for persisted chats (UUID-chat persistence). The API auto-creates a conversation
@@ -11,6 +11,7 @@ export type ConversationSummary = {
   id: string;
   title: string | null;
   agentId: string | null;
+  starred: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,9 +36,35 @@ export type ConversationMessage = {
   createdAt: string;
 };
 
-export async function listConversations(): Promise<ConversationSummary[]> {
-  const body = await apiGet<{ conversations: ConversationSummary[] }>("/api/v1/conversations");
+// Lists the caller's conversations, newest-first. `q` filters by title (server-side, case-insensitive
+// substring, across all the caller's chats); `limit` defaults to 50 server-side (the Chats page passes
+// a larger value). A bare `listConversations()` is unchanged for the sidebar.
+export async function listConversations(opts?: {
+  q?: string;
+  limit?: number;
+}): Promise<ConversationSummary[]> {
+  const params = new URLSearchParams();
+  if (opts?.q) params.set("q", opts.q);
+  if (opts?.limit != null) params.set("limit", String(opts.limit));
+  const query = params.toString();
+  const body = await apiGet<{ conversations: ConversationSummary[] }>(
+    `/api/v1/conversations${query ? `?${query}` : ""}`
+  );
   return body.conversations;
+}
+
+/** Rename a conversation (owner-only). Returns the updated summary. */
+export function renameConversation(id: string, title: string): Promise<ConversationSummary> {
+  return apiWrite<ConversationSummary>("PUT", `/api/v1/conversations/${encodeURIComponent(id)}`, {
+    title,
+  });
+}
+
+/** Pin/unpin a conversation (owner-only). Returns the updated summary. */
+export function setConversationStarred(id: string, starred: boolean): Promise<ConversationSummary> {
+  return apiWrite<ConversationSummary>("PUT", `/api/v1/conversations/${encodeURIComponent(id)}`, {
+    starred,
+  });
 }
 
 export async function getConversation(id: string): Promise<Conversation> {

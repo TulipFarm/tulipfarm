@@ -46,7 +46,14 @@ function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): v
   }
 }
 
-export function messagesToTimeline(docs: ConversationMessage[]): ChatMessage[] {
+// `votes` (the caller's persisted thumbs, keyed by message id) seeds each assistant reply's
+// `feedback` so a restored transcript shows prior votes. The assistant's persisted id is kept as
+// `serverId` (the React-key `id` stays a fresh uuid) so feedback can target the persisted row; user
+// turns carry no `serverId` since only assistant replies are rateable.
+export function messagesToTimeline(
+  docs: ConversationMessage[],
+  votes?: Map<string, "up" | "down">
+): ChatMessage[] {
   const out: ChatMessage[] = [];
   let lastAssistant: ChatMessage | undefined;
   for (const doc of docs) {
@@ -57,9 +64,11 @@ export function messagesToTimeline(docs: ConversationMessage[]): ChatMessage[] {
     } else if (doc.role === "assistant") {
       const message: ChatMessage = {
         id: newId(),
+        serverId: doc._id,
         role: "assistant",
         parts: assistantParts(doc.content),
         sealed: true,
+        feedback: votes?.get(doc._id),
       };
       out.push(message);
       lastAssistant = message;

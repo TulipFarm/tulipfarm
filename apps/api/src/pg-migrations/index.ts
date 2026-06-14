@@ -200,6 +200,38 @@ const CONVERSATION_TITLE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS conversations_user_updated_idx ON conversations (user_id, updated_at)",
 ];
 
+/**
+ * Per-message thumbs up/down feedback (FB-V1). One current vote per (message, user) — re-voting
+ * upserts, un-voting deletes. `rating` is +1/-1; the optional `note` captures a down-vote reason for
+ * a future self-improvement loop. `conversation_id` is denormalised (derived server-side from the
+ * message) to back per-conversation queries. `user_id` is FK-less, mirroring `conversations.user_id`.
+ */
+const MESSAGE_FEEDBACK_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS message_feedback (
+    id              uuid PRIMARY KEY,
+    message_id      uuid NOT NULL REFERENCES messages(id),
+    conversation_id uuid NOT NULL REFERENCES conversations(id),
+    user_id         uuid NOT NULL,
+    rating          smallint NOT NULL CHECK (rating IN (1, -1)),
+    note            text,
+    created_at      timestamptz NOT NULL,
+    updated_at      timestamptz NOT NULL,
+    UNIQUE (message_id, user_id)
+  )`,
+  // Reads filter by (conversation_id, user_id); lookups by message_id alone ride the UNIQUE index's
+  // leftmost column, so no separate message_id index is needed.
+  "CREATE INDEX IF NOT EXISTS message_feedback_convo_idx ON message_feedback (conversation_id)",
+];
+
+/**
+ * Conversation starring (Chats browse page). A `starred` flag so the Chats page can pin chats; the
+ * column is NOT NULL DEFAULT false so existing rows backfill to unstarred. Idempotent `ALTER` for
+ * safe re-runs.
+ */
+const CONVERSATION_STARRED_STATEMENTS: string[] = [
+  "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS starred boolean NOT NULL DEFAULT false",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -242,6 +274,25 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "conversations.title + (user_id, updated_at) index for the Recent chats list",
     up: async (q) => {
       for (const sql of CONVERSATION_TITLE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 6,
+    description:
+      "message_feedback: per-message thumbs up/down feedback keyed by (message_id, user_id)",
+    up: async (q) => {
+      for (const sql of MESSAGE_FEEDBACK_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 7,
+    description: "conversations.starred flag for pinning chats on the Chats page",
+    up: async (q) => {
+      for (const sql of CONVERSATION_STARRED_STATEMENTS) {
         await q.query(sql);
       }
     },
