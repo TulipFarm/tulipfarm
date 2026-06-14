@@ -64,7 +64,17 @@ export function ChatPanel({
   initialMessages?: ChatMessage[];
   onConversationChange?: (conversationId: string | undefined) => void;
 }) {
-  const { messages, status, error, send, approve, regenerate, sendA2uiAgent } = useChatStream({
+  const {
+    messages,
+    status,
+    error,
+    send,
+    approve,
+    regenerate,
+    editResend,
+    sendFeedback,
+    sendA2uiAgent,
+  } = useChatStream({
     initialConversationId,
     initialMessages,
     onConversationChange,
@@ -87,6 +97,8 @@ export function ChatPanel({
           status={status}
           onApprove={approve}
           onRegenerate={regenerate}
+          onEditResend={editResend}
+          onFeedback={sendFeedback}
           onA2uiAgent={sendA2uiAgent}
         />
       ) : (
@@ -99,7 +111,8 @@ export function ChatPanel({
       <Composer
         busy={busy}
         defaultModel={defaultModel}
-        onSend={(text, opts) => send(text, { ...opts, agentId })}
+        // A `@agent` mention in the composer overrides the panel's active agent for that turn.
+        onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />
       {status === "error" ? (
         <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-xs text-destructive">

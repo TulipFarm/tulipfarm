@@ -21,6 +21,8 @@ import type { MessageRepo } from "./chat/messages";
 import { registerChatRoutes } from "./chat/routes";
 import { StreamHub } from "./chat/stream-hub";
 import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
+import type { FeedbackRepo } from "./feedback/repo";
+import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
@@ -55,6 +57,7 @@ export interface AppOptions {
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
+  feedbackRepo?: FeedbackRepo;
   streamResumeRepo?: StreamResumeRepo;
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
@@ -90,7 +93,8 @@ export async function buildApp(opts: AppOptions = {}) {
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token", "If-Match"],
     // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
-    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id"],
+    // X-Message-Id is the just-streamed reply's persisted id, so the client can attach feedback to it.
+    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id"],
   });
 
   await app.register(helmet, {
@@ -209,6 +213,9 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.guardrailsService
       );
       registerApprovalRoutes(app, approvalRegistry, requireAuth);
+    }
+    if (opts.feedbackRepo) {
+      registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
     }
     if (opts.knowledgeService) {
       registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);

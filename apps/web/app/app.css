@@ -91,6 +91,58 @@
   animation: cursor-blink 1.1s steps(1) infinite;
 }
 
+/*
+ * Composer rich-text editor (Tiptap/ProseMirror), styled terminal-native. `.tf-editor` is the
+ * contenteditable element itself (the class is set via editorProps.attributes).
+ */
+.tf-editor {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.tf-editor :where(p) {
+  margin: 0;
+}
+.tf-editor :where(p + p) {
+  margin-top: 0.5rem;
+}
+/* Placeholder: the Placeholder extension tags the empty first line with data-placeholder. */
+.tf-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted-foreground);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+/* Inline mention chips — ruby-tinted; the @ / / / # char carries the kind distinction. */
+.tf-mention {
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 12%, transparent);
+}
+.tf-editor-link {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* Inline marks inside the editor. The editor is already monospace, so inline code needs a chipped
+ * surface to read as code (mirrors MarkdownView); bold/italic are made explicit too. */
+.tf-editor code {
+  border-radius: 3px;
+  padding: 0.05em 0.35em;
+  font-size: 0.9em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.tf-editor strong {
+  font-weight: 700;
+}
+.tf-editor em {
+  font-style: italic;
+}
+
 /* Respect reduced-motion: kill blink + transitions/animations globally. */
 @media (prefers-reduced-motion: reduce) {
   *,

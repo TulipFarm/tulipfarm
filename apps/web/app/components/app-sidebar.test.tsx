@@ -38,10 +38,9 @@ beforeEach(() => {
   });
 });
 
-test("renders all eight V1 sidebar sections", () => {
+test("renders the V1 sidebar sections (no standalone Chat item)", () => {
   render(<Stub initialEntries={["/"]} />);
   for (const label of [
-    "Chat",
     "Resources",
     "Agents",
     "Routines",
@@ -52,6 +51,13 @@ test("renders all eight V1 sidebar sections", () => {
   ]) {
     expect(screen.getByText(label)).toBeInTheDocument();
   }
+  // The "Chat" nav item was removed; chats are reached via the New chat button + the Chats header.
+  expect(screen.queryByRole("link", { name: "Chat" })).not.toBeInTheDocument();
+});
+
+test("renders a Chats header linking to the /chats browse page", () => {
+  render(<Stub initialEntries={["/"]} />);
+  expect(screen.getByRole("link", { name: "Chats" })).toHaveAttribute("href", "/chats");
 });
 
 test("does not render an Apps section (AC-V1-003)", () => {
@@ -83,15 +89,22 @@ test("renders a compact headerless nav (no Workspace/System section labels) + fo
   // Section headers were dropped for Claude-style density; the nav items themselves still render.
   expect(screen.queryByText("Workspace")).not.toBeInTheDocument();
   expect(screen.queryByText("System")).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Chat" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Resources" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /toggle dark mode/i })).toBeInTheDocument();
 });
 
-test("renders a Recent chats list linking each conversation to /chat/:id", () => {
+test("renders the recent chats list linking each conversation to /chat/:id", () => {
   useConversations.mockReturnValue({
     conversations: [
-      { id: "c1", title: "Inventory Planning", agentId: null, createdAt: "t", updatedAt: "t" },
-      { id: "c2", title: null, agentId: null, createdAt: "t", updatedAt: "t" },
+      {
+        id: "c1",
+        title: "Inventory Planning",
+        agentId: null,
+        starred: false,
+        createdAt: "t",
+        updatedAt: "t",
+      },
+      { id: "c2", title: null, agentId: null, starred: false, createdAt: "t", updatedAt: "t" },
     ],
     loading: false,
     error: null,
@@ -102,7 +115,7 @@ test("renders a Recent chats list linking each conversation to /chat/:id", () =>
     startNewChat: vi.fn(),
   });
   render(<Stub initialEntries={["/"]} />);
-  expect(screen.getByText("Recent chats")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Chats" })).toHaveAttribute("href", "/chats");
   expect(screen.getByRole("link", { name: "Inventory Planning" })).toHaveAttribute(
     "href",
     "/chat/c1"
@@ -111,11 +124,25 @@ test("renders a Recent chats list linking each conversation to /chat/:id", () =>
   expect(screen.getByRole("link", { name: "New chat" })).toHaveAttribute("href", "/chat/c2");
 });
 
-test("highlights the active conversation and un-highlights Chat (shallow-routing aware)", () => {
+test("highlights the active conversation (shallow-routing aware)", () => {
   useConversations.mockReturnValue({
     conversations: [
-      { id: "c1", title: "Inventory Planning", agentId: null, createdAt: "t", updatedAt: "t" },
-      { id: "c2", title: "Budget Review", agentId: null, createdAt: "t", updatedAt: "t" },
+      {
+        id: "c1",
+        title: "Inventory Planning",
+        agentId: null,
+        starred: false,
+        createdAt: "t",
+        updatedAt: "t",
+      },
+      {
+        id: "c2",
+        title: "Budget Review",
+        agentId: null,
+        starred: false,
+        createdAt: "t",
+        updatedAt: "t",
+      },
     ],
     loading: false,
     error: null,
@@ -134,8 +161,6 @@ test("highlights the active conversation and un-highlights Chat (shallow-routing
     "page"
   );
   expect(screen.getByRole("link", { name: "Budget Review" })).not.toHaveAttribute("aria-current");
-  // Even though the router still reads "/", the Chat nav item is NOT marked active.
-  expect(screen.getByRole("link", { name: "Chat" })).not.toHaveAttribute("aria-current", "page");
 });
 
 test("renders a New chat button that calls startNewChat", async () => {
@@ -156,9 +181,12 @@ test("renders a New chat button that calls startNewChat", async () => {
   expect(startNewChat).toHaveBeenCalledTimes(1);
 });
 
-test("renders no Recent chats section when there are no conversations", () => {
+test("still renders the Chats header (entry point) when there are no conversations", () => {
   render(<Stub initialEntries={["/"]} />);
-  expect(screen.queryByText("Recent chats")).not.toBeInTheDocument();
+  // The header is the entry point to the browse page, so it stays even with an empty history…
+  expect(screen.getByRole("link", { name: "Chats" })).toHaveAttribute("href", "/chats");
+  // …but no conversation rows are rendered.
+  expect(screen.queryByRole("link", { name: /^\/chat\// })).not.toBeInTheDocument();
 });
 
 test("collapsing the sidebar hides labels and persists the choice", async () => {

@@ -4,7 +4,6 @@ import {
   Boxes,
   CheckCheck,
   type LucideIcon,
-  MessageSquare,
   Plug,
   Puzzle,
   Settings,
@@ -28,7 +27,6 @@ export type NavItem = {
  * scannability. There is deliberately NO "Apps" section — micro apps are deferred (AC-V1-003).
  */
 export const navItems: NavItem[] = [
-  { to: "/", label: "Chat", icon: MessageSquare, group: "Workspace", end: true },
   { to: "/resources", label: "Resources", icon: Boxes, group: "Workspace" },
   { to: "/agents", label: "Agents", icon: Bot, group: "Workspace" },
   { to: "/skills", label: "Skills", icon: Puzzle, group: "Workspace" },

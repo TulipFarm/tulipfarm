@@ -155,12 +155,13 @@ describe("Transcript message actions", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: "copy" })).toBeInTheDocument();
+    // Both the user turn and the assistant reply expose a copy button.
+    expect(screen.getAllByRole("button", { name: "copy" }).length).toBeGreaterThanOrEqual(1);
     await user.click(screen.getByRole("button", { name: "regenerate" }));
     expect(onRegenerate).toHaveBeenCalledTimes(1);
   });
 
-  it("hides actions while a turn is still streaming", () => {
+  it("hides the assistant action bar while a turn is still streaming", () => {
     const state = fold([{ type: "text", data: { delta: "typing" } }], "hi");
     render(
       <Transcript
@@ -170,7 +171,124 @@ describe("Transcript message actions", () => {
         onRegenerate={vi.fn()}
       />
     );
-    expect(screen.queryByRole("button", { name: "copy" })).toBeNull();
+    // The user turn keeps its copy/edit toolbar, but the assistant controls stay hidden until sealed.
     expect(screen.queryByRole("button", { name: "regenerate" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
+  });
+
+  // A sealed assistant reply with its server id attached — the prerequisite for rendering thumbs.
+  function ratedReply() {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      "hi"
+    );
+    state.messages[1].serverId = "m1";
+    return state;
+  }
+
+  it("records a thumbs vote via onFeedback, decoupled from regenerate", async () => {
+    const user = userEvent.setup();
+    const onRegenerate = vi.fn();
+    const onFeedback = vi.fn();
+    const state = ratedReply();
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onRegenerate={onRegenerate}
+        onFeedback={onFeedback}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Good response" }));
+    expect(onFeedback).toHaveBeenLastCalledWith("m1", "up");
+    await user.click(screen.getByRole("button", { name: "Bad response" }));
+    expect(onFeedback).toHaveBeenLastCalledWith("m1", "down");
+    // Voting never re-runs the turn — regenerate is its own separate button now.
+    expect(onRegenerate).not.toHaveBeenCalled();
+  });
+
+  it("opens an optional note on down-vote and submits it via onFeedback", async () => {
+    const user = userEvent.setup();
+    const onFeedback = vi.fn();
+    const state = ratedReply();
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onFeedback={onFeedback}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Bad response" }));
+    await user.type(screen.getByRole("textbox", { name: "Feedback note" }), "too long{Enter}");
+    expect(onFeedback).toHaveBeenLastCalledWith("m1", "down", "too long");
+  });
+
+  it("shows no thumbs until the reply has a server id", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      "hi"
+    );
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onFeedback={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Good response" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
+  });
+
+  it("lets you edit a user message and re-runs from it on save", async () => {
+    const user = userEvent.setup();
+    const onEditResend = vi.fn();
+    const state = fold([], "original question");
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onEditResend={onEditResend}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "edit" }));
+    const box = screen.getByRole("textbox", { name: "Edit message" });
+    await user.clear(box);
+    await user.type(box, "edited question");
+    await user.click(screen.getByRole("button", { name: "save" }));
+
+    expect(onEditResend).toHaveBeenCalledTimes(1);
+    expect(onEditResend).toHaveBeenCalledWith(state.messages[0].id, "edited question");
+  });
+
+  it("cancelling an edit restores the message and fires nothing", async () => {
+    const user = userEvent.setup();
+    const onEditResend = vi.fn();
+    const state = fold([], "keep me");
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onEditResend={onEditResend}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "edit" }));
+    await user.type(screen.getByRole("textbox", { name: "Edit message" }), " — discarded");
+    await user.click(screen.getByRole("button", { name: "cancel" }));
+
+    expect(onEditResend).not.toHaveBeenCalled();
+    expect(screen.getByText("keep me")).toBeInTheDocument();
   });
 });

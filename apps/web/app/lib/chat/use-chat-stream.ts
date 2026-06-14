@@ -12,8 +12,16 @@ import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/red
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
 import type { Autonomy, ChatEvent, ChatMessage, ChatState, ModelTier } from "~/lib/chat/types";
+import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
 
-export type SendOptions = { model?: ModelTier; autonomy?: Autonomy; agentId?: string };
+export type SendOptions = {
+  model?: ModelTier;
+  autonomy?: Autonomy;
+  agentId?: string;
+  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
+  skills?: string[];
+  resources?: string[];
+};
 
 export type UseChatStreamOptions = {
   // Seed a restored conversation (the `/chat/:id` route) so its transcript renders and follow-up
@@ -47,6 +55,7 @@ type ChatAction =
   | { type: "user"; text: string }
   | { type: "meta"; meta: ChatStreamMeta }
   | { type: "regenerate" }
+  | { type: "editResend"; messageId: string; text: string }
   | { type: "reset" };
 
 /**
@@ -82,11 +91,23 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
     }
     return { ...state, messages, status: "submitted", error: undefined };
   }
+  if (action.type === "editResend") {
+    // Branch from a prior user turn: drop that message and everything after it, then re-append the
+    // edited text as a fresh turn. Local-only (the server keeps its full history) — the same V1
+    // trade-off as "regenerate", which likewise has no server-side counterpart.
+    const idx = state.messages.findIndex((m) => m.id === action.messageId);
+    if (idx === -1) return state;
+    return appendUserMessage({ ...state, messages: state.messages.slice(0, idx) }, action.text);
+  }
   if (action.type === "meta") {
     return {
       ...state,
       conversationId: action.meta.conversationId ?? state.conversationId,
       streamId: action.meta.streamId ?? state.streamId,
+      // The reply's persisted id arrives once per turn, before any text; the `finish` case stamps it
+      // onto the sealed assistant message as `serverId`. Set it directly (NOT `?? state.pendingServerId`)
+      // so a turn whose header is absent clears it rather than inheriting the previous turn's id.
+      pendingServerId: action.meta.messageId,
     };
   }
   return chatReducer(state, action);
@@ -113,6 +134,8 @@ export function useChatStream(opts?: UseChatStreamOptions) {
           model: opts?.model,
           autonomy: opts?.autonomy,
           agentId: opts?.agentId,
+          skills: opts?.skills,
+          resources: opts?.resources,
         },
         {
           onMeta: (meta) => {
@@ -159,6 +182,18 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     await runStream(text, lastOptsRef.current);
   }, [runStream]);
 
+  // Edit an earlier user turn and re-run from it, dropping every later turn (a local branch — the
+  // server keeps its history, mirroring regenerate). Reuses the last turn's model/agent options.
+  const editResend = useCallback(
+    async (messageId: string, text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      dispatch({ type: "editResend", messageId, text: trimmed });
+      await runStream(trimmed, lastOptsRef.current);
+    },
+    [runStream]
+  );
+
   const approve = useCallback(async (approvalId: string, decision: "approve" | "deny") => {
     try {
       await sendApprovalDecision(approvalId, decision);
@@ -167,6 +202,20 @@ export function useChatStream(opts?: UseChatStreamOptions) {
       // (e.g. a 404 race with the auto-deny timeout) needs no separate UI handling in V1.
     }
   }, []);
+
+  // Persist a thumbs vote on an assistant reply (fire-and-forget, like `approve`): `rating` null
+  // clears the vote. Optimistic UI lives in the component; a failed write needs no V1 surfacing.
+  const sendFeedback = useCallback(
+    async (messageId: string, rating: "up" | "down" | null, note?: string) => {
+      try {
+        if (rating === null) await clearFeedback(messageId);
+        else await postFeedback(messageId, rating, note);
+      } catch {
+        // Non-blocking: the local thumb state is the source of truth in-session.
+      }
+    },
+    []
+  );
 
   const reset = useCallback(() => {
     conversationIdRef.current = undefined;
@@ -190,6 +239,8 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     send,
     approve,
     regenerate,
+    editResend,
+    sendFeedback,
     reset,
     sendA2uiAgent,
   };

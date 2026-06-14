@@ -15,6 +15,7 @@ import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
 import { connectPg } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
+import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
@@ -90,6 +91,7 @@ async function boot() {
     const embeddingService = new EmbeddingService();
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
+    const feedbackRepo = new FeedbackRepo(pool);
     const streamResumeRepo = new PgStreamResumeRepo(pool);
     const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
@@ -155,6 +157,7 @@ async function boot() {
       guardrailsService,
       conversationRepo,
       messageRepo,
+      feedbackRepo,
       streamResumeRepo,
       streamHub,
       workingMemoryService,

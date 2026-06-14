@@ -66,4 +66,17 @@ describe("messagesToTimeline", () => {
   it("returns an empty timeline for no messages", () => {
     expect(messagesToTimeline([])).toEqual([]);
   });
+
+  it("keeps the persisted server id and seeds prior votes onto assistant replies", () => {
+    const out = messagesToTimeline(
+      [
+        msg({ _id: "a1", role: "assistant", content: "hi there" }),
+        msg({ _id: "a2", role: "assistant", content: "more" }),
+      ],
+      new Map([["a1", "down"]])
+    );
+    expect(out[0]).toMatchObject({ serverId: "a1", feedback: "down" });
+    expect(out[1].serverId).toBe("a2");
+    expect(out[1].feedback).toBeUndefined();
+  });
 });

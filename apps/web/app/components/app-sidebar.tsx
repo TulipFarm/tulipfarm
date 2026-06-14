@@ -1,5 +1,5 @@
 import { Link, NavLink } from "@remix-run/react";
-import { Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { ArrowUpRight, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "~/components/theme-toggle";
 import { useApprovals } from "~/lib/approvals-context";
@@ -26,14 +26,10 @@ function NavRow({
   item,
   rail,
   onNavigate,
-  activeOverride,
 }: {
   item: NavItem;
   rail: boolean;
   onNavigate: () => void;
-  // When set, replaces the router's `isActive` — used to keep "Chat" un-highlighted while a specific
-  // conversation is open (its URL was shallow-set via replaceState, so the router still reads "/").
-  activeOverride?: boolean;
 }) {
   const { to, label, icon: Icon, end, badgeKey } = item;
   // Live badge counts from the shared ApprovalsProvider (inert 0 when no provider is mounted).
@@ -73,21 +69,6 @@ function NavRow({
     </>
   );
 
-  // With an explicit override (the "Chat" item while a shallow-routed conversation is open) the
-  // router's isActive is wrong, so render a plain Link with fully manual active + aria-current.
-  if (activeOverride !== undefined) {
-    return (
-      <Link
-        to={to}
-        onClick={onNavigate}
-        title={rail ? label : undefined}
-        aria-current={activeOverride ? "page" : undefined}
-        className={rowClass(activeOverride)}
-      >
-        {content}
-      </Link>
-    );
-  }
   return (
     <NavLink
       to={to}
@@ -128,22 +109,40 @@ function NewChatButton({ rail, onNavigate }: { rail: boolean; onNavigate: () => 
   );
 }
 
-// Persisted chat history (UUID-chat persistence). Reads the shared ConversationsProvider; hidden in
-// the collapsed rail and when there are no chats yet. Titles are quick-model generated (or "New chat"
-// until one lands). Active state lights up the conversation matching the current /chat/:id route.
+// Persisted chat history (UUID-chat persistence). Reads the shared ConversationsProvider. The section
+// header is the clickable "Chats" entry point → the /chats browse page (there is no standalone "Chat"
+// nav item); below it, the recent conversations link to /chat/:id. Titles are quick-model generated
+// (or "New chat" until one lands). Active state lights up the conversation matching /chat/:id.
 function RecentChats({ rail, onNavigate }: { rail: boolean; onNavigate: () => void }) {
   const { conversations, activeChatId } = useConversations();
-  if (rail || conversations.length === 0) {
-    return null;
+  // Collapsed rail: just a single icon-link to the Chats page (the recent list is hidden), so the
+  // entry point survives collapse now that the nav has no "Chat" row.
+  if (rail) {
+    return (
+      <Link
+        to="/chats"
+        onClick={onNavigate}
+        title="Chats"
+        className="mt-2 flex shrink-0 items-center justify-center rounded-sm px-2 py-1.5 text-sidebar-foreground transition-colors hover:bg-sidebar-accent/50"
+      >
+        <MessageSquare className="size-4 shrink-0" />
+      </Link>
+    );
   }
   return (
     // The session zone: separated from the persistent nav by a full-bleed hairline (depth from
     // borders, not boxes; `-mx-2 px-2` bleeds the rule edge-to-edge while keeping content aligned).
-    // flex-1 + min-h-0 claims the leftover height; the label stays pinned, only the list below scrolls.
+    // flex-1 + min-h-0 claims the leftover height; the header stays pinned, only the list below scrolls.
     <div className="-mx-2 mt-2 flex min-h-0 flex-1 flex-col border-t border-sidebar-border px-2 pt-2">
-      <p className="shrink-0 px-3 pb-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-        Recent chats
-      </p>
+      {/* The header doubles as the link to the full Chats browse/search page. */}
+      <Link
+        to="/chats"
+        onClick={onNavigate}
+        className="group flex shrink-0 items-center gap-1 rounded-sm px-3 pb-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:text-sidebar-primary"
+      >
+        <span>Chats</span>
+        <ArrowUpRight className="size-3 opacity-0 transition-opacity group-hover:opacity-100" />
+      </Link>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {conversations.map((c) => {
           // Active state comes from the provider's `activeChatId` (not NavLink's router-only isActive)
@@ -180,9 +179,6 @@ export function AppSidebar() {
   const [isDesktop, setIsDesktop] = useState(true);
   const navRef = useRef<HTMLElement>(null);
   const close = () => setOpen(false);
-  // When a conversation is open, the "Chat" item (to "/") must not also light up — its URL was
-  // shallow-set, so the router still reads "/" and would otherwise mark it active.
-  const { activeChatId } = useConversations();
 
   // Collapse only applies on desktop; the mobile drawer always shows full labels.
   const rail = collapsed && isDesktop;
@@ -295,13 +291,7 @@ export function AppSidebar() {
           <div className="flex shrink-0 flex-col gap-0.5">
             <NewChatButton rail={rail} onNavigate={close} />
             {navItems.map((item) => (
-              <NavRow
-                key={item.to}
-                item={item}
-                rail={rail}
-                onNavigate={close}
-                activeOverride={item.to === "/" && activeChatId !== null ? false : undefined}
-              />
+              <NavRow key={item.to} item={item} rail={rail} onNavigate={close} />
             ))}
           </div>
           <RecentChats rail={rail} onNavigate={close} />

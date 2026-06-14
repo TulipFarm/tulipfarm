@@ -93,4 +93,35 @@ describe("PgConversationRepo", () => {
     }
     expect(await repo.list(userId, 2)).toHaveLength(2);
   });
+
+  it("defaults starred to false and setStarred toggles it without bumping updated_at", async () => {
+    const old = new Date("2020-01-01T00:00:00.000Z");
+    const conv = makeConv({ createdAt: old, updatedAt: old });
+    await repo.create(conv);
+    expect((await repo.findById(conv._id))?.starred).toBe(false);
+
+    await repo.setStarred(conv._id, true);
+    const found = await repo.findById(conv._id);
+    expect(found?.starred).toBe(true);
+    expect(found?.updatedAt.getTime()).toBe(old.getTime());
+
+    await repo.setStarred(conv._id, false);
+    expect((await repo.findById(conv._id))?.starred).toBe(false);
+  });
+
+  it("list filters by title (case-insensitive substring) when q is given, excluding null titles", async () => {
+    const userId = randomUUID();
+    const match = makeConv({ userId, updatedAt: new Date("2022-01-01") });
+    const noMatch = makeConv({ userId, updatedAt: new Date("2021-01-01") });
+    const untitled = makeConv({ userId, updatedAt: new Date("2023-01-01") });
+    await repo.create(match);
+    await repo.create(noMatch);
+    await repo.create(untitled);
+    await repo.setTitle(match._id, "Budget Review Q3");
+    await repo.setTitle(noMatch._id, "Inventory Planning");
+    // `untitled` keeps a null title.
+
+    const list = await repo.list(userId, 10, "budget");
+    expect(list.map((c) => c._id)).toEqual([match._id]);
+  });
 });

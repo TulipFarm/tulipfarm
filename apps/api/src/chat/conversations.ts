@@ -10,6 +10,8 @@ export interface ConversationDoc {
   model?: string;
   // Quick-model title derived from the first message; null until the async generator fills it in.
   title?: string;
+  // User-pinned flag (Chats page). Defaults to false; the Chats page sorts starred chats first.
+  starred?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -20,10 +22,18 @@ export interface ConversationRepo {
   touch(id: string): Promise<void>;
   /** Persist the conversation's active agent (the GeneralAssistant ↔ InformationArchitect handoff). */
   setAgent(id: string, agentId: string): Promise<void>;
-  /** Persist the generated title. Does not bump `updated_at` (it lands after the turn, out of band). */
+  /**
+   * Persist the title. Does not bump `updated_at`, so it works both for the async title generator
+   * (lands after the turn, out of band) and a manual rename (which should not reorder the list).
+   */
   setTitle(id: string, title: string): Promise<void>;
-  /** A user's conversations, newest-first, for the Recent chats sidebar. */
-  list(userId: string, limit: number): Promise<ConversationDoc[]>;
+  /** Persist the user-pinned flag (Chats page star toggle). Does not bump `updated_at`. */
+  setStarred(id: string, starred: boolean): Promise<void>;
+  /**
+   * A user's conversations, newest-first, for the Recent chats sidebar and the Chats page. An
+   * optional `q` filters by title (case-insensitive substring); rows with no title are excluded.
+   */
+  list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]>;
 }
 
 export class ConversationOwnerlessError extends Error {
@@ -40,6 +50,7 @@ function rowToConversation(row: Record<string, unknown>): ConversationDoc {
     agentId: (row.agent_id as string | null) ?? undefined,
     model: (row.model as string | null) ?? undefined,
     title: (row.title as string | null) ?? undefined,
+    starred: (row.starred as boolean | null) ?? false,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -93,10 +104,18 @@ export class PgConversationRepo implements ConversationRepo {
     await this.q.query("UPDATE conversations SET title = $2 WHERE id = $1", [id, title]);
   }
 
-  async list(userId: string, limit: number): Promise<ConversationDoc[]> {
+  async setStarred(id: string, starred: boolean): Promise<void> {
+    await this.q.query("UPDATE conversations SET starred = $2 WHERE id = $1", [id, starred]);
+  }
+
+  async list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]> {
+    // `$3::text IS NULL` short-circuits to the unfiltered list; otherwise a case-insensitive
+    // substring match on the title (null-title rows are excluded by the ILIKE).
     const { rows } = await this.q.query(
-      "SELECT * FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC LIMIT $2",
-      [userId, limit]
+      `SELECT * FROM conversations
+       WHERE user_id = $1 AND ($3::text IS NULL OR title ILIKE '%' || $3 || '%')
+       ORDER BY updated_at DESC LIMIT $2`,
+      [userId, limit, q ?? null]
     );
     return rows.map(rowToConversation);
   }

@@ -245,13 +245,18 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "finish": {
       const { messages, target } = ensureAssistant(state.messages);
+      // Stamp the server's reply id (from the X-Message-Id meta) onto the sealed message so feedback
+      // can target it. `id` (the React key) stays the client uuid — swapping it would remount.
       const sealed = withParts(messages, target, target.parts).map((m) =>
-        m.id === target.id ? { ...m, sealed: true } : m
+        m.id === target.id
+          ? { ...m, sealed: true, serverId: state.pendingServerId ?? m.serverId }
+          : m
       );
-      return { ...state, status: "idle", messages: sealed };
+      // Consume pendingServerId so it can never leak onto a later turn's reply.
+      return { ...state, status: "idle", messages: sealed, pendingServerId: undefined };
     }
 
     case "error":
-      return { ...state, status: "error", error: event.data.message };
+      return { ...state, status: "error", error: event.data.message, pendingServerId: undefined };
   }
 }

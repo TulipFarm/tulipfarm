@@ -92,9 +92,13 @@ export type ChatRequestBody = {
   model?: string;
   agentId?: string;
   autonomy?: Autonomy;
+  // Per-turn `/skill` + `#resource` tags from the composer, eagerly injected into the agent's
+  // context for this turn only (ephemeral, like `model`). Names resolve server-side.
+  skills?: string[];
+  resources?: string[];
 };
 
-export type ChatStreamMeta = { conversationId?: string; streamId?: string };
+export type ChatStreamMeta = { conversationId?: string; streamId?: string; messageId?: string };
 
 export type PostChatHandlers = {
   signal?: AbortSignal;
@@ -133,6 +137,7 @@ export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers
   onMeta?.({
     conversationId: res.headers.get("X-Conversation-Id") ?? undefined,
     streamId: res.headers.get("X-Stream-Id") ?? undefined,
+    messageId: res.headers.get("X-Message-Id") ?? undefined,
   });
 
   if (!res.body) return;

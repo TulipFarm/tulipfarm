@@ -139,9 +139,11 @@ export function fromUserText(conversationId: string, text: string): MessageDoc {
   };
 }
 
-export function fromAssistantText(conversationId: string, text: string): MessageDoc {
+// `id` lets the chat route persist the final reply under a pre-generated, client-known id (delivered
+// via the X-Message-Id header) so feedback can attach to the just-streamed message; defaults random.
+export function fromAssistantText(conversationId: string, text: string, id?: string): MessageDoc {
   return {
-    _id: randomUUID(),
+    _id: id ?? randomUUID(),
     conversationId,
     role: "assistant",
     content: text,

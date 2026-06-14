@@ -166,7 +166,8 @@ class FakeConversationRepo implements ConversationRepo {
   docs: Map<string, ConversationDoc> = new Map();
 
   async create(doc: ConversationDoc): Promise<void> {
-    this.docs.set(doc._id, { ...doc });
+    // Mirror the DB column default so reads see `starred: false` rather than undefined.
+    this.docs.set(doc._id, { starred: false, ...doc });
   }
   async findById(id: string): Promise<ConversationDoc | null> {
     return this.docs.get(id) ?? null;
@@ -186,9 +187,15 @@ class FakeConversationRepo implements ConversationRepo {
     const doc = this.docs.get(id);
     if (doc) doc.title = title;
   }
-  async list(userId: string, limit: number): Promise<ConversationDoc[]> {
+  async setStarred(id: string, starred: boolean): Promise<void> {
+    const doc = this.docs.get(id);
+    if (doc) doc.starred = starred;
+  }
+  async list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]> {
+    const needle = q?.toLowerCase();
     return [...this.docs.values()]
       .filter((d) => d.userId === userId)
+      .filter((d) => needle == null || (d.title?.toLowerCase().includes(needle) ?? false))
       .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
       .slice(0, limit);
   }
@@ -776,6 +783,70 @@ describe("chat routes", () => {
       expect(system).not.toContain("- code-review");
     });
 
+    // Composer tags (`/skill`, `#resource`) — per-turn eager injection. A tagged skill's body lands
+    // in <skills> even when it is NOT marked eager (works for any agent), and a tagged resource
+    // type's schema lands in <eager-resources>. Names are ephemeral — supplied per request, never
+    // persisted to the conversation.
+    it("eagerly injects tagged /skill bodies and #resource schemas for the turn", async () => {
+      await app.close();
+      const soulLoader = {
+        agents: new Map(),
+        skills: new Map([
+          [
+            "copywriting",
+            {
+              name: "copywriting",
+              // No `eager: true` — proves a normally-lazy skill is force-loaded when tagged.
+              frontmatter: { description: "Write punchy copy." },
+              body: "Write punchy copy.",
+            },
+          ],
+        ]),
+        resources: new Map([
+          ["tickets", { name: "tickets", schema: { title: "string" }, hasHooks: false }],
+        ]),
+      } as unknown as SoulLoader;
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        soulLoader,
+      });
+
+      const res = await post({
+        message: userMsg("draft one"),
+        skills: ["copywriting"],
+        resources: ["tickets"],
+      });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      const system = JSON.stringify(prompt[0]?.content);
+      expect(system).toContain("<skills>\\n## copywriting\\nWrite punchy copy.");
+      expect(system).toContain("<eager-resources>\\n## tickets\\ntitle: string");
+    });
+
+    it("ignores unknown tagged skill/resource names without failing the turn", async () => {
+      const res = await post({
+        message: userMsg("hi"),
+        skills: ["does-not-exist"],
+        resources: ["nope"],
+      });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+      const system = JSON.stringify(
+        (capturedPrompts[0] as Array<{ content: unknown }>)[0]?.content
+      );
+      expect(system).not.toContain("<eager-resources>");
+    });
+
     it("404 when conversationId is not found", async () => {
       const res = await post({ conversationId: randomUUID(), message: userMsg("hi") });
       expect(res.statusCode).toBe(404);
@@ -1311,11 +1382,31 @@ describe("chat routes", () => {
       const res = await get("/api/v1/conversations");
       expect(res.statusCode).toBe(200);
       const { conversations } = res.json() as {
-        conversations: Array<{ id: string; title: string | null }>;
+        conversations: Array<{ id: string; title: string | null; starred: boolean }>;
       };
       expect(conversations.map((c) => c.id)).toEqual([newer, older]);
       expect(conversations[0].title).toBe("Inventory Planning");
+      expect(conversations[0].starred).toBe(false);
       expect(conversations[1].title).toBeNull();
+    });
+
+    it("filters by title across all the caller's chats when ?q is given", async () => {
+      const match = randomUUID();
+      const noMatch = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: match, userId, createdAt: now, updatedAt: now });
+      await repo.create({ _id: noMatch, userId, createdAt: now, updatedAt: now });
+      await repo.setTitle(match, "Budget Review Q3");
+      await repo.setTitle(noMatch, "Inventory Planning");
+
+      const res = await get("/api/v1/conversations?q=budget");
+      const { conversations } = res.json() as { conversations: Array<{ id: string }> };
+      expect(conversations.map((c) => c.id)).toEqual([match]);
+    });
+
+    it("rejects a limit above the 200 cap (querystring validation)", async () => {
+      const res = await get("/api/v1/conversations?limit=500");
+      expect(res.statusCode).toBe(400);
     });
   });
 
@@ -1370,6 +1461,80 @@ describe("chat routes", () => {
       const res = await get(`/api/v1/conversations/${convoId}`, { session: otherSid });
       expect(res.statusCode).toBe(200);
       expect(res.json().id).toBe(convoId);
+    });
+  });
+
+  describe("PUT /api/v1/conversations/:id (rename / star)", () => {
+    function put(
+      id: string,
+      payload: InjectOptions["payload"],
+      opts: { session?: string | null; csrf?: boolean } = {}
+    ): Promise<LightMyRequestResponse> {
+      const { session = sid, csrf = true } = opts;
+      const cookies: Record<string, string> = {};
+      const headers: Record<string, string> = {};
+      if (session) cookies[SESSION_COOKIE] = session;
+      if (csrf) {
+        cookies[CSRF_COOKIE] = TEST_CSRF;
+        headers[CSRF_HEADER] = TEST_CSRF;
+      }
+      return app.inject({
+        method: "PUT",
+        url: `/api/v1/conversations/${id}`,
+        cookies,
+        headers,
+        payload,
+      });
+    }
+
+    async function seedOwn(): Promise<string> {
+      const id = randomUUID();
+      const now = new Date();
+      await repo.create({ _id: id, userId, createdAt: now, updatedAt: now });
+      return id;
+    }
+
+    it("401 without auth", async () => {
+      const res = await put(randomUUID(), { title: "x" }, { session: null, csrf: false });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("renames the conversation and echoes the updated summary", async () => {
+      const id = await seedOwn();
+      const res = await put(id, { title: "Budget Review" });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ id, title: "Budget Review", starred: false });
+      expect((await repo.findById(id))?.title).toBe("Budget Review");
+    });
+
+    it("stars the conversation", async () => {
+      const id = await seedOwn();
+      const res = await put(id, { starred: true });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().starred).toBe(true);
+      expect((await repo.findById(id))?.starred).toBe(true);
+    });
+
+    it("400 on an empty body (at least one field required)", async () => {
+      const id = await seedOwn();
+      expect((await put(id, {})).statusCode).toBe(400);
+    });
+
+    it("400 on a blank title", async () => {
+      const id = await seedOwn();
+      expect((await put(id, { title: "   " })).statusCode).toBe(400);
+    });
+
+    it("404 for a non-owner (owner-only write, unlike the tenant-open reads)", async () => {
+      const id = await seedOwn();
+      const res = await put(id, { starred: true }, { session: otherSid });
+      expect(res.statusCode).toBe(404);
+      expect((await repo.findById(id))?.starred).toBe(false);
+    });
+
+    it("404 for a missing conversation", async () => {
+      const res = await put(randomUUID(), { title: "x" });
+      expect(res.statusCode).toBe(404);
     });
   });
 
