@@ -1,7 +1,12 @@
 import type { LanguageModelV3, LanguageModelV3CallOptions } from "@ai-sdk/provider";
 import { APICallError } from "ai";
 import { describe, expect, it, vi } from "vitest";
-import { LlmConfigValidationError, LlmNotConfiguredError, UnknownModelError } from "./config";
+import {
+  LlmConfigValidationError,
+  LlmCredentialError,
+  LlmNotConfiguredError,
+  UnknownModelError,
+} from "./config";
 import { LlmService } from "./llm-service";
 import { createModel } from "./provider";
 
@@ -69,6 +74,98 @@ describe("LlmService", () => {
   it("invalid config throws LlmConfigValidationError", async () => {
     const svc = new LlmService();
     await expect(svc.init({ tiers: {} }, fakeSecrets)).rejects.toThrow(LlmConfigValidationError);
+  });
+
+  it("LlmCredentialError on a provider skips it and keeps the tier if another provider succeeds", async () => {
+    const okModel = (entry: { provider: string; model: string }) =>
+      Promise.resolve({
+        specificationVersion: "v3",
+        provider: entry.provider,
+        modelId: entry.model,
+        supportedUrls: {},
+        doGenerate: vi.fn(),
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV3);
+
+    // quick has 2 providers (1 rejected, 1 ok) + standard (ok) + complex (ok) = 4 calls total
+    vi.mocked(createModel)
+      .mockRejectedValueOnce(new LlmCredentialError("secret not found: azure-openai-api-key"))
+      .mockImplementationOnce(okModel)
+      .mockImplementationOnce(okModel)
+      .mockImplementationOnce(okModel);
+
+    const config = {
+      tiers: {
+        quick: {
+          providers: [
+            { provider: "azure", model: "gpt-4o", api_key_ref: "azure-openai-api-key" },
+            { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+          ],
+        },
+        standard: validConfig.tiers.standard,
+        complex: validConfig.tiers.complex,
+      },
+    };
+
+    const svc = new LlmService();
+    await expect(svc.init(config, fakeSecrets)).resolves.toBeUndefined();
+    expect(svc.getModel("quick")).toBeDefined();
+  });
+
+  it("LlmCredentialError on all providers of a tier skips the tier without throwing", async () => {
+    const okModel = (entry: { provider: string; model: string }) =>
+      Promise.resolve({
+        specificationVersion: "v3",
+        provider: entry.provider,
+        modelId: entry.model,
+        supportedUrls: {},
+        doGenerate: vi.fn(),
+        doStream: vi.fn(),
+      } as unknown as LanguageModelV3);
+
+    // quick has 1 provider (rejected) + standard (ok) + complex (ok) = 3 calls total
+    vi.mocked(createModel)
+      .mockRejectedValueOnce(new LlmCredentialError("secret not found: key"))
+      .mockImplementationOnce(okModel)
+      .mockImplementationOnce(okModel);
+
+    const config = {
+      tiers: {
+        quick: {
+          providers: [{ provider: "azure", model: "gpt-4o", api_key_ref: "key" }],
+        },
+        standard: validConfig.tiers.standard,
+        complex: validConfig.tiers.complex,
+      },
+    };
+
+    const svc = new LlmService();
+    await expect(svc.init(config, fakeSecrets)).resolves.toBeUndefined();
+    expect(() => svc.getModel("quick")).toThrow(LlmNotConfiguredError);
+    expect(svc.getModel("standard")).toBeDefined();
+    expect(svc.getModel("complex")).toBeDefined();
+  });
+
+  it("LlmCredentialError on all tiers disables LLM without throwing", async () => {
+    // validConfig has 1 provider per tier = 3 calls total
+    vi.mocked(createModel)
+      .mockRejectedValueOnce(new LlmCredentialError("secret not found: key"))
+      .mockRejectedValueOnce(new LlmCredentialError("secret not found: key"))
+      .mockRejectedValueOnce(new LlmCredentialError("secret not found: key"));
+
+    const svc = new LlmService();
+    await expect(svc.init(validConfig, fakeSecrets)).resolves.toBeUndefined();
+    expect(() => svc.getModel("quick")).toThrow(LlmNotConfiguredError);
+    expect(() => svc.getModel("standard")).toThrow(LlmNotConfiguredError);
+    expect(() => svc.getModel("complex")).toThrow(LlmNotConfiguredError);
+  });
+
+  it("unexpected errors during provider init still propagate", async () => {
+    // Throws on the first call — init bails before trying the other tiers
+    vi.mocked(createModel).mockRejectedValueOnce(new Error("unexpected network failure"));
+
+    const svc = new LlmService();
+    await expect(svc.init(validConfig, fakeSecrets)).rejects.toThrow("unexpected network failure");
   });
 
   it("threads the injected logger into tier fallback chains", async () => {

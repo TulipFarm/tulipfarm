@@ -20,7 +20,11 @@ const SecretMetaSchema = {
 export function registerSecretsRoutes(
   app: FastifyInstance,
   secretsService: SecretsService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  opts?: {
+    /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
+    onSecretDeleted?: (key: string) => Promise<void>;
+  }
 ): void {
   app.get(
     "/api/v1/secrets/status",
@@ -139,6 +143,17 @@ export function registerSecretsRoutes(
 
       const { key } = req.params as { key: string };
       await secretsService.delete(key);
+
+      if (opts?.onSecretDeleted) {
+        try {
+          await opts.onSecretDeleted(key);
+        } catch (err) {
+          app.log.error(
+            `[secrets] post-delete cascade for ${key} failed — ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+
       return reply.code(204).send();
     }
   );

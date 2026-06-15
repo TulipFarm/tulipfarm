@@ -36,6 +36,7 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerAgentRoutes } from "./soul/agents/routes";
+import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
@@ -152,7 +153,18 @@ export async function buildApp(opts: AppOptions = {}) {
     });
     const requireAuth = makeRequireAuth(opts.sessionStore, opts.userRepo, opts.tokenRepo);
     if (opts.secretsService) {
-      registerSecretsRoutes(app, opts.secretsService, requireAuth);
+      registerSecretsRoutes(app, opts.secretsService, requireAuth, {
+        onSecretDeleted:
+          opts.soulLoader && opts.gitSync && opts.llmService
+            ? makeLlmCascadeOnSecretDelete(
+                opts.soulLoader,
+                opts.gitSync,
+                opts.llmService,
+                opts.secretsService,
+                app.log
+              )
+            : undefined,
+      });
     }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);

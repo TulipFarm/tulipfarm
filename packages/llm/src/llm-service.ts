@@ -1,6 +1,12 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { LanguageModel } from "ai";
-import { LlmNotConfiguredError, UnknownModelError, validateLlmConfig } from "./config";
+import {
+  LlmConfigValidationError,
+  LlmCredentialError,
+  LlmNotConfiguredError,
+  UnknownModelError,
+  validateLlmConfig,
+} from "./config";
 import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
 import { type ModelSelector, resolveTier, type SelectionContext } from "./selection";
@@ -36,13 +42,45 @@ export class LlmService {
 
     for (const tier of TIERS) {
       const { providers } = config.tiers[tier];
-      const built = await Promise.all(providers.map((entry) => createModel(entry, secrets)));
-      built.forEach((model, i) => {
-        const id = providers[i]?.model;
-        if (id && !byModelId.has(id)) byModelId.set(id, model);
-      });
+
+      // Resolve providers concurrently. Each entry catches expected errors locally and
+      // returns null (skip + warn); unexpected errors re-throw immediately via Promise.all.
+      // Promise.all preserves result order, so the fallback chain stays in config order.
+      const resolved = await Promise.all(
+        providers.map(async (entry) => {
+          try {
+            return { model: await createModel(entry, secrets), id: entry.model };
+          } catch (err) {
+            if (err instanceof LlmCredentialError || err instanceof LlmConfigValidationError) {
+              console.warn(
+                `[llm] skip tier=${tier} provider=${entry.provider} model=${entry.model} — ${err.message}`
+              );
+              return null;
+            }
+            throw err;
+          }
+        })
+      );
+
+      const built: Awaited<ReturnType<typeof createModel>>[] = [];
+      for (const r of resolved) {
+        if (r === null) continue;
+        built.push(r.model);
+        if (!byModelId.has(r.id)) byModelId.set(r.id, r.model);
+      }
+
+      if (built.length === 0) {
+        console.warn(`[llm] tier=${tier} — no providers available, tier skipped`);
+        continue;
+      }
+
       models.set(tier, new FallbackModel(built, logger));
-      console.info(`[llm] tier=${tier} providers=${providers.length}`);
+      console.info(`[llm] tier=${tier} providers=${built.length}`);
+    }
+
+    if (models.size === 0) {
+      console.warn("[llm] no providers available across all tiers — LLM features disabled");
+      return;
     }
 
     this.models = models;
