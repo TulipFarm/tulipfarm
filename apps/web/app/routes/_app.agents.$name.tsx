@@ -3,7 +3,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { MarkdownView } from "~/components/markdown-view";
@@ -39,10 +38,7 @@ export default function AgentDetail() {
   const hasMeta = Boolean(agent.label || agent.domain || agent.model || agent.autonomy);
 
   return (
-    <ResourcePanel
-      crumbs={[{ label: "agents", to: "/agents" }, { label: agent.name }]}
-      command={`tulipfarm agents show ${agent.name}`}
-    >
+    <ResourcePanel crumbs={[{ label: "agents", to: "/agents" }, { label: agent.name }]}>
       <div>
         {/* Chat is wired in a later ticket; this preselects the agent on the chat surface. */}
         <Button size="sm" onClick={() => navigate(`/?agent=${encodeURIComponent(agent.name)}`)}>
@@ -70,12 +66,10 @@ export default function AgentDetail() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm agents show ${params.name ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="agents" command={command} />;
+    return <NotFoundState section="agents" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="agents" command={command} status={status} message={message} />;
+  return <ErrorState section="agents" status={status} message={message} />;
 }

@@ -27,7 +27,7 @@ export default function ResourcesIndex() {
 
   if (rows.length === 0) {
     return (
-      <ResourcePanel crumbs={[{ label: "resources" }]} command="tulipfarm resources --list">
+      <ResourcePanel crumbs={[{ label: "resources" }]}>
         <p className="text-sm text-muted-foreground">
           No resource types defined yet. Create one here, or ask the assistant to build one in chat.
         </p>
@@ -39,7 +39,7 @@ export default function ResourcesIndex() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "resources" }]} command="tulipfarm resources --list">
+    <ResourcePanel crumbs={[{ label: "resources" }]}>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
           {rows.length} {rows.length === 1 ? "type" : "types"}
@@ -81,12 +81,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="resources"
-      command="tulipfarm resources --list"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="resources" status={status} message={message} />;
 }

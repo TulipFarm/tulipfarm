@@ -3,7 +3,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
@@ -59,7 +58,7 @@ export default function ResourceCreate() {
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={`tulipfarm resources ${type} create`}>
+    <ResourcePanel crumbs={crumbs}>
       {schemaError ? (
         <p className="text-destructive">error: schema parse failed — {schemaError}</p>
       ) : (
@@ -79,15 +78,7 @@ export default function ResourceCreate() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="resources"
-      command={`tulipfarm resources ${params.type ?? ""} create`}
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="resources" status={status} message={message} />;
 }

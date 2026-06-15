@@ -11,7 +11,7 @@ patterns. Tokens live in `apps/web/app/app.css`; this doc explains the intent be
 ## Principles
 
 1. **Terminal-native, not SaaS.** Flat surfaces, no drop shadows, hairline borders, ASCII bracket
-   motifs (`[+]`, `[section]`, `$ … --list`). Depth comes from borders + contrast layers, never shadow.
+   motifs (`[+]`, `[section]`). Depth comes from borders + contrast layers, never shadow.
 2. **Ruby discipline (≤10% of any screen).** Ruby is the brand accent — active nav, focus rings,
    the wordmark, CTAs, `[+]` markers. Everything else is warm near-black ink on a warm cream canvas.
 3. **Coral red = danger only.** The destructive token is the only other saturated color; never
@@ -83,7 +83,7 @@ Ruby is lightened in dark mode (`0.46 → 0.70`) for contrast. The `--ring` toke
 
 - **Lucide** icons for the 8 sidebar nav rows only (`size-4`).
 - **ASCII brackets** are the content iconography: `[+]` (steps/actions), `[section]` (labels),
-  `$ tulipfarm <section> --list` → `0 results` (empty states), `▍`/`|` (cursors).
+  `▍`/`|` (cursors).
 
 ---
 
@@ -108,8 +108,8 @@ attribute. Wiring (`apps/web/app/root.tsx`):
   the nav opens the **session zone** (the scrollable "Recent chats" list); collapsible icon rail
   (`md:w-60 ↔ md:w-14`, persisted) that hides labels and shows a ruby dot for badges; pinned footer
   (synced theme toggle + instance label); responsive mobile drawer with Escape/focus a11y.
-- **Empty state** (`empty-state.tsx`): a terminal-window card — `[section]` title bar →
-  `$ tulipfarm <section> --list` → `0 results` → title + hint. Depth from border + `--card`.
+- **Empty state** (`empty-state.tsx`): a hairline-bordered card — a quiet uppercase section eyebrow
+  → title + hint. Depth from border + `--card`.
 - **Chat welcome** (`_app._index.tsx`): the signature moment — blinking ruby block-cursor wordmark,
   `● ready · GeneralAssistant · 8 sections` status line, a placeholder composer flagged `SOON`
   (`cursor-not-allowed`, non-interactive until chat wiring lands), staggered bracket first-steps.

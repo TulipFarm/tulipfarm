@@ -59,7 +59,7 @@ test("index lists agents with label, domain, and autonomy", () => {
 
 test("index with no agents shows the empty state", () => {
   renderWithData(<AgentsIndex />, { agents: [] });
-  expect(screen.getByText("0 results")).toBeInTheDocument();
+  expect(screen.getByText(/No agents registered/)).toBeInTheDocument();
 });
 
 test("index ErrorBoundary surfaces 401 as authentication required", () => {

@@ -57,10 +57,7 @@ export default function SettingsLlm() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-muted-foreground">
-        <span aria-hidden className="text-primary">
-          ${" "}
-        </span>
-        tulipfarm llm-config · tiers run their providers as a fallback chain (top first)
+        Tiers run their providers as a fallback chain (top first).
       </p>
       {noneEnabled ? (
         <p className="rounded-sm border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
@@ -85,12 +82,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="settings"
-      command="tulipfarm llm-config"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="settings" status={status} message={message} />;
 }

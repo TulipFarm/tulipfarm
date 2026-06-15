@@ -9,8 +9,6 @@ import { type CollectionWithCount, listCollectionsWithCounts } from "~/lib/knowl
 
 export const meta: MetaFunction = () => [{ title: "Collections · Knowledge · tulipfarm" }];
 
-const command = "tulipfarm knowledge collections --list";
-
 export async function clientLoader() {
   const page = await listCollectionsWithCounts();
   return { items: page.items, nextCursor: page.nextCursor };
@@ -41,7 +39,7 @@ export default function CollectionsIndex() {
   const crumbs = [{ label: "knowledge", to: "/knowledge" }, { label: "collections" }];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={command}>
+    <ResourcePanel crumbs={crumbs}>
       <div>
         <Button asChild variant="outline" size="sm">
           <Link to="/knowledge/collections/new">New collection</Link>
@@ -70,5 +68,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }

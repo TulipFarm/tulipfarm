@@ -20,7 +20,6 @@ export async function clientLoader() {
   return { items: page.items, nextCursor: page.nextCursor };
 }
 
-const command = "tulipfarm knowledge documents --list";
 const inputClass =
   "h-8 flex-1 rounded-sm border border-border bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
@@ -92,7 +91,7 @@ export default function DocumentsIndex() {
   const crumbs = [{ label: "knowledge", to: "/knowledge" }, { label: "documents" }];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={command}>
+    <ResourcePanel crumbs={crumbs}>
       <div>
         <Button asChild variant="outline" size="sm">
           <Link to="/knowledge/documents/new">New document</Link>
@@ -161,5 +160,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }

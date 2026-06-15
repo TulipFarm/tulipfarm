@@ -56,7 +56,6 @@ test("shows a loading line on the first load", () => {
 test("shows the empty state when there are no pending approvals", () => {
   useApprovals.mockReturnValue(state({ loading: false, approvals: [] }));
   renderPage();
-  expect(screen.getByText("0 results")).toBeInTheDocument();
   expect(screen.getByText(/No pending approvals/)).toBeInTheDocument();
 });
 

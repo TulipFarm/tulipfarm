@@ -9,8 +9,6 @@ import { useApprovals } from "~/lib/approvals-context";
 
 export const meta: MetaFunction = () => [{ title: "Approvals · tulipfarm" }];
 
-const COMMAND = "tulipfarm approvals --pending";
-
 // One-line, truncated args preview for a list row — the standalone approver needs to see WHAT the
 // gated tool will do (the inline chat card shows only the tool name + countdown). Guards non-JSON.
 function describeArgs(args: unknown): string {
@@ -72,7 +70,7 @@ export default function ApprovalsPage() {
 
   if (loading && approvals.length === 0 && !error) {
     return (
-      <ResourcePanel crumbs={[{ label: "approvals" }]} command={COMMAND}>
+      <ResourcePanel crumbs={[{ label: "approvals" }]}>
         <p className="text-xs text-muted-foreground">loading…</p>
       </ResourcePanel>
     );
@@ -80,7 +78,7 @@ export default function ApprovalsPage() {
 
   // Only blank the page for an error when there's nothing cached to show; otherwise prefer stale data.
   if (error && approvals.length === 0) {
-    return <ErrorState section="approvals" command={COMMAND} message={error} />;
+    return <ErrorState section="approvals" message={error} />;
   }
 
   if (approvals.length === 0) {
@@ -94,7 +92,7 @@ export default function ApprovalsPage() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "approvals" }]} command={COMMAND}>
+    <ResourcePanel crumbs={[{ label: "approvals" }]}>
       <p className="text-xs text-muted-foreground">{approvals.length} pending</p>
       <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
         {approvals.map((item) => (
