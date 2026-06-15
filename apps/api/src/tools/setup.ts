@@ -2,6 +2,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
 import type { WorkingMemoryService } from "../memory/service";
 import { MEMORY_TOOLS } from "../memory/tools";
+import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
@@ -124,6 +125,12 @@ export function buildToolRegistry(services: {
         execute: (args, _ctx) => t.handler(args, ctx),
       });
     }
+  }
+
+  // Frontend tools (A2UI P3) are already ToolDefs — they read the per-request RequestContext directly
+  // (client context) and return client-action descriptors. No services to close over.
+  for (const t of FRONTEND_TOOLS) {
+    registry.register(t);
   }
 
   return registry;

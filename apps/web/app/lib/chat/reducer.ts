@@ -73,6 +73,28 @@ function appendText(
   return [...parts, { kind, text: delta }];
 }
 
+// A2UI surfaces are addressed by `surfaceId` and can be re-rendered / live-updated across turns, so
+// they're located anywhere in the transcript (not just the current message).
+function hasSurface(messages: ChatMessage[], surfaceId: string): boolean {
+  return messages.some((m) => m.parts.some((p) => p.kind === "a2ui" && p.surfaceId === surfaceId));
+}
+
+// Replace every a2ui part matching `surfaceId` (across all messages) via `fn`, preserving order.
+function mapSurface(
+  messages: ChatMessage[],
+  surfaceId: string,
+  fn: (part: Extract<TimelinePart, { kind: "a2ui" }>) => TimelinePart
+): ChatMessage[] {
+  return messages.map((m) =>
+    m.parts.some((p) => p.kind === "a2ui" && p.surfaceId === surfaceId)
+      ? {
+          ...m,
+          parts: m.parts.map((p) => (p.kind === "a2ui" && p.surfaceId === surfaceId ? fn(p) : p)),
+        }
+      : m
+  );
+}
+
 // Map over tool parts, applying `fn` to the one matching `toolCallId` (others pass through).
 function mapTool(
   parts: TimelinePart[],
@@ -218,8 +240,38 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
 
     case "a2ui": {
+      const d = event.data;
+      // updateDataModel: stash the compiled leaf fragments on the surface part (located anywhere in the
+      // transcript) so the frame swaps them in place without rebuilding. No-op if the surface is gone.
+      if ("op" in d && d.op === "updateDataModel") {
+        return {
+          ...state,
+          status: "streaming",
+          messages: mapSurface(state.messages, d.surfaceId, (p) => ({
+            ...p,
+            fragments: d.fragments,
+          })),
+        };
+      }
+      // createSurface for an id already in the transcript REPLACES it in place (a live re-render /
+      // structure change → the frame rebuilds on the new html, clearing any pending fragments).
+      const surfaceId = "op" in d ? d.surfaceId : undefined;
+      if (surfaceId && hasSurface(state.messages, surfaceId)) {
+        return {
+          ...state,
+          status: "streaming",
+          messages: mapSurface(state.messages, surfaceId, () => ({
+            kind: "a2ui",
+            surfaceId,
+            html: d.html,
+          })),
+        };
+      }
+      // A brand-new surface (createSurface) or a legacy { html } block appends a fresh part.
       const { messages, target } = ensureAssistant(state.messages);
-      const part: TimelinePart = { kind: "a2ui", html: event.data.html };
+      const part: TimelinePart = surfaceId
+        ? { kind: "a2ui", surfaceId, html: d.html }
+        : { kind: "a2ui", html: d.html };
       return {
         ...state,
         status: "streaming",
@@ -258,5 +310,9 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "error":
       return { ...state, status: "error", error: event.data.message, pendingServerId: undefined };
+
+    // Imperative agent→client action — executed by the chat hook (navigate, …), no timeline change.
+    case "client-action":
+      return state;
   }
 }

@@ -8,6 +8,7 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
+import type { A2uiSurfaceStore } from "./a2ui/surface-store";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
@@ -18,6 +19,7 @@ import type { UserRepo } from "./auth/users";
 import { ApprovalRegistry } from "./chat/approvals";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
+import type { PendingInteractionRepo } from "./chat/pending-interactions";
 import { registerChatRoutes } from "./chat/routes";
 import { StreamHub } from "./chat/stream-hub";
 import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
@@ -65,6 +67,8 @@ export interface AppOptions {
   toolRegistry?: ToolRegistry;
   approvalRegistry?: ApprovalRegistry;
   guardrailsService?: GuardrailsService;
+  pendingInteractionRepo?: PendingInteractionRepo;
+  a2uiSurfaceStore?: A2uiSurfaceStore;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -210,7 +214,9 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.domainEventEmitter,
         toolRegistry,
         approvalRegistry,
-        opts.guardrailsService
+        opts.guardrailsService,
+        opts.pendingInteractionRepo,
+        opts.a2uiSurfaceStore
       );
       registerApprovalRoutes(app, approvalRegistry, requireAuth);
     }

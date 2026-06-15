@@ -7,7 +7,9 @@
  * (stale-closure guard). Cross-reload rehydration and reconnect are intentionally out of scope.
  */
 
+import { type NavigateFunction, useNavigate } from "@remix-run/react";
 import { useCallback, useReducer, useRef } from "react";
+import { invokeClientAction, prefillForm } from "~/lib/chat/action-registry";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
@@ -58,10 +60,53 @@ type ChatAction =
   | { type: "editResend"; messageId: string; text: string }
   | { type: "reset" };
 
+/** Snapshot what the user is viewing, sent with each turn so the agent can `get_client_context`. */
+function captureClientContext(): { route: string; title?: string } | undefined {
+  if (typeof window === "undefined") return undefined;
+  const route = window.location.pathname + window.location.search;
+  const title = typeof document !== "undefined" ? document.title : undefined;
+  return title ? { route, title } : { route };
+}
+
+/** Execute an imperative agent→client action: navigate (internal paths only), prefill, or invoke. */
+function handleClientAction(data: unknown, navigate: NavigateFunction): void {
+  const a = data as {
+    action?: string;
+    to?: string;
+    values?: Record<string, unknown>;
+    name?: string;
+    payload?: unknown;
+  };
+  if (a.action === "navigate") {
+    if (typeof a.to === "string" && a.to.startsWith("/") && !a.to.startsWith("//")) navigate(a.to);
+  } else if (a.action === "prefill" && a.values && typeof a.values === "object") {
+    prefillForm(a.values);
+  } else if (a.action === "invoke" && typeof a.name === "string") {
+    invokeClientAction(a.name, a.payload);
+  }
+}
+
+/** "emailNotifications" / "email_notifications" → "Email notifications" for a readable submission. */
+function humanizeKey(key: string): string {
+  const s = key
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .trim();
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : key;
+}
+
+function formatFieldValue(v: unknown): string {
+  if (typeof v === "boolean") return v ? "Yes" : "No";
+  if (v === null || v === undefined || v === "") return "—";
+  return String(v);
+}
+
 /**
  * Map an A2UI bridge `agent` payload (posted by a tf-* control click via the iframe runtime) into a
  * follow-up user turn. `choice` submits the chosen label (falling back to its value); `suggest_agent`
- * submits a prompt and switches the active agent. Unknown/malformed payloads are ignored.
+ * submits a prompt and switches the active agent; `a2ui-form` (HITL submit) renders the gathered field
+ * values as a readable markdown list (the server injects it as the open `ask_user` tool-result and
+ * resumes the run); `a2ui-action` submits a button's event (+ payload). Unknown payloads are ignored.
  */
 export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOptions } | null {
   if (typeof payload !== "object" || payload === null) return null;
@@ -74,6 +119,20 @@ export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOp
     const text = typeof p.label === "string" ? p.label : "";
     const agentId = typeof p.agentId === "string" ? p.agentId : undefined;
     return text ? { text, opts: agentId ? { agentId } : undefined } : null;
+  }
+  if (p.kind === "a2ui-form") {
+    const data =
+      typeof p.data === "object" && p.data !== null ? (p.data as Record<string, unknown>) : {};
+    const lines = Object.entries(data).map(
+      ([k, v]) => `- **${humanizeKey(k)}:** ${formatFieldValue(v)}`
+    );
+    return { text: lines.length > 0 ? lines.join("\n") : "(submitted)" };
+  }
+  if (p.kind === "a2ui-action") {
+    const event = typeof p.event === "string" ? p.event : "";
+    if (!event) return null;
+    const hasPayload = typeof p.payload === "object" && p.payload !== null;
+    return { text: hasPayload ? `${event} ${JSON.stringify(p.payload)}` : event };
   }
   return null;
 }
@@ -123,6 +182,10 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   // Mirror the latest refresh callback so the stable `runStream` closure always calls the current one.
   const onConversationChangeRef = useRef(opts?.onConversationChange);
   onConversationChangeRef.current = opts?.onConversationChange;
+  // Router for imperative agent→client actions (navigate_to), via a ref so `runStream` stays stable.
+  const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   // Open the stream for `text` and fold its events into the timeline. Shared by send + regenerate.
   const runStream = useCallback(async (text: string, opts?: SendOptions) => {
@@ -136,6 +199,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
           agentId: opts?.agentId,
           skills: opts?.skills,
           resources: opts?.resources,
+          clientContext: captureClientContext(),
         },
         {
           onMeta: (meta) => {
@@ -147,6 +211,11 @@ export function useChatStream(opts?: UseChatStreamOptions) {
             dispatch({ type: "meta", meta });
           },
           onEvent: (event) => {
+            // Imperative agent→client actions execute as a side effect; they don't touch the timeline.
+            if (event.type === "client-action") {
+              handleClientAction(event.data, navigateRef.current);
+              return;
+            }
             dispatch(event);
             // On completion the async title has usually landed — refresh so the sidebar shows it.
             if (event.type === "finish")

@@ -1,5 +1,6 @@
 import type { ToolSet } from "ai";
 import { describe, expect, it } from "vitest";
+import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { buildToolRegistry } from "../tools/setup";
 import { WorkingMemoryService } from "./service";
 import type { ToolCallResult } from "./tool-result";
@@ -38,7 +39,13 @@ function setup(): { set: ToolSet; repo: FakeWorkingMemoryRepo } {
 describe("memory tools via ToolRegistry", () => {
   it("exposes the two memory tools keyed by name", () => {
     const { set } = setup();
-    expect(Object.keys(set).sort()).toEqual(["delete_memory", "update_memory"]);
+    // Frontend tools are always-on (no service) and covered separately; filter to the memory family.
+    const frontendNames = new Set(FRONTEND_TOOLS.map((t) => t.name));
+    expect(
+      Object.keys(set)
+        .filter((k) => !frontendNames.has(k))
+        .sort()
+    ).toEqual(["delete_memory", "update_memory"]);
   });
 
   it("update_memory.execute round-trips to the service, scoped to the context user", async () => {

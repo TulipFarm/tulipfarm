@@ -21,6 +21,7 @@ const KNOWN_EVENT_TYPES = new Set<ChatEventType>([
   "sources",
   "agent-handoff",
   "a2ui",
+  "client-action",
   "guardrail_block",
   "finish",
   "error",
@@ -96,6 +97,8 @@ export type ChatRequestBody = {
   // context for this turn only (ephemeral, like `model`). Names resolve server-side.
   skills?: string[];
   resources?: string[];
+  // What the user is viewing this turn — the agent reads it via the `get_client_context` tool (P3).
+  clientContext?: { route?: string; title?: string };
 };
 
 export type ChatStreamMeta = { conversationId?: string; streamId?: string; messageId?: string };

@@ -49,12 +49,15 @@ describe("Transcript renders each part from its SSE event", () => {
       ])
     );
     expect(screen.getByText("[tool: write_thing]")).toBeInTheDocument();
+    // The args/result JSON is syntax-highlighted — split across spans — so match the <pre>'s text.
+    const inPre = (text: string) => (_: string, el: Element | null) =>
+      el?.tagName === "PRE" && (el.textContent ?? "").includes(text);
     // Collapsed: args + result are hidden until the accordion is expanded.
-    expect(screen.queryByText(/"x": 1/)).toBeNull();
-    expect(screen.queryByText(/"ok": true/)).toBeNull();
+    expect(screen.queryByText(inPre('"x": 1'))).toBeNull();
+    expect(screen.queryByText(inPre('"ok": true'))).toBeNull();
     await user.click(screen.getByRole("button", { name: /tool: write_thing/i }));
-    expect(screen.getByText(/"x": 1/)).toBeInTheDocument();
-    expect(screen.getByText(/"ok": true/)).toBeInTheDocument();
+    expect(screen.getByText(inPre('"x": 1'))).toBeInTheDocument();
+    expect(screen.getByText(inPre('"ok": true'))).toBeInTheDocument();
   });
 
   it("a reasoning panel (expandable)", async () => {

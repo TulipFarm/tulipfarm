@@ -5,6 +5,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
+import { type A2uiSurfaceStore, MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { assembleSystemPrompt } from "../context/assemble";
@@ -38,6 +39,7 @@ import {
   type MessageRepo,
   toModelMessage,
 } from "./messages";
+import { MemoryPendingInteractionRepo, type PendingInteractionRepo } from "./pending-interactions";
 import { attachToStream, type OutputScan, runChatStream } from "./producer";
 import { MessageSchema } from "./schemas";
 import { writeSseHeaders } from "./sse";
@@ -54,6 +56,27 @@ const SUMMARY_PROMPT =
   "information-dense recap. Preserve facts, decisions, names, numbers, and any open " +
   "tasks the assistant must remember to continue. Write only the summary.";
 
+/**
+ * HITL resume: rewrite the pending `ask_user` tool-result in the reconstructed model messages so the
+ * placeholder ("awaiting user input") becomes the user's actual answer. The DB row stays the
+ * placeholder (append-only history); only the in-memory messages handed to `streamText` carry the
+ * answer, so the model continues as if its own question was answered. Returns whether a result was
+ * patched.
+ */
+function patchToolResult(messages: ModelMessage[], toolCallId: string, value: unknown): boolean {
+  for (const m of messages) {
+    if (m.role !== "tool" || !Array.isArray(m.content)) continue;
+    for (const part of m.content) {
+      const p = part as { type?: string; toolCallId?: string; output?: unknown };
+      if (p.type === "tool-result" && p.toolCallId === toolCallId) {
+        p.output = { type: "json", value };
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 interface ChatBody {
   conversationId?: string;
   message: { role: "user"; content: string };
@@ -67,6 +90,8 @@ interface ChatBody {
   // into `<eager-resources>` — for THIS turn only. Unknown names are ignored.
   skills?: string[];
   resources?: string[];
+  // What the user is viewing this turn (A2UI P3) — exposed to the agent via `get_client_context`.
+  clientContext?: { route?: string; title?: string };
 }
 
 const ChatBodySchema = {
@@ -91,6 +116,11 @@ const ChatBodySchema = {
     llmDecision: { type: "boolean" },
     skills: { type: "array", items: { type: "string", minLength: 1 } },
     resources: { type: "array", items: { type: "string", minLength: 1 } },
+    clientContext: {
+      type: "object",
+      additionalProperties: false,
+      properties: { route: { type: "string" }, title: { type: "string" } },
+    },
   },
 } as const;
 
@@ -189,9 +219,8 @@ export async function persistStep(
         args: tc.input,
       });
     }
-    await messageRepo
-      .create(withProvenance(fromAssistantParts(conversationId, parts), provenance))
-      .catch(onError);
+    const assistantDoc = withProvenance(fromAssistantParts(conversationId, parts), provenance);
+    await messageRepo.create(assistantDoc).catch(onError);
 
     if (step.toolResults.length > 0) {
       const resultParts: MessagePart[] = step.toolResults.map((tr) => ({
@@ -200,7 +229,15 @@ export async function persistStep(
         toolName: tr.toolName,
         result: tr.output,
       }));
-      await messageRepo.create(fromToolResult(conversationId, resultParts)).catch(onError);
+      const toolDoc = fromToolResult(conversationId, resultParts);
+      // History orders by (created_at, id). The tool-result and its assistant tool-call are written
+      // back-to-back and can share a millisecond; a random id tiebreak could then sort the result
+      // BEFORE the call, leaving the call without an adjacent result (provider MissingToolResults on
+      // the next turn's rebuild). Pin the result strictly after the call to keep the pair intact.
+      if (toolDoc.createdAt.getTime() <= assistantDoc.createdAt.getTime()) {
+        toolDoc.createdAt = new Date(assistantDoc.createdAt.getTime() + 1);
+      }
+      await messageRepo.create(toolDoc).catch(onError);
     }
     return;
   }
@@ -249,11 +286,18 @@ export function registerChatRoutes(
   events?: EventEmitter,
   toolRegistry?: ToolRegistry,
   approvals?: ApprovalRegistry,
-  guardrails?: GuardrailsService
+  guardrails?: GuardrailsService,
+  pendingInteractionRepo?: PendingInteractionRepo,
+  a2uiSurfaceStore?: A2uiSurfaceStore
 ): void {
   // One in-process approval registry shared by the chat turn (which suspends gated tools) and the
   // decide route (which resolves them). Single-instance V1 — see chat/approvals.ts.
   const approvalRegistry = approvals ?? new ApprovalRegistry();
+  // HITL suspend/resume store (A2UI ask_user). Defaults to in-memory like the approval registry; the
+  // Postgres-backed repo is injected by buildApp so pauses survive restarts.
+  const pendingInteractions = pendingInteractionRepo ?? new MemoryPendingInteractionRepo();
+  // A2UI live-surface store: render_surface persists each surface; update_surface diffs + swaps it.
+  const surfaceStore = a2uiSurfaceStore ?? new MemoryA2uiSurfaceStore();
 
   app.post(
     "/api/v1/chat",
@@ -414,11 +458,19 @@ export function registerChatRoutes(
           }).then((r) => r.text),
         log: req.log,
       });
+      // HITL resume: if this conversation is paused on an `ask_user`, the incoming message is the
+      // ANSWER, not a new user turn — inject it as the pending tool-call's result and continue the run
+      // (the model sees its own question answered). The answer is still persisted as a user message for
+      // durable history; only THIS turn's model messages carry the patched tool-result.
+      const pending = await pendingInteractions.findOpenByConversation(convo._id);
       if (system) messages.push({ role: "system", content: system });
-      messages.push(...rendered.map(toModelMessage), {
-        role: "user",
-        content: body.message.content,
-      });
+      const renderedModel = rendered.map(toModelMessage);
+      if (pending) {
+        patchToolResult(renderedModel, pending.toolCallId, { answer: body.message.content });
+        messages.push(...renderedModel);
+      } else {
+        messages.push(...renderedModel, { role: "user", content: body.message.content });
+      }
       await messageRepo.create(fromUserText(convo._id, body.message.content));
       await repo.touch(convo._id);
 
@@ -466,13 +518,21 @@ export function registerChatRoutes(
           await emitter.emit("finish", { reason: "guardrail_block" });
           hub.finish(streamId);
           void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
-          return;
+          return; // pending interaction stays open — the user can re-submit the answer
         }
-        messages[messages.length - 1] = { role: "user", content: inResult.value };
+        // On resume the guarded answer goes back into the pending tool-result, not a trailing user msg.
+        if (pending) patchToolResult(messages, pending.toolCallId, { answer: inResult.value });
+        else messages[messages.length - 1] = { role: "user", content: inResult.value };
       }
+      // The HITL answer is committed once it clears input guarding (or when no guard runs). Resolving
+      // here — not before the guard — lets a blocked answer be re-submitted against the same pause.
+      if (pending) await pendingInteractions.resolve(pending.id);
 
       const coordinator = new BatchCoordinator();
       const fullResultCache = new Map<string, ToolCallResult>();
+      // Per-turn flag: get_client_context flips it true; side-effecting frontend actions are gated on
+      // it (shared across the whole turn, including handoffs, so a context read carries forward).
+      const contextRead = { value: false };
       // Tool-call stage (AC-V1-002): a block returns a denial the LLM sees (the turn continues),
       // not a `guardrail_block` SSE. Undefined guardrails → byte-identical to before.
       const runToolCallGuard: RunToolCallGuard | undefined = gr
@@ -535,7 +595,13 @@ export function registerChatRoutes(
           const turnTools =
             toolRegistry && toolRegistry.getAll().length > 0
               ? toolRegistry.buildToolSet(
-                  { userId: user._id, agentId: activeAgent.name, autonomy: body.autonomy },
+                  {
+                    userId: user._id,
+                    agentId: activeAgent.name,
+                    autonomy: body.autonomy,
+                    clientContext: body.clientContext,
+                    contextRead,
+                  },
                   coordinator,
                   fullResultCache,
                   makeApprovalGate(approvalRegistry, emitter),
@@ -554,7 +620,10 @@ export function registerChatRoutes(
               if (steps.length >= MAX_TOOL_STEPS) return true;
               const last = steps[steps.length - 1];
               return (last?.toolCalls ?? []).some(
-                (c) => c.toolName === "transfer_to_agent" || c.toolName === "complete_task"
+                (c) =>
+                  c.toolName === "transfer_to_agent" ||
+                  c.toolName === "complete_task" ||
+                  c.toolName === "ask_user" // HITL: end the turn cleanly with the form rendered
               );
             },
             onError: ({ error }) => {
@@ -578,12 +647,28 @@ export function registerChatRoutes(
             | { type: "transfer"; target: string; reason?: string }
             | { type: "complete"; summary?: string }
             | undefined;
+          // Set when this agent calls `ask_user`: the turn ends with the form rendered and a pending
+          // interaction is persisted so the next request resumes with the user's answer.
+          let pendingAsk:
+            | { toolCallId: string; surfaceId: string | null; schema: Record<string, unknown> }
+            | undefined;
           let errored = false;
           for await (const part of result.fullStream) {
             const p = part as { type?: string; toolName?: string; toolCallId?: string };
             // Suppress each agent's own terminal `finish`; one synthetic finish closes the whole turn.
             if (p.type === "finish") continue;
             if (p.type === "error") errored = true;
+            if (p.type === "tool-result" && p.toolName === "ask_user") {
+              const full = fullResultCache.get(p.toolCallId as string);
+              if (full?.success) {
+                const data = full.data as Record<string, unknown>;
+                pendingAsk = {
+                  toolCallId: p.toolCallId as string,
+                  surfaceId: typeof data.surfaceId === "string" ? data.surfaceId : null,
+                  schema: (data.schema as Record<string, unknown>) ?? {},
+                };
+              }
+            }
             if (
               p.type === "tool-result" &&
               (p.toolName === "transfer_to_agent" || p.toolName === "complete_task")
@@ -608,6 +693,21 @@ export function registerChatRoutes(
           }
 
           if (errored) return; // a terminal `error` was already yielded by the producer
+          if (pendingAsk) {
+            // HITL: end the turn with the form on screen and record the pause. The next request injects
+            // the user's answer as this tool-call's result and resumes the run (see the resume path).
+            await pendingInteractions.create({
+              id: randomUUID(),
+              conversationId: convo._id,
+              toolCallId: pendingAsk.toolCallId,
+              toolName: "ask_user",
+              awaitedSchema: pendingAsk.schema,
+              surfaceId: pendingAsk.surfaceId,
+              createdAt: new Date(),
+              resolvedAt: null,
+            });
+            break;
+          }
           if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
           if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
             await repo.setAgent(convo._id, control.target);
@@ -665,6 +765,8 @@ export function registerChatRoutes(
         log: req.log,
         fullResultCache,
         scanOutput,
+        surfaceStore,
+        conversationId: convo._id,
       });
     }
   );

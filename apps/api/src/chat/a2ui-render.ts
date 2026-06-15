@@ -1,3 +1,6 @@
+import { compileSurface } from "../a2ui/compiler";
+import { esc, sendAttr } from "../a2ui/escape";
+import type { A2uiSpec } from "../a2ui/spec";
 import type { ToolCallResult } from "../tools/types";
 
 /**
@@ -6,28 +9,11 @@ import type { ToolCallResult } from "../tools/types";
  * shell. Interactive controls carry a `data-a2ui-send` JSON payload that the in-iframe runtime posts
  * back through the `agent` bridge channel on click (see lib/a2ui/runtime.ts).
  *
- * Only three tools produce a view: `compose_view` (passthrough HTML), `present_choices`, and
- * `suggest_agent`. Every other tool — and every failed result — returns `null` (no a2ui event).
- * All agent-controlled strings are HTML-escaped so a `"`/`<` in a label cannot break out of the
- * attribute or tag and smuggle a different `data-a2ui-send` payload.
+ * View-producing tools: `compose_view` (passthrough HTML), `present_choices`, `suggest_agent`, and
+ * `render_surface` (declarative A2UI spec compiled to tf-* HTML). Every other tool — and every
+ * failed result — returns `null` (no a2ui event). All agent-controlled strings are HTML-escaped (via
+ * a2ui/escape) so a `"`/`<` in a label cannot break out and smuggle a different `data-a2ui-send`.
  */
-
-const ESCAPE: Record<string, string> = {
-  "&": "&amp;",
-  "<": "&lt;",
-  ">": "&gt;",
-  '"': "&quot;",
-  "'": "&#39;",
-};
-
-function esc(value: string): string {
-  return value.replace(/[&<>"']/g, (c) => ESCAPE[c] as string);
-}
-
-/** Serialize a postback payload into an HTML-escaped `data-a2ui-send` attribute value. */
-function sendAttr(payload: unknown): string {
-  return `data-a2ui-send="${esc(JSON.stringify(payload))}"`;
-}
 
 interface Choice {
   label: string;
@@ -78,4 +64,34 @@ export function renderA2uiHtml(toolName: string, result: ToolCallResult): string
     default:
       return null;
   }
+}
+
+/**
+ * The structured payload of an `a2ui` SSE event. The legacy view tools emit `{ html }`; `render_surface`
+ * emits a `createSurface` op (re-emitting it for the same surfaceId replaces the surface in place);
+ * `update_surface` emits `updateDataModel` with the changed leaf fragments. The payload is additive so
+ * an older client that only reads `data.html` keeps working.
+ */
+export type A2uiEventData =
+  | { html: string }
+  | { op: "createSurface"; surfaceId: string; html: string; nodeIds: string[] }
+  | {
+      op: "updateDataModel";
+      surfaceId: string;
+      fragments: Array<{ nodeId: string; html: string }>;
+    };
+
+/** Compile a `render_surface` tool result (`{ surfaceId, spec, dataModel }`) into a `createSurface` event. */
+export function renderSurfaceEvent(result: ToolCallResult): A2uiEventData | null {
+  if (!result.success) return null;
+  const data = result.data as { surfaceId?: unknown; spec?: unknown; dataModel?: unknown };
+  if (typeof data.surfaceId !== "string" || data.surfaceId.length === 0) return null;
+  if (typeof data.spec !== "object" || data.spec === null) return null;
+  const dataModel =
+    typeof data.dataModel === "object" && data.dataModel !== null
+      ? (data.dataModel as Record<string, unknown>)
+      : {};
+  const { html, nodeIds } = compileSurface(data.spec as A2uiSpec, dataModel);
+  if (html.length === 0) return null;
+  return { op: "createSurface", surfaceId: data.surfaceId, html, nodeIds };
 }

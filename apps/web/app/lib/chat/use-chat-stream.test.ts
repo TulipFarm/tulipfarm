@@ -19,10 +19,34 @@ describe("a2uiAgentToSend", () => {
     ).toEqual({ text: "Switch to Billing", opts: { agentId: "billing" } });
   });
 
+  test("maps an a2ui-form submit to a readable markdown list (humanized keys, Yes/No booleans)", () => {
+    expect(
+      a2uiAgentToSend({
+        kind: "a2ui-form",
+        event: "answer",
+        data: { city: "Pune", emailNotifications: false },
+      })
+    ).toEqual({ text: "- **City:** Pune\n- **Email Notifications:** No" });
+  });
+
+  test("maps an empty a2ui-form submit to a non-empty placeholder turn", () => {
+    expect(a2uiAgentToSend({ kind: "a2ui-form", event: "answer" })).toEqual({
+      text: "(submitted)",
+    });
+  });
+
+  test("maps an a2ui-action to the event (with payload when present)", () => {
+    expect(a2uiAgentToSend({ kind: "a2ui-action", event: "approve" })).toEqual({ text: "approve" });
+    expect(a2uiAgentToSend({ kind: "a2ui-action", event: "approve", payload: { id: 7 } })).toEqual({
+      text: 'approve {"id":7}',
+    });
+  });
+
   test("ignores unknown / malformed payloads", () => {
     expect(a2uiAgentToSend(null)).toBeNull();
     expect(a2uiAgentToSend({ kind: "choice" })).toBeNull();
     expect(a2uiAgentToSend({ kind: "other", label: "x" })).toBeNull();
+    expect(a2uiAgentToSend({ kind: "a2ui-action" })).toBeNull();
     expect(a2uiAgentToSend("nope")).toBeNull();
   });
 });

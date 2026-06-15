@@ -4,12 +4,14 @@ import { loadEncryptionKeys, PgSecretRepo, SecretsService } from "@tulipfarm/sec
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
+import { PgA2uiSurfaceStore } from "./a2ui/surface-store";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { bootstrapAdmin, PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
+import { PgPendingInteractionRepo } from "./chat/pending-interactions";
 import { registerStreamGc } from "./chat/stream-gc";
 import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
@@ -93,6 +95,8 @@ async function boot() {
     const messageRepo = new PgMessageRepo(pool);
     const feedbackRepo = new FeedbackRepo(pool);
     const streamResumeRepo = new PgStreamResumeRepo(pool);
+    const pendingInteractionRepo = new PgPendingInteractionRepo(pool);
+    const a2uiSurfaceStore = new PgA2uiSurfaceStore(pool);
     const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
@@ -159,6 +163,8 @@ async function boot() {
       messageRepo,
       feedbackRepo,
       streamResumeRepo,
+      pendingInteractionRepo,
+      a2uiSurfaceStore,
       streamHub,
       workingMemoryService,
       knowledgeService,
