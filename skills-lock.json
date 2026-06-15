@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "absolute": {
+      "source": "maddhruv/absolute",
+      "sourceType": "github",
+      "skillPath": "skills/absolute/SKILL.md",
+      "computedHash": "3bf54ea8429f347928fa7cc3d4630e5e5d801caf88508e7c8addc76268b09122"
+    },
     "design-taste-frontend": {
       "source": "Leonxlnx/taste-skill",
       "sourceType": "github",
