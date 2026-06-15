@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { A2uiFrame } from "~/components/a2ui-frame";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
@@ -16,10 +16,35 @@ function Label({ text }: { text: string }) {
   return <span className="text-xs uppercase tracking-[0.15em] text-muted-foreground">{text}</span>;
 }
 
+// Lightweight JSON syntax highlight tuned to the terminal palette: ruby keys, foreground values; the
+// structure (braces/commas/colons/whitespace) inherits the <pre>'s muted base. No tokenizer dep — a
+// single regex matches strings/numbers/literals, and a key is a string immediately followed by `:`.
+const JSON_TOKEN = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+
+function highlightJson(json: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  let key = 0;
+  JSON_TOKEN.lastIndex = 0;
+  for (let m = JSON_TOKEN.exec(json); m !== null; m = JSON_TOKEN.exec(json)) {
+    if (m.index > last) out.push(json.slice(last, m.index));
+    const token = m[0];
+    const isKey = token.startsWith('"') && /^\s*:/.test(json.slice(m.index + token.length));
+    out.push(
+      <span key={key++} className={isKey ? "text-primary" : "text-foreground"}>
+        {token}
+      </span>
+    );
+    last = m.index + token.length;
+  }
+  if (last < json.length) out.push(json.slice(last));
+  return out;
+}
+
 function Json({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-x-auto rounded-sm border border-border bg-muted p-2 text-xs text-foreground">
-      {JSON.stringify(value, null, 2)}
+    <pre className="overflow-x-auto rounded-sm border border-border bg-muted p-2 text-xs text-muted-foreground">
+      {highlightJson(JSON.stringify(value, null, 2))}
     </pre>
   );
 }
@@ -232,6 +257,7 @@ export function MessagePartView({
       return (
         <A2uiFrame
           html={part.html}
+          fragments={part.fragments}
           onAgent={onA2uiAgent}
           className="w-full rounded-sm border border-border"
         />

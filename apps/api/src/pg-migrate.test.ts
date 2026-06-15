@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (7)", async () => {
+  it("advances schema_version to the latest (8)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([7]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([8]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -34,6 +34,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"
     );
     expect(res.rows.map((r) => r.table_name)).toEqual([
+      "a2ui_surfaces",
       "api_tokens",
       "approvals",
       "conversations",
@@ -45,6 +46,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "knowledge_revisions",
       "message_feedback",
       "messages",
+      "pending_interactions",
       "rate_limits",
       "schema_version",
       "secrets",
@@ -74,11 +76,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 7", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 8", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([7]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([8]);
   });
 
   it("adds the conversations.title column and the user/updated_at index (005)", async () => {

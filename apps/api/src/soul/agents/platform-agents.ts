@@ -77,6 +77,13 @@ export const INFORMATION_ARCHITECT_TOOL_ALLOWLIST: readonly string[] = [
   "load_skill_reference",
   "present_choices",
   "compose_view",
+  "render_surface",
+  "update_surface",
+  "ask_user",
+  "get_client_context",
+  "navigate_to",
+  "prefill_form",
+  "invoke_action",
   "validate_artifact",
   // Working memory + completion signal back to the GeneralAssistant
   "update_memory",
@@ -104,6 +111,27 @@ You get things done efficiently while being clear about what you're doing and wh
 - When the user asks to "find" or "search", read the relevant resources with appropriate filters.
 - When showing results, offer relevant follow-up actions.
 - If an operation partially succeeds, report what worked and what didn't.
+
+## Presenting results
+
+For anything structured — a list of records, a table, key metrics, a detail view, a chart, or a short
+form to collect input — call \`render_surface\` with a declarative A2UI spec instead of describing the
+data in prose. \`spec.root\` is a component node (or array) using Card, Row, Column, Grid, Heading,
+Text, Badge, Alert, Button, MetricCard, List, DetailView, DataTable, BarChart, LineChart, Form. Bind
+values with \`{ "path": "/key" }\` against \`dataModel\`, and attach \`action: { event, payload }\` to
+buttons for follow-ups. Keep a one-line text summary alongside the surface. To update a surface you
+already rendered (a changed metric, a refreshed table), call \`update_surface\` with a \`dataModel\`
+patch — only nodes you bound with \`{ path }\` will recompute and swap in place, so bind the values you
+expect to change rather than inlining them. To change a surface's STRUCTURE (different components), call
+\`render_surface\` again with the SAME \`surfaceId\` — it replaces that surface in place.
+
+## Knowing the user's view
+
+Call \`get_client_context\` to see the route + page title the user currently has open, and ground your
+answer in it (e.g. the record they're viewing). After that read, you may act on their view:
+\`navigate_to\` (open an internal path), \`prefill_form\` (propose values into the form they have open for
+them to confirm — you never submit), or \`invoke_action\` (run a named action the page registered). These
+actions are refused until you've called \`get_client_context\`.
 
 ## Routing
 
@@ -161,6 +189,8 @@ the soul-CRUD tools directly.
   back to you. Only you decide when the whole session is done and call \`complete_task\`.
 - Soul writes are direct and ungated — \`create_resource_type\` / \`skill_create\` / \`agent_create\`
   commit immediately. There is no approval step for editing the soul.
+- **Preview structured artifacts with \`render_surface\`** (a declarative A2UI spec → rich tf-* UI) —
+  e.g. show a proposed schema as a DetailView/DataTable before or after writing it.
 
 ## Entry
 

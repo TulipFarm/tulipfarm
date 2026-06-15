@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { ajv } from "@tulipfarm/validation";
+import { A2UI_COMPONENTS_REF, A2UI_SPEC_SCHEMA } from "../a2ui/spec";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -158,6 +159,130 @@ export const composeViewTool: PlatformTool = {
       return err("validation_error", firstError(validateComposeView.errors));
     const { html } = args as { html: string };
     return ok({ html });
+  },
+};
+
+// ── render_surface ────────────────────────────────────────────────────────────
+
+const RENDER_SURFACE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["surfaceId", "spec"],
+  properties: {
+    surfaceId: {
+      type: "string",
+      minLength: 1,
+      description: 'A stable id for this surface, e.g. "q2-dashboard".',
+    },
+    spec: A2UI_SPEC_SCHEMA,
+    dataModel: {
+      type: "object",
+      description:
+        "Optional data object the spec's { path } bindings resolve against (JSON-pointer).",
+    },
+  },
+};
+const validateRenderSurface = ajv.compile(RENDER_SURFACE_SCHEMA);
+
+export const renderSurfaceTool: PlatformTool = {
+  name: "render_surface",
+  description:
+    "Render a rich UI surface from a declarative A2UI component spec (preferred over compose_view's raw HTML). `spec.root` is a component node or an array of nodes. The surface renders in the sandboxed iframe in chat. " +
+    A2UI_COMPONENTS_REF,
+  mutating: false,
+  inputSchema: RENDER_SURFACE_SCHEMA,
+  handler: async (args, _ctx) => {
+    if (!validateRenderSurface(args))
+      return err("validation_error", firstError(validateRenderSurface.errors));
+    const { surfaceId, spec, dataModel } = args as {
+      surfaceId: string;
+      spec: unknown;
+      dataModel?: Record<string, unknown>;
+    };
+    return ok({ surfaceId, spec, dataModel: dataModel ?? {} });
+  },
+};
+
+// ── update_surface ────────────────────────────────────────────────────────────
+
+const UPDATE_SURFACE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["surfaceId", "dataModel"],
+  properties: {
+    surfaceId: {
+      type: "string",
+      minLength: 1,
+      description:
+        "The id of a surface previously rendered with render_surface in this conversation.",
+    },
+    dataModel: {
+      type: "object",
+      description:
+        "A patch merged into the surface's data model (top-level keys). Nodes bound via { path } recompute and swap in place — so bind values you want to update later instead of inlining literals.",
+    },
+  },
+};
+const validateUpdateSurface = ajv.compile(UPDATE_SURFACE_SCHEMA);
+
+export const updateSurfaceTool: PlatformTool = {
+  name: "update_surface",
+  description:
+    "Update an already-rendered surface in place by patching its data model. Bound nodes ({ path }) recompute and swap without re-rendering the whole surface. Use after render_surface to reflect new data (a changed metric, a refreshed table) — the surface must have used { path } bindings for the values you patch.",
+  mutating: false,
+  inputSchema: UPDATE_SURFACE_SCHEMA,
+  handler: async (args, _ctx) => {
+    if (!validateUpdateSurface(args))
+      return err("validation_error", firstError(validateUpdateSurface.errors));
+    const { surfaceId, dataModel } = args as {
+      surfaceId: string;
+      dataModel: Record<string, unknown>;
+    };
+    return ok({ surfaceId, dataModel });
+  },
+};
+
+// ── ask_user ──────────────────────────────────────────────────────────────────
+
+const ASK_USER_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["surfaceId", "spec"],
+  properties: {
+    surfaceId: { type: "string", minLength: 1, description: "A stable id for the form surface." },
+    prompt: { type: "string", description: "The question shown to the user (also recorded)." },
+    spec: A2UI_SPEC_SCHEMA,
+    schema: {
+      type: "object",
+      description: "JSON Schema describing the expected answer (stored as the awaited schema).",
+    },
+  },
+};
+const validateAskUser = ajv.compile(ASK_USER_SCHEMA);
+
+export const askUserTool: PlatformTool = {
+  name: "ask_user",
+  description:
+    "Pause the run and ask the user for input via an interactive A2UI form, then resume with their answer as THIS tool's result. `spec` is the surface to render — include a Form whose `action.event` posts the answer; usually a Card wrapping a Heading (the question) and the Form. The turn ends with the form on screen; the user's submission resumes the SAME run with their answer. Use for genuine human-in-the-loop decisions, not rhetorical questions. " +
+    A2UI_COMPONENTS_REF,
+  mutating: false,
+  inputSchema: ASK_USER_SCHEMA,
+  handler: async (args, _ctx) => {
+    if (!validateAskUser(args)) return err("validation_error", firstError(validateAskUser.errors));
+    const { surfaceId, prompt, spec, schema } = args as {
+      surfaceId: string;
+      prompt?: string;
+      spec: unknown;
+      schema?: Record<string, unknown>;
+    };
+    return ok({
+      surfaceId,
+      spec,
+      dataModel: {},
+      prompt: prompt ?? null,
+      schema: schema ?? {},
+      __interactive: true,
+    });
   },
 };
 
@@ -674,6 +799,9 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   loadSkillTool,
   loadSkillReferenceTool,
   composeViewTool,
+  renderSurfaceTool,
+  updateSurfaceTool,
+  askUserTool,
   presentChoicesTool,
   suggestAgentTool,
   validateArtifactTool,

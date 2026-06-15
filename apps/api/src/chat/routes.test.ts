@@ -22,6 +22,7 @@ import { encodeCursor, type PaginatedResult } from "../pagination";
 import { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
+import { MemoryPendingInteractionRepo } from "./pending-interactions";
 import { buildTurnLog, parseLastEventId } from "./routes";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
@@ -1292,6 +1293,121 @@ describe("chat routes", () => {
         .join("");
       expect(closing).toContain("Done.");
       expect(streamRepo.rows.filter((r) => r.eventType === "finish")).toHaveLength(1);
+    });
+  });
+
+  // ── HITL suspend/resume (A2UI ask_user): turn 1 calls ask_user → the run ends with the form
+  //    rendered and a pending interaction is persisted; the next request injects the user's answer as
+  //    that tool-call's result and resumes the run (the model sees its own question answered). ──
+  describe("POST /api/v1/chat (ask_user HITL suspend/resume)", () => {
+    const FORM_SPEC = {
+      root: {
+        component: "Form",
+        action: { event: "answer" },
+        fields: [{ name: "city", input: "text" }],
+      },
+    };
+
+    function registerAskUserTool(): ToolRegistry {
+      const reg = new ToolRegistry();
+      reg.register({
+        name: "ask_user",
+        tier: "platform",
+        mutating: false,
+        description: "ask the user",
+        inputSchema: {
+          type: "object",
+          properties: {
+            surfaceId: { type: "string" },
+            spec: { type: "object" },
+            schema: { type: "object" },
+          },
+          required: ["surfaceId", "spec"],
+          additionalProperties: true,
+        },
+        execute: async (args) => ({
+          success: true as const,
+          data: {
+            surfaceId: (args as { surfaceId: string }).surfaceId,
+            spec: (args as { spec: unknown }).spec,
+            dataModel: {},
+            prompt: null,
+            schema: (args as { schema?: unknown }).schema ?? {},
+            __interactive: true,
+          },
+        }),
+      });
+      return reg;
+    }
+
+    it("suspends on ask_user, then resumes with the answer injected as the tool-result", async () => {
+      await app.close();
+      const pendingRepo = new MemoryPendingInteractionRepo();
+      // Turn 1: the model calls ask_user → the run suspends (its 2nd-call text is never reached).
+      select.mockImplementation(() =>
+        makeToolThenTextModel(
+          [{ toolCallId: "ask1", toolName: "ask_user", args: { surfaceId: "s", spec: FORM_SPEC } }],
+          "unused"
+        )
+      );
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        toolRegistry: registerAskUserTool(),
+        pendingInteractionRepo: pendingRepo,
+      });
+
+      const res1 = await post({ message: userMsg("help me set my profile") });
+      expect(res1.statusCode).toBe(200);
+      const convoId = res1.headers["x-conversation-id"] as string;
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 3000);
+
+      // The turn ended with the form rendered + a pending interaction recorded (unresolved).
+      expect(streamRepo.rows.some((r) => r.eventType === "a2ui")).toBe(true);
+      const open = pendingRepo.rows.filter((r) => r.resolvedAt === null);
+      expect(open).toHaveLength(1);
+      expect(open[0]).toMatchObject({
+        conversationId: convoId,
+        toolCallId: "ask1",
+        toolName: "ask_user",
+      });
+
+      // Turn 2: the user answers; the model now returns text (it sees its question answered).
+      streamRepo.rows.length = 0;
+      capturedPrompts.length = 0;
+      select.mockImplementation(() =>
+        makeFakeModel("claude-opus-4-8", () => makeStreamResult(["Got it."]))
+      );
+
+      const res2 = await post({ message: userMsg('{"city":"Pune"}'), conversationId: convoId });
+      expect(res2.statusCode).toBe(200);
+      await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 3000);
+
+      // The pending interaction is resolved.
+      expect(pendingRepo.rows.filter((r) => r.resolvedAt === null)).toHaveLength(0);
+
+      // The resume prompt fed to the model ends on the ask_user tool-result carrying the answer —
+      // NOT a fresh trailing user message — so the model continues its own turn.
+      const resumePrompt = capturedPrompts.at(-1) as Array<{ role: string }>;
+      const last = resumePrompt[resumePrompt.length - 1];
+      expect(last.role).toBe("tool");
+      const serialized = JSON.stringify(resumePrompt);
+      expect(serialized).toContain("ask1");
+      expect(serialized).toContain("Pune");
+
+      // The assistant continued with text.
+      const text = streamRepo.rows
+        .filter((r) => r.eventType === "text")
+        .map((r) => (r.data as { delta: string }).delta)
+        .join("");
+      expect(text).toContain("Got it.");
     });
   });
 

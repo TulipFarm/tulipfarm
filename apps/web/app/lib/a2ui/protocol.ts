@@ -16,6 +16,14 @@ export interface A2uiMessage {
 /** frame → host; handled internally by the component, not the host. */
 export type A2uiInternal = { __a2ui: "resize"; height: number } | { __a2ui: "ready" };
 
+/**
+ * host → frame; applied directly by the in-iframe runtime as a DOM swap (replace each node carrying
+ * `data-a2ui-id` with the compiled fragment), NOT relayed to components. Fragment HTML is sanitised
+ * parent-side before send (the CSP'd frame can't run DOMPurify). Powers `updateComponents` /
+ * `updateDataModel` live surface updates without rebuilding the iframe.
+ */
+export type A2uiSwap = { __a2ui: "swap"; fragments: Array<{ nodeId: string; html: string }> };
+
 const CHANNELS: readonly A2uiChannel[] = ["agent", "api", "navigate"];
 
 function isRecord(value: unknown): value is Record<string, unknown> {

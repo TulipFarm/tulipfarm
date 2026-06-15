@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import { type A2uiMessage, parseMessage } from "~/lib/a2ui/protocol";
 import { sanitizeAgentHtml } from "~/lib/a2ui/sanitize";
 import { buildSrcdoc } from "~/lib/a2ui/srcdoc";
@@ -13,6 +13,8 @@ export interface A2uiFrameProps {
   onAgent?: (payload: unknown) => void;
   onApi?: (payload: unknown) => void;
   onNavigate?: (payload: unknown) => void;
+  /** Compiled tf-* fragments (by node id) swapped into the live surface without rebuilding (P2). */
+  fragments?: Array<{ nodeId: string; html: string }>;
   className?: string;
 }
 
@@ -32,10 +34,13 @@ function currentTheme(): "light" | "dark" {
  * relays it to host callbacks. It never performs API calls or navigation itself (pure transport).
  */
 export const A2uiFrame = forwardRef<A2uiFrameHandle, A2uiFrameProps>(function A2uiFrame(
-  { html, theme, onAgent, onApi, onNavigate, className },
+  { html, theme, onAgent, onApi, onNavigate, fragments, className },
   ref
 ) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const readyRef = useRef(false);
+  const fragmentsRef = useRef(fragments);
+  fragmentsRef.current = fragments;
 
   const srcDoc = useMemo(
     () =>
@@ -47,6 +52,27 @@ export const A2uiFrame = forwardRef<A2uiFrameHandle, A2uiFrameProps>(function A2
       }),
     [html, theme]
   );
+
+  // Push fragments into the frame as a sanitised "swap" — the runtime replaces each [data-a2ui-id]
+  // node in place. Sanitising here (parent-side) is required: the CSP'd frame can't run DOMPurify.
+  const postSwap = useCallback((f: Array<{ nodeId: string; html: string }> | undefined) => {
+    const win = iframeRef.current?.contentWindow;
+    if (!f || f.length === 0 || !win) return;
+    win.postMessage(
+      {
+        __a2ui: "swap",
+        fragments: f.map((x) => ({ nodeId: x.nodeId, html: sanitizeAgentHtml(x.html) })),
+      },
+      "*"
+    );
+  }, []);
+
+  // Fragments arriving on an already-ready frame swap in immediately (html unchanged → no rebuild).
+  // While the frame is (re)loading after an html change, `readyRef` is false and the `ready` handler
+  // below re-applies the current fragments once the new document is parsed.
+  useEffect(() => {
+    if (readyRef.current) postSwap(fragments);
+  }, [fragments, postSwap]);
 
   useImperativeHandle(
     ref,
@@ -68,6 +94,10 @@ export const A2uiFrame = forwardRef<A2uiFrameHandle, A2uiFrameProps>(function A2
       if (!msg) return;
       if ("__a2ui" in msg) {
         if (msg.__a2ui === "resize") iframe.style.height = `${msg.height}px`;
+        else if (msg.__a2ui === "ready") {
+          readyRef.current = true;
+          postSwap(fragmentsRef.current); // (re)apply current fragments once the document is parsed
+        }
         return;
       }
       if (msg.channel === "agent") onAgent?.(msg.payload);
@@ -76,7 +106,7 @@ export const A2uiFrame = forwardRef<A2uiFrameHandle, A2uiFrameProps>(function A2
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onAgent, onApi, onNavigate]);
+  }, [onAgent, onApi, onNavigate, postSwap]);
 
   return (
     <iframe

@@ -21,6 +21,7 @@ export type ChatEventType =
   | "sources"
   | "agent-handoff"
   | "a2ui"
+  | "client-action"
   | "guardrail_block"
   | "finish"
   | "error";
@@ -55,7 +56,23 @@ export type ChatEvent =
   | { type: "task"; data: { taskId: string; label: string; status: StepStatus } }
   | { type: "sources"; data: { sources: SourceRef[] } }
   | { type: "agent-handoff"; data: { from?: string; to: string; reason?: string } }
-  | { type: "a2ui"; data: { html: string } }
+  | {
+      type: "a2ui";
+      // Additive: legacy view tools emit `{ html }`; `render_surface` emits a `createSurface` op with
+      // a surfaceId + node ids; live updates (P2) carry compiled tf-* fragments keyed by node id.
+      data:
+        | { html: string }
+        // createSurface renders a surface; re-emitting it for the same surfaceId replaces it in place
+        // (live structure update). updateDataModel swaps the changed leaf fragments without a rebuild.
+        | { op: "createSurface"; surfaceId: string; html: string; nodeIds?: string[] }
+        | {
+            op: "updateDataModel";
+            surfaceId: string;
+            fragments: Array<{ nodeId: string; html: string }>;
+          };
+    }
+  // Imperative agent→client action (navigate, …). Executed by the chat hook, not rendered as a part.
+  | { type: "client-action"; data: { action: string; to?: string; reason?: string | null } }
   | {
       type: "guardrail_block";
       data: { stage: "input" | "output"; guard: string; reason: string; message?: string };
@@ -101,7 +118,13 @@ export type TimelinePart =
   | { kind: "task"; taskId: string; label: string; status: StepStatus }
   | { kind: "sources"; sources: SourceRef[] }
   | { kind: "agent-handoff"; to: string; from?: string; reason?: string }
-  | { kind: "a2ui"; html: string }
+  | {
+      kind: "a2ui";
+      html: string;
+      surfaceId?: string;
+      // Pending compiled tf-* fragments (by node id) the frame swaps in without rebuilding (P2).
+      fragments?: Array<{ nodeId: string; html: string }>;
+    }
   | {
       kind: "guardrail";
       stage: "input" | "output";

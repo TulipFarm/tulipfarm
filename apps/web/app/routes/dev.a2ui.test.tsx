@@ -16,5 +16,6 @@ test("renders the harness in dev", () => {
   vi.stubEnv("DEV", true);
   const { container, getByTestId } = render(<DevA2ui />);
   expect(getByTestId("a2ui-send-in")).toBeTruthy();
-  expect(container.querySelector("iframe")).toBeTruthy();
+  expect(getByTestId("a2ui-swap")).toBeTruthy();
+  expect(container.querySelectorAll("iframe").length).toBe(2);
 });

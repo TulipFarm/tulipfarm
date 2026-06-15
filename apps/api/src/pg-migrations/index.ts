@@ -232,6 +232,37 @@ const CONVERSATION_STARRED_STATEMENTS: string[] = [
   "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS starred boolean NOT NULL DEFAULT false",
 ];
 
+/**
+ * Human-in-the-loop suspend/resume (A2UI HITL). `pending_interactions` records a turn that paused on
+ * an `ask_user` tool call: the row holds the pending tool-call id + the awaited answer schema, so the
+ * next request injects the user's response as that call's tool-result and resumes the run. The partial
+ * index supports the one hot query — the single open interaction per conversation. `a2ui_surfaces`
+ * persists each rendered surface's spec + data model so resume (and future live `updateDataModel` ops)
+ * can recompute bound nodes server-side.
+ */
+const HITL_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS pending_interactions (
+    id              uuid PRIMARY KEY,
+    conversation_id uuid NOT NULL REFERENCES conversations(id),
+    tool_call_id    text NOT NULL,
+    tool_name       text NOT NULL,
+    awaited_schema  jsonb NOT NULL,
+    surface_id      text,
+    created_at      timestamptz NOT NULL,
+    resolved_at     timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS pending_interactions_open_idx
+    ON pending_interactions (conversation_id) WHERE resolved_at IS NULL`,
+  `CREATE TABLE IF NOT EXISTS a2ui_surfaces (
+    conversation_id uuid NOT NULL REFERENCES conversations(id),
+    surface_id      text NOT NULL,
+    spec            jsonb NOT NULL,
+    data_model      jsonb NOT NULL,
+    updated_at      timestamptz NOT NULL,
+    PRIMARY KEY (conversation_id, surface_id)
+  )`,
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -293,6 +324,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "conversations.starred flag for pinning chats on the Chats page",
     up: async (q) => {
       for (const sql of CONVERSATION_STARRED_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 8,
+    description: "HITL: pending_interactions (ask_user suspend/resume) + a2ui_surfaces store",
+    up: async (q) => {
+      for (const sql of HITL_STATEMENTS) {
         await q.query(sql);
       }
     },

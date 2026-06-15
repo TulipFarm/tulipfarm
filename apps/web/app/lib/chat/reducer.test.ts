@@ -146,6 +146,71 @@ test("plan, task, sources, agent-handoff, a2ui each push a matching part", () =>
   ]);
 });
 
+test("a2ui createSurface pushes a surface part; updateDataModel attaches fragments to it", () => {
+  const state = fold([
+    {
+      type: "a2ui",
+      data: {
+        op: "createSurface",
+        surfaceId: "dash",
+        html: "<tf-card></tf-card>",
+        nodeIds: ["a2-0"],
+      },
+    },
+    {
+      type: "a2ui",
+      data: {
+        op: "updateDataModel",
+        surfaceId: "dash",
+        fragments: [{ nodeId: "a2-0", html: "<tf-card>updated</tf-card>" }],
+      },
+    },
+  ]);
+  const parts = assistantParts(state);
+  expect(parts).toHaveLength(1); // update mutates the existing part, not a new one
+  const part = parts[0];
+  if (part.kind !== "a2ui") throw new Error("expected a2ui part");
+  expect(part.surfaceId).toBe("dash");
+  expect(part.fragments).toEqual([{ nodeId: "a2-0", html: "<tf-card>updated</tf-card>" }]);
+});
+
+test("client-action is a no-op on the timeline (executed imperatively by the hook)", () => {
+  const state = fold([{ type: "client-action", data: { action: "navigate", to: "/x" } }]);
+  expect(state.messages.flatMap((m) => m.parts)).toHaveLength(0);
+});
+
+test("a2ui createSurface for an existing surfaceId replaces it in place (live structure update)", () => {
+  const state = fold([
+    {
+      type: "a2ui",
+      data: { op: "createSurface", surfaceId: "dash", html: "<tf-card>v1</tf-card>" },
+    },
+    {
+      type: "a2ui",
+      data: { op: "createSurface", surfaceId: "dash", html: "<tf-card>v2</tf-card>" },
+    },
+  ]);
+  const surfaces = assistantParts(state).filter((p) => p.kind === "a2ui");
+  expect(surfaces).toHaveLength(1); // replaced, not duplicated
+  const part = surfaces[0];
+  if (part.kind !== "a2ui") throw new Error("expected a2ui part");
+  expect(part.html).toBe("<tf-card>v2</tf-card>");
+});
+
+test("a2ui updateDataModel for an unknown surface is a no-op (no part, no empty message)", () => {
+  const state = fold([
+    {
+      type: "a2ui",
+      data: {
+        op: "updateDataModel",
+        surfaceId: "ghost",
+        fragments: [{ nodeId: "x", html: "<i></i>" }],
+      },
+    },
+  ]);
+  expect(state.messages.flatMap((m) => m.parts).filter((p) => p.kind === "a2ui")).toHaveLength(0);
+});
+
 test("plan with the same planId updates in place rather than pushing a duplicate", () => {
   const state = fold([
     {

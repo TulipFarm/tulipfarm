@@ -180,9 +180,20 @@ const SAMPLE_HTML = `
 <div onclick="window.__a2uiPwned = true">inert</div>
 `;
 
+// Mimics compiler output (each node carries a data-a2ui-id swap anchor) so the runtime swap path can
+// be exercised end-to-end in a real browser.
+const SURFACE_HTML = `
+<tf-card data-a2ui-id="a2-0">
+  <tf-metric-card data-a2ui-id="a2-1" data-trend="up">
+    <span data-slot="value">1,284</span>
+    <span data-slot="label">Records indexed</span>
+  </tf-metric-card>
+</tf-card>`;
+
 export default function DevA2ui() {
   const ref = useRef<A2uiFrameHandle>(null);
   const [received, setReceived] = useState<string[]>([]);
+  const [fragments, setFragments] = useState<Array<{ nodeId: string; html: string }>>();
 
   const log = useCallback((channel: string, payload: unknown) => {
     setReceived((prev) => [...prev, `${channel}:${JSON.stringify(payload)}`]);
@@ -212,6 +223,23 @@ export default function DevA2ui() {
         onApi={(p) => log("api", p)}
         onNavigate={(p) => log("navigate", p)}
       />
+
+      <h2>Surface swap</h2>
+      <button
+        type="button"
+        data-testid="a2ui-swap"
+        onClick={() =>
+          setFragments([
+            {
+              nodeId: "a2-1",
+              html: '<tf-metric-card data-a2ui-id="a2-1" data-trend="down"><span data-slot="value">42</span><span data-slot="label">Failed syncs</span></tf-metric-card>',
+            },
+          ])
+        }
+      >
+        swap fragment
+      </button>
+      <A2uiFrame html={SURFACE_HTML} fragments={fragments} />
     </main>
   );
 }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
 import { attachToStream, mapStreamPart, runChatStream } from "./producer";
 import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";
@@ -186,6 +187,125 @@ describe("runChatStream", () => {
     expect(rows.at(-1)?.data).toEqual({ message: "provider exploded" });
     expect(hub.isLive(streamId)).toBe(false);
     expect(log.error).toHaveBeenCalled();
+  });
+
+  it("emits an a2ui createSurface event after a render_surface tool-result", async () => {
+    await runChatStream(
+      streamId,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "render_surface",
+          output: {
+            success: true,
+            data: {
+              surfaceId: "dash",
+              spec: { root: { component: "Text", text: "hello" } },
+              dataModel: {},
+            },
+          },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
+    );
+
+    const rows = await repo.listAfter(streamId, 0);
+    expect(rows.map((r) => r.eventType)).toEqual(["tool-result", "a2ui", "finish"]);
+    const a2ui = rows.find((r) => r.eventType === "a2ui")?.data as {
+      op: string;
+      surfaceId: string;
+      html: string;
+      nodeIds: string[];
+    };
+    expect(a2ui.op).toBe("createSurface");
+    expect(a2ui.surfaceId).toBe("dash");
+    expect(a2ui.html).toContain("hello");
+    expect(a2ui.nodeIds).toEqual(["a2-0"]);
+  });
+
+  it("emits a client-action event after a navigate_to tool-result", async () => {
+    await runChatStream(
+      streamId,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "navigate_to",
+          output: { success: true, data: { action: "navigate", to: "/resources/tickets" } },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
+    );
+    const rows = await repo.listAfter(streamId, 0);
+    expect(rows.map((r) => r.eventType)).toEqual(["tool-result", "client-action", "finish"]);
+    expect(rows.find((r) => r.eventType === "client-action")?.data).toEqual({
+      action: "navigate",
+      to: "/resources/tickets",
+    });
+  });
+
+  it("render_surface then update_surface emits createSurface then an updateDataModel swap", async () => {
+    const surfaceStore = new MemoryA2uiSurfaceStore();
+    const conversationId = randomUUID();
+    const spec = {
+      root: { component: "Text", id: "greeting", text: { path: "/msg" } },
+    };
+    await runChatStream(
+      streamId,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "render_surface",
+          output: { success: true, data: { surfaceId: "s", spec, dataModel: { msg: "hi" } } },
+        },
+        {
+          type: "tool-result",
+          toolCallId: "c2",
+          toolName: "update_surface",
+          output: { success: true, data: { surfaceId: "s", dataModel: { msg: "bye" } } },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      {
+        emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+        hub,
+        log,
+        surfaceStore,
+        conversationId,
+      }
+    );
+
+    const a2ui = (await repo.listAfter(streamId, 0)).filter((r) => r.eventType === "a2ui");
+    expect(a2ui.map((r) => (r.data as { op: string }).op)).toEqual([
+      "createSurface",
+      "updateDataModel",
+    ]);
+    const update = a2ui[1].data as { fragments: Array<{ nodeId: string; html: string }> };
+    expect(update.fragments).toHaveLength(1);
+    expect(update.fragments[0].nodeId).toBe("greeting");
+    expect(update.fragments[0].html).toContain("bye");
+  });
+
+  it("emits a legacy { html } a2ui event for compose_view (back-compat)", async () => {
+    await runChatStream(
+      streamId,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "compose_view",
+          output: { success: true, data: { html: "<tf-card></tf-card>" } },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
+    );
+    const a2ui = (await repo.listAfter(streamId, 0)).find((r) => r.eventType === "a2ui")?.data;
+    expect(a2ui).toEqual({ html: "<tf-card></tf-card>" });
   });
 
   // ── Output guard: window-stream-then-scan (AC-V1-003 stream side) ───────────

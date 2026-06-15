@@ -108,17 +108,17 @@ export function ChatPanel({
           onPick={(text) => send(text, { model: defaultModel, agentId })}
         />
       )}
+      {status === "error" ? (
+        <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-xs text-destructive">
+          [error] {error ?? "the stream failed"} — try again
+        </p>
+      ) : null}
       <Composer
         busy={busy}
         defaultModel={defaultModel}
         // A `@agent` mention in the composer overrides the panel's active agent for that turn.
         onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />
-      {status === "error" ? (
-        <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-xs text-destructive">
-          [error] {error ?? "the stream failed"} — try again
-        </p>
-      ) : null}
     </div>
   );
 }
