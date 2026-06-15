@@ -128,15 +128,18 @@ if [ ! -f ".env.local" ]; then
   JWT_SECRET=$(openssl rand -base64 32)
   WEBHOOK_SECRET=$(openssl rand -base64 32)
 
-  # Replace placeholders (cross-platform sed: macOS uses -i '', Linux uses -i)
+  # Replace placeholders by matching each full KEY=<placeholder> line so every substitution
+  # is unique and order-independent (a bare s/// on the shared placeholder would overwrite
+  # all three lines with the first secret, and the 0,/pattern/ range trick is not supported
+  # by BSD sed on macOS). cross-platform sed: macOS uses -i '', Linux uses -i.
   if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s|<generate: openssl rand -base64 32>|$ENCRYPTION_KEY|" .env.local
-    sed -i '' "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$JWT_SECRET|;}" .env.local
-    sed -i '' "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$WEBHOOK_SECRET|;}" .env.local
+    sed -i '' "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
+    sed -i '' "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
+    sed -i '' "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
   else
-    sed -i "s|<generate: openssl rand -base64 32>|$ENCRYPTION_KEY|" .env.local
-    sed -i "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$JWT_SECRET|;}" .env.local
-    sed -i "0,/<generate: openssl rand -base64 32>/{s|<generate: openssl rand -base64 32>|$WEBHOOK_SECRET|;}" .env.local
+    sed -i "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
+    sed -i "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
+    sed -i "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
   fi
 
   # Expand SOUL_PATH to the absolute soul dir (dotenv does not expand ~).
