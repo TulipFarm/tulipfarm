@@ -26,7 +26,7 @@ export default function AgentsIndex() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "agents" }]} command="tulipfarm agents --list">
+    <ResourcePanel crumbs={[{ label: "agents" }]}>
       <p className="text-xs text-muted-foreground">
         {agents.length} {agents.length === 1 ? "agent" : "agents"}
       </p>
@@ -68,12 +68,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="agents"
-      command="tulipfarm agents --list"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="agents" status={status} message={message} />;
 }

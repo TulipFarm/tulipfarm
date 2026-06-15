@@ -59,15 +59,9 @@ function SectionLabel({ children }: { children: string }) {
 export default function HomePage() {
   return (
     <main className="flex flex-1 flex-col">
-      {/* ── Hero: the manpage header above a living ASCII tulip field ─────────── */}
+      {/* ── Hero: the wordmark above a living ASCII tulip field ───────────────── */}
       <section className="relative flex min-h-[calc(100dvh-3.5rem)] flex-col">
         <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-4 pt-20 pb-10 sm:px-6">
-          <p
-            className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground motion-safe:animate-rise"
-            style={{ animationDelay: "100ms" }}
-          >
-            tulipfarm(1) · user commands
-          </p>
           <h1
             className="mt-4 text-4xl font-bold tracking-tight sm:text-6xl motion-safe:animate-rise"
             style={{ animationDelay: "180ms" }}
@@ -81,7 +75,7 @@ export default function HomePage() {
             className="mt-5 max-w-xl text-base text-fd-muted-foreground sm:text-lg motion-safe:animate-rise"
             style={{ animationDelay: "260ms" }}
           >
-            The AI-native business operating system. Install it, give it a soul, put it to work.
+            The AI-native business operating system. Give it a soul, put it to work.
           </p>
           <p
             className="mt-4 text-xs text-fd-muted-foreground motion-safe:animate-rise"
@@ -106,7 +100,7 @@ export default function HomePage() {
               href="/docs/getting-started"
               className="rounded-sm border border-fd-border bg-fd-card px-5 py-2.5 text-sm font-medium transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:bg-fd-accent"
             >
-              $ get started
+              get started
             </Link>
           </div>
         </div>

@@ -4,7 +4,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
@@ -79,10 +78,9 @@ export default function ResourceDetail() {
     { label: type, to: listPath },
     { label: record.id },
   ];
-  const command = `tulipfarm resources ${type} show ${record.id}`;
 
   return (
-    <ResourcePanel crumbs={crumbs} command={command}>
+    <ResourcePanel crumbs={crumbs}>
       <div className="flex items-center gap-2">
         <Button asChild variant="outline" size="sm">
           <Link to={`/resources/${encodeURIComponent(type)}/${encodeURIComponent(record.id)}/edit`}>
@@ -105,12 +103,10 @@ export default function ResourceDetail() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm resources ${params.type ?? ""} show ${params.id ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="resources" command={command} />;
+    return <NotFoundState section="resources" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" command={command} status={status} message={message} />;
+  return <ErrorState section="resources" status={status} message={message} />;
 }

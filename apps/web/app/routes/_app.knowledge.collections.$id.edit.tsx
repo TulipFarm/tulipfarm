@@ -3,7 +3,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
@@ -55,10 +54,7 @@ export default function CollectionEdit() {
   ];
 
   return (
-    <ResourcePanel
-      crumbs={crumbs}
-      command={`tulipfarm knowledge collections edit ${collection.id}`}
-    >
+    <ResourcePanel crumbs={crumbs}>
       <CollectionForm
         mode="edit"
         initial={{
@@ -78,12 +74,10 @@ export default function CollectionEdit() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm knowledge collections edit ${params.id ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="knowledge" command={command} />;
+    return <NotFoundState section="knowledge" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }

@@ -4,7 +4,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
@@ -53,7 +52,7 @@ export default function ResourceTypeEdit() {
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={`tulipfarm resources ${type} edit-schema`}>
+    <ResourcePanel crumbs={crumbs}>
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <p className="text-xs text-muted-foreground">
           The full JSON Schema (YAML). Editing here is lossless — relationships (x-links), id
@@ -83,12 +82,10 @@ export default function ResourceTypeEdit() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm resources ${params.type ?? ""} edit-schema`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="resources" command={command} />;
+    return <NotFoundState section="resources" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="resources" command={command} status={status} message={message} />;
+  return <ErrorState section="resources" status={status} message={message} />;
 }

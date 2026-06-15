@@ -2,7 +2,6 @@ import {
   type ClientLoaderFunctionArgs,
   type MetaFunction,
   useLoaderData,
-  useParams,
   useRevalidator,
   useRouteError,
 } from "@remix-run/react";
@@ -80,10 +79,7 @@ export default function CollectionDetailRoute() {
   ];
 
   return (
-    <ResourcePanel
-      crumbs={crumbs}
-      command={`tulipfarm knowledge collections show ${collection.id}`}
-    >
+    <ResourcePanel crumbs={crumbs}>
       {error ? <p className="text-destructive">error: {error}</p> : null}
       <CollectionDetail
         collection={collection}
@@ -99,12 +95,10 @@ export default function CollectionDetailRoute() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm knowledge collections show ${params.id ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="knowledge" command={command} />;
+    return <NotFoundState section="knowledge" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }

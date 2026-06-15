@@ -3,7 +3,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
@@ -49,10 +48,7 @@ export default function SkillDetail() {
   }
 
   return (
-    <ResourcePanel
-      crumbs={[{ label: "skills", to: "/skills" }, { label: skill.name }]}
-      command={`tulipfarm skills show ${skill.name}`}
-    >
+    <ResourcePanel crumbs={[{ label: "skills", to: "/skills" }, { label: skill.name }]}>
       {error ? (
         <p className="rounded-sm border border-destructive bg-destructive/10 px-3 py-2 text-destructive">
           error: {error}
@@ -92,12 +88,10 @@ export default function SkillDetail() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm skills show ${params.name ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="skills" command={command} />;
+    return <NotFoundState section="skills" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="skills" command={command} status={status} message={message} />;
+  return <ErrorState section="skills" status={status} message={message} />;
 }

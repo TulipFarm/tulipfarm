@@ -98,12 +98,7 @@ export default function SettingsSecrets() {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-sm text-muted-foreground">
-        <span aria-hidden className="text-primary">
-          ${" "}
-        </span>
-        tulipfarm secrets --list · secret values are never shown
-      </p>
+      <p className="text-sm text-muted-foreground">Secret values are never shown.</p>
 
       {error ? (
         <p
@@ -281,12 +276,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="settings"
-      command="tulipfarm secrets --list"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="settings" status={status} message={message} />;
 }

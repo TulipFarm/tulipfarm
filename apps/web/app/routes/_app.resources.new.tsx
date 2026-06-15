@@ -108,7 +108,7 @@ export default function ResourceTypeNew() {
   const crumbs = [{ label: "resources", to: "/resources" }, { label: "new" }];
 
   return (
-    <ResourcePanel crumbs={crumbs} command="tulipfarm resources create">
+    <ResourcePanel crumbs={crumbs}>
       <form onSubmit={onSubmit} className="flex max-w-2xl flex-col gap-4">
         {error ? <p className="text-destructive">error: {error}</p> : null}
 
@@ -223,12 +223,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="resources"
-      command="tulipfarm resources create"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="resources" status={status} message={message} />;
 }

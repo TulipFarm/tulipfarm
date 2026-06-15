@@ -9,8 +9,6 @@ import { createDocument, type DocumentInput } from "~/lib/knowledge-api";
 
 export const meta: MetaFunction = () => [{ title: "New · Documents · Knowledge · tulipfarm" }];
 
-const command = "tulipfarm knowledge documents create";
-
 export default function DocumentNew() {
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
@@ -39,7 +37,7 @@ export default function DocumentNew() {
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={command}>
+    <ResourcePanel crumbs={crumbs}>
       <DocForm
         mode="create"
         onSubmit={onSubmit}
@@ -56,5 +54,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }

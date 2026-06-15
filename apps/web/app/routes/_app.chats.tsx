@@ -16,7 +16,6 @@ import { cn } from "~/lib/utils";
 
 export const meta: MetaFunction = () => [{ title: "Chats · tulipfarm" }];
 
-const command = "tulipfarm chats --list";
 const inputClass =
   "h-8 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
@@ -96,7 +95,7 @@ export default function ChatsRoute() {
   const sorted = [...items].sort((a, b) => Number(b.starred) - Number(a.starred));
 
   return (
-    <ResourcePanel crumbs={[{ label: "chats" }]} command={command}>
+    <ResourcePanel crumbs={[{ label: "chats" }]}>
       <input
         type="search"
         value={query}
@@ -342,5 +341,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="chats" command={command} status={status} message={message} />;
+  return <ErrorState section="chats" status={status} message={message} />;
 }

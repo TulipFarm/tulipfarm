@@ -66,12 +66,5 @@ export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return (
-    <ErrorState
-      section="skills"
-      command="tulipfarm skills --list"
-      status={status}
-      message={message}
-    />
-  );
+  return <ErrorState section="skills" status={status} message={message} />;
 }

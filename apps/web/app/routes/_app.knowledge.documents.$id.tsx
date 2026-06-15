@@ -3,7 +3,6 @@ import {
   type MetaFunction,
   useLoaderData,
   useNavigate,
-  useParams,
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
@@ -47,7 +46,7 @@ export default function DocumentDetail() {
   ];
 
   return (
-    <ResourcePanel crumbs={crumbs} command={`tulipfarm knowledge documents show ${doc.id}`}>
+    <ResourcePanel crumbs={crumbs}>
       {error ? <p className="text-destructive">error: {error}</p> : null}
       <DocDetail
         doc={doc}
@@ -61,12 +60,10 @@ export default function DocumentDetail() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
-  const params = useParams();
-  const command = `tulipfarm knowledge documents show ${params.id ?? ""}`;
   if (error instanceof ApiError && error.status === 404) {
-    return <NotFoundState section="knowledge" command={command} />;
+    return <NotFoundState section="knowledge" />;
   }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
-  return <ErrorState section="knowledge" command={command} status={status} message={message} />;
+  return <ErrorState section="knowledge" status={status} message={message} />;
 }
