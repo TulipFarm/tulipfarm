@@ -1,6 +1,6 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, expect, test, vi } from "vitest";
@@ -133,6 +133,8 @@ test("deleting a provider removes all of its stored field keys", async () => {
     config: {},
   });
   await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+  const dialog = await screen.findByRole("dialog");
+  await userEvent.click(within(dialog).getByRole("button", { name: /delete/i }));
   expect(settings.deleteSecret).toHaveBeenCalledWith("azure-openai-api-key");
   expect(settings.deleteSecret).toHaveBeenCalledWith("azure-openai-resource-name");
 });
@@ -144,6 +146,8 @@ test("a custom (non-provider) secret lists individually and deletes by its key",
     config: {},
   });
   await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+  const dialog = await screen.findByRole("dialog");
+  await userEvent.click(within(dialog).getByRole("button", { name: /delete/i }));
   expect(settings.deleteSecret).toHaveBeenCalledWith("stale-key");
 });
 
