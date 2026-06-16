@@ -23,9 +23,9 @@ import { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";
-import { buildTurnLog, parseLastEventId } from "./routes";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
+import { buildTurnLog, parseLastEventId } from "./turn-helpers";
 
 const TEST_CSRF = "a".repeat(64);
 

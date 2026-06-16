@@ -29,7 +29,7 @@ output:     [{ guard: content_filter, patterns: [credit_card, ssn, api_key, emai
 ```
 
 ## Wiring (live chat path)
-- **input** — `chat/routes.ts`, before `streamText`. Block → `guardrail_block`(input) + `finish`,
+- **input** — `chat/turn.ts`, before `streamText`. Block → `guardrail_block`(input) + `finish`,
   skip the model. Pass/transform → the transformed text is sent to the LLM (the persisted user
   turn keeps the original).
 - **tool-call** — `tools/registry.ts` `buildToolSet` callback, before the approval gate. Block →

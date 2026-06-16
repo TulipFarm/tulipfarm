@@ -28,7 +28,7 @@ toward `create_knowledge_document`), `MAX_TOTAL_CHARS=2048`, `MAX_TOOL_STEPS=25`
 ## Wiring
 
 `index.ts` builds `PgWorkingMemoryRepo` + `WorkingMemoryService` and passes them into `buildApp`,
-which threads the service into `registerChatRoutes`. The chat turn (`chat/routes.ts`) binds
+which threads the service into `registerChatRoutes`. The chat turn (`chat/turn.ts`) binds
 `buildMemoryToolSet(ctx)` as `streamText` `tools` and persists tool-call/tool-result steps via
 `onStepFinish`. Tools are scoped to the authenticated user (`user._id`).
 
