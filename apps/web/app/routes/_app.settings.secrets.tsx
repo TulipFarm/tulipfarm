@@ -2,6 +2,7 @@ import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { type FormEvent, useMemo, useState } from "react";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
 import {
   deleteSecret,
@@ -43,6 +44,10 @@ export default function SettingsSecrets() {
   const [customKey, setCustomKey] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{
+    label: string;
+    fn: () => Promise<unknown>;
+  } | null>(null);
 
   const selected = providers.find((p) => p.id === providerId);
 
@@ -149,7 +154,10 @@ export default function SettingsSecrets() {
                     disabled={busy}
                     onClick={(e) => {
                       e.preventDefault();
-                      void run(() => Promise.all(g.keys.map((k) => deleteSecret(k))));
+                      setPendingDelete({
+                        label: g.provider.label,
+                        fn: () => Promise.all(g.keys.map((k) => deleteSecret(k))),
+                      });
                     }}
                   >
                     Delete
@@ -186,7 +194,12 @@ export default function SettingsSecrets() {
                 size="sm"
                 className="ml-auto rounded-sm"
                 disabled={busy}
-                onClick={() => void run(() => deleteSecret(secret.key))}
+                onClick={() =>
+                  setPendingDelete({
+                    label: secret.key,
+                    fn: () => deleteSecret(secret.key),
+                  })
+                }
               >
                 Delete
               </Button>
@@ -268,6 +281,19 @@ export default function SettingsSecrets() {
           </Button>
         </div>
       </form>
+
+      <ConfirmModal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => {
+          const pending = pendingDelete;
+          setPendingDelete(null);
+          if (pending) void run(pending.fn);
+        }}
+        title="Delete secrets"
+        description={`Remove all secrets for "${pendingDelete?.label ?? ""}"? This cannot be undone.`}
+        busy={busy}
+      />
     </div>
   );
 }
