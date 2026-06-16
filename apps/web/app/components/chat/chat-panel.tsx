@@ -4,6 +4,7 @@ import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { useConversations } from "~/lib/conversations-context";
 import type { Suggestion } from "~/lib/onboarding";
+import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { asTier } from "./model-selector";
 import { Transcript } from "./transcript";
@@ -90,6 +91,7 @@ export function ChatPanel({
     status,
     error,
     currentAgent,
+    conversationId,
     send,
     stop,
     approve,
@@ -185,6 +187,7 @@ export function ChatPanel({
         // A `@agent` mention in the composer overrides the panel's active agent for that turn.
         onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />
+      <ChatDebugDrawer conversationId={conversationId} />
     </div>
   );
 }

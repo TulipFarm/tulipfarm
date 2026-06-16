@@ -33,6 +33,9 @@ export type ConversationMessage = {
   conversationId: string;
   role: "system" | "user" | "assistant" | "tool" | "summary";
   content: string | WireMessagePart[];
+  // Present on assistant rows (provenance: { model?, agentId }) and summary rows (compactedThrough).
+  // The API already sends this; surfaced here for the dev debug drawer.
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -76,4 +79,17 @@ export async function getConversationMessages(id: string): Promise<ConversationM
     `/api/v1/conversations/${encodeURIComponent(id)}/messages`
   );
   return body.messages;
+}
+
+// Dev-only raw conversation state for the chat debug drawer: the full persisted rows plus the system
+// prompt the LLM receives (reconstructed server-side). The backing route is registered only outside
+// production (see apps/api/src/chat/routes.ts), so this resolves only in dev.
+export type DebugContext = {
+  conversationId: string;
+  systemPrompt: string;
+  messages: ConversationMessage[];
+};
+
+export function getDebugContext(id: string): Promise<DebugContext> {
+  return apiGet<DebugContext>(`/api/v1/conversations/${encodeURIComponent(id)}/debug-context`);
 }

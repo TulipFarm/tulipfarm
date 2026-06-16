@@ -1944,4 +1944,128 @@ describe("chat routes", () => {
       expect(res.json().messages).toHaveLength(2);
     });
   });
+
+  describe("GET /api/v1/conversations/:id/debug-context (dev-only raw state)", () => {
+    // Seeds one of every persisted role, incl. tool-call/tool-result parts and a compaction summary,
+    // so the assertions prove the debug payload surfaces the full raw rows (not just user/assistant).
+    function seedAllRoles(convoId: string): void {
+      const base = Date.now();
+      const at = (i: number) => new Date(base + i * 1000);
+      messageRepo.messages.push(
+        {
+          _id: randomUUID(),
+          conversationId: convoId,
+          role: "user",
+          content: "hi",
+          createdAt: at(0),
+        },
+        {
+          _id: randomUUID(),
+          conversationId: convoId,
+          role: "assistant",
+          content: [
+            { type: "text", text: "on it" },
+            { type: "tool-call", toolCallId: "tc1", toolName: "search", args: { q: "x" } },
+          ] as MessagePart[],
+          createdAt: at(1),
+        },
+        {
+          _id: randomUUID(),
+          conversationId: convoId,
+          role: "tool",
+          content: [
+            { type: "tool-result", toolCallId: "tc1", toolName: "search", result: { hits: 0 } },
+          ] as MessagePart[],
+          createdAt: at(2),
+        },
+        {
+          _id: randomUUID(),
+          conversationId: convoId,
+          role: "summary",
+          content: "earlier turns, summarized",
+          createdAt: at(3),
+        }
+      );
+    }
+
+    it("401 without auth", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}/debug-context`, {
+        session: null,
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("404 for a missing conversation", async () => {
+      const res = await get(`/api/v1/conversations/${randomUUID()}/debug-context`);
+      expect(res.statusCode).toBe(404);
+      expect(res.json().error).toBe("conversation not found");
+    });
+
+    it("returns the reconstructed system prompt plus the full raw rows (all roles)", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({
+        _id: convoId,
+        userId,
+        agentId: "agent-x",
+        createdAt: now,
+        updatedAt: now,
+      });
+      seedAllRoles(convoId);
+
+      const res = await get(`/api/v1/conversations/${convoId}/debug-context`);
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.conversationId).toBe(convoId);
+      expect(typeof body.systemPrompt).toBe("string");
+      expect(body.systemPrompt.length).toBeGreaterThan(0);
+      // All four persisted roles survive to the payload, including summary + tool rows.
+      expect(body.messages.map((m: MessageDoc) => m.role)).toEqual([
+        "user",
+        "assistant",
+        "tool",
+        "summary",
+      ]);
+      // Tool-call/tool-result parts are preserved verbatim.
+      const assistant = body.messages[1];
+      expect(assistant.content).toContainEqual({
+        type: "tool-call",
+        toolCallId: "tc1",
+        toolName: "search",
+        args: { q: "x" },
+      });
+    });
+
+    it("is not registered when NODE_ENV=production (route absent → 404 even for a seeded convo)", async () => {
+      const prev = process.env.NODE_ENV;
+      process.env.NODE_ENV = "production";
+      const prodApp = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+      });
+      try {
+        const convoId = randomUUID();
+        const now = new Date();
+        await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
+        // A registered route would 200 for a seeded convo; a 404 here proves the gate omitted it.
+        const res = await prodApp.inject({
+          method: "GET",
+          url: `/api/v1/conversations/${convoId}/debug-context`,
+          cookies: { [SESSION_COOKIE]: sid },
+        });
+        expect(res.statusCode).toBe(404);
+        expect(res.json().error).not.toBe("conversation not found");
+      } finally {
+        await prodApp.close();
+        process.env.NODE_ENV = prev;
+      }
+    });
+  });
 });
