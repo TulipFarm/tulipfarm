@@ -19,8 +19,8 @@ lazily fetched) makes the rendered prefix deterministic and therefore prompt-cac
 <governance-knowledge>    alwaysLoadForAgents docs (reuses knowledge/governance.ts, 4k/16k caps)
 <skills>                  eager skill bodies — `## name` + body per `eager: true` skill, 32k cap, drop-whole
 <available-skills>        lazy skill L1 — one `- name: description` per soul skill, 8k cap, drop-whole
-<soul-context>            "" — deferred (soul L1 snapshot builder)
-<available-tools>         "" — deferred (Tools v0.8)
+<soul-context>            repo catalogue L1 — `## Agents/Skills/Resource Types/Routines/Integrations`, 16k cap, drop-whole
+<available-tools>         tool L1 — one `- name: description` per allowed tool, 8k cap, drop-whole
 ```
 
 Each block renders to a string or `""`. Empty blocks are **omitted entirely** (filtered before
@@ -33,6 +33,14 @@ projects skills with `eager: true` to their full `{ name, body }` for `<skills>`
 projects the rest to their sorted L1 `{ name, description }` for `<available-skills>` — the two sets are
 disjoint. A lazy skill's body (L2) and reference files (L3) load on demand via the `load_skill` /
 `load_skill_reference` platform tools; per-agent eager-skill election stays deferred post-V1.
+
+`<soul-context>` and `<available-tools>` give the agent **ambient awareness** without a tool
+round-trip. `buildSoulCatalogue` (`../soul/catalogue.ts`) projects every soul artifact — agents
+(via `listAgents`, platform agents included), the full skill set (eager + lazy), resource types,
+routines, integrations — to a sorted `{ name, description }` L1 catalogue; full bodies/schemas stay
+L2 (pulled via `agent_get` / `load_skill` / `resource_type_schema`). `<available-tools>` lists the
+tools the agent may actually call, scoped to its allowlist by `availableToolsFor` in
+`chat/routes.ts` (the same allowed set used to build the toolset, so the two can't drift).
 
 ## Why deterministic order matters
 
@@ -48,5 +56,6 @@ drop **whole** on overflow (never half-rendered) so the prefix can't drift mid-b
 ## Tests
 
 `assemble.test.ts` — pure unit coverage (order, determinism, skip, omit-empty, budgets,
-no-typed-state). The wiring is covered in `chat/routes.test.ts` (working memory, the lazy
-`<available-skills>` list, and the eager `<skills>` block).
+no-typed-state, plus the `<soul-context>` and `<available-tools>` blocks). The catalogue projection
+is covered in `../soul/catalogue.test.ts`, and the wiring in `chat/routes.test.ts` (working memory,
+the lazy `<available-skills>` list, and the eager `<skills>` block).

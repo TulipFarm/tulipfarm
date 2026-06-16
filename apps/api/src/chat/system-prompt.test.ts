@@ -2,6 +2,7 @@ import type { SoulAgent } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { assembleSystemPrompt } from "../context/assemble";
 import { INFORMATION_ARCHITECT } from "../soul/agents/platform-agents";
+import type { SoulCatalogue } from "../soul/catalogue";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 
 const agent: SoulAgent = {
@@ -10,13 +11,32 @@ const agent: SoulAgent = {
   body: "You are a test agent.",
 };
 
+const emptyCatalogue: SoulCatalogue = {
+  agents: [],
+  skills: [],
+  resourceTypes: [],
+  routines: [],
+  integrations: [],
+};
+
 const empty = {
   memory: [],
   governanceDocs: [],
   availableSkills: [],
   eagerSkills: [],
   taggedResources: [],
+  soulCatalogue: emptyCatalogue,
+  availableTools: [],
 };
+
+/** Inner text of one XML block, or "" when absent — lets a test scope assertions to a single block. */
+function blockBody(prompt: string, tag: string): string {
+  const open = `<${tag}>`;
+  const close = `</${tag}>`;
+  const i = prompt.indexOf(open);
+  const j = prompt.indexOf(close);
+  return i >= 0 && j >= 0 ? prompt.slice(i + open.length, j) : "";
+}
 
 describe("assembleAgentSystemPrompt", () => {
   it("matches a direct assembleSystemPrompt call when there is no platform agent", () => {
@@ -43,5 +63,26 @@ describe("assembleAgentSystemPrompt", () => {
     const withoutForge = assembleAgentSystemPrompt({ agent, platformAgent: undefined, ...empty });
     expect(withForge).toContain("skill-forge");
     expect(withoutForge).not.toContain("skill-forge");
+  });
+
+  it("threads the soul catalogue and tool index into their blocks; forge stays out of soul-context", () => {
+    const out = assembleAgentSystemPrompt({
+      agent,
+      platformAgent: INFORMATION_ARCHITECT,
+      ...empty,
+      soulCatalogue: {
+        agents: [{ name: "GeneralAssistant", description: "Front desk" }],
+        skills: [{ name: "catalogue-skill", description: "Repo skill" }],
+        resourceTypes: [{ name: "invoice", description: "Billable items" }],
+        routines: [],
+        integrations: [],
+      },
+      availableTools: [{ name: "agent_list", description: "list agents" }],
+    });
+    expect(out).toContain("- catalogue-skill: Repo skill");
+    expect(out).toContain("<available-tools>\n- agent_list: list agents\n</available-tools>");
+    // Forge skills surface only in <available-skills>, never the soul-repo catalogue.
+    expect(blockBody(out, "soul-context")).not.toContain("skill-forge");
+    expect(out).toContain("skill-forge");
   });
 });

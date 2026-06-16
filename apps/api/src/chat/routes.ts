@@ -19,8 +19,10 @@ import {
   GENERAL_ASSISTANT_NAME,
   getAgent,
   getPlatformAgent,
+  type PlatformAgent,
   resolveAgent,
 } from "../soul/agents/registry";
+import { buildSoulCatalogue } from "../soul/catalogue";
 import { type EagerSkill, listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
@@ -302,6 +304,35 @@ export function registerChatRoutes(
   // is removed when its producer settles (single-instance V1, mirroring the approval registry).
   const streamControllers = new Map<string, AbortController>();
 
+  // Per-agent tool scoping (shared by the chat turn's toolset build, its <available-tools> prompt
+  // block, and the debug-context route): the Information Architect is filtered to its forge
+  // allowlist; every other agent (the GeneralAssistant front desk + user soul agents) gets all
+  // registered tools EXCEPT the IA-exclusive soul writes — so only the IA can author/edit soul
+  // artifacts. `undefined` (no/empty registry) means no scoping — every registered tool is exposed.
+  const allowedToolNamesFor = (pa: PlatformAgent | undefined): ReadonlySet<string> | undefined => {
+    if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
+    if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
+    return new Set(
+      toolRegistry
+        .getAll()
+        .map((t) => t.name)
+        .filter((n) => !EXCLUSIVE_SOUL_WRITE_TOOLS.has(n))
+    );
+  };
+  // The same allowed set projected to the `<available-tools>` L1 index — name + description, sorted
+  // for a byte-stable prompt prefix (AC-V1-001). `[]` when no registry → the block is omitted.
+  const availableToolsFor = (
+    pa: PlatformAgent | undefined
+  ): { name: string; description: string }[] => {
+    if (!toolRegistry) return [];
+    const allowed = allowedToolNamesFor(pa);
+    return toolRegistry
+      .getAll()
+      .filter((t) => !allowed || allowed.has(t.name))
+      .map((t) => ({ name: t.name, description: t.description }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  };
+
   app.post(
     "/api/v1/chat",
     {
@@ -434,6 +465,9 @@ export function registerChatRoutes(
       const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
       const soulAvailableSkills = listAvailableSkills(soulLoader);
       const soulEagerSkills = listEagerSkills(soulLoader);
+      // Repo catalogue for <soul-context> — conversation-scoped (same for the front desk and any
+      // handoff target), so build it once and reuse across `buildSystemFor` calls.
+      const soulCatalogue = buildSoulCatalogue(soulLoader);
       // Per-turn `/skill` + `#resource` tags (ephemeral). Resolve names → bodies / schemas once and
       // eagerly inject; unknown names are dropped (the composer only offers real ones). Tagged skills
       // are merged with the soul's own eager skills, deduped by name so an already-eager skill isn't
@@ -468,6 +502,9 @@ export function registerChatRoutes(
           availableSkills: soulAvailableSkills,
           eagerSkills: mergedEagerSkills,
           taggedResources: turnTaggedResources,
+          soulCatalogue,
+          // Tools THIS agent may call — per-agent, so a handoff target gets its own scoped index.
+          availableTools: availableToolsFor(pa),
         });
       const system = buildSystemFor(agent, platformAgent);
       // Compaction (CTX-V1-001/002): over budget → summarize the oldest turns once into a durable
@@ -592,20 +629,6 @@ export function registerChatRoutes(
           }
         : undefined;
 
-      // Per-agent tool scoping: the Information Architect is filtered to its forge allowlist; every
-      // other agent (the GeneralAssistant front desk + user soul agents) gets all registered tools
-      // EXCEPT the IA-exclusive soul writes — so only the IA can author/edit soul artifacts.
-      const computeAllowed = (pa: typeof platformAgent): ReadonlySet<string> | undefined => {
-        if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
-        if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
-        return new Set(
-          toolRegistry
-            .getAll()
-            .map((t) => t.name)
-            .filter((n) => !EXCLUSIVE_SOUL_WRITE_TOOLS.has(n))
-        );
-      };
-
       // The user's (guarded) request — handed to a transfer target as a clean slate so the front
       // desk's framed history doesn't read as prompt injection (the target's own prompt says who it
       // is, mirroring the canary handoff).
@@ -653,7 +676,7 @@ export function registerChatRoutes(
                   fullResultCache,
                   makeApprovalGate(approvalRegistry, emitter),
                   runToolCallGuard,
-                  computeAllowed(activePlatform)
+                  allowedToolNamesFor(activePlatform)
                 )
               : undefined;
 
@@ -1211,6 +1234,8 @@ export function registerChatRoutes(
           availableSkills: listAvailableSkills(soulLoader),
           eagerSkills: listEagerSkills(soulLoader),
           taggedResources: [],
+          soulCatalogue: buildSoulCatalogue(soulLoader),
+          availableTools: availableToolsFor(platformAgent),
         });
         const history = await messageRepo.listByConversation(id, 1000);
         return reply.send({ conversationId: id, systemPrompt, messages: history.items });

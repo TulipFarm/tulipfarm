@@ -2,6 +2,7 @@ import { buildGovernanceBlock } from "../knowledge/governance";
 import type { KnowledgeDocument } from "../knowledge/types";
 import { MAX_TOTAL_CHARS } from "../memory/limits";
 import type { WorkingMemoryDoc } from "../memory/working-memory";
+import type { SoulCatalogue } from "../soul/catalogue";
 import type { AvailableSkill, EagerSkill } from "../soul/skills/registry";
 
 /**
@@ -43,6 +44,17 @@ export interface AssembleContext {
    * reason over records of that type without a tool round-trip. Ephemeral — set per turn, never cached.
    */
   taggedResources?: { name: string; schema: string }[];
+  /**
+   * L1 repo catalogue for `<soul-context>` — every soul artifact (agents, skills, resource types,
+   * routines, integrations) projected to name + description. Gives the agent ambient awareness of
+   * what already exists; full bodies/schemas stay L2 (pulled on demand). Unset → block omitted.
+   */
+  soulCatalogue?: SoulCatalogue;
+  /**
+   * L1 index of the tools this agent may call for `<available-tools>` — name + one-line description,
+   * scoped to the agent's allowlist (the same set used to build its toolset). Unset → block omitted.
+   */
+  availableTools?: { name: string; description: string }[];
 }
 
 function block(tag: string, body: string): string {
@@ -147,12 +159,74 @@ function renderTaggedResources(ctx: AssembleContext): string {
 }
 
 /**
- * Assemble the agent system prompt from the 9 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
- * and synchronous. Each block renders to a string or "" (when empty, over budget, or deferred);
- * empty blocks are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders
- * eager skill bodies and `<available-skills>` the lazy skill L1 index; the still-deferred blocks —
- * `<soul-context>`, `<available-tools>` — emit empty until the soul L1 snapshot and Tools land. No
- * `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005, AC-V1-003).
+ * `<soul-context>` budget — total chars across every catalogue entry's `name`+`description`. Over
+ * this the whole block is dropped (never half-rendered), matching the other block budgets. The
+ * catalogue spans five artifact types, so the budget is generous; V1 counts sit well under it.
+ */
+const MAX_SOUL_CONTEXT_CHARS = 16000;
+
+/** The five `<soul-context>` sections, in fixed render order, mapped to their catalogue key. */
+const SOUL_CONTEXT_SECTIONS: { heading: string; key: keyof SoulCatalogue }[] = [
+  { heading: "Agents", key: "agents" },
+  { heading: "Skills", key: "skills" },
+  { heading: "Resource Types", key: "resourceTypes" },
+  { heading: "Routines", key: "routines" },
+  { heading: "Integrations", key: "integrations" },
+];
+
+/**
+ * `<soul-context>` block (CONTEXT-ENGINE §1). The repo catalogue: a `## Heading` markdown section
+ * per artifact type, each with one `- name: description` line (just `- name` when no description),
+ * in name-sorted order. Only non-empty sections render; the whole block is omitted when the
+ * catalogue is empty and dropped whole when over budget.
+ */
+function renderSoulContext(ctx: AssembleContext): string {
+  const cat = ctx.soulCatalogue;
+  if (!cat) return "";
+  const total = SOUL_CONTEXT_SECTIONS.reduce(
+    (n, s) => n + cat[s.key].reduce((m, e) => m + e.name.length + e.description.length, 0),
+    0
+  );
+  if (total === 0) return "";
+  if (total > MAX_SOUL_CONTEXT_CHARS) return "";
+  const sections = SOUL_CONTEXT_SECTIONS.filter((s) => cat[s.key].length > 0).map((s) => {
+    const lines = cat[s.key]
+      .map((e) => (e.description ? `- ${e.name}: ${e.description}` : `- ${e.name}`))
+      .join("\n");
+    return `## ${s.heading}\n${lines}`;
+  });
+  return block("soul-context", sections.join("\n\n"));
+}
+
+/**
+ * `<available-tools>` budget — total chars across all tool `name`+`description` pairs. Over this
+ * the whole block is dropped (never half-rendered), matching `renderAvailableSkills`.
+ */
+const MAX_AVAILABLE_TOOLS_CHARS = 8000;
+
+/**
+ * `<available-tools>` block (Tools, CONTEXT-ENGINE §1). The tool L1 index: one `- name: description`
+ * line per tool the agent may call (scoped to its allowlist), in name-sorted order. Omitted when
+ * the agent has no tools; dropped whole when over budget.
+ */
+function renderAvailableTools(ctx: AssembleContext): string {
+  const tools = ctx.availableTools ?? [];
+  if (tools.length === 0) return "";
+  const total = tools.reduce((n, t) => n + t.name.length + t.description.length, 0);
+  if (total > MAX_AVAILABLE_TOOLS_CHARS) return "";
+  const body = tools
+    .map((t) => (t.description ? `- ${t.name}: ${t.description}` : `- ${t.name}`))
+    .join("\n");
+  return block("available-tools", body);
+}
+
+/**
+ * Assemble the agent system prompt from the 10 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
+ * and synchronous. Each block renders to a string or "" (when empty or over budget); empty blocks
+ * are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders eager skill
+ * bodies and `<available-skills>` the lazy skill L1 index; `<soul-context>` renders the repo
+ * catalogue (agents/skills/resource types/routines/integrations) and `<available-tools>` the agent's
+ * tool L1 index. No `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005, AC-V1-003).
  */
 export function assembleSystemPrompt(ctx: AssembleContext): string {
   const blocks = [
@@ -166,8 +240,8 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderEagerSkills(ctx),
     renderAvailableSkills(ctx),
     renderTaggedResources(ctx),
-    "", // <soul-context> — deferred (soul L1 snapshot builder)
-    "", // <available-tools> — deferred (Tools v0.8)
+    renderSoulContext(ctx),
+    renderAvailableTools(ctx),
   ];
   return blocks.filter((b) => b.length > 0).join("\n");
 }
