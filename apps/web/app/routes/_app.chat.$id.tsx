@@ -59,12 +59,13 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 }
 
 export default function ChatConversationRoute() {
-  const { id, agentId, defaultModel, messages } = useLoaderData<typeof clientLoader>();
+  const { id, title, agentId, defaultModel, messages } = useLoaderData<typeof clientLoader>();
   const { refresh } = useConversations();
   return (
     <ChatPanel
       key={id}
       agentId={agentId}
+      title={title ?? undefined}
       defaultModel={defaultModel}
       initialConversationId={id}
       initialMessages={messages}

@@ -1,4 +1,5 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
+import { AgentGlyph } from "~/components/agent-glyph";
 import { EmptyState } from "~/components/empty-state";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
@@ -35,11 +36,16 @@ export default function AgentsIndex() {
           <li key={agent.name}>
             <Link
               to={`/agents/${encodeURIComponent(agent.name)}`}
-              className="group flex items-baseline gap-2 px-3 py-2 transition-colors hover:bg-accent"
+              className="group flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-accent"
             >
-              <span aria-hidden className="text-primary">
-                ▸
-              </span>
+              <AgentGlyph
+                name={agent.name}
+                domain={agent.domain}
+                autonomy={agent.autonomy}
+                size="sm"
+                decorative
+                className="shrink-0"
+              />
               <span className="font-medium text-foreground">{agent.label ?? agent.name}</span>
               {agent.description ? (
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">

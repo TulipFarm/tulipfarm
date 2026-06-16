@@ -158,5 +158,9 @@ export type ChatState = {
   // The server's id for the in-flight reply (X-Message-Id, delivered via meta before any text);
   // stamped onto the assistant message as `serverId` when the turn's `finish` seals it.
   pendingServerId?: string;
+  // The agent currently handling the conversation, updated live by `agent-handoff` events so the
+  // header indicator follows transfers. Undefined until the first handoff — callers fall back to the
+  // restored conversation's persisted agent.
+  currentAgent?: string;
   error?: string;
 };

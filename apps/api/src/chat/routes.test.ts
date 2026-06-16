@@ -143,6 +143,35 @@ function makeToolThenTextModel(
   });
 }
 
+// Model whose stream emits one delta then stays open until its abortSignal fires, at which point it
+// errors the stream (as a real provider does on cancel). Lets a test drive POST /stop deterministically.
+function makeAbortableModel(): LanguageModelV3 {
+  return {
+    specificationVersion: "v3",
+    provider: "test",
+    modelId: "claude-opus-4-8",
+    supportedUrls: {},
+    doStream: vi.fn(async (options: { prompt: unknown[]; abortSignal?: AbortSignal }) => {
+      capturedPrompts.push(options.prompt);
+      const signal = options.abortSignal;
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue({ type: "text-start", id: "t0" });
+          controller.enqueue({ type: "text-delta", id: "t0", delta: "partial" });
+          // Stay open; a real provider ends/errors the stream once the request is aborted.
+          const onAbort = () => controller.error(new DOMException("Aborted", "AbortError"));
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener("abort", onAbort, { once: true });
+        },
+      });
+      return { stream };
+    }),
+    doGenerate: vi.fn(async () => {
+      throw new Error("doGenerate unused");
+    }),
+  } as unknown as LanguageModelV3;
+}
+
 // Non-streaming model for the quick-tier compaction summarizer: doGenerate returns fixed text.
 function makeQuickModel(text: string): LanguageModelV3 {
   return {
@@ -923,6 +952,8 @@ describe("chat routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers["content-type"]).toContain("text/event-stream");
       expect(res.headers["x-stream-id"]).toBeDefined();
+      // The turn's active agent is surfaced up front so the client header reflects it immediately.
+      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
       expect(res.body).toMatch(/id: 1\nevent: text\ndata: /);
       expect(res.body).toContain("event: finish");
     });
@@ -941,6 +972,7 @@ describe("chat routes", () => {
       expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:4000");
       expect(res.headers["access-control-allow-credentials"]).toBe("true");
       expect(String(res.headers["access-control-expose-headers"])).toMatch(/x-conversation-id/i);
+      expect(String(res.headers["access-control-expose-headers"])).toMatch(/x-agent-id/i);
     });
 
     it("buffers the turn's events in the stream repo for replay", async () => {
@@ -1296,6 +1328,145 @@ describe("chat routes", () => {
     });
   });
 
+  // ── Sticky @mention hand-off: a mid-conversation `@agent` mention re-targets the active agent.
+  //    Unlike the LLM-driven transfer_to_agent above, this is a deterministic, user-initiated switch
+  //    keyed off body.agentId — the tagged agent takes over this turn and persists as the
+  //    conversation's agent until a different one is tagged. InformationArchitect/GeneralAssistant are
+  //    platform agents (always resolvable via getAgent), so no toolRegistry/soul setup is needed. ──
+  describe("POST /api/v1/chat (sticky @mention hand-off)", () => {
+    async function seedConvo(agentId?: string): Promise<string> {
+      const id = randomUUID();
+      const now = new Date();
+      await repo.create({
+        _id: id,
+        userId,
+        agentId,
+        model: undefined,
+        createdAt: now,
+        updatedAt: now,
+      });
+      return id;
+    }
+    const handoffs = () => streamRepo.rows.filter((r) => r.eventType === "agent-handoff");
+    const finish = () => waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
+
+    it("routes the turn to the @mentioned agent, persists it, and emits an inline handoff marker", async () => {
+      const convoId = await seedConvo("GeneralAssistant");
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@Information Architect build it"),
+        agentId: "InformationArchitect",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      // The header reflects the switched agent immediately (X-Agent-Id), the switch persists, and a
+      // single agent-handoff event drives the client's inline marker + current-agent indicator.
+      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
+      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+      const hs = handoffs();
+      expect(hs).toHaveLength(1);
+      expect(hs[0]?.data).toMatchObject({ from: "GeneralAssistant", to: "InformationArchitect" });
+    });
+
+    it("a turn with no @mention stays on the conversation's persisted agent (sticky)", async () => {
+      const convoId = await seedConvo("InformationArchitect");
+      const res = await post({ conversationId: convoId, message: userMsg("and the next bit") });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
+      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+      expect(handoffs()).toHaveLength(0);
+    });
+
+    it("re-tagging a different agent switches again", async () => {
+      const convoId = await seedConvo("InformationArchitect");
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@General Assistant thanks"),
+        agentId: "GeneralAssistant",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
+      expect(handoffs()[0]?.data).toMatchObject({
+        from: "InformationArchitect",
+        to: "GeneralAssistant",
+      });
+    });
+
+    it("ignores an unknown @mention (no switch, no marker, no persist)", async () => {
+      const convoId = await seedConvo("GeneralAssistant");
+      const setAgentSpy = vi.spyOn(repo, "setAgent");
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@Nobody hello"),
+        agentId: "NoSuchAgent999",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
+      expect(handoffs()).toHaveLength(0);
+      expect(setAgentSpy).not.toHaveBeenCalled();
+    });
+
+    it("mentioning the already-active agent is a no-op (no marker, no persist)", async () => {
+      const convoId = await seedConvo("GeneralAssistant");
+      const setAgentSpy = vi.spyOn(repo, "setAgent");
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@General Assistant still you"),
+        agentId: "GeneralAssistant",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(handoffs()).toHaveLength(0);
+      expect(setAgentSpy).not.toHaveBeenCalled();
+    });
+
+    it("a legacy conversation (no persisted agent) mentioning the default agent is a no-op", async () => {
+      // convo.agentId === undefined (a row predating agent persistence): the effective agent is the
+      // GeneralAssistant, so tagging it must NOT spuriously switch/persist/emit a marker.
+      const convoId = await seedConvo();
+      const setAgentSpy = vi.spyOn(repo, "setAgent");
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@General Assistant hi"),
+        agentId: "GeneralAssistant",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(handoffs()).toHaveLength(0);
+      expect(setAgentSpy).not.toHaveBeenCalled();
+    });
+
+    it("a setAgent persistence failure is non-fatal — the turn still runs as the switched agent", async () => {
+      const convoId = await seedConvo("GeneralAssistant");
+      vi.spyOn(repo, "setAgent").mockRejectedValueOnce(new Error("db down"));
+      const res = await post({
+        conversationId: convoId,
+        message: userMsg("@Information Architect build it"),
+        agentId: "InformationArchitect",
+      });
+      expect(res.statusCode).toBe(200);
+      await finish();
+
+      // The in-memory switch survives a failed persist: the turn is served by the target agent and a
+      // finish closes the stream (no 500). Persistence simply didn't stick this time.
+      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
+      expect(streamRepo.rows.filter((r) => r.eventType === "finish")).toHaveLength(1);
+    });
+  });
+
   // ── HITL suspend/resume (A2UI ask_user): turn 1 calls ask_user → the run ends with the form
   //    rendered and a pending interaction is persisted; the next request injects the user's answer as
   //    that tool-call's result and resumes the run (the model sees its own question answered). ──
@@ -1462,6 +1633,65 @@ describe("chat routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.body).toMatch(/id: 1\n/);
       expect(res.body).toContain("id: 3");
+    });
+  });
+
+  describe("POST /api/v1/chat/streams/:streamId/stop", () => {
+    function stopReq(
+      streamId: string,
+      opts: { auth?: boolean; csrf?: boolean } = {}
+    ): Promise<LightMyRequestResponse> {
+      const { auth = true, csrf = true } = opts;
+      const cookies: Record<string, string> = {};
+      const headers: Record<string, string> = {};
+      if (auth) cookies[SESSION_COOKIE] = sid;
+      if (csrf) {
+        cookies[CSRF_COOKIE] = TEST_CSRF;
+        headers[CSRF_HEADER] = TEST_CSRF;
+      }
+      return app.inject({
+        method: "POST",
+        url: `/api/v1/chat/streams/${streamId}/stop`,
+        cookies,
+        headers,
+      });
+    }
+
+    it("401 without auth", async () => {
+      const res = await stopReq(randomUUID(), { auth: false, csrf: false });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("404 for an unknown / already-finished stream", async () => {
+      const res = await stopReq(randomUUID());
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("aborts a live stream and finishes it with reason stopped", async () => {
+      select.mockReturnValue(makeAbortableModel());
+      // The streamId is internal, so capture it as the producer registers the stream on the hub.
+      const registered: string[] = [];
+      const origRegister = streamHub.register.bind(streamHub);
+      vi.spyOn(streamHub, "register").mockImplementation((id: string) => {
+        registered.push(id);
+        origRegister(id);
+      });
+
+      // Fire the turn but don't await — the model holds the stream open until we stop it.
+      const turn = post({ message: userMsg("hi") });
+      await waitFor(() => registered.length > 0);
+      const streamId = registered[0];
+
+      const stop = await stopReq(streamId);
+      expect(stop.statusCode).toBe(200);
+      expect(stop.json()).toEqual({ status: "stopped" });
+
+      // The aborted turn ends; the persisted terminal is a stopped finish, not an error.
+      await turn;
+      const rows = await streamRepo.listAfter(streamId, 0);
+      expect(rows.at(-1)?.eventType).toBe("finish");
+      expect(rows.at(-1)?.data).toEqual({ reason: "stopped" });
+      expect(streamHub.isLive(streamId)).toBe(false);
     });
   });
 

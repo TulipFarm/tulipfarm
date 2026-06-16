@@ -53,6 +53,20 @@
   --sidebar-accent-foreground: oklch(0.3 0.008 40);
   --sidebar-border: oklch(0.9 0.004 50);
   --sidebar-ring: oklch(0.46 0.17 25);
+
+  /*
+   * Agent glyph palette — 7 muted, low-chroma hues (chroma ≤0.09) for agent avatars.
+   * Indexed 0–6; `deriveGlyph()` picks one by hashing the agent name. Hue angles are kept
+   * clear of ruby (~25°) and coral/destructive (~27°) so a glyph never reads as brand/danger;
+   * ruby stays reserved for the ACTIVE agent only. Light values for the cream canvas.
+   */
+  --glyph-hue-0: oklch(0.52 0.08 240); /* steel-blue */
+  --glyph-hue-1: oklch(0.52 0.08 150); /* sage */
+  --glyph-hue-2: oklch(0.52 0.08 300); /* mauve */
+  --glyph-hue-3: oklch(0.55 0.08 80); /* amber */
+  --glyph-hue-4: oklch(0.5 0.04 220); /* slate */
+  --glyph-hue-5: oklch(0.5 0.07 130); /* moss */
+  --glyph-hue-6: oklch(0.5 0.09 320); /* plum */
 }
 
 [data-theme="dark"] {
@@ -90,4 +104,13 @@
   --sidebar-accent-foreground: oklch(0.94 0.003 80);
   --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: oklch(0.7 0.15 25);
+
+  /* Glyph palette, lightened ~0.13 for contrast on the warm near-black canvas. */
+  --glyph-hue-0: oklch(0.65 0.08 240);
+  --glyph-hue-1: oklch(0.65 0.08 150);
+  --glyph-hue-2: oklch(0.65 0.08 300);
+  --glyph-hue-3: oklch(0.68 0.08 80);
+  --glyph-hue-4: oklch(0.63 0.04 220);
+  --glyph-hue-5: oklch(0.63 0.07 130);
+  --glyph-hue-6: oklch(0.63 0.09 320);
 }

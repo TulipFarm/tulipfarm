@@ -1,5 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
+import {
+  appendUserMessage,
+  chatReducer,
+  initialChatState,
+  rewindLastTurn,
+} from "~/lib/chat/reducer";
 import type { ChatEvent, ChatState, TimelinePart } from "~/lib/chat/types";
 
 // Fold a sequence of events onto a fresh state, as the stream would.
@@ -146,6 +151,19 @@ test("plan, task, sources, agent-handoff, a2ui each push a matching part", () =>
   ]);
 });
 
+test("agent-handoff updates currentAgent so the header indicator follows the live switch", () => {
+  const state = fold([
+    { type: "agent-handoff", data: { from: "GeneralAssistant", to: "InformationArchitect" } },
+  ]);
+  expect(state.currentAgent).toBe("InformationArchitect");
+  // A later handoff back to the front desk moves the indicator again.
+  const back = fold([
+    { type: "agent-handoff", data: { from: "GeneralAssistant", to: "InformationArchitect" } },
+    { type: "agent-handoff", data: { from: "InformationArchitect", to: "GeneralAssistant" } },
+  ]);
+  expect(back.currentAgent).toBe("GeneralAssistant");
+});
+
 test("a2ui createSurface pushes a surface part; updateDataModel attaches fragments to it", () => {
   const state = fold([
     {
@@ -289,4 +307,54 @@ test("finish stamps the assistant message serverId from pendingServerId, leaving
   expect(msg?.id).not.toBe("srv-1");
   // ...and the pending id is consumed so it can't leak onto a later turn's reply.
   expect(state.pendingServerId).toBeUndefined();
+});
+
+describe("rewindLastTurn (Stop / un-send)", () => {
+  test("drops the open assistant reply and the last user message, returning to idle", () => {
+    const submitted = appendUserMessage(initialChatState, "draft prompt");
+    const streaming = chatReducer(submitted, { type: "text", data: { delta: "partial" } });
+    expect(streaming.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    const next = rewindLastTurn(streaming);
+    expect(next.messages).toHaveLength(0);
+    expect(next.status).toBe("idle");
+    // pure: the source state is untouched
+    expect(streaming.messages).toHaveLength(2);
+  });
+
+  test("rewinds only the latest turn, keeping earlier sealed turns", () => {
+    let s = appendUserMessage(initialChatState, "first");
+    s = fold(
+      [
+        { type: "text", data: { delta: "reply one" } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      s
+    );
+    s = appendUserMessage(s, "second");
+    s = chatReducer(s, { type: "text", data: { delta: "partial two" } });
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant", "user", "assistant"]);
+    const next = rewindLastTurn(s);
+    expect(next.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(next.messages[0].parts).toEqual([{ kind: "text", text: "first" }]);
+    expect(next.status).toBe("idle");
+  });
+
+  test("is a safe no-op on the empty timeline", () => {
+    const next = rewindLastTurn(initialChatState);
+    expect(next.messages).toHaveLength(0);
+    expect(next.status).toBe("idle");
+  });
+
+  test("clears a prior error and the pending server id", () => {
+    const errored: ChatState = {
+      ...initialChatState,
+      status: "error",
+      error: "boom",
+      pendingServerId: "srv-x",
+    };
+    const next = rewindLastTurn(errored);
+    expect(next.status).toBe("idle");
+    expect(next.error).toBeUndefined();
+    expect(next.pendingServerId).toBeUndefined();
+  });
 });

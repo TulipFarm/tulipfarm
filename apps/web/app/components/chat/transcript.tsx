@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
 import { MessagePartView } from "./parts";
+import type { MentionEntry } from "./use-mention-catalog";
 
 function partKey(part: TimelinePart, i: number): string {
   switch (part.kind) {
@@ -187,9 +188,11 @@ function AssistantActions({
 // textarea; saving re-runs the conversation from this turn (a local branch — see useChatStream).
 function UserMessage({
   message,
+  mentions,
   onEditResend,
 }: {
   message: ChatMessage;
+  mentions?: MentionEntry[];
   onEditResend?: (messageId: string, text: string) => void;
 }) {
   const text = messageText(message);
@@ -250,7 +253,7 @@ function UserMessage({
   return (
     <div className="group flex flex-col items-end gap-1">
       <div className="max-w-[80%] rounded-lg bg-muted px-3.5 py-2 text-sm text-foreground [&_:first-child]:mt-0 [&_:last-child]:mb-0">
-        <MarkdownView>{text}</MarkdownView>
+        <MarkdownView mentions={mentions}>{text}</MarkdownView>
       </div>
       <div className={`${toolbar} justify-end`}>
         <CopyButton text={text} />
@@ -268,6 +271,7 @@ function Message({
   message,
   status,
   isLast,
+  mentions,
   onApprove,
   onRegenerate,
   onEditResend,
@@ -277,6 +281,7 @@ function Message({
   message: ChatMessage;
   status: ChatStatus;
   isLast: boolean;
+  mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
   onEditResend?: (messageId: string, text: string) => void;
@@ -284,7 +289,7 @@ function Message({
   onA2uiAgent?: (payload: unknown) => void;
 }) {
   if (message.role === "user") {
-    return <UserMessage message={message} onEditResend={onEditResend} />;
+    return <UserMessage message={message} mentions={mentions} onEditResend={onEditResend} />;
   }
 
   const streaming = !message.sealed && status === "streaming";
@@ -331,6 +336,7 @@ function Loader() {
 export function Transcript({
   messages,
   status,
+  mentions,
   onApprove,
   onRegenerate,
   onEditResend,
@@ -339,6 +345,7 @@ export function Transcript({
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
+  mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
   onEditResend?: (messageId: string, text: string) => void;
@@ -368,6 +375,7 @@ export function Transcript({
             message={m}
             status={status}
             isLast={i === messages.length - 1}
+            mentions={mentions}
             onApprove={onApprove}
             onRegenerate={onRegenerate}
             onEditResend={onEditResend}

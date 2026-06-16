@@ -5,6 +5,7 @@ import {
   useNavigate,
   useRouteError,
 } from "@remix-run/react";
+import { AgentGlyph } from "~/components/agent-glyph";
 import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
@@ -39,6 +40,18 @@ export default function AgentDetail() {
 
   return (
     <ResourcePanel crumbs={[{ label: "agents", to: "/agents" }, { label: agent.name }]}>
+      <div className="flex items-center gap-3">
+        <AgentGlyph
+          name={agent.name}
+          domain={agent.domain}
+          autonomy={agent.autonomy}
+          size="lg"
+          decorative
+          className="shrink-0"
+        />
+        <h1 className="text-lg font-semibold text-foreground">{display}</h1>
+      </div>
+
       <div>
         {/* Chat is wired in a later ticket; this preselects the agent on the chat surface. */}
         <Button size="sm" onClick={() => navigate(`/?agent=${encodeURIComponent(agent.name)}`)}>

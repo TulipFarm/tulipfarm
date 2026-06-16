@@ -15,6 +15,35 @@ const TIERS: { id: Tier; label: string; level: 1 | 2 | 3; blurb: string }[] = [
   { id: "complex", label: "complex", level: 3, blurb: "Deepest reasoning — hard, multi-step work" },
 ];
 
+// The pickable tiers as plain ids (mirrors TIERS) for narrowing arbitrary model strings.
+const PICKABLE_TIERS: readonly ModelTier[] = ["quick", "standard", "complex"];
+
+/**
+ * Narrow an arbitrary model string — an agent's `frontmatter.model`, which may be a tier, `"auto"`,
+ * or a raw provider model id — to one of the three *pickable* tiers. `"auto"`, raw ids, and undefined
+ * all yield undefined, so callers leave the dropdown unchanged rather than show an unrepresentable value.
+ */
+export function asTier(s: string | undefined): ModelTier | undefined {
+  return s != null && (PICKABLE_TIERS as readonly string[]).includes(s)
+    ? (s as ModelTier)
+    : undefined;
+}
+
+/**
+ * The tier the composer's MODEL selector should reflect for the next turn: the `@`-mentioned agent's
+ * tier if one is in the box, else the active conversation agent's tier, else the fallback. Pure and
+ * id-keyed so the composer can sync the dropdown via an effect without driving ProseMirror.
+ */
+export function effectiveTier(args: {
+  mentionedAgentId?: string;
+  tierById: (id: string) => ModelTier | undefined;
+  activeAgentTier?: ModelTier;
+  fallback: ModelTier;
+}): ModelTier {
+  const mentioned = args.mentionedAgentId ? args.tierById(args.mentionedAgentId) : undefined;
+  return mentioned ?? args.activeAgentTier ?? args.fallback;
+}
+
 // Three ascending bars, like a volume/signal meter: bars up to `level` are lit, the rest dimmed.
 function SignalBars({ level }: { level: 1 | 2 | 3 }) {
   const bars = [3, 6, 9];

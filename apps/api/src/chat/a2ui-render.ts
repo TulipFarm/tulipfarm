@@ -22,16 +22,19 @@ interface Choice {
 }
 
 function renderChoices(data: { question: string; choices: Choice[] }): string {
-  const buttons = data.choices
+  // Each option is one full-width clickable card: the label and its description live INSIDE the same
+  // box (and the same data-a2ui-send target), so the description is unambiguously tied to its label
+  // and the whole row is selectable — not a flat run of button/description siblings.
+  const options = data.choices
     .map((c) => {
       const attr = sendAttr({ kind: "choice", value: c.value, label: c.label });
-      const desc = c.description
-        ? `<tf-text data-tone="muted" data-size="sm">${esc(c.description)}</tf-text>`
-        : "";
-      return `<tf-button ${attr}>${esc(c.label)}</tf-button>${desc}`;
+      const desc = c.description ? `<span data-slot="desc">${esc(c.description)}</span>` : "";
+      return `<tf-choice ${attr}><span data-slot="label">${esc(c.label)}</span>${desc}</tf-choice>`;
     })
     .join("");
-  return `<tf-card><tf-text>${esc(data.question)}</tf-text>${buttons}</tf-card>`;
+  return `<tf-card><tf-text>${esc(
+    data.question
+  )}</tf-text><tf-choices>${options}</tf-choices></tf-card>`;
 }
 
 function renderSuggestAgent(data: {

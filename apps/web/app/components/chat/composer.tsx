@@ -3,12 +3,12 @@ import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
 import { Bold, Code, Italic, Link as LinkIcon } from "lucide-react";
-import { type ReactNode, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelTier } from "~/lib/chat/types";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
-import { type PMNode, serializeDoc } from "./editor/serialize";
+import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
-import { ModelSelector } from "./model-selector";
+import { effectiveTier, ModelSelector } from "./model-selector";
 
 /** What a composed turn carries to the parent: the model tier plus the resolved mention tags. */
 export type ComposerSendOptions = {
@@ -28,12 +28,22 @@ export type ComposerSendOptions = {
  */
 export function Composer({
   onSend,
+  onStop,
   busy,
   defaultModel = "standard",
+  activeAgentTier,
+  tierById,
 }: {
   onSend: (text: string, opts: ComposerSendOptions) => void;
+  // Halt the in-flight reply (shown as a Stop button while `busy`); also restores the last sent
+  // prompt into the editor to fix and resend.
+  onStop?: () => void;
   busy?: boolean;
   defaultModel?: ModelTier;
+  // The active conversation agent's tier — reflected in the MODEL selector when no `@agent` is typed.
+  activeAgentTier?: ModelTier;
+  // agentId → its pickable tier; used to reflect an `@`-mentioned agent's tier as it's typed.
+  tierById?: (id: string) => ModelTier | undefined;
 }) {
   const [model, setModel] = useState<ModelTier>(defaultModel);
   const getItems = useMentionData();
@@ -41,6 +51,9 @@ export function Composer({
   // editorProps is frozen at creation, so route Enter through a ref that always holds the latest
   // closure (current model/busy/onSend) — avoids the classic Tiptap stale-closure on send.
   const submitRef = useRef<() => void>(() => {});
+  // The last sent document (Tiptap JSON), stashed before clearing so Stop can restore it verbatim —
+  // mention chips included (getJSON ↔ setContent round-trips exactly).
+  const lastSentDocRef = useRef<PMNode | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -79,17 +92,45 @@ export function Composer({
       italic: editor?.isActive("italic") ?? false,
       code: editor?.isActive("code") ?? false,
       link: editor?.isActive("link") ?? false,
+      // The first `@agent` mention in the box, recomputed on each edit — drives the MODEL tier below.
+      mentionedAgentId: editor ? firstAgentMentionId(editor.getJSON() as PMNode) : undefined,
     }),
   });
   const isEmpty = state?.isEmpty ?? true;
 
+  // The MODEL selector reflects the tier of the agent that will handle the next turn: the `@`-mentioned
+  // agent in the box, else the active conversation agent, else the default. Keyed on the derived tier
+  // string so the effect only fires on an actual tier change — a manual dropdown pick therefore sticks
+  // until the relevant agent changes (D5).
+  const tier = effectiveTier({
+    mentionedAgentId: state?.mentionedAgentId,
+    tierById: tierById ?? (() => undefined),
+    activeAgentTier,
+    fallback: defaultModel,
+  });
+  useEffect(() => {
+    setModel(tier);
+  }, [tier]);
+
   submitRef.current = () => {
     if (!editor || busy) return;
-    const { text, agentId, skills, resources } = serializeDoc(editor.getJSON() as PMNode);
+    const doc = editor.getJSON() as PMNode;
+    const { text, agentId, skills, resources } = serializeDoc(doc);
     if (!text) return;
     onSend(text, { model, agentId, skills, resources });
+    lastSentDocRef.current = doc;
     editor.commands.clearContent();
   };
+
+  function handleStop() {
+    onStop?.();
+    // Restore the last sent prompt so it can be fixed and resent — but never clobber a draft the user
+    // began typing while the reply streamed.
+    if (editor?.isEmpty && lastSentDocRef.current) {
+      editor.commands.setContent(lastSentDocRef.current);
+      editor.commands.focus("end");
+    }
+  }
 
   function setLink() {
     if (!editor) return;
@@ -139,17 +180,29 @@ export function Composer({
           <EditorContent editor={editor} />
           <div className="flex items-center gap-4 border-t border-border/60 px-3 py-2">
             <ModelSelector value={model} onChange={setModel} disabled={busy} />
-            <button
-              type="button"
-              onClick={() => submitRef.current()}
-              disabled={isEmpty || busy}
-              className="ml-auto inline-flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-            >
-              send
-              <span aria-hidden className="opacity-70">
-                ↵
-              </span>
-            </button>
+            {busy ? (
+              <button
+                type="button"
+                onClick={handleStop}
+                aria-label="Stop response"
+                className="ml-auto inline-flex items-center gap-1.5 rounded-sm border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+              >
+                <span aria-hidden className="size-2 rounded-[1px] bg-current" />
+                stop
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => submitRef.current()}
+                disabled={isEmpty}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+              >
+                send
+                <span aria-hidden className="opacity-70">
+                  ↵
+                </span>
+              </button>
+            )}
           </div>
         </div>
         <p className="mt-1.5 px-1 text-[0.625rem] text-muted-foreground">

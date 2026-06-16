@@ -13,7 +13,7 @@ import Mention from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
-import { MENTION_KINDS } from "./mention-config";
+import { MENTION_KINDS, type MentionKind } from "./mention-config";
 import { MentionList, type MentionListRef } from "./mention-list";
 import { filterItems } from "./serialize";
 import type { GetItems } from "./use-mention-data";
@@ -23,7 +23,8 @@ export const MENTION_PLUGIN_KEYS = MENTION_KINDS.map((c) => new PluginKey(c.node
 
 // Fresh closure per active suggestion session: mounts the dropdown, repositions it above the caret on
 // every update, and forwards keystrokes to the list (Escape falls through so the plugin closes it).
-function suggestionRender() {
+// `kind` is merged into the list props so agent rows can render their glyph avatar.
+function suggestionRender(kind: MentionKind) {
   let renderer: ReactRenderer<MentionListRef> | null = null;
 
   const reposition = (clientRect?: (() => DOMRect | null) | null) => {
@@ -43,12 +44,15 @@ function suggestionRender() {
 
   return {
     onStart: (props: SuggestionProps) => {
-      renderer = new ReactRenderer(MentionList, { props, editor: props.editor });
+      renderer = new ReactRenderer(MentionList, {
+        props: { ...props, kind },
+        editor: props.editor,
+      });
       document.body.appendChild(renderer.element);
       reposition(props.clientRect);
     },
     onUpdate: (props: SuggestionProps) => {
-      renderer?.updateProps(props);
+      renderer?.updateProps({ ...props, kind });
       reposition(props.clientRect);
     },
     onKeyDown: (props: SuggestionKeyDownProps) => {
@@ -77,7 +81,7 @@ export function buildMentionExtensions(getItems: GetItems) {
         char: cfg.char,
         pluginKey: MENTION_PLUGIN_KEYS[i],
         items: ({ query }: { query: string }) => filterItems(query, getItems(cfg.kind)),
-        render: suggestionRender,
+        render: () => suggestionRender(cfg.kind),
       },
     })
   );

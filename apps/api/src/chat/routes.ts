@@ -18,6 +18,7 @@ import { parsePaginationQuery } from "../pagination";
 import {
   EXCLUSIVE_SOUL_WRITE_TOOLS,
   GENERAL_ASSISTANT_NAME,
+  getAgent,
   getPlatformAgent,
   resolveAgent,
 } from "../soul/agents/registry";
@@ -298,6 +299,9 @@ export function registerChatRoutes(
   const pendingInteractions = pendingInteractionRepo ?? new MemoryPendingInteractionRepo();
   // A2UI live-surface store: render_surface persists each surface; update_surface diffs + swaps it.
   const surfaceStore = a2uiSurfaceStore ?? new MemoryA2uiSurfaceStore();
+  // In-flight turns keyed by streamId, so the stop endpoint can abort the LLM mid-stream. Each entry
+  // is removed when its producer settles (single-instance V1, mirroring the approval registry).
+  const streamControllers = new Map<string, AbortController>();
 
   app.post(
     "/api/v1/chat",
@@ -349,6 +353,38 @@ export function registerChatRoutes(
           prompt: body.message.content,
           log: req.log,
         });
+      }
+
+      // 1b. Sticky @mention hand-off: a mid-conversation `@agent` mention re-targets the active
+      //     agent. The tagged agent takes over this turn and persists as the conversation's agent
+      //     until a different one is tagged. (New conversations already seed their agent from
+      //     body.agentId above, so no switch/marker there.) Surfaced to the client as the same
+      //     `agent-handoff` event a transfer emits (see agentTurnStream).
+      let userSwitch: { from: string; to: string; reason: string } | undefined;
+      // Compare against the EFFECTIVE current agent: a legacy row with no persisted agentId resolves
+      // to the GeneralAssistant, so tagging it must read as a no-op (not a spurious GA→GA switch).
+      const currentAgentId = convo.agentId ?? GENERAL_ASSISTANT_NAME;
+      if (!isNew && body.agentId && body.agentId !== currentAgentId) {
+        const target = getAgent(soulLoader, body.agentId); // platform OR soul agent; undefined if unknown
+        if (target) {
+          userSwitch = {
+            from: currentAgentId,
+            to: target.name,
+            reason: "you mentioned this agent",
+          };
+          convo.agentId = target.name;
+          try {
+            await repo.setAgent(convo._id, target.name);
+          } catch (e) {
+            // Non-fatal: continue with the mutated in-memory convo.agentId rather than aborting the
+            // turn on a transient DB error (other persistence in the stream is treated as non-fatal too).
+            req.log.error(
+              { err: e, conversationId: convo._id },
+              "setAgent (user @mention switch) failed"
+            );
+          }
+        }
+        // unknown agentId → ignore, keep convo.agentId (the composer only offers real agents)
       }
 
       // 2. Resolve the model synchronously so a bad request returns before headers go out.
@@ -478,6 +514,10 @@ export function registerChatRoutes(
       //    connection can reconnect via Last-Event-ID; the producer runs detached so the
       //    turn finishes (and keeps buffering) even after the client disconnects.
       const streamId = randomUUID();
+      // Per-turn abort handle: the stop endpoint looks this up by streamId and aborts the LLM so the
+      // turn halts (rather than running detached to completion). `streamText` reads `.signal` below.
+      const abortController = new AbortController();
+      streamControllers.set(streamId, abortController);
       // Pre-generate the reply's message id and hand it to the client up front (X-Message-Id, like
       // X-Stream-Id), so a thumbs up/down on the just-streamed reply can reference a server-known id.
       // `persistStep` writes the final-text message under it (see the holder below).
@@ -487,6 +527,9 @@ export function registerChatRoutes(
       writeSseHeaders(reply.raw, {
         "X-Stream-Id": streamId,
         "X-Message-Id": replyMessageId,
+        // The agent handling this turn (from the @mention / conversation) so the client's header
+        // indicator reflects it immediately; mid-turn handoffs then update it via agent-handoff events.
+        "X-Agent-Id": agent.name,
         ...corsPassthrough(reply),
       });
       reply.hijack();
@@ -591,6 +634,18 @@ export function registerChatRoutes(
         // so the next iteration runs that wrap-up turn and then ends.
         let closingTurn = false;
 
+        // A user @mention switched the active agent before the turn began — surface it as the same
+        // agent-handoff event a transfer would, ahead of the new agent's first output, so the client
+        // renders the inline marker and moves the current-agent indicator.
+        if (userSwitch) {
+          yield {
+            type: "agent-handoff",
+            from: userSwitch.from,
+            to: userSwitch.to,
+            reason: userSwitch.reason,
+          };
+        }
+
         for (let depth = 0; depth < MAX_HANDOFF_DEPTH; depth++) {
           const turnTools =
             toolRegistry && toolRegistry.getAll().length > 0
@@ -614,6 +669,8 @@ export function registerChatRoutes(
             model: selected,
             messages: turnMessages,
             tools: turnTools,
+            // The stop endpoint aborts this signal to halt generation mid-turn (see streamControllers).
+            abortSignal: abortController.signal,
             // Stop the agent's own loop at the step budget, or as soon as it hands off / completes —
             // so control returns to this loop without the agent rambling after the control tool.
             stopWhen: ({ steps }) => {
@@ -710,9 +767,17 @@ export function registerChatRoutes(
           }
           if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
           if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
+            const fromAgent = activeAgent.name;
             await repo.setAgent(convo._id, control.target);
             activeAgent = resolveAgent(soulLoader, control.target);
             activePlatform = getPlatformAgent(activeAgent.name);
+            // Surface the live switch so the client's current-agent indicator follows the handoff.
+            yield {
+              type: "agent-handoff",
+              from: fromAgent,
+              to: activeAgent.name,
+              reason: control.reason,
+            };
             const handoffUser = control.reason
               ? `${userContent}\n\n(Handoff context: ${control.reason})`
               : userContent;
@@ -726,9 +791,12 @@ export function registerChatRoutes(
           if (control?.type === "complete" && depth < MAX_HANDOFF_DEPTH - 1) {
             // Control returns to the front desk, which streams a brief confirmation of what the
             // specialist just did — otherwise the turn ends on a silent (collapsed) tool result.
+            const fromAgent = activeAgent.name;
             await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
             activeAgent = resolveAgent(soulLoader, GENERAL_ASSISTANT_NAME);
             activePlatform = getPlatformAgent(activeAgent.name);
+            // Hand the indicator back to the front desk for the closing confirmation turn.
+            yield { type: "agent-handoff", from: fromAgent, to: activeAgent.name };
             const summary = control.summary ?? "completed the requested work";
             turnMessages = [
               { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
@@ -767,7 +835,42 @@ export function registerChatRoutes(
         scanOutput,
         surfaceStore,
         conversationId: convo._id,
-      });
+        abortSignal: abortController.signal,
+      }).finally(() => streamControllers.delete(streamId));
+    }
+  );
+
+  app.post(
+    "/api/v1/chat/streams/:streamId/stop",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Stop an in-flight chat stream: aborts the LLM so generation halts immediately. The " +
+          "producer ends the stream with a `finish` (reason `stopped`). 404 if the stream already " +
+          "finished or never existed.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["streamId"],
+          properties: { streamId: { type: "string", minLength: 1 } },
+        },
+        response: {
+          200: { type: "object", properties: { status: { type: "string" } }, required: ["status"] },
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { streamId } = req.params as { streamId: string };
+      const controller = streamControllers.get(streamId);
+      if (!controller) {
+        return reply.code(404).send({ error: "stream not found or already finished" });
+      }
+      controller.abort();
+      return reply.send({ status: "stopped" });
     }
   );
 

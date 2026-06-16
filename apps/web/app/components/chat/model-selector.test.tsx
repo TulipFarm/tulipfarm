@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
-import { ModelSelector } from "~/components/chat/model-selector";
+import { describe, expect, test, vi } from "vitest";
+import { asTier, effectiveTier, ModelSelector } from "~/components/chat/model-selector";
+import type { ModelTier } from "~/lib/chat/types";
 
 vi.mock("~/lib/settings", () => ({
   getLlmConfig: vi.fn().mockResolvedValue({
@@ -44,6 +45,50 @@ test("selecting a tier calls onChange with its id", async () => {
   await openMenu(user);
   await user.click(screen.getByRole("button", { name: "quick" }));
   expect(onChange).toHaveBeenCalledWith("quick");
+});
+
+describe("asTier", () => {
+  test("passes through the three pickable tiers", () => {
+    expect(asTier("quick")).toBe("quick");
+    expect(asTier("standard")).toBe("standard");
+    expect(asTier("complex")).toBe("complex");
+  });
+
+  test("rejects 'auto', raw model ids, and undefined (dropdown left unchanged)", () => {
+    expect(asTier("auto")).toBeUndefined();
+    expect(asTier("gpt-4o")).toBeUndefined();
+    expect(asTier(undefined)).toBeUndefined();
+    expect(asTier("")).toBeUndefined();
+  });
+});
+
+describe("effectiveTier", () => {
+  const tierById = (id: string): ModelTier | undefined =>
+    ({ Billing: "standard", Architect: "complex" })[id] as ModelTier | undefined;
+
+  test("the @mentioned agent's tier wins over the active agent's", () => {
+    expect(
+      effectiveTier({
+        mentionedAgentId: "Architect",
+        tierById,
+        activeAgentTier: "standard",
+        fallback: "standard",
+      })
+    ).toBe("complex");
+  });
+
+  test("falls back to the active agent's tier when no mention is present", () => {
+    expect(effectiveTier({ tierById, activeAgentTier: "complex", fallback: "standard" })).toBe(
+      "complex"
+    );
+  });
+
+  test("falls back to the fallback when a mention has no pickable tier and no active tier", () => {
+    // 'Unknown' is not in tierById → undefined; no activeAgentTier → fallback.
+    expect(effectiveTier({ mentionedAgentId: "Unknown", tierById, fallback: "standard" })).toBe(
+      "standard"
+    );
+  });
 });
 
 test("each option explains the tier (line 1) and lists its models (line 2)", async () => {
