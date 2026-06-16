@@ -29,11 +29,24 @@ export function Modal({
 
   // Drive open/close from props. Guard against calling when already in the
   // desired state to prevent spurious 'close' events triggering onClose.
+  // Falls back to toggling the `open` attribute directly in environments that
+  // don't implement showModal (e.g. jsdom in tests).
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
-    else if (!open && d.open) d.close();
+    if (open && !d.open) {
+      if (typeof d.showModal === "function") {
+        d.showModal();
+      } else {
+        d.setAttribute("open", "");
+      }
+    } else if (!open && d.open) {
+      if (typeof d.close === "function") {
+        d.close();
+      } else {
+        d.removeAttribute("open");
+      }
+    }
   }, [open]);
 
   // Sync parent state when the dialog closes natively (Escape key).
