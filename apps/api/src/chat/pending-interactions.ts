@@ -3,7 +3,7 @@ import type { Queryable } from "../db";
 /**
  * A turn paused on an `ask_user` tool call (A2UI HITL). The row records the pending tool-call id + the
  * awaited answer schema; the next chat request injects the user's response as that call's tool-result
- * and resumes the run (chat/routes.ts). At most one interaction is open per conversation.
+ * and resumes the run (chat/turn.ts). At most one interaction is open per conversation.
  */
 export interface PendingInteraction {
   id: string;

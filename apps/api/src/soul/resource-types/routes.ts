@@ -123,42 +123,8 @@ export function registerResourceTypeRoutes(
         return reply.code(409).send({ error: "resource type already exists" });
       }
 
-      // Parse YAML
-      let parsed: unknown;
-      try {
-        parsed = parseYaml(schemaYaml);
-      } catch (err) {
-        return reply.code(422).send({
-          error: `invalid YAML: ${err instanceof Error ? err.message : String(err)}`,
-        });
-      }
-
-      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        return reply.code(422).send({ error: "schema must be a YAML object (JSON Schema)" });
-      }
-
-      // JSON Schema meta-validation
-      const validMeta = ajv.validateSchema(parsed);
-      const metaErrors = ajv.errors;
-      if (!validMeta) {
-        const e = metaErrors?.[0];
-        return reply.code(422).send({
-          error: e?.message ?? "invalid JSON Schema",
-          path: e?.instancePath ?? "",
-        });
-      }
-
-      // x-* whitelist check (VAL-V1-009 1-pass)
-      try {
-        validateResourceSchema(parsed as Record<string, unknown>);
-      } catch (err) {
-        if (err instanceof TulipFarmValidationError) {
-          return reply
-            .code(422)
-            .send({ error: err.message, boundary: err.boundary, path: err.path });
-        }
-        throw err;
-      }
+      const check = checkSchemaYaml(schemaYaml);
+      if (!check.ok) return reply.code(check.status).send(check.body);
 
       await mkdir(typeDir, { recursive: true });
       await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");

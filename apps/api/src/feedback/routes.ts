@@ -58,7 +58,7 @@ export function registerFeedbackRoutes(
         messageId,
         userId: user._id,
         rating,
-        note: trimmed ? trimmed : null,
+        note: trimmed || null,
       });
       if (!ok) return reply.code(404).send({ error: "message not found" });
       return reply.send({ status: "ok" });

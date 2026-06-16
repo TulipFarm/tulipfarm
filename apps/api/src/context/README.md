@@ -5,7 +5,7 @@ durable stores every turn (specs/CONTEXT-ENGINE.md §1).
 
 ## `assembleSystemPrompt(ctx)` — `assemble.ts`
 
-Pure, synchronous, no IO. The caller (`chat/routes.ts`) fetches every input from its store and
+Pure, synchronous, no IO. The caller (`chat/turn.ts`) fetches every input from its store and
 passes it resolved in `AssembleContext`; assembly only renders. Keeping inputs resolved (not
 lazily fetched) makes the rendered prefix deterministic and therefore prompt-cacheable.
 
@@ -40,7 +40,7 @@ round-trip. `buildSoulCatalogue` (`../soul/catalogue.ts`) projects every soul ar
 routines, integrations — to a sorted `{ name, description }` L1 catalogue; full bodies/schemas stay
 L2 (pulled via `agent_get` / `load_skill` / `resource_type_schema`). `<available-tools>` lists the
 tools the agent may actually call, scoped to its allowlist by `availableToolsFor` in
-`chat/routes.ts` (the same allowed set used to build the toolset, so the two can't drift).
+`chat/turn-helpers.ts` (the same allowed set used to build the toolset, so the two can't drift).
 
 ## Why deterministic order matters
 
