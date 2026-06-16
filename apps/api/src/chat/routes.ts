@@ -8,7 +8,6 @@ import { stringify as stringifyYaml } from "yaml";
 import { type A2uiSurfaceStore, MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import { assembleSystemPrompt } from "../context/assemble";
 import { DOMAIN_EVENTS } from "../domain-events";
 import type { GuardContext, GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
@@ -22,7 +21,6 @@ import {
   getPlatformAgent,
   resolveAgent,
 } from "../soul/agents/registry";
-import { BUILTIN_SKILLS } from "../soul/skills/builtin-skills";
 import { type EagerSkill, listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
@@ -47,6 +45,7 @@ import { writeSseHeaders } from "./sse";
 import { makeStreamEmitter } from "./stream-emitter";
 import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
+import { assembleAgentSystemPrompt } from "./system-prompt";
 import { buildAndStoreTitle } from "./title";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -460,23 +459,16 @@ export function registerChatRoutes(
         .map((type) => soulLoader?.resources.get(type))
         .filter((r): r is NonNullable<typeof r> => r != null)
         .map((r) => ({ name: r.name, schema: stringifyYaml(r.schema) }));
-      const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string => {
-        const forgeAvailable = (pa?.forgeSkills ?? [])
-          .map((n) => BUILTIN_SKILLS.get(n))
-          .filter((s): s is NonNullable<typeof s> => s !== undefined)
-          .map((s) => ({ name: s.name, description: s.description }));
-        return assembleSystemPrompt({
-          agentId: a.name,
-          domain: typeof a.frontmatter.domain === "string" ? a.frontmatter.domain : null,
-          tenantId: "default",
-          personality: a.body,
+      const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string =>
+        assembleAgentSystemPrompt({
+          agent: a,
+          platformAgent: pa,
           memory: memoryList,
           governanceDocs,
-          availableSkills: [...soulAvailableSkills, ...forgeAvailable],
+          availableSkills: soulAvailableSkills,
           eagerSkills: mergedEagerSkills,
           taggedResources: turnTaggedResources,
         });
-      };
       const system = buildSystemFor(agent, platformAgent);
       // Compaction (CTX-V1-001/002): over budget → summarize the oldest turns once into a durable
       // `summary` row; recent turns stay verbatim. Best-effort — a summarize failure falls back to
@@ -1161,4 +1153,68 @@ export function registerChatRoutes(
       return reply.send({ messages: result.items, nextCursor: result.nextCursor });
     }
   );
+
+  // Dev-only raw-state inspector backing the chat debug drawer. Returns the full persisted rows (all
+  // roles incl. system/summary, tool-call/tool-result parts, metadata) PLUS the system prompt the LLM
+  // receives — reconstructed via the same `assembleAgentSystemPrompt` the chat turn uses, so it cannot
+  // drift from reality. The assembled prompt embeds user working-memory + governance docs, so the route
+  // is registered only outside production; the web app's `import.meta.env.DEV` gate does not protect an API.
+  if (process.env.NODE_ENV !== "production") {
+    app.get(
+      "/api/v1/conversations/:id/debug-context",
+      {
+        preHandler: requireAuth,
+        schema: {
+          description:
+            "Dev-only: a conversation's reconstructed system prompt + full raw message rows " +
+            "(not registered in production).",
+          tags: ["chat"],
+          security: [{ sessionCookie: [] }, { bearerToken: [] }],
+          params: {
+            type: "object",
+            required: ["id"],
+            properties: { id: { type: "string" } },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                conversationId: { type: "string" },
+                systemPrompt: { type: "string" },
+                messages: { type: "array", items: MessageSchema },
+              },
+              required: ["conversationId", "systemPrompt", "messages"],
+            },
+            401: ErrorSchema,
+            404: ErrorSchema,
+          },
+        },
+      },
+      async (req, reply) => {
+        const { id } = req.params as { id: string };
+        const convo = await repo.findById(id);
+        if (!convo) {
+          return reply.code(404).send({ error: "conversation not found" });
+        }
+        // Reconstruct this conversation's durable system prompt with no per-turn ephemeral skills /
+        // resources (there is no in-flight turn) — mirrors the chat route's front-desk assembly. Memory
+        // is the conversation owner's, so the prompt matches what the LLM actually saw for this chat.
+        const agent = resolveAgent(soulLoader, convo.agentId);
+        const platformAgent = getPlatformAgent(agent.name);
+        const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
+        const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
+        const systemPrompt = assembleAgentSystemPrompt({
+          agent,
+          platformAgent,
+          memory,
+          governanceDocs,
+          availableSkills: listAvailableSkills(soulLoader),
+          eagerSkills: listEagerSkills(soulLoader),
+          taggedResources: [],
+        });
+        const history = await messageRepo.listByConversation(id, 1000);
+        return reply.send({ conversationId: id, systemPrompt, messages: history.items });
+      }
+    );
+  }
 }

@@ -339,6 +339,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     pendingApprovals: state.pendingApprovals,
     status: state.status,
     currentAgent: state.currentAgent,
+    conversationId: state.conversationId,
     error: state.error,
     send,
     stop,
