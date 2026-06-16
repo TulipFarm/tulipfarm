@@ -808,9 +808,11 @@ describe("chat routes", () => {
       const system = JSON.stringify(prompt[0]?.content);
       // Eager body renders in <skills> (no load_skill needed).
       expect(system).toContain("<skills>\\n## code-review\\nReview carefully.");
-      // Lazy skill stays in the L1 index; the eager one does not leak into it.
-      expect(system).toContain("<available-skills>\\n- data-export: Export data.");
-      expect(system).not.toContain("- code-review");
+      // The L1 index holds ONLY the lazy skill — the eager one does not leak into it (it surfaces
+      // as a full body in <skills>, and by name in the <soul-context> catalogue, but never here).
+      expect(system).toContain(
+        "<available-skills>\\n- data-export: Export data.\\n</available-skills>"
+      );
     });
 
     // Composer tags (`/skill`, `#resource`) — per-turn eager injection. A tagged skill's body lands

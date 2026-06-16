@@ -1,6 +1,7 @@
 import type { SoulAgent } from "@tulipfarm/soul";
 import { type AssembleContext, assembleSystemPrompt } from "../context/assemble";
 import type { PlatformAgent } from "../soul/agents/platform-agents";
+import type { SoulCatalogue } from "../soul/catalogue";
 import { BUILTIN_SKILLS } from "../soul/skills/builtin-skills";
 import type { AvailableSkill } from "../soul/skills/registry";
 
@@ -19,6 +20,8 @@ export function assembleAgentSystemPrompt(args: {
   availableSkills: AvailableSkill[];
   eagerSkills: AssembleContext["eagerSkills"];
   taggedResources: AssembleContext["taggedResources"];
+  soulCatalogue: SoulCatalogue;
+  availableTools: AssembleContext["availableTools"];
 }): string {
   const {
     agent,
@@ -28,6 +31,8 @@ export function assembleAgentSystemPrompt(args: {
     availableSkills,
     eagerSkills,
     taggedResources,
+    soulCatalogue,
+    availableTools,
   } = args;
   // Platform forge skills surface in <available-skills> alongside the soul's own (loadable via load_skill).
   const forgeAvailable = (platformAgent?.forgeSkills ?? [])
@@ -44,5 +49,7 @@ export function assembleAgentSystemPrompt(args: {
     availableSkills: [...availableSkills, ...forgeAvailable],
     eagerSkills,
     taggedResources,
+    soulCatalogue,
+    availableTools,
   });
 }

@@ -314,8 +314,8 @@ describe("assembleSystemPrompt — eager-resources (#resource)", () => {
   });
 });
 
-describe("assembleSystemPrompt — deferred + typed-state (AC-V1-003)", () => {
-  it("omits the still-deferred soul-context and tools blocks", () => {
+describe("assembleSystemPrompt — typed-state (AC-V1-003)", () => {
+  it("omits the soul-context and available-tools blocks when their inputs are unset", () => {
     const out = assembleSystemPrompt(
       baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })
     );
@@ -341,5 +341,140 @@ describe("assembleSystemPrompt — deferred + typed-state (AC-V1-003)", () => {
 
   it("returns an empty string when every block is empty", () => {
     expect(assembleSystemPrompt(baseCtx())).toBe("");
+  });
+});
+
+const emptyCatalogue = {
+  agents: [],
+  skills: [],
+  resourceTypes: [],
+  routines: [],
+  integrations: [],
+};
+
+describe("assembleSystemPrompt — soul-context (repo catalogue L1)", () => {
+  it("renders a ## section per non-empty artifact type, each `- name: description`", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        soulCatalogue: {
+          agents: [{ name: "GeneralAssistant", description: "Front desk" }],
+          skills: [{ name: "code-review", description: "Review code" }],
+          resourceTypes: [{ name: "invoice", description: "Billable items" }],
+          routines: [{ name: "nightly", description: "Runs nightly" }],
+          integrations: [{ name: "slack", description: "Slack workspace" }],
+        },
+      })
+    );
+    expect(out).toContain(
+      "<soul-context>\n" +
+        "## Agents\n- GeneralAssistant: Front desk\n\n" +
+        "## Skills\n- code-review: Review code\n\n" +
+        "## Resource Types\n- invoice: Billable items\n\n" +
+        "## Routines\n- nightly: Runs nightly\n\n" +
+        "## Integrations\n- slack: Slack workspace\n" +
+        "</soul-context>"
+    );
+  });
+
+  it("renders only the sections that have entries", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        soulCatalogue: {
+          ...emptyCatalogue,
+          agents: [{ name: "a", description: "A" }],
+          resourceTypes: [{ name: "r", description: "R" }],
+        },
+      })
+    );
+    expect(out).toContain(
+      "<soul-context>\n## Agents\n- a: A\n\n## Resource Types\n- r: R\n</soul-context>"
+    );
+    expect(out).not.toContain("## Skills");
+    expect(out).not.toContain("## Routines");
+  });
+
+  it("renders just `- name` when an entry has no description", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ soulCatalogue: { ...emptyCatalogue, agents: [{ name: "a", description: "" }] } })
+    );
+    expect(out).toContain("<soul-context>\n## Agents\n- a\n</soul-context>");
+  });
+
+  it("omits the block when the catalogue is unset or entirely empty", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<soul-context>");
+    expect(assembleSystemPrompt(baseCtx({ soulCatalogue: emptyCatalogue }))).not.toContain(
+      "<soul-context>"
+    );
+  });
+
+  it("drops the whole block when over the char budget (never half-rendered)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        soulCatalogue: {
+          ...emptyCatalogue,
+          agents: [{ name: "big", description: "x".repeat(17000) }],
+        },
+      })
+    );
+    expect(out).not.toContain("<soul-context>");
+  });
+
+  it("renders after <available-skills> and <eager-resources> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        availableSkills: [{ name: "lazy", description: "lazy desc" }],
+        taggedResources: [{ name: "tickets", schema: "title: string" }],
+        soulCatalogue: { ...emptyCatalogue, agents: [{ name: "a", description: "A" }] },
+      })
+    );
+    expect(out.indexOf("<available-skills>")).toBeLessThan(out.indexOf("<soul-context>"));
+    expect(out.indexOf("<eager-resources>")).toBeLessThan(out.indexOf("<soul-context>"));
+  });
+});
+
+describe("assembleSystemPrompt — available-tools (tool L1)", () => {
+  it("renders one `- name: description` line per tool, in given order", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        availableTools: [
+          { name: "agent_list", description: "list all agents" },
+          { name: "load_skill", description: "load a skill body" },
+        ],
+      })
+    );
+    expect(out).toContain(
+      "<available-tools>\n- agent_list: list all agents\n- load_skill: load a skill body\n</available-tools>"
+    );
+  });
+
+  it("renders just `- name` when a tool has no description", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ availableTools: [{ name: "bare", description: "" }] })
+    );
+    expect(out).toContain("<available-tools>\n- bare\n</available-tools>");
+  });
+
+  it("omits the block when there are no tools (unset or empty)", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<available-tools>");
+    expect(assembleSystemPrompt(baseCtx({ availableTools: [] }))).not.toContain(
+      "<available-tools>"
+    );
+  });
+
+  it("drops the whole block when over the char budget (never half-rendered)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ availableTools: [{ name: "big", description: "x".repeat(9000) }] })
+    );
+    expect(out).not.toContain("<available-tools>");
+  });
+
+  it("renders last, after <soul-context> (CONTEXT-ENGINE §1 order)", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        soulCatalogue: { ...emptyCatalogue, agents: [{ name: "a", description: "A" }] },
+        availableTools: [{ name: "agent_list", description: "list agents" }],
+      })
+    );
+    expect(out.indexOf("<soul-context>")).toBeLessThan(out.indexOf("<available-tools>"));
   });
 });
