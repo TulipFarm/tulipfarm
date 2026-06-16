@@ -40,6 +40,10 @@ export function mapStreamPart(
         data: { toolCallId, toolName: p.toolName, result },
       };
     }
+    case "agent-handoff":
+      // Synthetic part yielded by the turn loop when the active agent switches (transfer/complete),
+      // so the client's current-agent indicator follows the live handoff.
+      return { eventType: "agent-handoff", data: { from: p.from, to: p.to, reason: p.reason } };
     case "finish":
       return { eventType: "finish", data: { reason: p.finishReason ?? "stop" } };
     case "error":
@@ -65,6 +69,10 @@ export interface StreamProducerDeps {
   // A2UI live surfaces: persisted on render_surface, loaded + diffed on update_surface (per conversation).
   surfaceStore?: A2uiSurfaceStore;
   conversationId?: string;
+  // The per-turn abort signal (from the chat stop endpoint). When it fires, the LLM stream is
+  // aborted: the producer converts the resulting AbortError / error part into a clean
+  // `finish` (reason `stopped`) rather than a terminal `error`, so a deliberate stop reads as a stop.
+  abortSignal?: AbortSignal;
   /**
    * Optional output guard. When set, the producer streams `text` progressively but holds back a
    * trailing safety window: it releases each prefix only after scanning the accumulated text (with
@@ -157,6 +165,14 @@ export async function runChatStream(
       if (blocked) continue;
       const mapped = mapStreamPart(part, deps.fullResultCache);
       if (!mapped) continue;
+      // Deliberate stop: the LLM was aborted via the stop endpoint. Aborting can surface as a graceful
+      // end (the turn yields its own `finish`), an `error` part, or a throw (handled in the catch).
+      // Whichever terminal arrives, rewrite it to one clean `finish` (reason `stopped`) and stop.
+      if (deps.abortSignal?.aborted && isTerminalEvent(mapped.eventType)) {
+        await deps.emitter.emit("finish", { reason: "stopped" });
+        sawTerminal = true;
+        break;
+      }
       if (scanOutput && mapped.eventType === "text") {
         textBuffer += (mapped.data as { delta: string }).delta;
         await drainText(scanOutput, false);
@@ -187,13 +203,21 @@ export async function runChatStream(
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }
     if (scanOutput) await drainText(scanOutput, true);
-    if (!sawTerminal && !blocked) await deps.emitter.emit("finish", { reason: "stop" });
+    if (!sawTerminal && !blocked) {
+      await deps.emitter.emit("finish", { reason: deps.abortSignal?.aborted ? "stopped" : "stop" });
+    }
   } catch (err) {
-    deps.log.error({ err, streamId }, "chat stream producer failed");
     if (!sawTerminal) {
-      await deps.emitter.emit("error", {
-        message: err instanceof Error ? err.message : "stream error",
-      });
+      // A deliberate stop (abort) ends as a clean `finish`, not an `error` — so it is not logged as a
+      // failure and the client reads it as a stop rather than a crash.
+      if (deps.abortSignal?.aborted || (err instanceof Error && err.name === "AbortError")) {
+        await deps.emitter.emit("finish", { reason: "stopped" });
+      } else {
+        deps.log.error({ err, streamId }, "chat stream producer failed");
+        await deps.emitter.emit("error", {
+          message: err instanceof Error ? err.message : "stream error",
+        });
+      }
     }
   } finally {
     deps.hub.finish(streamId);

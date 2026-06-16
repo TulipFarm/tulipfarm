@@ -99,7 +99,7 @@ export async function buildApp(opts: AppOptions = {}) {
     allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token", "If-Match"],
     // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
     // X-Message-Id is the just-streamed reply's persisted id, so the client can attach feedback to it.
-    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id"],
+    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id"],
   });
 
   await app.register(helmet, {

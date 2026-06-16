@@ -21,7 +21,10 @@ vi.mock("~/lib/conversations", () => ({
   getConversation: vi.fn(),
   getConversationMessages: vi.fn(),
 }));
-vi.mock("~/lib/agents", () => ({ getAgent: vi.fn() }));
+vi.mock("~/lib/agents", () => ({
+  getAgent: vi.fn(),
+  listAgents: vi.fn(() => Promise.resolve([])),
+}));
 
 const loaderArgs = (id: string) =>
   ({ params: { id } }) as unknown as Parameters<typeof clientLoader>[0];

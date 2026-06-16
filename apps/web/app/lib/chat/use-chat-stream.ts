@@ -10,9 +10,14 @@
 import { type NavigateFunction, useNavigate } from "@remix-run/react";
 import { useCallback, useReducer, useRef } from "react";
 import { invokeClientAction, prefillForm } from "~/lib/chat/action-registry";
-import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
+import {
+  appendUserMessage,
+  chatReducer,
+  initialChatState,
+  rewindLastTurn,
+} from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
-import { postChat, sendApprovalDecision } from "~/lib/chat/sse-client";
+import { postChat, sendApprovalDecision, stopChatStream } from "~/lib/chat/sse-client";
 import type { Autonomy, ChatEvent, ChatMessage, ChatState, ModelTier } from "~/lib/chat/types";
 import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
 
@@ -58,6 +63,7 @@ type ChatAction =
   | { type: "meta"; meta: ChatStreamMeta }
   | { type: "regenerate" }
   | { type: "editResend"; messageId: string; text: string }
+  | { type: "stopped" }
   | { type: "reset" };
 
 /** Snapshot what the user is viewing, sent with each turn so the agent can `get_client_context`. */
@@ -140,6 +146,9 @@ export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOp
 function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "user") return appendUserMessage(state, action.text);
   if (action.type === "reset") return initialChatState;
+  // Stop: rewind the in-flight turn (drop the user message + partial reply). The composer restores
+  // the original prompt into its editor so it can be fixed and resent.
+  if (action.type === "stopped") return rewindLastTurn(state);
   if (action.type === "regenerate") {
     // Drop the trailing assistant turn so the re-streamed events fold onto a fresh one (the prior user
     // message stays — no duplicate bubble). The server still records a new turn: V1 has no true
@@ -163,6 +172,9 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
       ...state,
       conversationId: action.meta.conversationId ?? state.conversationId,
       streamId: action.meta.streamId ?? state.streamId,
+      // Server-authoritative active agent for this turn (the @mentioned/conversation agent), so the
+      // header follows direct routing — not only transfer_to_agent handoffs. Kept if absent.
+      currentAgent: action.meta.agentId ?? state.currentAgent,
       // The reply's persisted id arrives once per turn, before any text; the `finish` case stamps it
       // onto the sealed assistant message as `serverId`. Set it directly (NOT `?? state.pendingServerId`)
       // so a turn whose header is absent clears it rather than inheriting the previous turn's id.
@@ -179,6 +191,9 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const stateRef = useRef(state);
   stateRef.current = state;
   const lastOptsRef = useRef<SendOptions | undefined>(undefined);
+  // The in-flight turn's abort handle, so `stop` can cancel the fetch (and the catch can tell a
+  // user-initiated stop from a real transport error).
+  const abortRef = useRef<AbortController | null>(null);
   // Mirror the latest refresh callback so the stable `runStream` closure always calls the current one.
   const onConversationChangeRef = useRef(opts?.onConversationChange);
   onConversationChangeRef.current = opts?.onConversationChange;
@@ -189,6 +204,8 @@ export function useChatStream(opts?: UseChatStreamOptions) {
 
   // Open the stream for `text` and fold its events into the timeline. Shared by send + regenerate.
   const runStream = useCallback(async (text: string, opts?: SendOptions) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       await postChat(
         {
@@ -202,6 +219,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
           clientContext: captureClientContext(),
         },
         {
+          signal: controller.signal,
           onMeta: (meta) => {
             if (meta.conversationId) {
               conversationIdRef.current = meta.conversationId;
@@ -224,12 +242,18 @@ export function useChatStream(opts?: UseChatStreamOptions) {
         }
       );
     } catch (err) {
-      // Transport-layer failure (auth, 5xx, network) before/while streaming: surface it so the
-      // composer leaves its busy state instead of spinning on the loader forever.
-      dispatch({
-        type: "error",
-        data: { message: err instanceof Error ? err.message : "stream failed" },
-      });
+      // A user-initiated stop aborts the fetch (AbortError): rewind the turn instead of showing an
+      // error. Any other failure (auth, 5xx, network) surfaces so the composer leaves its busy state.
+      if (err instanceof DOMException && err.name === "AbortError") {
+        dispatch({ type: "stopped" });
+      } else {
+        dispatch({
+          type: "error",
+          data: { message: err instanceof Error ? err.message : "stream failed" },
+        });
+      }
+    } finally {
+      abortRef.current = null;
     }
   }, []);
 
@@ -262,6 +286,16 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     },
     [runStream]
   );
+
+  // Stop the in-flight turn: best-effort halt the server's LLM (so token burn stops), then abort the
+  // local fetch — the catch dispatches `stopped`, rewinding the turn. The streamId arrives via the
+  // X-Stream-Id header (onMeta) almost immediately; a stop in the brief window before it lands still
+  // aborts locally (the server then runs that one turn to completion).
+  const stop = useCallback(() => {
+    const sid = stateRef.current.streamId;
+    if (sid) void stopChatStream(sid).catch(() => {});
+    abortRef.current?.abort();
+  }, []);
 
   const approve = useCallback(async (approvalId: string, decision: "approve" | "deny") => {
     try {
@@ -304,8 +338,10 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     messages: state.messages,
     pendingApprovals: state.pendingApprovals,
     status: state.status,
+    currentAgent: state.currentAgent,
     error: state.error,
     send,
+    stop,
     approve,
     regenerate,
     editResend,

@@ -1,5 +1,9 @@
-import ReactMarkdown, { type Components } from "react-markdown";
+import { useMemo } from "react";
+import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { mentionComponents } from "./chat/mention-chip";
+import { rehypeMentions } from "./chat/mention-highlight";
+import type { MentionEntry } from "./chat/use-mention-catalog";
 
 /*
  * Renders markdown (AGENT.md / SKILL.md bodies) styled to the terminal aesthetic — everything stays
@@ -106,10 +110,30 @@ const components: Components = {
   hr: ({ node: _n, ...p }) => <hr className="my-4 border-border" {...p} />,
 };
 
-export function MarkdownView({ children }: { children: string }) {
+export function MarkdownView({
+  children,
+  mentions,
+}: {
+  children: string;
+  /** When set, `@agent`/`/skill`/`#resource` tags are highlighted as chips with a hover card. */
+  mentions?: MentionEntry[];
+}) {
+  const list = mentions ?? [];
+  const active = list.length > 0;
+  const byPhrase = useMemo(() => new Map(list.map((m) => [m.phrase, m] as const)), [list]);
+  const rehypePlugins: Options["rehypePlugins"] = active
+    ? [[rehypeMentions, { phrases: list.map((m) => m.phrase) }]]
+    : undefined;
+  const resolvedComponents: Components = active
+    ? { ...components, ...mentionComponents(byPhrase) }
+    : components;
   return (
     <div className="text-sm">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={rehypePlugins}
+        components={resolvedComponents}
+      >
         {children}
       </ReactMarkdown>
     </div>

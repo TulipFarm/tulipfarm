@@ -12,6 +12,7 @@
  * `filterItems` is the suggestion-menu filter (prefix matches rank above substring matches).
  */
 
+import type { Autonomy } from "~/lib/agents";
 import { type MentionKind, NODE_TO_KIND } from "./mention-config";
 
 /** The slice of a ProseMirror JSON node the serializer reads. */
@@ -34,6 +35,12 @@ export interface MentionItem {
   id: string;
   label: string;
   description?: string;
+  // Agent-only glyph inputs (undefined for skill/resource mentions); see components/agent-glyph.
+  domain?: string;
+  autonomy?: Autonomy;
+  // Agent-only: the agent's configured model tier (frontmatter `model`; raw string, may be a tier,
+  // "auto", or a model id). Lets the composer reflect a mentioned agent's tier in the MODEL selector.
+  model?: string;
 }
 
 // Only embed a link whose href uses a safe scheme. Keeps `javascript:`/`data:`/other URIs out of the
@@ -103,6 +110,23 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
     skills: uniq(collected.skill),
     resources: uniq(collected.resource),
   };
+}
+
+/**
+ * The id of the first `@agent` mention in a composer doc, or undefined if there is none. Pure (no
+ * DOM) so the composer can read it from a `useEditorState` selector to drive the MODEL tier — without
+ * the full `serializeDoc` pass. Mirrors `serializeDoc`'s "first agent mention wins" rule.
+ */
+export function firstAgentMentionId(doc: PMNode): string | undefined {
+  for (const block of doc.content ?? []) {
+    for (const node of block.content ?? []) {
+      if (NODE_TO_KIND[node.type]?.kind === "agent") {
+        const id = typeof node.attrs?.id === "string" ? node.attrs.id : undefined;
+        if (id) return id;
+      }
+    }
+  }
+  return undefined;
 }
 
 /**

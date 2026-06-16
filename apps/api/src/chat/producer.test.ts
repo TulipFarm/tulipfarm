@@ -69,6 +69,12 @@ describe("mapStreamPart", () => {
       eventType: "tool-call",
       data: { toolCallId: "c1", toolName: "t", args: { a: 1 } },
     });
+    expect(
+      mapStreamPart({ type: "agent-handoff", from: "GeneralAssistant", to: "InformationArchitect" })
+    ).toEqual({
+      eventType: "agent-handoff",
+      data: { from: "GeneralAssistant", to: "InformationArchitect", reason: undefined },
+    });
     expect(mapStreamPart({ type: "finish", finishReason: "stop" })).toEqual({
       eventType: "finish",
       data: { reason: "stop" },
@@ -187,6 +193,53 @@ describe("runChatStream", () => {
     expect(rows.at(-1)?.data).toEqual({ message: "provider exploded" });
     expect(hub.isLive(streamId)).toBe(false);
     expect(log.error).toHaveBeenCalled();
+  });
+
+  it("turns a thrown abort into a clean `finish` (reason stopped), not an error", async () => {
+    const ac = new AbortController();
+    async function* aborted(): AsyncIterable<unknown> {
+      yield { type: "text-delta", text: "partial" };
+      ac.abort();
+      // The signal is aborted: a generic throw is treated as a deliberate stop (the guard is the
+      // signal, not the error name — so this holds however the AI SDK surfaces the abort).
+      throw new Error("The operation was aborted");
+    }
+    await runChatStream(streamId, aborted(), {
+      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+      hub,
+      log,
+      abortSignal: ac.signal,
+    });
+    const rows = await repo.listAfter(streamId, 0);
+    expect(rows.map((r) => r.eventType)).toEqual(["text", "finish"]);
+    expect(rows.at(-1)?.data).toEqual({ reason: "stopped" });
+    expect(hub.isLive(streamId)).toBe(false);
+    // A deliberate stop is not a failure.
+    expect(log.error).not.toHaveBeenCalled();
+  });
+
+  it("turns an `error` part emitted after abort into a clean stopped `finish`", async () => {
+    const ac = new AbortController();
+    async function* aborted(): AsyncIterable<unknown> {
+      yield { type: "text-delta", text: "partial" };
+      ac.abort();
+      // Some SDK paths surface the abort as an error stream part rather than a throw.
+      yield { type: "error", error: new Error("aborted") };
+      // Anything after the stop must be suppressed.
+      yield { type: "text-delta", text: "should not appear" };
+    }
+    await runChatStream(streamId, aborted(), {
+      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+      hub,
+      log,
+      abortSignal: ac.signal,
+    });
+    const rows = await repo.listAfter(streamId, 0);
+    expect(rows.map((r) => r.eventType)).toEqual(["text", "finish"]);
+    expect(rows.at(-1)?.data).toEqual({ reason: "stopped" });
+    expect(rows.some((r) => r.eventType === "error")).toBe(false);
+    expect(hub.isLive(streamId)).toBe(false);
+    expect(log.error).not.toHaveBeenCalled();
   });
 
   it("emits an a2ui createSurface event after a render_surface tool-result", async () => {

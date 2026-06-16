@@ -1,0 +1,73 @@
+/*
+ * Highlight `@agent` mentions inside a rendered user message. The composer serializes a mention to
+ * literal `@<label>` text (the structured chip is lost), and a label may contain spaces
+ * ("@Sprint Planner") — so we can't regex-guess a boundary. Instead we wrap occurrences of the EXACT
+ * known agent phrases in a `<span class="tf-mention">`, reusing the composer's ruby chip styling.
+ *
+ * Implemented as a rehype plugin (operates on the rendered hast tree) so it composes with the rest of
+ * the markdown rendering and never highlights inside code spans or links.
+ */
+
+interface HastNode {
+  type: string;
+  tagName?: string;
+  value?: string;
+  properties?: Record<string, unknown>;
+  children?: HastNode[];
+}
+
+const SKIP_TAGS = new Set(["code", "pre", "a"]);
+
+function escapeRegExp(input: string): string {
+  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function splitMentions(text: string, pattern: RegExp): HastNode[] {
+  const out: HastNode[] = [];
+  let last = 0;
+  pattern.lastIndex = 0;
+  for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
+    if (m.index > last) out.push({ type: "text", value: text.slice(last, m.index) });
+    out.push({
+      type: "element",
+      tagName: "span",
+      properties: { className: ["tf-mention"] },
+      children: [{ type: "text", value: m[0] }],
+    });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length || out.length === 0) out.push({ type: "text", value: text.slice(last) });
+  return out;
+}
+
+/**
+ * rehype plugin (use as `[rehypeMentions, { phrases }]`). Wraps each known mention phrase in a ruby
+ * `.tf-mention` chip. Longest-first matching so "@Sprint Planner" beats a "@Sprint" prefix; word
+ * boundaries guard against partial hits ("@A" inside "@Andrew") and emails ("foo@bar").
+ */
+export function rehypeMentions(options: { phrases: string[] }) {
+  const phrases = [...new Set(options.phrases.filter(Boolean))].sort((a, b) => b.length - a.length);
+  const pattern =
+    phrases.length > 0
+      ? new RegExp(`(?<!\\w)(?:${phrases.map(escapeRegExp).join("|")})(?!\\w)`, "g")
+      : null;
+
+  return (tree: HastNode): void => {
+    if (!pattern) return;
+    const walk = (node: HastNode): void => {
+      if (!node.children) return;
+      if (node.tagName && SKIP_TAGS.has(node.tagName)) return;
+      const next: HastNode[] = [];
+      for (const child of node.children) {
+        if (child.type === "text" && typeof child.value === "string") {
+          next.push(...splitMentions(child.value, pattern));
+        } else {
+          walk(child);
+          next.push(child);
+        }
+      }
+      node.children = next;
+    };
+    walk(tree);
+  };
+}

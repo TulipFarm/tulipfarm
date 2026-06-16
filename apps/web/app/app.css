@@ -92,6 +92,120 @@
 }
 
 /*
+ * Agent glyph avatars (components/agent-glyph). Stroke-only line art; the component sets
+ * `--glyph-stroke` inline to a muted hue (or --primary when active) and `stroke-width` from
+ * autonomy. Motion is state-driven via a `glyph-<state>` class. No scale transforms (terminal
+ * aesthetic); all paths use pathLength=1 so the dash math is uniform across shapes.
+ */
+.glyph path,
+.glyph line,
+.glyph circle {
+  fill: none;
+  stroke: var(--glyph-stroke, currentColor);
+}
+
+/* idle — gentle opacity "breathe"; strokes stay fully drawn. */
+@keyframes glyph-breathe {
+  0%,
+  100% {
+    stroke-opacity: 0.65;
+  }
+  50% {
+    stroke-opacity: 1;
+  }
+}
+.glyph-idle path,
+.glyph-idle line,
+.glyph-idle circle {
+  animation: glyph-breathe 3s ease-in-out infinite;
+}
+
+/* hover — one-shot "draw-on" sweep. */
+@keyframes glyph-sweep {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.glyph-idle:hover path,
+.glyph-idle:hover line,
+.glyph-idle:hover circle,
+.group:hover .glyph-idle path,
+.group:hover .glyph-idle line,
+.group:hover .glyph-idle circle {
+  stroke-dasharray: 1 1;
+  animation: glyph-sweep 600ms var(--ease-snappy);
+}
+
+/* thinking — dashes march continuously along each path (the self-redraw motif). */
+@keyframes glyph-march {
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+.glyph-thinking path,
+.glyph-thinking line,
+.glyph-thinking circle {
+  stroke-dasharray: 0.15 0.85;
+  animation: glyph-march 1.2s linear infinite;
+}
+
+/* success — quick draw-on bloom + brighten. */
+@keyframes glyph-bloom {
+  from {
+    stroke-dashoffset: 1;
+    stroke-opacity: 0.4;
+  }
+  to {
+    stroke-dashoffset: 0;
+    stroke-opacity: 1;
+  }
+}
+.glyph-success path,
+.glyph-success line,
+.glyph-success circle {
+  stroke-dasharray: 1 1;
+  animation: glyph-bloom 600ms var(--ease-snappy) forwards;
+}
+
+/* error — brief coral flicker. */
+@keyframes glyph-flicker {
+  0%,
+  100% {
+    stroke-opacity: 1;
+  }
+  20%,
+  60% {
+    stroke-opacity: 0.25;
+  }
+  40%,
+  80% {
+    stroke-opacity: 0.9;
+  }
+}
+.glyph-error path,
+.glyph-error line,
+.glyph-error circle {
+  stroke: var(--destructive);
+  animation: glyph-flicker 400ms ease-out;
+}
+
+/*
+ * Reduced motion: the global guard below kills the animations; also neutralize the thinking
+ * dash so a non-animating glyph never renders partially drawn.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .glyph path,
+  .glyph line,
+  .glyph circle {
+    stroke-dasharray: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}
+
+/*
  * Composer rich-text editor (Tiptap/ProseMirror), styled terminal-native. `.tf-editor` is the
  * contenteditable element itself (the class is set via editorProps.attributes).
  */

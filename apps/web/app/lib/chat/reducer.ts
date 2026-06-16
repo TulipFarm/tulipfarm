@@ -36,6 +36,17 @@ export function appendUserMessage(state: ChatState, text: string): ChatState {
   return { ...state, messages: [...state.messages, message], status: "submitted" };
 }
 
+// Stop / un-send: drop the trailing assistant turn(s) AND the last user message, returning the
+// timeline to a clean pre-send state. The composer restores the original prompt into its editor; this
+// only rewinds the transcript. Local-only — the server keeps its full history, the same V1 trade-off
+// as `regenerate` / `editResend`.
+export function rewindLastTurn(state: ChatState): ChatState {
+  const messages = state.messages.slice();
+  while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
+  if (messages.length > 0 && messages[messages.length - 1].role === "user") messages.pop();
+  return { ...state, messages, status: "idle", error: undefined, pendingServerId: undefined };
+}
+
 // The assistant message events fold into: the last one if it is still open, else a fresh one.
 function ensureAssistant(messages: ChatMessage[]): {
   messages: ChatMessage[];
@@ -235,6 +246,8 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       return {
         ...state,
         status: "streaming",
+        // Track the new agent so the header indicator follows the handoff, not just the transcript.
+        currentAgent: event.data.to,
         messages: withParts(messages, target, [...target.parts, part]),
       };
     }

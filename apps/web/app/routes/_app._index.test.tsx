@@ -13,7 +13,10 @@ vi.mock("@remix-run/react", async () => {
 });
 
 // clientLoader-direct test (catch path) mocks the data clients it calls.
-vi.mock("~/lib/agents", () => ({ getAgent: vi.fn() }));
+vi.mock("~/lib/agents", () => ({
+  getAgent: vi.fn(),
+  listAgents: vi.fn(() => Promise.resolve([])),
+}));
 vi.mock("~/lib/onboarding", () => ({ listOnboardingSuggestions: vi.fn() }));
 
 import { getAgent } from "~/lib/agents";

@@ -101,7 +101,13 @@ export type ChatRequestBody = {
   clientContext?: { route?: string; title?: string };
 };
 
-export type ChatStreamMeta = { conversationId?: string; streamId?: string; messageId?: string };
+export type ChatStreamMeta = {
+  conversationId?: string;
+  streamId?: string;
+  messageId?: string;
+  // The agent handling this turn (X-Agent-Id) so the header reflects the routed/@mentioned agent.
+  agentId?: string;
+};
 
 export type PostChatHandlers = {
   signal?: AbortSignal;
@@ -141,6 +147,7 @@ export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers
     conversationId: res.headers.get("X-Conversation-Id") ?? undefined,
     streamId: res.headers.get("X-Stream-Id") ?? undefined,
     messageId: res.headers.get("X-Message-Id") ?? undefined,
+    agentId: res.headers.get("X-Agent-Id") ?? undefined,
   });
 
   if (!res.body) return;
@@ -166,6 +173,17 @@ export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers
       }
     }
   }
+}
+
+// Stop an in-flight chat stream server-side: aborts the LLM so generation halts. Reuses the shared
+// write client (cookie/Bearer auth + CSRF echo). 404s if the stream already finished — callers
+// fire-and-forget since the client also aborts its own fetch.
+export function stopChatStream(streamId: string): Promise<{ status: string }> {
+  return apiWrite<{ status: string }>(
+    "POST",
+    `/api/v1/chat/streams/${encodeURIComponent(streamId)}/stop`,
+    {}
+  );
 }
 
 // Post an approval verdict for a pending tool call. Reuses the shared write client so it inherits

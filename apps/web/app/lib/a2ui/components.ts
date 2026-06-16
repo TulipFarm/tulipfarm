@@ -8,6 +8,11 @@
  * (--muted/--secondary), brand (--primary, sparing), danger (--destructive) — no green/amber.
  */
 export const A2UI_COMPONENT_CSS = `
+/* Any control carrying a postback payload is clickable (the runtime's delegated click handler turns
+   it into a follow-up turn), so it gets the pointer affordance — overriding tf-button's display-only
+   cursor:default. Attribute selector outranks the tf-button type selector. */
+[data-a2ui-send] { cursor: pointer; }
+
 /* tf-card — border is the only separator (light: --card ≈ --background). */
 tf-card {
   display: block;
@@ -307,6 +312,40 @@ tf-button[data-size="lg"] {
   height: 40px;
   padding: 8px 24px;
   font-size: 1rem;
+}
+
+/* tf-choices / tf-choice — present_choices options. Each tf-choice is a full-width, left-aligned
+   selectable card grouping a bold label + its muted description in ONE hairline box (and one click
+   target), so an option's description is never ambiguous between two buttons. The list gap separates
+   options; the inner gap (2px) binds label to description. */
+tf-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+tf-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--card);
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+tf-choice:hover {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+tf-choice [data-slot="label"] {
+  font-weight: 600;
+  color: var(--foreground);
+}
+tf-choice [data-slot="desc"] {
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
 }
 
 /* tf-data-table — schema-shaped rows on a native <table>, styled flat to match schema-table.tsx.

@@ -1,4 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { AgentGlyph } from "~/components/agent-glyph";
+import type { MentionKind } from "./mention-config";
 import type { MentionItem } from "./serialize";
 
 /**
@@ -15,8 +17,13 @@ export interface MentionListRef {
 
 export const MentionList = forwardRef<
   MentionListRef,
-  { items: MentionItem[]; command: (item: { id: string; label: string }) => void }
->(({ items, command }, ref) => {
+  {
+    items: MentionItem[];
+    command: (item: { id: string; label: string }) => void;
+    /** Trigger kind — agent rows render a glyph avatar; skill/resource rows don't. */
+    kind?: MentionKind;
+  }
+>(({ items, command, kind }, ref) => {
   const [selected, setSelected] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a fresh query yields a fresh list — reset the highlight to the top.
@@ -59,14 +66,26 @@ export const MentionList = forwardRef<
             e.preventDefault();
             command({ id: item.id, label: item.label });
           }}
-          className={`flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors ${
+          className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left transition-colors ${
             i === selected ? "bg-secondary" : "hover:bg-secondary"
           }`}
         >
-          <span className="font-medium text-foreground">{item.label}</span>
-          {item.description ? (
-            <span className="line-clamp-1 text-xs text-muted-foreground">{item.description}</span>
+          {kind === "agent" ? (
+            <AgentGlyph
+              name={item.id}
+              domain={item.domain}
+              autonomy={item.autonomy}
+              size="xs"
+              decorative
+              className="mt-0.5 shrink-0"
+            />
           ) : null}
+          <span className="flex min-w-0 flex-col items-start gap-0.5">
+            <span className="font-medium text-foreground">{item.label}</span>
+            {item.description ? (
+              <span className="line-clamp-1 text-xs text-muted-foreground">{item.description}</span>
+            ) : null}
+          </span>
         </button>
       ))}
     </div>

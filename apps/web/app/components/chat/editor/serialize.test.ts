@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { filterItems, type MentionItem, type PMNode, serializeDoc } from "./serialize";
+import {
+  filterItems,
+  firstAgentMentionId,
+  type MentionItem,
+  type PMNode,
+  serializeDoc,
+} from "./serialize";
 
 // Build a single-paragraph doc from inline nodes — mirrors `editor.getJSON()` shape.
 function para(...inline: PMNode[]): PMNode {
@@ -138,5 +144,45 @@ describe("filterItems", () => {
 
   it("caps results to the limit", () => {
     expect(filterItems("co", items, 1)).toHaveLength(1);
+  });
+});
+
+describe("firstAgentMentionId", () => {
+  it("returns undefined for a plain message (no mentions)", () => {
+    expect(firstAgentMentionId(para(text("just text")))).toBeUndefined();
+  });
+
+  it("returns the id of a lone @agent mention", () => {
+    expect(firstAgentMentionId(para(mention("mentionAgent", "Billing")))).toBe("Billing");
+  });
+
+  it("returns the FIRST @agent mention when several are present", () => {
+    const doc = para(mention("mentionAgent", "First"), mention("mentionAgent", "Second"));
+    expect(firstAgentMentionId(doc)).toBe("First");
+  });
+
+  it("ignores skill/resource mentions and finds the agent among them", () => {
+    const doc = para(
+      mention("mentionSkill", "copywriting"),
+      mention("mentionResource", "tickets"),
+      mention("mentionAgent", "Triage")
+    );
+    expect(firstAgentMentionId(doc)).toBe("Triage");
+  });
+
+  it("returns undefined when only skill/resource mentions are present", () => {
+    const doc = para(mention("mentionSkill", "copywriting"), mention("mentionResource", "tickets"));
+    expect(firstAgentMentionId(doc)).toBeUndefined();
+  });
+
+  it("finds an agent mention in a later block", () => {
+    const doc: PMNode = {
+      type: "doc",
+      content: [
+        { type: "paragraph", content: [text("intro")] },
+        { type: "paragraph", content: [mention("mentionAgent", "Second")] },
+      ],
+    };
+    expect(firstAgentMentionId(doc)).toBe("Second");
   });
 });
