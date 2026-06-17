@@ -263,6 +263,35 @@ const HITL_STATEMENTS: string[] = [
   )`,
 ];
 
+/**
+ * Generic scoped key-value store (KV-V1). Identity is the composite PK
+ * (scope, owner_id, namespace, key). `owner_id` is `NOT NULL DEFAULT ''` rather than nullable: a
+ * nullable column can't be part of a PRIMARY KEY, and NULL is "distinct" in unique indexes — which
+ * would make `ON CONFLICT` never fire for system rows and silently insert duplicates. The empty-string
+ * sentinel keeps the PK legal and last-write-wins upsert reliable across all three scopes; the repo
+ * maps '' <-> undefined so no caller sees it. `value` is plaintext jsonb (secrets live in `secrets`).
+ * `expires_at` NULL = never expires; reads filter `expires_at IS NULL OR expires_at > now()` (lazy
+ * expiry, no sweeper in v1). The CHECKs pin the scope enum and the system<=>'' owner invariant (the
+ * latter mirrors `conversations_owner_check`).
+ */
+const KV_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS kv_store (
+    scope      text NOT NULL,
+    owner_id   text NOT NULL DEFAULT '',
+    namespace  text NOT NULL,
+    key        text NOT NULL,
+    value      jsonb NOT NULL,
+    expires_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (scope, owner_id, namespace, key),
+    CONSTRAINT kv_store_scope_check CHECK (scope IN ('system', 'user', 'agent')),
+    CONSTRAINT kv_store_owner_check CHECK ((scope = 'system') = (owner_id = ''))
+  )`,
+  // Backs list-by-namespace (scope, owner_id, namespace) lookups.
+  "CREATE INDEX IF NOT EXISTS kv_store_owner_ns_idx ON kv_store (scope, owner_id, namespace)",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -333,6 +362,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "HITL: pending_interactions (ask_user suspend/resume) + a2ui_surfaces store",
     up: async (q) => {
       for (const sql of HITL_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 9,
+    description:
+      "kv_store: generic scoped key-value store (composite PK, lazy expiry, jsonb value)",
+    up: async (q) => {
+      for (const sql of KV_STATEMENTS) {
         await q.query(sql);
       }
     },

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (8)", async () => {
+  it("advances schema_version to the latest (9)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([8]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([9]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -44,6 +44,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "knowledge_documents",
       "knowledge_documents_collections",
       "knowledge_revisions",
+      "kv_store",
       "message_feedback",
       "messages",
       "pending_interactions",
@@ -76,11 +77,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 8", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 9", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([8]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([9]);
   });
 
   it("adds the conversations.title column and the user/updated_at index (005)", async () => {
@@ -118,5 +119,60 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
         "INSERT INTO conversations (id, user_id, created_at, updated_at) VALUES (gen_random_uuid(), gen_random_uuid(), now(), now())"
       )
     ).resolves.toBeDefined();
+  });
+
+  it("creates kv_store and its namespace index (009)", async () => {
+    await runPgMigrations(db);
+    const tbl = await db.query<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'kv_store'"
+    );
+    expect(tbl.rows.map((r) => r.table_name)).toEqual(["kv_store"]);
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname = 'kv_store_owner_ns_idx'"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual(["kv_store_owner_ns_idx"]);
+  });
+
+  it("system rows upsert in place via the '' owner sentinel (ON CONFLICT fires)", async () => {
+    await runPgMigrations(db);
+    const insert = (val: string) =>
+      db.query(
+        `INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at)
+         VALUES ('system', '', 'cfg', 'flag', $1::jsonb, now(), now())
+         ON CONFLICT (scope, owner_id, namespace, key) DO UPDATE SET value = EXCLUDED.value`,
+        [val]
+      );
+    await insert('"a"');
+    await insert('"b"'); // would duplicate (not update) if NULL/sentinel handling were wrong
+    const res = await db.query<{ n: number; value: unknown }>(
+      "SELECT count(*)::int AS n, max(value::text) AS value FROM kv_store WHERE scope = 'system'"
+    );
+    expect(Number(res.rows[0]?.n)).toBe(1);
+    expect(res.rows[0]?.value).toBe('"b"');
+  });
+
+  it("enforces the kv_store scope CHECK", async () => {
+    await runPgMigrations(db);
+    await expect(
+      db.query(
+        "INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at) VALUES ('bogus', 'o', 'n', 'k', '1'::jsonb, now(), now())"
+      )
+    ).rejects.toThrow();
+  });
+
+  it("enforces the kv_store system<=>'' owner CHECK both ways", async () => {
+    await runPgMigrations(db);
+    // system scope must have an empty owner.
+    await expect(
+      db.query(
+        "INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at) VALUES ('system', 'someone', 'n', 'k', '1'::jsonb, now(), now())"
+      )
+    ).rejects.toThrow();
+    // non-system scope must have a non-empty owner.
+    await expect(
+      db.query(
+        "INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at) VALUES ('user', '', 'n', 'k', '1'::jsonb, now(), now())"
+      )
+    ).rejects.toThrow();
   });
 });

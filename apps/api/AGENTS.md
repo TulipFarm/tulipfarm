@@ -15,6 +15,7 @@ src/
   platform/       # platform-tier tool implementations + tool-result helpers
   hooks/          # isolated-vm hook sandbox + worker
   knowledge/      # RAG: documents, chunks, pgvector + tsvector search; governance block
+  kv/             # generic scoped key-value store (system/user/agent) — see kv/README.md
   memory/         # per-user working memory
   secrets/        # secret storage
   soul/           # soul git ops (commit, push) + agents/, skills/, resource-types/ CRUD
@@ -91,7 +92,7 @@ interface ToolDef {
 `tools/setup.ts` (`buildToolRegistry`). Group module tool arrays by tier (e.g. `PLATFORM_TOOLS`).
 Existing tools by category: system resource/agent/skill/resource-type CRUD (`resources/`,
 `soul/*/`), platform UI/routing/soul-batch (`platform/tools.ts`), memory (`memory/tools.ts`),
-knowledge (`knowledge/tools.ts`).
+knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`kv_set`/`kv_delete`/`kv_list`).
 
 ## Context & streaming
 

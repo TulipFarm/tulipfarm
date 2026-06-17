@@ -30,6 +30,8 @@ import {
   PgKnowledgeRevisionRepo,
 } from "./knowledge/repo";
 import { KnowledgeService } from "./knowledge/service";
+import { PgKvRepo } from "./kv/repo";
+import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
 import { WorkingMemoryService } from "./memory/service";
 import { PgWorkingMemoryRepo } from "./memory/working-memory";
@@ -99,6 +101,7 @@ async function boot() {
     const a2uiSurfaceStore = new PgA2uiSurfaceStore(pool);
     const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
+    const kvService = new KvService(new PgKvRepo(pool));
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
@@ -124,6 +127,7 @@ async function boot() {
     // (which tools each agent may actually call) are applied per-turn in the chat route.
     const toolRegistry = buildToolRegistry({
       workingMemory: workingMemoryService,
+      kv: kvService,
       knowledge: knowledgeService,
       resources: {
         repoFactory: resourceRepoFactory,
@@ -167,6 +171,7 @@ async function boot() {
       a2uiSurfaceStore,
       streamHub,
       workingMemoryService,
+      kvService,
       knowledgeService,
       toolRegistry,
     });

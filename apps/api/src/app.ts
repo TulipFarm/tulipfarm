@@ -29,6 +29,8 @@ import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
+import { registerKvRoutes } from "./kv/routes";
+import type { KvService } from "./kv/service";
 import type { WorkingMemoryService } from "./memory/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
@@ -64,6 +66,7 @@ export interface AppOptions {
   streamResumeRepo?: StreamResumeRepo;
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
+  kvService?: KvService;
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
   approvalRegistry?: ApprovalRegistry;
@@ -166,6 +169,9 @@ export async function buildApp(opts: AppOptions = {}) {
             : undefined,
       });
     }
+    if (opts.kvService) {
+      registerKvRoutes(app, opts.kvService, requireAuth);
+    }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);
       if (opts.soulLoader) {
@@ -209,6 +215,7 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.toolRegistry ??
         buildToolRegistry({
           workingMemory: opts.workingMemoryService,
+          kv: opts.kvService,
           knowledge: opts.knowledgeService,
         });
       const approvalRegistry = opts.approvalRegistry ?? new ApprovalRegistry();

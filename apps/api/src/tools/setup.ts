@@ -1,5 +1,7 @@
 import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
+import type { KvService } from "../kv/service";
+import { KV_TOOLS } from "../kv/tools";
 import type { WorkingMemoryService } from "../memory/service";
 import { MEMORY_TOOLS } from "../memory/tools";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
@@ -17,6 +19,7 @@ import { ToolRegistry } from "./registry";
  */
 export function buildToolRegistry(services: {
   workingMemory?: WorkingMemoryService;
+  kv?: KvService;
   knowledge?: KnowledgeService;
   resources?: ResourceServices;
   resourceTypes?: ResourceTypeToolContext;
@@ -36,6 +39,20 @@ export function buildToolRegistry(services: {
         description: t.description,
         inputSchema: t.inputSchema,
         execute: (args, { userId, agentId }) => t.handler(args, { userId, service: svc, agentId }),
+      });
+    }
+  }
+
+  if (services.kv) {
+    const svc = services.kv;
+    for (const t of KV_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "platform",
+        mutating: t.mutating,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, { userId, agentId }) => t.handler(args, { userId, agentId, service: svc }),
       });
     }
   }
