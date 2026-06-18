@@ -20,15 +20,35 @@
 
 ### Quick Start
 
-1. **Initialize local environment:**
+App processes always run **native** in dev (`pnpm dev`, hot reload); Postgres is the
+developer's choice. Pick one of the two datastore options below (both satisfy AC-006).
+
+1. **Provision Postgres** — choose one:
+
+   **Option A — native Postgres (Homebrew/apt):**
    ```bash
    bash scripts/setup-dev.sh
    ```
-   This installs PostgreSQL 17 + pgvector via Homebrew, starts the service, creates the `tulipfarm` database and the `./soul` directory, and generates a `.env.local` file with bootstrap secrets.
+   Installs PostgreSQL 17 + pgvector, starts the service, creates the `tulipfarm`
+   database and the soul directory, and generates `.env.local` with bootstrap secrets.
+
+   **Option B — bundled Postgres via Docker Compose** (same `pgvector/pgvector:pg17`
+   image CI tests; nothing else from the stack runs):
+   ```bash
+   cp .env.example .env   # provides POSTGRES_PASSWORD for the container
+   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile bundled up -d postgres
+   ```
+   Then set the datastore URL in `.env.local` (the dev override exposes Postgres on
+   `localhost:5432`):
+   ```bash
+   DATABASE_URL=postgresql://tulipfarm:<POSTGRES_PASSWORD>@localhost:5432/tulipfarm
+   ```
+   (`<POSTGRES_PASSWORD>` is the value from the `.env` you just copied.)
 
 2. **Verify the datastore is running:**
    ```bash
-   psql tulipfarm -c 'select 1'
+   psql tulipfarm -c 'select 1'                       # Option A
+   pg_isready -h localhost -p 5432 -U tulipfarm       # Option B
    ```
 
 3. **Install dependencies and start development:**
@@ -77,7 +97,8 @@ The `./soul` directory is a local git repository that stores your system configu
 
 To stop PostgreSQL:
 ```bash
-brew services stop postgresql@17
+brew services stop postgresql@17                                              # Option A
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down           # Option B (keeps data)
 ```
 
 To stop the dev servers, press `Ctrl+C` in the terminal running `pnpm dev`.

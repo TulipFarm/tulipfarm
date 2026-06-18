@@ -1,7 +1,9 @@
 import type { EventEmitter } from "node:events";
+import { existsSync } from "node:fs";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
+import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import type { LlmService } from "@tulipfarm/llm";
@@ -80,6 +82,19 @@ export async function buildApp(opts: AppOptions = {}) {
   // so `app.close()` frees the port immediately instead of hanging on an open EventSource.
   const app = Fastify({ logger: true, forceCloseConnections: true });
 
+  // Single-image SPA serving (AC-010 / ARCH-V1-006): when the built web client is
+  // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
+  // in native `pnpm dev` (Vite serves the SPA), so this whole layer is inert there.
+  const webDist = process.env.WEB_DIST;
+  const serveSpa = !!webDist && existsSync(webDist);
+  // Non-SPA surfaces keep their own handling: the API (JSON), the Scalar docs UI, the
+  // OpenAPI doc, and the health probe. Everything else is a client-routed SPA path.
+  const isAppApiPath = (url: string) =>
+    url.startsWith("/api") ||
+    url.startsWith("/docs") ||
+    url.startsWith("/health") ||
+    url.startsWith("/openapi");
+
   await app.register(swagger, {
     openapi: {
       openapi: "3.1.0",
@@ -119,6 +134,14 @@ export async function buildApp(opts: AppOptions = {}) {
       reply.header(
         "content-security-policy",
         "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:"
+      );
+    } else if (serveSpa && !isAppApiPath(req.url)) {
+      // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
+      // for the app shell + its assets to a same-origin policy (INST-003c posture).
+      reply.header(
+        "content-security-policy",
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+          "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
       );
     }
   });
@@ -245,6 +268,20 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.knowledgeService) {
       registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);
     }
+  }
+
+  // SPA last, so it never shadows an API/docs/health route. `wildcard: false` serves
+  // only real files (index.html, /assets/*, favicon) and lets unknown paths fall
+  // through to the not-found handler below — which returns the SPA shell for client
+  // routes and a JSON 404 for the API.
+  if (serveSpa && webDist) {
+    await app.register(fastifyStatic, { root: webDist, wildcard: false });
+    app.setNotFoundHandler((req, reply) => {
+      if ((req.method === "GET" || req.method === "HEAD") && !isAppApiPath(req.url)) {
+        return reply.sendFile("index.html");
+      }
+      return reply.code(404).send({ error: "Not Found" });
+    });
   }
 
   return app;
