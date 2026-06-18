@@ -413,10 +413,13 @@ jobs:
           EOF
       # `--wait` blocks until BOTH services report healthy (postgres pg_isready, app's
       # /health healthcheck) or the timeout trips — this is the health gate.
+      # `--pull missing`: pull images absent locally (the bundled `pgvector/pgvector:pg17`
+      # base) but REUSE the `app:ci` image the buildx step just loaded — never try to pull
+      # the not-yet-published app tag from GHCR. (`--pull never` would also block postgres.)
       - name: Bring up the bundled stack and wait for health
         run: |
           set -o pipefail
-          docker compose up -d --wait --wait-timeout 180 --pull never 2>&1 | tee compose-parity.log
+          docker compose up -d --wait --wait-timeout 180 --pull missing 2>&1 | tee compose-parity.log
       - name: Assert /health on the host port
         run: |
           set -o pipefail
