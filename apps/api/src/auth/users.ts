@@ -89,17 +89,29 @@ export async function createUser(
   return user;
 }
 
-// Seeds the first admin on boot when no users exist and ADMIN_EMAIL/ADMIN_PASSWORD
-// are set. Idempotent — a no-op once any user exists or the env vars are absent.
+// Deterministic dev admin. In non-production, when ADMIN_EMAIL/ADMIN_PASSWORD are not set, the
+// first admin defaults to these known dev credentials so `pnpm dev` is sign-in-ready with zero
+// setup (and the login screen prefills them). Production has NO default — it requires the env vars,
+// so a known-password admin is never auto-seeded in prod.
+export const DEV_ADMIN_EMAIL = "admin@tulipfarm.dev";
+export const DEV_ADMIN_PASSWORD = "password123";
+
+// Seeds the first admin on boot when no users exist. Uses ADMIN_EMAIL/ADMIN_PASSWORD when set;
+// otherwise falls back to the dev defaults in non-production. Idempotent — a no-op once any user
+// exists, or when neither env vars nor (in prod) a default are available.
 export async function bootstrapAdmin(
   repo: UserRepo,
   log?: { info: (msg: string) => void }
 ): Promise<void> {
-  const email = process.env.ADMIN_EMAIL;
-  const password = process.env.ADMIN_PASSWORD;
+  const isProd = process.env.NODE_ENV === "production";
+  const email = process.env.ADMIN_EMAIL ?? (isProd ? undefined : DEV_ADMIN_EMAIL);
+  const password = process.env.ADMIN_PASSWORD ?? (isProd ? undefined : DEV_ADMIN_PASSWORD);
   if (!email || !password) return;
   if ((await repo.count()) > 0) return;
 
   await createUser(repo, email, password, "admin");
   log?.info(`Bootstrapped admin user ${normalizeEmail(email)}`);
+  if (!process.env.ADMIN_PASSWORD && !isProd) {
+    log?.info("Using dev default admin password (password123) — set ADMIN_PASSWORD to override.");
+  }
 }

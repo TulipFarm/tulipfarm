@@ -155,6 +155,37 @@ async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, path);
 }
 
+export type SessionUser = { id: string; email: string; role: string };
+
+// Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the
+// CSRF cookie. No Bearer/CSRF headers needed — pre-login there is no session, so the CSRF hook is a
+// no-op. A 401 throws ApiError("invalid credentials"); the form surfaces err.message.
+export async function login(email: string, password: string): Promise<SessionUser> {
+  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw await readError(res);
+  return ((await res.json()) as { user: SessionUser }).user;
+}
+
+// Current authenticated user (cookie session or dev Bearer token). Throws ApiError(401) when
+// unauthenticated — the _app gate uses that to redirect to /login.
+export async function getSession(): Promise<SessionUser> {
+  return (await apiGet<{ user: SessionUser }>("/api/v1/auth/session")).user;
+}
+
+// Destroy the session + clear the cookie. Best-effort: ignores the response (logout is idempotent).
+export async function logout(): Promise<void> {
+  await fetch(`${API_BASE}/api/v1/auth/logout`, {
+    method: "POST",
+    credentials: "include",
+    headers: mutationHeaders(),
+  });
+}
+
 // Create a resource type. `schema` is a JSON Schema serialised as a string (JSON is valid YAML, so
 // the API's YAML parser accepts it). Returns the persisted summary; 409 if the type already exists.
 export async function createResourceType(

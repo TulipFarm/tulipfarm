@@ -1,6 +1,12 @@
 import { EventEmitter } from "node:events";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { loadEncryptionKeys, PgSecretRepo, SecretsService } from "@tulipfarm/secrets";
+import {
+  loadEncryptionKeys,
+  loadOrProvisionActiveDek,
+  PgDekRepo,
+  PgSecretRepo,
+  SecretsService,
+} from "@tulipfarm/secrets";
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
@@ -82,8 +88,16 @@ async function boot() {
     const rateLimiter = new PgRateLimiter(pool);
 
     const secretRepo = new PgSecretRepo(pool);
+    const dekRepo = new PgDekRepo(pool);
     const encryptionKeys = loadEncryptionKeys();
-    const secretsService = new SecretsService(secretRepo, encryptionKeys);
+    // Fail-fast boot canary: unwrap the active DEK under the env KEK (auto-provisioning one on
+    // first boot to preserve zero-setup) and verify its canary. A wrong/missing key or corrupt
+    // wrap throws KeyManagerError → the catch below logs and exits 1, rather than failing later at
+    // first secret access. `encryptionKeys` doubles as the legacy KEK for any pre-backfill rows.
+    const activeDek = await loadOrProvisionActiveDek(dekRepo, encryptionKeys);
+    const secretsService = new SecretsService(secretRepo, activeDek, {
+      legacyKeys: encryptionKeys,
+    });
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"

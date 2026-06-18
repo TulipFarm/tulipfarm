@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
 import { SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance } from "fastify";
@@ -54,6 +54,9 @@ class FakeSecretRepo implements SecretRepo {
   }
   async upsert(_key: string, _fields: SecretEnvelopeFields): Promise<void> {}
   async delete(): Promise<void> {}
+  async listLegacyKeys(): Promise<string[]> {
+    return [];
+  }
 }
 
 function makeFakeGitSync() {
@@ -64,7 +67,10 @@ function makeFakeGitSync() {
 }
 
 function buildTestApp() {
-  const secretsService = new SecretsService(new FakeSecretRepo(), { current: randomBytes(32) });
+  const secretsService = new SecretsService(new FakeSecretRepo(), {
+    dekId: randomUUID(),
+    key: randomBytes(32),
+  });
   return buildApp({
     sessionStore: new MemorySessionStore(),
     userRepo: new FakeUserRepo(),

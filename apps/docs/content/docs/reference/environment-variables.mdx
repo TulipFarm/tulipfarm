@@ -30,3 +30,4 @@ whether it is required.
 | `GIT_REMOTE_URL` | — | Remote for the soul repo. When set, the instance syncs the soul to and from it. |
 | `GIT_CREDENTIALS` | — | Credentials for pushing to `GIT_REMOTE_URL`. |
 | `ENCRYPTION_KEY_PREVIOUS` | — | The prior `ENCRYPTION_KEY` during a key rotation. Decryption tries the current key, then this one. See [Secrets](/docs/concepts/secrets). |
+| `API_TOKEN_PEPPER` | — | Base64 server secret. When set, API tokens are hashed with `HMAC-SHA256(token, pepper)` instead of plain SHA-256. Must be 32 bytes. See [Hashing](/docs/security/hashing). |

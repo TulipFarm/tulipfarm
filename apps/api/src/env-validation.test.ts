@@ -152,6 +152,28 @@ describe("validateEnvironment", () => {
     validateEnvironment(env, exit);
     expect(exit).not.toHaveBeenCalled();
   });
+
+  it("passes when API_TOKEN_PEPPER is absent (optional)", () => {
+    const exit = vi.fn();
+    validateEnvironment(validEnv(), exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("passes when API_TOKEN_PEPPER is a valid 32-byte base64 key", () => {
+    const exit = vi.fn();
+    const env = { ...validEnv(), API_TOKEN_PEPPER: secret32() };
+    validateEnvironment(env, exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("exits when API_TOKEN_PEPPER is set but wrong byte length", () => {
+    const exit = vi.fn();
+    const env = { ...validEnv(), API_TOKEN_PEPPER: randomBytes(16).toString("base64") };
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    validateEnvironment(env, exit);
+    expect(exit).toHaveBeenCalledWith(1);
+    vi.restoreAllMocks();
+  });
 });
 
 describe("validateBase64Secret", () => {

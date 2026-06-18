@@ -1,4 +1,4 @@
-import { SecretUnavailableError } from "@tulipfarm/secrets";
+import { DecryptError, SecretUnavailableError } from "@tulipfarm/secrets";
 import { describe, expect, it, vi } from "vitest";
 import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import { createModel } from "./provider";
@@ -220,5 +220,17 @@ describe("createModel", () => {
         secrets as never
       )
     ).rejects.toBe(boom);
+  });
+
+  it("converts a DecryptError (stale key) into LlmCredentialError so init skips the provider", async () => {
+    const secrets = {
+      get: vi.fn(() => Promise.reject(new DecryptError("unable to decrypt secret"))),
+    };
+    await expect(
+      createModel(
+        { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "anthropic-api-key" },
+        secrets as never
+      )
+    ).rejects.toBeInstanceOf(LlmCredentialError);
   });
 });

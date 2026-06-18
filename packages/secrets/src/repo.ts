@@ -7,6 +7,8 @@ export interface SecretDoc {
   iv: string; // base64
   authTag: string; // base64
   type: SecretType;
+  // Which DEK encrypted this row. NULL = legacy (encrypted directly under the env key, pre-backfill).
+  dekId: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -17,6 +19,7 @@ export interface SecretEnvelopeFields {
   iv: string;
   authTag: string;
   type: SecretType;
+  dekId?: string;
 }
 
 export interface SecretMeta {
@@ -31,6 +34,8 @@ export interface SecretRepo {
   findByKey(key: string): Promise<SecretDoc | null>;
   upsert(key: string, fields: SecretEnvelopeFields): Promise<void>;
   delete(key: string): Promise<void>;
+  // Keys of rows not yet migrated to a DEK (dek_id IS NULL). Drives the backfill.
+  listLegacyKeys(): Promise<string[]>;
 }
 
 /**
@@ -51,6 +56,7 @@ function rowToSecret(row: Record<string, unknown>): SecretDoc {
     iv: row.iv as string,
     authTag: row.auth_tag as string,
     type: row.type as SecretType,
+    dekId: (row.dek_id as string | null) ?? null,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -78,19 +84,27 @@ export class PgSecretRepo implements SecretRepo {
 
   async upsert(key: string, fields: SecretEnvelopeFields): Promise<void> {
     await this.q.query(
-      `INSERT INTO secrets (key, encrypted_value, iv, auth_tag, type, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, now(), now())
+      `INSERT INTO secrets (key, encrypted_value, iv, auth_tag, type, dek_id, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, now(), now())
        ON CONFLICT (key) DO UPDATE SET
          encrypted_value = EXCLUDED.encrypted_value,
          iv = EXCLUDED.iv,
          auth_tag = EXCLUDED.auth_tag,
          type = EXCLUDED.type,
+         dek_id = EXCLUDED.dek_id,
          updated_at = now()`,
-      [key, fields.encryptedValue, fields.iv, fields.authTag, fields.type]
+      [key, fields.encryptedValue, fields.iv, fields.authTag, fields.type, fields.dekId ?? null]
     );
   }
 
   async delete(key: string): Promise<void> {
     await this.q.query("DELETE FROM secrets WHERE key = $1", [key]);
+  }
+
+  async listLegacyKeys(): Promise<string[]> {
+    const { rows } = await this.q.query(
+      "SELECT key FROM secrets WHERE dek_id IS NULL ORDER BY key"
+    );
+    return rows.map((row) => row.key as string);
   }
 }

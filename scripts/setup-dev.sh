@@ -127,6 +127,10 @@ if [ ! -f ".env.local" ]; then
   ENCRYPTION_KEY=$(openssl rand -base64 32)
   JWT_SECRET=$(openssl rand -base64 32)
   WEBHOOK_SECRET=$(openssl rand -base64 32)
+  # Fixed dev admin password — deterministic, not random (matches the app's bootstrapAdmin dev
+  # default and the login screen's prefilled value). Hashed with Argon2id at boot. Change it in
+  # .env.local for anything beyond local dev.
+  ADMIN_PASSWORD=password123
 
   # Replace placeholders by matching each full KEY=<placeholder> line so every substitution
   # is unique and order-independent (a bare s/// on the shared placeholder would overwrite
@@ -136,10 +140,12 @@ if [ ! -f ".env.local" ]; then
     sed -i '' "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
     sed -i '' "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
     sed -i '' "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
+    sed -i '' "s|ADMIN_PASSWORD=<set a strong password>|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env.local
   else
     sed -i "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
     sed -i "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
     sed -i "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
+    sed -i "s|ADMIN_PASSWORD=<set a strong password>|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env.local
   fi
 
   # Expand SOUL_PATH to the absolute soul dir (dotenv does not expand ~).
@@ -149,9 +155,14 @@ if [ ! -f ".env.local" ]; then
     sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
   fi
 
+  ADMIN_EMAIL=$(grep -E '^ADMIN_EMAIL=' .env.local | cut -d= -f2-)
   echo "✅ .env.local created with generated secrets"
+  echo ""
+  echo "   🔑 Sign in with these admin credentials (also saved in .env.local):"
+  echo "        email:    ${ADMIN_EMAIL:-admin@tulipfarm.dev}"
+  echo "        password: $ADMIN_PASSWORD"
 else
-  echo "✅ .env.local already exists"
+  echo "✅ .env.local already exists (sign-in creds: ADMIN_EMAIL / ADMIN_PASSWORD in .env.local)"
 fi
 
 # Symlink .env.local to apps/api for turbo dev (turbo runs from package dir)
@@ -166,10 +177,10 @@ echo ""
 echo "✨ Setup complete!"
 echo ""
 echo "Next steps:"
-echo "  1. Review and customize .env.local if needed"
-echo "  2. Run: pnpm dev"
-echo "  3. API will start on http://localhost:3001"
-echo "  4. Web UI will start on http://localhost:3000"
+echo "  1. Run: pnpm dev"
+echo "  2. Web UI:  http://localhost:4000   (API: http://localhost:4010)"
+echo "  3. Sign in at /login with the admin email + password above"
+echo "     (or read them from .env.local: ADMIN_EMAIL / ADMIN_PASSWORD)"
 echo ""
 echo "To verify the datastore is running:"
 echo "  psql tulipfarm -c 'select 1'"

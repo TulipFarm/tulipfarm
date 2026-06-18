@@ -72,4 +72,47 @@ describe("PgSecretRepo", () => {
     await repo.delete("gone");
     expect(await repo.findByKey("gone")).toBeNull();
   });
+
+  it("round-trips dek_id when tagged, and leaves it NULL when omitted", async () => {
+    await repo.upsert("tagged", {
+      encryptedValue: "x",
+      iv: "i",
+      authTag: "t",
+      type: "user-provided",
+      dekId: "11111111-1111-1111-1111-111111111111",
+    });
+    await repo.upsert("legacy", {
+      encryptedValue: "y",
+      iv: "i",
+      authTag: "t",
+      type: "user-provided",
+    });
+
+    expect((await repo.findByKey("tagged"))?.dekId).toBe("11111111-1111-1111-1111-111111111111");
+    expect((await repo.findByKey("legacy"))?.dekId).toBeNull();
+  });
+
+  it("listLegacyKeys returns only rows with dek_id IS NULL, sorted", async () => {
+    await repo.upsert("z-legacy", {
+      encryptedValue: "a",
+      iv: "i",
+      authTag: "t",
+      type: "user-provided",
+    });
+    await repo.upsert("a-legacy", {
+      encryptedValue: "b",
+      iv: "i",
+      authTag: "t",
+      type: "user-provided",
+    });
+    await repo.upsert("tagged", {
+      encryptedValue: "c",
+      iv: "i",
+      authTag: "t",
+      type: "user-provided",
+      dekId: "22222222-2222-2222-2222-222222222222",
+    });
+
+    expect(await repo.listLegacyKeys()).toEqual(["a-legacy", "z-legacy"]);
+  });
 });

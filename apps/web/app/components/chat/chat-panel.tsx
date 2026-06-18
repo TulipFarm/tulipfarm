@@ -1,8 +1,10 @@
+import { Link } from "@remix-run/react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import type { Autonomy } from "~/lib/agents";
 import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { useConversations } from "~/lib/conversations-context";
+import { errorAction } from "~/lib/error-actions";
 import type { Suggestion } from "~/lib/onboarding";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
@@ -126,6 +128,8 @@ export function ChatPanel({
     : undefined;
   const displayTitle = liveTitle ?? title;
   const hasMessages = messages.length > 0;
+  // Actionable errors (e.g. "LLM not configured") get a deep-link CTA to where the user fixes them.
+  const errorCta = status === "error" ? errorAction(error) : null;
 
   return (
     <div className="flex h-[calc(100svh-3rem)] flex-col md:h-svh">
@@ -175,6 +179,17 @@ export function ChatPanel({
       {status === "error" ? (
         <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-xs text-destructive">
           [error] {error ?? "the stream failed"} — try again
+          {errorCta ? (
+            <>
+              {" · "}
+              <Link
+                to={errorCta.to}
+                className="cursor-pointer font-medium underline underline-offset-2 hover:text-foreground"
+              >
+                {errorCta.label} →
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : null}
       <Composer

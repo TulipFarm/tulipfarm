@@ -65,6 +65,13 @@ export function validateEnvironment(
     validateBase64Secret("ENCRYPTION_KEY_PREVIOUS", env, exit);
   }
 
+  // Validate API_TOKEN_PEPPER if set (optional). When present, API-token hashes use
+  // HMAC-SHA256(token, pepper) instead of bare SHA-256; absence keeps legacy SHA-256 hashing.
+  // Not required — pepper loss is acceptable (tokens are re-issuable).
+  if (env.API_TOKEN_PEPPER !== undefined) {
+    validateBase64Secret("API_TOKEN_PEPPER", env, exit);
+  }
+
   // Validate SESSION_TTL_SECONDS if set (optional)
   if (env.SESSION_TTL_SECONDS !== undefined) {
     const ttl = Number.parseInt(env.SESSION_TTL_SECONDS, 10);

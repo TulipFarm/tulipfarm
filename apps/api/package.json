@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
+    "keys": "tsx src/cli/keys.ts",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"

@@ -292,6 +292,36 @@ const KV_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS kv_store_owner_ns_idx ON kv_store (scope, owner_id, namespace)",
 ];
 
+/**
+ * Envelope encryption (SEC-V1 key recovery). Secrets are encrypted under a Data Encryption Key
+ * (DEK); the DEK is wrapped (same AES-256-GCM codec) under one or more Key Encryption Keys and
+ * stored here — one row per (dek_id, kek_label). The `env` wrap is the operational path
+ * (ENCRYPTION_KEY); the `recovery` wrap is the offline break-glass path. The partial unique index
+ * enforces at most one active env wrap and one active recovery wrap (rotation retires before
+ * inserting). The canary columns (a fixed plaintext encrypted under the DEK) live on the env wrap
+ * for the fail-fast boot check. `secrets.dek_id` tags which DEK encrypted a row; NULL = legacy
+ * (still encrypted directly under ENCRYPTION_KEY, until `keys backfill` migrates it).
+ */
+const ENVELOPE_KEY_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS wrapped_deks (
+    dek_id          uuid NOT NULL,
+    kek_label       text NOT NULL,
+    encrypted_value text NOT NULL,
+    iv              text NOT NULL,
+    auth_tag        text NOT NULL,
+    canary_value    text,
+    canary_iv       text,
+    canary_auth_tag text,
+    created_at      timestamptz NOT NULL,
+    retired_at      timestamptz,
+    PRIMARY KEY (dek_id, kek_label),
+    CONSTRAINT wrapped_deks_kek_label_check CHECK (kek_label IN ('env', 'recovery'))
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS wrapped_deks_active_label_idx
+    ON wrapped_deks (kek_label) WHERE retired_at IS NULL`,
+  "ALTER TABLE secrets ADD COLUMN IF NOT EXISTS dek_id uuid",
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -372,6 +402,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "kv_store: generic scoped key-value store (composite PK, lazy expiry, jsonb value)",
     up: async (q) => {
       for (const sql of KV_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 10,
+    description:
+      "wrapped_deks: DEK/KEK envelope table + secrets.dek_id (envelope encryption + key recovery)",
+    up: async (q) => {
+      for (const sql of ENVELOPE_KEY_STATEMENTS) {
         await q.query(sql);
       }
     },

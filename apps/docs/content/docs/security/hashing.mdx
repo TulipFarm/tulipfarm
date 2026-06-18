@@ -1,0 +1,59 @@
+---
+title: Hashing
+description: How TulipFarm hashes passwords and API tokens.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Some secrets never need to be read back — the instance only has to check whether a value
+matches. Those are **hashed**: transformed one-way so the original cannot be recovered,
+even by TulipFarm. The rule is simple. A value that must be used again, like an LLM
+provider key, is [encrypted](/docs/security/encryption); a value that only has to be
+verified, like a login password or an API token, is hashed.
+
+Two things are hashed: user passwords and the API tokens TulipFarm issues.
+
+## Passwords use Argon2id
+
+User passwords are hashed with **Argon2id**, the memory-hard algorithm OWASP recommends
+for password storage. A random salt is generated per password and embedded in the stored
+hash, so two users with the same password get different hashes and precomputed
+("rainbow table") attacks do not apply. Verifying a login re-derives the hash from the
+candidate password; the plaintext password is never stored.
+
+To avoid revealing which emails exist, a login for an unknown email is still checked
+against a dummy hash, so a wrong email and a wrong password take the same time to reject.
+
+## API tokens are hashed, and can be peppered
+
+The `tulip_…` API tokens TulipFarm issues are random, high-entropy strings, so by default
+they are stored as a plain **SHA-256** hash — a salt adds nothing when the input is already
+unguessable.
+
+For defense in depth, set `API_TOKEN_PEPPER` (a 32-byte base64 server secret). Token hashes
+then become **HMAC-SHA256(token, pepper)**, version-tagged so old and new hashes coexist.
+The pepper lives in the environment, never in the database, so a stolen database alone
+cannot verify token guesses. Existing tokens keep working and upgrade to the peppered form
+the next time they authenticate.
+
+<Callout type="warn">
+The pepper is a one-way door: once tokens have upgraded, removing or changing
+`API_TOKEN_PEPPER` stops them from authenticating. Set it once and keep it stable, or plan
+to re-issue tokens.
+</Callout>
+
+## IV, salt, and pepper are different tools
+
+These three are easy to confuse. Each breaks predictability for a different operation:
+
+| Tool | Used by | Purpose | Secret? |
+|---|---|---|---|
+| **IV** | encryption (AES-GCM) | makes identical plaintext encrypt differently | No — stored with the ciphertext |
+| **Salt** | password hashing (Argon2id) | makes identical passwords hash differently | No — stored inside the hash |
+| **Pepper** | API-token hashing (optional) | makes a hash uncomputable without a server-held key | Yes — kept out of the database |
+
+TulipFarm applies the IV and the salt automatically. The pepper is the one you opt into.
+
+To create or revoke a token, see [Issue an API token](/docs/guides/issue-an-api-token). For
+the variables TulipFarm reads, including `API_TOKEN_PEPPER`, see
+[Environment variables](/docs/reference/environment-variables).
