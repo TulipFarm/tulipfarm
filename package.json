@@ -18,11 +18,11 @@
     "*.{ts,tsx,js,jsx,json,css}": "biome check --write --no-errors-on-unmatched"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
+    "@biomejs/biome": "^2.5.0",
     "lefthook": "^2.1.9",
     "lint-staged": "^17.0.7",
     "turbo": "^2.9.17",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }

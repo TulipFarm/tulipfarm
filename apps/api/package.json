@@ -16,12 +16,12 @@
     "@fastify/helmet": "^13.0.2",
     "@fastify/swagger": "^9.7.0",
     "@node-rs/argon2": "^2.0.2",
-    "@scalar/fastify-api-reference": "^1.59.2",
+    "@scalar/fastify-api-reference": "^1.60.0",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/validation": "workspace:*",
-    "ai": "^6.0.199",
+    "ai": "^6.0.208",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
     "isolated-vm": "^7.0.0",
@@ -38,6 +38,6 @@
     "@vitest/coverage-v8": "^4.1.8",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }
