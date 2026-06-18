@@ -1,5 +1,5 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { hashToken, type TokenRepo } from "./api-tokens";
+import { findTokenForRawToken, type TokenRepo } from "./api-tokens";
 import type { SessionStore } from "./session-store";
 import type { UserDoc, UserRepo } from "./users";
 
@@ -28,7 +28,7 @@ export function makeRequireAuth(store: SessionStore, repo: UserRepo, tokenRepo: 
     const authHeader = req.headers.authorization;
     if (authHeader?.startsWith("Bearer ")) {
       const rawToken = authHeader.slice(7);
-      const tokenDoc = await tokenRepo.findByHash(hashToken(rawToken));
+      const tokenDoc = await findTokenForRawToken(tokenRepo, rawToken);
       if (tokenDoc) {
         const user = await repo.findById(tokenDoc.userId);
         if (user) {

@@ -46,9 +46,9 @@ describe("002_knowledge migration on PGlite", () => {
     await db.close();
   });
 
-  it("bumps schema_version to the latest (9)", async () => {
+  it("bumps schema_version to the latest (10)", async () => {
     const { rows } = await db.query("SELECT version FROM schema_version WHERE id = true");
-    expect(Number((rows[0] as { version: number }).version)).toBe(9);
+    expect(Number((rows[0] as { version: number }).version)).toBe(10);
   });
 
   it("creates all five knowledge tables", async () => {

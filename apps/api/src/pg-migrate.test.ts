@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (9)", async () => {
+  it("advances schema_version to the latest (10)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([9]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([10]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -55,6 +55,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "stream_resume",
       "users",
       "working_memory",
+      "wrapped_deks",
     ]);
   });
 
@@ -77,11 +78,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 9", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 10", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([9]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([10]);
   });
 
   it("adds the conversations.title column and the user/updated_at index (005)", async () => {
@@ -174,5 +175,44 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
         "INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at) VALUES ('user', '', 'n', 'k', '1'::jsonb, now(), now())"
       )
     ).rejects.toThrow();
+  });
+
+  it("creates wrapped_deks, its active-label index, and the secrets.dek_id column (010)", async () => {
+    await runPgMigrations(db);
+    const tbl = await db.query<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'wrapped_deks'"
+    );
+    expect(tbl.rows.map((r) => r.table_name)).toEqual(["wrapped_deks"]);
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname = 'wrapped_deks_active_label_idx'"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual(["wrapped_deks_active_label_idx"]);
+    const col = await db.query<{ column_name: string; is_nullable: string }>(
+      "SELECT column_name, is_nullable FROM information_schema.columns WHERE table_name = 'secrets' AND column_name = 'dek_id'"
+    );
+    expect(col.rows.map((r) => r.column_name)).toEqual(["dek_id"]);
+    expect(col.rows[0]?.is_nullable).toBe("YES");
+  });
+
+  it("enforces the wrapped_deks kek_label CHECK", async () => {
+    await runPgMigrations(db);
+    await expect(
+      db.query(
+        `INSERT INTO wrapped_deks (dek_id, kek_label, encrypted_value, iv, auth_tag, created_at)
+         VALUES (gen_random_uuid(), 'bogus', 'c', 'i', 't', now())`
+      )
+    ).rejects.toThrow();
+  });
+
+  it("forbids two active wraps with the same kek_label (partial unique index)", async () => {
+    await runPgMigrations(db);
+    const insertEnv = (dek: string) =>
+      db.query(
+        `INSERT INTO wrapped_deks (dek_id, kek_label, encrypted_value, iv, auth_tag, created_at)
+         VALUES ($1, 'env', 'c', 'i', 't', now())`,
+        [dek]
+      );
+    await insertEnv("11111111-1111-1111-1111-111111111111");
+    await expect(insertEnv("22222222-2222-2222-2222-222222222222")).rejects.toThrow();
   });
 });

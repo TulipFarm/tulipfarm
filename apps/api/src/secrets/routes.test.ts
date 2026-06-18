@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { SecretDoc, SecretEnvelopeFields, SecretMeta, SecretRepo } from "@tulipfarm/secrets";
 import { SecretsService } from "@tulipfarm/secrets";
 import type { FastifyInstance } from "fastify";
@@ -81,7 +81,11 @@ class FakeSecretRepo implements SecretRepo {
     this.docs.set(key, {
       _id: existing?._id ?? key,
       key,
-      ...fields,
+      encryptedValue: fields.encryptedValue,
+      iv: fields.iv,
+      authTag: fields.authTag,
+      type: fields.type,
+      dekId: fields.dekId ?? null,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
@@ -89,6 +93,10 @@ class FakeSecretRepo implements SecretRepo {
 
   async delete(key: string): Promise<void> {
     this.docs.delete(key);
+  }
+
+  async listLegacyKeys(): Promise<string[]> {
+    return [...this.docs.values()].filter((d) => d.dekId === null).map((d) => d.key);
   }
 }
 
@@ -114,7 +122,10 @@ describe("secrets routes", () => {
     adminSid = await store.create(admin._id);
     memberSid = await store.create(member._id);
 
-    const secretsService = new SecretsService(secretRepo, { current: randomBytes(32) });
+    const secretsService = new SecretsService(secretRepo, {
+      dekId: randomUUID(),
+      key: randomBytes(32),
+    });
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo, secretsService });
   });
 

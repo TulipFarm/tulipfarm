@@ -6,31 +6,53 @@
 ## Public API (`src/index.ts`)
 
 - **`SecretsService`** — high-level `get` / `set` / `list` / `delete` with an in-memory cache.
-- **`PgSecretRepo`** (+ type `SecretRepo`) — persistence; the V1 store is PostgreSQL (caller injects a `Queryable`).
+  Constructed with an `ActiveDek` (+ optional `legacyKeys` for pre-backfill rows).
+- **`PgSecretRepo`** (+ type `SecretRepo`) — secret persistence; V1 store is PostgreSQL.
+- **`PgDekRepo`** (+ type `DekRepo`) — wrapped-DEK persistence (`wrapped_deks` table).
 - **`encryptSecret` / `decryptSecret`** — AES-256-GCM envelope codec.
-- **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads keys from env.
+- **Key manager** — `generateDek`, `wrapDek` / `unwrapDek`, `makeCanary` / `verifyCanary`,
+  `loadOrProvisionActiveDek`, `rotateEnvKek`, `provisionRecoveryKey`, `recoverWithKey`,
+  `KeyManagerError`, type `ActiveDek`.
+- **`backfillSecretsToDek`** — migrate legacy (pre-envelope) secrets onto the DEK.
+- **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads the env KEK(s).
 - **`assertValidSecretKey`** + `InvalidSecretKeyError` — key-name guard.
-- Types: `SecretDoc`, `SecretEnvelopeFields`, `SecretMeta`, `SecretType`.
+- Types: `SecretDoc`, `SecretEnvelopeFields`, `SecretMeta`, `SecretType`, `WrappedDekRow`, `KekLabel`.
 
-## Model
+## Model — envelope encryption (SEC-V1 key recovery)
 
-- Each secret is encrypted per-record: random IV + auth tag, stored base64 in an envelope.
-- **Rotation:** `decryptSecret` tries the current key, then the previous key
-  (`ENCRYPTION_KEY` + `ENCRYPTION_KEY_PREVIOUS`) — reads survive a key swap with no downtime;
-  writes always use the current key.
-- **`SecretsService` cache:** TTL freshness plus a stale-grace window, so a brief datastore blip
-  still serves the last known value (logged when served stale).
+- Each secret is encrypted under a single 32-byte **DEK** (random IV + auth tag, base64 envelope),
+  and tagged with `secrets.dek_id`.
+- The DEK is **wrapped** (same GCM codec) under one or more **KEKs**, stored in `wrapped_deks`:
+  the `env` wrap (operational, = `ENCRYPTION_KEY`) carries a canary; the `recovery` wrap is the
+  offline break-glass path.
+- **Boot:** `loadOrProvisionActiveDek` unwraps the DEK under the env KEK and verifies the canary —
+  fail-fast on a wrong/missing key or corruption. On a fresh DB it auto-provisions the DEK (so
+  `npm run dev` just works); the recovery key and legacy backfill are explicit operator steps.
+- **KEK rotation (cheap):** `decryptSecret`'s current→previous fall-through now lives in
+  `unwrapDek` — set the new key as `ENCRYPTION_KEY`, the old as `ENCRYPTION_KEY_PREVIOUS`, run
+  `keys rotate-kek`; secrets are never re-encrypted.
+- **Recovery:** if `ENCRYPTION_KEY` is lost, set a fresh one and run `keys recover` with the offline
+  recovery key — it unwraps the DEK from the recovery wrap and rebuilds the env wrap.
+- **Legacy rows** (`dek_id IS NULL`, pre-upgrade) decrypt under `legacyKeys` until `keys backfill`
+  re-encrypts them onto the DEK.
+- **`SecretsService` cache:** TTL freshness plus a stale-grace window (logged when served stale).
+
+## Operator CLI
+
+`pnpm --filter @tulipfarm/api keys <cmd>`: `verify` (boot canary on demand), `show-recovery`
+(mint + reveal the offline recovery key once), `rotate-kek`, `recover` (`RECOVERY_KEY=…`),
+`backfill`. See `docs/runbooks/secrets-key-recovery.md`.
 
 ## How to extend
 
-- **New backend:** implement the `SecretRepo` interface (`list` / `findByKey` / `upsert` /
-  `delete`); keep `PgSecretRepo` as the reference.
-- **Always** call `assertValidSecretKey()` before any write — it enforces the charset and blocks
-  prototype-pollution names (`__proto__`, `prototype`, `constructor`).
-- Rotate by shifting env keys (`PREVIOUS` ← old, current ← new); reads fall through automatically.
-- Never log decrypted values; surface failures as the package's typed errors.
+- **New secret backend:** implement `SecretRepo` (`list` / `findByKey` / `upsert` / `delete` /
+  `listLegacyKeys`); keep `PgSecretRepo` as the reference. New DEK backend: implement `DekRepo`.
+- **Always** call `assertValidSecretKey()` before any write — it blocks prototype-pollution names.
+- Never log a DEK, recovery KEK, or decrypted value; surface failures as typed errors.
 
 ## Tests
 
-Vitest, colocated (`crypto` / `keys` / `key-guard` / `service`). Cover the encrypt→decrypt round
-trip, malformed envelopes, the dual-key rotation fall-through, and cache TTL / stale behavior.
+Vitest, colocated unit (`crypto` / `keys` / `key-guard` / `service` / `key-manager` / `backfill`)
+plus DB-level `apps/api/src/secrets/key-manager.pg.test.ts` (provision / rotate / recover /
+canary fail-fast / backfill). Cover the round trip, malformed envelopes, KEK fall-through, the
+legacy decrypt branch, backfill idempotency, and cache TTL / stale behavior.

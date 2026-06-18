@@ -1,6 +1,7 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { DecryptError } from "./crypto";
+import { encryptSecret } from "./crypto";
+import type { ActiveDek } from "./key-manager";
 import type { EncryptionKeys } from "./keys";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
 import { SecretsService, SecretUnavailableError } from "./service";
@@ -33,7 +34,11 @@ class FakeRepo implements SecretRepo {
     this.docs.set(key, {
       _id: existing?._id ?? key,
       key,
-      ...fields,
+      encryptedValue: fields.encryptedValue,
+      iv: fields.iv,
+      authTag: fields.authTag,
+      type: fields.type,
+      dekId: fields.dekId ?? null,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     });
@@ -42,30 +47,50 @@ class FakeRepo implements SecretRepo {
   async delete(key: string): Promise<void> {
     this.docs.delete(key);
   }
+
+  async listLegacyKeys(): Promise<string[]> {
+    return [...this.docs.values()].filter((d) => d.dekId === null).map((d) => d.key);
+  }
 }
 
-function makeKeys(): EncryptionKeys {
-  return { current: randomBytes(32) };
+function makeDek(): ActiveDek {
+  return { dekId: randomUUID(), key: randomBytes(32) };
+}
+
+// Seed a legacy row (pre-envelope-encryption): encrypted directly under an env key, dek_id NULL.
+function seedLegacy(repo: FakeRepo, key: string, plaintext: string, envKey: Buffer): void {
+  const envelope = encryptSecret(plaintext, envKey);
+  repo.docs.set(key, {
+    _id: key,
+    key,
+    ...envelope,
+    type: "user-provided",
+    dekId: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
 }
 
 describe("SecretsService", () => {
-  it("set then get returns the original plaintext (round-trip)", async () => {
+  it("set then get returns the original plaintext (round-trip under the DEK)", async () => {
     const repo = new FakeRepo();
-    const svc = new SecretsService(repo, makeKeys());
+    const svc = new SecretsService(repo, makeDek());
 
     await svc.set("api.key", "super-secret");
     expect(await svc.get("api.key")).toBe("super-secret");
   });
 
-  it("stores no plaintext in the repo doc", async () => {
+  it("tags the row with the active dekId and stores no plaintext", async () => {
     const repo = new FakeRepo();
-    const svc = new SecretsService(repo, makeKeys());
+    const dek = makeDek();
+    const svc = new SecretsService(repo, dek);
 
     await svc.set("api.key", "super-secret");
 
     const doc = repo.docs.get("api.key");
     expect(doc).toBeDefined();
     if (!doc) throw new Error("doc missing");
+    expect(doc.dekId).toBe(dek.dekId);
     expect(doc.encryptedValue).not.toBe("super-secret");
     for (const value of Object.values(doc)) {
       expect(value).not.toBe("super-secret");
@@ -75,7 +100,7 @@ describe("SecretsService", () => {
   it("serves a fresh cache hit without re-querying the repo", async () => {
     const repo = new FakeRepo();
     let t = 0;
-    const svc = new SecretsService(repo, makeKeys(), { now: () => t, ttlMs: 1000 });
+    const svc = new SecretsService(repo, makeDek(), { now: () => t, ttlMs: 1000 });
 
     await svc.set("api.key", "v1");
     expect(await svc.get("api.key")).toBe("v1");
@@ -89,7 +114,7 @@ describe("SecretsService", () => {
   it("re-queries the repo once the cache entry expires", async () => {
     const repo = new FakeRepo();
     let t = 0;
-    const svc = new SecretsService(repo, makeKeys(), { now: () => t, ttlMs: 1000 });
+    const svc = new SecretsService(repo, makeDek(), { now: () => t, ttlMs: 1000 });
 
     await svc.set("api.key", "v1");
     await svc.get("api.key");
@@ -104,7 +129,7 @@ describe("SecretsService", () => {
     const repo = new FakeRepo();
     let t = 0;
     const log = { warn: vi.fn() };
-    const svc = new SecretsService(repo, makeKeys(), {
+    const svc = new SecretsService(repo, makeDek(), {
       now: () => t,
       ttlMs: 1000,
       staleMs: 5000,
@@ -126,7 +151,7 @@ describe("SecretsService", () => {
     const repo = new FakeRepo();
     let t = 0;
     const log = { warn: vi.fn() };
-    const svc = new SecretsService(repo, makeKeys(), {
+    const svc = new SecretsService(repo, makeDek(), {
       now: () => t,
       ttlMs: 1000,
       staleMs: 5000,
@@ -145,7 +170,7 @@ describe("SecretsService", () => {
   it("throws SecretUnavailableError when the repo returns null (not-found)", async () => {
     const repo = new FakeRepo();
     const log = { warn: vi.fn() };
-    const svc = new SecretsService(repo, makeKeys(), { log });
+    const svc = new SecretsService(repo, makeDek(), { log });
 
     await expect(svc.get("missing")).rejects.toBeInstanceOf(SecretUnavailableError);
     expect(log.warn).not.toHaveBeenCalled();
@@ -154,7 +179,7 @@ describe("SecretsService", () => {
   it("evicts the cache on delete so a later get hits the repo", async () => {
     const repo = new FakeRepo();
     const t = 0;
-    const svc = new SecretsService(repo, makeKeys(), { now: () => t, ttlMs: 1_000_000 });
+    const svc = new SecretsService(repo, makeDek(), { now: () => t, ttlMs: 1_000_000 });
 
     await svc.set("api.key", "v1");
     await svc.get("api.key"); // primes cache
@@ -168,7 +193,7 @@ describe("SecretsService", () => {
   it("evicts the cache on set so a later get returns the new value", async () => {
     const repo = new FakeRepo();
     const t = 0;
-    const svc = new SecretsService(repo, makeKeys(), { now: () => t, ttlMs: 1_000_000 });
+    const svc = new SecretsService(repo, makeDek(), { now: () => t, ttlMs: 1_000_000 });
 
     await svc.set("api.key", "v1");
     expect(await svc.get("api.key")).toBe("v1"); // caches v1
@@ -180,44 +205,47 @@ describe("SecretsService", () => {
   });
 });
 
-describe("SecretsService — key rotation", () => {
-  it("decrypts secret written under old key when previous key is set", async () => {
+describe("SecretsService — legacy rows (pre-backfill)", () => {
+  it("decrypts a legacy (dek_id NULL) row under the configured env KEK", async () => {
     const repo = new FakeRepo();
-    const oldKey = randomBytes(32);
-    const newKey = randomBytes(32);
+    const envKey = randomBytes(32);
+    const legacyKeys: EncryptionKeys = { current: envKey };
+    seedLegacy(repo, "legacy.key", "old-secret", envKey);
 
-    const oldSvc = new SecretsService(repo, { current: oldKey });
-    await oldSvc.set("api.key", "rotate-me");
-
-    const newSvc = new SecretsService(repo, { current: newKey, previous: oldKey });
-    expect(await newSvc.get("api.key")).toBe("rotate-me");
+    const svc = new SecretsService(repo, makeDek(), { legacyKeys });
+    expect(await svc.get("legacy.key")).toBe("old-secret");
   });
 
-  it("re-encrypts under current key on next write after rotation", async () => {
+  it("decrypts a legacy row under the previous env KEK after env-key rotation", async () => {
     const repo = new FakeRepo();
-    const oldKey = randomBytes(32);
-    const newKey = randomBytes(32);
+    const oldEnvKey = randomBytes(32);
+    const legacyKeys: EncryptionKeys = { current: randomBytes(32), previous: oldEnvKey };
+    seedLegacy(repo, "legacy.key", "old-secret", oldEnvKey);
 
-    const oldSvc = new SecretsService(repo, { current: oldKey });
-    await oldSvc.set("api.key", "rotate-me");
-
-    const rotationSvc = new SecretsService(repo, { current: newKey, previous: oldKey });
-    await rotationSvc.set("api.key", "rotate-me"); // re-encrypts under newKey
-
-    // new-key-only service can decrypt — confirms re-encrypted under current key
-    const newOnlySvc = new SecretsService(repo, { current: newKey });
-    expect(await newOnlySvc.get("api.key")).toBe("rotate-me");
+    const svc = new SecretsService(repo, makeDek(), { legacyKeys });
+    expect(await svc.get("legacy.key")).toBe("old-secret");
   });
 
-  it("throws DecryptError when both current and previous keys cannot decrypt", async () => {
+  it("throws when a legacy row exists but no legacy key is configured", async () => {
     const repo = new FakeRepo();
-    const writeKey = randomBytes(32);
+    seedLegacy(repo, "legacy.key", "old-secret", randomBytes(32));
 
-    const writeSvc = new SecretsService(repo, { current: writeKey });
-    await writeSvc.set("api.key", "secret");
+    const svc = new SecretsService(repo, makeDek()); // no legacyKeys
+    await expect(svc.get("legacy.key")).rejects.toBeInstanceOf(SecretUnavailableError);
+  });
 
-    const wrongKeys: EncryptionKeys = { current: randomBytes(32), previous: randomBytes(32) };
-    const wrongSvc = new SecretsService(repo, wrongKeys);
-    await expect(wrongSvc.get("api.key")).rejects.toBeInstanceOf(DecryptError);
+  it("a re-set legacy row becomes DEK-tagged and no longer needs the legacy key", async () => {
+    const repo = new FakeRepo();
+    const envKey = randomBytes(32);
+    seedLegacy(repo, "legacy.key", "old-secret", envKey);
+
+    const dek = makeDek();
+    const svc = new SecretsService(repo, dek, { legacyKeys: { current: envKey } });
+    await svc.set("legacy.key", "new-secret"); // re-encrypts under the DEK + tags dekId
+
+    expect(repo.docs.get("legacy.key")?.dekId).toBe(dek.dekId);
+    // a DEK-only service (no legacy key) can now read it
+    const dekOnly = new SecretsService(repo, dek);
+    expect(await dekOnly.get("legacy.key")).toBe("new-secret");
   });
 });

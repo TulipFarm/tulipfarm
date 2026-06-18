@@ -1,6 +1,22 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
 import { type PaginatedResult, toPage } from "../pagination";
+
+// Version tag distinguishing pepper-hashed (HMAC) token hashes from legacy bare-SHA-256 ones.
+// Legacy hashes are unprefixed 64-char hex; v2 hashes carry this prefix. The prefix can never
+// collide with hex, so both schemes coexist in the UNIQUE token_hash column during migration.
+const HASH_V2_PREFIX = "v2:";
+
+// The server-held pepper. When set, token hashes are HMAC-SHA256(token, pepper) — a DB dump alone
+// then can't verify token guesses. Absent → legacy SHA-256 (acceptable for high-entropy tokens).
+function loadPepper(env: NodeJS.ProcessEnv = process.env): Buffer | null {
+  return env.API_TOKEN_PEPPER ? Buffer.from(env.API_TOKEN_PEPPER, "base64") : null;
+}
+
+// Legacy (v1) hash: bare SHA-256 hex. Kept for verifying tokens minted before the pepper.
+export function hashTokenLegacy(rawToken: string): string {
+  return createHash("sha256").update(rawToken).digest("hex");
+}
 
 export interface TokenDoc {
   _id: string;
@@ -29,8 +45,33 @@ export function toPublicToken(token: TokenDoc): PublicToken {
   };
 }
 
-export function hashToken(rawToken: string): string {
-  return createHash("sha256").update(rawToken).digest("hex");
+// Active hashing scheme: HMAC + pepper (tagged `v2:`) when a pepper is configured, else legacy
+// SHA-256. New tokens are born under whichever scheme is active.
+export function hashToken(rawToken: string, pepper: Buffer | null = loadPepper()): string {
+  if (!pepper) return hashTokenLegacy(rawToken);
+  return HASH_V2_PREFIX + createHmac("sha256", pepper).update(rawToken).digest("hex");
+}
+
+// Resolve a raw bearer token to its stored row, transparently bridging the hashing schemes:
+//  1. Look up under the active scheme (v2 when a pepper is set, else v1).
+//  2. If a pepper is set and that misses, the row may predate the pepper — look up under legacy
+//     v1, and on a hit lazily upgrade it to v2 so it migrates on first use.
+export async function findTokenForRawToken(
+  repo: TokenRepo,
+  rawToken: string,
+  pepper: Buffer | null = loadPepper()
+): Promise<TokenDoc | null> {
+  const primary = await repo.findByHash(hashToken(rawToken, pepper));
+  if (primary) return primary;
+
+  if (pepper) {
+    const legacy = await repo.findByHash(hashTokenLegacy(rawToken));
+    if (legacy) {
+      await repo.updateHash?.(legacy._id, hashToken(rawToken, pepper));
+      return legacy;
+    }
+  }
+  return null;
 }
 
 function generateRawToken(): string {
@@ -40,6 +81,9 @@ function generateRawToken(): string {
 export interface TokenRepo {
   create(token: TokenDoc): Promise<void>;
   findByHash(hash: string): Promise<TokenDoc | null>;
+  // Optional: lazy re-hash of a legacy token to the active scheme on successful auth. Best-effort
+  // optimization — auth still works without it, so non-persistent fakes may omit it.
+  updateHash?(id: string, tokenHash: string): Promise<void>;
   findByUserId(userId: string): Promise<TokenDoc[]>;
   findAll(): Promise<TokenDoc[]>;
   findById(id: string): Promise<TokenDoc | null>;
@@ -79,6 +123,10 @@ export class PgTokenRepo implements TokenRepo {
   async findByHash(hash: string): Promise<TokenDoc | null> {
     const { rows } = await this.q.query("SELECT * FROM api_tokens WHERE token_hash = $1", [hash]);
     return rows.length > 0 ? rowToToken(rows[0]) : null;
+  }
+
+  async updateHash(id: string, tokenHash: string): Promise<void> {
+    await this.q.query("UPDATE api_tokens SET token_hash = $2 WHERE id = $1", [id, tokenHash]);
   }
 
   async findByUserId(userId: string): Promise<TokenDoc[]> {
