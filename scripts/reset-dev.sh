@@ -1,0 +1,132 @@
+#!/bin/bash
+set -euo pipefail
+
+# TulipFarm local dev RESET — the counterpart to setup-dev.sh.
+#
+# Wipes local runtime state so you can start completely fresh:
+#   • the Postgres database (all users, secrets, encryption keys, chats, jobs)
+#   • the soul repo (~/.tulipfarm/soul)
+#   • .env.local (+ the apps/api symlink)
+#
+# This is DESTRUCTIVE and cannot be undone. It does NOT uninstall Postgres/pgvector
+# or stop the Postgres service — only the project's own data.
+#
+# Usage:
+#   scripts/reset-dev.sh             # interactive: confirm, then full reset
+#   scripts/reset-dev.sh -y          # skip the confirmation prompt
+#   scripts/reset-dev.sh --db-only   # reset ONLY the database (keep soul + .env.local)
+#   scripts/reset-dev.sh --keep-env  # reset DB + soul, but keep .env.local (your keys)
+
+usage() {
+  sed -n '4,18p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+ASSUME_YES=false
+DB_ONLY=false
+KEEP_ENV=false
+for arg in "${@:-}"; do
+  case "$arg" in
+    -y | --yes) ASSUME_YES=true ;;
+    --db-only) DB_ONLY=true ;;
+    --keep-env) KEEP_ENV=true ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    "") ;;
+    *)
+      echo "Unknown option: $arg"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+# Always operate from the repo root, regardless of where this is invoked from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+# macOS: postgresql@17 is keg-only — expose its client tools (dropdb/createdb).
+if [[ "$OSTYPE" == "darwin"* ]] && command -v brew &>/dev/null; then
+  PG_PREFIX="$(brew --prefix postgresql@17 2>/dev/null || true)"
+  [ -n "$PG_PREFIX" ] && export PATH="$PG_PREFIX/bin:$PATH"
+fi
+
+# Resolve the actual targets from .env.local when present; else use setup-dev.sh defaults.
+read_env() { [ -f ".env.local" ] && grep -E "^$1=" ".env.local" | head -1 | cut -d= -f2- || true; }
+
+DATABASE_URL="$(read_env DATABASE_URL)"
+DATABASE_URL="${DATABASE_URL:-postgres://localhost:5432/tulipfarm}"
+DB_NAME="$(basename "${DATABASE_URL%%\?*}")"
+DB_NAME="${DB_NAME:-tulipfarm}"
+
+SOUL_PATH="$(read_env SOUL_PATH)"
+SOUL_PATH="${SOUL_PATH:-$HOME/.tulipfarm/soul}"
+SOUL_PATH="${SOUL_PATH/#\~/$HOME}" # expand a leading ~ (dotenv stores it literally)
+
+# Safety: never rm a dangerous path.
+case "$SOUL_PATH" in
+  "" | "/" | "$HOME" | "$HOME/") echo "❌ refusing to delete unsafe SOUL_PATH '$SOUL_PATH'"; exit 1 ;;
+esac
+
+echo "🧹 TulipFarm local reset — this will DELETE:"
+echo "   • Postgres database: $DB_NAME  (users, secrets, encryption keys, chats, jobs — all gone)"
+if ! $DB_ONLY; then
+  echo "   • Soul repo:         $SOUL_PATH"
+  $KEEP_ENV || echo "   • Env file:          $REPO_ROOT/.env.local  (+ apps/api/.env.local symlink)"
+fi
+echo ""
+echo "⚠ Stop the dev server first (Ctrl-C the 'pnpm dev' process)."
+echo ""
+
+if ! $ASSUME_YES; then
+  read -r -p "Type 'reset' to confirm: " reply
+  [ "$reply" = "reset" ] || {
+    echo "Aborted."
+    exit 1
+  }
+fi
+
+# 1) Database — drop, then recreate empty so the next boot migrates from scratch.
+if command -v dropdb &>/dev/null; then
+  echo "🗄  Dropping database '$DB_NAME'..."
+  # --force terminates lingering connections (e.g. a still-running dev server). Falls back for
+  # older clients without --force.
+  dropdb --force --if-exists "$DB_NAME" 2>/dev/null \
+    || dropdb --if-exists "$DB_NAME" 2>/dev/null \
+    || echo "   (could not drop — is Postgres running? is the dev server still connected?)"
+  if createdb "$DB_NAME" 2>/dev/null; then
+    echo "✅ Recreated empty database '$DB_NAME'"
+  else
+    echo "   (could not recreate '$DB_NAME' — create it manually or re-run setup-dev.sh)"
+  fi
+else
+  echo "⚠ dropdb not on PATH — drop the '$DB_NAME' database manually"
+fi
+
+if $DB_ONLY; then
+  echo ""
+  echo "✨ Database reset. Start the app — a fresh admin is bootstrapped from .env.local:"
+  echo "   pnpm dev"
+  exit 0
+fi
+
+# 2) Soul repo
+if [ -d "$SOUL_PATH" ]; then
+  echo "📁 Removing soul repo at $SOUL_PATH..."
+  rm -rf "$SOUL_PATH"
+  echo "✅ Soul repo removed"
+fi
+
+# 3) .env.local + the apps/api symlink (+ any web env override)
+if ! $KEEP_ENV; then
+  [ -f "$REPO_ROOT/.env.local" ] && rm -f "$REPO_ROOT/.env.local" && echo "✅ Removed .env.local"
+  [ -L "apps/api/.env.local" ] && rm -f "apps/api/.env.local" && echo "✅ Removed apps/api/.env.local symlink"
+  [ -f "apps/web/.env.local" ] && rm -f "apps/web/.env.local" && echo "✅ Removed apps/web/.env.local"
+fi
+
+echo ""
+echo "✨ Reset complete. Start fresh:"
+$KEEP_ENV || echo "   scripts/setup-dev.sh   # recreates DB, soul repo, and .env.local with new keys"
+echo "   pnpm dev"

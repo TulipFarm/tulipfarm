@@ -1,12 +1,51 @@
-import { Link, NavLink } from "@remix-run/react";
-import { ArrowUpRight, Menu, MessageSquare, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { Link, NavLink, useNavigate } from "@remix-run/react";
+import {
+  ArrowUpRight,
+  LogOut,
+  Menu,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { ThemeToggle } from "~/components/theme-toggle";
+import { logout } from "~/lib/api";
 import { useApprovals } from "~/lib/approvals-context";
 import type { BadgeKey } from "~/lib/badges";
 import { useConversations } from "~/lib/conversations-context";
 import { type NavItem, navItems } from "~/lib/nav";
 import { cn } from "~/lib/utils";
+
+// Footer sign-out: destroys the session then routes to /login. Icon-only when the rail is collapsed.
+function SignOutButton({ rail }: { rail: boolean }) {
+  const navigate = useNavigate();
+  const [busy, setBusy] = useState(false);
+  async function onClick() {
+    setBusy(true);
+    try {
+      await logout();
+    } finally {
+      navigate("/login", { replace: true });
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      title="Sign out"
+      aria-label="Sign out"
+      className={cn(
+        "flex cursor-pointer items-center gap-1.5 rounded-sm text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-60",
+        rail ? "justify-center p-1.5" : "px-1.5 py-1"
+      )}
+    >
+      <LogOut className="size-4" aria-hidden />
+      {rail ? null : <span>sign out</span>}
+    </button>
+  );
+}
 
 const COLLAPSED_KEY = "sidebar-collapsed";
 
@@ -309,6 +348,7 @@ export function AppSidebar() {
               v1 · local instance
             </span>
           )}
+          <SignOutButton rail={rail} />
           <ThemeToggle iconOnly />
         </div>
       </aside>

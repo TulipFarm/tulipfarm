@@ -3,8 +3,10 @@ import {
   ApiError,
   createRecord,
   getRecord,
+  getSession,
   listRecords,
   listResourceTypes,
+  login,
   updateRecord,
 } from "~/lib/api";
 
@@ -43,6 +45,32 @@ test("attaches a Bearer token when VITE_API_TOKEN is set", async () => {
   await listResourceTypes();
   const [, init] = fetchFn.mock.calls[0];
   expect(init.headers.Authorization).toBe("Bearer tulip_dev");
+});
+
+test("login POSTs credentials with credentials:include and returns the user", async () => {
+  const fetchFn = mockFetch(200, {
+    user: { id: "u1", email: "admin@tulipfarm.dev", role: "admin" },
+  });
+  const user = await login("admin@tulipfarm.dev", "pw");
+  const [url, init] = fetchFn.mock.calls[0];
+  expect(url).toContain("/api/v1/auth/login");
+  expect(init.method).toBe("POST");
+  expect(init.credentials).toBe("include");
+  expect(JSON.parse(init.body)).toEqual({ email: "admin@tulipfarm.dev", password: "pw" });
+  expect(user.email).toBe("admin@tulipfarm.dev");
+});
+
+test("login throws ApiError with the API message on 401", async () => {
+  mockFetch(401, { error: "invalid credentials" });
+  await expect(login("admin@tulipfarm.dev", "wrong")).rejects.toMatchObject({
+    status: 401,
+    message: "invalid credentials",
+  });
+});
+
+test("getSession unwraps the current user", async () => {
+  mockFetch(200, { user: { id: "u1", email: "admin@tulipfarm.dev", role: "admin" } });
+  expect((await getSession()).role).toBe("admin");
 });
 
 test("listResourceTypes unwraps the types array", async () => {

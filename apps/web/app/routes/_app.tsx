@@ -1,7 +1,24 @@
-import { Outlet } from "@remix-run/react";
+import { Outlet, redirect } from "@remix-run/react";
 import { AppSidebar } from "~/components/app-sidebar";
+import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
 import { ConversationsProvider } from "~/lib/conversations-context";
+
+// Auth gate for the whole app shell: every /app/* route runs this parent loader first. An
+// unauthenticated session (401) redirects to /login (preserving where the user was headed); a dev
+// Bearer token (VITE_API_TOKEN) authenticates too, so that path keeps working. Other errors bubble
+// to the route ErrorBoundary.
+export async function clientLoader() {
+  try {
+    return { user: await getSession() };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401) {
+      const here = typeof window !== "undefined" ? window.location.pathname : "/";
+      throw redirect(`/login?redirectTo=${encodeURIComponent(here)}`);
+    }
+    throw err;
+  }
+}
 
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending
 // approvals (sidebar badge + Approvals page); ConversationsProvider holds the Recent chats list.
