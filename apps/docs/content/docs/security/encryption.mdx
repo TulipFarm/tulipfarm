@@ -1,0 +1,76 @@
+---
+title: Encryption
+description: How TulipFarm encrypts the secrets your instance stores.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+TulipFarm encrypts the credentials it has to use again later — LLM provider API keys,
+integration tokens, and any secret you store. Encryption is reversible by design: when an
+agent calls a provider, the instance must recover the real key to send it. Values that
+only need to be checked, never read back, are [hashed](/docs/security/hashing) instead.
+
+## AES-256-GCM with a fresh IV per record
+
+Every secret is encrypted with **AES-256-GCM**. Each value gets a random 12-byte
+initialization vector (IV) and a 16-byte authentication tag, stored next to the ciphertext
+as a base64 envelope. The IV is what makes two identical secrets encrypt to different
+ciphertext — it does for encryption what a salt does for hashing, so no separate salt is
+added. The authentication tag means a tampered or corrupted value fails to decrypt rather
+than returning garbage.
+
+## The key that encrypts is itself wrapped
+
+A single master key has an obvious failure mode: lose it and every encrypted value is
+gone. TulipFarm avoids that with **envelope encryption**.
+
+- A random 32-byte **Data Encryption Key (DEK)** encrypts the secrets themselves.
+- The DEK is then encrypted ("wrapped") under one or more **Key Encryption Keys (KEKs)**
+  and stored in the `wrapped_deks` table.
+- The everyday KEK is your `ENCRYPTION_KEY`. A separate, offline **recovery key** wraps the
+  same DEK independently.
+
+```text
+secret  ──AES-GCM(DEK)──────────────▶  secrets table
+DEK     ──AES-GCM(ENCRYPTION_KEY)───▶  wrapped_deks   (everyday path)
+DEK     ──AES-GCM(recovery key)─────▶  wrapped_deks   (offline break-glass)
+```
+
+Because the same DEK is wrapped under two independent keys, losing one still leaves a way
+in through the other.
+
+## Surviving a lost ENCRYPTION_KEY
+
+On a fresh instance the DEK is provisioned automatically, so nothing extra is needed to
+start. To guard against losing `ENCRYPTION_KEY`, mint an offline recovery key once with
+`keys show-recovery`; it is printed a single time and held only by you, never in the
+database or the environment. If `ENCRYPTION_KEY` is later lost, set a fresh one and run
+`keys recover` with the offline key — it unwraps the DEK and rebuilds the everyday wrap.
+
+<Callout type="warn">
+If both `ENCRYPTION_KEY` and the offline recovery key are lost, the secrets are
+unrecoverable by design — there is no backdoor. Mint and safeguard the recovery key.
+</Callout>
+
+## Rotation does not re-encrypt your secrets
+
+Rotating `ENCRYPTION_KEY` only re-wraps the small DEK, so it is cheap regardless of how
+many secrets you hold. Set the new key as `ENCRYPTION_KEY` and the old one as
+`ENCRYPTION_KEY_PREVIOUS`, then run `keys rotate-kek`. Reads keep working throughout:
+unwrapping tries the current key first, then the previous one.
+
+## Validated at rest and in transit
+
+At rest, the GCM authentication tag is checked on every read, so corruption or a wrong key
+is caught immediately instead of being served as bad data. At startup a canary check fails
+the boot loudly if the key cannot unwrap the DEK, rather than failing later at first use.
+In transit, the API is served over TLS in production and sets `Secure`, `HttpOnly`,
+`SameSite=Strict` session cookies.
+
+These operator commands run through the API's `keys` CLI:
+`pnpm --filter @tulipfarm/api keys <command>`.
+
+To add or remove a secret, see [Store a secret](/docs/guides/store-a-secret). For the
+variables that configure encryption, see
+[Environment variables](/docs/reference/environment-variables). For where secrets fit in
+the wider instance, see [Secrets](/docs/concepts/secrets).
