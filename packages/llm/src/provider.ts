@@ -4,6 +4,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import {
+  DecryptError,
   llmProviderById,
   providerField,
   type SecretsService,
@@ -32,6 +33,16 @@ export async function resolveApiKey(
           `or use api_key_ref: env://VAR. (${err.message})`
       );
     }
+    // A stored-but-undecryptable credential (e.g. ENCRYPTION_KEY changed since it was saved) is a
+    // credential problem, not an internal fault: treat it like an unavailable secret so init skips
+    // this provider with a warning instead of aborting boot. The credential surfaces as broken when
+    // the provider is actually used (tier unavailable / re-enter prompt), not at startup.
+    if (err instanceof DecryptError) {
+      throw new LlmCredentialError(
+        `LLM credential "${api_key_ref}" could not be decrypted — the encryption key may have ` +
+          `changed since it was saved. Re-enter it (PUT /secrets/${api_key_ref}). (${err.message})`
+      );
+    }
     throw err;
   }
 }
@@ -46,7 +57,9 @@ async function resolveStored(
   try {
     return await secrets.get(key);
   } catch (err) {
-    if (err instanceof SecretUnavailableError) return undefined;
+    // Missing OR undecryptable config value → treat as not-set; the downstream provider check
+    // (e.g. "azure requires resource_name or base_url") then skips the provider gracefully.
+    if (err instanceof SecretUnavailableError || err instanceof DecryptError) return undefined;
     throw err;
   }
 }
