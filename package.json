@@ -1,6 +1,7 @@
 {
   "name": "tulipfarm",
   "private": true,
+  "version": "0.1.0-build-test.0",
   "packageManager": "pnpm@11.5.3",
   "scripts": {
     "build": "turbo build",
@@ -12,6 +13,8 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "release": "release-it",
+    "release:canary": "release-it --no-git.requireBranch --preRelease",
     "prepare": "lefthook install"
   },
   "lint-staged": {
@@ -19,8 +22,12 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
+    "@release-it/conventional-changelog": "^11.0.1",
     "lefthook": "^2.1.9",
     "lint-staged": "^17.0.7",
+    "release-it": "^20.2.0",
     "turbo": "^2.9.17",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"

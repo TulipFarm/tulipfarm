@@ -4,88 +4,165 @@ set -e
 echo "🚀 TulipFarm Local Development Setup"
 echo ""
 
-# Detect OS and install with appropriate package manager
-if [[ "$OSTYPE" == "darwin"* ]]; then
-  # macOS with Homebrew
-  if ! command -v brew &> /dev/null; then
-    echo "❌ Homebrew not found. Install from https://brew.sh"
-    exit 1
-  fi
-
-  if ! brew ls postgresql@17 &> /dev/null; then
-    echo "📦 Installing postgresql@17..."
-    brew install postgresql@17
+# --- Choose datastore mode -------------------------------------------------
+# Two ways to run the local Postgres (both satisfy AC-006):
+#   docker : bundled pgvector/pgvector:pg17 container (same image CI/prod use) — no
+#            system install, exposed on localhost:5432 via docker-compose.dev.yml.
+#   native : install PostgreSQL 17 + pgvector via Homebrew/apt/yum on the host.
+# Honour a preset DB_MODE for non-interactive runs (CI, re-runs); otherwise prompt.
+DB_MODE="${DB_MODE:-}"
+if [ -z "$DB_MODE" ]; then
+  if [ -t 0 ]; then
+    echo "How do you want to run PostgreSQL for local development?"
+    echo "  1) Docker  — bundled pgvector container, no system install (recommended)"
+    echo "  2) Native  — install PostgreSQL 17 + pgvector on this machine"
+    read -r -p "Select [1/2] (default 1): " choice
+    case "$choice" in
+      2 | native | n | N) DB_MODE="native" ;;
+      *) DB_MODE="docker" ;;
+    esac
   else
-    echo "✅ postgresql@17 already installed"
+    DB_MODE="docker"
+    echo "ℹ Non-interactive shell — defaulting to Docker. Set DB_MODE=native to override."
   fi
-
-  if ! brew ls pgvector &> /dev/null; then
-    echo "📦 Installing pgvector..."
-    brew install pgvector
-  else
-    echo "✅ pgvector already installed"
-  fi
-
-  echo "🔄 Starting PostgreSQL service..."
-  brew services start postgresql@17 || true
-  # postgresql@17 is keg-only; expose its client tools (createdb/psql) for this script
-  export PATH="$(brew --prefix postgresql@17)/bin:$PATH"
-
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-  # Linux with apt or yum
-  if command -v apt-get &> /dev/null; then
-    echo "📦 Using apt to install dependencies..."
-    sudo apt-get update
-
-    if ! command -v psql &> /dev/null; then
-      echo "📦 Installing PostgreSQL + pgvector..."
-      sudo apt-get install -y postgresql postgresql-contrib
-      sudo apt-get install -y postgresql-17-pgvector \
-        || sudo apt-get install -y postgresql-16-pgvector \
-        || echo "⚠ Install pgvector manually for your Postgres version"
-    else
-      echo "✅ PostgreSQL already installed"
-    fi
-
-    echo "🔄 Starting PostgreSQL service..."
-    sudo systemctl start postgresql || true
-
-  elif command -v yum &> /dev/null; then
-    echo "📦 Using yum to install dependencies..."
-
-    if ! command -v psql &> /dev/null; then
-      echo "📦 Installing PostgreSQL + pgvector..."
-      sudo yum install -y postgresql-server postgresql-contrib
-      sudo yum install -y pgvector || echo "⚠ Install pgvector manually for your Postgres version"
-    else
-      echo "✅ PostgreSQL already installed"
-    fi
-
-    echo "🔄 Starting PostgreSQL service..."
-    sudo systemctl start postgresql || true
-
-  else
-    echo "❌ No supported package manager found (apt or yum required)"
-    exit 1
-  fi
-
-else
-  echo "❌ Unsupported OS: $OSTYPE"
-  exit 1
 fi
+echo "▶ Datastore mode: $DB_MODE"
+echo ""
 
-# Give services a moment to start
-sleep 2
+# Set by whichever branch runs; consumed when writing .env.local below.
+# Native keeps the template's peer-auth URL; Docker wires in the generated password.
+DATABASE_URL_OVERRIDE=""
 
-# Create the Postgres database (idempotent)
-if command -v createdb &> /dev/null; then
-  if createdb tulipfarm 2>/dev/null; then
-    echo "✅ Created Postgres database 'tulipfarm'"
-  else
-    echo "✅ Postgres database 'tulipfarm' already exists"
+if [ "$DB_MODE" = "docker" ]; then
+  # --- Docker: bundled Postgres container ----------------------------------
+  if ! command -v docker &> /dev/null; then
+    echo "❌ Docker not found. Install Docker Desktop / Engine, or re-run with DB_MODE=native."
+    exit 1
   fi
+  if ! docker compose version &> /dev/null; then
+    echo "❌ Docker Compose v2 plugin required ('docker compose')."
+    exit 1
+  fi
+  if ! docker info &> /dev/null; then
+    echo "❌ Docker daemon not running. Start Docker and re-run."
+    exit 1
+  fi
+
+  # The bundled postgres reads POSTGRES_PASSWORD from .env (compose interpolation).
+  # Reuse an existing value so it matches the persisted data volume; else generate
+  # an alphanumeric one (no URL-special chars, so DATABASE_URL needs no escaping).
+  touch .env
+  if grep -q '^POSTGRES_PASSWORD=' .env; then
+    POSTGRES_PASSWORD="$(grep '^POSTGRES_PASSWORD=' .env | head -1 | cut -d= -f2-)"
+    echo "✅ Reusing POSTGRES_PASSWORD from .env"
+  else
+    POSTGRES_PASSWORD="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 32)"
+    echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
+    echo "✅ Generated POSTGRES_PASSWORD and wrote it to .env"
+  fi
+  grep -q '^COMPOSE_PROFILES=' .env || echo "COMPOSE_PROFILES=bundled" >> .env
+
+  echo "🐳 Starting bundled Postgres container (pgvector/pgvector:pg17)..."
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile bundled up -d postgres
+
+  echo "⏳ Waiting for Postgres to be ready..."
+  for _ in $(seq 1 30); do
+    if docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+      exec -T postgres pg_isready -U tulipfarm -d tulipfarm &> /dev/null; then
+      echo "✅ Postgres is ready on localhost:5432"
+      break
+    fi
+    sleep 2
+  done
+
+  # The container auto-creates the tulipfarm DB + user (POSTGRES_DB/POSTGRES_USER),
+  # so no createdb step. Wire the dev app at the host-exposed port with the password.
+  DATABASE_URL_OVERRIDE="postgresql://tulipfarm:${POSTGRES_PASSWORD}@localhost:5432/tulipfarm"
+
 else
-  echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
+  # --- Native: install Postgres on the host --------------------------------
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    # macOS with Homebrew
+    if ! command -v brew &> /dev/null; then
+      echo "❌ Homebrew not found. Install from https://brew.sh"
+      exit 1
+    fi
+
+    if ! brew ls postgresql@17 &> /dev/null; then
+      echo "📦 Installing postgresql@17..."
+      brew install postgresql@17
+    else
+      echo "✅ postgresql@17 already installed"
+    fi
+
+    if ! brew ls pgvector &> /dev/null; then
+      echo "📦 Installing pgvector..."
+      brew install pgvector
+    else
+      echo "✅ pgvector already installed"
+    fi
+
+    echo "🔄 Starting PostgreSQL service..."
+    brew services start postgresql@17 || true
+    # postgresql@17 is keg-only; expose its client tools (createdb/psql) for this script
+    export PATH="$(brew --prefix postgresql@17)/bin:$PATH"
+
+  elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Linux with apt or yum
+    if command -v apt-get &> /dev/null; then
+      echo "📦 Using apt to install dependencies..."
+      sudo apt-get update
+
+      if ! command -v psql &> /dev/null; then
+        echo "📦 Installing PostgreSQL + pgvector..."
+        sudo apt-get install -y postgresql postgresql-contrib
+        sudo apt-get install -y postgresql-17-pgvector \
+          || sudo apt-get install -y postgresql-16-pgvector \
+          || echo "⚠ Install pgvector manually for your Postgres version"
+      else
+        echo "✅ PostgreSQL already installed"
+      fi
+
+      echo "🔄 Starting PostgreSQL service..."
+      sudo systemctl start postgresql || true
+
+    elif command -v yum &> /dev/null; then
+      echo "📦 Using yum to install dependencies..."
+
+      if ! command -v psql &> /dev/null; then
+        echo "📦 Installing PostgreSQL + pgvector..."
+        sudo yum install -y postgresql-server postgresql-contrib
+        sudo yum install -y pgvector || echo "⚠ Install pgvector manually for your Postgres version"
+      else
+        echo "✅ PostgreSQL already installed"
+      fi
+
+      echo "🔄 Starting PostgreSQL service..."
+      sudo systemctl start postgresql || true
+
+    else
+      echo "❌ No supported package manager found (apt or yum required)"
+      exit 1
+    fi
+
+  else
+    echo "❌ Unsupported OS: $OSTYPE"
+    exit 1
+  fi
+
+  # Give services a moment to start
+  sleep 2
+
+  # Create the Postgres database (idempotent)
+  if command -v createdb &> /dev/null; then
+    if createdb tulipfarm 2>/dev/null; then
+      echo "✅ Created Postgres database 'tulipfarm'"
+    else
+      echo "✅ Postgres database 'tulipfarm' already exists"
+    fi
+  else
+    echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
+  fi
 fi
 
 # Initialize the soul directory — a DEDICATED git repo OUTSIDE the project repo so its own commits
@@ -148,6 +225,17 @@ if [ ! -f ".env.local" ]; then
     sed -i "s|ADMIN_PASSWORD=<set a strong password>|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env.local
   fi
 
+  # Docker mode: point the dev app at the bundled container (host port + password).
+  # Native mode keeps the template's local peer-auth URL.
+  if [ -n "$DATABASE_URL_OVERRIDE" ]; then
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL_OVERRIDE|" .env.local
+    else
+      sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$DATABASE_URL_OVERRIDE|" .env.local
+    fi
+    echo "✅ DATABASE_URL pointed at the bundled Postgres container"
+  fi
+
   # Expand SOUL_PATH to the absolute soul dir (dotenv does not expand ~).
   if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i '' "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
@@ -163,6 +251,10 @@ if [ ! -f ".env.local" ]; then
   echo "        password: $ADMIN_PASSWORD"
 else
   echo "✅ .env.local already exists (sign-in creds: ADMIN_EMAIL / ADMIN_PASSWORD in .env.local)"
+  if [ -n "$DATABASE_URL_OVERRIDE" ]; then
+    echo "ℹ Docker mode: ensure DATABASE_URL in .env.local is:"
+    echo "    $DATABASE_URL_OVERRIDE"
+  fi
 fi
 
 # Symlink .env.local to apps/api for turbo dev (turbo runs from package dir)
@@ -183,5 +275,12 @@ echo "  3. Sign in at /login with the admin email + password above"
 echo "     (or read them from .env.local: ADMIN_EMAIL / ADMIN_PASSWORD)"
 echo ""
 echo "To verify the datastore is running:"
-echo "  psql tulipfarm -c 'select 1'"
+if [ "$DB_MODE" = "docker" ]; then
+  echo "  pg_isready -h localhost -p 5432 -U tulipfarm"
+  echo ""
+  echo "To stop the bundled Postgres container (keeps data):"
+  echo "  docker compose -f docker-compose.yml -f docker-compose.dev.yml down"
+else
+  echo "  psql tulipfarm -c 'select 1'"
+fi
 echo ""

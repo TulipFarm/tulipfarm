@@ -1,0 +1,14 @@
+**/node_modules
+.git
+**/dist
+**/build
+**/.turbo
+.env
+.env.*
+!.env.example
+/soul
+*.log
+.absolute-work
+specs
+docs
+references

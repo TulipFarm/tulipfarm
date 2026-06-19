@@ -2,3 +2,10 @@ pre-commit:
   commands:
     lint-staged:
       run: pnpm exec lint-staged
+
+# Validate commit messages against Conventional Commits (commitlint). {1} is the
+# path to the commit-message file git passes to the commit-msg hook.
+commit-msg:
+  commands:
+    commitlint:
+      run: pnpm exec commitlint --edit {1}

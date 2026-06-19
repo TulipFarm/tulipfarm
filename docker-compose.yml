@@ -1,0 +1,74 @@
+name: tulipfarm
+
+# 2-service stack (ARCH-V1, Postgres-only). `app` is the single image (API + built
+# SPA + in-process pg-boss workers). Bundled `postgres` ships pgvector.
+#
+# Datastore mode is a pure config choice (INST-004 — one mechanism, no code branch):
+#   Bundled (default): COMPOSE_PROFILES=bundled starts `postgres`; DATABASE_URL wires
+#     to it from POSTGRES_PASSWORD. `.env.example` ships this default.
+#   External:          set EXTERNAL_DATASTORE=true, COMPOSE_PROFILES= (empty) so the
+#     bundled `postgres` is NOT started, and point DATABASE_URL at managed Postgres
+#     (must allow the `vector` + `citext` extensions).
+services:
+  app:
+    # Shipped to the install dir, which has no build context — pull the published image only.
+    # (For local image builds use a docker-compose.override.yml with `build: .`.)
+    image: ghcr.io/tulipfarm/app:${TULIPFARM_VERSION:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+        # External mode disables the `bundled` profile, so `postgres` is absent —
+        # don't block app startup on a service that isn't part of the run.
+        required: false
+    environment:
+      PORT: "8080"
+      NODE_ENV: production
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8080}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
+      # Bundled mode: wired from POSTGRES_PASSWORD below. External/managed mode:
+      # set EXTERNAL_DATASTORE=true and override DATABASE_URL.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD}@postgres:5432/tulipfarm}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
+      SOUL_PATH: /opt/tulipfarm/soul
+      SETUP_MODE: ${SETUP_MODE:-wizard}
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+    volumes:
+      - tulipfarm-soul:/opt/tulipfarm/soul
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    # Bundled datastore only — disabled in External mode (see header). Default-on via
+    # COMPOSE_PROFILES=bundled in `.env`.
+    profiles: ["bundled"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tulipfarm
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: tulipfarm
+    volumes:
+      - tulipfarm-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "tulipfarm", "-d", "tulipfarm"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  tulipfarm-postgres:
+  tulipfarm-soul:
