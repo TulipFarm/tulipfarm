@@ -482,14 +482,27 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Always tag the exact version. Only move `:latest` for STABLE releases —
+      # prerelease/canary tags carry a `-` identifier (e.g. v0.1.0-alpha.0, from
+      # `pnpm release:canary`) and must not clobber the latest stable image.
+      - name: Compute image tags
+        id: imgtags
+        run: |
+          ref="${{ github.ref_name }}"
+          {
+            echo "tags<<EOF"
+            echo "ghcr.io/tulipfarm/app:${ref}"
+            if [[ "$ref" != *-* ]]; then
+              echo "ghcr.io/tulipfarm/app:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push (multi-arch)
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/tulipfarm/app:${{ github.ref_name }}
-            ghcr.io/tulipfarm/app:latest
+          tags: ${{ steps.imgtags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

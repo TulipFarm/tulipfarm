@@ -102,3 +102,42 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml down           # 
 ```
 
 To stop the dev servers, press `Ctrl+C` in the terminal running `pnpm dev`.
+
+## Commits & Releases
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/). They're
+enforced in two places: a `commit-msg` git hook (commitlint, via lefthook) locally, and
+the **PR Title** check in CI. The commit/PR `type` drives the next version bump.
+
+Releases are cut with [`release-it`](https://github.com/release-it/release-it) +
+`@release-it/conventional-changelog` (config in `.release-it.json`): it derives the
+version from the commit history, writes `CHANGELOG.md`, bumps `package.json`, commits,
+tags `v<version>`, pushes, and creates the GitHub Release. Pushing the `v*` tag triggers
+the `publish-image` job in `ci.yml`, which builds and pushes the multi-arch Docker image
+to GHCR (`ghcr.io/tulipfarm/app:<version>` + `:latest`) after the `compose-parity` health
+gate — so the image ships as a consequence of the release. Two equivalent ways to cut one:
+
+- **CI (recommended):** run the **Release** workflow from the Actions tab
+  (`workflow_dispatch`). Optionally choose the bump (`auto`/`patch`/`minor`/`major`) or a
+  dry run. For the tag push to trigger image publishing, set a `RELEASE_TOKEN` repo secret
+  (a PAT/GitHub App token with `contents: write`) — pushes made with the default
+  `GITHUB_TOKEN` do not trigger other workflows.
+- **Local:** from a clean `main`, run `pnpm release` (needs a `GITHUB_TOKEN` env var for
+  the GitHub Release). Add `--dry-run` to preview, or `patch`/`minor`/`major` to override
+  the computed bump.
+
+### Canary / prereleases
+
+To cut a prerelease from any branch, pass the prerelease identifier to
+`release:canary`:
+
+```bash
+pnpm release:canary alpha   # -> v0.1.0-alpha.0, then v0.1.0-alpha.1, ...
+pnpm release:canary beta    # -> v0.1.0-beta.0
+```
+
+It runs `release-it --no-git.requireBranch --preRelease <id>`, so it works off
+feature branches and marks the GitHub Release as a prerelease. The `v*` tag still
+triggers the image publish, but `publish-image` only moves `:latest` for **stable**
+tags — prerelease tags (those containing a `-`) publish only
+`ghcr.io/tulipfarm/app:<version>`.
