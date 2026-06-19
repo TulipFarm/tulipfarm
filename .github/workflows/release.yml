@@ -1,0 +1,63 @@
+name: Release
+
+# Cut a release from `main` with release-it: derive the version bump from
+# Conventional Commits, write CHANGELOG.md, commit, tag `v<version>`, push, and
+# create the matching GitHub Release. Pushing the `v*` tag triggers the
+# `publish-image` job in ci.yml, which builds + pushes the multi-arch image to
+# GHCR — so the Docker image ships as a consequence of the release.
+#
+# This is the CI counterpart to running `pnpm release` locally; both use the same
+# .release-it.json so the two paths produce identical releases.
+on:
+  workflow_dispatch:
+    inputs:
+      increment:
+        description: "Version bump (auto = derive from Conventional Commits)"
+        type: choice
+        options: [auto, patch, minor, major]
+        default: auto
+      dry-run:
+        description: "Dry run — compute everything but do not commit/tag/push/release"
+        type: boolean
+        default: false
+
+# Only ever one release in flight; never cancel a half-done release.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Cut release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # Full history so conventional-changelog can read the commit log since
+          # the last tag.
+          fetch-depth: 0
+          # A PAT with `contents: write` (RELEASE_TOKEN) makes the pushed `v*`
+          # tag trigger ci.yml's publish-image. The default GITHUB_TOKEN works to
+          # cut the release, but pushes made with it do NOT trigger other
+          # workflows (GitHub's recursion guard) — so without the PAT the image
+          # would not auto-publish and you'd re-push the tag manually.
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - uses: ./.github/actions/setup
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Run release-it
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          INCREMENT: ${{ inputs.increment }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          args=(--ci)
+          [ "$INCREMENT" != "auto" ] && args+=("$INCREMENT")
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          pnpm exec release-it "${args[@]}"
