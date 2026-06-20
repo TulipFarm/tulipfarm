@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -87,6 +88,21 @@ export async function buildApp(opts: AppOptions = {}) {
   // in native `pnpm dev` (Vite serves the SPA), so this whole layer is inert there.
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist && existsSync(webDist);
+
+  // Read SHA-256 hashes of the SPA's inline scripts, written by the Dockerfile build step.
+  // Falls back to 'unsafe-inline' only if the hashes file is absent (e.g. local dev builds
+  // that bypass Docker). In the shipped image the file is always present (SEC-V1-002).
+  const spaScriptSrc = (() => {
+    if (!serveSpa || !webDist) return "'unsafe-inline'";
+    try {
+      const hashes = JSON.parse(
+        readFileSync(join(webDist, ".csp-hashes.json"), "utf8")
+      ) as string[];
+      return hashes.map((h) => `'${h}'`).join(" ");
+    } catch {
+      return "'unsafe-inline'";
+    }
+  })();
   // Non-SPA surfaces keep their own handling: the API (JSON), the Scalar docs UI, the
   // OpenAPI doc, and the health probe. Everything else is a client-routed SPA path.
   const isAppApiPath = (url: string) =>
@@ -138,9 +154,11 @@ export async function buildApp(opts: AppOptions = {}) {
     } else if (serveSpa && !isAppApiPath(req.url)) {
       // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
       // for the app shell + its assets to a same-origin policy (INST-003c posture).
+      // script-src uses build-time SHA-256 hashes (computed in the Dockerfile) so only
+      // the exact inline scripts Remix bakes into index.html are allowed (SEC-V1-002).
       reply.header(
         "content-security-policy",
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+        `default-src 'self'; script-src 'self' ${spaScriptSrc}; style-src 'self' 'unsafe-inline'; ` +
           "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
       );
     }
