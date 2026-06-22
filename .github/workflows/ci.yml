@@ -472,6 +472,60 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Installer smoke (issue 186 / AC-001): run the real OCI installer
+  # (scripts/get.tulipfarm.sh) against the locally-built image into a throwaway dir and
+  # assert /health (+ idempotent re-run). Standalone, non-tag refs only (like the other
+  # quality jobs); not part of the publish path.
+  installer-smoke:
+    name: Installer smoke
+    runs-on: ubuntu-latest
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      # Build app image as :ci into the daemon; the smoke harness reuses it (no rebuild).
+      - name: Build app image (load into daemon)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: ghcr.io/tulipfarm/app:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run installer smoke test
+        run: |
+          set -o pipefail
+          bash scripts/test/installer-smoke.sh 2>&1 | tee installer-smoke.log
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Installer smoke"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Installer brought up the stack and /health passed**"
+            else
+              echo "❌ **Installer smoke failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 installer-smoke.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-installer-smoke
+          path: installer-smoke.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Multi-arch publish (INST-001/011, AC-003): build the single bundled image for
   # linux/amd64 + linux/arm64 and push to GHCR under one pinned version tag (no skew).
   # Tags only (v*); gated on `compose-parity` so only health-checked images ship.

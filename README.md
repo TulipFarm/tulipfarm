@@ -9,6 +9,32 @@
   Your business' control panel where autonomous agents run your operations.
 </p>
 
+## Install (self-host)
+
+One line stands up the full stack (the `app` image + bundled PostgreSQL 17 + pgvector)
+with Docker or Podman, generates all secrets, and prints the setup-wizard URL — zero
+config questions. Re-running is the upgrade path (preserves `.env` + data).
+
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo bash
+```
+On Linux with no engine it auto-installs Podman; on macOS install Docker Desktop or
+Podman first (the no-VM native lane is not yet available).
+
+**Windows (WSL2)** — from PowerShell:
+```powershell
+irm https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 | iex
+```
+Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
+
+Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
+`8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
+`TF_BASE_URL`/`TF_REF`. Full guide: [docs/installation](apps/docs/content/docs/installation.mdx).
+
+> Note: the published image + compose land on `main` with the deploy milestone; until
+> then, install from a branch with `TF_REF=<branch>` or test locally via `TF_LOCAL_SRC`.
+
 ## Local Development
 
 ### Prerequisites
