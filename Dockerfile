@@ -24,26 +24,9 @@ RUN pnpm install --frozen-lockfile
 # VITE_API_URL="" makes the built SPA use relative URLs — correct when the API
 # serves the SPA from the same origin (single-image mode on port 8080).
 # The dev fallback in api.ts (localhost:4010) must NOT be baked into the image.
+# The csp-hash Vite plugin extracts inline-script SHA-256 hashes from index.html
+# and writes the full CSP header to build/client/.csp-header.txt (SEC-V1-002).
 RUN VITE_API_URL="" pnpm --filter @tulipfarm/web build
-# Extract SHA-256 hashes of every inline <script> block from the built index.html
-# and write them to .csp-hashes.json. The API reads this at startup to construct a
-# hash-based script-src CSP — no 'unsafe-inline' needed (SEC-V1-002).
-RUN node -e " \
-  const fs = require('fs'); \
-  const crypto = require('crypto'); \
-  const html = fs.readFileSync('apps/web/build/client/index.html', 'utf8'); \
-  const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g; \
-  const hashes = []; \
-  let m; \
-  while ((m = re.exec(html)) !== null) { \
-    const content = m[1]; \
-    if (content.trim()) { \
-      hashes.push('sha256-' + crypto.createHash('sha256').update(content).digest('base64')); \
-    } \
-  } \
-  fs.writeFileSync('apps/web/build/client/.csp-hashes.json', JSON.stringify(hashes)); \
-  console.log('CSP hashes written:', hashes); \
-"
 # Bundle the API + workspace packages into one file. Native modules and packages
 # that read their own files at runtime (scalar UI assets) stay external and are
 # supplied by the prod deploy closure below. The datastore driver (pg) and queue
