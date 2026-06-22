@@ -18,9 +18,14 @@ Install these first:
 
 - **Node.js 24** (the version pinned in `.node-version`)
 - **pnpm** — `npm install -g pnpm`
-- **Homebrew** (macOS only) — the setup script uses it to install PostgreSQL
+- **Docker with Compose v2** (recommended) — the setup script starts a bundled `pgvector/pgvector:pg17` container so nothing needs installing on the host
 
-The setup script installs **PostgreSQL 17 + pgvector** for you.
+If you prefer a native PostgreSQL install instead, Docker is not required. The setup script will prompt you.
+
+<Callout type="info">
+  On macOS with native mode, you also need **Homebrew** — the script uses it to
+  install PostgreSQL 17 + pgvector.
+</Callout>
 
 <Steps>
 
@@ -34,10 +39,31 @@ cd tulipfarm
 bash scripts/setup-dev.sh
 ```
 
-The script installs PostgreSQL 17 + pgvector, starts the database service, creates the
-`tulipfarm` database, initializes your soul repository at `~/.tulipfarm/soul`, and
-generates a `.env.local` file with random bootstrap secrets (`ENCRYPTION_KEY`,
-`JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`).
+The script prompts you to choose how to run PostgreSQL:
+
+- **Docker** (default) — starts a `pgvector/pgvector:pg17` container exposed on `localhost:5432`.
+  No system packages are installed. This is the same image CI and production use.
+- **Native** — installs PostgreSQL 17 + pgvector via Homebrew (macOS) or apt/yum (Linux) and
+  starts the system service.
+
+Either way, the script initializes your soul repository at `~/.tulipfarm/soul` and generates a
+`.env.local` file with random bootstrap secrets (`ENCRYPTION_KEY`, `JWT_SECRET`,
+`WEBHOOK_SIGNING_SECRET`).
+
+For a non-interactive run (CI, scripted environments), set `DB_MODE` before running:
+
+```bash
+DB_MODE=docker bash scripts/setup-dev.sh
+```
+
+Confirm the database is accepting connections:
+
+```bash
+# Docker mode
+pg_isready -h localhost -p 5432 -U tulipfarm
+# Native mode
+psql tulipfarm -c 'select 1'
+```
 
 </Step>
 

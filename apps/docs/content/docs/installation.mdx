@@ -1,0 +1,92 @@
+---
+title: Install (self-host)
+description: One-line install of the TulipFarm OCI stack on Linux, macOS, or Windows (WSL2).
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The one-line installer stands up the full TulipFarm stack (the `app` image + a bundled
+PostgreSQL 17 + pgvector) with Docker or Podman, generates all secrets for you, and
+prints the setup-wizard URL. It asks **zero configuration questions**.
+
+<Callout type="info">
+  Re-running the installer is the upgrade path: it preserves your `.env` (never
+  re-generates secrets) and your database, then pulls the pinned version and restarts.
+</Callout>
+
+## Linux / macOS
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo bash
+```
+
+What it does: detects a container engine (on Linux, auto-installs Podman if neither
+Docker nor Podman is present), writes `/opt/tulipfarm/{docker-compose.yml,.env}`,
+generates `ENCRYPTION_KEY` / `JWT_SECRET` / `WEBHOOK_SIGNING_SECRET` / `POSTGRES_PASSWORD`,
+brings the stack up, polls `/health`, and prints the URL to open.
+
+<Callout type="warn">
+  On macOS with no container runtime, install Docker Desktop or Podman first. The
+  no-VM native lane is not yet available.
+</Callout>
+
+## Windows (WSL2)
+
+From PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 | iex
+```
+
+This verifies WSL2 (and a Linux distro) is installed, then runs the Linux installer
+inside WSL. If WSL is missing it prints the `wsl --install` steps to run first.
+
+## Finish setup
+
+Open the printed URL. While no admin exists, the setup wizard lets you create the first
+admin (no auth), then set the business name, LLM provider key, and optional soul git
+remote. After the first admin is created the setup route locks.
+
+<Callout type="warn">
+  If the installer detected a public IP it prints a TLS warning: the instance is
+  reachable over HTTP and the first visitor becomes admin — complete setup immediately
+  and put a reverse proxy with TLS in front for production.
+</Callout>
+
+## Overrides
+
+### Linux / macOS
+
+All optional, set as environment variables before running:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `TF_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/app:<tag>`). |
+| `TF_PORT` | `8080` | Host port to publish. |
+| `TF_INSTALL_DIR` | `/opt/tulipfarm` | Install directory. |
+| `TF_RUNTIME` | auto | Force `docker` or `podman`. |
+| `TF_BASE_URL` / `TF_REF` | GitHub raw / `main` | Where compose + `.env.example` are fetched from. |
+
+Example — pin a version on a custom port:
+
+```bash
+TF_VERSION=v0.1.0 TF_PORT=9000 \
+  bash -c "curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo -E bash"
+```
+
+### Windows (WSL2)
+
+The PowerShell script accepts named parameters. Download it first, then run with the parameters you need:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 -OutFile install.ps1
+.\install.ps1 -Version v0.1.0
+```
+
+| Parameter | Default | Purpose |
+| --- | --- | --- |
+| `-Version` | `latest` | App image tag (`TF_VERSION` inside WSL). |
+| `-BaseUrl` | GitHub raw | Base URL for fetched files. |
+| `-Ref` | `main` | Git ref under `-BaseUrl`. |
+
+To set `TF_PORT`, `TF_INSTALL_DIR`, or `TF_RUNTIME`, open your WSL terminal and run the bash installer directly with those env vars instead.
