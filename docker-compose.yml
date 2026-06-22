@@ -33,7 +33,6 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       WEBHOOK_SIGNING_SECRET: ${WEBHOOK_SIGNING_SECRET}
       SOUL_PATH: /opt/tulipfarm/soul
-      SETUP_MODE: ${SETUP_MODE:-wizard}
     ports:
       - "${HOST_PORT:-8080}:8080"
     volumes:

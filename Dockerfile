@@ -21,7 +21,12 @@ COPY . .
 # only; never copied to runtime) lets `prepare` succeed without bloating the context.
 RUN git init -q
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @tulipfarm/web build
+# VITE_API_URL="" makes the built SPA use relative URLs — correct when the API
+# serves the SPA from the same origin (single-image mode on port 8080).
+# The dev fallback in api.ts (localhost:4010) must NOT be baked into the image.
+# The csp-hash Vite plugin extracts inline-script SHA-256 hashes from index.html
+# and writes the full CSP header to build/client/.csp-header.txt (SEC-V1-002).
+RUN VITE_API_URL="" pnpm --filter @tulipfarm/web build
 # Bundle the API + workspace packages into one file. Native modules and packages
 # that read their own files at runtime (scalar UI assets) stay external and are
 # supplied by the prod deploy closure below. The datastore driver (pg) and queue
