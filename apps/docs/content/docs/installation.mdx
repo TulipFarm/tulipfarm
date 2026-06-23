@@ -43,9 +43,20 @@ inside WSL. If WSL is missing it prints the `wsl --install` steps to run first.
 
 ## Finish setup
 
-Open the printed URL. While no admin exists, the setup wizard lets you create the first
-admin (no auth), then set the business name, LLM provider key, and optional soul git
-remote. After the first admin is created the setup route locks.
+Open the printed URL. The app redirects to the setup wizard at `/setup`. Work through
+the four steps:
+
+1. **Admin account** — enter an email and password. This is the only step that requires
+   no authentication; the route locks once any admin exists.
+2. **Business profile** — give your instance a name and optional description.
+3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure OpenAI, or an
+   OpenAI-compatible endpoint), enter your credentials, and pick a model. You can skip
+   this step and configure it later in **Settings → LLM Config**.
+4. **Soul backup** — optionally set a git remote URL for soul backup and sync. Skippable.
+
+After step 4, the wizard marks setup complete in `soul.yaml` and redirects to the main
+workspace. The setup routes lock — no second visitor can claim the instance through the
+wizard.
 
 <Callout type="warn">
   If the installer detected a public IP it prints a TLS warning: the instance is

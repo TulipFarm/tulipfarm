@@ -1,4 +1,14 @@
 {
   "title": "Concepts",
-  "pages": ["index", "soul", "resources", "agents", "skills", "knowledge", "llm", "secrets"]
+  "pages": [
+    "index",
+    "soul",
+    "setup",
+    "resources",
+    "agents",
+    "skills",
+    "knowledge",
+    "llm",
+    "secrets"
+  ]
 }

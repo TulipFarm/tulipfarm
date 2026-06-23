@@ -6,6 +6,7 @@
     "install-a-skill",
     "configure-llm-providers",
     "store-a-secret",
-    "issue-an-api-token"
+    "issue-an-api-token",
+    "deploy-headless"
   ]
 }

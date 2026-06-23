@@ -69,25 +69,6 @@ psql tulipfarm -c 'select 1'
 
 <Step>
 
-### Set your admin credentials
-
-Open `.env.local` and set a password for the bootstrap admin. The first user is created
-on boot from these values:
-
-```bash title=".env.local"
-ADMIN_EMAIL=admin@tulipfarm.dev
-ADMIN_PASSWORD=choose-a-strong-password
-```
-
-<Callout type="warn">
-`ADMIN_EMAIL` must be a real email format. An address with no TLD such as
-`admin@localhost` is rejected, and the admin would never be able to log in.
-</Callout>
-
-</Step>
-
-<Step>
-
 ### Install dependencies and start TulipFarm
 
 ```bash
@@ -116,17 +97,23 @@ You should see:
 
 <Step>
 
-### Log in
+### Complete the setup wizard
 
-Open `http://localhost:4000` and sign in with the `ADMIN_EMAIL` and `ADMIN_PASSWORD`
-you set. You land on the workspace: a sidebar with Chat, Resources, Agents, Skills, and
-Settings.
+Open `http://localhost:4000`. Because no admin exists yet, the app redirects to the
+setup wizard at `/setup`. Work through the four steps:
 
-<Callout title="Chat is coming">
-The chat composer is visible but not yet wired — it is flagged `soon`. For now you drive
-your instance through the workspace sections and the soul repo, which is what the rest of
-this guide does.
-</Callout>
+1. **Admin account** — enter an email and password. This creates the first admin and logs
+   you in.
+2. **Business profile** — give your instance a name and optional description.
+3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure OpenAI, or an
+   OpenAI-compatible endpoint), enter the credentials, and pick a model. You can skip this
+   and configure it later in **Settings → LLM Config**.
+4. **Soul backup** — optionally point the soul at a git remote for backup. You can skip
+   this and set it up later in **Settings**.
+
+After step 4, the wizard calls `POST /api/v1/setup/complete` and redirects to the main
+workspace. The setup route locks — a second browser visitor cannot create another admin
+through the wizard.
 
 </Step>
 
