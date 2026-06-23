@@ -19,6 +19,8 @@ import {
   disconnectIntegration,
   getIntegration,
   type McpConnectionStatus,
+  type OAuthConfig,
+  type RequiredEnvVar,
   startOAuth,
 } from "~/lib/integrations";
 
@@ -53,12 +55,93 @@ function errMessage(e: unknown): string {
   return e instanceof Error ? e.message : "request failed";
 }
 
+function FieldHints({ field }: { field: RequiredEnvVar }) {
+  if (!field.steps?.length && !field.setup_url) return null;
+  return (
+    <details className="mt-0.5">
+      <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">
+        How to get this
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1 pl-3 text-xs text-muted-foreground">
+        {field.steps?.map((step, i) => (
+          <p key={step}>
+            {i + 1}. {step}
+          </p>
+        ))}
+        {field.setup_url && (
+          <a
+            href={field.setup_url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-0.5 text-primary underline underline-offset-2 hover:opacity-80"
+          >
+            Open docs →
+          </a>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function EnvField({
+  field,
+  value,
+  onChange,
+}: {
+  field: RequiredEnvVar;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs font-medium text-foreground" htmlFor={field.name}>
+        {field.label}
+        {field.description && (
+          <span className="ml-1 font-normal text-muted-foreground">— {field.description}</span>
+        )}
+      </label>
+      <input
+        id={field.name}
+        className={inputClass}
+        type={field.secret ? "password" : "text"}
+        placeholder={field.name}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        autoComplete={field.secret ? "off" : undefined}
+      />
+      <FieldHints field={field} />
+    </div>
+  );
+}
+
+/** Split required_env into shared / oauth-only / token (direct-only) groups. */
+function splitFields(
+  fields: RequiredEnvVar[],
+  oauth: OAuthConfig | undefined
+): {
+  shared: RequiredEnvVar[];
+  oauthOnly: RequiredEnvVar[];
+  directOnly: RequiredEnvVar[];
+} {
+  if (!oauth) return { shared: fields, oauthOnly: [], directOnly: [] };
+  const oauthKeys = new Set([oauth.client_id_env, oauth.client_secret_env]);
+  const tokenKey = oauth.token_env;
+  return {
+    shared: fields.filter((f) => !oauthKeys.has(f.name) && f.name !== tokenKey),
+    oauthOnly: fields.filter((f) => oauthKeys.has(f.name)),
+    directOnly: fields.filter((f) => f.name === tokenKey),
+  };
+}
+
 export default function IntegrationDetailPage() {
   const { integration } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const requiredEnv = integration.manifest.required_env ?? [];
+  const oauthConfig = integration.manifest.oauth;
+  const { shared, oauthOnly, directOnly } = splitFields(requiredEnv, oauthConfig);
+
   const [envValues, setEnvValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(requiredEnv.map((e) => [e.name, ""]))
   );
@@ -68,6 +151,9 @@ export default function IntegrationDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
+
+  const setField = (name: string) => (v: string) =>
+    setEnvValues((prev) => ({ ...prev, [name]: v }));
 
   // Handle OAuth callback redirect: ?connected=true or ?error=...
   useEffect(() => {
@@ -88,8 +174,15 @@ export default function IntegrationDetailPage() {
     e.preventDefault();
     setConnecting(true);
     setActionError(undefined);
+    // Exclude oauth-only fields (client_id / client_secret) from direct connect env
+    const oauthKeys = new Set(
+      oauthConfig ? [oauthConfig.client_id_env, oauthConfig.client_secret_env] : []
+    );
+    const directEnv = Object.fromEntries(
+      Object.entries(envValues).filter(([k]) => !oauthKeys.has(k))
+    );
     try {
-      await connectIntegration(integration.name, envValues);
+      await connectIntegration(integration.name, directEnv);
       revalidator.revalidate();
     } catch (err) {
       setActionError(errMessage(err));
@@ -138,7 +231,6 @@ export default function IntegrationDetailPage() {
 
   const isConnected = integration.status === "connected";
   const entry = integration.manifest.entry as Record<string, unknown>;
-  const oauthConfig = integration.manifest.oauth;
 
   return (
     <ResourcePanel
@@ -191,7 +283,7 @@ export default function IntegrationDetailPage() {
 
         {/* Connect form (only when not connected) */}
         {!isConnected && (
-          <form onSubmit={handleConnect} className="flex flex-col gap-3">
+          <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-foreground">Connect</h2>
               {integration.setupGuide && (
@@ -204,83 +296,98 @@ export default function IntegrationDetailPage() {
                 </button>
               )}
             </div>
-            {requiredEnv.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                No configuration required. Click Connect to start the MCP server.
-              </p>
-            ) : (
-              requiredEnv.map((field) => (
-                <div key={field.name} className="flex flex-col gap-1">
-                  <label className="text-xs font-medium text-foreground" htmlFor={field.name}>
-                    {field.label}
-                    {field.description && (
-                      <span className="ml-1 font-normal text-muted-foreground">
-                        — {field.description}
-                      </span>
-                    )}
-                  </label>
-                  <input
-                    id={field.name}
-                    className={inputClass}
-                    type={field.secret ? "password" : "text"}
-                    placeholder={field.name}
-                    value={envValues[field.name] ?? ""}
-                    onChange={(e) =>
-                      setEnvValues((prev) => ({ ...prev, [field.name]: e.target.value }))
-                    }
-                    autoComplete={field.secret ? "off" : undefined}
-                  />
-                  {(field.steps?.length || field.setup_url) && (
-                    <details className="mt-0.5">
-                      <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">
-                        How to get this
-                      </summary>
-                      <div className="mt-1.5 flex flex-col gap-1 pl-3 text-xs text-muted-foreground">
-                        {field.steps?.map((step, i) => (
-                          // biome-ignore lint/suspicious/noArrayIndexKey: static ordered list
-                          <p key={i}>
-                            {i + 1}. {step}
-                          </p>
-                        ))}
-                        {field.setup_url && (
-                          <a
-                            href={field.setup_url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="mt-0.5 text-primary underline underline-offset-2 hover:opacity-80"
-                          >
-                            Open docs →
-                          </a>
-                        )}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              ))
-            )}
+
+            {/* Shared fields (e.g. Team ID) — always shown */}
+            {shared.map((field) => (
+              <EnvField
+                key={field.name}
+                field={field}
+                value={envValues[field.name] ?? ""}
+                onChange={setField(field.name)}
+              />
+            ))}
+
             {actionError && <p className="text-sm text-destructive">{actionError}</p>}
             {oauthPending && (
               <p className="text-xs text-muted-foreground">
                 Waiting for authorization in the new tab…
               </p>
             )}
-            <div className="flex gap-2">
-              {oauthConfig && (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={oauthPending || connecting}
-                  onClick={handleOAuth}
-                >
-                  {oauthPending ? "Authorizing…" : "Connect with OAuth"}
+
+            {oauthConfig ? (
+              /* Two-path layout when OAuth is available */
+              <div className="flex flex-col gap-4">
+                {/* OAuth path */}
+                <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
+                  <p className="text-xs font-medium text-foreground">
+                    Option A — Connect with OAuth
+                  </p>
+                  {oauthOnly.map((field) => (
+                    <EnvField
+                      key={field.name}
+                      field={field}
+                      value={envValues[field.name] ?? ""}
+                      onChange={setField(field.name)}
+                    />
+                  ))}
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={oauthPending || connecting}
+                    onClick={handleOAuth}
+                  >
+                    {oauthPending ? "Authorizing…" : "Connect with OAuth"}
+                  </Button>
+                </div>
+
+                {/* Direct token path */}
+                <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
+                  <p className="text-xs font-medium text-foreground">
+                    Option B — Paste token directly
+                  </p>
+                  {directOnly.map((field) => (
+                    <EnvField
+                      key={field.name}
+                      field={field}
+                      value={envValues[field.name] ?? ""}
+                      onChange={setField(field.name)}
+                    />
+                  ))}
+                  <form onSubmit={handleConnect}>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      variant="outline"
+                      disabled={connecting || oauthPending}
+                    >
+                      {connecting ? "Connecting…" : "Connect"}
+                    </Button>
+                  </form>
+                </div>
+              </div>
+            ) : (
+              /* Simple layout when no OAuth */
+              <form onSubmit={handleConnect} className="flex flex-col gap-3">
+                {requiredEnv.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    No configuration required. Click Connect to start the MCP server.
+                  </p>
+                ) : (
+                  requiredEnv.map((field) => (
+                    <EnvField
+                      key={field.name}
+                      field={field}
+                      value={envValues[field.name] ?? ""}
+                      onChange={setField(field.name)}
+                    />
+                  ))
+                )}
+                <Button type="submit" size="sm" disabled={connecting}>
+                  {connecting ? "Connecting…" : "Connect"}
                 </Button>
-              )}
-              <Button type="submit" size="sm" disabled={connecting || oauthPending}>
-                {connecting ? "Connecting…" : "Connect"}
-              </Button>
-            </div>
-          </form>
+              </form>
+            )}
+          </div>
         )}
 
         {/* Disconnect */}
