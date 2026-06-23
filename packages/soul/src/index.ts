@@ -7,6 +7,7 @@ export type {
   IntegrationManifest,
   Logger,
   McpEntry,
+  OAuthConfig,
   RequiredEnvVar,
   SoulAgent,
   SoulIntegration,

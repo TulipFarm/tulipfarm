@@ -218,7 +218,17 @@ export class SoulLoader {
           // connection.yaml is optional — integration is installed but not yet connected
         }
 
-        map.set(name, { name, manifest: manifestRaw, connection });
+        let setupGuide: string | undefined;
+        try {
+          setupGuide = await readFile(
+            join(this.soulPath, "integrations", name, "setup-guide.md"),
+            "utf8"
+          );
+        } catch {
+          // setup-guide.md is optional
+        }
+
+        map.set(name, { name, manifest: manifestRaw, connection, setupGuide });
       } catch (err) {
         this.logger.warn(
           `Soul: skipping integration "${name}" — ${err instanceof Error ? err.message : String(err)}`

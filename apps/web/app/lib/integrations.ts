@@ -22,14 +22,29 @@ export type RequiredEnvVar = {
   label: string;
   description?: string;
   secret?: boolean;
+  setup_url?: string;
+  steps?: string[];
+};
+
+export type OAuthConfig = {
+  authorization_url: string;
+  token_url: string;
+  scopes: string[];
+  client_id_env: string;
+  client_secret_env: string;
+  token_env: string;
+  token_response_path?: string;
 };
 
 export type IntegrationDetail = IntegrationSummary & {
   manifest: {
     required_env?: RequiredEnvVar[];
     entry: Record<string, unknown>;
+    setup_guide_path?: string;
+    oauth?: OAuthConfig;
   };
   connected: boolean;
+  setupGuide?: string;
 };
 
 export type ScannedIntegration = {
@@ -106,4 +121,15 @@ export async function deleteIntegration(name: string): Promise<void> {
 
 export async function marketplaceIntegrations(): Promise<MarketplaceCatalog> {
   return apiGet<MarketplaceCatalog>("/api/v1/integrations/marketplace");
+}
+
+export async function startOAuth(
+  name: string,
+  env: Record<string, string>
+): Promise<{ authUrl: string }> {
+  return apiWrite<{ authUrl: string }>(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/oauth/start`,
+    { env }
+  );
 }

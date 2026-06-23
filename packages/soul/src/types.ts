@@ -34,6 +34,18 @@ export interface RequiredEnvVar {
   label: string;
   description?: string;
   secret?: boolean;
+  setup_url?: string;
+  steps?: string[];
+}
+
+export interface OAuthConfig {
+  authorization_url: string;
+  token_url: string;
+  scopes: string[];
+  client_id_env: string;
+  client_secret_env: string;
+  token_env: string;
+  token_response_path?: string;
 }
 
 export interface IntegrationManifest {
@@ -44,6 +56,8 @@ export interface IntegrationManifest {
   maintainer?: string;
   entry: McpEntry;
   required_env?: RequiredEnvVar[];
+  setup_guide_path?: string;
+  oauth?: OAuthConfig;
 }
 
 export interface IntegrationConnection {
@@ -55,6 +69,7 @@ export interface SoulIntegration {
   name: string;
   manifest: IntegrationManifest;
   connection?: IntegrationConnection;
+  setupGuide?: string;
 }
 
 /** Minimal logger surface (pino/console compatible) shared across soul services. */

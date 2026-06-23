@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import type { GitSyncService, IntegrationManifest, SoulLoader } from "@tulipfarm/soul";
+import type { GitSyncService, IntegrationManifest, OAuthConfig, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as toYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
@@ -24,6 +24,7 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 const SCAN_TTL_MS = 10 * 60 * 1000;
+const OAUTH_TTL_MS = 10 * 60 * 1000;
 const CLONE_TIMEOUT_MS = 60_000;
 const MAX_SCANS = 25;
 
@@ -33,6 +34,23 @@ export interface DiscoveredIntegration {
   type: string;
   manifestPath: string;
   content: string;
+  setupGuideContent?: string;
+}
+
+interface OAuthStateEntry {
+  name: string;
+  env: Record<string, string>;
+  oauthConfig: OAuthConfig;
+  redirectUri: string;
+  expires: number;
+}
+
+const oauthStates = new Map<string, OAuthStateEntry>();
+
+function pruneOAuthStates(now: number): void {
+  for (const [id, entry] of oauthStates) {
+    if (entry.expires <= now) oauthStates.delete(id);
+  }
 }
 
 interface ScanEntry {
@@ -104,12 +122,24 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
           if (parsed.type !== "mcp") continue; // V1: mcp only
           const name = asString(parsed.name) ?? basename(dirname(full));
           if (!NAME_RE.test(name)) continue;
+          let setupGuideContent: string | undefined;
+          if (parsed.setup_guide_path) {
+            try {
+              setupGuideContent = await readFile(
+                join(dirname(full), parsed.setup_guide_path),
+                "utf8"
+              );
+            } catch {
+              // setup guide is optional
+            }
+          }
           out.push({
             name,
             description: asString(parsed.description),
             type: "mcp",
             manifestPath: relative(root, full),
             content,
+            setupGuideContent,
           });
         } catch {
           // skip invalid manifests
@@ -346,6 +376,7 @@ export function registerIntegrationRoutes(
               type: { type: "string" },
               manifest: { type: "object", additionalProperties: true },
               connected: { type: "boolean" },
+              setupGuide: { type: "string" },
             },
           },
           401: ErrorSchema,
@@ -365,6 +396,7 @@ export function registerIntegrationRoutes(
         errorMessage: mcpClient.getErrorMessage(name),
         manifest: integration.manifest,
         connected: integration.connection?.enabled === true,
+        setupGuide: integration.setupGuide,
       };
     }
   );
@@ -501,6 +533,9 @@ export function registerIntegrationRoutes(
         const dir = join(gitSync.path, "integrations", integration.name);
         await mkdir(dir, { recursive: true });
         await writeFile(join(dir, "manifest.json"), integration.content, "utf8");
+        if (integration.setupGuideContent) {
+          await writeFile(join(dir, "setup-guide.md"), integration.setupGuideContent, "utf8");
+        }
         installed.push(integration.name);
       }
 
@@ -621,6 +656,194 @@ export function registerIntegrationRoutes(
       }
 
       return { status: "disconnected" };
+    }
+  );
+
+  // Start OAuth authorization flow for an integration
+  app.post(
+    "/api/v1/integrations/:name/oauth/start",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Begin OAuth authorization flow. Returns an authUrl to open in a new tab. The user's client_id and other env values must be supplied so the redirect can be pre-filled on callback.",
+        tags: ["integrations"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        body: {
+          type: "object",
+          required: ["env"],
+          additionalProperties: false,
+          properties: {
+            env: { type: "object", additionalProperties: { type: "string" } },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["authUrl"],
+            properties: { authUrl: { type: "string" } },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const integration = soulLoader.integrations.get(name);
+      if (!integration) return reply.code(404).send({ error: `integration not found: ${name}` });
+
+      const oauthConfig = integration.manifest.oauth;
+      if (!oauthConfig) {
+        return reply.code(400).send({ error: `integration "${name}" does not support OAuth` });
+      }
+
+      const { env } = req.body as { env: Record<string, string> };
+      const clientId = env[oauthConfig.client_id_env];
+      if (!clientId) {
+        return reply
+          .code(400)
+          .send({ error: `missing required env field: ${oauthConfig.client_id_env}` });
+      }
+
+      const publicUrl = process.env.PUBLIC_URL ?? "http://localhost:8080";
+      const redirectUri = `${publicUrl}/api/v1/integrations/${name}/oauth/callback`;
+      const state = randomUUID();
+      const now = Date.now();
+      pruneOAuthStates(now);
+      oauthStates.set(state, {
+        name,
+        env,
+        oauthConfig,
+        redirectUri,
+        expires: now + OAUTH_TTL_MS,
+      });
+
+      const params = new URLSearchParams({
+        response_type: "code",
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        scope: oauthConfig.scopes.join(" "),
+        state,
+      });
+      const authUrl = `${oauthConfig.authorization_url}?${params.toString()}`;
+      return { authUrl };
+    }
+  );
+
+  // OAuth callback — exchanges code for token, writes connection.yaml, starts MCP
+  app.get(
+    "/api/v1/integrations/:name/oauth/callback",
+    {
+      schema: {
+        description:
+          "OAuth callback handler. Exchanges the authorization code for an access token, writes connection.yaml, and starts the MCP server. Redirects to the integration detail page.",
+        tags: ["integrations"],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        querystring: {
+          type: "object",
+          properties: {
+            code: { type: "string" },
+            state: { type: "string" },
+            error: { type: "string" },
+            error_description: { type: "string" },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const query = req.query as {
+        code?: string;
+        state?: string;
+        error?: string;
+        error_description?: string;
+      };
+
+      const webBase = process.env.PUBLIC_URL ?? "http://localhost:8080";
+
+      if (query.error) {
+        const msg = encodeURIComponent(query.error_description ?? query.error);
+        return reply.redirect(`${webBase}/integrations/${name}?error=${msg}`);
+      }
+
+      const { code, state } = query;
+      if (!code || !state) {
+        return reply.redirect(
+          `${webBase}/integrations/${name}?error=${encodeURIComponent("missing code or state")}`
+        );
+      }
+
+      const stateEntry = oauthStates.get(state);
+      if (!stateEntry || stateEntry.expires <= Date.now() || stateEntry.name !== name) {
+        return reply.redirect(
+          `${webBase}/integrations/${name}?error=${encodeURIComponent("invalid or expired state")}`
+        );
+      }
+      oauthStates.delete(state);
+
+      const { oauthConfig, env, redirectUri } = stateEntry;
+      const clientId = env[oauthConfig.client_id_env] ?? "";
+      const clientSecret = env[oauthConfig.client_secret_env] ?? "";
+
+      // Exchange code for token via form-encoded POST
+      let tokenData: Record<string, unknown>;
+      try {
+        const tokenRes = await fetch(oauthConfig.token_url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Accept: "application/json",
+          },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: redirectUri,
+            client_id: clientId,
+            client_secret: clientSecret,
+          }).toString(),
+        });
+        tokenData = (await tokenRes.json()) as Record<string, unknown>;
+      } catch (e) {
+        const msg = encodeURIComponent(
+          `token exchange failed: ${e instanceof Error ? e.message : String(e)}`
+        );
+        return reply.redirect(`${webBase}/integrations/${name}?error=${msg}`);
+      }
+
+      // Extract token via dot-path (default "access_token")
+      const tokenPath = oauthConfig.token_response_path ?? "access_token";
+      const token = tokenPath.split(".").reduce<unknown>((obj, key) => {
+        return obj && typeof obj === "object" ? (obj as Record<string, unknown>)[key] : undefined;
+      }, tokenData);
+
+      if (typeof token !== "string" || !token) {
+        const msg = encodeURIComponent("token not found in OAuth response");
+        return reply.redirect(`${webBase}/integrations/${name}?error=${msg}`);
+      }
+
+      // Merge token into env and write connection.yaml
+      const mergedEnv = { ...env, [oauthConfig.token_env]: token };
+      const connection = { enabled: true, env: mergedEnv };
+      const connPath = join(gitSync.path, "integrations", name, "connection.yaml");
+      try {
+        await writeFile(connPath, toYaml(connection), "utf8");
+        await gitSync.withSync(`soul: connect integration ${name} via OAuth`);
+        await soulLoader.reload();
+        const integration = soulLoader.integrations.get(name);
+        if (integration) {
+          await mcpClient.connect(name, integration.manifest, connection);
+        }
+      } catch (e) {
+        const msg = encodeURIComponent(
+          `connect failed: ${e instanceof Error ? e.message : String(e)}`
+        );
+        return reply.redirect(`${webBase}/integrations/${name}?error=${msg}`);
+      }
+
+      return reply.redirect(`${webBase}/integrations/${name}?connected=true`);
     }
   );
 

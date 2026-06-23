@@ -1,15 +1,17 @@
 import {
   type ClientLoaderFunctionArgs,
-  Link,
   type MetaFunction,
   useLoaderData,
   useRevalidator,
   useRouteError,
+  useSearchParams,
 } from "@remix-run/react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { Modal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
 import {
   connectIntegration,
@@ -17,6 +19,7 @@ import {
   disconnectIntegration,
   getIntegration,
   type McpConnectionStatus,
+  startOAuth,
 } from "~/lib/integrations";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
@@ -53,15 +56,33 @@ function errMessage(e: unknown): string {
 export default function IntegrationDetailPage() {
   const { integration } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const requiredEnv = integration.manifest.required_env ?? [];
   const [envValues, setEnvValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(requiredEnv.map((e) => [e.name, ""]))
   );
   const [connecting, setConnecting] = useState(false);
+  const [oauthPending, setOauthPending] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string>();
+  const [guideOpen, setGuideOpen] = useState(false);
+
+  // Handle OAuth callback redirect: ?connected=true or ?error=...
+  useEffect(() => {
+    const connected = searchParams.get("connected");
+    const error = searchParams.get("error");
+    if (connected === "true") {
+      setOauthPending(false);
+      setSearchParams({}, { replace: true });
+      revalidator.revalidate();
+    } else if (error) {
+      setOauthPending(false);
+      setActionError(decodeURIComponent(error));
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams, revalidator]);
 
   async function handleConnect(e: React.FormEvent) {
     e.preventDefault();
@@ -74,6 +95,18 @@ export default function IntegrationDetailPage() {
       setActionError(errMessage(err));
     } finally {
       setConnecting(false);
+    }
+  }
+
+  async function handleOAuth() {
+    setActionError(undefined);
+    setOauthPending(true);
+    try {
+      const { authUrl } = await startOAuth(integration.name, envValues);
+      window.open(authUrl, "_blank", "noopener,noreferrer");
+    } catch (err) {
+      setActionError(errMessage(err));
+      setOauthPending(false);
     }
   }
 
@@ -105,6 +138,7 @@ export default function IntegrationDetailPage() {
 
   const isConnected = integration.status === "connected";
   const entry = integration.manifest.entry as Record<string, unknown>;
+  const oauthConfig = integration.manifest.oauth;
 
   return (
     <ResourcePanel
@@ -158,7 +192,18 @@ export default function IntegrationDetailPage() {
         {/* Connect form (only when not connected) */}
         {!isConnected && (
           <form onSubmit={handleConnect} className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium text-foreground">Connect</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-medium text-foreground">Connect</h2>
+              {integration.setupGuide && (
+                <button
+                  type="button"
+                  onClick={() => setGuideOpen(true)}
+                  className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  Setup guide →
+                </button>
+              )}
+            </div>
             {requiredEnv.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 No configuration required. Click Connect to start the MCP server.
@@ -185,12 +230,53 @@ export default function IntegrationDetailPage() {
                     }
                     autoComplete={field.secret ? "off" : undefined}
                   />
+                  {(field.steps?.length || field.setup_url) && (
+                    <details className="mt-0.5">
+                      <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">
+                        How to get this
+                      </summary>
+                      <div className="mt-1.5 flex flex-col gap-1 pl-3 text-xs text-muted-foreground">
+                        {field.steps?.map((step, i) => (
+                          // biome-ignore lint/suspicious/noArrayIndexKey: static ordered list
+                          <p key={i}>
+                            {i + 1}. {step}
+                          </p>
+                        ))}
+                        {field.setup_url && (
+                          <a
+                            href={field.setup_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mt-0.5 text-primary underline underline-offset-2 hover:opacity-80"
+                          >
+                            Open docs →
+                          </a>
+                        )}
+                      </div>
+                    </details>
+                  )}
                 </div>
               ))
             )}
             {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+            {oauthPending && (
+              <p className="text-xs text-muted-foreground">
+                Waiting for authorization in the new tab…
+              </p>
+            )}
             <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={connecting}>
+              {oauthConfig && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={oauthPending || connecting}
+                  onClick={handleOAuth}
+                >
+                  {oauthPending ? "Authorizing…" : "Connect with OAuth"}
+                </Button>
+              )}
+              <Button type="submit" size="sm" disabled={connecting || oauthPending}>
                 {connecting ? "Connecting…" : "Connect"}
               </Button>
             </div>
@@ -235,6 +321,20 @@ export default function IntegrationDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* Setup guide modal */}
+      {integration.setupGuide && (
+        <Modal
+          open={guideOpen}
+          onClose={() => setGuideOpen(false)}
+          title="Setup guide"
+          className="max-w-2xl"
+        >
+          <div className="max-h-[70vh] overflow-y-auto">
+            <MarkdownView>{integration.setupGuide}</MarkdownView>
+          </div>
+        </Modal>
+      )}
     </ResourcePanel>
   );
 }
