@@ -40,6 +40,8 @@ import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
+import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
+import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
@@ -194,6 +196,23 @@ export async function buildApp(opts: AppOptions = {}) {
       rateLimiter: opts.rateLimiter,
     });
     const requireAuth = makeRequireAuth(opts.sessionStore, opts.userRepo, opts.tokenRepo);
+    // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
+    // In headless boot the wizard step routes below are absent (404), but status is always reachable.
+    const soulPath = process.env.SOUL_PATH;
+    if (soulPath) {
+      registerSetupStatusRoute(app, { userRepo: opts.userRepo, soulPath });
+    }
+    // Wizard step routes: only registered when NOT in headless boot (AC-005).
+    if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
+      registerSetupRoutes(app, {
+        userRepo: opts.userRepo,
+        sessionStore: opts.sessionStore,
+        secretsService: opts.secretsService,
+        gitSync: opts.gitSync,
+        soulPath,
+        requireAuth,
+      });
+    }
     if (opts.secretsService) {
       registerSecretsRoutes(app, opts.secretsService, requireAuth, {
         onSecretDeleted:

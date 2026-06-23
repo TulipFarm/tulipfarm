@@ -162,7 +162,6 @@ DATABASE_URL=postgresql://tulipfarm:${pw}@postgres:5432/tulipfarm
 ENCRYPTION_KEY=${enc}
 JWT_SECRET=${jwt}
 WEBHOOK_SIGNING_SECRET=${webhook}
-SETUP_MODE=wizard
 EOF
 }
 

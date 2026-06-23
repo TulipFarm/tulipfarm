@@ -3,12 +3,15 @@ import { AppSidebar } from "~/components/app-sidebar";
 import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
 import { ConversationsProvider } from "~/lib/conversations-context";
+import { getSetupStatus } from "~/lib/setup";
 
-// Auth gate for the whole app shell: every /app/* route runs this parent loader first. An
-// unauthenticated session (401) redirects to /login (preserving where the user was headed); a dev
-// Bearer token (VITE_API_TOKEN) authenticates too, so that path keeps working. Other errors bubble
-// to the route ErrorBoundary.
+// Auth gate for the whole app shell: every /app/* route runs this parent loader first.
+// Checks setup status first: if the instance needs first-run setup, redirect to /setup.
+// Then checks auth: unauthenticated session (401) redirects to /login.
 export async function clientLoader() {
+  const { needsSetup } = await getSetupStatus();
+  if (needsSetup) throw redirect("/setup");
+
   try {
     return { user: await getSession() };
   } catch (err) {
