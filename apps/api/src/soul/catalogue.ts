@@ -75,7 +75,7 @@ export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCata
   const integrations = values(soulLoader?.integrations)
     .map((i) => ({
       name: i.name,
-      description: asDesc(i.connection.description) || asDesc(i.connection.title),
+      description: asDesc(i.manifest.description),
     }))
     .sort(byName);
 

@@ -1,3 +1,5 @@
+import type { SoulLoader } from "@tulipfarm/soul";
+import type { McpClientService } from "../integrations/mcp-client-service";
 import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
 import type { KvService } from "../kv/service";
@@ -26,6 +28,8 @@ export function buildToolRegistry(services: {
   agentTools?: AgentToolContext;
   skillTools?: SkillToolContext;
   platform?: PlatformToolContext;
+  mcpClient?: McpClientService;
+  soulLoader?: SoulLoader;
 }): ToolRegistry {
   const registry = new ToolRegistry();
 
@@ -148,6 +152,18 @@ export function buildToolRegistry(services: {
   // (client context) and return client-action descriptors. No services to close over.
   for (const t of FRONTEND_TOOLS) {
     registry.register(t);
+  }
+
+  // MCP integration tools: give the McpClientService the registry so it can register/unregister
+  // tools dynamically when integrations connect/disconnect at runtime, then start all currently
+  // enabled integrations from soul.
+  if (services.mcpClient) {
+    const mcpClient = services.mcpClient;
+    mcpClient.setRegistry(registry);
+    if (services.soulLoader?.integrations) {
+      // Non-blocking: failures are logged inside startAll, not thrown.
+      void mcpClient.startAll(services.soulLoader.integrations);
+    }
   }
 
   return registry;

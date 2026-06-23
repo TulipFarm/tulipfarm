@@ -25,9 +25,36 @@ export interface SoulRoutine {
   hasHooks: boolean;
 }
 
+export type McpEntry =
+  | { transport: "stdio"; command: string; args?: string[] }
+  | { transport: "sse"; url: string; headers?: Record<string, string> };
+
+export interface RequiredEnvVar {
+  name: string;
+  label: string;
+  description?: string;
+  secret?: boolean;
+}
+
+export interface IntegrationManifest {
+  name: string;
+  type: "mcp";
+  version?: string;
+  description?: string;
+  maintainer?: string;
+  entry: McpEntry;
+  required_env?: RequiredEnvVar[];
+}
+
+export interface IntegrationConnection {
+  enabled: boolean;
+  env?: Record<string, string>;
+}
+
 export interface SoulIntegration {
   name: string;
-  connection: Record<string, unknown>;
+  manifest: IntegrationManifest;
+  connection?: IntegrationConnection;
 }
 
 /** Minimal logger surface (pino/console compatible) shared across soul services. */

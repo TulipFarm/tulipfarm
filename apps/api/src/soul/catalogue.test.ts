@@ -31,9 +31,14 @@ const routine = (name: string, config: Record<string, unknown>): SoulRoutine => 
   config,
   hasHooks: false,
 });
-const integration = (name: string, connection: Record<string, unknown>): SoulIntegration => ({
+const integration = (name: string, description?: string): SoulIntegration => ({
   name,
-  connection,
+  manifest: {
+    name,
+    type: "mcp",
+    description,
+    entry: { transport: "stdio", command: "echo" },
+  },
 });
 
 function fakeLoader(
@@ -67,7 +72,7 @@ describe("buildSoulCatalogue", () => {
         ],
         resources: [resource("ticket", {}), resource("invoice", {})],
         routines: [routine("nightly", {}), routine("hourly", {})],
-        integrations: [integration("slack", {}), integration("github", {})],
+        integrations: [integration("slack"), integration("github")],
       })
     );
     // Platform agents are always present, sorted in among soul agents by name.
@@ -93,7 +98,7 @@ describe("buildSoulCatalogue", () => {
           resource("bare", {}),
         ],
         routines: [routine("r", { title: "Routine title" })],
-        integrations: [integration("i", { title: "Integration title" })],
+        integrations: [integration("i", "Integration title")],
       })
     );
     expect(cat.skills[0]?.description).toBe("Skill desc");

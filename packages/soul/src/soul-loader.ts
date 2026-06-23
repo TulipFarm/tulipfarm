@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml } from "yaml";
 import type {
+  IntegrationConnection,
+  IntegrationManifest,
   Logger,
+  McpEntry,
   SoulAgent,
   SoulIntegration,
   SoulResource,
@@ -187,11 +190,35 @@ export class SoulLoader {
     const map = new Map<string, SoulIntegration>();
     const names = await subdirs(join(this.soulPath, "integrations"));
     for (const name of names) {
-      const connPath = join(this.soulPath, "integrations", name, "connection.yaml");
+      const manifestPath = join(this.soulPath, "integrations", name, "manifest.json");
       try {
-        const content = await readFile(connPath, "utf8");
-        const connection = (parseYaml(content) ?? {}) as Record<string, unknown>;
-        map.set(name, { name, connection });
+        const manifestRaw = JSON.parse(await readFile(manifestPath, "utf8")) as IntegrationManifest;
+        if (manifestRaw.type !== "mcp") {
+          this.logger.warn(
+            `Soul: skipping integration "${name}" — unsupported type "${manifestRaw.type}" (V1 supports mcp only)`
+          );
+          continue;
+        }
+        // Validate entry shape minimally — must have transport
+        const entry = manifestRaw.entry as McpEntry;
+        if (!entry?.transport) {
+          this.logger.warn(
+            `Soul: skipping integration "${name}" — manifest.entry.transport missing`
+          );
+          continue;
+        }
+
+        let connection: IntegrationConnection | undefined;
+        const connPath = join(this.soulPath, "integrations", name, "connection.yaml");
+        try {
+          const connRaw = (parseYaml(await readFile(connPath, "utf8")) ??
+            {}) as IntegrationConnection;
+          connection = connRaw;
+        } catch {
+          // connection.yaml is optional — integration is installed but not yet connected
+        }
+
+        map.set(name, { name, manifest: manifestRaw, connection });
       } catch (err) {
         this.logger.warn(
           `Soul: skipping integration "${name}" — ${err instanceof Error ? err.message : String(err)}`

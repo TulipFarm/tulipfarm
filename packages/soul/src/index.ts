@@ -3,7 +3,11 @@ export type { SoulMigration } from "./migrations/index";
 export { SoulLoader } from "./soul-loader";
 export { runSoulMigrations } from "./soul-migrations";
 export type {
+  IntegrationConnection,
+  IntegrationManifest,
   Logger,
+  McpEntry,
+  RequiredEnvVar,
   SoulAgent,
   SoulIntegration,
   SoulResource,
