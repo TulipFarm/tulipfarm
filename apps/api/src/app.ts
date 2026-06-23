@@ -289,6 +289,16 @@ export async function buildApp(opts: AppOptions = {}) {
           mcpClient: mcpClientSvc,
           soulLoader: opts.soulLoader,
         });
+      // When an external registry is provided (e.g. from index.ts which builds the full registry
+      // separately), the inner buildToolRegistry above is skipped, so mcpClientSvc never gets its
+      // registry wired. Do it here so integration tools registered on connect/disconnect land in
+      // the same registry the chat turn uses.
+      if (opts.toolRegistry) {
+        mcpClientSvc.setRegistry(opts.toolRegistry);
+        if (opts.soulLoader?.integrations) {
+          void mcpClientSvc.startAll(opts.soulLoader.integrations);
+        }
+      }
       const approvalRegistry = opts.approvalRegistry ?? new ApprovalRegistry();
       registerChatRoutes(
         app,

@@ -89,6 +89,10 @@ export class McpClientService {
     return this.connections.get(name)?.errorMessage;
   }
 
+  getToolNames(name: string): string[] {
+    return this.connections.get(name)?.toolNames ?? [];
+  }
+
   async connect(
     name: string,
     manifest: IntegrationManifest,

@@ -377,6 +377,7 @@ export function registerIntegrationRoutes(
               manifest: { type: "object", additionalProperties: true },
               connected: { type: "boolean" },
               setupGuide: { type: "string" },
+              toolNames: { type: "array", items: { type: "string" } },
             },
           },
           401: ErrorSchema,
@@ -397,6 +398,7 @@ export function registerIntegrationRoutes(
         manifest: integration.manifest,
         connected: integration.connection?.enabled === true,
         setupGuide: integration.setupGuide,
+        toolNames: mcpClient.getToolNames(name),
       };
     }
   );
@@ -614,7 +616,7 @@ export function registerIntegrationRoutes(
         });
       }
 
-      return { status: mcpClient.getStatus(name), toolCount: 0 };
+      return { status: mcpClient.getStatus(name), toolCount: mcpClient.getToolNames(name).length };
     }
   );
 
