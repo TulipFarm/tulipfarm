@@ -4,6 +4,7 @@
     "define-a-resource-type",
     "work-with-records",
     "install-a-skill",
+    "connect-an-integration",
     "configure-llm-providers",
     "store-a-secret",
     "issue-an-api-token",

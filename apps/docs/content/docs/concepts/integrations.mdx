@@ -1,0 +1,99 @@
+---
+title: Integrations
+description: MCP servers that give agents access to external tools, connected through the soul.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+An integration connects TulipFarm to an external service — Slack, GitHub, or any
+[Model Context Protocol](https://modelcontextprotocol.io) server — so agents can call
+that service's tools directly during a conversation. When an integration is connected,
+its tools appear in the agent's context alongside TulipFarm's built-in tools.
+
+## What lives in the soul
+
+Each installed integration occupies a directory under `soul/integrations/{name}/`:
+
+```text
+soul/
+  integrations/
+    slack/
+      manifest.json      definition: what the server is and how to start it
+      connection.yaml    credential env vars + enabled flag
+      setup-guide.md     optional credential walkthrough
+```
+
+`manifest.json` is written once at install time. `connection.yaml` is written when you
+connect the integration; it holds the environment variables the MCP server needs (tokens,
+IDs) and the `enabled: true` flag that tells the runtime to start it on boot.
+
+## Install vs. connect
+
+Installing and connecting are two separate steps.
+
+**Install** copies the integration's `manifest.json` into the soul repo and records it in
+`integrations-lock.json` with its source URL and ref. No server starts. No credentials
+are needed yet.
+
+**Connect** writes the credentials into `connection.yaml`, starts the MCP subprocess, and
+registers its tools in the tool registry. From that point on, any agent turn can call
+those tools.
+
+Disconnecting stops the server and removes its tools from the registry. The soul entry
+stays; you can reconnect later without reinstalling.
+
+## Credentials: two paths
+
+A connected integration needs credentials. TulipFarm supports two ways to supply them.
+
+**Direct token** — paste a long-lived token (or any other static value) directly into the
+connect form. This is the fastest path and works for any integration.
+
+**OAuth** — for integrations that declare an `oauth` block in their manifest, you can
+register your own OAuth app with the external service and let TulipFarm drive the
+authorization code flow. You supply the Client ID and Client Secret; TulipFarm opens the
+service's authorization page in a new tab, exchanges the code, and stores the resulting
+access token automatically.
+
+<Callout type="info">
+TulipFarm does not manage a shared OAuth app. You register your own — this keeps
+your tokens scoped to your account and your data.
+</Callout>
+
+Credentials are stored in `connection.yaml` in the soul repo. Treat that file like any
+other secrets file: restrict access to the soul directory.
+
+## Tools in the agent context
+
+When an integration connects, TulipFarm lists the tools the MCP server exposes and
+registers each one in the tool registry under the name
+`integration_{integration-name}_{tool-name}`. For example, Slack's `post_message` tool
+becomes `integration_slack_post_message`.
+
+Those tools are available to every agent on the next turn, right alongside the built-in
+resource, memory, and skill tools. The agent calls them the same way it calls any other
+tool — by name, with arguments — and the result is returned from the running MCP server
+process.
+
+If the MCP server exits unexpectedly, its tools are unregistered and the integration
+status changes to `error`. Reconnecting restarts the server and re-registers the tools.
+
+## Installing from the marketplace
+
+The official TulipFarm integrations are published at `tulipfarm/integrations` on GitHub.
+You can browse and install from there in the web UI, or scan any git URL that contains
+a `manifest.json` file at depth ≤ 6.
+
+<Callout type="info">
+Scanning clones the repository temporarily. Nothing is written to the soul until you
+explicitly confirm the install.
+</Callout>
+
+## V1 limits
+
+- Only `type: mcp` integrations are supported. HTTP/SSE transports are accepted alongside
+  stdio; other types are ignored with a warning.
+- Every agent gets access to all connected integration tools. Per-agent tool restriction
+  is not yet available.
+- TulipFarm does not rotate or refresh tokens. If an OAuth access token expires, you need
+  to reconnect.
