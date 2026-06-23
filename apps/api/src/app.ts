@@ -200,7 +200,11 @@ export async function buildApp(opts: AppOptions = {}) {
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
     const soulPath = process.env.SOUL_PATH;
     if (soulPath) {
-      registerSetupStatusRoute(app, { userRepo: opts.userRepo, soulPath });
+      registerSetupStatusRoute(app, {
+        userRepo: opts.userRepo,
+        soulPath,
+        rateLimiter: opts.rateLimiter,
+      });
     }
     // Wizard step routes: only registered when NOT in headless boot (AC-005).
     if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {

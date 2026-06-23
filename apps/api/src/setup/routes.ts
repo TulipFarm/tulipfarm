@@ -8,6 +8,7 @@ import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { createUser, toPublicUser, type UserRepo } from "../auth/users";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import { isHeadlessBoot } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
@@ -45,9 +46,13 @@ function setSessionCookies(reply: FastifyReply, sid: string, ttlSeconds: number)
 // so the web client can rely on an explicit 200 rather than treating 404 as "not needed".
 export function registerSetupStatusRoute(
   app: FastifyInstance,
-  deps: Pick<SetupDeps, "userRepo" | "soulPath">
+  deps: Pick<SetupDeps, "userRepo" | "soulPath"> & { rateLimiter?: RateLimiter }
 ): void {
-  const { userRepo, soulPath } = deps;
+  const { userRepo, soulPath, rateLimiter } = deps;
+  // 30 req/min per IP — generous for a status poll, protects DB/FS on cold path.
+  const preHandler = rateLimiter
+    ? makeRateLimitHook(rateLimiter, (req) => `rl:setup:${req.ip}`, 30, 60_000)
+    : undefined;
   // Closure-scoped cache: once setup is confirmed complete, skip all I/O for the
   // lifetime of this process. Resets naturally on restart (one cold check per boot).
   let done = false;
@@ -55,6 +60,7 @@ export function registerSetupStatusRoute(
   app.get(
     "/api/v1/setup/status",
     {
+      ...(preHandler ? { preHandler } : {}),
       schema: {
         description: "Whether first-run setup is still required.",
         tags: ["setup"],
