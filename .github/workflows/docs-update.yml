@@ -1,0 +1,47 @@
+name: Daily Documentation Update
+
+on:
+  schedule:
+    - cron: '30 10 * * *' # 4:00 PM IST (UTC+5:30) daily
+  workflow_dispatch: # manual trigger for testing
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-update
+  cancel-in-progress: true
+
+jobs:
+  update-docs:
+    name: Auto-update documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run absolute-documentations skill
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Improve all documentation in this repository using the absolute-documentations skill.
+
+            Invoke the skill now. This is a fully automated CI run — you MUST NOT pause at any
+            approval gate or intake question. Answer all skill questions yourself using best
+            judgment from the codebase, then auto-approve the outline and proceed to write.
+
+            Scope (IMPROVE mode, not AUDIT):
+            - apps/docs/content/docs/**   (Fumadocs user-facing docs, MDX format)
+            - README.md, AGENTS.md, DESIGN.md  (root-level developer docs)
+            - docs/runbooks/*.md               (operational runbooks)
+
+            Audience: developers building on or contributing to this project.
+            Goal: every doc is accurate, complete, Diátaxis-compliant, and matches the current
+            codebase state.
+
+            After all docs are improved:
+            1. Create branch: docs/auto-update-YYYY-MM-DD (today's date)
+            2. Commit with message: "docs: automated documentation update"
+            3. Open a PR titled "docs: automated documentation update [YYYY-MM-DD]"
