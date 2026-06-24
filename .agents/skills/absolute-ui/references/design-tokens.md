@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      working with design tokens, CSS custom properties, theming architecture, or design system setup. -->
 
 # Design Tokens and Theming Architecture

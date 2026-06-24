@@ -1,37 +1,39 @@
 ---
 name: absolute-simplify
-version: 0.1.0
+version: 0.5.0
 description: >
-  Autonomously simplifies code in your working changes or targeted files. Detects
-  staged or unstaged git changes, analyzes for simplification opportunities following
-  clean code and clean architecture principles, applies improvements directly, runs
-  tests to verify nothing broke, and shows a structured summary with reasoning.
-  Triggers on "simplify this", "refactor this", "clean up my changes",
-  "absolute-simplify", "simplify my code", "make this cleaner", "tidy this up",
-  "reduce complexity", "flatten this", "remove dead code", or when code needs
-  clarity improvements, nesting reduction, or redundancy removal.
-  Language-agnostic at base with deep opinions for JS/TS/React, Python, and Go.
+  Autonomously simplify staged/unstaged git changes or a target path — reduce
+  complexity, flatten nesting, remove redundancy and dead code — then run tests
+  to prove nothing broke. Acts on your working diff; for repo-wide dead code use
+  absolute-prune; for lint/type debt use absolute-debt.
+  Triggers on "absolute simplify", "simplify this", "clean up my changes",
+  "refactor this", "reduce complexity", "remove dead code", "tidy this up".
 category: workflow
-tags: [simplification, refactoring, clean-code, autonomous, code-quality, clarity]
-recommended_skills: [absolute-work, absolute-ui]
+tags:
+  - workflow
+  - simplification
+  - refactoring
+  - cleanup
+  - code-quality
 platforms:
   - claude-code
   - gemini-cli
   - openai-codex
   - mcp
-model: opus
+user-invocable: true
+argument-hint: "[target]"
 license: MIT
 maintainers:
   - github: maddhruv
 ---
 
-When this skill is activated, always start your first response with the broom emoji.
+> Start your first response with the broom emoji.
 
-# Absolute Simplify
+## Absolute Simplify
 
 ## Activation Banner
 
-**At the very start of every absolute-simplify invocation**, before any other output, display this ASCII art banner:
+**At the very start of every `simplify` invocation**, before any other output, display this ASCII art banner:
 
 ```
  █████╗ ██████╗ ███████╗ ██████╗ ██╗     ██╗   ██╗████████╗███████╗
@@ -63,7 +65,7 @@ compact solutions. You never change what code does, only how it does it.
 
 Trigger this skill when the user:
 - Asks to simplify, clean up, refactor, or refine their code or recent changes
-- Says "absolute-simplify", "simplify this", "clean up my changes", "simplify my code"
+- Says "absolute simplify", "simplify this", "clean up my changes", "simplify my code"
 - Says "refactor this", "refactor my changes", "make this cleaner", "tidy this up"
 - Says "reduce complexity", "flatten this", "remove dead code", "clean this up"
 - Points at a file or directory and asks to make it cleaner, simpler, or more readable
@@ -72,10 +74,10 @@ Trigger this skill when the user:
 - Has just finished writing code and wants it polished before committing
 
 Do NOT trigger this skill for:
-- Adding new features or functionality (use absolute-work instead)
+- Adding new features or functionality (use `/absolute work` instead)
 - Fixing bugs where behavior needs to change
 - Performance optimization (simplification targets readability, not speed)
-- Architecture-level redesign (use absolute-work instead)
+- Architecture-level redesign (use `/absolute work` instead)
 - Code review that should only produce findings, not edits
 
 ---
@@ -117,7 +119,7 @@ You MUST complete these steps in order:
 Determine what code to simplify, in this priority order:
 
 1. **Check for arguments first.** If the user specified a file or directory
-   (e.g., `/absolute-simplify src/utils/`), that is the scope. Skip git checks.
+   (e.g., `/absolute simplify src/utils/`), that is the scope. Skip git checks.
 
 2. **Check staged changes.** Run `git diff --cached --name-only`. If non-empty,
    those files are the scope. Tell the user: "Found N staged files. Simplifying
@@ -252,8 +254,9 @@ After all simplifications are applied, attempt to verify nothing broke.
 - `go.mod` exists -> `go vet ./...`
 
 **Run and interpret:**
-- Set a **60-second timeout** on test/lint commands. If they time out, report
-  "Tests timed out - manual verification recommended" and do not revert.
+- Set a **reasonable timeout** on test/lint commands so a slow suite never hangs
+  the session. If they time out, report "Tests timed out - manual verification
+  recommended" and do not revert.
 - If tests pass, report it.
 - If tests fail, analyze which test(s) broke:
   - If clearly caused by a simplification: revert that specific change, re-run
@@ -354,8 +357,8 @@ code theory in the summary -- just state what changed and why in plain language.
    break tests or reduce coverage. Apply extra conservatism to test files.
 
 4. **Auto-verify can time out on slow test suites.** Large projects have test
-   suites that take minutes. The 60-second timeout prevents hanging. Report the
-   timeout and let the user run tests manually.
+   suites that take minutes. A timeout prevents hanging. Report the timeout and
+   let the user run tests manually.
 
 5. **Multi-language repos overload context.** A monorepo with JS, Python, and Go
    files in scope loads 4 reference files (3 language + 1 universal). If one
@@ -382,7 +385,7 @@ code theory in the summary -- just state what changed and why in plain language.
 | Making 10 separate edits to one file | Batch all changes to a file in one pass |
 | Skipping re-read after edit | Always re-read the file to verify syntactic coherence |
 | Not re-staging files that were staged | After editing staged files, run `git add` to preserve staging state |
-| Running tests without a timeout | Cap test runs at 60 seconds. Report timeout, don't hang |
+| Running tests without a timeout | Cap test runs with a timeout. Report timeout, don't hang |
 | Presenting analysis and asking for permission | This is an autonomous skill. Analyze, apply, verify, report |
 
 ---
@@ -408,15 +411,12 @@ references.
 
 ---
 
-## Companion check
+## Companion commands
 
-> On first activation of this skill in a conversation: check which companion
-> skills are installed by running
-> `ls ~/.claude/skills/ ~/.agent/skills/ ~/.agents/skills/ .claude/skills/ .agent/skills/ .agents/skills/ 2>/dev/null`.
-> Compare the results against the `recommended_skills` field in this file's
-> frontmatter. For any that are missing, mention them once and offer to install:
-> ```
-> npx skills add AbsolutelySkilled/AbsolutelySkilled --skill <name>
-> ```
-> Skip entirely if `recommended_skills` is empty or all companions are already
-> installed.
+Sibling commands in this skill chain naturally around `simplify`:
+
+- **`/absolute work`** — plan and build features end-to-end (then `simplify` the diff).
+- **`/absolute ui`** — design or refine interface code.
+- **`/absolute docs`** — document the simplified code.
+
+Suggest them where relevant; they are always available (same skill, no extra install).

@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      the user specifies a product type, industry, or domain to help choose
      the right style, colors, fonts, and layout patterns. -->
 

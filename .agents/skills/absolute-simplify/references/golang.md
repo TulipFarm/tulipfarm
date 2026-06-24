@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Simplify AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (simplify command). Load this file when
      simplifying Go files. -->
 
 # Go Simplification Guide

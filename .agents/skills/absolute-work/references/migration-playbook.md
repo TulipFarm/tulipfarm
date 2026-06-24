@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Work AbsolutelySkilled skill. Load this file when the work type is a migration — alongside intake-playbook.md. Covers call-site inventory, codemods, incremental rollout, backwards-compat, and rollback. -->
+<!-- Part of the `absolute` skill (work command). Load this file when the work type is a migration — alongside intake-playbook.md. Covers call-site inventory, codemods, incremental rollout, backwards-compat, and rollback. -->
 
 # Migration Playbook
 

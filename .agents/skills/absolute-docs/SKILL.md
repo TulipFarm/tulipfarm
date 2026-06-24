@@ -1,42 +1,36 @@
 ---
-name: absolute-documentations
-version: 0.1.0
+name: absolute-docs
+version: 0.5.0
 description: >
-  Diátaxis-driven documentation writing, improvement, and auditing for AI agents.
-  Writes public-facing product docs (tutorials, how-to guides, reference,
-  explanation) and repo developer docs (README, CONTRIBUTING, ARCHITECTURE, ADRs,
-  changelogs, runbooks), improves existing pages to their quadrant's standard, and
-  audits whole doc sites against the Diátaxis map. Detects the docs stack
-  (Fumadocs, Docusaurus, Starlight, MkDocs, VitePress, Mintlify, plain Markdown)
-  and follows its conventions. Triggers on "write docs", "document this",
-  "write a tutorial", "write a README", "improve this doc", "audit our docs",
-  "restructure the documentation", or "absolute-documentations this".
-category: writing
+  Diátaxis-driven documentation for AI coding agents: write, improve, or audit
+  tutorials, how-tos, reference, explanation, and developer docs (README,
+  CONTRIBUTING, ADRs). Detects the docs stack; gates on the outline before
+  writing prose; verifies every claim against the code before it ships.
+  Triggers on "absolute docs", "write docs", "write a tutorial", "write a README",
+  "document this", "improve this doc", "audit our docs".
+category: workflow
 tags:
+  - workflow
   - documentation
   - diataxis
-  - technical-writing
-  - developer-docs
   - readme
-  - docs-site
-recommended_skills: [absolute-work, absolute-ui]
+  - tutorials
+  - reference
 platforms:
   - claude-code
   - gemini-cli
   - openai-codex
   - mcp
-sources:
-  - url: https://diataxis.fr/
-    accessed: 2026-06-10
-    description: The Diátaxis framework for technical documentation authoring
+user-invocable: true
+argument-hint: "[target]"
 license: MIT
 maintainers:
   - github: maddhruv
 ---
 
-When this skill is activated, always start your first response with the 📚 emoji.
+> Start your first response with the 📚 emoji.
 
-# Absolute Documentations: Diátaxis-Driven Documentation
+## Absolute Documentations: Diátaxis-Driven Documentation
 
 Absolute Documentations turns "write some docs" into documentation a reader can
 actually use. Every document it produces serves exactly one reader need, identified
@@ -333,3 +327,15 @@ Load on demand from `references/`:
   work.
 - **No invented features** — if it is not in the code, it is not in the docs.
 - **No commits** — it writes files and reports; the user reviews and commits.
+
+---
+
+## Companion commands
+
+Sibling commands in this skill pair well with `docs`:
+
+- **`/absolute work`** — build the feature you are now documenting.
+- **`/absolute ui`** — design the interface a tutorial walks through.
+- **`/absolute simplify`** — tidy code before documenting it.
+
+Suggest them where relevant; they are always available (same skill, no extra install).

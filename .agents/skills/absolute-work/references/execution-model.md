@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Work AbsolutelySkilled skill. Load this file in Phase 3 (decomposition) and Phase 4 (execution): DAG patterns, the safety-first wave algorithm, agent prompts, conflict handling, scope creep, and failure recovery. -->
+<!-- Part of the `absolute` skill (work command). Load this file in Phase 3 (decomposition) and Phase 4 (execution): DAG patterns, the safety-first wave algorithm, agent prompts, conflict handling, scope creep, and failure recovery. -->
 
 # Execution Model
 

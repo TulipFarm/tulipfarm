@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Work AbsolutelySkilled skill. Load this file in Phase 4/5: TDD per task, verification signals, the generator-evaluator protocol, scored rubric, and the mandatory tail tasks. -->
+<!-- Part of the `absolute` skill (work command). Load this file in Phase 4/5: TDD per task, verification signals, the generator-evaluator protocol, scored rubric, and the mandatory tail tasks. -->
 
 # Verification Framework
 
@@ -185,7 +185,7 @@ Review all changes since the rollback point. Work the review pyramid bottom-up: 
 Correctness → Performance → Design → Readability → Convention → Testing. Classify findings
 `[MAJOR]` / `[MINOR]`. Fix all `[MAJOR]` immediately and reasonable `[MINOR]`. Re-run after fixes.
 **Acceptance:** zero `[MAJOR]` remaining; all `[MINOR]` documented (fixed or explicitly deferred).
-Depends on all implementation/test/docs tasks. If `absolute-simplify` is installed, run it on the
+Depends on all implementation/test/docs tasks. Run the `/absolute simplify` command on the
 working changes here.
 
 ### Second-to-last — Requirements Validation (`verify`)
