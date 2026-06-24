@@ -43,8 +43,13 @@ configuration.
 
 ## Credentials
 
-A provider entry references its API key by a logical secret name (for example,
-`anthropic-api-key`), resolved at runtime from the [secrets store](/docs/concepts/secrets)
-and cached after first use. Keys never live in the LLM config file itself. To run, a
-provider must be configured in **Settings → Secrets** before it can be selected in a
-tier — see [Configure LLM providers](/docs/guides/configure-llm-providers).
+A provider entry references its API key with an `api_key_ref` field. Two forms are
+accepted:
+
+- `env://VAR_NAME` — reads directly from the environment variable `VAR_NAME`.
+- A bare name like `anthropic-api-key` — resolved from the [secrets store](/docs/concepts/secrets)
+  at runtime and cached after first use.
+
+Keys never live in the LLM config file itself. A provider must have its credentials
+configured in **Settings → Secrets** before it can be selected in a tier — see
+[Configure LLM providers](/docs/guides/configure-llm-providers).

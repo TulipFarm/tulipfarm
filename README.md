@@ -30,10 +30,9 @@ Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 
 Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
-`TF_BASE_URL`/`TF_REF`. Full guide: [docs/installation](apps/docs/content/docs/installation.mdx).
+`TF_BASE_URL`/`TF_REF`. Full guide: see `apps/docs/content/docs/installation.mdx`.
 
-> Note: the published image + compose land on `main` with the deploy milestone; until
-> then, install from a branch with `TF_REF=<branch>` or test locally via `TF_LOCAL_SRC`.
+> To install a specific version or branch, set `TF_VERSION=<tag>` or `TF_REF=<branch>` before running the installer. To test a local build, set `TF_LOCAL_SRC=1`.
 
 ## Local Development
 
@@ -97,21 +96,20 @@ developer's choice (both options satisfy AC-006).
 The `scripts/setup-dev.sh` script automatically:
 - Installs and starts PostgreSQL 17 + pgvector
 - Creates the `tulipfarm` database
-- Initializes a local `./soul` git repository with the required directory structure
+- Initializes the soul git repository at `~/.tulipfarm/soul` with the required directory structure
 - Generates `.env.local` with random bootstrap secrets (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
 
 **Manual adjustments:** Edit `.env.local` to customize the datastore or add optional variables like `GIT_REMOTE_URL` for syncing soul changes to a remote repository.
 
 ### Soul Repository
 
-The `./soul` directory is a local git repository that stores your system configuration (resources, routines, agents, skills, integrations). By default, it is local-only. To enable remote sync:
+The soul lives at `~/.tulipfarm/soul` — a git repository that stores your system configuration (resources, routines, agents, skills, integrations). By default, it is local-only. To enable remote sync:
 
 1. Create a private GitHub repository for your soul
 2. Add the remote and set `GIT_REMOTE_URL` in `.env.local`:
    ```bash
-   cd soul
-   git remote add origin https://github.com/your-org/your-soul.git
-   git push -u origin main
+   git -C ~/.tulipfarm/soul remote add origin https://github.com/your-org/your-soul.git
+   git -C ~/.tulipfarm/soul push -u origin main
    ```
 3. Update `.env.local`: `GIT_REMOTE_URL=https://github.com/your-org/your-soul.git`
 

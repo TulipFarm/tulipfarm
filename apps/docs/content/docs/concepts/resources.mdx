@@ -63,11 +63,13 @@ the UI surfaces it as unresolved rather than blocking the delete.
 Beyond identifiers and links, schemas support declarative transforms applied before a
 write:
 
-- `x-computed` — derive a field's value from others
-- `x-normalize` — clean a value into canonical form
+- **`x-normalize`** — clean a value into canonical form. Supported strategies: `trim`,
+  `lowercase`, `uppercase`, `slugify`, `phone-e164`, `email-normalize`.
+- **`x-computed`** — derive a field's value from others. Supported strategies: `sha256`,
+  `uuid`, `sequence`.
 
 These cover the common before-write cases without code. For arbitrary logic, a resource
-type can include a `hooks.ts` file, executed in a sandboxed environment.
+type can include a `hooks.ts` file executed in an isolated sandbox (`isolated-vm`).
 
 <Callout type="info">
 Resource types are authored in the soul today — there is no in-app form to create a new

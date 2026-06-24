@@ -53,6 +53,14 @@ Editing the soul — creating or changing an agent, skill, or schema — is neve
 `autonomy` gate applies only to actions on the outside world and your data. In V1 every
 agent has access to the full tool set; there is no per-agent tool restriction yet.
 
+## Guardrails
+
+Independent of autonomy, every turn runs through three guard stages configured in
+`soul/guardrails.yaml`: **input** (before the model sees the message), **tool-call**
+(before each tool executes), and **output** (after the model responds). Guards use
+pattern matching — no extra LLM required. If `guardrails.yaml` is absent or invalid,
+the instance falls back to built-in safe defaults.
+
 ## Creating agents
 
 Agents are created and edited through agent tools and forges, which write the `AGENT.md`
