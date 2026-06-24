@@ -1,0 +1,56 @@
+name: Scheduled Simplify (Rotation)
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # every 6 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: absolute-simplify-cron
+  cancel-in-progress: true
+
+jobs:
+  simplify:
+    name: Simplify target directory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compute target directory
+        id: target
+        run: |
+          SLOT=$(( ($(date +%s) / 3600 / 6) % 10 ))
+          DIRS=(apps/api apps/web packages/llm packages/soul packages/ui packages/utils packages/validation packages/constants packages/secrets packages/types)
+          DIR="${DIRS[$SLOT]}"
+          DIRNAME="${DIR##*/}"
+          echo "dir=$DIR" >> $GITHUB_OUTPUT
+          echo "dirname=$DIRNAME" >> $GITHUB_OUTPUT
+          echo "Selected slot $SLOT → $DIR"
+
+      - name: Run absolute-simplify skill
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--allowedTools "Bash,Edit,Write,Read,Glob,Grep"'
+          prompt: |
+            Simplify the code in the directory ${{ steps.target.outputs.dir }} using the
+            absolute-simplify skill.
+
+            Invoke the skill now. This is a fully automated CI run — you MUST NOT pause at
+            any approval gate or intake question. Answer all skill questions yourself using
+            best judgment from the codebase. Target path: ${{ steps.target.outputs.dir }}
+
+            After the skill finishes:
+            - If there are NO changes to commit: exit silently. Do not open a PR.
+            - If there ARE changes:
+              1. Create a branch: chore/simplify-${{ steps.target.outputs.dirname }}-$(date +%Y-%m-%d)
+              2. Commit with message: "chore: simplify ${{ steps.target.outputs.dir }}"
+              3. Open a PR targeting main titled:
+                 "chore: simplify ${{ steps.target.outputs.dir }} ($(date +%Y-%m-%d))"
+              4. Assign the PR to maddhruv
+              5. Add PR body: "Automated simplification of ${{ steps.target.outputs.dir }} by scheduled absolute-simplify."
