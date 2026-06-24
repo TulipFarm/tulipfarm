@@ -38,6 +38,8 @@ export const INFORMATION_ARCHITECT_NAME = "InformationArchitect";
 export const EXCLUSIVE_SOUL_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "create_resource_type",
   "resource_type_update",
+  "create_resource_hooks",
+  "resource_hooks_delete",
   "agent_create",
   "agent_update",
   "agent_delete",
@@ -62,9 +64,12 @@ export const INFORMATION_ARCHITECT_TOOL_ALLOWLIST: readonly string[] = [
   "agent_get",
   "skill_list",
   "skill_get",
-  // Soul writes (resource types / agents / skills)
+  // Soul writes (resource types + hooks / agents / skills)
   "create_resource_type",
   "resource_type_update",
+  "create_resource_hooks",
+  "resource_hooks_get",
+  "resource_hooks_delete",
   "agent_create",
   "agent_update",
   "agent_delete",

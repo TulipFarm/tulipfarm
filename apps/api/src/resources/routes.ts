@@ -410,12 +410,14 @@ export function registerResourceRoutes(
           404: ErrorSchema,
           409: ErrorSchema,
           401: ErrorSchema,
+          422: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
       const { type, id } = req.params as { type: string; id: string };
-      if (!soulLoader.resources.has(type)) {
+      const resourceDef = soulLoader.resources.get(type);
+      if (!resourceDef) {
         return reply.code(404).send({ error: `resource type not found: ${type}` });
       }
 
@@ -426,6 +428,14 @@ export function registerResourceRoutes(
       const loaded = await loadForWrite(repo, id, ifMatch);
       if (!loaded.ok) return reply.code(loaded.err.code).send(loaded.err.body);
       const existing = loaded.doc;
+
+      const before = await maybeRunBeforeHook(
+        hookExecutor,
+        resourceDef,
+        type,
+        toApiRecord(existing)
+      );
+      if (!before.ok) return reply.code(before.err.code).send(before.err.body);
 
       const now = new Date();
       const softDeleted = {
@@ -439,6 +449,7 @@ export function registerResourceRoutes(
       if (!replaced) return reply.code(409).send({ error: "version conflict" });
 
       await repo.appendHistory(makeHistoryEntry(id, "delete", softDeleted));
+      await maybeRunAfterHook(hookExecutor, resourceDef, type, toApiRecord(softDeleted));
       return reply.code(204).send();
     }
   );

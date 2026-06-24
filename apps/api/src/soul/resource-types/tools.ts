@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { analyzeHook, HookAnalysisError } from "../../hooks/hook-analyzer.js";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
@@ -235,9 +236,175 @@ const resourceTypeUpdate: ResourceTypeTool = {
   },
 };
 
+// ── Hook tools ────────────────────────────────────────────────────────────────
+
+const HOOKS_WRITE_SCHEMA = {
+  type: "object",
+  required: ["name", "source"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Resource type name." },
+    source: {
+      type: "string",
+      minLength: 1,
+      description:
+        "Hook source code. Must be an IIFE-style object literal with optional `before` and/or `after` async functions, e.g. `({ async before(ctx) { ... }, async after(ctx) { ... } })`.",
+    },
+  },
+} as const;
+
+const HOOKS_GET_SCHEMA = {
+  type: "object",
+  required: ["name"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Resource type name." },
+  },
+} as const;
+
+const HOOKS_DELETE_SCHEMA = {
+  type: "object",
+  required: ["name"],
+  additionalProperties: false,
+  properties: {
+    name: { type: "string", minLength: 1, description: "Resource type name." },
+  },
+} as const;
+
+const validateHooksWrite = ajv.compile(HOOKS_WRITE_SCHEMA);
+const validateHooksGet = ajv.compile(HOOKS_GET_SCHEMA);
+const validateHooksDelete = ajv.compile(HOOKS_DELETE_SCHEMA);
+
+/**
+ * Validate hook source: must be a parenthesized object literal with only `before`/`after` keys,
+ * and must pass the banned-pattern static analysis.
+ */
+function validateHookSource(source: string): ToolCallResult | null {
+  try {
+    analyzeHook(source);
+  } catch (e) {
+    if (e instanceof HookAnalysisError) {
+      return err("validation_error", e.message);
+    }
+    throw e;
+  }
+
+  const trimmed = source.trim();
+  if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+    return err(
+      "validation_error",
+      "hook source must be a parenthesized object literal: `({ before(ctx) { ... } })`"
+    );
+  }
+
+  return null;
+}
+
+const createResourceHooks: ResourceTypeTool = {
+  name: "create_resource_hooks",
+  description:
+    "Create or replace a hooks.ts file for a resource type. The source must be a parenthesized " +
+    "object literal with optional `before` and/or `after` async functions. Runs static analysis " +
+    "to block banned patterns (require, import, eval, fetch, setTimeout, etc.). Commits via withSync.",
+  mutating: true,
+  inputSchema: HOOKS_WRITE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateHooksWrite(args)) return err("validation_error", firstError(validateHooksWrite));
+    const { name, source } = args as { name: string; source: string };
+
+    if (!ctx.soulLoader.resources.has(name)) {
+      return err("not_found", `resource type not found: ${name}`);
+    }
+
+    const validationErr = validateHookSource(source);
+    if (validationErr) return validationErr;
+
+    const hooksFile = join(ctx.gitSync.path, "resources", name, "hooks.ts");
+    try {
+      await writeFile(hooksFile, source, "utf8");
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.gitSync.withSync(`soul: add hooks for resource type ${name}`);
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({ name, hasHooks: true });
+  },
+};
+
+const getResourceHooks: ResourceTypeTool = {
+  name: "resource_hooks_get",
+  description: "Get the hooks.ts source for a resource type, or null if none exists.",
+  mutating: false,
+  inputSchema: HOOKS_GET_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateHooksGet(args)) return err("validation_error", firstError(validateHooksGet));
+    const { name } = args as { name: string };
+
+    const rt = ctx.soulLoader.resources.get(name);
+    if (!rt) return err("not_found", `resource type not found: ${name}`);
+
+    return ok({ name, hasHooks: rt.hasHooks, source: rt.hookSource ?? null });
+  },
+};
+
+const deleteResourceHooks: ResourceTypeTool = {
+  name: "resource_hooks_delete",
+  description:
+    "Remove the hooks.ts file for a resource type. The resource type itself is not affected.",
+  mutating: true,
+  inputSchema: HOOKS_DELETE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateHooksDelete(args)) return err("validation_error", firstError(validateHooksDelete));
+    const { name } = args as { name: string };
+
+    if (!ctx.soulLoader.resources.has(name)) {
+      return err("not_found", `resource type not found: ${name}`);
+    }
+
+    const hooksFile = join(ctx.gitSync.path, "resources", name, "hooks.ts");
+    if (!existsSync(hooksFile)) {
+      return err("not_found", `no hooks.ts found for resource type: ${name}`);
+    }
+
+    try {
+      await unlink(hooksFile);
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.gitSync.withSync(`soul: remove hooks for resource type ${name}`);
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    try {
+      await ctx.soulLoader.reload();
+    } catch (e) {
+      return err("internal_error", reason(e));
+    }
+
+    return ok({ name, hasHooks: false });
+  },
+};
+
 export const RESOURCE_TYPE_TOOLS: ResourceTypeTool[] = [
   createResourceType,
   listResourceTypes,
   resourceTypeSchema,
   resourceTypeUpdate,
+  createResourceHooks,
+  getResourceHooks,
+  deleteResourceHooks,
 ];

@@ -328,6 +328,46 @@ describe("resource routes", () => {
       expect(res.statusCode).toBe(422);
       expect(res.json<{ error: string }>().error).toBe("hook boom");
     });
+
+    it("runs before and after hooks on DELETE", async () => {
+      runBeforeHook.mockImplementation(async (_src, _type, record) => record);
+      const createRes = await post({ title: "Bug" });
+      expect(createRes.statusCode).toBe(201);
+      const { id, version } = createRes.json<{ id: string; version: number }>();
+      runBeforeHook.mockClear();
+      runAfterHook.mockClear();
+
+      runBeforeHook.mockImplementation(async (_src, _type, record) => record);
+      const delRes = await hookApp.inject({
+        method: "DELETE",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: hookSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": String(version) },
+      });
+      expect(delRes.statusCode).toBe(204);
+      expect(runBeforeHook).toHaveBeenCalledOnce();
+      expect(runAfterHook).toHaveBeenCalledOnce();
+    });
+
+    it("blocks DELETE when before hook throws HookError", async () => {
+      runBeforeHook.mockImplementation(async (_src, _type, record) => record);
+      const createRes = await post({ title: "Bug" });
+      expect(createRes.statusCode).toBe(201);
+      const { id, version } = createRes.json<{ id: string; version: number }>();
+      runBeforeHook.mockClear();
+      runAfterHook.mockClear();
+
+      runBeforeHook.mockRejectedValue(new HookError("cannot delete active record"));
+      const delRes = await hookApp.inject({
+        method: "DELETE",
+        url: `/api/v1/resources/ticket/${id}`,
+        cookies: { [SESSION_COOKIE]: hookSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF, "if-match": String(version) },
+      });
+      expect(delRes.statusCode).toBe(422);
+      expect(delRes.json<{ error: string }>().error).toBe("cannot delete active record");
+      expect(runAfterHook).not.toHaveBeenCalled();
+    });
   });
 
   // ── GET list ──────────────────────────────────────────────────────────────
