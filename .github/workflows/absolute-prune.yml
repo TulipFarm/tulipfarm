@@ -1,0 +1,48 @@
+name: Prune Dead Code
+
+on:
+  schedule:
+    - cron: '0 9 */2 * *' # every alternate day at 2:30 PM IST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: absolute-prune
+  cancel-in-progress: true
+
+jobs:
+  prune:
+    name: Remove dead code
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Run absolute-prune skill
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--allowedTools "Bash,Edit,Write,Read,Glob,Grep"'
+          prompt: |
+            Remove dead code from this repository using the absolute-prune skill.
+
+            Invoke the skill now. This is a fully automated CI run — you MUST NOT pause at
+            any approval gate or intake question. Answer all skill questions yourself using
+            best judgment from the codebase.
+
+            Scope: unused dependencies, unreferenced exports, unreachable code, orphaned files.
+            Only remove what tool evidence confirms is unused — no guessing.
+            Run in reversible waves. Verify tests pass after each wave.
+
+            After pruning:
+            - If there are NO changes: exit silently. Do not open a PR.
+            - If there ARE changes:
+              1. Create branch: chore/prune-$(date +%Y-%m-%d)
+              2. Commit with message: "chore: prune dead code $(date +%Y-%m-%d)"
+              3. Open a PR titled: "chore: prune dead code ($(date +%Y-%m-%d))"
+              4. In the PR body, list what was removed and the evidence used to confirm it was dead
+              5. Add label "cleanup" to the PR (create it if it doesn't exist)
+              6. Assign the PR to maddhruv
