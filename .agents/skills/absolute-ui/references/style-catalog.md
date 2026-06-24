@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      choosing a UI style direction, or when the user asks what aesthetic to use. -->
 
 # UI Style Catalog

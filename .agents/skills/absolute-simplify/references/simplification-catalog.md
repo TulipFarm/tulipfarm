@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Simplify AbsolutelySkilled skill. Always load this file
+<!-- Part of the `absolute` skill (simplify command). Always load this file
      as it contains language-agnostic simplification patterns. -->
 
 # Universal Simplification Catalog

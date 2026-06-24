@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      building a new color system from scratch or choosing a palette for a specific product type. -->
 
 # Palette Recipes

@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      working with cards, list views, content grids, or collection layouts. -->
 
 # Cards and Lists

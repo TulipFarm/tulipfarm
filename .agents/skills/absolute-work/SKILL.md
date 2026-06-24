@@ -1,42 +1,37 @@
 ---
 name: absolute-work
-version: 0.1.0
+version: 0.5.0
 description: >
-  End-to-end, phase-gated software development lifecycle for AI agents. Turns a
-  ticket, task, plan, or migration into a validated design, a dependency-graphed
-  task board, and verified code. Triggers on "build this end-to-end", "plan and
-  build", "break this into tasks", "pick up this ticket", "grill me on this",
-  "run this migration", "absolute-work this", or any multi-step development task.
-  Relentlessly interviews to a shared design, writes a reviewed spec, decomposes
-  into atomic tasks on a persistent markdown board, then peels tasks one safe wave
-  at a time with test-first verification. Handles features, bugs, refactors,
-  greenfield projects, planning breakdowns, and migrations.
+  End-to-end, phase-gated SDLC for AI coding agents: relentless design interview →
+  reviewed spec → dependency-graphed task board → safe-wave TDD execution →
+  verification → converge. Handles features, bugs, refactors, greenfield projects,
+  planning breakdowns, and migrations.
+  Triggers on "absolute work", "build this end-to-end", "plan and build",
+  "break this into tasks", "grill me on this plan", "pick up this ticket",
+  "run this migration".
 category: workflow
 tags:
+  - workflow
   - sdlc
   - planning
-  - task-management
   - tdd
-  - migration
-  - workflow
-recommended_skills: [absolute-simplify, absolute-ui]
+  - spec
+  - specification
 platforms:
   - claude-code
   - gemini-cli
   - openai-codex
   - mcp
-sources:
-  - url: https://github.com/AbsolutelySkilled/AbsolutelySkilled
-    accessed: 2026-06-03
-    description: Unified lifecycle merging relentless design interviewing, spec-driven development, dependency-graphed decomposition, safety-first wave execution, and generator-evaluator verification
+user-invocable: true
+argument-hint: "[target]"
 license: MIT
 maintainers:
   - github: maddhruv
 ---
 
-When this skill is activated, always start your first response with the 🛠️ emoji.
+> Start your first response with the 🛠️ emoji.
 
-# Absolute Work: End-to-End AI Development Lifecycle
+## Absolute Work: End-to-End AI Development Lifecycle
 
 Absolute Work takes any unit of work — a ticket, a task, a plan, a migration — from
 fuzzy intent to verified code. It is one continuous skill with **hard gates** between
@@ -119,7 +114,8 @@ without explicit user confirmation.**
 ## Codebase Convention Detection
 
 **Before INTAKE begins**, auto-detect the project's conventions so every phase is grounded
-in reality, not assumptions.
+in reality, not assumptions. If `.absolute.config.json` or `~/.absolute/config.json` exists
+(from `/absolute init`), read its cached `conventions` first and detect only what's missing.
 
 | Signal | Files to Check |
 |---|---|
@@ -210,7 +206,7 @@ Identify the type and swap in its tailored question bank (full banks in `referen
 
 ### Step 4 — Scope assessment
 If the request spans multiple independent subsystems, flag it and decompose into sub-projects
-first; brainstorm the first sub-project through the normal flow. See `references/approach-analysis.md`.
+first; brainstorm the first sub-project through the normal flow.
 
 ### Step 5 — Relentless interview
 - **One question at a time** via `AskUserQuestion`. Never batch.
@@ -422,10 +418,12 @@ Load a reference only when its phase needs it — they are long and consume cont
 
 ---
 
-## Companion check
+## Companion commands
 
-> On first activation of this skill in a conversation: check which companion skills are installed by running `ls ~/.claude/skills/ ~/.agent/skills/ ~/.agents/skills/ .claude/skills/ .agent/skills/ .agents/skills/ 2>/dev/null`. Compare the results against the `recommended_skills` field in this file's frontmatter. For any that are missing, mention them once and offer to install:
-> ```
-> npx skills add AbsolutelySkilled/AbsolutelySkilled --skill <name>
-> ```
-> Skip entirely if `recommended_skills` is empty or all companions are already installed.
+Sibling commands in this skill chain naturally after `work`:
+
+- **`/absolute ui`** — design the interface for what you built.
+- **`/absolute simplify`** — clean up the diff before committing.
+- **`/absolute docs`** — document what shipped.
+
+Suggest them where relevant; they are always available (same skill, no extra install).

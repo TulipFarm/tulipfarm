@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Work AbsolutelySkilled skill. Load this file during Phase 1 (INTAKE & BRAINSTORM) for question banks, codebase-first intelligence, design-tree traversal, and calibration. -->
+<!-- Part of the `absolute` skill (work command). Load this file during Phase 1 (INTAKE & BRAINSTORM) for question banks, codebase-first intelligence, design-tree traversal, and calibration. -->
 
 # Intake Playbook
 

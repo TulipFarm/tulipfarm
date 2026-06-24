@@ -1,4 +1,4 @@
-<!-- Part of the Absolute Work AbsolutelySkilled skill. Load this file in Phase 3 for the full .absolute-work/board.md specification — format, status transitions, and example. -->
+<!-- Part of the `absolute` skill (work command). Load this file in Phase 3 for the full .absolute-work/board.md specification — format, status transitions, and example. -->
 
 # Board Format Specification
 

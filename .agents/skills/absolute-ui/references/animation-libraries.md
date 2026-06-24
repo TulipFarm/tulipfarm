@@ -1,4 +1,4 @@
-<!-- Part of the absolute-ui AbsolutelySkilled skill. Load this file when
+<!-- Part of the `absolute` skill (ui command). Load this file when
      using Framer Motion, GSAP, or needing spring physics parameters and easing references. -->
 
 # Animation Libraries & Advanced Techniques
