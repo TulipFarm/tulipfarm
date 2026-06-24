@@ -144,7 +144,6 @@ export default function ResourceTypeNew() {
             id, createdAt, updatedAt and version are added automatically.
           </p>
           {fields.map((f, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional and reorder-free.
             <div
               key={i}
               className="flex flex-wrap items-center gap-2 rounded-sm border border-border p-2"
