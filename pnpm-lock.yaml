@@ -114,9 +114,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^4.1.8
         version: 4.1.8(vitest@4.1.8)
-      esbuild:
-        specifier: ^0.28.0
-        version: 0.28.0
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -156,9 +153,6 @@ importers:
       react-dom:
         specifier: ^19.2.7
         version: 19.2.7(react@19.2.7)
-      tailwind-merge:
-        specifier: ^3.6.0
-        version: 3.6.0
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4.3.0
@@ -199,9 +193,6 @@ importers:
       '@radix-ui/react-slot':
         specifier: ^1.2.5
         version: 1.2.5(@types/react@19.2.17)(react@19.2.7)
-      '@remix-run/node':
-        specifier: ^2.17.5
-        version: 2.17.5(typescript@6.0.3)
       '@remix-run/react':
         specifier: ^2.17.5
         version: 2.17.5(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@6.0.3)
@@ -238,9 +229,6 @@ importers:
       dompurify:
         specifier: ^3.4.8
         version: 3.4.9
-      isbot:
-        specifier: ^5.1.42
-        version: 5.1.42
       lucide-react:
         specifier: ^1.17.0
         version: 1.17.0(react@19.2.7)
@@ -430,9 +418,6 @@ importers:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
-      '@types/react':
-        specifier: ^19.2.17
-        version: 19.2.17
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -4946,10 +4931,6 @@ packages:
 
   isarray@1.0.0:
     resolution: {integrity: sha512-VLghIWNM6ELQzo7zwmcg0NmTVyWKYjvIeM83yjp0wRDTmUnrM678fQbcKBo6n2CJEF0szoG//ytg+TKla89ALQ==}
-
-  isbot@5.1.42:
-    resolution: {integrity: sha512-/SXsVh7KpPRISrD4ffrGSxnTLlUBzEQUfWIusaJPrpJ93FW1P0YEZri5vAUkFsA0m2HRUhQRQadk2wJ+EeKowQ==}
-    engines: {node: '>=18'}
 
   isexe@2.0.0:
     resolution: {integrity: sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw==}
@@ -11899,8 +11880,6 @@ snapshots:
       is-inside-container: 1.0.0
 
   isarray@1.0.0: {}
-
-  isbot@5.1.42: {}
 
   isexe@2.0.0: {}
 
