@@ -2,7 +2,7 @@ name: Daily Documentation Update
 
 on:
   schedule:
-    - cron: '30 10 * * *' # 4:00 PM IST (UTC+5:30) daily
+    - cron: '30 20 * * *' # 2:00 AM IST daily
   workflow_dispatch: # manual trigger for testing
 
 permissions:
@@ -26,6 +26,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: '--allowedTools "Bash,Edit,Write,Read,Glob,Grep,mcp__github__create_pull_request,mcp__github__list_pull_requests"'
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           show_full_output: true
           prompt: |
             Improve all documentation in this repository using the absolute-documentations skill.

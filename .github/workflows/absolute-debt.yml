@@ -2,7 +2,7 @@ name: Daily Lint & Type Debt
 
 on:
   schedule:
-    - cron: '0 13 * * *' # 6:30 PM IST daily (30 min after upgrade)
+    - cron: '30 20 * * *' # 2:00 AM IST daily
   workflow_dispatch:
 
 permissions:
@@ -35,6 +35,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: '--allowedTools "Bash,Edit,Write,Read,Glob,Grep"'
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             Pay down lint and type debt in this repository using the absolute-debt skill.
 

@@ -2,7 +2,7 @@ name: Prune Dead Code
 
 on:
   schedule:
-    - cron: '0 9 */2 * *' # every alternate day at 2:30 PM IST
+    - cron: '30 20 */2 * *' # every alternate day at 2:00 AM IST
   workflow_dispatch:
 
 permissions:
@@ -26,6 +26,8 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           claude_args: '--allowedTools "Bash,Edit,Write,Read,Glob,Grep"'
+          env:
+            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           prompt: |
             Remove dead code from this repository using the absolute-prune skill.
 
