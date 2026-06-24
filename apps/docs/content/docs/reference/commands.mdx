@@ -12,6 +12,7 @@ noted. The package manager is `pnpm` — do not substitute npm or yarn.
 |---|---|
 | `bash scripts/setup-dev.sh` | Installs PostgreSQL 17 + pgvector, starts the database, creates the `tulipfarm` database, initializes the soul repo at `~/.tulipfarm/soul`, and writes `.env.local` with generated secrets. |
 | `pnpm install` | Installs workspace dependencies. Use `--frozen-lockfile` in CI. |
+| `pnpm reset:dev` | Tears down the local dev database and soul, then re-runs setup. Use when you want a clean slate. |
 
 ## Run
 
@@ -41,3 +42,15 @@ pnpm --filter @tulipfarm/api dev
 pnpm --filter @tulipfarm/web test
 pnpm --filter @tulipfarm/docs build
 ```
+
+## Secrets and encryption
+
+These run against a local or production instance. They read `.env.local` and `DATABASE_URL`.
+
+| Command | What it does |
+|---|---|
+| `pnpm --filter @tulipfarm/api keys verify` | Checks that the active DEK unwraps correctly under the current `ENCRYPTION_KEY`. Run after a key rotation to confirm the new key works. |
+| `pnpm --filter @tulipfarm/api keys show-recovery` | Mints the offline recovery key and prints it **once**. Store it in a password manager or sealed vault — it is never shown again. |
+| `pnpm --filter @tulipfarm/api keys rotate-kek` | Re-wraps the DEK under the new `ENCRYPTION_KEY`. Requires both `ENCRYPTION_KEY` (new) and `ENCRYPTION_KEY_PREVIOUS` (old) to be set. |
+| `pnpm --filter @tulipfarm/api keys recover` | Recovers a lost `ENCRYPTION_KEY` using the offline recovery key. Set `RECOVERY_KEY=<base64>` in the environment before running. |
+| `pnpm --filter @tulipfarm/api keys backfill` | Migrates secrets written before envelope encryption onto the DEK. Idempotent and resumable. |

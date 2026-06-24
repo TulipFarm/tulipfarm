@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repo. Read before editing.
 
 TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 
-- **Node**: see `.node-version` · **Package manager**: `pnpm@11.1.3` (never use npm/yarn)
+- **Node**: see `.node-version` · **Package manager**: `pnpm@11.5.3` (never use npm/yarn)
 - **Workspaces**: `apps/*`, `packages/*`
 
 ## Layout
@@ -38,10 +38,12 @@ pnpm install            # frozen install in CI: pnpm install --frozen-lockfile
 pnpm dev                # api on :4010, web on :4000
 pnpm dev:api            # api only
 pnpm dev:web            # web only
+pnpm dev:docs           # docs site on :4020
 pnpm lint               # biome check across all workspaces
 pnpm typecheck          # tsc --noEmit across all workspaces
 pnpm test               # vitest run
 pnpm build              # turbo build
+pnpm reset:dev          # wipe local db + soul, then re-run setup (clean slate)
 ```
 
 Single workspace: `pnpm --filter @tulipfarm/api <script>`.
@@ -58,7 +60,7 @@ Tests use **Vitest** (`*.test.ts` colocated with source). `pnpm test` passes wit
 
 ## Lint / format — Biome (read this to avoid churn)
 
-Single source of truth: `biome.json` (Biome 1.9.4). **No ESLint, no Prettier.** Do not add them.
+Single source of truth: `biome.json` (Biome 2.4.16). **No ESLint, no Prettier.** Do not add them.
 
 Auto-fix before hand-fixing:
 

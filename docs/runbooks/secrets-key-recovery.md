@@ -3,6 +3,13 @@
 How TulipFarm protects encrypted secrets, and the operator procedures for recovery and rotation.
 Background: `apps/docs/content/docs/security/encryption.mdx`.
 
+## Prerequisites
+
+- Shell access to the machine running the TulipFarm API.
+- `.env.local` (or equivalent) in scope so the process can read `DATABASE_URL` and `ENCRYPTION_KEY`.
+- `node` and `pnpm` installed (same version as the project — check `.node-version`).
+- The API checked out at the relevant version (`git status` should be clean or on the right commit).
+
 ## How it works (1 minute)
 
 - Every secret is encrypted under a single **DEK** (Data Encryption Key).
@@ -64,6 +71,9 @@ keep working. To move them onto the DEK:
 ```bash
 pnpm --filter @tulipfarm/api keys backfill   # idempotent + resumable; reports migrated/failed
 ```
+
+Verify all secrets migrated successfully by checking `dek_id IS NOT NULL` in the output, or run
+`keys verify` to confirm the active DEK covers all wraps.
 
 ## API-token pepper (optional, separate from the above)
 
