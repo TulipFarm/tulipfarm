@@ -77,10 +77,11 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
 }
 
 // Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
-// http(s)/file URL. ssh:// and scp-style (git@host:path) sources are rejected to avoid the operator's
-// clone reaching internal hosts (SSRF). Single-trust V1; a tighter allowlist is a post-V1 hardening.
+// https URL. ssh://, scp-style (git@host:path), and file:// sources are rejected — ssh/scp
+// avoid operator clones reaching internal hosts (SSRF); file:// would expose local filesystem
+// contents via git history. Single-trust V1; a URL allowlist is a post-V1 hardening.
 function isAllowedSource(source: string): boolean {
-  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^(https?|file):\/\//.test(source);
+  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^https:\/\//.test(source);
 }
 
 // Normalize an allowed source into something `git clone` accepts. A bare "owner/repo" becomes a
