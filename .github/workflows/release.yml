@@ -34,7 +34,7 @@ jobs:
     name: Cut release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           # Full history so conventional-changelog can read the commit log since
           # the last tag.
