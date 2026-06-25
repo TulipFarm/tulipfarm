@@ -1,4 +1,4 @@
-import { Check, Copy, Pencil, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
@@ -184,71 +184,9 @@ function AssistantActions({
   );
 }
 
-// User turn: a right-aligned bubble with a copy/edit toolbar. Editing swaps the bubble for an inline
-// textarea; saving re-runs the conversation from this turn (a local branch — see useChatStream).
-function UserMessage({
-  message,
-  mentions,
-  onEditResend,
-}: {
-  message: ChatMessage;
-  mentions?: MentionEntry[];
-  onEditResend?: (messageId: string, text: string) => void;
-}) {
+// User turn: a right-aligned bubble with a copy toolbar.
+function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: MentionEntry[] }) {
   const text = messageText(message);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(text);
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => {
-    const ta = ref.current;
-    if (editing && ta) {
-      ta.focus();
-      ta.setSelectionRange(ta.value.length, ta.value.length);
-    }
-  }, [editing]);
-
-  function save() {
-    const trimmed = draft.trim();
-    setEditing(false);
-    if (trimmed) onEditResend?.(message.id, trimmed);
-  }
-  function cancel() {
-    setDraft(text);
-    setEditing(false);
-  }
-
-  if (editing) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <textarea
-          ref={ref}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              save();
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              cancel();
-            }
-          }}
-          rows={Math.min(8, draft.split("\n").length + 1)}
-          aria-label="Edit message"
-          className="w-full resize-none rounded-lg bg-muted px-3.5 py-2 text-sm text-foreground ring-1 ring-border"
-        />
-        <div className="flex items-center justify-end gap-1 text-xs text-muted-foreground">
-          <button type="button" onClick={cancel} className={actionBtn}>
-            cancel
-          </button>
-          <button type="button" onClick={save} className={`${actionBtn} text-primary`}>
-            save
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="group flex flex-col items-end gap-1">
@@ -257,11 +195,6 @@ function UserMessage({
       </div>
       <div className={`${toolbar} justify-end`}>
         <CopyButton text={text} />
-        {onEditResend ? (
-          <IconAction label="edit" onClick={() => setEditing(true)}>
-            <Pencil className="size-3.5" />
-          </IconAction>
-        ) : null}
       </div>
     </div>
   );
@@ -274,7 +207,6 @@ function Message({
   mentions,
   onApprove,
   onRegenerate,
-  onEditResend,
   onFeedback,
   onA2uiAgent,
 }: {
@@ -284,12 +216,11 @@ function Message({
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
-  onEditResend?: (messageId: string, text: string) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
   onA2uiAgent?: (payload: unknown) => void;
 }) {
   if (message.role === "user") {
-    return <UserMessage message={message} mentions={mentions} onEditResend={onEditResend} />;
+    return <UserMessage message={message} mentions={mentions} />;
   }
 
   const streaming = !message.sealed && status === "streaming";
@@ -339,7 +270,6 @@ export function Transcript({
   mentions,
   onApprove,
   onRegenerate,
-  onEditResend,
   onFeedback,
   onA2uiAgent,
 }: {
@@ -348,7 +278,6 @@ export function Transcript({
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
-  onEditResend?: (messageId: string, text: string) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
   onA2uiAgent?: (payload: unknown) => void;
 }) {
@@ -378,7 +307,6 @@ export function Transcript({
             mentions={mentions}
             onApprove={onApprove}
             onRegenerate={onRegenerate}
-            onEditResend={onEditResend}
             onFeedback={onFeedback}
             onA2uiAgent={onA2uiAgent}
           />

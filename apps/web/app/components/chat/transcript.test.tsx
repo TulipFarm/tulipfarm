@@ -250,48 +250,4 @@ describe("Transcript message actions", () => {
     expect(screen.queryByRole("button", { name: "Good response" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
   });
-
-  it("lets you edit a user message and re-runs from it on save", async () => {
-    const user = userEvent.setup();
-    const onEditResend = vi.fn();
-    const state = fold([], "original question");
-    render(
-      <Transcript
-        messages={state.messages}
-        status={state.status}
-        onApprove={vi.fn()}
-        onEditResend={onEditResend}
-      />
-    );
-
-    await user.click(screen.getByRole("button", { name: "edit" }));
-    const box = screen.getByRole("textbox", { name: "Edit message" });
-    await user.clear(box);
-    await user.type(box, "edited question");
-    await user.click(screen.getByRole("button", { name: "save" }));
-
-    expect(onEditResend).toHaveBeenCalledTimes(1);
-    expect(onEditResend).toHaveBeenCalledWith(state.messages[0].id, "edited question");
-  });
-
-  it("cancelling an edit restores the message and fires nothing", async () => {
-    const user = userEvent.setup();
-    const onEditResend = vi.fn();
-    const state = fold([], "keep me");
-    render(
-      <Transcript
-        messages={state.messages}
-        status={state.status}
-        onApprove={vi.fn()}
-        onEditResend={onEditResend}
-      />
-    );
-
-    await user.click(screen.getByRole("button", { name: "edit" }));
-    await user.type(screen.getByRole("textbox", { name: "Edit message" }), " — discarded");
-    await user.click(screen.getByRole("button", { name: "cancel" }));
-
-    expect(onEditResend).not.toHaveBeenCalled();
-    expect(screen.getByText("keep me")).toBeInTheDocument();
-  });
 });
