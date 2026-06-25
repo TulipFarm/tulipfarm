@@ -46,9 +46,9 @@ describe("002_knowledge migration on PGlite", () => {
     await db.close();
   });
 
-  it("bumps schema_version to the latest (10)", async () => {
+  it("bumps schema_version to the latest (14)", async () => {
     const { rows } = await db.query("SELECT version FROM schema_version WHERE id = true");
-    expect(Number((rows[0] as { version: number }).version)).toBe(10);
+    expect(Number((rows[0] as { version: number }).version)).toBe(14);
   });
 
   it("creates all five knowledge tables", async () => {
@@ -104,5 +104,131 @@ describe("002_knowledge migration on PGlite", () => {
     await db.query("DELETE FROM knowledge_documents WHERE id = $1", [docId]);
     const { rows } = await db.query("SELECT count(*)::int AS n FROM knowledge_chunks");
     expect((rows[0] as { n: number }).n).toBe(0);
+  });
+
+  // --- OKF bundles (011) ---
+
+  async function seedBundle(id: string = randomUUID(), name: string = `b-${id}`): Promise<string> {
+    await db.query(
+      "INSERT INTO knowledge_bundles (id, name, created_at, updated_at) VALUES ($1, $2, now(), now())",
+      [id, name]
+    );
+    return id;
+  }
+
+  it("creates the three OKF tables (011)", async () => {
+    for (const t of ["knowledge_bundles", "knowledge_links", "knowledge_bundle_overrides"]) {
+      const { rows } = await db.query("SELECT to_regclass($1) AS t", [t]);
+      expect((rows[0] as { t: string | null }).t).not.toBeNull();
+    }
+  });
+
+  it("adds the OKF columns to knowledge_documents (011; okf_type later dropped by 014)", async () => {
+    const { rows } = await db.query(
+      `SELECT column_name FROM information_schema.columns
+       WHERE table_name = 'knowledge_documents'
+         AND column_name IN ('bundle_id', 'path', 'okf_type', 'resource', 'frontmatter_extra')
+       ORDER BY column_name`
+    );
+    expect((rows as { column_name: string }[]).map((r) => r.column_name)).toEqual([
+      "bundle_id",
+      "frontmatter_extra",
+      "path",
+      "resource",
+    ]);
+  });
+
+  it("enforces partial unique (bundle_id, path) but allows NULL-bundle legacy duplicates", async () => {
+    const bundleId = await seedBundle();
+    const mkConcept = (path: string) =>
+      db.query(
+        `INSERT INTO knowledge_documents
+           (id, title, content, plain_text, source, source_id, bundle_id, path, created_at, updated_at)
+         VALUES ($1, 'T', 'c', 'c', 'authored', $2, $3, $4, now(), now())`,
+        [randomUUID(), randomUUID(), bundleId, path]
+      );
+    await mkConcept("tables/orders");
+    await expect(mkConcept("tables/orders")).rejects.toThrow();
+    // Legacy docs (NULL bundle_id/path) are unaffected by the partial index.
+    await expect(seedDoc(db)).resolves.toBeDefined();
+    await expect(seedDoc(db)).resolves.toBeDefined();
+  });
+
+  it("tolerates broken links (target_id NULL) and cascades links with their source (011)", async () => {
+    const bundleId = await seedBundle();
+    const srcId = randomUUID();
+    await db.query(
+      `INSERT INTO knowledge_documents
+         (id, title, content, plain_text, source, source_id, bundle_id, path, created_at, updated_at)
+       VALUES ($1, 'T', 'c', 'c', 'authored', $2, $3, 'a', now(), now())`,
+      [srcId, randomUUID(), bundleId]
+    );
+    await db.query(
+      `INSERT INTO knowledge_links (id, bundle_id, source_id, target_path, target_id, created_at)
+       VALUES ($1, $2, $3, 'not/yet/imported', NULL, now())`,
+      [randomUUID(), bundleId, srcId]
+    );
+    let n = await db.query("SELECT count(*)::int AS n FROM knowledge_links");
+    expect((n.rows[0] as { n: number }).n).toBe(1);
+    await db.query("DELETE FROM knowledge_documents WHERE id = $1", [srcId]);
+    n = await db.query("SELECT count(*)::int AS n FROM knowledge_links");
+    expect((n.rows[0] as { n: number }).n).toBe(0);
+  });
+
+  it("enforces the bundle_overrides file CHECK (index.md|log.md only) (011)", async () => {
+    const bundleId = await seedBundle();
+    await expect(
+      db.query(
+        `INSERT INTO knowledge_bundle_overrides (bundle_id, dir_path, file, content, updated_at)
+         VALUES ($1, '', 'readme.md', 'x', now())`,
+        [bundleId]
+      )
+    ).rejects.toThrow();
+    await expect(
+      db.query(
+        `INSERT INTO knowledge_bundle_overrides (bundle_id, dir_path, file, content, updated_at)
+         VALUES ($1, '', 'index.md', 'x', now())`,
+        [bundleId]
+      )
+    ).resolves.toBeDefined();
+  });
+
+  // --- OKF cross-space links (012) ---
+
+  it("adds target_bundle_id + target_bundle_name to knowledge_links (012)", async () => {
+    const { rows } = await db.query(
+      `SELECT column_name, is_nullable FROM information_schema.columns
+       WHERE table_name = 'knowledge_links'
+         AND column_name IN ('target_bundle_id', 'target_bundle_name')
+       ORDER BY column_name`
+    );
+    expect(rows as { column_name: string; is_nullable: string }[]).toEqual([
+      { column_name: "target_bundle_id", is_nullable: "YES" },
+      { column_name: "target_bundle_name", is_nullable: "YES" },
+    ]);
+  });
+
+  it("allows same (source, path) into two different target bundles but dedupes same-space (012)", async () => {
+    const srcBundle = await seedBundle();
+    const srcId = randomUUID();
+    await db.query(
+      `INSERT INTO knowledge_documents
+         (id, title, content, plain_text, source, source_id, bundle_id, path, created_at, updated_at)
+       VALUES ($1, 'T', 'c', 'c', 'authored', $2, $3, 'a', now(), now())`,
+      [srcId, randomUUID(), srcBundle]
+    );
+    const link = (targetBundleName: string | null) =>
+      db.query(
+        `INSERT INTO knowledge_links
+           (id, bundle_id, source_id, target_path, target_id, target_bundle_id, target_bundle_name, created_at)
+         VALUES ($1, $2, $3, 'shared/path', NULL, NULL, $4, now())`,
+        [randomUUID(), srcBundle, srcId, targetBundleName]
+      );
+    // Two cross-space links to the SAME path but DIFFERENT bundle names both insert.
+    await expect(link("Engineering")).resolves.toBeDefined();
+    await expect(link("Sales")).resolves.toBeDefined();
+    // A same-space link (NULL bundle name) collides with another same-space link to the same path.
+    await expect(link(null)).resolves.toBeDefined();
+    await expect(link(null)).rejects.toThrow();
   });
 });

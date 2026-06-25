@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { PaginatedResult } from "../pagination";
+import type { KnowledgeBundleOverrideRepo } from "./bundle-overrides-repo";
+import type { BundlePatch, KnowledgeBundleRepo } from "./bundles-repo";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import { indexDocument, reindexAll } from "./index-service";
+import type { KnowledgeLinksRepo } from "./links-repo";
+import { parseOkf, resolveLink, rewriteCrossPageBundleName } from "./okf/parse";
+import { type IndexEntry, renderIndex } from "./okf/synthesize";
 import type {
   DocumentListOpts,
   KnowledgeCollectionRepo,
@@ -10,15 +15,38 @@ import type {
 } from "./repo";
 import { search } from "./search-service";
 import type {
+  Backlink,
+  BundlePageRef,
+  BundleWithActivity,
   EmbeddingPort,
   IndexingStatus,
+  KnowledgeBundle,
   KnowledgeCollection,
   KnowledgeDocument,
   KnowledgeRevision,
   KnowledgeSource,
+  RecentPage,
   SearchFilters,
   SearchResults,
 } from "./types";
+
+function normalizeConceptPath(p: string): string {
+  return p.replace(/^\/+|\/+$/g, "").replace(/\.md$/i, "");
+}
+
+function dirOf(path: string): string {
+  return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+}
+
+/** First non-heading, non-empty body line — a concept's index/preview description. */
+function snippet(text: string, max = 140): string | null {
+  const line = text
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("---"));
+  if (!line) return null;
+  return line.length > max ? `${line.slice(0, max)}…` : line;
+}
 
 export interface CreateDocumentInput {
   title: string;
@@ -64,6 +92,52 @@ export interface IngestSourceInput {
   tags?: string[];
 }
 
+export interface CreateBundleInput {
+  name: string;
+  description?: string | null;
+}
+
+export type CreateBundleResult =
+  | { ok: true; bundle: KnowledgeBundle }
+  | { ok: false; reason: "name_taken" | "okf_unavailable" };
+
+export interface WriteConceptInput {
+  bundleId: string;
+  path: string;
+  /** Full OKF concept markdown (frontmatter + body). */
+  content: string;
+  /** Reason recorded on the history revision this write snapshots (internal callers, e.g. rename). */
+  reason?: string | null;
+}
+
+export type WriteConceptResult =
+  | { ok: true; document: KnowledgeDocument }
+  | { ok: true; override: true }
+  | { ok: false; reason: "okf_unavailable" | "bundle_not_found" | "invalid_okf" };
+
+/** Thrown when a bundle rename collides with a name another bundle already holds (→ HTTP 409). */
+export class BundleNameTakenError extends Error {
+  constructor(name: string) {
+    super(`bundle name already in use: ${name}`);
+    this.name = "BundleNameTakenError";
+  }
+}
+
+export interface BundleGraph {
+  nodes: Array<{ id: string; path: string | null; title: string }>;
+  edges: Array<{
+    sourceId: string;
+    targetId: string | null;
+    targetPath: string;
+    broken: boolean;
+    /** Set when the edge points into another bundle (cross-space); null for same-bundle edges. */
+    targetBundleName: string | null;
+    /** The resolved id of that other bundle, when it exists; null while unresolved. */
+    targetBundleId: string | null;
+  }>;
+  truncated: boolean;
+}
+
 export interface KnowledgeServiceDeps {
   documents: KnowledgeDocumentRepo;
   chunks: KnowledgeChunkRepo;
@@ -72,6 +146,10 @@ export interface KnowledgeServiceDeps {
   embeddings: EmbeddingPort;
   /** When set, document writes enqueue async (re)indexing instead of indexing inline. */
   enqueueIndex?: (documentId: string) => Promise<void>;
+  /** OKF bundle repos — optional; required only for the OKF bundle/concept methods. */
+  bundles?: KnowledgeBundleRepo;
+  links?: KnowledgeLinksRepo;
+  overrides?: KnowledgeBundleOverrideRepo;
 }
 
 /**
@@ -180,11 +258,38 @@ export class KnowledgeService {
 
   // ── search + governance ──────────────────────────────────────────────────────
 
-  search(query: string, filters: SearchFilters, limit: number): Promise<SearchResults> {
-    return search(query, filters, limit, {
+  /**
+   * Vector/lexical search. With `expandGraph`, each hit's directly-linked OKF neighbors are
+   * appended (score 0) so related concepts travel together (graph-aware retrieval).
+   */
+  async search(
+    query: string,
+    filters: SearchFilters,
+    limit: number,
+    opts?: { expandGraph?: boolean }
+  ): Promise<SearchResults> {
+    const base = await search(query, filters, limit, {
       embeddings: this.deps.embeddings,
       chunksRepo: this.deps.chunks,
     });
+    if (!opts?.expandGraph || !this.deps.links) return base;
+    const hitIds = [...new Set(base.results.map((r) => r.documentId))];
+    const neighborIds = (await this.deps.links.getLinkedDocumentIds(hitIds)).filter(
+      (id) => !hitIds.includes(id)
+    );
+    if (neighborIds.length === 0) return base;
+    const neighbors = await Promise.all(neighborIds.map((id) => this.deps.documents.getById(id)));
+    const extra = neighbors
+      .filter((d): d is KnowledgeDocument => Boolean(d?.active))
+      .map((d) => ({
+        documentId: d._id,
+        chunkId: `graph:${d._id}`,
+        title: d.title,
+        content: d.plainText.slice(0, 800),
+        source: d.source,
+        score: 0,
+      }));
+    return { results: [...base.results, ...extra], warnings: base.warnings };
   }
 
   governanceDocuments(): Promise<KnowledgeDocument[]> {
@@ -256,6 +361,294 @@ export class KnowledgeService {
 
   listCollectionDocumentIds(collectionId: string): Promise<string[]> {
     return this.deps.collections.listDocumentIds(collectionId);
+  }
+
+  // ── OKF bundles ──────────────────────────────────────────────────────────────
+
+  private okf(): {
+    bundles: KnowledgeBundleRepo;
+    links: KnowledgeLinksRepo;
+    overrides: KnowledgeBundleOverrideRepo;
+  } | null {
+    const { bundles, links, overrides } = this.deps;
+    return bundles && links && overrides ? { bundles, links, overrides } : null;
+  }
+
+  async createBundle(input: CreateBundleInput): Promise<CreateBundleResult> {
+    const okf = this.okf();
+    if (!okf) return { ok: false, reason: "okf_unavailable" };
+    if (await okf.bundles.getByName(input.name)) return { ok: false, reason: "name_taken" };
+    const now = new Date();
+    const bundle: KnowledgeBundle = {
+      _id: randomUUID(),
+      name: input.name,
+      description: input.description ?? null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await okf.bundles.insert(bundle);
+    return { ok: true, bundle };
+  }
+
+  async getBundle(id: string): Promise<KnowledgeBundle | null> {
+    const okf = this.okf();
+    return okf ? okf.bundles.getById(id) : null;
+  }
+
+  async listBundles(opts: {
+    limit: number;
+    after?: { createdAt: Date; _id: string };
+  }): Promise<PaginatedResult<KnowledgeBundle>> {
+    const okf = this.okf();
+    if (!okf) return { items: [], nextCursor: null };
+    return okf.bundles.list(opts);
+  }
+
+  async updateBundle(id: string, patch: BundlePatch): Promise<KnowledgeBundle | null> {
+    const okf = this.okf();
+    if (!okf) return null;
+    const before = await okf.bundles.getById(id);
+    if (!before) return null;
+    // Reject a rename onto a name another bundle already holds (the UNIQUE index is the backstop).
+    if (patch.name && patch.name !== before.name) {
+      const clash = await okf.bundles.getByName(patch.name);
+      if (clash && clash._id !== id) throw new BundleNameTakenError(patch.name);
+    }
+    let updated: KnowledgeBundle | null;
+    try {
+      updated = await okf.bundles.update(id, patch, new Date());
+    } catch (err) {
+      // The UNIQUE(name) index is the backstop if the pre-check raced a concurrent rename. Only a
+      // name-column violation maps to "taken" — scoped here so 23505s from the rename rewrite below
+      // (knowledge_links / knowledge_documents) propagate as real errors, not a misleading 409.
+      if (patch.name && (err as { code?: string }).code === "23505") {
+        throw new BundleNameTakenError(patch.name);
+      }
+      throw err;
+    }
+    if (updated && patch.name && before.name !== updated.name) {
+      await this.renameCrossLinks(before.name, updated.name);
+    }
+    return updated;
+  }
+
+  /**
+   * After a bundle is renamed, rewrite the `tf:page/<old>/…` links embedded in every doc that
+   * references it (across all bundles) to the new name, re-running `writeConcept` so each doc's
+   * body AND its `knowledge_links` rows re-extract consistently. Each rewritten doc gets a tagged
+   * history revision. A final global resolve pass backfills any ids the per-doc writes missed.
+   * No DB transaction (none available): order is rename → rewrite → resolve, so a partial failure
+   * leaves at most a few stale inbound links rather than a half-renamed bundle.
+   */
+  private async renameCrossLinks(oldName: string, newName: string): Promise<void> {
+    const okf = this.okf();
+    if (!okf) return;
+    const sourceIds = await okf.links.listSourceIdsByTargetBundleName(oldName);
+    for (const sourceId of sourceIds) {
+      const doc = await this.deps.documents.getById(sourceId);
+      // Skip soft-deleted sources: their link rows persist, but re-writing one would flip it back to
+      // active (upsertBySource forces active=true) — a rename must not resurrect a deleted page.
+      if (!doc?.bundleId || doc.path == null || !doc.active) continue;
+      const next = rewriteCrossPageBundleName(doc.content, oldName, newName);
+      if (next === doc.content) continue;
+      await this.writeConcept({
+        bundleId: doc.bundleId,
+        path: doc.path,
+        content: next,
+        reason: `bundle renamed ${oldName} → ${newName}`,
+      });
+    }
+    // Safety net: a rename leaves the bundle's id (and each target page's id) intact, so any link row
+    // still naming the old bundle — e.g. a doc whose body rewrite was skipped — only has a stale name
+    // column. Fix it directly so backlinks/graph stay consistent regardless of the per-doc rewrites.
+    await okf.links.renameTargetBundle(oldName, newName);
+    await okf.links.resolveCrossBundleLinks();
+  }
+
+  async deleteBundle(id: string): Promise<boolean> {
+    const okf = this.okf();
+    return okf ? okf.bundles.delete(id) : false;
+  }
+
+  listBundleDocuments(bundleId: string): Promise<KnowledgeDocument[]> {
+    return this.deps.documents.listByBundle(bundleId);
+  }
+
+  /**
+   * Author or update one OKF concept from its full markdown. A reserved final path segment
+   * (`index`/`log`) is stored as a directory override instead of a concept. Recomputes the
+   * concept's outbound cross-links and (re)indexes only when the body changed.
+   */
+  async writeConcept(input: WriteConceptInput): Promise<WriteConceptResult> {
+    const okf = this.okf();
+    if (!okf) return { ok: false, reason: "okf_unavailable" };
+    if (!(await okf.bundles.getById(input.bundleId)))
+      return { ok: false, reason: "bundle_not_found" };
+
+    const path = normalizeConceptPath(input.path);
+    const last = path.split("/").at(-1);
+    if (last === "index" || last === "log") {
+      await okf.overrides.upsert({
+        bundleId: input.bundleId,
+        dirPath: dirOf(path),
+        file: `${last}.md` as "index.md" | "log.md",
+        content: input.content,
+        updatedAt: new Date(),
+      });
+      return { ok: true, override: true };
+    }
+
+    const concept = parseOkf(input.content);
+    if (!concept) return { ok: false, reason: "invalid_okf" };
+
+    const prior = await this.deps.documents.getByBundlePath(input.bundleId, path);
+    const now = new Date();
+    const draft: KnowledgeDocument = {
+      _id: prior?._id ?? randomUUID(),
+      title: concept.title ?? last ?? path,
+      content: input.content,
+      plainText: concept.body,
+      // Bundle concepts are always authored content — keeps the (source, source_id) upsert key
+      // stable so it can't collide with the partial unique (bundle_id, path) index.
+      source: "authored",
+      sourceId: `okf:${input.bundleId}:${path}`,
+      domain: concept.tf.domain,
+      tags: concept.tags,
+      active: concept.tf.active ?? true,
+      alwaysLoadForAgents: concept.tf.alwaysLoadForAgents ?? false,
+      version: 1,
+      bundleId: input.bundleId,
+      path,
+      resource: concept.resource,
+      frontmatterExtra: concept.extra,
+      createdAt: prior?.createdAt ?? now,
+      updatedAt: concept.timestamp ? new Date(concept.timestamp) : now,
+    };
+    const { _id } = await this.deps.documents.upsertBySource(draft);
+
+    // History: snapshot the prior content as a revision whenever an existing concept's content
+    // actually changes (creates have no prior; unchanged re-writes stay silent). `reason` is set by
+    // internal callers like bundle rename; ordinary edits leave it null.
+    if (prior && prior.content !== input.content) {
+      await this.deps.revisions.append(
+        randomUUID(),
+        prior._id,
+        prior.content,
+        prior.plainText,
+        input.reason ?? null
+      );
+    }
+
+    const sameSpace = await Promise.all(
+      concept.links.map(async (raw) => {
+        const targetPath = resolveLink(path, raw);
+        const target = await this.deps.documents.getByBundlePath(input.bundleId, targetPath);
+        // A soft-deleted target must read as broken (targetId null), not as a resolved live link.
+        return { targetPath, targetId: target?.active ? target._id : null };
+      })
+    );
+    const crossSpace = await Promise.all(
+      concept.crossLinks.map(async (cl) => {
+        const targetBundle = await okf.bundles.getByName(cl.bundleName);
+        const target = targetBundle
+          ? await this.deps.documents.getByBundlePath(targetBundle._id, cl.path)
+          : null;
+        return {
+          targetPath: cl.path,
+          targetId: target?.active ? target._id : null,
+          targetBundleName: cl.bundleName,
+          targetBundleId: targetBundle?._id ?? null,
+        };
+      })
+    );
+    await okf.links.replaceForDocument(_id, input.bundleId, [...sameSpace, ...crossSpace]);
+
+    const canonical = await this.deps.documents.getById(_id);
+    if (!canonical) return { ok: false, reason: "invalid_okf" };
+    if (!prior || prior.plainText !== concept.body) await this.afterWrite(canonical);
+    return { ok: true, document: canonical };
+  }
+
+  /** Progressive-disclosure listing for a directory: an authored index.md override, else synthesized. */
+  async navigateBundle(bundleId: string, dirPath: string): Promise<string | null> {
+    const okf = this.okf();
+    if (!okf) return null;
+    if (!(await okf.bundles.getById(bundleId))) return null;
+    const dir = normalizeConceptPath(dirPath);
+    const override = await okf.overrides.get(bundleId, dir, "index.md");
+    if (override) return override.content;
+    const docs = await this.deps.documents.listByBundle(bundleId);
+    const entries: IndexEntry[] = docs.map((d) => ({
+      path: d.path ?? "",
+      title: d.title,
+      description: snippet(d.plainText),
+    }));
+    return renderIndex(dir, entries);
+  }
+
+  /** Node + edge list for a bundle's cross-link graph (capped for payload safety). */
+  async getBundleGraph(bundleId: string): Promise<BundleGraph | null> {
+    const okf = this.okf();
+    if (!okf) return null;
+    if (!(await okf.bundles.getById(bundleId))) return null;
+    const NODE_CAP = 500;
+    const EDGE_CAP = 1000;
+    const docs = await this.deps.documents.listByBundle(bundleId);
+    const allEdges = await okf.links.getGraphForBundle(bundleId);
+    const nodes = docs.slice(0, NODE_CAP).map((d) => ({
+      id: d._id,
+      path: d.path ?? null,
+      title: d.title,
+    }));
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const edges = allEdges
+      .filter((e) => nodeIds.has(e.sourceId))
+      .slice(0, EDGE_CAP)
+      .map((e) => ({
+        sourceId: e.sourceId,
+        targetId: e.targetId,
+        targetPath: e.targetPath,
+        broken: e.targetId === null,
+        targetBundleName: e.targetBundleName,
+        targetBundleId: e.targetBundleId,
+      }));
+    return { nodes, edges, truncated: docs.length > NODE_CAP || allEdges.length > EDGE_CAP };
+  }
+
+  /** Pages that link to a concept (same- or cross-space) — the "Linked from" panel. */
+  async getBacklinks(documentId: string): Promise<Backlink[] | null> {
+    const okf = this.okf();
+    if (!okf) return null;
+    const doc = await this.deps.documents.getById(documentId);
+    if (!doc || !doc.bundleId || doc.path == null) return null;
+    const bundle = await okf.bundles.getById(doc.bundleId);
+    if (!bundle) return null;
+    return okf.links.getBacklinks({
+      documentId,
+      bundleId: doc.bundleId,
+      bundleName: bundle.name,
+      path: doc.path,
+    });
+  }
+
+  /** Flat list of every OKF page across all bundles — feeds the editor's `@`-mention Pages section. */
+  async listAllPages(): Promise<BundlePageRef[]> {
+    const okf = this.okf();
+    if (!okf) return [];
+    return this.deps.documents.listAllBundlePages();
+  }
+
+  /** Knowledge home overview: every space with page count + last activity, plus recently-edited pages. */
+  async getKnowledgeOverview(
+    recentLimit: number
+  ): Promise<{ spaces: BundleWithActivity[]; recent: RecentPage[] }> {
+    const okf = this.okf();
+    if (!okf) return { spaces: [], recent: [] };
+    const [spaces, recent] = await Promise.all([
+      okf.bundles.listWithActivity(),
+      this.deps.documents.listRecentPages(recentLimit),
+    ]);
+    return { spaces, recent };
   }
 
   // ── indexing (used by the pg-boss worker + adapters) ─────────────────────────

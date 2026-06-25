@@ -27,9 +27,12 @@ import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
+import { PgKnowledgeBundleOverrideRepo } from "./knowledge/bundle-overrides-repo";
+import { PgKnowledgeBundleRepo } from "./knowledge/bundles-repo";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { subscribeKnowledgeIndexing } from "./knowledge/events";
 import { enqueueIndex, registerKnowledgeIndexing } from "./knowledge/indexing";
+import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
 import {
   PgKnowledgeCollectionRepo,
   PgKnowledgeDocumentRepo,
@@ -130,6 +133,9 @@ async function boot() {
       chunks: new PgKnowledgeChunkRepo(pool),
       collections: new PgKnowledgeCollectionRepo(pool),
       revisions: new PgKnowledgeRevisionRepo(pool),
+      bundles: new PgKnowledgeBundleRepo(pool),
+      links: new PgKnowledgeLinksRepo(pool),
+      overrides: new PgKnowledgeBundleOverrideRepo(pool),
       embeddings: embeddingService,
       enqueueIndex: (documentId) =>
         enqueueIndex(boss, { kind: "document", documentId }).then(() => undefined),

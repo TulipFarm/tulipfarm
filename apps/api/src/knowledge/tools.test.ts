@@ -13,12 +13,16 @@ function ctx(service: Partial<KnowledgeService>): KnowledgeToolContext {
 }
 
 describe("knowledge tools", () => {
-  it("exposes exactly the four KN-V1-006 tools", () => {
+  it("exposes the knowledge + OKF bundle tools", () => {
     expect(KNOWLEDGE_TOOLS.map((t) => t.name).sort()).toEqual([
+      "create_bundle",
       "create_knowledge_collection",
       "create_knowledge_document",
+      "list_bundles",
       "list_knowledge_collections",
+      "navigate_bundle",
       "query_knowledge",
+      "write_concept",
     ]);
   });
 
