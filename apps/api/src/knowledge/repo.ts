@@ -1,15 +1,19 @@
 import type { Queryable } from "../db";
 import { type PaginatedResult, toPage } from "../pagination";
 import type {
+  BundlePageRef,
   KnowledgeCollection,
   KnowledgeDocument,
   KnowledgeRevision,
   KnowledgeSource,
+  RecentPage,
   SearchFilters,
 } from "./types";
 
+// OKF columns (bundle_id..frontmatter_extra) sit between version and the timestamps. frontmatter_extra
+// is jsonb — bound as a JSON string with an explicit ::jsonb cast (works on both pg.Pool and PGlite).
 const DOC_COLS =
-  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, created_at, updated_at";
+  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, bundle_id, path, resource, frontmatter_extra, created_at, updated_at";
 
 function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
   return {
@@ -24,6 +28,10 @@ function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
     active: row.active as boolean,
     alwaysLoadForAgents: row.always_load_for_agents as boolean,
     version: Number(row.version),
+    bundleId: (row.bundle_id as string | null) ?? null,
+    path: (row.path as string | null) ?? null,
+    resource: (row.resource as string | null) ?? null,
+    frontmatterExtra: (row.frontmatter_extra as Record<string, unknown> | null) ?? {},
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };
@@ -42,6 +50,10 @@ function docParams(doc: KnowledgeDocument): unknown[] {
     doc.active,
     doc.alwaysLoadForAgents,
     doc.version,
+    doc.bundleId ?? null,
+    doc.path ?? null,
+    doc.resource ?? null,
+    JSON.stringify(doc.frontmatterExtra ?? {}),
     doc.createdAt,
     doc.updatedAt,
   ];
@@ -65,6 +77,14 @@ export interface KnowledgeDocumentRepo {
   governanceDocuments(): Promise<KnowledgeDocument[]>;
   /** Active docs, for a full re-index pass. */
   listActive(): Promise<KnowledgeDocument[]>;
+  /** Resolve a concept by (bundleId, path) — used for cross-link resolution. */
+  getByBundlePath(bundleId: string, path: string): Promise<KnowledgeDocument | null>;
+  /** Active concepts in a bundle, ordered by path (export / navigate / graph / index synthesis). */
+  listByBundle(bundleId: string): Promise<KnowledgeDocument[]>;
+  /** Flat list of every active OKF page across all bundles (id, bundle, path, title) — @-mention source. */
+  listAllBundlePages(): Promise<BundlePageRef[]>;
+  /** The N most-recently-updated active OKF pages across all bundles — Knowledge home "Recently edited". */
+  listRecentPages(limit: number): Promise<RecentPage[]>;
 }
 
 export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
@@ -73,7 +93,7 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
   async insert(doc: KnowledgeDocument): Promise<void> {
     await this.q.query(
       `INSERT INTO knowledge_documents (${DOC_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)`,
       docParams(doc)
     );
   }
@@ -81,11 +101,13 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
   async upsertBySource(doc: KnowledgeDocument): Promise<{ _id: string; version: number }> {
     const { rows } = await this.q.query(
       `INSERT INTO knowledge_documents (${DOC_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
        ON CONFLICT (source, source_id) DO UPDATE SET
          title = EXCLUDED.title, content = EXCLUDED.content, plain_text = EXCLUDED.plain_text,
          domain = EXCLUDED.domain, tags = EXCLUDED.tags,
          always_load_for_agents = EXCLUDED.always_load_for_agents,
+         bundle_id = EXCLUDED.bundle_id, path = EXCLUDED.path,
+         resource = EXCLUDED.resource, frontmatter_extra = EXCLUDED.frontmatter_extra,
          active = true, version = knowledge_documents.version + 1, updated_at = EXCLUDED.updated_at
        RETURNING id, version`,
       docParams(doc)
@@ -136,8 +158,10 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
     const { rows } = await this.q.query(
       `UPDATE knowledge_documents
        SET title=$1, content=$2, plain_text=$3, domain=$4, tags=$5::text[],
-           always_load_for_agents=$6, active=$7, version=$8, updated_at=$9
-       WHERE id=$10 AND version=$11 RETURNING id`,
+           always_load_for_agents=$6, active=$7, version=$8,
+           resource=$9, bundle_id=$10, path=$11, frontmatter_extra=$12::jsonb,
+           updated_at=$13
+       WHERE id=$14 AND version=$15 RETURNING id`,
       [
         doc.title,
         doc.content,
@@ -147,6 +171,10 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
         doc.alwaysLoadForAgents,
         doc.active,
         doc.version,
+        doc.resource ?? null,
+        doc.bundleId ?? null,
+        doc.path ?? null,
+        JSON.stringify(doc.frontmatterExtra ?? {}),
         doc.updatedAt,
         id,
         expectedVersion,
@@ -177,6 +205,66 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
       `SELECT ${DOC_COLS} FROM knowledge_documents WHERE active=true ORDER BY created_at, id`
     );
     return rows.map(rowToDocument);
+  }
+
+  async getByBundlePath(bundleId: string, path: string): Promise<KnowledgeDocument | null> {
+    const { rows } = await this.q.query(
+      `SELECT ${DOC_COLS} FROM knowledge_documents WHERE bundle_id = $1 AND path = $2`,
+      [bundleId, path]
+    );
+    return rows[0] ? rowToDocument(rows[0]) : null;
+  }
+
+  async listByBundle(bundleId: string): Promise<KnowledgeDocument[]> {
+    const { rows } = await this.q.query(
+      `SELECT ${DOC_COLS} FROM knowledge_documents
+       WHERE bundle_id = $1 AND active = true ORDER BY path`,
+      [bundleId]
+    );
+    return rows.map(rowToDocument);
+  }
+
+  async listAllBundlePages(): Promise<BundlePageRef[]> {
+    const { rows } = await this.q.query(
+      `SELECT d.id, d.bundle_id, b.name AS bundle_name, d.path, d.title
+       FROM knowledge_documents d
+       JOIN knowledge_bundles b ON b.id = d.bundle_id
+       WHERE d.bundle_id IS NOT NULL AND d.path IS NOT NULL AND d.active = true
+       ORDER BY b.name, d.path`
+    );
+    return rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        documentId: row.id as string,
+        bundleId: row.bundle_id as string,
+        bundleName: row.bundle_name as string,
+        path: row.path as string,
+        title: row.title as string,
+      };
+    });
+  }
+
+  async listRecentPages(limit: number): Promise<RecentPage[]> {
+    const { rows } = await this.q.query(
+      `SELECT d.id, d.bundle_id, b.name AS bundle_name, d.path, d.title, d.updated_at
+       FROM knowledge_documents d
+       JOIN knowledge_bundles b ON b.id = d.bundle_id
+       WHERE d.bundle_id IS NOT NULL AND d.path IS NOT NULL AND d.active = true
+       ORDER BY d.updated_at DESC, d.id
+       LIMIT $1`,
+      [limit]
+    );
+    return rows.map((r) => {
+      const row = r as Record<string, unknown>;
+      return {
+        documentId: row.id as string,
+        bundleId: row.bundle_id as string,
+        bundleName: row.bundle_name as string,
+        path: row.path as string,
+        title: row.title as string,
+        updatedAt: row.updated_at as Date,
+      };
+    });
   }
 }
 

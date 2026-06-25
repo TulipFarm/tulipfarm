@@ -117,6 +117,23 @@ describe("compileSurface", () => {
     expect(html).toContain("&quot;label&quot;:&quot;Sales&quot;");
   });
 
+  it("compiles a ForceGraph with JSON data-nodes / data-edges attributes", () => {
+    const spec: A2uiSpec = {
+      root: {
+        component: "ForceGraph",
+        nodes: { path: "/nodes" },
+        edges: [{ source: "orders", target: "customers", broken: false }],
+      },
+    };
+    const { html } = compileSurface(spec, {
+      nodes: [{ id: "orders", label: "Orders" }],
+    });
+    expect(html).toContain("<tf-force-graph");
+    expect(html).toContain("data-nodes=");
+    expect(html).toContain("&quot;id&quot;:&quot;orders&quot;");
+    expect(html).toContain("&quot;target&quot;:&quot;customers&quot;");
+  });
+
   it("compiles a DataTable with an aria-sort header", () => {
     const spec: A2uiSpec = {
       root: {

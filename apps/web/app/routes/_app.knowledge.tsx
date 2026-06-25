@@ -1,38 +1,25 @@
-import { type MetaFunction, NavLink, Outlet } from "@remix-run/react";
+import { type MetaFunction, Outlet } from "@remix-run/react";
+import { KnowledgeTree } from "~/components/knowledge/space-tree";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
 
-const TABS = [
-  { to: "/knowledge/documents", label: "documents" },
-  { to: "/knowledge/collections", label: "collections" },
-];
-
 /*
- * Layout for the Knowledge subtree: a bracket sub-nav (documents | collections) over the child
- * outlet. The active tab wears ruby brackets, matching the terminal `[section]` motif. Children own
- * their own data + panels; `_index` redirects to /knowledge/documents.
+ * Knowledge wiki shell (Notion/Confluence-style). A persistent forest tree rail (all spaces + their
+ * pages) on the left, the selected page in the content outlet on the right — the rail stays put while
+ * pages swap. The main app sidebar auto-collapses to its icon rail whenever the path is under
+ * /knowledge (wired in _app.tsx via `forceCollapsed`), giving the tree rail the freed space. On mobile
+ * the tree stacks above the content. Children own their data; the tree self-fetches + refreshes on the
+ * `okf:bundle-changed` event.
  */
 export default function KnowledgeLayout() {
   return (
-    <div className="flex flex-col">
-      <nav className="mx-auto flex w-full max-w-4xl items-center gap-4 px-6 pt-8 text-xs uppercase tracking-[0.2em]">
-        {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} className="transition-colors">
-            {({ isActive }) => (
-              <span
-                className={
-                  isActive ? "text-primary" : "text-muted-foreground hover:text-foreground"
-                }
-              >
-                {isActive ? "[ " : ""}
-                {t.label}
-                {isActive ? " ]" : ""}
-              </span>
-            )}
-          </NavLink>
-        ))}
-      </nav>
-      <Outlet />
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      <aside className="flex max-h-[45vh] shrink-0 flex-col border-b border-border bg-sidebar text-sidebar-foreground md:max-h-none md:w-64 md:border-b-0 md:border-r">
+        <KnowledgeTree />
+      </aside>
+      <div className="min-w-0 flex-1 overflow-y-auto">
+        <Outlet />
+      </div>
     </div>
   );
 }

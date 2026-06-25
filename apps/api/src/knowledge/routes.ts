@@ -1,9 +1,10 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { parsePaginationQuery } from "../pagination";
-import type { KnowledgeService } from "./service";
+import { BundleNameTakenError, type KnowledgeService } from "./service";
 import type {
   IndexingStatus,
+  KnowledgeBundle,
   KnowledgeCollection,
   KnowledgeDocument,
   KnowledgeRevision,
@@ -33,6 +34,10 @@ function toApiDocument(d: KnowledgeDocument, status?: IndexingStatus): Record<st
     active: d.active,
     alwaysLoadForAgents: d.alwaysLoadForAgents,
     version: d.version,
+    bundleId: d.bundleId ?? null,
+    path: d.path ?? null,
+    resource: d.resource ?? null,
+    frontmatterExtra: d.frontmatterExtra ?? {},
     createdAt: d.createdAt.toISOString(),
     updatedAt: d.updatedAt.toISOString(),
     ...(status !== undefined ? { indexingStatus: status } : {}),
@@ -554,6 +559,371 @@ export function registerKnowledgeRoutes(
       const { id } = req.params as { id: string };
       const ids = await service.listCollectionDocumentIds(id);
       return reply.send({ documentIds: ids });
+    }
+  );
+
+  // ── OKF bundles ────────────────────────────────────────────────────────────────
+
+  const BundleSchema = {
+    type: "object",
+    additionalProperties: true,
+    properties: { id: { type: "string" } },
+    required: ["id"],
+  } as const;
+  const toApiBundle = (b: KnowledgeBundle): Record<string, unknown> => ({
+    id: b._id,
+    name: b.name,
+    description: b.description,
+    createdAt: b.createdAt.toISOString(),
+    updatedAt: b.updatedAt.toISOString(),
+  });
+
+  app.post(
+    "/api/v1/knowledge/bundles",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Create an OKF knowledge bundle.",
+        tags,
+        security: sec,
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", minLength: 1 },
+            description: { type: "string", nullable: true },
+          },
+        },
+        response: { 201: BundleSchema, 400: ErrorSchema, 409: ErrorSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const res = await service.createBundle(
+        req.body as { name: string; description?: string | null }
+      );
+      if (!res.ok) {
+        return reply.code(res.reason === "name_taken" ? 409 : 400).send({ error: res.reason });
+      }
+      return reply.code(201).send(toApiBundle(res.bundle));
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/bundles",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "List OKF bundles (cursor paginated).",
+        tags,
+        security: sec,
+        querystring: {
+          type: "object",
+          properties: { cursor: { type: "string" }, limit: { type: "number" } },
+        },
+        response: { 200: PageSchema(BundleSchema), 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { limit, after } = parsePaginationQuery(req.query as Record<string, unknown>);
+      const page = await service.listBundles({ limit, after });
+      return reply.send({ items: page.items.map(toApiBundle), nextCursor: page.nextCursor });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/bundles/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Get one OKF bundle.",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: { 200: BundleSchema, 404: ErrorSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const b = await service.getBundle(id);
+      if (!b) return reply.code(404).send({ error: "not found" });
+      return reply.send(toApiBundle(b));
+    }
+  );
+
+  app.put(
+    "/api/v1/knowledge/bundles/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Update an OKF bundle's metadata.",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        body: {
+          type: "object",
+          properties: {
+            name: { type: "string", minLength: 1 },
+            description: { type: "string", nullable: true },
+          },
+        },
+        response: { 200: BundleSchema, 404: ErrorSchema, 409: ErrorSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      try {
+        const b = await service.updateBundle(
+          id,
+          req.body as { name?: string; description?: string | null }
+        );
+        if (!b) return reply.code(404).send({ error: "not found" });
+        return reply.send(toApiBundle(b));
+      } catch (err) {
+        // Rename collided with an existing bundle name (pre-check, or the UNIQUE index mapped to this
+        // error inside updateBundle). Other errors from the rename rewrite propagate as 500s.
+        if (err instanceof BundleNameTakenError) {
+          return reply.code(409).send({ error: "bundle name already in use" });
+        }
+        throw err;
+      }
+    }
+  );
+
+  app.delete(
+    "/api/v1/knowledge/bundles/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Delete an OKF bundle (cascades its concepts, links, overrides).",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: { 204: { type: "null" }, 404: ErrorSchema, 401: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const ok = await service.deleteBundle(id);
+      return ok ? reply.code(204).send() : reply.code(404).send({ error: "not found" });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/bundles/:id/documents",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "List the concepts in a bundle (with path + OKF type).",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: {
+          200: { type: "object", properties: { items: { type: "array" } }, required: ["items"] },
+          404: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!(await service.getBundle(id))) return reply.code(404).send({ error: "not found" });
+      const docs = await service.listBundleDocuments(id);
+      return reply.send({ items: docs.map((d) => toApiDocument(d)) });
+    }
+  );
+
+  app.post(
+    "/api/v1/knowledge/bundles/:id/concepts",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Author or update an OKF concept (full markdown). A reserved index/log path sets a directory override.",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        body: {
+          type: "object",
+          required: ["path", "content"],
+          properties: {
+            path: { type: "string", minLength: 1 },
+            content: { type: "string", minLength: 1 },
+          },
+        },
+        response: {
+          200: { type: "object", additionalProperties: true },
+          201: DocumentSchema,
+          400: ErrorSchema,
+          404: ErrorSchema,
+          401: ErrorSchema,
+          503: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const b = req.body as { path: string; content: string };
+      const res = await service.writeConcept({ bundleId: id, path: b.path, content: b.content });
+      if (!res.ok) {
+        if (res.reason === "bundle_not_found") return reply.code(404).send({ error: "not found" });
+        if (res.reason === "okf_unavailable") return reply.code(503).send({ error: res.reason });
+        return reply.code(400).send({ error: res.reason });
+      }
+      if ("override" in res) return reply.code(200).send({ override: true, path: b.path });
+      return reply.code(201).send(toApiDocument(res.document));
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/bundles/:id/navigate",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Progressive-disclosure index listing for a directory (dirPath, '' = root).",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        querystring: { type: "object", properties: { dirPath: { type: "string" } } },
+        response: {
+          200: {
+            type: "object",
+            properties: { listing: { type: "string" } },
+            required: ["listing"],
+          },
+          404: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const { dirPath } = req.query as { dirPath?: string };
+      const listing = await service.navigateBundle(id, dirPath ?? "");
+      if (listing === null) return reply.code(404).send({ error: "not found" });
+      return reply.send({ listing });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/bundles/:id/graph",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Node + edge list for a bundle's cross-link graph (capped).",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              nodes: { type: "array" },
+              edges: { type: "array" },
+              truncated: { type: "boolean" },
+            },
+            required: ["nodes", "edges", "truncated"],
+          },
+          404: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const graph = await service.getBundleGraph(id);
+      if (!graph) return reply.code(404).send({ error: "not found" });
+      return reply.send(graph);
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/documents/:id/backlinks",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Pages that link to a concept (same- or cross-space) — the 'Linked from' panel.",
+        tags,
+        security: sec,
+        params: { type: "object", properties: { id: { type: "string" } }, required: ["id"] },
+        response: {
+          200: { type: "object", properties: { items: { type: "array" } }, required: ["items"] },
+          404: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      const items = await service.getBacklinks(id);
+      if (items === null) return reply.code(404).send({ error: "not found" });
+      return reply.send({ items });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/pages",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Flat list of every OKF page across all bundles (for the @-mention Pages picker).",
+        tags,
+        security: sec,
+        response: {
+          200: { type: "object", properties: { items: { type: "array" } }, required: ["items"] },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      const items = await service.listAllPages();
+      return reply.send({ items });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/overview",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Knowledge home overview: every space with page count + last activity, and recently-edited pages.",
+        tags,
+        security: sec,
+        querystring: {
+          type: "object",
+          properties: { recentLimit: { type: "number" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { spaces: { type: "array" }, recent: { type: "array" } },
+            required: ["spaces", "recent"],
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const raw = Number((req.query as { recentLimit?: number }).recentLimit);
+      const recentLimit = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 20) : 8;
+      const { spaces, recent } = await service.getKnowledgeOverview(recentLimit);
+      return reply.send({
+        spaces: spaces.map((s) => ({
+          ...toApiBundle(s.bundle),
+          pageCount: s.pageCount,
+          lastActivity: s.lastActivity.toISOString(),
+        })),
+        recent: recent.map((p) => ({
+          documentId: p.documentId,
+          bundleId: p.bundleId,
+          bundleName: p.bundleName,
+          path: p.path,
+          title: p.title,
+          updatedAt: p.updatedAt.toISOString(),
+        })),
+      });
     }
   );
 }

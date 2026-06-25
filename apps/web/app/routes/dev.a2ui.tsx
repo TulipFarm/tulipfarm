@@ -99,6 +99,11 @@ const SAMPLE_HTML = `
   data-labels='["Mon","Tue","Wed","Thu","Fri"]'
   data-datasets='[{"label":"Signups","data":[3,7,5,9,6]},{"label":"Churn","data":[1,0,2,1,2]}]'></tf-chart-line>
 
+<tf-heading>Force graph (in-iframe, CSP)</tf-heading>
+<tf-force-graph
+  data-nodes='[{"id":"orders","title":"Orders","okfType":"BigQuery Table"},{"id":"customers","title":"Customers","okfType":"BigQuery Table"},{"id":"playbook","title":"Sales Playbook","okfType":"Playbook"}]'
+  data-edges='[{"sourceId":"orders","targetId":"customers","broken":false},{"sourceId":"playbook","targetId":"orders","broken":false},{"sourceId":"playbook","targetId":null,"broken":true}]'></tf-force-graph>
+
 <tf-heading>Schema form</tf-heading>
 <tf-schema-form>
   <div data-slot="field">

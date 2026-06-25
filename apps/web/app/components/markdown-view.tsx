@@ -1,9 +1,59 @@
+import { Link } from "@remix-run/react";
 import { useMemo } from "react";
-import ReactMarkdown, { type Components, type Options } from "react-markdown";
+import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { rehypeCallouts } from "~/lib/rehype-callouts";
+import { rehypeTags } from "~/lib/rehype-tags";
 import { mentionComponents } from "./chat/mention-chip";
 import { rehypeMentions } from "./chat/mention-highlight";
 import type { MentionEntry } from "./chat/use-mention-catalog";
+
+const TAG_BASE = "/knowledge/tags/";
+
+// react-markdown strips unknown URL schemes to "" by default — keep only our three KNOWN `tf:` forms
+// (unresolved cross-space links) intact so `wikiAnchor` can render them as muted, non-navigable text.
+// Restricting to the known schemas keeps the sanitizer bypass narrow (no open-ended `tf:` allow).
+const wikiUrlTransform = (url: string) =>
+  /^tf:(page|agent|resource)\//.test(url) ? url : defaultUrlTransform(url);
+
+// In wiki mode, internal hrefs (`/…`, produced by rewriteWikiLinks + rehypeTags) render as
+// client-side links; unresolved `tf:` hrefs render muted; everything else opens in a new tab.
+const wikiAnchor: Components["a"] = ({ node: _n, children, href, ...p }) => {
+  const target = typeof href === "string" ? href : "";
+  if (target.startsWith("/")) {
+    const cls =
+      typeof p.className === "string"
+        ? p.className
+        : "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+    return (
+      <Link to={target} className={cls}>
+        {children}
+      </Link>
+    );
+  }
+  if (target.startsWith("tf:")) {
+    return (
+      <span className="text-muted-foreground" title="link target not found">
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a
+      className="text-primary underline underline-offset-2 hover:opacity-80"
+      target="_blank"
+      rel="noreferrer"
+      href={target}
+    >
+      {children}
+    </a>
+  );
+};
+
+// Border accent for a GitHub-alert callout by kind.
+function calloutBorder(kind: string): string {
+  return kind === "WARNING" || kind === "CAUTION" ? "border-destructive" : "border-primary";
+}
 
 /*
  * Renders markdown (AGENT.md / SKILL.md bodies) styled to the terminal aesthetic — everything stays
@@ -58,11 +108,28 @@ const components: Components = {
       {children}
     </li>
   ),
-  blockquote: ({ node: _n, children, ...p }) => (
-    <blockquote className="my-3 border-l border-border pl-3 text-muted-foreground" {...p}>
-      {children}
-    </blockquote>
-  ),
+  blockquote: ({ node, children, ...p }) => {
+    const raw = node?.properties?.dataCallout;
+    const kind = typeof raw === "string" ? raw : undefined;
+    if (kind) {
+      return (
+        <div
+          data-callout={kind}
+          className={`my-3 rounded-sm border-l-2 ${calloutBorder(kind)} bg-muted/40 px-3 py-2 text-foreground`}
+        >
+          <p className="mb-1 text-[0.625rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+            {kind}
+          </p>
+          <div className="[&>:first-child]:mt-0 [&>:last-child]:mb-0">{children}</div>
+        </div>
+      );
+    }
+    return (
+      <blockquote className="my-3 border-l border-border pl-3 text-muted-foreground" {...p}>
+        {children}
+      </blockquote>
+    );
+  },
   code: ({ node: _n, children, className, ...p }) => {
     // Inline code (no language class) vs. fenced block (rendered inside <pre>).
     const isBlock = typeof className === "string" && className.includes("language-");
@@ -113,26 +180,30 @@ const components: Components = {
 export function MarkdownView({
   children,
   mentions,
+  wikiLinks,
 }: {
   children: string;
   /** When set, `@agent`/`/skill`/`#resource` tags are highlighted as chips with a hover card. */
   mentions?: MentionEntry[];
+  /** Knowledge-wiki mode: render internal `/…` hrefs as client links and `#tag` text as chip links. */
+  wikiLinks?: boolean;
 }) {
   const list = mentions ?? [];
   const active = list.length > 0;
   const byPhrase = useMemo(() => new Map(list.map((m) => [m.phrase, m] as const)), [list]);
-  const rehypePlugins: Options["rehypePlugins"] = active
-    ? [[rehypeMentions, { phrases: list.map((m) => m.phrase) }]]
-    : undefined;
-  const resolvedComponents: Components = active
-    ? { ...components, ...mentionComponents(byPhrase) }
-    : components;
+  const rehypePlugins: Options["rehypePlugins"] = [rehypeCallouts];
+  if (active) rehypePlugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
+  if (wikiLinks) rehypePlugins.push([rehypeTags, { tagBase: TAG_BASE }]);
+  let resolvedComponents: Components = components;
+  if (active) resolvedComponents = { ...resolvedComponents, ...mentionComponents(byPhrase) };
+  if (wikiLinks) resolvedComponents = { ...resolvedComponents, a: wikiAnchor };
   return (
     <div className="text-sm">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={rehypePlugins}
         components={resolvedComponents}
+        urlTransform={wikiLinks ? wikiUrlTransform : undefined}
       >
         {children}
       </ReactMarkdown>

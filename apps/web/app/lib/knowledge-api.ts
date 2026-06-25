@@ -19,6 +19,11 @@ export type KnowledgeDocument = {
   active: boolean;
   alwaysLoadForAgents: boolean;
   version: number;
+  // OKF-only; present on bundle concepts so a tag-filtered listing can link to its concept route.
+  bundleId?: string | null;
+  path?: string | null;
+  // OKF concept metadata — also returned by `GET /documents/:id`, so a by-id load can render the view.
+  resource?: string | null;
   createdAt: string;
   updatedAt: string;
   // Derived server-side from the document's chunks (read-only). Absent on older payloads.
@@ -76,8 +81,11 @@ function pageQuery(cursor: string | undefined, limit: number): string {
 
 // ── documents ────────────────────────────────────────────────────────────────
 
-export function listDocuments(cursor?: string, limit = 50): Promise<DocPage> {
-  return apiGet<DocPage>(`${BASE}/documents?${pageQuery(cursor, limit)}`);
+export function listDocuments(cursor?: string, limit = 50, tags?: string[]): Promise<DocPage> {
+  const q = new URLSearchParams({ limit: String(limit) });
+  if (cursor) q.set("cursor", cursor);
+  if (tags && tags.length > 0) q.set("tags", tags.join(","));
+  return apiGet<DocPage>(`${BASE}/documents?${q.toString()}`);
 }
 
 export function getDocument(id: string): Promise<KnowledgeDocument> {
@@ -159,4 +167,173 @@ export async function listCollectionsWithCounts(
     })
   );
   return { items, nextCursor: page.nextCursor };
+}
+
+// ── OKF bundles ────────────────────────────────────────────────────────────────
+
+export type KnowledgeBundle = {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// A bundle member document. Carries the OKF-specific fields (path/resource) on top of the
+// base knowledge-document shape; `content` is the full OKF markdown (frontmatter + body).
+export type BundleDocument = {
+  id: string;
+  title: string;
+  content: string;
+  source: KnowledgeSource;
+  sourceId: string;
+  domain: string | null;
+  tags: string[];
+  active: boolean;
+  alwaysLoadForAgents: boolean;
+  version: number;
+  bundleId: string | null;
+  path: string | null;
+  resource: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type BundlePage = { items: KnowledgeBundle[]; nextCursor: string | null };
+
+export type BundleInput = {
+  name: string;
+  description?: string | null;
+};
+
+// A concept write either creates/replaces a concept document, or — when the path's last segment is
+// `index`/`log` — records a directory override (200, no document returned).
+export type ConceptWriteResult = BundleDocument | { override: true; path: string };
+
+export type BundleGraphNode = {
+  id: string;
+  path: string | null;
+  title: string;
+};
+export type BundleGraphEdge = {
+  sourceId: string;
+  targetId: string | null;
+  targetPath: string;
+  broken: boolean;
+  /** Set when the edge points into another bundle (cross-space); null for same-bundle edges. */
+  targetBundleName: string | null;
+  /** The resolved id of that other bundle, when it exists; null while unresolved. */
+  targetBundleId: string | null;
+};
+export type BundleGraph = {
+  nodes: BundleGraphNode[];
+  edges: BundleGraphEdge[];
+  truncated: boolean;
+};
+
+export function listBundles(cursor?: string, limit = 50): Promise<BundlePage> {
+  return apiGet<BundlePage>(`${BASE}/bundles?${pageQuery(cursor, limit)}`);
+}
+
+export function getBundle(id: string): Promise<KnowledgeBundle> {
+  return apiGet<KnowledgeBundle>(`${BASE}/bundles/${enc(id)}`);
+}
+
+export function createBundle(body: BundleInput): Promise<KnowledgeBundle> {
+  return apiWrite<KnowledgeBundle>("POST", `${BASE}/bundles`, body);
+}
+
+export function updateBundle(id: string, body: Partial<BundleInput>): Promise<KnowledgeBundle> {
+  return apiWrite<KnowledgeBundle>("PUT", `${BASE}/bundles/${enc(id)}`, body);
+}
+
+export function deleteBundle(id: string): Promise<void> {
+  return apiDelete(`${BASE}/bundles/${enc(id)}`);
+}
+
+export function listBundleDocuments(id: string): Promise<{ items: BundleDocument[] }> {
+  return apiGet<{ items: BundleDocument[] }>(`${BASE}/bundles/${enc(id)}/documents`);
+}
+
+// Author/replace a concept (or record a directory override). The server parses/validates the OKF
+// `content`; a 400 carries the validation message (surfaced by the form).
+export function writeConcept(
+  id: string,
+  path: string,
+  content: string
+): Promise<ConceptWriteResult> {
+  return apiWrite<ConceptWriteResult>("POST", `${BASE}/bundles/${enc(id)}/concepts`, {
+    path,
+    content,
+  });
+}
+
+// Markdown index listing for a directory in the bundle ("" = root).
+export function navigateBundle(id: string, dirPath = ""): Promise<{ listing: string }> {
+  const q = dirPath ? `?dirPath=${enc(dirPath)}` : "";
+  return apiGet<{ listing: string }>(`${BASE}/bundles/${enc(id)}/navigate${q}`);
+}
+
+export function getBundleGraph(id: string): Promise<BundleGraph> {
+  return apiGet<BundleGraph>(`${BASE}/bundles/${enc(id)}/graph`);
+}
+
+// A page that links to a concept (the "Linked from" panel). `bundleName` lets the UI resolve the
+// source's space without an extra lookup; cross-space backlinks come back the same shape.
+export type Backlink = {
+  sourceId: string;
+  title: string;
+  path: string | null;
+  bundleId: string;
+  bundleName: string;
+};
+
+// A flat reference to one OKF page across all bundles — feeds the editor's `@`-mention Pages section.
+export type BundlePageRef = {
+  documentId: string;
+  bundleId: string;
+  bundleName: string;
+  path: string;
+  title: string;
+};
+
+export function getBacklinks(documentId: string): Promise<{ items: Backlink[] }> {
+  return apiGet<{ items: Backlink[] }>(`${BASE}/documents/${enc(documentId)}/backlinks`);
+}
+
+// One stored revision of a concept's full OKF content (the API returns them newest-first). `content`
+// is the full markdown — enough to preview read-only and to Restore (re-POST via writeConcept).
+export type KnowledgeRevision = {
+  id: string;
+  documentId: string;
+  revisionNumber: number;
+  content: string;
+  reason: string | null;
+  createdAt: string;
+};
+
+export function listRevisions(documentId: string): Promise<{ items: KnowledgeRevision[] }> {
+  return apiGet<{ items: KnowledgeRevision[] }>(`${BASE}/documents/${enc(documentId)}/revisions`);
+}
+
+export function listAllPages(): Promise<{ items: BundlePageRef[] }> {
+  return apiGet<{ items: BundlePageRef[] }>(`${BASE}/pages`);
+}
+
+// A space on the Knowledge home grid: bundle metadata + its active page count and last activity
+// (latest of the space's own update or any of its pages' updates).
+export type SpaceOverview = KnowledgeBundle & { pageCount: number; lastActivity: string };
+// A recently-edited page across all spaces, for the Knowledge home "Recently edited" list.
+export type RecentPage = {
+  documentId: string;
+  bundleId: string;
+  bundleName: string;
+  path: string;
+  title: string;
+  updatedAt: string;
+};
+export type KnowledgeOverview = { spaces: SpaceOverview[]; recent: RecentPage[] };
+
+export function getKnowledgeOverview(recentLimit = 8): Promise<KnowledgeOverview> {
+  return apiGet<KnowledgeOverview>(`${BASE}/overview?recentLimit=${recentLimit}`);
 }

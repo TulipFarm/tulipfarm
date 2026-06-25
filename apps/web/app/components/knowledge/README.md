@@ -1,43 +1,50 @@
-# Knowledge section (web)
+# Knowledge wiki (web)
 
-Frontend for managing knowledge **documents** and **collections** in the shell. Markdown-only
-content — **no file upload** (AC-V1-004). The backend (`apps/api/src/knowledge`) is the source of
-truth; this is the UI over it.
+Notion/Confluence-style wiki over OKF bundles. One unified **space → page** tree (no
+documents/collections tabs); pages are markdown, edited with the shared `@tulipfarm/editor`
+(TipTap, markdown in/out). The backend (`apps/api/src/knowledge`) is the source of truth.
 
-## Data layer
-- **`app/lib/knowledge-api.ts`** — typed client over the shared `apiGet/apiWrite/apiSend/apiDelete`
-  primitives in `app/lib/api.ts` (cookie-first auth, CSRF echo, quoted `If-Match`). Covers documents
-  CRUD, collections CRUD + membership, and search. `listCollectionsWithCounts` fans out one
-  `documentIds` request per collection (N+1 — collections are few).
-  - `apiSend` (added to `api.ts`) is for 204-returning mutations (e.g. add-to-collection) where
-    `apiWrite` would throw parsing an empty body.
+## Model (UI ↔ OKF)
 
-## Components (this dir — all presentational; routes own data + navigation)
-- `index-status-badge` — per-doc `indexingStatus` pill (`indexed` ruby / `lexical-only` · `pending` muted).
-- `doc-list` — `DocTable` (browse, sortable title/domain/updated) + `SearchResults` (semantic hits).
-- `doc-form` — title / content (textarea + **markdown preview** via `MarkdownView`) / tags
-  (comma ↔ `string[]`) / domain / `alwaysLoadForAgents`. Server-authoritative errors via props.
-- `doc-detail` — `MarkdownView` body + metadata + badge + two-step inline **delete**.
-- `collection-list` — name / description / **doc count**.
-- `collection-form` — name / description / domain.
-- `collection-detail` — meta + member documents with add (by id) / remove.
+- **Space** = an OKF bundle (the word "bundle" is hidden in the UI). Top-level tree node.
+- **Page** = a concept doc at a `path` within a space; children = docs/dirs under `<path>/`.
+- A page is a **container** simply by having children — the tree merges a concept `a.md` and a
+  sibling dir `a/` into ONE node that is clickable (its body) AND expandable (its children).
+- **Front page** = the space's root `index.md` override (authored or synthesized contents).
+- Zero new DB: spaces/pages/front page reuse `createBundle` / `writeConcept(id, path|"index", …)`
+  / `navigateBundle`. Cross-links / #tags / `log.md` history are later phases.
 
-Shared chrome reused (not duplicated): `ResourcePanel`, `EmptyState`, `states` (Error/NotFound),
-`MarkdownView`, `ui/button`, `resource-form`'s exported `writeErrorState` (422→field, 409→banner).
+## Data + pure logic (`app/lib/`)
+
+- `knowledge-api.ts` — typed client (bundles CRUD, `writeConcept`, `navigateBundle`,
+  `listBundleDocuments`, graph, zip export/import). Legacy doc/collection fns remain (agents use
+  them) but have no UI.
+- `okf-listing.ts` — pure `parseListing` / `mergeEntries` (the merge rule) / `listingToNodes` /
+  `rewriteOkfLinks` (relative `.md` links → SPA routes). Unit-tested.
+- `rehype-callouts.ts` — renders `> [!NOTE]` blockquotes as callouts in `MarkdownView`.
+
+## Components (this dir)
+
+- `space-tree` — the forest rail: spaces → lazy pages (merge rule), active highlight, inline `[+]`
+  create, refreshes on the `okf:bundle-changed` window event a write dispatches.
+- `concept-form` — guided (frontmatter fields + `<PageEditor>` WYSIWYG body) / **raw** OKF escape
+  hatch. Submits `{ path, content }`.
+- `concept-detail` — read view (`MarkdownView`, callout-aware).
+- `bundle-form` — space name/description/domain.
+- `bundle-graph` — d3-force cross-link graph (content-pane route).
+- `bundle-list` — spaces card grid (the orphan `/knowledge/bundles` index; tree is the real nav).
 
 ## Routes (`app/routes/_app.knowledge.*`)
-`_app.knowledge.tsx` = layout with the `[documents] · [collections]` sub-nav + `<Outlet/>`;
-`_app.knowledge._index.tsx` redirects to `/knowledge/documents` (via `<Navigate replace>`). Each entity
-has `_index` / `new` / `$id` / `$id.edit`, mirroring the `_app.resources.*` convention. Routes fetch in
-`clientLoader`, render via `useLoaderData`, and expose an `ErrorBoundary` (401 → auth, 404 → not found).
 
-## indexingStatus (backend contract)
-The API derives `indexingStatus ∈ {indexed, lexical-only, pending}` per document from its chunks
-(read-only; returned on document create/get/list/update). `pending` = not yet indexed (prod indexing
-is async); `lexical-only` = indexed without embeddings (no provider — search returns the
-`embedding-unavailable` warning the list surfaces).
+`_app.knowledge.tsx` = the wiki **shell**: persistent `<KnowledgeTree/>` rail + content `<Outlet/>`;
+the main app sidebar auto-collapses here (wired in `_app.tsx` via `forceCollapsed`). `_index` =
+welcome pane. `bundles.$id` = thin context provider (no chrome); its `_index` = front page;
+`concepts.$` = page read; `concepts.new` (accepts `?parent=` / `?path=index`) + `concepts.edit.$`
+= edit via `<PageEditor>`; `bundles.$id.graph` = graph; `bundles.new` / `bundles.$id.edit` = space
+create / settings.
 
 ## Tests
-`*.test.tsx` colocated (badge, doc-form) + `app/routes/knowledge.{documents,collections}.routes.test.tsx`
-(Vitest + `createRemixStub` + mocked `useLoaderData`/`useRouteError`). `app/lib/knowledge-api.test.ts`
-mocks `fetch`. Run: `pnpm --filter @tulipfarm/web test knowledge`.
+
+Pure logic in `@tulipfarm/editor` (markdown round-trip, callout, slash filter) + `app/lib/
+okf-listing.test.ts` + `markdown-view.test.tsx` (callouts). The tree/shell/editor are verified
+end-to-end via Playwright. Run: `pnpm --filter @tulipfarm/web test knowledge`.

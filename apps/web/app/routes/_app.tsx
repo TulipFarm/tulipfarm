@@ -1,4 +1,4 @@
-import { Outlet, redirect } from "@remix-run/react";
+import { Outlet, redirect, useLocation } from "@remix-run/react";
 import { AppSidebar } from "~/components/app-sidebar";
 import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
@@ -23,13 +23,16 @@ export async function clientLoader() {
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending
 // approvals (sidebar badge + Approvals page); ConversationsProvider holds the Recent chats list.
 export default function AppLayout() {
+  // The Knowledge wiki provides its own page-tree rail, so the main nav auto-collapses to its icon
+  // rail under /knowledge (transient — the persisted collapse preference is untouched).
+  const onKnowledge = useLocation().pathname.startsWith("/knowledge");
   return (
     <ApprovalsProvider>
       <ConversationsProvider>
         {/* Desktop shell is capped to the viewport (h-svh + overflow-hidden) so the sidebar nav and
             the main panel each scroll internally instead of growing the whole page. */}
         <div className="md:flex md:h-svh md:overflow-hidden">
-          <AppSidebar />
+          <AppSidebar forceCollapsed={onKnowledge} />
           <main className="min-h-[calc(100svh-3rem)] flex-1 overflow-auto md:h-svh md:min-h-0">
             <Outlet />
           </main>

@@ -211,7 +211,7 @@ function RecentChats({ rail, onNavigate }: { rail: boolean; onNavigate: () => vo
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolean } = {}) {
   const [open, setOpen] = useState(false); // mobile drawer
   const [collapsed, setCollapsed] = useState(false); // desktop rail
   // Desktop-first so the nav is never hidden from AT before the media query resolves.
@@ -219,8 +219,10 @@ export function AppSidebar() {
   const navRef = useRef<HTMLElement>(null);
   const close = () => setOpen(false);
 
-  // Collapse only applies on desktop; the mobile drawer always shows full labels.
-  const rail = collapsed && isDesktop;
+  // Collapse only applies on desktop; the mobile drawer always shows full labels. `forceCollapsed`
+  // (set under /knowledge, which has its own tree rail) rails the nav without touching the persisted
+  // user preference.
+  const rail = (collapsed || forceCollapsed) && isDesktop;
 
   useEffect(() => {
     setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "true");
@@ -300,19 +302,22 @@ export function AppSidebar() {
         >
           <Logo />
           {rail ? null : <span className="flex-1 text-base font-bold">tulipfarm</span>}
-          {/* Desktop collapse toggle. */}
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="hover:bg-sidebar-accent/50 hidden rounded-sm p-1.5 md:inline-flex"
-          >
-            {collapsed ? (
-              <PanelLeftOpen className="size-4" />
-            ) : (
-              <PanelLeftClose className="size-4" />
-            )}
-          </button>
+          {/* Desktop collapse toggle — hidden under /knowledge, where the route force-rails the nav,
+              so a click here can't quietly persist `collapsed=true` into the user's preference. */}
+          {forceCollapsed ? null : (
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              className="hover:bg-sidebar-accent/50 hidden cursor-pointer rounded-sm p-1.5 md:inline-flex"
+            >
+              {collapsed ? (
+                <PanelLeftOpen className="size-4" />
+              ) : (
+                <PanelLeftClose className="size-4" />
+              )}
+            </button>
+          )}
           {/* Mobile drawer close. */}
           <button
             type="button"
