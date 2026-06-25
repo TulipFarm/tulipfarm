@@ -18,7 +18,8 @@ const NORMALIZERS: Record<NormalizerKey, (v: string) => string> = {
       .toLowerCase()
       .replace(/[^\w\s-]/g, "")
       .replace(/[\s_-]+/g, "-")
-      .replace(/^-+|-+$/g, ""),
+      .replace(/^-+/, "")
+      .replace(/-+$/, ""),
   // US-only V1: strip non-digits, prepend +1
   "phone-e164": (v) => `+1${v.replace(/\D/g, "")}`,
   "email-normalize": (v) => v.trim().toLowerCase(),

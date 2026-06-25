@@ -77,10 +77,10 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
 }
 
 // Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
-// http(s)/file URL. ssh:// and scp-style (git@host:path) sources are rejected to avoid the operator's
-// clone reaching internal hosts (SSRF). Single-trust V1; a tighter allowlist is a post-V1 hardening.
+// https URL. ssh://, file://, and scp-style (git@host:path) sources are rejected to prevent SSRF
+// and local path traversal. Single-trust V1; a tighter allowlist is a post-V1 hardening.
 function isAllowedSource(source: string): boolean {
-  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^(https?|file):\/\//.test(source);
+  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^https?:\/\//.test(source);
 }
 
 // Normalize an allowed source into something `git clone` accepts. A bare "owner/repo" becomes a
@@ -129,10 +129,17 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
 
 async function cloneToTemp(source: string): Promise<{ dir: string; ref: string }> {
   const dir = await mkdtemp(join(tmpdir(), "skill-scan-"));
-  await execFileP("git", ["clone", "--depth", "1", normalizeGitUrl(source), dir], {
-    timeout: CLONE_TIMEOUT_MS,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
+  // `--no-local` prevents git from treating https URLs as local paths on some platforms.
+  // `--` separates options from the URL so the URL cannot be misinterpreted as an option.
+  // lgtm[js/second-order-command-line-injection]
+  await execFileP(
+    "git",
+    ["clone", "--depth", "1", "--no-local", "--", normalizeGitUrl(source), dir],
+    {
+      timeout: CLONE_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }
+  );
   const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], { cwd: dir });
   return { dir, ref: stdout.trim() };
 }
