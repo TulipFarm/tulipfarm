@@ -61,8 +61,9 @@ Construct a JSON Schema 2020-12 object:
 If \`validate_artifact\` is available, validate the schema and fix any errors before presenting.
 
 ### Step 6 — Preview & approve
-Summarise the type briefly (name, purpose, key fields) and ask for approval in one short sentence,
-e.g. "Should I create the \`issue\` resource type?". Keep it concise — do not dump the full raw YAML.
+Summarise the type briefly (name, purpose, key fields) and use \`present_choices\` for approval
+(e.g. "Create it" / "Edit first" / "Cancel"). Keep the summary concise — do not dump the full raw
+YAML. Never list approval options as plain-text bullets.
 
 ### Step 7 — Write
 On approval, call \`create_resource_type\` with the resource \`name\` and the \`schema\` (the JSON
@@ -70,10 +71,9 @@ Schema, serialised as YAML). This commits \`resources/<name>/schema.yml\` to the
 materialises the Postgres table.
 
 ### Step 8 — Hooks (optional)
-After the resource type is created, assess whether it needs lifecycle hooks. Ask: "Does this
-resource need custom before/after logic that declarative transforms can't cover?" Suggest hooks
-when the schema implies cross-resource validation, conditional computation, or business-rule
-enforcement. Common triggers:
+After the resource type is created, assess whether it needs lifecycle hooks. Use \`present_choices\`
+to ask whether hooks are needed — never list the options as plain-text bullets. If you recommend
+hooks, explain why in one sentence, then present the choice. Common triggers that suggest hooks:
 
 - A field references another resource type and writes need to validate a value on the target (not
   just existence — \`x-links\` handles existence). Example: checking the target's balance or status.
