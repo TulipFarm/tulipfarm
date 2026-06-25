@@ -207,6 +207,13 @@ export const A2UI_CATALOG: Record<A2uiNode["component"], CatalogEntry> = {
     const submit = `<tf-button ${send}>${esc(n.submitLabel ?? "Submit")}</tf-button>`;
     return `<tf-schema-form${id}>${fields}<p>${submit}</p></tf-schema-form>`;
   },
+
+  ForceGraph: (node, ctx, id) => {
+    const n = node as Of<"ForceGraph">;
+    const nodes = esc(JSON.stringify(ctx.raw(n.nodes) ?? []));
+    const edges = esc(JSON.stringify(ctx.raw(n.edges) ?? []));
+    return `<tf-force-graph data-nodes="${nodes}" data-edges="${edges}"${id}></tf-force-graph>`;
+  },
 };
 
 function chart(tag: string, node: ChartNode, ctx: CompileCtx, id: string): string {

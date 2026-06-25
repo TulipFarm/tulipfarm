@@ -62,7 +62,6 @@ type ChatAction =
   | { type: "user"; text: string }
   | { type: "meta"; meta: ChatStreamMeta }
   | { type: "regenerate" }
-  | { type: "editResend"; messageId: string; text: string }
   | { type: "stopped" }
   | { type: "reset" };
 
@@ -158,14 +157,6 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
       messages.pop();
     }
     return { ...state, messages, status: "submitted", error: undefined };
-  }
-  if (action.type === "editResend") {
-    // Branch from a prior user turn: drop that message and everything after it, then re-append the
-    // edited text as a fresh turn. Local-only (the server keeps its full history) — the same V1
-    // trade-off as "regenerate", which likewise has no server-side counterpart.
-    const idx = state.messages.findIndex((m) => m.id === action.messageId);
-    if (idx === -1) return state;
-    return appendUserMessage({ ...state, messages: state.messages.slice(0, idx) }, action.text);
   }
   if (action.type === "meta") {
     return {
@@ -275,18 +266,6 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     await runStream(text, lastOptsRef.current);
   }, [runStream]);
 
-  // Edit an earlier user turn and re-run from it, dropping every later turn (a local branch — the
-  // server keeps its history, mirroring regenerate). Reuses the last turn's model/agent options.
-  const editResend = useCallback(
-    async (messageId: string, text: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      dispatch({ type: "editResend", messageId, text: trimmed });
-      await runStream(trimmed, lastOptsRef.current);
-    },
-    [runStream]
-  );
-
   // Stop the in-flight turn: best-effort halt the server's LLM (so token burn stops), then abort the
   // local fetch — the catch dispatches `stopped`, rewinding the turn. The streamId arrives via the
   // X-Stream-Id header (onMeta) almost immediately; a stop in the brief window before it lands still
@@ -345,7 +324,6 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     stop,
     approve,
     regenerate,
-    editResend,
     sendFeedback,
     reset,
     sendA2uiAgent,

@@ -141,8 +141,9 @@ function readCookie(name: string): string | null {
 }
 
 // Best-effort extraction of the API's `{ error, path }` body into an ApiError; falls back to
-// status text. `path` (present on 422) lets forms highlight the offending field.
-async function readError(res: Response): Promise<ApiError> {
+// status text. `path` (present on 422) lets forms highlight the offending field. Exported so clients
+// that bypass the JSON helpers (binary export, raw-zip import) can reuse the same error mapping.
+export async function readError(res: Response): Promise<ApiError> {
   let message = res.statusText || `request failed (${res.status})`;
   let path: string | undefined;
   try {

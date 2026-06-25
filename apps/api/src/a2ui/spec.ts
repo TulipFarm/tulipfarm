@@ -105,6 +105,13 @@ export type A2uiNode =
       action: A2uiAction;
       fields: A2uiFormField[];
       submitLabel?: string;
+    })
+  | (NodeBase & {
+      component: "ForceGraph";
+      /** [{ id, label, type? }] — nodes, or a binding to them. */
+      nodes: unknown[] | { path: string };
+      /** [{ source, target, broken? }] — directed edges, or a binding to them. */
+      edges: unknown[] | { path: string };
     });
 
 export type A2uiComponentName = A2uiNode["component"];
@@ -137,7 +144,8 @@ export const A2UI_COMPONENTS_REF =
   "DetailView{rows:[{label,value}]}; " +
   "DataTable{columns:[string],rows:[[value]],sort?:{column,direction:'ascending'|'descending'}}; " +
   "BarChart|LineChart{labels:[string],datasets:[{label,data:[number]}]}; " +
-  "Form{action:{event,payload?},submitLabel?,fields:[{name,input:'text'|'email'|'number'|'textarea'|'select'|'radio'|'checkbox'|'switch'|'date',label?,value?,required?,options?:[{label,value}]}]}. " +
+  "Form{action:{event,payload?},submitLabel?,fields:[{name,input:'text'|'email'|'number'|'textarea'|'select'|'radio'|'checkbox'|'switch'|'date',label?,value?,required?,options?:[{label,value}]}]}; " +
+  "ForceGraph{nodes:[{id,label,type?}],edges:[{source,target,broken?}]}. " +
   'Every leaf value may be a literal OR a binding { "path": "/key" } resolved against dataModel.';
 
 export const A2UI_SPEC_SCHEMA: Record<string, unknown> = {
@@ -150,7 +158,7 @@ export const A2UI_SPEC_SCHEMA: Record<string, unknown> = {
       description:
         "A component node, or an array of nodes. Each node is an object with a `component` field " +
         "(Card, Row, Column, Grid, Heading, Text, Badge, Alert, Button, MetricCard, List, " +
-        "DetailView, DataTable, BarChart, LineChart, Form) plus that component's props. Leaf values " +
+        "DetailView, DataTable, BarChart, LineChart, Form, ForceGraph) plus that component's props. Leaf values " +
         'may be literals or `{ "path": "/key" }` bindings into the data model.',
     },
   },

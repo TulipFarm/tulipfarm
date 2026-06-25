@@ -98,7 +98,6 @@ export function ChatPanel({
     stop,
     approve,
     regenerate,
-    editResend,
     sendFeedback,
     sendA2uiAgent,
   } = useChatStream({
@@ -162,7 +161,6 @@ export function ChatPanel({
           mentions={entries}
           onApprove={approve}
           onRegenerate={regenerate}
-          onEditResend={editResend}
           onFeedback={sendFeedback}
           onA2uiAgent={sendA2uiAgent}
         />

@@ -21,15 +21,15 @@
     "*.{ts,tsx,js,jsx,json,css}": "biome check --write --no-errors-on-unmatched"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.16",
-    "@commitlint/cli": "^21.0.2",
-    "@commitlint/config-conventional": "^21.0.2",
+    "@biomejs/biome": "^2.5.1",
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
     "@release-it/conventional-changelog": "^11.0.1",
     "lefthook": "^2.1.9",
-    "lint-staged": "^17.0.7",
+    "lint-staged": "^17.0.8",
     "release-it": "^20.2.0",
     "turbo": "^2.9.17",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }

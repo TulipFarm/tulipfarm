@@ -1,0 +1,154 @@
+import {
+  type ClientLoaderFunctionArgs,
+  Link,
+  type MetaFunction,
+  useLoaderData,
+  useNavigate,
+  useOutletContext,
+} from "@remix-run/react";
+import { Network, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { MarkdownView } from "~/components/markdown-view";
+import { Button } from "~/components/ui/button";
+import { ApiError } from "~/lib/api";
+import { buildConceptResolver } from "~/lib/concept-href";
+import { deleteBundle, listAllPages, navigateBundle } from "~/lib/knowledge-api";
+import { rewriteOkfLinks } from "~/lib/okf-listing";
+import type { BundleOutletContext } from "~/routes/_app.knowledge.bundles.$id";
+
+export const meta: MetaFunction = () => [{ title: "Bundle · Knowledge · tulipfarm" }];
+
+export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
+  const id = params.id;
+  if (!id) throw new ApiError(404, "missing bundle id");
+  // The root index.md (authored override or synthesized contents) is the space front page.
+  // listAllPages → resolver so the index's concept links resolve to stable UUID routes.
+  const [{ listing }, pages] = await Promise.all([
+    navigateBundle(id, ""),
+    listAllPages().then((r) => r.items),
+  ]);
+  return { listing, pages };
+}
+
+/*
+ * Space front page (the wiki home). Renders the root index.md — authored or synthesized — with its
+ * bundle-relative links rewritten to SPA routes, under a page toolbar (new page / edit front page /
+ * graph / settings / delete). Bundle metadata comes from the workspace outlet context; the listing is
+ * this route's own loader.
+ */
+export default function BundleHome() {
+  const { bundle } = useOutletContext<BundleOutletContext>();
+  const { listing, pages } = useLoaderData<typeof clientLoader>();
+  const navigate = useNavigate();
+  const base = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
+
+  const [deleting, setDeleting] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onDelete() {
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteBundle(bundle.id);
+      window.dispatchEvent(new Event("okf:bundle-changed"));
+      navigate("/knowledge");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "delete failed");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <article className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">{bundle.name}</h1>
+        {bundle.description ? (
+          <p className="text-sm text-muted-foreground">{bundle.description}</p>
+        ) : null}
+      </header>
+
+      <div className="flex flex-wrap items-center gap-1.5 border-y border-border py-2.5">
+        <Button asChild size="sm" className="cursor-pointer">
+          <Link to={`${base}/concepts/new`}>
+            <Plus aria-hidden />
+            New page
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm" className="cursor-pointer">
+          <Link to={`${base}/concepts/new?path=index`}>
+            <Pencil aria-hidden />
+            Edit front page
+          </Link>
+        </Button>
+        <Button asChild variant="ghost" size="sm" className="cursor-pointer">
+          <Link to={`${base}/graph`}>
+            <Network aria-hidden />
+            Graph
+          </Link>
+        </Button>
+
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            className="size-8 cursor-pointer"
+            aria-label="Space settings"
+            title="Space settings"
+          >
+            <Link to={`${base}/edit`}>
+              <Settings aria-hidden />
+            </Link>
+          </Button>
+
+          <Divider />
+          {confirming ? (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                className="cursor-pointer"
+                onClick={onDelete}
+                disabled={deleting}
+              >
+                {deleting ? "deleting…" : "Confirm delete"}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="cursor-pointer"
+                onClick={() => setConfirming(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="cursor-pointer text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setConfirming(true)}
+            >
+              <Trash2 aria-hidden />
+              Delete
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
+
+      {/* wikiLinks: the rewritten `/knowledge/...` concept links render as in-SPA <Link>s, not new tabs. */}
+      <MarkdownView wikiLinks>
+        {rewriteOkfLinks(listing, bundle.id, buildConceptResolver(pages))}
+      </MarkdownView>
+    </article>
+  );
+}
+
+// Thin vertical rule that visually groups the toolbar's primary actions from the space-level ones.
+function Divider() {
+  return <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-border" />;
+}

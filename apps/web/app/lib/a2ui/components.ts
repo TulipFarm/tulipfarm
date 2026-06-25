@@ -539,4 +539,15 @@ tf-chart-line {
 }
 tf-chart-bar > canvas,
 tf-chart-line > canvas { display: block; }
+
+/* tf-force-graph — fixed-height box for the SVG network the force-graph bootstrap draws (data-nodes /
+   data-edges JSON). Same fixed-height rationale as charts: a stable box so the SVG cannot feed back
+   into the ResizeObserver height report. Node/edge colors come from CSS tokens (palette-honest). */
+tf-force-graph {
+  display: block;
+  position: relative;
+  height: 360px;
+  margin: 12px 0;
+}
+tf-force-graph > svg { display: block; width: 100%; height: 100%; }
 `;

@@ -322,6 +322,77 @@ const ENVELOPE_KEY_STATEMENTS: string[] = [
   "ALTER TABLE secrets ADD COLUMN IF NOT EXISTS dek_id uuid",
 ];
 
+/**
+ * Open Knowledge Format bundles (OKF-V1). Curated knowledge gains a portable, wiki-navigable shape:
+ * a `knowledge_bundles` root + per-document `bundle_id`/`path` (the concept id, e.g. 'tables/orders')
+ * + OKF `okf_type`/`resource`. Hierarchy is implicit from splitting `path` on '/'. `frontmatter_extra`
+ * round-trips unknown frontmatter keys from foreign bundles (OKF requires consumers preserve unknowns).
+ * `knowledge_links` is the untyped directed cross-link graph parsed from concept bodies — `target_id`
+ * NULL marks a broken/not-yet-imported link (tolerated, never rejected). `knowledge_bundle_overrides`
+ * stores hand-authored index.md/log.md that override the auto-synthesized listing/changelog. The
+ * partial unique `(bundle_id, path)` index leaves legacy NULL-bundle rows untouched; OKF upserts ride
+ * the existing UNIQUE(source, source_id) via a synthetic 'okf:<bundleId>:<path>' source_id (a partial
+ * index can't be an ON CONFLICT target).
+ */
+const OKF_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS knowledge_bundles (
+    id          uuid PRIMARY KEY,
+    name        text NOT NULL UNIQUE,
+    description text,
+    domain      text,
+    created_at  timestamptz NOT NULL,
+    updated_at  timestamptz NOT NULL
+  )`,
+  "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS bundle_id uuid REFERENCES knowledge_bundles(id)",
+  "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS path text",
+  "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS okf_type text",
+  "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS resource text",
+  "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS frontmatter_extra jsonb NOT NULL DEFAULT '{}'",
+  `CREATE UNIQUE INDEX IF NOT EXISTS knowledge_documents_bundle_path_idx
+    ON knowledge_documents (bundle_id, path) WHERE bundle_id IS NOT NULL AND path IS NOT NULL`,
+  `CREATE TABLE IF NOT EXISTS knowledge_links (
+    id          uuid PRIMARY KEY,
+    bundle_id   uuid NOT NULL REFERENCES knowledge_bundles(id) ON DELETE CASCADE,
+    source_id   uuid NOT NULL REFERENCES knowledge_documents(id) ON DELETE CASCADE,
+    target_path text NOT NULL,
+    target_id   uuid REFERENCES knowledge_documents(id) ON DELETE SET NULL,
+    created_at  timestamptz NOT NULL,
+    UNIQUE (source_id, target_path)
+  )`,
+  "CREATE INDEX IF NOT EXISTS knowledge_links_source_idx ON knowledge_links (source_id)",
+  "CREATE INDEX IF NOT EXISTS knowledge_links_target_idx ON knowledge_links (target_id)",
+  "CREATE INDEX IF NOT EXISTS knowledge_links_bundle_idx ON knowledge_links (bundle_id)",
+  `CREATE TABLE IF NOT EXISTS knowledge_bundle_overrides (
+    bundle_id  uuid NOT NULL REFERENCES knowledge_bundles(id) ON DELETE CASCADE,
+    dir_path   text NOT NULL,
+    file       text NOT NULL CHECK (file IN ('index.md', 'log.md')),
+    content    text NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (bundle_id, dir_path, file)
+  )`,
+];
+
+/**
+ * Cross-space links (Phase 2). A concept body may link to a page in ANOTHER bundle via a
+ * `tf:page/<BundleName>/<path>` href. `target_bundle_name` is the verbatim bundle name from the
+ * link (NULL = same bundle as the source); `target_bundle_id` is filled once that bundle exists.
+ * The original inline `UNIQUE (source_id, target_path)` can't tell apart same-path links into two
+ * different bundles, so it is swapped for an expression unique index that folds the NULL same-space
+ * name to '' — same-space rows still dedupe while each cross-bundle target is unique per name.
+ */
+const OKF_CROSSLINK_STATEMENTS: string[] = [
+  "ALTER TABLE knowledge_links ADD COLUMN IF NOT EXISTS target_bundle_id uuid REFERENCES knowledge_bundles(id) ON DELETE CASCADE",
+  "ALTER TABLE knowledge_links ADD COLUMN IF NOT EXISTS target_bundle_name text",
+  "ALTER TABLE knowledge_links DROP CONSTRAINT IF EXISTS knowledge_links_source_id_target_path_key",
+  `CREATE UNIQUE INDEX IF NOT EXISTS knowledge_links_source_target_uidx
+    ON knowledge_links (source_id, COALESCE(target_bundle_name, ''), target_path)`,
+  "CREATE INDEX IF NOT EXISTS knowledge_links_target_bundle_idx ON knowledge_links (target_bundle_id)",
+  // Partial index so the post-import cross-bundle resolve pass scans only cross-space rows, not the
+  // (usually far larger) set of same-space links where target_bundle_name IS NULL.
+  `CREATE INDEX IF NOT EXISTS knowledge_links_target_bundle_name_idx
+    ON knowledge_links (target_bundle_name) WHERE target_bundle_name IS NOT NULL`,
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -414,6 +485,40 @@ export const PG_MIGRATIONS: PgMigration[] = [
       for (const sql of ENVELOPE_KEY_STATEMENTS) {
         await q.query(sql);
       }
+    },
+  },
+  {
+    version: 11,
+    description:
+      "okf: knowledge_bundles + documents bundle/path/okf_type/resource/frontmatter_extra + knowledge_links + bundle_overrides (Open Knowledge Format)",
+    up: async (q) => {
+      for (const sql of OKF_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 12,
+    description:
+      "okf-crosslinks: knowledge_links.target_bundle_id + target_bundle_name (cross-space links) + per-bundle-name unique index",
+    up: async (q) => {
+      for (const sql of OKF_CROSSLINK_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 13,
+    description: "okf: drop vestigial knowledge_bundles.domain (space-level domain was never read)",
+    up: async (q) => {
+      await q.query("ALTER TABLE knowledge_bundles DROP COLUMN IF EXISTS domain");
+    },
+  },
+  {
+    version: 14,
+    description: "okf: drop knowledge_documents.okf_type (concept `type` field removed)",
+    up: async (q) => {
+      await q.query("ALTER TABLE knowledge_documents DROP COLUMN IF EXISTS okf_type");
     },
   },
 ];

@@ -8,7 +8,7 @@ import type { KnowledgeService } from "./service";
 const frontendNames = new Set(FRONTEND_TOOLS.map((t) => t.name));
 
 describe("knowledge tools via ToolRegistry", () => {
-  it("exposes the four knowledge tools as an AI SDK tool set", () => {
+  it("exposes the knowledge + OKF tools as an AI SDK tool set", () => {
     const registry = buildToolRegistry({ knowledge: {} as KnowledgeService });
     const set = registry.buildToolSet({ userId: "u" });
     expect(
@@ -16,10 +16,14 @@ describe("knowledge tools via ToolRegistry", () => {
         .filter((k) => !frontendNames.has(k))
         .sort()
     ).toEqual([
+      "create_bundle",
       "create_knowledge_collection",
       "create_knowledge_document",
+      "list_bundles",
       "list_knowledge_collections",
+      "navigate_bundle",
       "query_knowledge",
+      "write_concept",
     ]);
   });
 });

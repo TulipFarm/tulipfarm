@@ -1,0 +1,105 @@
+import { Link } from "@remix-run/react";
+import { type FormEvent, useState } from "react";
+import { Button } from "~/components/ui/button";
+import type { BundleInput } from "~/lib/knowledge-api";
+
+/*
+ * Create/edit form for an OKF bundle (name, description). Mirrors collection-form's look and
+ * server-authoritative error handling; empty optional fields submit as null. A 409 (name taken) is
+ * surfaced by the route as `formError`.
+ */
+const inputClass =
+  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
+
+export type BundleFormProps = {
+  mode: "create" | "edit";
+  initial?: Partial<{ name: string; description: string | null }>;
+  onSubmit: (body: BundleInput) => void | Promise<void>;
+  submitting: boolean;
+  fieldErrors?: Record<string, string>;
+  formError?: string | null;
+  cancelTo: string;
+};
+
+export function BundleForm({
+  mode,
+  initial,
+  onSubmit,
+  submitting,
+  fieldErrors = {},
+  formError,
+  cancelTo,
+}: BundleFormProps) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  // Client-side required-name check, so an empty submit never round-trips to a server 400.
+  const [nameError, setNameError] = useState<string | null>(null);
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed === "") {
+      setNameError("name is required");
+      return;
+    }
+    onSubmit({
+      name: trimmed,
+      description: description.trim() === "" ? null : description.trim(),
+    });
+  }
+
+  // Local required-check takes precedence over any server-side field error.
+  const shownNameError = nameError ?? fieldErrors.name;
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+      {formError ? (
+        <p className="rounded-sm border border-destructive/40 bg-destructive/5 px-3 py-2 text-destructive">
+          error: {formError}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="name" className="text-xs text-muted-foreground">
+          name<span className="text-primary"> *</span>
+        </label>
+        <input
+          id="name"
+          className={inputClass}
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value);
+            if (nameError) setNameError(null);
+          }}
+          aria-invalid={nameError ? true : undefined}
+          required
+        />
+        {shownNameError ? <p className="text-xs text-destructive">{shownNameError}</p> : null}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor="description" className="text-xs text-muted-foreground">
+          description<span className="opacity-60"> (optional)</span>
+        </label>
+        <textarea
+          id="description"
+          className={`${inputClass} min-h-20`}
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
+        {fieldErrors.description ? (
+          <p className="text-xs text-destructive">{fieldErrors.description}</p>
+        ) : null}
+      </div>
+
+      <div className="flex items-center gap-2 pt-2">
+        <Button type="submit" disabled={submitting}>
+          {submitting ? "saving…" : mode === "create" ? "Create" : "Save"}
+        </Button>
+        <Button asChild variant="outline">
+          <Link to={cancelTo}>Cancel</Link>
+        </Button>
+      </div>
+    </form>
+  );
+}

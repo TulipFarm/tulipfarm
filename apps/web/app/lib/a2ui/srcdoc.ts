@@ -1,6 +1,7 @@
 import { A2UI_CHART_BOOTSTRAP } from "~/lib/a2ui/chart-bootstrap";
 import { CHART_JS_SOURCE } from "~/lib/a2ui/chart-source";
 import { A2UI_COMPONENT_CSS } from "~/lib/a2ui/components";
+import { A2UI_FORCE_GRAPH_BOOTSTRAP } from "~/lib/a2ui/force-graph-bootstrap";
 import { A2UI_RUNTIME } from "~/lib/a2ui/runtime";
 
 /**
@@ -35,6 +36,12 @@ export function buildSrcdoc(input: {
       `<script nonce="${nonce}">${A2UI_CHART_BOOTSTRAP}</script>`
     : "";
 
+  // The force-graph bootstrap is self-contained (no external library), so it is injected on its own
+  // nonce'd script only when a tf-force-graph element is present — same lazy pattern as the charts.
+  const forceGraphScripts = sanitizedHtml.includes("tf-force-graph")
+    ? `<script nonce="${nonce}">${A2UI_FORCE_GRAPH_BOOTSTRAP}</script>`
+    : "";
+
   const csp = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
@@ -55,7 +62,7 @@ export function buildSrcdoc(input: {
 <style>${tokensCss}</style>
 <style>${RESET}</style>
 <style>${A2UI_COMPONENT_CSS}</style>
-<script nonce="${nonce}">${A2UI_RUNTIME}</script>${chartScripts}
+<script nonce="${nonce}">${A2UI_RUNTIME}</script>${chartScripts}${forceGraphScripts}
 </head>
 <body>${sanitizedHtml}</body>
 </html>`;
