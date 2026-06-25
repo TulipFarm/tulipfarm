@@ -7,6 +7,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
 import { analyzeHook, HookAnalysisError } from "../../hooks/hook-analyzer.js";
+import type { RateLimiter } from "../../rate-limit";
+import { makeRateLimitHook } from "../../rate-limit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -79,17 +81,31 @@ const ResourceTypeSchema = {
   required: ["name", "schema", "hasHooks"],
 } as const;
 
+const SOUL_WRITE_LIMIT = 60;
+const SOUL_WRITE_WINDOW_MS = 60_000;
+
 export function registerResourceTypeRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
-  reconcile?: () => Promise<void>
+  reconcile?: () => Promise<void>,
+  rateLimiter?: RateLimiter
 ): void {
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(
+        rateLimiter,
+        (req) => `rl:soul:${req.ip}`,
+        SOUL_WRITE_LIMIT,
+        SOUL_WRITE_WINDOW_MS
+      )
+    : undefined;
+  const writeHandlers: PreHandler[] = rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth];
+
   app.post(
     "/api/v1/resource-types",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Create a new resource type. `schema` is a YAML string (JSON Schema). Written as-is to soul/resources/{name}/schema.yml.",
@@ -172,7 +188,7 @@ export function registerResourceTypeRoutes(
   app.put(
     "/api/v1/resource-types/:name",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Replace an existing resource type's schema. `schema` is a YAML string (JSON Schema).",
@@ -223,7 +239,7 @@ export function registerResourceTypeRoutes(
   app.delete(
     "/api/v1/resource-types/:name",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Remove a resource type definition from the soul. The Postgres table is left intact " +
@@ -285,7 +301,7 @@ export function registerResourceTypeRoutes(
   app.put(
     "/api/v1/resource-types/:name/hooks",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Create or replace the hooks.ts file for a resource type. " +
@@ -346,7 +362,7 @@ export function registerResourceTypeRoutes(
   app.delete(
     "/api/v1/resource-types/:name/hooks",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description: "Remove the hooks.ts file for a resource type.",
         tags: ["soul"],
