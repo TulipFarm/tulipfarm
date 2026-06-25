@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import { citext } from "@electric-sql/pglite/contrib/citext";
-import { vector } from "@electric-sql/pglite/vector";
+import { vector } from "@electric-sql/pglite-pgvector";
 
 /**
  * In-process Postgres (WASM) for real-SQL migration/repo tests, loaded with the
