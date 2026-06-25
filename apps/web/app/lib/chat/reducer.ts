@@ -39,7 +39,7 @@ export function appendUserMessage(state: ChatState, text: string): ChatState {
 // Stop / un-send: drop the trailing assistant turn(s) AND the last user message, returning the
 // timeline to a clean pre-send state. The composer restores the original prompt into its editor; this
 // only rewinds the transcript. Local-only — the server keeps its full history, the same V1 trade-off
-// as `regenerate` / `editResend`.
+// as `regenerate`.
 export function rewindLastTurn(state: ChatState): ChatState {
   const messages = state.messages.slice();
   while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
