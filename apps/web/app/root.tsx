@@ -1,4 +1,5 @@
 import {
+  type HtmlLinkDescriptor,
   Links,
   Meta,
   type MetaFunction,
@@ -14,6 +15,15 @@ import "~/app.css";
 export const meta: MetaFunction = () => [
   { title: "tulipfarm" },
   { name: "description", content: "The business agent harness." },
+  { name: "theme-color", content: "#E11D63" },
+];
+
+// Favicon + PWA install metadata. Assets live in apps/web/public and are copied verbatim
+// into the build output, served as real files by the API's static handler (wildcard: false).
+export const links = (): HtmlLinkDescriptor[] => [
+  { rel: "icon", href: "/favicon.ico", sizes: "any" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+  { rel: "manifest", href: "/manifest.webmanifest" },
 ];
 
 /*
