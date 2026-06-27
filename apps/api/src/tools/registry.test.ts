@@ -70,7 +70,7 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ name: "ctx_check", execute }));
       const ts = reg.buildToolSet(ctx);
-      await ts.ctx_check.execute?.({}, { messages: [], toolCallId: "tc1" });
+      await ts.ctx_check.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
       expect(execute).toHaveBeenCalledWith({}, ctx);
     });
 
@@ -134,8 +134,8 @@ describe("ToolRegistry", () => {
 
       // Simulate SDK: all execute() calls made synchronously before any await
       await Promise.all([
-        ts.read_a.execute?.({}, { messages: [], toolCallId: "tc1" }),
-        ts.read_b.execute?.({}, { messages: [], toolCallId: "tc2" }),
+        ts.read_a.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" }),
+        ts.read_b.execute?.({}, { messages: [], context: undefined, toolCallId: "tc2" }),
       ]);
 
       expect(log[0]).toBe("a:start");
@@ -176,8 +176,8 @@ describe("ToolRegistry", () => {
       const ts = reg.buildToolSet(ctx, coordinator);
 
       await Promise.all([
-        ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" }),
-        ts.read_y.execute?.({}, { messages: [], toolCallId: "tc2" }),
+        ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" }),
+        ts.read_y.execute?.({}, { messages: [], context: undefined, toolCallId: "tc2" }),
       ]);
 
       expect(log).toEqual(["x:start", "x:end", "y:start", "y:end"]);
@@ -201,7 +201,10 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(schemaedTool({ name: "vt", execute }));
       const ts = reg.buildToolSet(ctx);
-      const result = await ts.vt.execute?.({}, { messages: [], toolCallId: "tc1" });
+      const result = await ts.vt.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc1" }
+      );
       expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
       expect(execute).not.toHaveBeenCalled();
     });
@@ -211,7 +214,10 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(schemaedTool({ name: "vt2", execute }));
       const ts = reg.buildToolSet(ctx);
-      const result = await ts.vt2.execute?.({ key: "hello" }, { messages: [], toolCallId: "tc2" });
+      const result = await ts.vt2.execute?.(
+        { key: "hello" },
+        { messages: [], context: undefined, toolCallId: "tc2" }
+      );
       expect(result).toEqual({ success: true, data: "reached" });
       expect(execute).toHaveBeenCalledWith({ key: "hello" }, ctx);
     });
@@ -222,7 +228,10 @@ describe("ToolRegistry", () => {
       reg.register(schemaedTool({ name: "vt3", execute }));
       const coordinator = new BatchCoordinator();
       const ts = reg.buildToolSet(ctx, coordinator);
-      const result = await ts.vt3.execute?.({ wrong: 123 }, { messages: [], toolCallId: "tc3" });
+      const result = await ts.vt3.execute?.(
+        { wrong: 123 },
+        { messages: [], context: undefined, toolCallId: "tc3" }
+      );
       expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
       expect(execute).not.toHaveBeenCalled();
     });
@@ -236,7 +245,10 @@ describe("ToolRegistry", () => {
       reg.register(makeTool({ execute: async () => ({ success: true as const, data: bigList }) }));
       const cache = new Map<string, import("./types").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache);
-      const result = await ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc-full" });
+      const result = await ts.test_tool.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc-full" }
+      );
       expect((result as { success: true; data: { total_count: number } }).data.total_count).toBe(
         25
       );
@@ -247,7 +259,10 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ execute: async () => ({ success: true as const, data: [1, 2] }) }));
       const ts = reg.buildToolSet(ctx);
-      const result = await ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc-small" });
+      const result = await ts.test_tool.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc-small" }
+      );
       expect(result).toEqual({ success: true, data: [1, 2] });
     });
 
@@ -266,7 +281,7 @@ describe("ToolRegistry", () => {
       );
       const cache = new Map<string, import("./types").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache);
-      await ts.strict.execute?.({}, { messages: [], toolCallId: "tc-inv" });
+      await ts.strict.execute?.({}, { messages: [], context: undefined, toolCallId: "tc-inv" });
       expect(cache.has("tc-inv")).toBe(false);
     });
   });
@@ -276,7 +291,10 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ execute: async () => ({ success: true, data: "fast" }) }));
       const ts = reg.buildToolSet(ctx);
-      const result = await ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc" });
+      const result = await ts.test_tool.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc" }
+      );
       expect(result).toEqual({ success: true, data: "fast" });
     });
 
@@ -289,7 +307,10 @@ describe("ToolRegistry", () => {
         })
       );
       const ts = reg.buildToolSet(ctx);
-      const resultPromise = ts.test_tool.execute?.({}, { messages: [], toolCallId: "tc" });
+      const resultPromise = ts.test_tool.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc" }
+      );
       vi.advanceTimersByTime(TOOL_TIMEOUT_MS);
       const result = await resultPromise;
       expect(result).toEqual({
@@ -328,7 +349,7 @@ describe("ToolRegistry", () => {
       const { gate, calls, resolve } = controllableGate();
       const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
 
-      const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      const p = ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
       await Promise.resolve();
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({ toolCallId: "tc1", toolName: "write_x" });
@@ -347,7 +368,7 @@ describe("ToolRegistry", () => {
       const cache = new Map<string, import("./types").ToolCallResult>();
       const ts = reg.buildToolSet(approvalCtx, undefined, cache, gate);
 
-      const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      const p = ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
       resolve({ outcome: "denied", reason: "denied by operator" });
       const result = await p;
 
@@ -366,7 +387,9 @@ describe("ToolRegistry", () => {
       const { gate, calls } = controllableGate();
       const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
 
-      expect(await ts.read_x.execute?.({}, { messages: [], toolCallId: "tc1" })).toEqual({
+      expect(
+        await ts.read_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" })
+      ).toEqual({
         success: true,
         data: "read",
       });
@@ -380,7 +403,7 @@ describe("ToolRegistry", () => {
       const { gate, calls } = controllableGate();
       const ts = reg.buildToolSet({ ...ctx, autonomy: "full" }, undefined, undefined, gate);
 
-      await ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+      await ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
       expect(calls).toHaveLength(0);
       expect(execute).toHaveBeenCalledTimes(1);
     });
@@ -389,7 +412,9 @@ describe("ToolRegistry", () => {
       const reg = new ToolRegistry();
       reg.register(makeTool({ name: "write_x", mutating: true }));
       const ts = reg.buildToolSet(approvalCtx);
-      expect(await ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" })).toEqual({
+      expect(
+        await ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" })
+      ).toEqual({
         success: true,
         data: "ok",
       });
@@ -404,7 +429,12 @@ describe("ToolRegistry", () => {
       const { gate, calls } = controllableGate();
       const ts = reg.buildToolSet(approvalCtx, undefined, undefined, gate);
 
-      expect(await ts.agent_create.execute?.({}, { messages: [], toolCallId: "tc-soul" })).toEqual({
+      expect(
+        await ts.agent_create.execute?.(
+          {},
+          { messages: [], context: undefined, toolCallId: "tc-soul" }
+        )
+      ).toEqual({
         success: true,
         data: "soul-ran",
       });
@@ -421,7 +451,7 @@ describe("ToolRegistry", () => {
         const { gate, resolve } = controllableGate();
         const ts = reg.buildToolSet(approvalCtx, new BatchCoordinator(), undefined, gate);
 
-        const p = ts.write_x.execute?.({}, { messages: [], toolCallId: "tc1" });
+        const p = ts.write_x.execute?.({}, { messages: [], context: undefined, toolCallId: "tc1" });
         await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_MS * 3);
         expect(execute).not.toHaveBeenCalled(); // still pending, not timed out
 
@@ -442,7 +472,10 @@ describe("ToolRegistry", () => {
       const cache = new Map<string, import("./types").ToolCallResult>();
       const ts = reg.buildToolSet(ctx, undefined, cache, undefined, guard);
 
-      const result = await ts.guarded.execute?.({}, { messages: [], toolCallId: "tc1" });
+      const result = await ts.guarded.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc1" }
+      );
 
       expect(result).toMatchObject({
         success: false,
@@ -473,7 +506,10 @@ describe("ToolRegistry", () => {
       const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: false, args: { key: "a" } }));
       const ts = reg.buildToolSet(ctx, undefined, undefined, undefined, guard);
 
-      await ts.inspected.execute?.({ key: "a" }, { messages: [], toolCallId: "tc-i" });
+      await ts.inspected.execute?.(
+        { key: "a" },
+        { messages: [], context: undefined, toolCallId: "tc-i" }
+      );
 
       expect(guard).toHaveBeenCalledWith({
         tool: expect.objectContaining({ name: "inspected" }),
@@ -497,6 +533,7 @@ describe("ToolRegistry", () => {
         { key: "original" },
         {
           messages: [],
+          context: undefined,
           toolCallId: "tc2",
         }
       );
@@ -514,7 +551,7 @@ describe("ToolRegistry", () => {
 
       const result = await ts.unguarded.execute?.(
         { key: "v" },
-        { messages: [], toolCallId: "tc3" }
+        { messages: [], context: undefined, toolCallId: "tc3" }
       );
 
       expect(result).toEqual({ success: true, data: "direct" });
@@ -537,7 +574,10 @@ describe("ToolRegistry", () => {
       );
       const ts = reg.buildToolSet(ctx, undefined, undefined, undefined, guard);
 
-      const result = await ts.strict_guarded.execute?.({}, { messages: [], toolCallId: "tc4" });
+      const result = await ts.strict_guarded.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc4" }
+      );
 
       expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
       expect(guard).not.toHaveBeenCalled();
@@ -550,7 +590,10 @@ describe("ToolRegistry", () => {
       const guard = vi.fn<RunToolCallGuard>(async () => ({ blocked: true, reason: "blocklist" }));
       const ts = reg.buildToolSet(ctx, new BatchCoordinator(), undefined, undefined, guard);
 
-      const result = await ts.coord_guarded.execute?.({}, { messages: [], toolCallId: "tc5" });
+      const result = await ts.coord_guarded.execute?.(
+        {},
+        { messages: [], context: undefined, toolCallId: "tc5" }
+      );
 
       expect(result).toMatchObject({
         success: false,
