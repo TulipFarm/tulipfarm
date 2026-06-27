@@ -15,3 +15,4 @@ references
 .absolute-work
 .claude/logs
 .playwright-mcp
+.claude/worktrees
