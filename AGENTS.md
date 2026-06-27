@@ -2,6 +2,11 @@
 
 Guidance for AI coding agents working in this repo. Read before editing.
 
+> **Terminology is binding.** Use the canonical names in
+> [`metadata/terminologies.md`](metadata/terminologies.md) for every concept, at
+> every layer (code, DB, REST, URL, UI, docs). When unsure what to call something,
+> that file decides — it also lists banned/retired synonyms and the rename backlog.
+
 ## What this is
 
 TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
