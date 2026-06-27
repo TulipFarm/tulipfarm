@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import type { PaginatedResult } from "../pagination.js";
 import type {
   CounterStore,
@@ -269,6 +270,78 @@ describe("resource_delete", () => {
     const tool = getTool("resource_delete");
     const result = await tool.handler({ type: "ticket", id, version: 1 }, makeCtx(factory));
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("runs before and after hooks on delete", async () => {
+    const factory = new FakeRepoFactory();
+    const repo = factory.forType("ticket") as FakeRepo;
+    const id = randomUUID();
+    const now = new Date();
+    await repo.insert({ _id: id, version: 1, createdAt: now, updatedAt: now, title: "T" });
+
+    const runBeforeHook = vi.fn().mockImplementation(async (_src, _type, record) => record);
+    const runAfterHook = vi.fn().mockResolvedValue(undefined);
+    const hookExecutor = { runBeforeHook, runAfterHook } as unknown as HookExecutor;
+
+    const hookRes: SoulResource = {
+      name: "ticket",
+      schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      hasHooks: true,
+      hookSource: "({})",
+      hookHash: "h",
+      hooksEnabled: true,
+    };
+    const soulLoader = {
+      resources: {
+        get: (t: string) => (t === "ticket" ? hookRes : undefined),
+        has: (t: string) => t === "ticket",
+      },
+    } as unknown as SoulLoader;
+
+    const ctx = { ...makeCtx(factory), soulLoader, hookExecutor };
+    const tool = getTool("resource_delete");
+    const result = await tool.handler({ type: "ticket", id, version: 1 }, ctx);
+    expect(result).toMatchObject({ success: true, data: { id } });
+    expect(runBeforeHook).toHaveBeenCalledOnce();
+    expect(runAfterHook).toHaveBeenCalledOnce();
+  });
+
+  it("blocks delete when before hook throws HookError", async () => {
+    const factory = new FakeRepoFactory();
+    const repo = factory.forType("ticket") as FakeRepo;
+    const id = randomUUID();
+    const now = new Date();
+    await repo.insert({ _id: id, version: 1, createdAt: now, updatedAt: now, title: "T" });
+
+    const runBeforeHook = vi.fn().mockRejectedValue(new HookError("cannot delete"));
+    const runAfterHook = vi.fn().mockResolvedValue(undefined);
+    const hookExecutor = { runBeforeHook, runAfterHook } as unknown as HookExecutor;
+
+    const hookRes: SoulResource = {
+      name: "ticket",
+      schema: { type: "object", properties: { title: { type: "string" } }, required: ["title"] },
+      hasHooks: true,
+      hookSource: "({})",
+      hookHash: "h",
+      hooksEnabled: true,
+    };
+    const soulLoader = {
+      resources: {
+        get: (t: string) => (t === "ticket" ? hookRes : undefined),
+        has: (t: string) => t === "ticket",
+      },
+    } as unknown as SoulLoader;
+
+    const ctx = { ...makeCtx(factory), soulLoader, hookExecutor };
+    const tool = getTool("resource_delete");
+    const result = await tool.handler({ type: "ticket", id, version: 1 }, ctx);
+    expect(result).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: "cannot delete" },
+    });
+    expect(runAfterHook).not.toHaveBeenCalled();
+    const stored = repo.docs.get(id);
+    expect(stored?.deletedAt).toBeUndefined();
   });
 });
 

@@ -1,11 +1,14 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/validation";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
+import { analyzeHook, HookAnalysisError } from "../../hooks/hook-analyzer.js";
+import type { RateLimiter } from "../../rate-limit";
+import { makeRateLimitHook } from "../../rate-limit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -78,17 +81,31 @@ const ResourceTypeSchema = {
   required: ["name", "schema", "hasHooks"],
 } as const;
 
+const SOUL_WRITE_LIMIT = 60;
+const SOUL_WRITE_WINDOW_MS = 60_000;
+
 export function registerResourceTypeRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
-  reconcile?: () => Promise<void>
+  reconcile?: () => Promise<void>,
+  rateLimiter?: RateLimiter
 ): void {
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(
+        rateLimiter,
+        (req) => `rl:soul:${req.ip}`,
+        SOUL_WRITE_LIMIT,
+        SOUL_WRITE_WINDOW_MS
+      )
+    : undefined;
+  const writeHandlers: PreHandler[] = rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth];
+
   app.post(
     "/api/v1/resource-types",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Create a new resource type. `schema` is a YAML string (JSON Schema). Written as-is to soul/resources/{name}/schema.yml.",
@@ -171,7 +188,7 @@ export function registerResourceTypeRoutes(
   app.put(
     "/api/v1/resource-types/:name",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Replace an existing resource type's schema. `schema` is a YAML string (JSON Schema).",
@@ -222,7 +239,7 @@ export function registerResourceTypeRoutes(
   app.delete(
     "/api/v1/resource-types/:name",
     {
-      preHandler: requireAuth,
+      preHandler: writeHandlers,
       schema: {
         description:
           "Remove a resource type definition from the soul. The Postgres table is left intact " +
@@ -244,6 +261,137 @@ export function registerResourceTypeRoutes(
       }
       await rm(typeDir, { recursive: true, force: true });
       await gitSync.commit(`soul: remove resource type ${name}`);
+      await soulLoader.reload();
+      return reply.code(204).send();
+    }
+  );
+
+  // ── Hook routes ───────────────────────────────────────────────────────────
+
+  const HookResponseSchema = {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      hasHooks: { type: "boolean" },
+      source: { type: "string", nullable: true },
+    },
+    required: ["name", "hasHooks"],
+  } as const;
+
+  app.get(
+    "/api/v1/resource-types/:name/hooks",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Get the hooks.ts source for a resource type, or null if none exists.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        response: { 200: HookResponseSchema, 401: ErrorSchema, 404: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const rt = soulLoader.resources.get(name);
+      if (!rt) return reply.code(404).send({ error: `resource type not found: ${name}` });
+      return reply.send({ name, hasHooks: rt.hasHooks, source: rt.hookSource ?? null });
+    }
+  );
+
+  app.put(
+    "/api/v1/resource-types/:name/hooks",
+    {
+      preHandler: writeHandlers,
+      schema: {
+        description:
+          "Create or replace the hooks.ts file for a resource type. " +
+          "Runs static analysis to block banned patterns.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        body: {
+          type: "object",
+          required: ["source"],
+          properties: { source: { type: "string" } },
+        },
+        response: {
+          200: HookResponseSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+          422: ValidationErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      const { source } = req.body as { source: string };
+
+      if (!name || !NAME_RE.test(name)) {
+        return reply.code(400).send({ error: "invalid resource type name" });
+      }
+      if (!soulLoader.resources.has(name)) {
+        return reply.code(404).send({ error: `resource type not found: ${name}` });
+      }
+
+      try {
+        analyzeHook(source);
+      } catch (hookErr) {
+        if (hookErr instanceof HookAnalysisError) {
+          return reply.code(422).send({ error: hookErr.message });
+        }
+        throw hookErr;
+      }
+
+      const trimmed = source.trim();
+      if (!trimmed.startsWith("(") || !trimmed.endsWith(")")) {
+        return reply.code(422).send({
+          error: "hook source must be a parenthesized object literal: `({ before(ctx) { ... } })`",
+        });
+      }
+
+      const hooksFile = join(gitSync.path, "resources", name, "hooks.ts");
+      await writeFile(hooksFile, source, "utf8");
+      await gitSync.commit(`soul: add hooks for resource type ${name}`);
+      await soulLoader.reload();
+
+      return reply.send({ name, hasHooks: true, source });
+    }
+  );
+
+  app.delete(
+    "/api/v1/resource-types/:name/hooks",
+    {
+      preHandler: writeHandlers,
+      schema: {
+        description: "Remove the hooks.ts file for a resource type.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { name } = req.params as { name: string };
+      if (!name || !NAME_RE.test(name)) {
+        return reply.code(400).send({ error: "invalid resource type name" });
+      }
+      if (!soulLoader.resources.has(name)) {
+        return reply.code(404).send({ error: `resource type not found: ${name}` });
+      }
+
+      const hooksFile = join(gitSync.path, "resources", name, "hooks.ts");
+      if (!existsSync(hooksFile)) {
+        return reply.code(404).send({ error: `no hooks found for resource type: ${name}` });
+      }
+
+      await unlink(hooksFile);
+      await gitSync.commit(`soul: remove hooks for resource type ${name}`);
       await soulLoader.reload();
       return reply.code(204).send();
     }

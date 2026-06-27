@@ -14,10 +14,11 @@ vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   rm: vi.fn().mockResolvedValue(undefined),
+  unlink: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -415,6 +416,202 @@ x-computed:
       });
       expect(gitSync.commit).toHaveBeenCalledWith("soul: remove resource type ticket");
       expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── GET /api/v1/resource-types/:name/hooks ─────────────────────────────────
+
+  describe("GET /api/v1/resource-types/:name/hooks", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types/ticket/hooks",
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("returns 404 when resource type does not exist", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types/ghost/hooks",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("returns hook source when hooks exist", async () => {
+      const hookSource = "({ async before(ctx) { ctx.patch({ x: 1 }); } })";
+      await app.close();
+      soulLoader = makeFakeSoulLoader([
+        {
+          name: "ticket",
+          schema: { type: "object" },
+          hasHooks: true,
+          hookSource,
+          hooksEnabled: true,
+        },
+      ]);
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types/ticket/hooks",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ name: "ticket", hasHooks: true, source: hookSource });
+    });
+
+    it("returns null source when no hooks exist", async () => {
+      await app.close();
+      soulLoader = makeFakeSoulLoader([
+        { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+      ]);
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/resource-types/ticket/hooks",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({ name: "ticket", hasHooks: false, source: null });
+    });
+  });
+
+  // ── PUT /api/v1/resource-types/:name/hooks ─────────────────────────────────
+
+  describe("PUT /api/v1/resource-types/:name/hooks", () => {
+    const VALID_HOOK =
+      "({ async before(ctx) { ctx.patch({ upper: ctx.record.title.toUpperCase() }); } })";
+
+    const putHook = (payload: { source: string }) => ({
+      method: "PUT" as const,
+      url: "/api/v1/resource-types/ticket/hooks",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload,
+    });
+
+    beforeEach(async () => {
+      await app.close();
+      soulLoader = makeFakeSoulLoader([
+        { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+      ]);
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/resource-types/ticket/hooks",
+        payload: { source: VALID_HOOK },
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("writes hooks.ts, commits, and reloads", async () => {
+      const res = await app.inject(putHook({ source: VALID_HOOK }));
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({ name: "ticket", hasHooks: true, source: VALID_HOOK });
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("hooks.ts"),
+        VALID_HOOK,
+        "utf8"
+      );
+      expect(gitSync.commit).toHaveBeenCalledWith("soul: add hooks for resource type ticket");
+      expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("returns 404 when resource type does not exist", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/resource-types/ghost/hooks",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { source: VALID_HOOK },
+      });
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("returns 422 for banned pattern (require)", async () => {
+      const res = await app.inject(putHook({ source: "({ before() { require('fs'); } })" }));
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({
+        error: expect.stringContaining("banned pattern"),
+      });
+      expect(writeFile).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 when source is not parenthesized", async () => {
+      const res = await app.inject(putHook({ source: "{ before() {} }" }));
+      expect(res.statusCode).toBe(422);
+      expect(res.json()).toMatchObject({
+        error: expect.stringContaining("parenthesized"),
+      });
+    });
+  });
+
+  // ── DELETE /api/v1/resource-types/:name/hooks ──────────────────────────────
+
+  describe("DELETE /api/v1/resource-types/:name/hooks", () => {
+    const delHooks = () => ({
+      method: "DELETE" as const,
+      url: "/api/v1/resource-types/ticket/hooks",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+    });
+
+    beforeEach(async () => {
+      await app.close();
+      soulLoader = makeFakeSoulLoader([
+        { name: "ticket", schema: { type: "object" }, hasHooks: true, hooksEnabled: true },
+      ]);
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/resource-types/ticket/hooks",
+      });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("deletes hooks.ts, commits, and reloads", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject(delHooks());
+      expect(res.statusCode).toBe(204);
+      expect(unlink).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"));
+      expect(gitSync.commit).toHaveBeenCalledWith("soul: remove hooks for resource type ticket");
+      expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+
+    it("returns 404 when hooks.ts does not exist", async () => {
+      vi.mocked(existsSync).mockReturnValue(false);
+      const res = await app.inject(delHooks());
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toMatchObject({
+        error: expect.stringContaining("no hooks found"),
+      });
+      expect(unlink).not.toHaveBeenCalled();
+    });
+
+    it("returns 404 when resource type does not exist", async () => {
+      await app.close();
+      soulLoader = makeFakeSoulLoader();
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/resource-types/ghost/hooks",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(404);
     });
   });
 });

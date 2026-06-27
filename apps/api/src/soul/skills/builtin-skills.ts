@@ -61,23 +61,59 @@ Construct a JSON Schema 2020-12 object:
 If \`validate_artifact\` is available, validate the schema and fix any errors before presenting.
 
 ### Step 6 — Preview & approve
-Summarise the type briefly (name, purpose, key fields) and ask for approval in one short sentence,
-e.g. "Should I create the \`issue\` resource type?". Keep it concise — do not dump the full raw YAML.
+Summarise the type briefly (name, purpose, key fields) and use \`present_choices\` for approval
+(e.g. "Create it" / "Edit first" / "Cancel"). Keep the summary concise — do not dump the full raw
+YAML. Never list approval options as plain-text bullets.
 
 ### Step 7 — Write
 On approval, call \`create_resource_type\` with the resource \`name\` and the \`schema\` (the JSON
 Schema, serialised as YAML). This commits \`resources/<name>/schema.yml\` to the soul and
 materialises the Postgres table.
 
-### Step 8 — Report
-Confirm what was created in one sentence (name + field count). Do NOT call \`complete_task\` — the
-master flow owns session completion.
+### Step 8 — Hooks (optional)
+After the resource type is created, assess whether it needs lifecycle hooks. Use \`present_choices\`
+to ask whether hooks are needed — never list the options as plain-text bullets. If you recommend
+hooks, explain why in one sentence, then present the choice. Common triggers that suggest hooks:
+
+- A field references another resource type and writes need to validate a value on the target (not
+  just existence — \`x-links\` handles existence). Example: checking the target's balance or status.
+- Status transitions need to be guarded (e.g. only \`pending\` → \`approved\` or \`rejected\`).
+- A computed field depends on data from another resource (cross-resource join at write time).
+- A date range needs business-day calculation or overlap detection.
+
+If the user wants hooks, or you recommend them and the user agrees:
+
+1. Interview for the before/after logic: what should happen before a record is saved? After?
+2. Write the hook as a parenthesized object literal with \`before\` and/or \`after\` async functions.
+   The sandbox provides \`ctx\` with:
+   - \`ctx.record\` — the record data (pre-persist in \`before\`, post-persist in \`after\`)
+   - \`ctx.patch({...})\` — merge fields into the record (**before** hook only)
+   - \`ctx.resources.get(type, id)\` — read another resource from Postgres (async)
+   - \`ctx.hash(str)\` — SHA-256 hex digest
+   - \`ctx.uuid()\` — random UUID
+   - \`ctx.now\` — fixed timestamp for the run (milliseconds)
+3. **Banned patterns** (static analysis rejects these): \`require()\`, \`import()\`, \`eval()\`,
+   \`Function()\`, \`process\`, \`global\`, \`Buffer\`, \`fetch()\`, \`setTimeout\`, \`setInterval\`,
+   \`setImmediate\`, \`queueMicrotask\`. No network, no Node APIs — pure computation + \`ctx\` only.
+4. Preview the hook source and ask for approval.
+5. On approval, call \`create_resource_hooks\` with \`name\` and \`source\`.
+6. To read existing hooks: \`resource_hooks_get\`. To remove: \`resource_hooks_delete\`.
+
+Hooks fire on **Create**, **Update**, and **Delete**. The \`before\` hook can block the operation
+by throwing an Error. The \`after\` hook is best-effort and never fails the request.
+For Delete, the \`before\` hook receives the existing record and can prevent deletion; \`ctx.patch()\`
+has no effect since no business data is persisted on delete.
+
+### Step 9 — Report
+Confirm what was created in one sentence (name + field count + whether hooks were added). Do NOT
+call \`complete_task\` — the master flow owns session completion.
 
 ## Edit Flow
-1. \`resource_type_schema\` to load the current schema.
+1. \`resource_type_schema\` to load the current schema. \`resource_hooks_get\` to check for hooks.
 2. Interview the user about the change; describe it in plain language (no raw dumps).
-3. Validate, then \`resource_type_update\` to apply.
-4. Report the change in one sentence.
+3. Validate, then \`resource_type_update\` to apply schema changes.
+4. If hooks need adding/editing: \`create_resource_hooks\`. If removing: \`resource_hooks_delete\`.
+5. Report the change in one sentence.
 
 ## Error handling
 Recoverable issues (bad field type, validation failure, user changes mind): fix and retry. A logical

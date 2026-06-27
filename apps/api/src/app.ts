@@ -219,7 +219,8 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.gitSync,
           opts.soulLoader,
           requireAuth,
-          opts.reconcileResources
+          opts.reconcileResources,
+          opts.rateLimiter
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
         registerOnboardingRoutes(app, opts.soulLoader, requireAuth);

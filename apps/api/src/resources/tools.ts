@@ -325,13 +325,21 @@ const resourceDelete: ResourceTool = {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
     const { type, id, version } = args as { type: string; id: string; version: number };
 
-    if (!ctx.soulLoader.resources.has(type))
-      return err("not_found", `resource type not found: ${type}`);
+    const resourceDef = ctx.soulLoader.resources.get(type);
+    if (!resourceDef) return err("not_found", `resource type not found: ${type}`);
 
     const repo = ctx.repoFactory.forType(type);
     const loaded = await loadForWrite(repo, id, version);
     if (!loaded.ok) return err("not_found", loaded.err.body.error);
     const existing = loaded.doc;
+
+    const before = await maybeRunBeforeHook(
+      ctx.hookExecutor,
+      resourceDef,
+      type,
+      toApiRecord(existing)
+    );
+    if (!before.ok) return err("validation_error", before.err.body.error);
 
     const now = new Date();
     const softDeleted = {
@@ -348,6 +356,7 @@ const resourceDelete: ResourceTool = {
     } catch (e) {
       return err("internal_error", reason(e));
     }
+    await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(softDeleted));
     return ok({ id });
   },
 };

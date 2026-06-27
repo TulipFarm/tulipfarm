@@ -38,6 +38,8 @@ export const INFORMATION_ARCHITECT_NAME = "InformationArchitect";
 export const EXCLUSIVE_SOUL_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "create_resource_type",
   "resource_type_update",
+  "create_resource_hooks",
+  "resource_hooks_delete",
   "agent_create",
   "agent_update",
   "agent_delete",
@@ -62,9 +64,12 @@ export const INFORMATION_ARCHITECT_TOOL_ALLOWLIST: readonly string[] = [
   "agent_get",
   "skill_list",
   "skill_get",
-  // Soul writes (resource types / agents / skills)
+  // Soul writes (resource types + hooks / agents / skills)
   "create_resource_type",
   "resource_type_update",
+  "create_resource_hooks",
+  "resource_hooks_get",
+  "resource_hooks_delete",
   "agent_create",
   "agent_update",
   "agent_delete",
@@ -111,6 +116,10 @@ You get things done efficiently while being clear about what you're doing and wh
 - When the user asks to "find" or "search", read the relevant resources with appropriate filters.
 - When showing results, offer relevant follow-up actions.
 - If an operation partially succeeds, report what worked and what didn't.
+- **When you need the user to pick between options** (yes/no, A vs B, any branching decision), call
+  \`present_choices\` instead of listing options as bullet points in prose. Plain-text bullet lists
+  are not interactive — the user's free-text reply may not match and the turn can stall. Interactive
+  choices are always clickable and unambiguous.
 
 ## Presenting results
 
@@ -191,6 +200,10 @@ the soul-CRUD tools directly.
   commit immediately. There is no approval step for editing the soul.
 - **Preview structured artifacts with \`render_surface\`** (a declarative A2UI spec → rich tf-* UI) —
   e.g. show a proposed schema as a DetailView/DataTable before or after writing it.
+- **Use \`present_choices\` for every branching decision** (yes/no, option A vs B, "do you want X?").
+  Never list options as plain-text bullet points — they are not interactive. \`present_choices\`
+  renders clickable cards the user can tap; plain prose requires free-text matching and stalls the
+  turn when the user types a short answer like "yes".
 
 ## Entry
 
