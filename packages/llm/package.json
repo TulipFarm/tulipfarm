@@ -9,15 +9,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.86",
-    "@ai-sdk/azure": "^3.0.77",
-    "@ai-sdk/openai": "^3.0.74",
-    "@ai-sdk/openai-compatible": "^2.0.51",
-    "@ai-sdk/provider": "^3.0.10",
+    "@ai-sdk/anthropic": "^4.0.0",
+    "@ai-sdk/azure": "^4.0.0",
+    "@ai-sdk/openai": "^4.0.0",
+    "@ai-sdk/openai-compatible": "^3.0.0",
+    "@ai-sdk/provider": "^4.0.0",
     "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/validation": "workspace:*",
-    "ai": "^6.0.209"
+    "ai": "^7.0.2"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",

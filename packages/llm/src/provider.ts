@@ -2,7 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createAzure } from "@ai-sdk/azure";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
-import type { LanguageModelV3 } from "@ai-sdk/provider";
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 import {
   DecryptError,
   llmProviderById,
@@ -67,7 +67,7 @@ async function resolveStored(
 export async function createModel(
   entry: ProviderEntry,
   secrets: SecretsService
-): Promise<LanguageModelV3> {
+): Promise<LanguageModelV4> {
   const info = llmProviderById(entry.provider);
 
   // API key: an explicit api_key_ref (incl. env://VAR escape) wins; otherwise the provider's

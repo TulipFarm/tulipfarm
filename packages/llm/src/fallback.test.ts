@@ -1,9 +1,9 @@
-import type { LanguageModelV3, LanguageModelV3CallOptions } from "@ai-sdk/provider";
+import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { FallbackModel, isHardFailure } from "./fallback";
 
-const opts = {} as LanguageModelV3CallOptions;
+const opts = {} as LanguageModelV4CallOptions;
 
 function apiError(statusCode: number, isRetryable: boolean): APICallError {
   return new APICallError({
@@ -16,17 +16,17 @@ function apiError(statusCode: number, isRetryable: boolean): APICallError {
 }
 
 function makeModel(
-  overrides: Partial<Pick<LanguageModelV3, "doGenerate" | "doStream">> = {}
-): LanguageModelV3 {
+  overrides: Partial<Pick<LanguageModelV4, "doGenerate" | "doStream">> = {}
+): LanguageModelV4 {
   return {
-    specificationVersion: "v3",
+    specificationVersion: "v4",
     provider: "test",
     modelId: "test-model",
     supportedUrls: {},
     doGenerate: vi.fn().mockRejectedValue(new Error("not implemented")),
     doStream: vi.fn().mockRejectedValue(new Error("not implemented")),
     ...overrides,
-  } as unknown as LanguageModelV3;
+  } as unknown as LanguageModelV4;
 }
 
 function makeStreamResult(chunks: unknown[], failAfterChunks?: number) {

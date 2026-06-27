@@ -440,6 +440,9 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       const result = streamText({
         model: selected,
         messages: turnMessages,
+        // AI SDK v7 rejects `role: "system"` entries in `messages` by default; the per-turn prompt
+        // is assembled as a leading system message (and re-seeded on handoff), so opt back in.
+        allowSystemInMessages: true,
         tools: turnTools,
         // The stop endpoint aborts this signal to halt generation mid-turn (see streamControllers).
         abortSignal: abortController.signal,
