@@ -28,6 +28,8 @@ export type SendOptions = {
   // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
   skills?: string[];
   resources?: string[];
+  // Per-turn `~knowledge` page pins (documentIds) — full page content injected server-side this turn.
+  knowledgePages?: string[];
 };
 
 export type UseChatStreamOptions = {
@@ -207,6 +209,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
           agentId: opts?.agentId,
           skills: opts?.skills,
           resources: opts?.resources,
+          knowledgePages: opts?.knowledgePages,
           clientContext: captureClientContext(),
         },
         {

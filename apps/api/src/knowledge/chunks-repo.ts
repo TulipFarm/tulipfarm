@@ -23,6 +23,12 @@ function docFilterConditions(filters: SearchFilters, params: unknown[]): string[
     params.push(filters.tags);
     conds.push(`d.tags @> $${params.length}::text[]`);
   }
+  // Scope to one bundle (space). Rides the existing `JOIN knowledge_documents d`, so no chunk-level
+  // bundle_id column is needed — both the vector and lexical paths inherit this predicate.
+  if (filters.bundleId !== undefined) {
+    params.push(filters.bundleId);
+    conds.push(`d.bundle_id = $${params.length}`);
+  }
   return conds;
 }
 

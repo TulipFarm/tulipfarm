@@ -1,3 +1,4 @@
+import { Link } from "@remix-run/react";
 import { type ReactNode, useState } from "react";
 import { A2uiFrame } from "~/components/a2ui-frame";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
@@ -171,27 +172,36 @@ function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
   );
 }
 
+const SOURCE_LINK_CLASS =
+  "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+
 function SourcesPart({ sources }: { sources: SourceRef[] }) {
   return (
     <div className="text-sm">
       <Label text="[sources]" />
       <ul className="mt-1 space-y-0.5">
-        {sources.map((s, i) => (
-          <li key={s.id ?? s.url ?? `${s.title ?? "source"}-${i}`}>
-            {s.url ? (
-              <a
-                href={s.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-primary underline underline-offset-2 hover:opacity-80"
-              >
-                {s.title ?? s.url}
-              </a>
-            ) : (
-              <span className="text-muted-foreground">{s.title ?? "source"}</span>
-            )}
-          </li>
-        ))}
+        {sources.map((s, i) => {
+          const label = `📖 ${s.title ?? s.url ?? "source"}`;
+          // Internal wiki citations (`/knowledge/…`) navigate in-app; external links open a new tab;
+          // an unlinked source (no resolvable wiki page) renders as muted text.
+          return (
+            <li key={s.id ?? s.url ?? `${s.title ?? "source"}-${i}`}>
+              {s.url ? (
+                s.url.startsWith("/") ? (
+                  <Link to={s.url} className={SOURCE_LINK_CLASS}>
+                    {label}
+                  </Link>
+                ) : (
+                  <a href={s.url} target="_blank" rel="noreferrer" className={SOURCE_LINK_CLASS}>
+                    {label}
+                  </a>
+                )
+              ) : (
+                <span className="text-muted-foreground">{label}</span>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -201,17 +211,20 @@ function SourcesPart({ sources }: { sources: SourceRef[] }) {
 export function MessagePartView({
   part,
   streaming,
+  citations,
   onApprove,
   onA2uiAgent,
 }: {
   part: TimelinePart;
   streaming?: boolean;
+  /** The message's cited-source links, so `[n]` markers in a text part become clickable. */
+  citations?: { ref: number; url: string }[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onA2uiAgent?: (payload: unknown) => void;
 }) {
   switch (part.kind) {
     case "text":
-      return <Response text={part.text} streaming={streaming} />;
+      return <Response text={part.text} streaming={streaming} citations={citations} />;
     case "reasoning":
       return <ReasoningPart text={part.text} />;
     case "tool":

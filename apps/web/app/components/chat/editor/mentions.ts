@@ -13,10 +13,32 @@ import Mention from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
+import { searchDocuments } from "~/lib/knowledge-api";
 import { MENTION_KINDS, type MentionKind } from "./mention-config";
 import { MentionList, type MentionListRef } from "./mention-list";
-import { filterItems } from "./serialize";
+import { filterItems, type MentionItem } from "./serialize";
 import type { GetItems } from "./use-mention-data";
+
+// `~knowledge` is search-powered: each keystroke runs a server fuzzy search (the KB is unbounded, so a
+// static client-filtered list won't do). An empty query shows nothing; a failed search degrades to an
+// empty menu. The latest keystroke's result wins (Tiptap re-renders on each resolved `items`).
+async function searchKnowledgeItems(query: string): Promise<MentionItem[]> {
+  if (query.trim() === "") return [];
+  try {
+    const { results } = await searchDocuments(query, 8);
+    // De-dupe by document — search returns one hit per matching chunk, so a page can appear twice.
+    const seen = new Set<string>();
+    const items: MentionItem[] = [];
+    for (const r of results) {
+      if (seen.has(r.documentId)) continue;
+      seen.add(r.documentId);
+      items.push({ id: r.documentId, label: r.title, description: r.content.slice(0, 80) });
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
 
 /** One suggestion plugin key per trigger — also consumed by the composer to detect an open menu. */
 export const MENTION_PLUGIN_KEYS = MENTION_KINDS.map((c) => new PluginKey(c.nodeName));
@@ -80,7 +102,10 @@ export function buildMentionExtensions(getItems: GetItems) {
       suggestion: {
         char: cfg.char,
         pluginKey: MENTION_PLUGIN_KEYS[i],
-        items: ({ query }: { query: string }) => filterItems(query, getItems(cfg.kind)),
+        items:
+          cfg.kind === "knowledge"
+            ? ({ query }: { query: string }) => searchKnowledgeItems(query)
+            : ({ query }: { query: string }) => filterItems(query, getItems(cfg.kind)),
         render: () => suggestionRender(cfg.kind),
       },
     })

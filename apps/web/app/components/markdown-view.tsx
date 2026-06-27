@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { rehypeCallouts } from "~/lib/rehype-callouts";
+import { rehypeCitations } from "~/lib/rehype-citations";
 import { rehypeTags } from "~/lib/rehype-tags";
 import { mentionComponents } from "./chat/mention-chip";
 import { rehypeMentions } from "./chat/mention-highlight";
@@ -16,39 +17,61 @@ const TAG_BASE = "/knowledge/tags/";
 const wikiUrlTransform = (url: string) =>
   /^tf:(page|agent|resource)\//.test(url) ? url : defaultUrlTransform(url);
 
-// In wiki mode, internal hrefs (`/…`, produced by rewriteWikiLinks + rehypeTags) render as
-// client-side links; unresolved `tf:` hrefs render muted; everything else opens in a new tab.
-const wikiAnchor: Components["a"] = ({ node: _n, children, href, ...p }) => {
-  const target = typeof href === "string" ? href : "";
-  if (target.startsWith("/")) {
-    const cls =
-      typeof p.className === "string"
-        ? p.className
-        : "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+// A single anchor renderer that branches on the rendered node, so wiki-mode link handling and inline
+// `[n]` citation linkification compose instead of overriding each other. In priority order:
+//   1. citation markers (`.tf-citation`, always an internal `/knowledge/…` href) → in-app `<Link>`;
+//   2. wiki internal hrefs (`/…` from rewriteWikiLinks + rehypeTags) → in-app `<Link>`;
+//   3. wiki unresolved `tf:` hrefs → muted, non-navigable text;
+//   4. everything else → opens in a new tab (markdown link title/attrs preserved via `...p`).
+function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): Components["a"] {
+  return ({ node: _n, children, href, className, ...p }) => {
+    const target = typeof href === "string" ? href : "";
+    const isCitation =
+      opts.citations &&
+      typeof className === "string" &&
+      className.split(" ").includes("tf-citation");
+    if (isCitation && target.startsWith("/")) {
+      return (
+        <Link
+          to={target}
+          className="font-medium text-primary no-underline hover:underline cursor-pointer"
+          title="cited source"
+        >
+          {children}
+        </Link>
+      );
+    }
+    if (opts.wikiLinks && target.startsWith("/")) {
+      const cls =
+        typeof className === "string"
+          ? className
+          : "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+      return (
+        <Link to={target} className={cls}>
+          {children}
+        </Link>
+      );
+    }
+    if (opts.wikiLinks && target.startsWith("tf:")) {
+      return (
+        <span className="text-muted-foreground" title="link target not found">
+          {children}
+        </span>
+      );
+    }
     return (
-      <Link to={target} className={cls}>
+      <a
+        className="text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer"
+        target="_blank"
+        rel="noreferrer"
+        href={target}
+        {...p}
+      >
         {children}
-      </Link>
+      </a>
     );
-  }
-  if (target.startsWith("tf:")) {
-    return (
-      <span className="text-muted-foreground" title="link target not found">
-        {children}
-      </span>
-    );
-  }
-  return (
-    <a
-      className="text-primary underline underline-offset-2 hover:opacity-80"
-      target="_blank"
-      rel="noreferrer"
-      href={target}
-    >
-      {children}
-    </a>
-  );
-};
+  };
+}
 
 // Border accent for a GitHub-alert callout by kind.
 function calloutBorder(kind: string): string {
@@ -181,22 +204,39 @@ export function MarkdownView({
   children,
   mentions,
   wikiLinks,
+  citations,
 }: {
   children: string;
   /** When set, `@agent`/`/skill`/`#resource` tags are highlighted as chips with a hover card. */
   mentions?: MentionEntry[];
   /** Knowledge-wiki mode: render internal `/…` hrefs as client links and `#tag` text as chip links. */
   wikiLinks?: boolean;
+  /** Inline `[n]` → cited-page link map (ref number → wiki url). Linkifies citation markers in prose. */
+  citations?: { ref: number; url: string }[];
 }) {
   const list = mentions ?? [];
   const active = list.length > 0;
   const byPhrase = useMemo(() => new Map(list.map((m) => [m.phrase, m] as const)), [list]);
+  const refs = useMemo(
+    () => new Map((citations ?? []).map((c) => [c.ref, c.url] as const)),
+    [citations]
+  );
+  const citationsOn = refs.size > 0;
+  // Memoize the custom anchor so its identity is stable across streaming re-renders (a fresh
+  // component type each render would remount every link); recompute only when a mode toggles.
+  const anchor = useMemo(
+    () => makeAnchorRenderer({ wikiLinks: Boolean(wikiLinks), citations: citationsOn }),
+    [wikiLinks, citationsOn]
+  );
   const rehypePlugins: Options["rehypePlugins"] = [rehypeCallouts];
   if (active) rehypePlugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
   if (wikiLinks) rehypePlugins.push([rehypeTags, { tagBase: TAG_BASE }]);
+  if (citationsOn) rehypePlugins.push([rehypeCitations, { refs }]);
   let resolvedComponents: Components = components;
   if (active) resolvedComponents = { ...resolvedComponents, ...mentionComponents(byPhrase) };
-  if (wikiLinks) resolvedComponents = { ...resolvedComponents, a: wikiAnchor };
+  // One anchor renderer handles both wiki internal links and citation linkification (no longer
+  // mutually exclusive), so a surface rendering wiki prose with citations keeps both.
+  if (wikiLinks || citationsOn) resolvedComponents = { ...resolvedComponents, a: anchor };
   return (
     <div className="text-sm">
       <ReactMarkdown

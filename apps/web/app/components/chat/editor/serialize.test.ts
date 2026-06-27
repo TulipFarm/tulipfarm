@@ -110,11 +110,28 @@ describe("serializeDoc — mentions", () => {
     expect(out.agentId).toBe("github-triage");
   });
 
+  it("collects ~knowledge page ids and writes a ~label token", () => {
+    const doc = para(text("summarize "), mention("mentionKnowledge", "doc-1", "Refund Policy"));
+    const out = serializeDoc(doc);
+    expect(out.text).toBe("summarize ~Refund Policy");
+    expect(out.knowledge).toEqual(["doc-1"]);
+  });
+
+  it("de-duplicates ~knowledge ids in order", () => {
+    const doc = para(
+      mention("mentionKnowledge", "doc-1", "A"),
+      mention("mentionKnowledge", "doc-2", "B"),
+      mention("mentionKnowledge", "doc-1", "A")
+    );
+    expect(serializeDoc(doc).knowledge).toEqual(["doc-1", "doc-2"]);
+  });
+
   it("returns empty arrays and undefined agentId for a plain message", () => {
     const out = serializeDoc(para(text("just text")));
     expect(out.agentId).toBeUndefined();
     expect(out.skills).toEqual([]);
     expect(out.resources).toEqual([]);
+    expect(out.knowledge).toEqual([]);
   });
 });
 

@@ -1,5 +1,7 @@
 import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
+import type { KnowledgeService } from "../knowledge/service";
+import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import { EXCLUSIVE_SOUL_WRITE_TOOLS, type PlatformAgent } from "../soul/agents/registry";
 import type { ToolRegistry } from "../tools/registry";
 import {
@@ -55,6 +57,9 @@ export interface ChatBody {
   // into `<eager-resources>` — for THIS turn only. Unknown names are ignored.
   skills?: string[];
   resources?: string[];
+  // Per-turn `~knowledge` pins from the composer: documentIds whose full page content is injected
+  // into `<pinned-knowledge>` for THIS turn only. Unknown/inactive ids are dropped.
+  knowledgePages?: string[];
   // What the user is viewing this turn (A2UI P3) — exposed to the agent via `get_client_context`.
   clientContext?: { route?: string; title?: string };
 }
@@ -81,6 +86,7 @@ export const ChatBodySchema = {
     llmDecision: { type: "boolean" },
     skills: { type: "array", items: { type: "string", minLength: 1 } },
     resources: { type: "array", items: { type: "string", minLength: 1 } },
+    knowledgePages: { type: "array", maxItems: 10, items: { type: "string", minLength: 1 } },
     clientContext: {
       type: "object",
       additionalProperties: false,
@@ -254,6 +260,19 @@ export function allowedToolNamesFor(
       .map((t) => t.name)
       .filter((n) => !EXCLUSIVE_SOUL_WRITE_TOOLS.has(n))
   );
+}
+
+/**
+ * Whether to instruct knowledge grounding + citation (and surface pinned pages) for an agent this
+ * turn: a knowledge service must be wired AND `cite_sources` must be in the agent's scoped toolset
+ * (so e.g. the Information Architect, which has no knowledge tools, is excluded). Centralizes the gate
+ * the chat turn and the debug-context route otherwise duplicated.
+ */
+export function canGroundKnowledge(
+  knowledge: KnowledgeService | undefined,
+  tools: { name: string }[]
+): boolean {
+  return knowledge != null && tools.some((t) => t.name === CITE_SOURCES_TOOL);
 }
 
 // The same allowed set projected to the `<available-tools>` L1 index — name + description, sorted

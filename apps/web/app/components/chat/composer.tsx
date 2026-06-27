@@ -16,6 +16,7 @@ export type ComposerSendOptions = {
   agentId?: string;
   skills: string[];
   resources: string[];
+  knowledgePages: string[];
 };
 
 /**
@@ -115,9 +116,9 @@ export function Composer({
   submitRef.current = () => {
     if (!editor || busy) return;
     const doc = editor.getJSON() as PMNode;
-    const { text, agentId, skills, resources } = serializeDoc(doc);
+    const { text, agentId, skills, resources, knowledge } = serializeDoc(doc);
     if (!text) return;
-    onSend(text, { model, agentId, skills, resources });
+    onSend(text, { model, agentId, skills, resources, knowledgePages: knowledge });
     lastSentDocRef.current = doc;
     editor.commands.clearContent();
   };
@@ -208,7 +209,7 @@ export function Composer({
         <p className="mt-1.5 px-1 text-[0.625rem] text-muted-foreground">
           enter to send · shift+enter for newline · <span className="text-primary">/</span>skills ·{" "}
           <span className="text-primary">@</span>agents · <span className="text-primary">#</span>
-          resources
+          resources · <span className="text-primary">~</span>knowledge
         </p>
       </div>
     </div>

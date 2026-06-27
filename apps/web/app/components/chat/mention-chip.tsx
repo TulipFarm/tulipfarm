@@ -14,6 +14,7 @@ const KIND_LABEL: Record<MentionEntry["kind"], string> = {
   agent: "Agent",
   skill: "Skill",
   resource: "Resource type",
+  knowledge: "Knowledge",
 };
 
 function MentionChip({ entry, children }: { entry?: MentionEntry; children: ReactNode }) {

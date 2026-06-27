@@ -35,7 +35,7 @@ type Tok = { type?: string; text?: string; raw?: string; tokens?: Tok[]; [k: str
 function stripMarkerTokens(tokens: Tok[]): Tok[] {
   const rest = tokens.slice();
   const first = rest[0];
-  if (!first || first.type !== "paragraph") return rest;
+  if (first?.type !== "paragraph") return rest;
 
   const para: Tok = { ...first, tokens: (first.tokens ?? []).map((t) => ({ ...t })) };
   const inline = para.tokens as Tok[];

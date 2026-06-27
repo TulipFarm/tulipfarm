@@ -13,7 +13,7 @@ import type { ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
-import { availableToolsFor } from "./turn-helpers";
+import { availableToolsFor, canGroundKnowledge } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -326,6 +326,7 @@ export function registerConversationRoutes(
         const platformAgent = getPlatformAgent(agent.name);
         const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
         const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
+        const tools = availableToolsFor(toolRegistry, platformAgent);
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
@@ -335,7 +336,8 @@ export function registerConversationRoutes(
           eagerSkills: listEagerSkills(soulLoader),
           taggedResources: [],
           soulCatalogue: buildSoulCatalogue(soulLoader),
-          availableTools: availableToolsFor(toolRegistry, platformAgent),
+          availableTools: tools,
+          knowledgeGrounding: canGroundKnowledge(knowledge, tools),
         });
         const history = await messageRepo.listByConversation(id, 1000);
         return reply.send({ conversationId: id, systemPrompt, messages: history.items });

@@ -69,6 +69,7 @@ test("Model Selector sets the per-message model override on send", async () => {
     agentId: undefined,
     skills: [],
     resources: [],
+    knowledgePages: [],
   });
   expect(clearContent).toHaveBeenCalled();
 });
@@ -85,6 +86,7 @@ test("the model defaults to the active agent's tier", async () => {
     agentId: undefined,
     skills: [],
     resources: [],
+    knowledgePages: [],
   });
 });
 
@@ -115,6 +117,7 @@ test("send serializes mentions into agentId + skills + resources", async () => {
     agentId: "GithubTriage",
     skills: ["copywriting"],
     resources: ["tickets"],
+    knowledgePages: [],
   });
 });
 

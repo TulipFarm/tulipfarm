@@ -16,9 +16,14 @@ describe("knowledge tools via ToolRegistry", () => {
         .filter((k) => !frontendNames.has(k))
         .sort()
     ).toEqual([
+      "cite_sources",
       "create_bundle",
       "create_knowledge_collection",
       "create_knowledge_document",
+      "get_backlinks",
+      "get_bundle_graph",
+      "get_concept_by_path",
+      "get_document",
       "list_bundles",
       "list_knowledge_collections",
       "navigate_bundle",
