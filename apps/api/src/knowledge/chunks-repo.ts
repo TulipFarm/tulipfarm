@@ -9,7 +9,7 @@ import type {
 } from "./types";
 
 /** Push `d.*` filter conditions onto `params` and return the SQL fragments. */
-function docFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
+export function docFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
   const conds: string[] = [];
   if (filters.domain !== undefined) {
     params.push(filters.domain);
@@ -28,6 +28,10 @@ function docFilterConditions(filters: SearchFilters, params: unknown[]): string[
   if (filters.bundleId !== undefined) {
     params.push(filters.bundleId);
     conds.push(`d.bundle_id = $${params.length}`);
+  }
+  if (filters.type !== undefined) {
+    params.push(filters.type);
+    conds.push(`d.type = $${params.length}`);
   }
   return conds;
 }

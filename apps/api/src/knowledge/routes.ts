@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { parsePaginationQuery } from "../pagination";
+import type { PageHit, PageRetrievalService } from "./retrieval-service";
 import { BundleNameTakenError, type KnowledgeService } from "./service";
 import type {
   IndexingStatus,
@@ -78,6 +79,18 @@ function toApiHit(h: SearchHit): Record<string, unknown> {
   };
 }
 
+function pageHitToApi(h: PageHit): Record<string, unknown> {
+  return {
+    documentId: h.documentId,
+    title: h.title,
+    bundleId: h.bundleId,
+    path: h.path,
+    snippet: h.snippet,
+    highlightRanges: h.highlightRanges,
+    score: h.score,
+  };
+}
+
 function filtersFromQuery(q: Record<string, unknown>): SearchFilters {
   const filters: SearchFilters = {};
   if (typeof q.domain === "string") filters.domain = q.domain;
@@ -85,6 +98,8 @@ function filtersFromQuery(q: Record<string, unknown>): SearchFilters {
   if (typeof q.tags === "string") filters.tags = q.tags.split(",").filter(Boolean);
   else if (Array.isArray(q.tags))
     filters.tags = q.tags.filter((t): t is string => typeof t === "string");
+  if (typeof q.bundleId === "string") filters.bundleId = q.bundleId;
+  if (typeof q.type === "string") filters.type = q.type;
   return filters;
 }
 
@@ -108,7 +123,10 @@ const PageSchema = (item: object) =>
 export function registerKnowledgeRoutes(
   app: FastifyInstance,
   service: KnowledgeService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  // Optional: only the page-search branch needs it. When absent, page-mode requests fall back to
+  // chunk search so the knowledge routes never disappear just because the spine wasn't wired.
+  retrieval?: PageRetrievalService
 ): void {
   const sec: Array<Record<string, string[]>> = [{ sessionCookie: [] }, { bearerToken: [] }];
   const tags = ["knowledge"];
@@ -323,18 +341,24 @@ export function registerKnowledgeRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "Search knowledge (vector-primary, lexical fallback).",
+        description:
+          "Search knowledge. granularity 'chunk' (default) = vector-primary, lexical fallback; " +
+          "'page' = lexical page-level spine (title+body+recency, trgm typo recall). Blank query in " +
+          "page mode returns recent pages.",
         tags,
         security: sec,
         body: {
           type: "object",
           required: ["query"],
           properties: {
-            query: { type: "string", minLength: 1 },
+            query: { type: "string" },
             limit: { type: "number" },
+            granularity: { type: "string", enum: ["chunk", "page"] },
             domain: { type: "string" },
             source: { type: "string" },
             tags: { type: "array", items: { type: "string" } },
+            bundleId: { type: "string" },
+            type: { type: "string" },
           },
         },
         response: {
@@ -349,8 +373,24 @@ export function registerKnowledgeRoutes(
       },
     },
     async (req, reply) => {
-      const b = req.body as { query: string; limit?: number } & Record<string, unknown>;
+      const b = req.body as { query: string; limit?: number; granularity?: string } & Record<
+        string,
+        unknown
+      >;
       const limit = Math.min(Math.max(b.limit ?? 10, 1), 50);
+      if (b.granularity === "page" && retrieval) {
+        const filters = filtersFromQuery(b);
+        const hits =
+          b.query.trim() === ""
+            ? await retrieval.recentPages(limit, filters)
+            : await retrieval.searchPages({ query: b.query, filters, limit });
+        return reply.send({ results: hits.map(pageHitToApi), warnings: [] });
+      }
+      // Chunk mode has no zero-query state — a blank query short-circuits (the schema no longer enforces
+      // a min length, since page mode needs blanks for its recent-pages fallback).
+      if (b.query.trim() === "") {
+        return reply.send({ results: [], warnings: [] });
+      }
       const res = await service.search(b.query, filtersFromQuery(b), limit);
       return reply.send({ results: res.results.map(toApiHit), warnings: res.warnings });
     }

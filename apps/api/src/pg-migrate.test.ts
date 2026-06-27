@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks + 013_drop_bundle_domain + 014_drop_okf_type + 015_title_tsv + 016_doc_type + 017_pg_trgm on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (14)", async () => {
+  it("advances schema_version to the latest (17)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([14]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([17]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -81,11 +81,48 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 14", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 17", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([14]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([17]);
+  });
+
+  it("adds knowledge_documents.title_tsv (generated tsvector) + its GIN index (015)", async () => {
+    await runPgMigrations(db);
+    const col = await db.query<{ column_name: string; is_generated: string }>(
+      "SELECT column_name, is_generated FROM information_schema.columns WHERE table_name = 'knowledge_documents' AND column_name = 'title_tsv'"
+    );
+    expect(col.rows.map((r) => r.column_name)).toEqual(["title_tsv"]);
+    expect(col.rows[0]?.is_generated).toBe("ALWAYS");
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname = 'knowledge_documents_title_tsv_gin'"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual(["knowledge_documents_title_tsv_gin"]);
+  });
+
+  it("re-adds knowledge_documents.type + its index, backfilled from frontmatter_extra (016)", async () => {
+    await runPgMigrations(db);
+    const col = await db.query<{ column_name: string }>(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'knowledge_documents' AND column_name = 'type'"
+    );
+    expect(col.rows.map((r) => r.column_name)).toEqual(["type"]);
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname = 'knowledge_documents_type_idx'"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual(["knowledge_documents_type_idx"]);
+  });
+
+  it("creates the pg_trgm extension + title trigram index (017)", async () => {
+    await runPgMigrations(db);
+    const ext = await db.query<{ extname: string }>(
+      "SELECT extname FROM pg_extension WHERE extname = 'pg_trgm'"
+    );
+    expect(ext.rows.map((r) => r.extname)).toEqual(["pg_trgm"]);
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname = 'knowledge_documents_title_trgm'"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual(["knowledge_documents_title_trgm"]);
   });
 
   it("adds the conversations.title column and the user/updated_at index (005)", async () => {

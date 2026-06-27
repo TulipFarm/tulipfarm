@@ -27,6 +27,8 @@ export interface KnowledgeDocument {
   path?: string | null;
   /** OKF: the `resource` frontmatter field — canonical URI of the underlying asset. */
   resource?: string | null;
+  /** OKF: the `type` frontmatter field — categorizes the page for the search `type` facet. */
+  type?: string | null;
   /** OKF: round-trip store for unknown frontmatter keys from imported foreign bundles. */
   frontmatterExtra?: Record<string, unknown>;
   createdAt: Date;
@@ -146,6 +148,8 @@ export interface SearchFilters {
   tags?: string[];
   /** Scope search to one OKF bundle (space). Matched against the document's `bundle_id`. */
   bundleId?: string;
+  /** Filter to one OKF `type` (e.g. "table", "playbook"). Matched against the document's `type`. */
+  type?: string;
 }
 
 export interface SearchHit {

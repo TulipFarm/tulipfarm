@@ -38,6 +38,7 @@ import {
   PgKnowledgeDocumentRepo,
   PgKnowledgeRevisionRepo,
 } from "./knowledge/repo";
+import { PageRetrievalService } from "./knowledge/retrieval-service";
 import { KnowledgeService } from "./knowledge/service";
 import { PgKvRepo } from "./kv/repo";
 import { KvService } from "./kv/service";
@@ -141,6 +142,9 @@ async function boot() {
         enqueueIndex(boss, { kind: "document", documentId }).then(() => undefined),
     });
 
+    // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).
+    const retrievalService = new PageRetrievalService(pool);
+
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
@@ -193,6 +197,7 @@ async function boot() {
       workingMemoryService,
       kvService,
       knowledgeService,
+      retrievalService,
       toolRegistry,
     });
 

@@ -114,6 +114,33 @@ export function searchDocuments(query: string, limit = 10): Promise<SearchRespon
   return apiWrite<SearchResponse>("POST", `${BASE}/search`, { query, limit });
 }
 
+// A whole-page search hit (granularity "page"). Distinct from the chunk-level SearchHit.
+export type PageSearchHit = {
+  documentId: string;
+  title: string;
+  bundleId: string | null;
+  path: string | null;
+  snippet: string;
+  highlightRanges: Array<[number, number]>;
+  score: number;
+};
+
+export type PageSearchResponse = { results: PageSearchHit[]; warnings: string[] };
+
+// Page-level human search (granularity "page"). A blank query returns recent pages server-side.
+export function searchPages(
+  query: string,
+  opts: { bundleId?: string; type?: string; limit?: number } = {}
+): Promise<PageSearchHit[]> {
+  return apiWrite<PageSearchResponse>("POST", `${BASE}/search`, {
+    query,
+    granularity: "page",
+    limit: opts.limit ?? 10,
+    ...(opts.bundleId ? { bundleId: opts.bundleId } : {}),
+    ...(opts.type ? { type: opts.type } : {}),
+  }).then((r) => r.results);
+}
+
 // ── collections ──────────────────────────────────────────────────────────────
 
 export function listCollections(cursor?: string, limit = 50): Promise<CollectionPage> {

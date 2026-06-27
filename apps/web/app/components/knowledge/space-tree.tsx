@@ -11,6 +11,7 @@ import {
 } from "~/lib/knowledge-api";
 import { listingToNodes, type PageNode } from "~/lib/okf-listing";
 import { cn } from "~/lib/utils";
+import { SidebarSearch } from "./sidebar-search";
 
 /*
  * Unified knowledge tree (the wiki rail). A forest of spaces (bundles); each expands lazily into its
@@ -72,6 +73,7 @@ export function KnowledgeTree() {
           <Plus className="size-3.5" aria-hidden />
         </Link>
       </div>
+      <SidebarSearch />
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
         {error ? (
           <p className="px-2 py-1 text-xs text-destructive">

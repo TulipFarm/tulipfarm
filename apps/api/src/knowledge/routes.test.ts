@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -9,6 +10,7 @@ import {
   PgKnowledgeDocumentRepo,
   PgKnowledgeRevisionRepo,
 } from "./repo";
+import { PageRetrievalService } from "./retrieval-service";
 import { registerKnowledgeRoutes } from "./routes";
 import { KnowledgeService } from "./service";
 import type { EmbeddingPort } from "./types";
@@ -23,7 +25,11 @@ function fakeEmbeddings(available: boolean): EmbeddingPort {
   };
 }
 
-async function buildKnowledgeApp(db: PGlite, available = true): Promise<FastifyInstance> {
+async function buildKnowledgeApp(
+  db: PGlite,
+  available = true,
+  withRetrieval = true
+): Promise<FastifyInstance> {
   const service = new KnowledgeService({
     documents: new PgKnowledgeDocumentRepo(db),
     chunks: new PgKnowledgeChunkRepo(db),
@@ -32,7 +38,12 @@ async function buildKnowledgeApp(db: PGlite, available = true): Promise<FastifyI
     embeddings: fakeEmbeddings(available),
   });
   const app = Fastify();
-  registerKnowledgeRoutes(app, service, async () => {});
+  registerKnowledgeRoutes(
+    app,
+    service,
+    async () => {},
+    withRetrieval ? new PageRetrievalService(db) : undefined
+  );
   await app.ready();
   return app;
 }
@@ -62,6 +73,93 @@ describe("knowledge routes", () => {
     expect(res.statusCode).toBe(201);
     return res.json<{ id: string }>().id;
   }
+
+  // Raw-insert a bundle page (the route's page mode reads via PageRetrievalService's SQL, not the
+  // chunk-mode service deps). A title match needs no chunks (title_tsv hit path).
+  async function seedBundlePage(
+    title: string,
+    opts: { path?: string; type?: string } = {}
+  ): Promise<{ bundleId: string; docId: string }> {
+    const bundleId = randomUUID();
+    const docId = randomUUID();
+    await db.query(
+      `INSERT INTO knowledge_bundles (id, name, description, created_at, updated_at)
+       VALUES ($1, $2, NULL, now(), now())`,
+      [bundleId, `b-${bundleId}`]
+    );
+    await db.query(
+      `INSERT INTO knowledge_documents
+         (id, title, content, plain_text, source, source_id, tags, active, always_load_for_agents,
+          version, bundle_id, path, type, frontmatter_extra, created_at, updated_at)
+       VALUES ($1,$2,$3,$3,'authored',$4,'{}',true,false,1,$5,$6,$7,'{}'::jsonb,now(),now())`,
+      [
+        docId,
+        title,
+        `${title} body`,
+        `okf:${bundleId}:${opts.path ?? "p"}`,
+        bundleId,
+        opts.path ?? "p",
+        opts.type ?? null,
+      ]
+    );
+    return { bundleId, docId };
+  }
+
+  it("page-mode search returns whole-page hits and honors the type facet", async () => {
+    const { bundleId, docId } = await seedBundlePage("Orders Table", { type: "table" });
+    await seedBundlePage("Customers", { path: "c" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: `${base}/search`,
+      payload: { query: "orders", granularity: "page" },
+    });
+    expect(res.statusCode).toBe(200);
+    const hit = res
+      .json<{ results: Array<Record<string, unknown>> }>()
+      .results.find((r) => r.documentId === docId);
+    expect(hit).toMatchObject({ documentId: docId, title: "Orders Table", bundleId, path: "p" });
+    expect(hit).toHaveProperty("snippet");
+    expect(hit).toHaveProperty("highlightRanges");
+    expect(hit).not.toHaveProperty("chunkId"); // page shape, not chunk
+
+    const typed = await app.inject({
+      method: "POST",
+      url: `${base}/search`,
+      payload: { query: "orders", granularity: "page", type: "table" },
+    });
+    expect(
+      typed.json<{ results: Array<{ documentId: string }> }>().results.map((r) => r.documentId)
+    ).toEqual([docId]);
+  });
+
+  it("page-mode blank query returns recent pages", async () => {
+    const { docId } = await seedBundlePage("Recent Page");
+    const res = await app.inject({
+      method: "POST",
+      url: `${base}/search`,
+      payload: { query: "", granularity: "page" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(
+      res.json<{ results: Array<{ documentId: string }> }>().results.map((r) => r.documentId)
+    ).toContain(docId);
+  });
+
+  it("falls back to chunk results for granularity=page when the retrieval spine is absent", async () => {
+    const noRetrieval = await buildKnowledgeApp(db, false, false); // lexical, no spine
+    const id = await createDoc("Paris", "the capital of france");
+    const res = await noRetrieval.inject({
+      method: "POST",
+      url: `${base}/search`,
+      payload: { query: "capital", granularity: "page" },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<{ results: Array<Record<string, unknown>>; warnings: string[] }>();
+    // chunk-shaped hits (chunkId present) prove the chunk path ran despite granularity=page.
+    expect(body.results.some((r) => r.documentId === id && "chunkId" in r)).toBe(true);
+    await noRetrieval.close();
+  });
 
   it("creates, fetches, lists, and 404s documents", async () => {
     const id = await createDoc();

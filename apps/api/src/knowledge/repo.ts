@@ -13,7 +13,7 @@ import type {
 // OKF columns (bundle_id..frontmatter_extra) sit between version and the timestamps. frontmatter_extra
 // is jsonb — bound as a JSON string with an explicit ::jsonb cast (works on both pg.Pool and PGlite).
 const DOC_COLS =
-  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, bundle_id, path, resource, frontmatter_extra, created_at, updated_at";
+  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, bundle_id, path, resource, frontmatter_extra, type, created_at, updated_at";
 
 function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
   return {
@@ -31,6 +31,7 @@ function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
     bundleId: (row.bundle_id as string | null) ?? null,
     path: (row.path as string | null) ?? null,
     resource: (row.resource as string | null) ?? null,
+    type: (row.type as string | null) ?? null,
     frontmatterExtra: (row.frontmatter_extra as Record<string, unknown> | null) ?? {},
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
@@ -54,6 +55,7 @@ function docParams(doc: KnowledgeDocument): unknown[] {
     doc.path ?? null,
     doc.resource ?? null,
     JSON.stringify(doc.frontmatterExtra ?? {}),
+    doc.type ?? null,
     doc.createdAt,
     doc.updatedAt,
   ];
@@ -93,7 +95,7 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
   async insert(doc: KnowledgeDocument): Promise<void> {
     await this.q.query(
       `INSERT INTO knowledge_documents (${DOC_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)`,
       docParams(doc)
     );
   }
@@ -101,13 +103,14 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
   async upsertBySource(doc: KnowledgeDocument): Promise<{ _id: string; version: number }> {
     const { rows } = await this.q.query(
       `INSERT INTO knowledge_documents (${DOC_COLS})
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
        ON CONFLICT (source, source_id) DO UPDATE SET
          title = EXCLUDED.title, content = EXCLUDED.content, plain_text = EXCLUDED.plain_text,
          domain = EXCLUDED.domain, tags = EXCLUDED.tags,
          always_load_for_agents = EXCLUDED.always_load_for_agents,
          bundle_id = EXCLUDED.bundle_id, path = EXCLUDED.path,
          resource = EXCLUDED.resource, frontmatter_extra = EXCLUDED.frontmatter_extra,
+         type = EXCLUDED.type,
          active = true, version = knowledge_documents.version + 1, updated_at = EXCLUDED.updated_at
        RETURNING id, version`,
       docParams(doc)
@@ -160,8 +163,8 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
        SET title=$1, content=$2, plain_text=$3, domain=$4, tags=$5::text[],
            always_load_for_agents=$6, active=$7, version=$8,
            resource=$9, bundle_id=$10, path=$11, frontmatter_extra=$12::jsonb,
-           updated_at=$13
-       WHERE id=$14 AND version=$15 RETURNING id`,
+           type=$13, updated_at=$14
+       WHERE id=$15 AND version=$16 RETURNING id`,
       [
         doc.title,
         doc.content,
@@ -175,6 +178,7 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
         doc.bundleId ?? null,
         doc.path ?? null,
         JSON.stringify(doc.frontmatterExtra ?? {}),
+        doc.type ?? null,
         doc.updatedAt,
         id,
         expectedVersion,

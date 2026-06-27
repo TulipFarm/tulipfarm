@@ -13,6 +13,7 @@ import {
   PgKnowledgeDocumentRepo,
   PgKnowledgeRevisionRepo,
 } from "./repo";
+import { PageRetrievalService } from "./retrieval-service";
 import { registerKnowledgeRoutes } from "./routes";
 import { KnowledgeService } from "./service";
 import type { EmbeddingPort } from "./types";
@@ -39,7 +40,7 @@ async function buildApp(db: PGlite): Promise<FastifyInstance> {
     embeddings: lexicalOnly(),
   });
   const app = Fastify();
-  registerKnowledgeRoutes(app, service, async () => {});
+  registerKnowledgeRoutes(app, service, async () => {}, new PageRetrievalService(db));
   await app.ready();
   return app;
 }
