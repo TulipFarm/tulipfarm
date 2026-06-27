@@ -345,7 +345,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
         <div
           className={cn(
             "flex shrink-0 items-center gap-2 border-t border-sidebar-border p-2",
-            rail ? "justify-center" : "px-3"
+            rail ? "flex-col" : "px-3"
           )}
         >
           {rail ? null : (
