@@ -2,21 +2,21 @@ import { createRemixStub } from "@remix-run/testing";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { BundleForm } from "./bundle-form";
+import { SpaceForm } from "./space-form";
 
 function renderForm(onSubmit: (body: { name: string; description?: string | null }) => void) {
   const Stub = createRemixStub([
     {
       path: "/",
       Component: () => (
-        <BundleForm mode="create" onSubmit={onSubmit} submitting={false} cancelTo="/knowledge" />
+        <SpaceForm mode="create" onSubmit={onSubmit} submitting={false} cancelTo="/knowledge" />
       ),
     },
   ]);
   return render(<Stub />);
 }
 
-describe("BundleForm", () => {
+describe("SpaceForm", () => {
   it("blocks an empty-name submit and shows a validation message", async () => {
     const onSubmit = vi.fn();
     renderForm(onSubmit);

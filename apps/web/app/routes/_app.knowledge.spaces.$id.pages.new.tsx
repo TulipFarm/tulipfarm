@@ -6,31 +6,31 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
-import { ConceptForm } from "~/components/knowledge/concept-form";
+import { PageForm } from "~/components/knowledge/page-form";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { conceptHref } from "~/lib/concept-href";
-import { getBundle, navigateBundle, writeConcept } from "~/lib/knowledge-api";
+import { getSpace, navigateSpace, writePage } from "~/lib/knowledge-api";
 import { isSynthesizedIndex } from "~/lib/okf-listing";
+import { pageHref } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "New page · Knowledge · tulipfarm" }];
 
 export async function clientLoader({ params, request }: ClientLoaderFunctionArgs) {
   const id = params.id;
-  if (!id) throw new ApiError(404, "missing bundle id");
+  if (!id) throw new ApiError(404, "missing space id");
   const url = new URL(request.url);
   const seedPath = url.searchParams.get("path") ?? "";
   const parent = url.searchParams.get("parent") ?? "";
-  const bundle = await getBundle(id);
+  const space = await getSpace(id);
 
   // "Edit front page" → author the reserved root index.md override: lock the path, open the raw tab,
   // and pre-fill the current front-page content.
   if (seedPath === "index") {
-    const { listing } = await navigateBundle(id, "");
+    const { listing } = await navigateSpace(id, "");
     // Only pre-fill when there's an authored front page; never freeze the synthesized contents.
     return {
-      bundle,
+      space,
       initialPath: "index",
       lockPath: true,
       initialTab: "raw" as const,
@@ -39,28 +39,28 @@ export async function clientLoader({ params, request }: ClientLoaderFunctionArgs
   }
 
   const initialPath = parent ? `${parent.replace(/\/+$/, "")}/` : "";
-  return { bundle, initialPath, lockPath: false, initialTab: undefined, initialContent: undefined };
+  return { space, initialPath, lockPath: false, initialTab: undefined, initialContent: undefined };
 }
 
-export default function ConceptNew() {
-  const { bundle, initialPath, lockPath, initialTab, initialContent } =
+export default function PageNew() {
+  const { space, initialPath, lockPath, initialTab, initialContent } =
     useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const detailPath = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
+  const detailPath = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
   async function onSubmit(path: string, content: string) {
     setSubmitting(true);
     setFormError(null);
     try {
-      const result = await writeConcept(bundle.id, path, content);
-      window.dispatchEvent(new Event("okf:bundle-changed")); // refresh the tree
+      const result = await writePage(space.id, path, content);
+      window.dispatchEvent(new Event("okf:space-changed")); // refresh the tree
       if ("override" in result) {
         navigate(detailPath);
       } else {
-        navigate(conceptHref(result.id, path)); // canonical uuid URL of the new concept
+        navigate(pageHref(result.id, path)); // canonical uuid URL of the new page
       }
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "request failed");
@@ -70,15 +70,15 @@ export default function ConceptNew() {
 
   const crumbs = [
     { label: "knowledge", to: "/knowledge" },
-    { label: bundle.name, to: detailPath },
+    { label: space.name, to: detailPath },
     { label: initialPath === "index" ? "front page" : "new page" },
   ];
 
   return (
     <ResourcePanel crumbs={crumbs}>
-      <ConceptForm
+      <PageForm
         mode="create"
-        bundleId={bundle.id}
+        spaceId={space.id}
         initialPath={initialPath}
         lockPath={lockPath}
         initialTab={initialTab}

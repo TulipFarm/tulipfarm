@@ -7,8 +7,8 @@ import {
 } from "@remix-run/react";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { conceptHref } from "~/lib/concept-href";
-import { listDocuments } from "~/lib/knowledge-api";
+import { listPages } from "~/lib/knowledge-api";
+import { pageHref } from "~/lib/page-href";
 
 export const meta: MetaFunction = ({ params }) => [
   { title: `#${params.tag} · Knowledge · tulipfarm` },
@@ -18,9 +18,9 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   // Lowercase to match stored tags (normalized lowercase on save) under the case-sensitive server filter.
   const tag = params.tag?.toLowerCase();
   if (!tag) throw new ApiError(404, "missing tag");
-  const page = await listDocuments(undefined, 50, [tag]);
-  // Only wiki concepts are navigable from here (legacy non-bundle docs have no detail route).
-  const items = page.items.filter((d) => d.bundleId && d.path);
+  const page = await listPages(undefined, 50, [tag]);
+  // Only wiki pages are navigable from here (legacy non-space docs have no detail route).
+  const items = page.items.filter((d) => d.spaceId && d.path);
   return { tag, items };
 }
 
@@ -37,7 +37,7 @@ export default function TagListing() {
       ) : (
         <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
           {items.map((d) => {
-            const to = d.bundleId && d.path ? conceptHref(d.id, d.path) : null;
+            const to = d.spaceId && d.path ? pageHref(d.id, d.path) : null;
             return (
               <li key={d.id} className="px-3 py-2 text-sm">
                 {to ? (

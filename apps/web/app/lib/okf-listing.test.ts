@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildConceptResolver } from "./concept-href";
-import type { BundlePageRef } from "./knowledge-api";
+import type { SpacePageRef } from "./knowledge-api";
 import {
   isSynthesizedIndex,
   listingToNodes,
@@ -9,42 +8,43 @@ import {
   rewriteOkfLinks,
   rewriteWikiLinks,
 } from "./okf-listing";
+import { buildPageResolver } from "./page-href";
 
-// One resolver for the rewriter tests: a handful of pages across the current bundle ("abc") and a
-// cross-space bundle ("Sales"). conceptHref(id, path) → /knowledge/concepts/<id>/<last-path-segment>.
-const PAGES: BundlePageRef[] = [
-  { documentId: "doc-orders", bundleId: "abc", bundleName: "Eng", path: "orders", title: "Orders" },
-  { documentId: "doc-tables", bundleId: "abc", bundleName: "Eng", path: "tables", title: "Tables" },
-  { documentId: "doc-to", bundleId: "abc", bundleName: "Eng", path: "tables/orders", title: "O" },
-  { documentId: "doc-cust", bundleId: "abc", bundleName: "Eng", path: "customers", title: "C" },
-  { documentId: "doc-sub", bundleId: "abc", bundleName: "Eng", path: "sub", title: "Sub" },
-  { documentId: "doc-rb", bundleId: "abc", bundleName: "Eng", path: "runbook", title: "Runbook" },
-  { documentId: "doc-pricing", bundleId: "sid", bundleName: "Sales", path: "pricing", title: "P" },
+// One resolver for the rewriter tests: a handful of pages across the current space ("abc") and a
+// cross-space space ("Sales"). pageHref(id, path) → /knowledge/pages/<id>/<last-path-segment>.
+const PAGES: SpacePageRef[] = [
+  { pageId: "doc-orders", spaceId: "abc", spaceName: "Eng", path: "orders", title: "Orders" },
+  { pageId: "doc-tables", spaceId: "abc", spaceName: "Eng", path: "tables", title: "Tables" },
+  { pageId: "doc-to", spaceId: "abc", spaceName: "Eng", path: "tables/orders", title: "O" },
+  { pageId: "doc-cust", spaceId: "abc", spaceName: "Eng", path: "customers", title: "C" },
+  { pageId: "doc-sub", spaceId: "abc", spaceName: "Eng", path: "sub", title: "Sub" },
+  { pageId: "doc-rb", spaceId: "abc", spaceName: "Eng", path: "runbook", title: "Runbook" },
+  { pageId: "doc-pricing", spaceId: "sid", spaceName: "Sales", path: "pricing", title: "P" },
 ];
-const resolver = buildConceptResolver(PAGES);
+const resolver = buildPageResolver(PAGES);
 
 describe("parseListing", () => {
-  it("splits concepts (.md) and subdirectories (trailing slash)", () => {
+  it("splits pages (.md) and subdirectories (trailing slash)", () => {
     const md = ["* [Orders](orders.md)", "* [Tables](tables/)", "* [ext](https://x.com)"].join(
       "\n"
     );
     const entries = parseListing("", md);
     expect(entries).toEqual([
-      { kind: "concept", label: "Orders", path: "orders" },
+      { kind: "page", label: "Orders", path: "orders" },
       { kind: "dir", label: "Tables", path: "tables" },
     ]);
   });
 
   it("resolves child paths relative to dirPath", () => {
     const entries = parseListing("tables", "* [Orders](orders.md)");
-    expect(entries[0]).toEqual({ kind: "concept", label: "Orders", path: "tables/orders" });
+    expect(entries[0]).toEqual({ kind: "page", label: "Orders", path: "tables/orders" });
   });
 });
 
 describe("mergeEntries (the page-with-children rule)", () => {
-  it("merges a concept and a sibling dir of the same basename into one node", () => {
+  it("merges a page and a sibling dir of the same basename into one node", () => {
     const node = mergeEntries([
-      { kind: "concept", label: "Engineering", path: "engineering" },
+      { kind: "page", label: "Engineering", path: "engineering" },
       { kind: "dir", label: "engineering", path: "engineering" },
     ]);
     expect(node).toEqual([
@@ -52,13 +52,11 @@ describe("mergeEntries (the page-with-children rule)", () => {
     ]);
   });
 
-  it("a concept-only entry is clickable but not expandable", () => {
-    expect(mergeEntries([{ kind: "concept", label: "Runbook", path: "runbook" }])[0]).toMatchObject(
-      {
-        hasBody: true,
-        hasChildren: false,
-      }
-    );
+  it("a page-only entry is clickable but not expandable", () => {
+    expect(mergeEntries([{ kind: "page", label: "Runbook", path: "runbook" }])[0]).toMatchObject({
+      hasBody: true,
+      hasChildren: false,
+    });
   });
 
   it("a dir-only entry is expandable but not clickable", () => {
@@ -76,9 +74,9 @@ describe("mergeEntries (the page-with-children rule)", () => {
 });
 
 describe("rewriteOkfLinks", () => {
-  it("rewrites relative .md and dir links to stable concept UUID routes", () => {
+  it("rewrites relative .md and dir links to stable page UUID routes", () => {
     expect(rewriteOkfLinks("see [O](orders.md) and [T](tables/)", "abc", resolver)).toBe(
-      "see [O](/knowledge/concepts/doc-orders/orders) and [T](/knowledge/concepts/doc-tables/tables)"
+      "see [O](/knowledge/pages/doc-orders/orders) and [T](/knowledge/pages/doc-tables/tables)"
     );
   });
   it("leaves external, anchor, absolute, and unresolved (pure-dir) links untouched", () => {
@@ -97,9 +95,9 @@ describe("rewriteWikiLinks", () => {
     );
   });
 
-  it("rewrites a known cross-space tf:page link to the target concept's UUID route", () => {
+  it("rewrites a known cross-space tf:page link to the target page's UUID route", () => {
     expect(rewriteWikiLinks("[Pricing](tf:page/Sales/pricing)", "abc", resolver)).toBe(
-      "[Pricing](/knowledge/concepts/doc-pricing/pricing)"
+      "[Pricing](/knowledge/pages/doc-pricing/pricing)"
     );
   });
 
@@ -113,7 +111,7 @@ describe("rewriteWikiLinks", () => {
     expect(
       rewriteWikiLinks("[A](/tables/orders.md) [B](customers.md) [C](sub/)", "abc", resolver)
     ).toBe(
-      "[A](/knowledge/concepts/doc-to/orders) [B](/knowledge/concepts/doc-cust/customers) [C](/knowledge/concepts/doc-sub/sub)"
+      "[A](/knowledge/pages/doc-to/orders) [B](/knowledge/pages/doc-cust/customers) [C](/knowledge/pages/doc-sub/sub)"
     );
   });
 
@@ -128,7 +126,7 @@ describe("rewriteWikiLinks", () => {
     );
     // A real link next to an image: only the link is rewritten.
     expect(rewriteWikiLinks("![d](pic.md) and [R](runbook.md)", "abc", resolver)).toBe(
-      "![d](pic.md) and [R](/knowledge/concepts/doc-rb/runbook)"
+      "![d](pic.md) and [R](/knowledge/pages/doc-rb/runbook)"
     );
   });
 });
@@ -137,7 +135,7 @@ describe("isSynthesizedIndex", () => {
   it("treats empty and reserved-heading listings as synthesized", () => {
     expect(isSynthesizedIndex("")).toBe(true);
     expect(isSynthesizedIndex("\n  \n")).toBe(true);
-    expect(isSynthesizedIndex("# Concepts\n\n* [Orders](orders.md)")).toBe(true);
+    expect(isSynthesizedIndex("# Pages\n\n* [Orders](orders.md)")).toBe(true);
     expect(isSynthesizedIndex("# Subdirectories\n\n* [tables](tables/)")).toBe(true);
   });
   it("treats authored prose as NOT synthesized", () => {

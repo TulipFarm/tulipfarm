@@ -146,9 +146,9 @@ describe("sourcesEventForToolResult", () => {
     expect(
       sourcesEventForToolResult("cite_sources", {
         success: true,
-        data: { sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/concepts/d" }] },
+        data: { sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/pages/d" }] },
       })
-    ).toEqual({ sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/concepts/d" }] });
+    ).toEqual({ sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/pages/d" }] });
   });
 
   it("returns null for other tools, failures, and empty/malformed source lists", () => {
@@ -700,7 +700,7 @@ describe("runChatStream a2ui follow-on", () => {
           output: {
             success: true,
             data: {
-              sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/concepts/d" }],
+              sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/pages/d" }],
             },
           },
         },
@@ -710,7 +710,7 @@ describe("runChatStream a2ui follow-on", () => {
     );
     expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "sources", "finish"]);
     expect(emitted.find((e) => e.eventType === "sources")?.data).toEqual({
-      sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/concepts/d" }],
+      sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/pages/d" }],
     });
   });
 

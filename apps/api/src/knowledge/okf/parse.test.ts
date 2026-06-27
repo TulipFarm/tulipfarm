@@ -4,7 +4,7 @@ import {
   extractLinks,
   parseOkf,
   resolveLink,
-  rewriteCrossPageBundleName,
+  rewriteCrossPageSpaceName,
 } from "./parse";
 
 describe("parseOkf", () => {
@@ -59,7 +59,7 @@ describe("parseOkf", () => {
 });
 
 describe("extractLinks", () => {
-  it("captures bundle-relative .md links, dedupes, and ignores external/anchor links", () => {
+  it("captures space-relative .md links, dedupes, and ignores external/anchor links", () => {
     const body = `See [a](/tables/orders.md) and [b](customers.md) and [a again](/tables/orders.md).
 External [x](https://e.com/y.md), mail [m](mailto:a@b.md), anchor [h](#sec) ignored.
 Parent [p](../refs/p.md).`;
@@ -68,50 +68,50 @@ Parent [p](../refs/p.md).`;
 });
 
 describe("extractCrossPageLinks", () => {
-  it("captures tf:page/<Bundle>/<path> links, dedupes, and ignores agent/resource/.md links", () => {
+  it("captures tf:page/<Space>/<path> links, dedupes, and ignores agent/resource/.md links", () => {
     const body = `Cross [a](tf:page/Engineering/runbook) and nested [b](tf:page/Sales/tables/orders).
 Dupe [a2](tf:page/Engineering/runbook). Agent [g](tf:agent/deploy-bot) and resource
 [r](tf:resource/tickets) and same-space [s](customers.md) are NOT cross-page links.`;
     expect(extractCrossPageLinks(body)).toEqual([
-      { bundleName: "Engineering", path: "runbook" },
-      { bundleName: "Sales", path: "tables/orders" },
+      { spaceName: "Engineering", path: "runbook" },
+      { spaceName: "Sales", path: "tables/orders" },
     ]);
   });
 
   it("strips a trailing .md and surrounding slashes from the target path", () => {
     expect(extractCrossPageLinks("[x](tf:page/Eng/runbook.md)")).toEqual([
-      { bundleName: "Eng", path: "runbook" },
+      { spaceName: "Eng", path: "runbook" },
     ]);
   });
 });
 
-describe("rewriteCrossPageBundleName", () => {
-  it("rewrites the bundle segment of matching tf:page links, keeping the path", () => {
+describe("rewriteCrossPageSpaceName", () => {
+  it("rewrites the space segment of matching tf:page links, keeping the path", () => {
     const body = "See [a](tf:page/Sales/pricing) and nested [b](tf:page/Sales/tables/orders).";
-    expect(rewriteCrossPageBundleName(body, "Sales", "Revenue")).toBe(
+    expect(rewriteCrossPageSpaceName(body, "Sales", "Revenue")).toBe(
       "See [a](tf:page/Revenue/pricing) and nested [b](tf:page/Revenue/tables/orders)."
     );
   });
 
   it("matches the decoded name and re-encodes the new name", () => {
     expect(
-      rewriteCrossPageBundleName("[x](tf:page/Data%20Eng/runbook)", "Data Eng", "Core Infra")
+      rewriteCrossPageSpaceName("[x](tf:page/Data%20Eng/runbook)", "Data Eng", "Core Infra")
     ).toBe("[x](tf:page/Core%20Infra/runbook)");
   });
 
-  it("leaves non-matching bundles and other tf: links untouched", () => {
+  it("leaves non-matching spaces and other tf: links untouched", () => {
     const body = "[a](tf:page/Sales/x) [b](tf:agent/bot) [c](tf:resource/tickets) [d](other.md)";
-    expect(rewriteCrossPageBundleName(body, "Engineering", "Core")).toBe(body);
+    expect(rewriteCrossPageSpaceName(body, "Engineering", "Core")).toBe(body);
   });
 });
 
 describe("resolveLink", () => {
-  it("resolves absolute links from the bundle root", () => {
+  it("resolves absolute links from the space root", () => {
     expect(resolveLink("tables/orders", "/tables/customers.md")).toBe("tables/customers");
     expect(resolveLink("anything", "/a.md")).toBe("a");
   });
 
-  it("resolves relative links from the source concept's directory", () => {
+  it("resolves relative links from the source page's directory", () => {
     expect(resolveLink("tables/orders", "customers.md")).toBe("tables/customers");
     expect(resolveLink("tables/orders", "./customers.md")).toBe("tables/customers");
     expect(resolveLink("tables/orders", "../references/post_type_ids.md")).toBe(

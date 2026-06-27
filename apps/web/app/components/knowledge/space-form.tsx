@@ -1,27 +1,27 @@
 import { Link } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
-import type { BundleInput } from "~/lib/knowledge-api";
+import type { SpaceInput } from "~/lib/knowledge-api";
 
 /*
- * Create/edit form for an OKF bundle (name, description). Mirrors collection-form's look and
+ * Create/edit form for an OKF space (name, description). Mirrors the space-form look and
  * server-authoritative error handling; empty optional fields submit as null. A 409 (name taken) is
  * surfaced by the route as `formError`.
  */
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
-export type BundleFormProps = {
+export type SpaceFormProps = {
   mode: "create" | "edit";
   initial?: Partial<{ name: string; description: string | null }>;
-  onSubmit: (body: BundleInput) => void | Promise<void>;
+  onSubmit: (body: SpaceInput) => void | Promise<void>;
   submitting: boolean;
   fieldErrors?: Record<string, string>;
   formError?: string | null;
   cancelTo: string;
 };
 
-export function BundleForm({
+export function SpaceForm({
   mode,
   initial,
   onSubmit,
@@ -29,7 +29,7 @@ export function BundleForm({
   fieldErrors = {},
   formError,
   cancelTo,
-}: BundleFormProps) {
+}: SpaceFormProps) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   // Client-side required-name check, so an empty submit never round-trips to a server 400.

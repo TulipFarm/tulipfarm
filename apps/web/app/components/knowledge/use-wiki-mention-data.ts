@@ -7,20 +7,20 @@ import {
 import { useEffect, useMemo, useRef } from "react";
 import { listAgents } from "~/lib/agents";
 import { listResourceTypes } from "~/lib/api";
-import { listAllPages, listBundleDocuments } from "~/lib/knowledge-api";
+import { listAllPages, listSpacePages } from "~/lib/knowledge-api";
 
 /*
  * Builds the `@` (pages/agents/resources) + `#` (tags) editor extensions for the wiki page editor,
  * wired to a host data source. Lists are fetched once on mount into refs (not state) so the editor's
  * extensions never need to rebuild — the suggestion plugins read the latest ref on every keystroke
- * (mirrors the chat composer's `use-mention-data`). Same-space pages encode as a bundle-root `.md`
+ * (mirrors the chat composer's `use-mention-data`). Same-space pages encode as a space-root `.md`
  * link; cross-space pages as `tf:page/<name>/<path>`; agents/resources as `tf:agent|resource/<id>`.
  */
 
 // Platform/forge agents are internal infrastructure — never surface them in the author's @-menu.
 const INTERNAL_AGENTS = new Set(["GeneralAssistant", "InformationArchitect"]);
 
-export function useWikiMentionExtensions(bundleId: string): AnyExtension[] {
+export function useWikiMentionExtensions(spaceId: string): AnyExtension[] {
   const pages = useRef<MentionItem[]>([]);
   const agents = useRef<MentionItem[]>([]);
   const resources = useRef<MentionItem[]>([]);
@@ -29,24 +29,24 @@ export function useWikiMentionExtensions(bundleId: string): AnyExtension[] {
   useEffect(() => {
     let active = true;
     void (async () => {
-      const [pageList, agentList, typeList, bundleDocs] = await Promise.all([
+      const [pageList, agentList, typeList, spacePages] = await Promise.all([
         listAllPages()
           .then((r) => r.items)
           .catch(() => []),
         listAgents().catch(() => []),
         listResourceTypes().catch(() => []),
-        listBundleDocuments(bundleId)
+        listSpacePages(spaceId)
           .then((r) => r.items)
           .catch(() => []),
       ]);
       if (!active) return;
       pages.current = pageList.map((p) =>
-        p.bundleId === bundleId
+        p.spaceId === spaceId
           ? { label: p.title, href: `/${p.path}.md` }
           : {
               label: p.title,
-              href: `tf:page/${encodeURIComponent(p.bundleName)}/${p.path}`,
-              hint: p.bundleName,
+              href: `tf:page/${encodeURIComponent(p.spaceName)}/${p.path}`,
+              hint: p.spaceName,
             }
       );
       agents.current = agentList
@@ -62,13 +62,13 @@ export function useWikiMentionExtensions(bundleId: string): AnyExtension[] {
         hint: "resource type",
       }));
       const tagSet = new Set<string>();
-      for (const d of bundleDocs) for (const t of d.tags) tagSet.add(t);
+      for (const d of spacePages) for (const t of d.tags) tagSet.add(t);
       tags.current = [...tagSet].sort();
     })();
     return () => {
       active = false;
     };
-  }, [bundleId]);
+  }, [spaceId]);
 
   // Built once: the data source closes over the refs, so the extensions are stable for the editor's
   // lifetime (rebuilding them would recreate the editor and drop content).

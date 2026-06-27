@@ -1,5 +1,5 @@
 /*
- * Rehype plugin: turn inline `#tag` tokens in a rendered concept body into chip links to the
+ * Rehype plugin: turn inline `#tag` tokens in a rendered page body into chip links to the
  * tag-filtered listing. Mirrors `chat/mention-highlight.ts` — it walks the hast tree (so it never
  * fires inside code spans or existing links) and splits matching text nodes into `<a class="tf-tag-chip">`
  * anchors with an internal `/knowledge/tags/<tag>` href (the markdown view renders internal hrefs as

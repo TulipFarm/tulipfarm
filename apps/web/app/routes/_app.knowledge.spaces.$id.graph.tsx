@@ -6,34 +6,34 @@ import {
   useOutletContext,
   useRouteError,
 } from "@remix-run/react";
-import { BundleGraphView } from "~/components/knowledge/bundle-graph";
+import { SpaceGraphView } from "~/components/knowledge/space-graph";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { getBundleGraph, listAllPages } from "~/lib/knowledge-api";
-import type { BundleOutletContext } from "~/routes/_app.knowledge.bundles.$id";
+import { getSpaceGraph, listAllPages } from "~/lib/knowledge-api";
+import type { SpaceOutletContext } from "~/routes/_app.knowledge.spaces.$id";
 
 export const meta: MetaFunction = () => [{ title: "Graph · Knowledge · tulipfarm" }];
 
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id;
-  if (!id) throw new ApiError(404, "missing bundle id");
-  // listAllPages → resolver so cross-space stub nodes can link to the target concept's UUID route.
+  if (!id) throw new ApiError(404, "missing space id");
+  // listAllPages → resolver so cross-space stub nodes can link to the target page's UUID route.
   const [graph, pages] = await Promise.all([
-    getBundleGraph(id),
+    getSpaceGraph(id),
     listAllPages().then((r) => r.items),
   ]);
   return { graph, pages };
 }
 
 /*
- * Bundle cross-link graph as a content-pane route — the persistent page tree stays beside it. The
- * d3-force layout + SVG render live in BundleGraphView; this route only fetches the graph and frames
- * it with a breadcrumb. Bundle metadata comes from the workspace outlet context.
+ * Space cross-link graph as a content-pane route — the persistent page tree stays beside it. The
+ * d3-force layout + SVG render live in SpaceGraphView; this route only fetches the graph and frames
+ * it with a breadcrumb. Space metadata comes from the workspace outlet context.
  */
-export default function BundleGraphRoute() {
+export default function SpaceGraphRoute() {
   const { graph, pages } = useLoaderData<typeof clientLoader>();
-  const { bundle } = useOutletContext<BundleOutletContext>();
-  const base = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
+  const { space } = useOutletContext<SpaceOutletContext>();
+  const base = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-6 py-8">
@@ -42,7 +42,7 @@ export default function BundleGraphRoute() {
         className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
       >
         <Link to={base} className="transition-colors hover:text-foreground">
-          {bundle.name}
+          {space.name}
         </Link>
         <span aria-hidden className="opacity-40">
           /
@@ -50,7 +50,7 @@ export default function BundleGraphRoute() {
         <span className="text-foreground">graph</span>
       </nav>
       <h1 className="text-base font-bold text-foreground">Cross-link graph</h1>
-      <BundleGraphView graph={graph} pages={pages} />
+      <SpaceGraphView graph={graph} pages={pages} />
     </div>
   );
 }

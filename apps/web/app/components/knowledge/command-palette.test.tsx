@@ -5,29 +5,29 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const searchPages = vi.fn();
 const getKnowledgeOverview = vi.fn();
-const listBundles = vi.fn();
+const listSpaces = vi.fn();
 vi.mock("~/lib/knowledge-api", () => ({
   searchPages: (...a: unknown[]) => searchPages(...a),
   getKnowledgeOverview: (...a: unknown[]) => getKnowledgeOverview(...a),
-  listBundles: (...a: unknown[]) => listBundles(...a),
+  listSpaces: (...a: unknown[]) => listSpaces(...a),
 }));
 
 import { CommandPalette, OPEN_SEARCH_EVENT, queryHighlightRanges } from "./command-palette";
 
 const hit = (id: string, title: string) => ({
-  documentId: id,
+  pageId: id,
   title,
-  bundleId: "b1",
+  spaceId: "b1",
   path: title.toLowerCase(),
   snippet: "a snippet",
   highlightRanges: [] as Array<[number, number]>,
   score: 1,
 });
 
-function renderPalette(bundleId: string | null = null) {
+function renderPalette(spaceId: string | null = null) {
   const Stub = createRemixStub([
-    { path: "/", Component: () => <CommandPalette bundleId={bundleId} /> },
-    { path: "/knowledge/concepts/:id/*", Component: () => <div>NAVIGATED</div> },
+    { path: "/", Component: () => <CommandPalette spaceId={spaceId} /> },
+    { path: "/knowledge/pages/:id/*", Component: () => <div>NAVIGATED</div> },
   ]);
   return render(<Stub />);
 }
@@ -36,9 +36,9 @@ describe("CommandPalette", () => {
   beforeEach(() => {
     searchPages.mockReset();
     getKnowledgeOverview.mockReset();
-    listBundles.mockReset();
+    listSpaces.mockReset();
     getKnowledgeOverview.mockResolvedValue({ spaces: [], recent: [] });
-    listBundles.mockResolvedValue({ items: [{ id: "b1", name: "Engineering" }], nextCursor: null });
+    listSpaces.mockResolvedValue({ items: [{ id: "b1", name: "Engineering" }], nextCursor: null });
     searchPages.mockResolvedValue([]);
   });
 
@@ -101,7 +101,7 @@ describe("CommandPalette", () => {
     expect(mark.tagName).toBe("MARK");
   });
 
-  it("shows the scope toggle only when a bundle is active", async () => {
+  it("shows the scope toggle only when a space is active", async () => {
     const { unmount } = renderPalette(null);
     fireEvent(window, new Event(OPEN_SEARCH_EVENT));
     await screen.findByPlaceholderText("Search knowledge…");

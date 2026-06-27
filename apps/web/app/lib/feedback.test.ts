@@ -51,6 +51,6 @@ test("getConversationFeedback GETs and unwraps the list", async () => {
   });
   const out = await getConversationFeedback("c1");
   const [url] = fetchFn.mock.calls[0];
-  expect(url).toBe("http://localhost:4010/api/v1/conversations/c1/feedback");
+  expect(url).toBe("http://localhost:4010/api/v1/chats/c1/feedback");
   expect(out).toEqual([{ messageId: "m1", rating: "up", note: null }]);
 });

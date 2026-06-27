@@ -122,7 +122,7 @@ Information Architect can decide how to proceed.`;
 
 const SKILL_FORGE = `# Skill Forge Workflow
 
-Guides creating or editing a **skill** — a stateless, atomic capability carrying instructions for a
+Guides creating or editing a **skill** — a stateless, atomic unit carrying instructions for a
 single well-defined task (SKILL.md = \`name\` + \`description\` + markdown body). Skills are loaded by
 agents on demand via \`load_skill\`. They have no identity and no memory.
 
@@ -268,7 +268,7 @@ export const BUILTIN_SKILLS: Map<string, BuiltinSkill> = new Map(
     {
       name: "skill-forge",
       description:
-        "Forge a skill (SKILL.md): a stateless, single-task capability loaded by agents on demand. Use when the user wants to create/author/add a skill, capability, or reusable instruction. Writes via skill_create + skill_activate.",
+        "Forge a skill (SKILL.md): a stateless, single-task unit loaded by agents on demand. Use when the user wants to create/author/add a skill or reusable instruction. Writes via skill_create + skill_activate.",
       body: SKILL_FORGE,
     },
     {

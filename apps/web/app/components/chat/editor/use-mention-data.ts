@@ -14,7 +14,7 @@ import type { MentionItem } from "./serialize";
 export type GetItems = (kind: MentionKind) => MentionItem[];
 
 // `knowledge` is search-powered (server fuzzy search per keystroke), not a static list — its menu
-// items come from `searchDocuments` in mentions.ts, so this static reader always returns [] for it.
+// items come from `searchKnowledge` in mentions.ts, so this static reader always returns [] for it.
 const EMPTY: Record<MentionKind, MentionItem[]> = {
   agent: [],
   skill: [],

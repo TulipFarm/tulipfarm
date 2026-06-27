@@ -51,32 +51,32 @@ export async function listConversations(opts?: {
   if (opts?.limit != null) params.set("limit", String(opts.limit));
   const query = params.toString();
   const body = await apiGet<{ conversations: ConversationSummary[] }>(
-    `/api/v1/conversations${query ? `?${query}` : ""}`
+    `/api/v1/chats${query ? `?${query}` : ""}`
   );
   return body.conversations;
 }
 
 /** Rename a conversation (owner-only). Returns the updated summary. */
 export function renameConversation(id: string, title: string): Promise<ConversationSummary> {
-  return apiWrite<ConversationSummary>("PUT", `/api/v1/conversations/${encodeURIComponent(id)}`, {
+  return apiWrite<ConversationSummary>("PUT", `/api/v1/chats/${encodeURIComponent(id)}`, {
     title,
   });
 }
 
 /** Pin/unpin a conversation (owner-only). Returns the updated summary. */
 export function setConversationStarred(id: string, starred: boolean): Promise<ConversationSummary> {
-  return apiWrite<ConversationSummary>("PUT", `/api/v1/conversations/${encodeURIComponent(id)}`, {
+  return apiWrite<ConversationSummary>("PUT", `/api/v1/chats/${encodeURIComponent(id)}`, {
     starred,
   });
 }
 
 export async function getConversation(id: string): Promise<Conversation> {
-  return apiGet<Conversation>(`/api/v1/conversations/${encodeURIComponent(id)}`);
+  return apiGet<Conversation>(`/api/v1/chats/${encodeURIComponent(id)}`);
 }
 
 export async function getConversationMessages(id: string): Promise<ConversationMessage[]> {
   const body = await apiGet<{ messages: ConversationMessage[]; nextCursor: string | null }>(
-    `/api/v1/conversations/${encodeURIComponent(id)}/messages`
+    `/api/v1/chats/${encodeURIComponent(id)}/messages`
   );
   return body.messages;
 }
@@ -91,5 +91,5 @@ export type DebugContext = {
 };
 
 export function getDebugContext(id: string): Promise<DebugContext> {
-  return apiGet<DebugContext>(`/api/v1/conversations/${encodeURIComponent(id)}/debug-context`);
+  return apiGet<DebugContext>(`/api/v1/chats/${encodeURIComponent(id)}/debug-context`);
 }

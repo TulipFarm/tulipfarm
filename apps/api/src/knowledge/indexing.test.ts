@@ -14,7 +14,7 @@ function fakeService() {
 
 describe("jobKey", () => {
   it("is deterministic per source", () => {
-    expect(jobKey({ kind: "document", documentId: "d1" })).toBe("document:d1");
+    expect(jobKey({ kind: "page", pageId: "d1" })).toBe("page:d1");
     expect(jobKey({ kind: "resource", resourceType: "ticket", resourceId: "r1", record: {} })).toBe(
       "resource:r1"
     );
@@ -44,9 +44,9 @@ describe("resourceToText", () => {
 });
 
 describe("handleIndexJob", () => {
-  it("document job → reindexById", async () => {
+  it("page job → reindexById", async () => {
     const { service, reindexById } = fakeService();
-    await handleIndexJob({ kind: "document", documentId: "d1" }, { service });
+    await handleIndexJob({ kind: "page", pageId: "d1" }, { service });
     expect(reindexById).toHaveBeenCalledWith("d1");
   });
 
@@ -99,11 +99,11 @@ describe("enqueueIndex", () => {
   it("sends with a deterministic singletonKey + retry config", async () => {
     const send = vi.fn(async () => "job-id");
     const boss: Enqueuer = { send };
-    await enqueueIndex(boss, { kind: "document", documentId: "d1" });
+    await enqueueIndex(boss, { kind: "page", pageId: "d1" });
     expect(send).toHaveBeenCalledWith(
       "knowledge-index",
-      { kind: "document", documentId: "d1" },
-      { singletonKey: "document:d1", retryLimit: 3, retryBackoff: true }
+      { kind: "page", pageId: "d1" },
+      { singletonKey: "page:d1", retryLimit: 3, retryBackoff: true }
     );
   });
 });

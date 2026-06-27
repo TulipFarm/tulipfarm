@@ -4,93 +4,93 @@ import { KnowledgeService, type KnowledgeServiceDeps } from "./service";
 
 vi.mock("./search-service", () => ({ search: vi.fn() }));
 
-describe("KnowledgeService.getConceptByPath", () => {
-  it("normalizes the path (strips leading/trailing slash + .md) before the bundle lookup", async () => {
-    const getByBundlePath = vi.fn(async () => null);
+describe("KnowledgeService.getPageByPath", () => {
+  it("normalizes the path (strips leading/trailing slash + .md) before the space lookup", async () => {
+    const getBySpacePath = vi.fn(async () => null);
     const svc = new KnowledgeService({
-      documents: { getByBundlePath },
+      pages: { getBySpacePath },
     } as unknown as KnowledgeServiceDeps);
 
-    await svc.getConceptByPath("b1", "/tables/orders.md");
-    expect(getByBundlePath).toHaveBeenCalledWith("b1", "tables/orders");
+    await svc.getPageByPath("s1", "/tables/orders.md");
+    expect(getBySpacePath).toHaveBeenCalledWith("s1", "tables/orders");
 
-    await svc.getConceptByPath("b1", "tables/orders");
-    expect(getByBundlePath).toHaveBeenLastCalledWith("b1", "tables/orders");
+    await svc.getPageByPath("s1", "tables/orders");
+    expect(getBySpacePath).toHaveBeenLastCalledWith("s1", "tables/orders");
   });
 
-  it("returns the document the repo resolves", async () => {
-    const doc = { _id: "d1", title: "Orders" };
+  it("returns the page the repo resolves", async () => {
+    const page = { _id: "d1", title: "Orders" };
     const svc = new KnowledgeService({
-      documents: { getByBundlePath: vi.fn(async () => doc) },
+      pages: { getBySpacePath: vi.fn(async () => page) },
     } as unknown as KnowledgeServiceDeps);
-    expect(await svc.getConceptByPath("b1", "tables/orders")).toBe(doc);
+    expect(await svc.getPageByPath("s1", "tables/orders")).toBe(page);
   });
 });
 
-describe("KnowledgeService.getActiveDocument", () => {
-  function svcWith(doc: unknown) {
+describe("KnowledgeService.getActivePage", () => {
+  function svcWith(page: unknown) {
     return new KnowledgeService({
-      documents: { getById: vi.fn(async () => doc) },
+      pages: { getById: vi.fn(async () => page) },
     } as unknown as KnowledgeServiceDeps);
   }
 
-  it("returns the document when active", async () => {
-    const doc = { _id: "d1", title: "Orders", active: true };
-    expect(await svcWith(doc).getActiveDocument("d1")).toBe(doc);
+  it("returns the page when active", async () => {
+    const page = { _id: "d1", title: "Orders", active: true };
+    expect(await svcWith(page).getActivePage("d1")).toBe(page);
   });
 
-  it("returns null for a soft-deleted or missing document", async () => {
-    expect(await svcWith({ _id: "d1", active: false }).getActiveDocument("d1")).toBeNull();
-    expect(await svcWith(null).getActiveDocument("missing")).toBeNull();
+  it("returns null for a soft-deleted or missing page", async () => {
+    expect(await svcWith({ _id: "d1", active: false }).getActivePage("d1")).toBeNull();
+    expect(await svcWith(null).getActivePage("missing")).toBeNull();
   });
 });
 
 describe("KnowledgeService.search graph expansion scope", () => {
-  const neighbor = (id: string, bundleId: string) => ({
+  const neighbor = (id: string, spaceId: string) => ({
     _id: id,
     title: id,
     plainText: "body",
     source: "authored",
     active: true,
-    bundleId,
+    spaceId,
   });
 
   function svc() {
     return new KnowledgeService({
       embeddings: {},
       chunks: {},
-      links: { getLinkedDocumentIds: vi.fn(async () => ["nb-same", "nb-other"]) },
-      documents: {
+      links: { getLinkedPageIds: vi.fn(async () => ["nb-same", "nb-other"]) },
+      pages: {
         getById: vi.fn(async (id: string) =>
           id === "nb-same"
-            ? neighbor("nb-same", "b1")
+            ? neighbor("nb-same", "s1")
             : id === "nb-other"
-              ? neighbor("nb-other", "b2")
+              ? neighbor("nb-other", "s2")
               : null
         ),
       },
     } as unknown as KnowledgeServiceDeps);
   }
 
-  it("drops cross-bundle neighbors when the search is scoped to a bundle", async () => {
+  it("drops cross-space neighbors when the search is scoped to a space", async () => {
     vi.mocked(search).mockResolvedValue({
-      results: [{ documentId: "hit-1" }],
+      results: [{ pageId: "hit-1" }],
       warnings: [],
     } as never);
-    const res = await svc().search("q", { bundleId: "b1" }, 10, { expandGraph: true });
-    const ids = res.results.map((r) => r.documentId);
+    const res = await svc().search("q", { spaceId: "s1" }, 10, { expandGraph: true });
+    const ids = res.results.map((r) => r.pageId);
     expect(ids).toContain("nb-same");
-    // The b2 neighbor must NOT leak into a search explicitly scoped to b1.
+    // The s2 neighbor must NOT leak into a search explicitly scoped to s1.
     expect(ids).not.toContain("nb-other");
   });
 
-  it("keeps neighbors from any bundle when the search is unscoped", async () => {
+  it("keeps neighbors from any space when the search is unscoped", async () => {
     vi.mocked(search).mockResolvedValue({
-      results: [{ documentId: "hit-1" }],
+      results: [{ pageId: "hit-1" }],
       warnings: [],
     } as never);
     const res = await svc().search("q", {}, 10, { expandGraph: true });
-    const ids = res.results.map((r) => r.documentId);
+    const ids = res.results.map((r) => r.pageId);
     expect(ids).toEqual(expect.arrayContaining(["nb-same", "nb-other"]));
   });
 });

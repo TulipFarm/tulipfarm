@@ -35,7 +35,7 @@ export function registerConversationRoutes(
   const { repo, messageRepo, workingMemory, knowledge, soulLoader, toolRegistry } = deps;
 
   app.get(
-    "/api/v1/conversations",
+    "/api/v1/chats",
     {
       preHandler: requireAuth,
       schema: {
@@ -95,7 +95,7 @@ export function registerConversationRoutes(
   );
 
   app.put(
-    "/api/v1/conversations/:id",
+    "/api/v1/chats/:id",
     {
       preHandler: requireAuth,
       schema: {
@@ -171,7 +171,7 @@ export function registerConversationRoutes(
   );
 
   app.get(
-    "/api/v1/conversations/:id",
+    "/api/v1/chats/:id",
     {
       preHandler: requireAuth,
       schema: {
@@ -223,7 +223,7 @@ export function registerConversationRoutes(
   );
 
   app.get(
-    "/api/v1/conversations/:id/messages",
+    "/api/v1/chats/:id/messages",
     {
       preHandler: requireAuth,
       schema: {
@@ -284,7 +284,7 @@ export function registerConversationRoutes(
   // is registered only outside production; the web app's `import.meta.env.DEV` gate does not protect an API.
   if (process.env.NODE_ENV !== "production") {
     app.get(
-      "/api/v1/conversations/:id/debug-context",
+      "/api/v1/chats/:id/debug-context",
       {
         preHandler: requireAuth,
         schema: {
@@ -325,13 +325,13 @@ export function registerConversationRoutes(
         const agent = resolveAgent(soulLoader, convo.agentId);
         const platformAgent = getPlatformAgent(agent.name);
         const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
-        const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
+        const governancePages = knowledge ? await knowledge.governancePages() : [];
         const tools = availableToolsFor(toolRegistry, platformAgent);
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
           memory,
-          governanceDocs,
+          governancePages,
           availableSkills: listAvailableSkills(soulLoader),
           eagerSkills: listEagerSkills(soulLoader),
           taggedResources: [],

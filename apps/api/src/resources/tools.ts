@@ -138,7 +138,7 @@ const validateDelete = ajv.compile(DELETE_SCHEMA);
 const validateSearch = ajv.compile(SEARCH_SCHEMA);
 
 const resourceCreate: ResourceTool = {
-  name: "resource_create",
+  name: "record_create",
   description:
     "Create a new record of the given resource type. Returns the created record with its UUID id and version.",
   mutating: true,
@@ -190,7 +190,7 @@ const resourceCreate: ResourceTool = {
 };
 
 const resourceList: ResourceTool = {
-  name: "resource_list",
+  name: "record_list",
   description:
     "List records of a resource type. Cursor-paginated. Soft-deleted records excluded by default.",
   mutating: false,
@@ -216,8 +216,8 @@ const resourceList: ResourceTool = {
 };
 
 const resourceGet: ResourceTool = {
-  name: "resource_get",
-  description: "Get a single resource record by id.",
+  name: "record_get",
+  description: "Get a single record by id.",
   mutating: false,
   inputSchema: GET_SCHEMA,
   handler: async (args, ctx) => {
@@ -239,9 +239,9 @@ const resourceGet: ResourceTool = {
 };
 
 const resourceUpdate: ResourceTool = {
-  name: "resource_update",
+  name: "record_update",
   description:
-    "Merge-update a resource record. Pass only the fields to change. Requires version for optimistic concurrency.",
+    "Merge-update a record. Pass only the fields to change. Requires version for optimistic concurrency.",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
   handler: async (args, ctx) => {
@@ -316,9 +316,9 @@ const resourceUpdate: ResourceTool = {
 };
 
 const resourceDelete: ResourceTool = {
-  name: "resource_delete",
+  name: "record_delete",
   description:
-    "Soft-delete a resource record. Requires version for optimistic concurrency. Record remains in history.",
+    "Soft-delete a record. Requires version for optimistic concurrency. Record remains in history.",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
   handler: async (args, ctx) => {
@@ -362,7 +362,7 @@ const resourceDelete: ResourceTool = {
 };
 
 const resourceSearch: ResourceTool = {
-  name: "resource_search",
+  name: "record_search",
   description:
     "Search records of a resource type by field values (JSONB containment match). All filter fields must match exactly.",
   mutating: false,

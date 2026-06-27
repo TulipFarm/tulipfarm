@@ -8,58 +8,52 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
-import { ConceptDetail } from "~/components/knowledge/concept-detail";
+import { PageDetail } from "~/components/knowledge/page-detail";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { buildConceptResolver, conceptHref, conceptSlug } from "~/lib/concept-href";
-import {
-  deleteDocument,
-  getBacklinks,
-  getBundle,
-  getDocument,
-  listAllPages,
-} from "~/lib/knowledge-api";
+import { deletePage, getBacklinks, getPage, getSpace, listAllPages } from "~/lib/knowledge-api";
+import { buildPageResolver, pageHref, pageSlug } from "~/lib/page-href";
 
-export const meta: MetaFunction = () => [{ title: "Concept · Knowledge · tulipfarm" }];
+export const meta: MetaFunction = () => [{ title: "Page · Knowledge · tulipfarm" }];
 
-// Canonical concept page: addressed by the stable document UUID (`/knowledge/concepts/<id>/<slug>`).
-// The trailing slug splat is cosmetic and ignored — only `conceptId` resolves. Bundle context (name +
-// the `/knowledge/bundles/<id>` base for breadcrumb / back-link / tag links) is re-derived from the doc.
+// Canonical page: addressed by the stable page UUID (`/knowledge/pages/<id>/<slug>`).
+// The trailing slug splat is cosmetic and ignored — only `pageId` resolves. Space context (name +
+// the `/knowledge/spaces/<id>` base for breadcrumb / back-link / tag links) is re-derived from the doc.
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
-  const conceptId = params.conceptId;
-  if (!conceptId) throw new ApiError(404, "missing concept id");
-  const doc = await getDocument(conceptId).catch(() => null);
-  // Must be a live OKF concept (active, in a bundle, with a path) — otherwise it has no concept page.
-  if (!doc?.active || !doc.bundleId || !doc.path) throw new ApiError(404, "concept not found");
+  const pageId = params.pageId;
+  if (!pageId) throw new ApiError(404, "missing page id");
+  const doc = await getPage(pageId).catch(() => null);
+  // Must be a live OKF page (active, in a space, with a path) — otherwise it has no page route.
+  if (!doc?.active || !doc.spaceId || !doc.path) throw new ApiError(404, "page not found");
   // The slug is cosmetic + optional, but canonicalize it: a bare or stale slug redirects to
-  // /knowledge/concepts/<id>/<slug>. (No redirect when the path slugifies to empty.)
-  const slug = conceptSlug(doc.path);
-  if (slug && (params["*"] ?? "") !== slug) throw redirect(conceptHref(doc.id, doc.path));
-  const [bundle, backlinks, pages] = await Promise.all([
-    getBundle(doc.bundleId),
-    getBacklinks(conceptId)
+  // /knowledge/pages/<id>/<slug>. (No redirect when the path slugifies to empty.)
+  const slug = pageSlug(doc.path);
+  if (slug && (params["*"] ?? "") !== slug) throw redirect(pageHref(doc.id, doc.path));
+  const [space, backlinks, pages] = await Promise.all([
+    getSpace(doc.spaceId),
+    getBacklinks(pageId)
       .then((r) => r.items)
       .catch(() => []),
     listAllPages().then((r) => r.items),
   ]);
-  return { doc, path: doc.path, bundle, backlinks, pages };
+  return { doc, path: doc.path, space, backlinks, pages };
 }
 
-export default function ConceptDetailRoute() {
-  const { doc, path, bundle, backlinks, pages } = useLoaderData<typeof clientLoader>();
+export default function PageDetailRoute() {
+  const { doc, path, space, backlinks, pages } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const base = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
-  const resolver = buildConceptResolver(pages);
+  const base = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
+  const resolver = buildPageResolver(pages);
 
   async function onDelete() {
     setDeleting(true);
     setError(null);
     try {
-      await deleteDocument(doc.id);
-      window.dispatchEvent(new Event("okf:bundle-changed")); // refresh the persistent tree
+      await deletePage(doc.id);
+      window.dispatchEvent(new Event("okf:space-changed")); // refresh the persistent tree
       navigate(base);
     } catch (err) {
       setError(err instanceof Error ? err.message : "delete failed");
@@ -74,7 +68,7 @@ export default function ConceptDetailRoute() {
         className="flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground"
       >
         <Link to={base} className="transition-colors hover:text-foreground">
-          {bundle.name}
+          {space.name}
         </Link>
         {path.split("/").map((seg, i, all) => (
           <span key={all.slice(0, i + 1).join("/")} className="flex items-center gap-1">
@@ -86,11 +80,11 @@ export default function ConceptDetailRoute() {
         ))}
       </nav>
       {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
-      <ConceptDetail
-        bundleId={bundle.id}
+      <PageDetail
+        spaceId={space.id}
         doc={doc}
         path={path}
-        editTo={`/knowledge/concepts/${encodeURIComponent(doc.id)}/edit`}
+        editTo={`/knowledge/pages/${encodeURIComponent(doc.id)}/edit`}
         onDelete={onDelete}
         deleting={deleting}
         backlinks={backlinks}

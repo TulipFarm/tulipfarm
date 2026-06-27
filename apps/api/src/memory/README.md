@@ -22,8 +22,8 @@ facts the agent reads every turn and writes via two platform tools. Facts are ke
 
 ## Caps (`limits.ts`)
 
-`MAX_ENTRIES=30`, `MAX_VALUE_CHARS=1024` (a larger single value is "document-sized" → rejected
-toward `create_knowledge_document`), `MAX_TOTAL_CHARS=2048`, `MAX_TOOL_STEPS=25`.
+`MAX_ENTRIES=30`, `MAX_VALUE_CHARS=1024` (a larger single value is long-form → rejected
+toward `create_knowledge_page`), `MAX_TOTAL_CHARS=2048`, `MAX_TOOL_STEPS=25`.
 
 ## Wiring
 

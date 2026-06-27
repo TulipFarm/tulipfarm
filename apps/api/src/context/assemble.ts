@@ -1,5 +1,5 @@
 import { buildGovernanceBlock } from "../knowledge/governance";
-import type { KnowledgeDocument } from "../knowledge/types";
+import type { KnowledgePage } from "../knowledge/types";
 import { MAX_TOTAL_CHARS } from "../memory/limits";
 import type { WorkingMemoryDoc } from "../memory/working-memory";
 import type { SoulCatalogue } from "../soul/catalogue";
@@ -26,7 +26,7 @@ export interface AssembleContext {
   /** Per-user working memory, store-capped, oldest-written first (MEM-V1-003). */
   memory: WorkingMemoryDoc[];
   /** Active `alwaysLoadForAgents` knowledge docs (KN-V1-005). */
-  governanceDocs: KnowledgeDocument[];
+  governancePages: KnowledgePage[];
   /**
    * Eager skill bodies for `<skills>` — skills with `eager: true` in their SKILL.md frontmatter.
    * Their full body is included in the prompt so the agent can apply them without a `load_skill`
@@ -57,7 +57,7 @@ export interface AssembleContext {
   availableTools?: { name: string; description: string }[];
   /**
    * Per-turn `~knowledge` pins from the composer — full page content the user explicitly attached for
-   * this turn, injected into `<pinned-knowledge>`. Each carries its documentId so the agent can cite
+   * this turn, injected into `<pinned-knowledge>`. Each carries its pageId so the agent can cite
    * it with `cite_sources`. Ephemeral (varies per turn); dropped whole when over budget.
    */
   pinnedKnowledge?: { id: string; title: string; content: string }[];
@@ -242,7 +242,7 @@ const MAX_PINNED_KNOWLEDGE_CHARS = 32000;
 
 /**
  * `<pinned-knowledge>` block — full knowledge pages the user attached this turn via `~knowledge`.
- * One `## title — documentId: id` section per page so the agent can answer from them and cite each
+ * One `## title — pageId: id` section per page so the agent can answer from them and cite each
  * via `cite_sources`. Omitted when none pinned; dropped whole when over budget.
  */
 function renderPinnedKnowledge(ctx: AssembleContext): string {
@@ -251,11 +251,11 @@ function renderPinnedKnowledge(ctx: AssembleContext): string {
   const total = pages.reduce((n, p) => n + p.title.length + p.content.length, 0);
   if (total > MAX_PINNED_KNOWLEDGE_CHARS) return "";
   const intro =
-    "The user pinned these knowledge pages for this turn. Prefer them when answering, and cite each one you use with cite_sources using its documentId.";
+    "The user pinned these knowledge pages for this turn. Prefer them when answering, and cite each one you use with cite_sources using its pageId.";
   // Strip newlines from the (user-authored) title so it can't break out of its `##` heading line and
   // inject structure into the prompt. Page content stays verbatim (same trust as governance docs).
   const body = pages
-    .map((p) => `## ${p.title.replace(/[\r\n]+/g, " ")} — documentId: ${p.id}\n${p.content}`)
+    .map((p) => `## ${p.title.replace(/[\r\n]+/g, " ")} — pageId: ${p.id}\n${p.content}`)
     .join("\n\n");
   return block("pinned-knowledge", `${intro}\n\n${body}`);
 }
@@ -272,12 +272,12 @@ const KNOWLEDGE_GROUNDING_TEXT = [
   "you retrieve. Prefer searching over asking the user to clarify: if a request is terse, abbreviated,",
   "or ambiguous but could plausibly be answered from stored knowledge, run query_knowledge with your",
   "best interpretation before asking what they mean. Search with a plain natural-language query and do",
-  "not set domain, tags, or bundleId unless the user named a specific space or category. If a search",
+  "not set domain, tags, or spaceId unless the user named a specific space or category. If a search",
   "returns nothing, retry once with simpler, broader keywords (and no filters); only ask for",
   "clarification when that still finds nothing. Do not search for greetings or small talk. Mark each",
   "claim drawn from a source with an inline [n] reference, numbered from 1 in order of first use. After",
-  "writing the answer, call cite_sources once with { citations: [{ ref, documentId }] }, mapping each",
-  "[n] to the documentId of the result it came from. Cite only pages you actually used.",
+  "writing the answer, call cite_sources once with { citations: [{ ref, pageId }] }, mapping each",
+  "[n] to the pageId of the result it came from. Cite only pages you actually used.",
 ].join(" ");
 
 function renderKnowledgeGrounding(ctx: AssembleContext): string {
@@ -300,7 +300,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderMemory(ctx),
     // V1: governance is tenant-wide. `domain` is display-only on the agent (AGT-V1-007), so it
     // feeds <agent-identity> but does NOT scope governance — preserving prior behavior.
-    buildGovernanceBlock(ctx.governanceDocs, null),
+    buildGovernanceBlock(ctx.governancePages, null),
     renderEagerSkills(ctx),
     renderAvailableSkills(ctx),
     renderTaggedResources(ctx),

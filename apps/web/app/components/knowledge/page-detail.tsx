@@ -5,20 +5,20 @@ import { BacklinksPanel } from "~/components/knowledge/backlinks-panel";
 import { HistoryDrawer } from "~/components/knowledge/history-panel";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
-import type { ConceptResolver } from "~/lib/concept-href";
-import type { Backlink, KnowledgeDocument } from "~/lib/knowledge-api";
+import type { Backlink, KnowledgePage } from "~/lib/knowledge-api";
 import { parseOkf } from "~/lib/okf";
 import { rewriteWikiLinks } from "~/lib/okf-listing";
+import type { PageResolver } from "~/lib/page-href";
 
 /*
- * Read-only OKF concept view: a document-style page — title + a single metadata line (type · updated ·
+ * Read-only OKF page view: a document-style page — title + a single metadata line (type · updated ·
  * resource · tags), the markdown body rendered as prose (links rewritten to SPA routes, `#tag` → chips),
  * then a "Linked from" backlinks footer. Edit links out; the `⋯` overflow menu holds History (opens a
  * right-side drawer) and Delete (two-step confirm; the route owns the delete). An empty body shows a
  * placeholder with an Edit affordance.
  */
-export function ConceptDetail({
-  bundleId,
+export function PageDetail({
+  spaceId,
   doc,
   path,
   editTo,
@@ -27,19 +27,19 @@ export function ConceptDetail({
   backlinks,
   resolver,
 }: {
-  bundleId: string;
-  doc: KnowledgeDocument;
+  spaceId: string;
+  doc: KnowledgePage;
   path: string;
   editTo: string;
   onDelete: () => void | Promise<void>;
   deleting: boolean;
   backlinks: Backlink[];
-  resolver: ConceptResolver;
+  resolver: PageResolver;
 }) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const body = useMemo(
-    () => rewriteWikiLinks(parseOkf(doc.content).body, bundleId, resolver),
-    [doc.content, bundleId, resolver]
+    () => rewriteWikiLinks(parseOkf(doc.content).body, spaceId, resolver),
+    [doc.content, spaceId, resolver]
   );
   const httpResource = doc.resource && /^https?:\/\//i.test(doc.resource);
 
@@ -55,7 +55,7 @@ export function ConceptDetail({
                 <Dot />
                 {httpResource ? (
                   // Only http(s) resources are clickable — guards against `javascript:`/`data:` hrefs
-                  // (the resource field is author-controlled and also set by bundle import).
+                  // (the resource field is author-controlled and also set by space import).
                   <a
                     href={doc.resource}
                     target="_blank"
@@ -127,8 +127,8 @@ export function ConceptDetail({
       <HistoryDrawer
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}
-        documentId={doc.id}
-        bundleId={bundleId}
+        pageId={doc.id}
+        spaceId={spaceId}
         path={path}
         resolver={resolver}
         currentContent={doc.content}

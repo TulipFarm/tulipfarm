@@ -24,11 +24,11 @@ export interface PlatformTool {
 const MEMORY_GUIDANCE =
   "Store small, stable, personal facts only (e.g. 'prefers terse replies', 'enterprise plan'). " +
   "Anything large, document-like, or tenant/business data belongs in knowledge — use " +
-  "create_knowledge_document instead.";
+  "create_knowledge_page instead.";
 
 // Plain JSON Schema literals, matching the codebase's inline-schema convention (see ChatBodySchema).
 // `value` deliberately carries NO maxLength: an oversized write must reach the service so the tool
-// can return the create_knowledge_document suggestion (AC-V1-004), not a generic schema rejection.
+// can return the create_knowledge_page suggestion (AC-V1-004), not a generic schema rejection.
 const UPDATE_MEMORY_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -81,7 +81,7 @@ export const updateMemoryTool: PlatformTool = {
     if (outcome.kind === "rejected_oversize") {
       return err(
         "oversize_value",
-        `Value for "${key}" exceeds the ${MAX_VALUE_CHARS}-character working-memory limit. It is document-sized — store it with create_knowledge_document instead.`
+        `Value for "${key}" exceeds the ${MAX_VALUE_CHARS}-character working-memory limit. It is long-form — store it with create_knowledge_page instead.`
       );
     }
     return ok({ key, stored: true });

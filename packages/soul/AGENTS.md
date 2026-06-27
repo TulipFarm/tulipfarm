@@ -23,7 +23,7 @@ agents/<name>/AGENT.md            # markdown + optional YAML frontmatter
 skills/<name>/SKILL.md
 resources/<name>/schema.yml       # + optional hooks.ts (SHA256-hashed for integrity)
 routines/<name>/routine.yaml      # + optional hooks.ts
-integrations/<name>/connection.yaml
+integrations/<name>/config.yaml
 llm.config.yaml   soul.yaml   guardrails.yaml   # repo-root manifests (optional)
 ```
 

@@ -11,20 +11,20 @@ import { useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import { buildConceptResolver } from "~/lib/concept-href";
-import { deleteBundle, listAllPages, navigateBundle } from "~/lib/knowledge-api";
+import { deleteSpace, listAllPages, navigateSpace } from "~/lib/knowledge-api";
 import { rewriteOkfLinks } from "~/lib/okf-listing";
-import type { BundleOutletContext } from "~/routes/_app.knowledge.bundles.$id";
+import { buildPageResolver } from "~/lib/page-href";
+import type { SpaceOutletContext } from "~/routes/_app.knowledge.spaces.$id";
 
-export const meta: MetaFunction = () => [{ title: "Bundle · Knowledge · tulipfarm" }];
+export const meta: MetaFunction = () => [{ title: "Space · Knowledge · tulipfarm" }];
 
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id;
-  if (!id) throw new ApiError(404, "missing bundle id");
+  if (!id) throw new ApiError(404, "missing space id");
   // The root index.md (authored override or synthesized contents) is the space front page.
-  // listAllPages → resolver so the index's concept links resolve to stable UUID routes.
+  // listAllPages → resolver so the index's page links resolve to stable UUID routes.
   const [{ listing }, pages] = await Promise.all([
-    navigateBundle(id, ""),
+    navigateSpace(id, ""),
     listAllPages().then((r) => r.items),
   ]);
   return { listing, pages };
@@ -32,15 +32,15 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 /*
  * Space front page (the wiki home). Renders the root index.md — authored or synthesized — with its
- * bundle-relative links rewritten to SPA routes, under a page toolbar (new page / edit front page /
- * graph / settings / delete). Bundle metadata comes from the workspace outlet context; the listing is
+ * space-relative links rewritten to SPA routes, under a page toolbar (new page / edit front page /
+ * graph / settings / delete). Space metadata comes from the workspace outlet context; the listing is
  * this route's own loader.
  */
-export default function BundleHome() {
-  const { bundle } = useOutletContext<BundleOutletContext>();
+export default function SpaceHome() {
+  const { space } = useOutletContext<SpaceOutletContext>();
   const { listing, pages } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
-  const base = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
+  const base = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
   const [deleting, setDeleting] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -50,8 +50,8 @@ export default function BundleHome() {
     setDeleting(true);
     setError(null);
     try {
-      await deleteBundle(bundle.id);
-      window.dispatchEvent(new Event("okf:bundle-changed"));
+      await deleteSpace(space.id);
+      window.dispatchEvent(new Event("okf:space-changed"));
       navigate("/knowledge");
     } catch (err) {
       setError(err instanceof Error ? err.message : "delete failed");
@@ -62,21 +62,21 @@ export default function BundleHome() {
   return (
     <article className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">{bundle.name}</h1>
-        {bundle.description ? (
-          <p className="text-sm text-muted-foreground">{bundle.description}</p>
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">{space.name}</h1>
+        {space.description ? (
+          <p className="text-sm text-muted-foreground">{space.description}</p>
         ) : null}
       </header>
 
       <div className="flex flex-wrap items-center gap-1.5 border-y border-border py-2.5">
         <Button asChild size="sm" className="cursor-pointer">
-          <Link to={`${base}/concepts/new`}>
+          <Link to={`${base}/pages/new`}>
             <Plus aria-hidden />
             New page
           </Link>
         </Button>
         <Button asChild variant="ghost" size="sm" className="cursor-pointer">
-          <Link to={`${base}/concepts/new?path=index`}>
+          <Link to={`${base}/pages/new?path=index`}>
             <Pencil aria-hidden />
             Edit front page
           </Link>
@@ -140,9 +140,9 @@ export default function BundleHome() {
 
       {error ? <p className="text-sm text-destructive">error: {error}</p> : null}
 
-      {/* wikiLinks: the rewritten `/knowledge/...` concept links render as in-SPA <Link>s, not new tabs. */}
+      {/* wikiLinks: the rewritten `/knowledge/...` page links render as in-SPA <Link>s, not new tabs. */}
       <MarkdownView wikiLinks>
-        {rewriteOkfLinks(listing, bundle.id, buildConceptResolver(pages))}
+        {rewriteOkfLinks(listing, space.id, buildPageResolver(pages))}
       </MarkdownView>
     </article>
   );

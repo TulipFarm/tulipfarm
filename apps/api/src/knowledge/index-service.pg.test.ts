@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { indexDocument, reindexAll } from "./index-service";
-import { PgKnowledgeDocumentRepo } from "./repo";
-import type { EmbeddingPort, KnowledgeDocument } from "./types";
+import { indexPage, reindexAll } from "./index-service";
+import { PgKnowledgePageRepo } from "./repo";
+import type { EmbeddingPort, KnowledgePage } from "./types";
 
 function fakeEmbeddings(opts: {
   available: boolean;
@@ -28,7 +28,7 @@ function fakeEmbeddings(opts: {
   };
 }
 
-function doc(plainText: string): KnowledgeDocument {
+function page(plainText: string): KnowledgePage {
   const now = new Date();
   return {
     _id: randomUUID(),
@@ -47,16 +47,16 @@ function doc(plainText: string): KnowledgeDocument {
   };
 }
 
-describe("indexDocument", () => {
+describe("indexPage", () => {
   let db: PGlite;
   let chunks: PgKnowledgeChunkRepo;
-  let docs: PgKnowledgeDocumentRepo;
+  let pages: PgKnowledgePageRepo;
 
   beforeEach(async () => {
     db = await makePglite();
     await runPgMigrations(db);
     chunks = new PgKnowledgeChunkRepo(db);
-    docs = new PgKnowledgeDocumentRepo(db);
+    pages = new PgKnowledgePageRepo(db);
   });
   afterEach(async () => {
     await db.close();
@@ -70,9 +70,9 @@ describe("indexDocument", () => {
   }
 
   it("embeds chunks when a provider is available, storing model + dim", async () => {
-    const d = doc("the quick brown fox jumps over the lazy dog");
-    await docs.insert(d);
-    const res = await indexDocument(d, chunks, fakeEmbeddings({ available: true, dim: 3 }));
+    const p = page("the quick brown fox jumps over the lazy dog");
+    await pages.insert(p);
+    const res = await indexPage(p, chunks, fakeEmbeddings({ available: true, dim: 3 }));
     expect(res.embedded).toBe(true);
     expect(res.chunkCount).toBeGreaterThan(0);
     expect(await embeddedCount()).toBe(res.chunkCount);
@@ -83,48 +83,44 @@ describe("indexDocument", () => {
   });
 
   it("stores lexical-only chunks (NULL embedding) when no provider", async () => {
-    const d = doc("hello world content here");
-    await docs.insert(d);
-    const res = await indexDocument(d, chunks, fakeEmbeddings({ available: false }));
+    const p = page("hello world content here");
+    await pages.insert(p);
+    const res = await indexPage(p, chunks, fakeEmbeddings({ available: false }));
     expect(res.embedded).toBe(false);
     expect(res.chunkCount).toBeGreaterThan(0);
     expect(await embeddedCount()).toBe(0);
   });
 
   it("falls back to lexical-only when embedMany throws EmbeddingUnavailable mid-flight", async () => {
-    const d = doc("content that should still be chunked");
-    await docs.insert(d);
-    const res = await indexDocument(
-      d,
-      chunks,
-      fakeEmbeddings({ available: true, throwOnEmbed: true })
-    );
+    const p = page("content that should still be chunked");
+    await pages.insert(p);
+    const res = await indexPage(p, chunks, fakeEmbeddings({ available: true, throwOnEmbed: true }));
     expect(res.embedded).toBe(false);
     expect(await embeddedCount()).toBe(0);
   });
 
   it("is idempotent — re-indexing replaces chunks rather than duplicating", async () => {
-    const d = doc("alpha beta gamma delta epsilon");
-    await docs.insert(d);
-    const first = await indexDocument(d, chunks, fakeEmbeddings({ available: true }));
-    await indexDocument(d, chunks, fakeEmbeddings({ available: true }));
+    const p = page("alpha beta gamma delta epsilon");
+    await pages.insert(p);
+    const first = await indexPage(p, chunks, fakeEmbeddings({ available: true }));
+    await indexPage(p, chunks, fakeEmbeddings({ available: true }));
     const { rows } = await db.query("SELECT count(*)::int AS n FROM knowledge_chunks");
     expect((rows[0] as { n: number }).n).toBe(first.chunkCount);
   });
 
   it("produces no chunks for whitespace-only text", async () => {
-    const d = doc("   \n  ");
-    await docs.insert(d);
-    const res = await indexDocument(d, chunks, fakeEmbeddings({ available: true }));
+    const p = page("   \n  ");
+    await pages.insert(p);
+    const res = await indexPage(p, chunks, fakeEmbeddings({ available: true }));
     expect(res.chunkCount).toBe(0);
   });
 
-  it("reindexAll re-embeds every active document", async () => {
-    const a = doc("first document body");
-    const b = doc("second document body");
-    await docs.insert(a);
-    await docs.insert(b);
-    const n = await reindexAll(docs, chunks, fakeEmbeddings({ available: true }));
+  it("reindexAll re-embeds every active page", async () => {
+    const a = page("first page body");
+    const b = page("second page body");
+    await pages.insert(a);
+    await pages.insert(b);
+    const n = await reindexAll(pages, chunks, fakeEmbeddings({ available: true }));
     expect(n).toBe(2);
     expect(await embeddedCount()).toBeGreaterThanOrEqual(2);
   });

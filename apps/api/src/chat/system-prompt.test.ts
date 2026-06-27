@@ -21,7 +21,7 @@ const emptyCatalogue: SoulCatalogue = {
 
 const empty = {
   memory: [],
-  governanceDocs: [],
+  governancePages: [],
   availableSkills: [],
   eagerSkills: [],
   taggedResources: [],

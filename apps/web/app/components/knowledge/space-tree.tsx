@@ -1,39 +1,39 @@
 import { Link, useParams } from "@remix-run/react";
 import { ChevronRight, FileText, Folder, Library, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { buildConceptResolver, type ConceptResolver, conceptHref } from "~/lib/concept-href";
 import {
-  type BundlePageRef,
-  type KnowledgeBundle,
+  type KnowledgeSpace,
   listAllPages,
-  listBundles,
-  navigateBundle,
+  listSpaces,
+  navigateSpace,
+  type SpacePageRef,
 } from "~/lib/knowledge-api";
 import { listingToNodes, type PageNode } from "~/lib/okf-listing";
+import { buildPageResolver, type PageResolver, pageHref } from "~/lib/page-href";
 import { cn } from "~/lib/utils";
 import { SidebarSearch } from "./sidebar-search";
 
 /*
- * Unified knowledge tree (the wiki rail). A forest of spaces (bundles); each expands lazily into its
+ * Unified knowledge tree (the wiki rail). A forest of spaces; each expands lazily into its
  * pages via the `navigate` endpoint. A page that has both a body and children renders as ONE node that
  * is clickable (opens the page) AND expandable (reveals sub-pages) — the merge rule in okf-listing.
  * The active space/page (from the route splat) is highlighted and auto-expanded. The tree re-reads on
- * the `okf:bundle-changed` window event a write dispatches. cursor-pointer on every interactive node.
+ * the `okf:space-changed` window event a write dispatches. cursor-pointer on every interactive node.
  */
 
 const enc = encodeURIComponent;
 
 export function KnowledgeTree() {
   const params = useParams();
-  const [bundles, setBundles] = useState<KnowledgeBundle[] | null>(null);
-  const [pages, setPages] = useState<BundlePageRef[]>([]);
+  const [spaces, setSpaces] = useState<KnowledgeSpace[] | null>(null);
+  const [pages, setPages] = useState<SpacePageRef[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [page, all] = await Promise.all([listBundles(), listAllPages()]);
-      setBundles(page.items);
+      const [page, all] = await Promise.all([listSpaces(), listAllPages()]);
+      setSpaces(page.items);
       setPages(all.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load");
@@ -46,16 +46,16 @@ export function KnowledgeTree() {
 
   useEffect(() => {
     const onChanged = () => void load();
-    window.addEventListener("okf:bundle-changed", onChanged);
-    return () => window.removeEventListener("okf:bundle-changed", onChanged);
+    window.addEventListener("okf:space-changed", onChanged);
+    return () => window.removeEventListener("okf:space-changed", onChanged);
   }, [load]);
 
-  // `listAllPages` doubles as the path↔id resolver for page hrefs and the active-highlight: concept
-  // routes carry the doc UUID (`params.conceptId`), not (bundleId, path), so resolve it back to its
-  // page. The bundle-home / new-page routes still carry `params.id`.
-  const resolver = useMemo(() => buildConceptResolver(pages), [pages]);
-  const activeRef = params.conceptId ? resolver.byId(params.conceptId) : null;
-  const activeBundleId = activeRef?.bundleId ?? params.id;
+  // `listAllPages` doubles as the path↔id resolver for page hrefs and the active-highlight: page
+  // routes carry the page UUID (`params.pageId`), not (spaceId, path), so resolve it back to its
+  // page. The space-home / new-page routes still carry `params.id`.
+  const resolver = useMemo(() => buildPageResolver(pages), [pages]);
+  const activeRef = params.pageId ? resolver.byId(params.pageId) : null;
+  const activeSpaceId = activeRef?.spaceId ?? params.id;
   const activePath = activeRef?.path ?? null;
 
   return (
@@ -65,7 +65,7 @@ export function KnowledgeTree() {
           Knowledge
         </span>
         <Link
-          to="/knowledge/bundles/new"
+          to="/knowledge/spaces/new"
           title="New space"
           aria-label="New space"
           className="cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
@@ -82,23 +82,23 @@ export function KnowledgeTree() {
               retry
             </button>
           </p>
-        ) : bundles === null ? (
+        ) : spaces === null ? (
           <p className="px-2 py-1 text-xs text-muted-foreground">loading…</p>
-        ) : bundles.length === 0 ? (
+        ) : spaces.length === 0 ? (
           <p className="px-2 py-1 text-xs text-muted-foreground">
             No spaces yet.{" "}
-            <Link to="/knowledge/bundles/new" className="cursor-pointer text-primary underline">
+            <Link to="/knowledge/spaces/new" className="cursor-pointer text-primary underline">
               Create one
             </Link>
           </p>
         ) : (
           <ul className="flex flex-col gap-0.5">
-            {bundles.map((b) => (
+            {spaces.map((b) => (
               <SpaceNode
                 key={b.id}
-                bundle={b}
-                isActiveSpace={b.id === activeBundleId}
-                activePath={b.id === activeBundleId ? activePath : null}
+                space={b}
+                isActiveSpace={b.id === activeSpaceId}
+                activePath={b.id === activeSpaceId ? activePath : null}
                 resolver={resolver}
               />
             ))}
@@ -110,18 +110,18 @@ export function KnowledgeTree() {
 }
 
 function SpaceNode({
-  bundle,
+  space,
   isActiveSpace,
   activePath,
   resolver,
 }: {
-  bundle: KnowledgeBundle;
+  space: KnowledgeSpace;
   isActiveSpace: boolean;
   activePath: string | null;
-  resolver: ConceptResolver;
+  resolver: PageResolver;
 }) {
   const [open, setOpen] = useState(isActiveSpace);
-  const base = `/knowledge/bundles/${enc(bundle.id)}`;
+  const base = `/knowledge/spaces/${enc(space.id)}`;
   return (
     <li>
       <div className="group flex items-center gap-1 rounded-sm pr-1 hover:bg-accent">
@@ -144,44 +144,38 @@ function SpaceNode({
             "min-w-0 flex-1 cursor-pointer truncate py-1 font-medium",
             isActiveSpace && !activePath ? "text-primary" : "text-foreground"
           )}
-          title={bundle.name}
+          title={space.name}
         >
-          {bundle.name}
+          {space.name}
         </Link>
         <Link
-          to={`${base}/concepts/new`}
+          to={`${base}/pages/new`}
           title="New page"
-          aria-label={`New page in ${bundle.name}`}
+          aria-label={`New page in ${space.name}`}
           className="cursor-pointer rounded-sm p-1 text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100"
         >
           <Plus className="size-3" aria-hidden />
         </Link>
       </div>
       {open ? (
-        <Dir
-          bundleId={bundle.id}
-          dirPath=""
-          depth={1}
-          activePath={activePath}
-          resolver={resolver}
-        />
+        <Dir spaceId={space.id} dirPath="" depth={1} activePath={activePath} resolver={resolver} />
       ) : null}
     </li>
   );
 }
 
 function Dir({
-  bundleId,
+  spaceId,
   dirPath,
   depth,
   activePath,
   resolver,
 }: {
-  bundleId: string;
+  spaceId: string;
   dirPath: string;
   depth: number;
   activePath: string | null;
-  resolver: ConceptResolver;
+  resolver: PageResolver;
 }) {
   const [nodes, setNodes] = useState<PageNode[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -191,14 +185,14 @@ function Dir({
     setLoading(true);
     setError(null);
     try {
-      const { listing } = await navigateBundle(bundleId, dirPath);
+      const { listing } = await navigateSpace(spaceId, dirPath);
       setNodes(listingToNodes(dirPath, listing));
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to load");
     } finally {
       setLoading(false);
     }
-  }, [bundleId, dirPath]);
+  }, [spaceId, dirPath]);
 
   useEffect(() => {
     void load();
@@ -208,8 +202,8 @@ function Dir({
   // stay stale until it is collapsed and re-expanded.
   useEffect(() => {
     const onChanged = () => void load();
-    window.addEventListener("okf:bundle-changed", onChanged);
-    return () => window.removeEventListener("okf:bundle-changed", onChanged);
+    window.addEventListener("okf:space-changed", onChanged);
+    return () => window.removeEventListener("okf:space-changed", onChanged);
   }, [load]);
 
   const pad = { paddingLeft: `${depth * 0.75 + 0.25}rem` };
@@ -241,7 +235,7 @@ function Dir({
       {(nodes ?? []).map((node) => (
         <PageRow
           key={node.path}
-          bundleId={bundleId}
+          spaceId={spaceId}
           node={node}
           depth={depth}
           activePath={activePath}
@@ -253,25 +247,25 @@ function Dir({
 }
 
 function PageRow({
-  bundleId,
+  spaceId,
   node,
   depth,
   activePath,
   resolver,
 }: {
-  bundleId: string;
+  spaceId: string;
   node: PageNode;
   depth: number;
   activePath: string | null;
-  resolver: ConceptResolver;
+  resolver: PageResolver;
 }) {
   const [open, setOpen] = useState(() => !!activePath && activePath.startsWith(`${node.path}/`));
-  const base = `/knowledge/bundles/${enc(bundleId)}`;
+  const base = `/knowledge/spaces/${enc(spaceId)}`;
   const isActive = activePath === node.path;
   const pad = { paddingLeft: `${depth * 0.75 + 0.25}rem` };
-  // A page with a body links to its stable concept UUID route (resolved from its path).
-  const ref = resolver.byBundleIdPath(bundleId, node.path);
-  const to = node.hasBody && ref ? conceptHref(ref.documentId, node.path) : null;
+  // A page with a body links to its stable page UUID route (resolved from its path).
+  const ref = resolver.bySpaceIdPath(spaceId, node.path);
+  const to = node.hasBody && ref ? pageHref(ref.pageId, node.path) : null;
 
   return (
     <li>
@@ -326,7 +320,7 @@ function PageRow({
           </button>
         )}
         <Link
-          to={`${base}/concepts/new?parent=${enc(node.path)}`}
+          to={`${base}/pages/new?parent=${enc(node.path)}`}
           title="New sub-page"
           aria-label={`New page under ${node.label}`}
           className="cursor-pointer rounded-sm p-1 text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100"
@@ -336,7 +330,7 @@ function PageRow({
       </div>
       {node.hasChildren && open ? (
         <Dir
-          bundleId={bundleId}
+          spaceId={spaceId}
           dirPath={node.path}
           depth={depth + 1}
           activePath={activePath}

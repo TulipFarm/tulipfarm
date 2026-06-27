@@ -8,37 +8,37 @@ import type {
   SearchHit,
 } from "./types";
 
-/** Push `d.*` filter conditions onto `params` and return the SQL fragments. */
-export function docFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
+/** Push `p.*` filter conditions onto `params` and return the SQL fragments. */
+export function pageFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
   const conds: string[] = [];
   if (filters.domain !== undefined) {
     params.push(filters.domain);
-    conds.push(`d.domain = $${params.length}`);
+    conds.push(`p.domain = $${params.length}`);
   }
   if (filters.source !== undefined) {
     params.push(filters.source);
-    conds.push(`d.source = $${params.length}`);
+    conds.push(`p.source = $${params.length}`);
   }
   if (filters.tags && filters.tags.length > 0) {
     params.push(filters.tags);
-    conds.push(`d.tags @> $${params.length}::text[]`);
+    conds.push(`p.tags @> $${params.length}::text[]`);
   }
-  // Scope to one bundle (space). Rides the existing `JOIN knowledge_documents d`, so no chunk-level
-  // bundle_id column is needed — both the vector and lexical paths inherit this predicate.
-  if (filters.bundleId !== undefined) {
-    params.push(filters.bundleId);
-    conds.push(`d.bundle_id = $${params.length}`);
+  // Scope to one space. Rides the existing `JOIN knowledge_pages p`, so no chunk-level
+  // space_id column is needed — both the vector and lexical paths inherit this predicate.
+  if (filters.spaceId !== undefined) {
+    params.push(filters.spaceId);
+    conds.push(`p.space_id = $${params.length}`);
   }
   if (filters.type !== undefined) {
     params.push(filters.type);
-    conds.push(`d.type = $${params.length}`);
+    conds.push(`p.type = $${params.length}`);
   }
   return conds;
 }
 
 function rowToHit(row: Record<string, unknown>, score: number): SearchHit {
   return {
-    documentId: row.document_id as string,
+    pageId: row.page_id as string,
     chunkId: row.chunk_id as string,
     title: row.title as string,
     content: row.content as string,
@@ -48,8 +48,8 @@ function rowToHit(row: Record<string, unknown>, score: number): SearchHit {
 }
 
 export interface KnowledgeChunkRepo {
-  deleteByDocument(documentId: string): Promise<void>;
-  insertMany(documentId: string, chunks: ChunkInput[]): Promise<void>;
+  deleteByPage(pageId: string): Promise<void>;
+  insertMany(pageId: string, chunks: ChunkInput[]): Promise<void>;
   /** Cosine exact-scan over chunks whose stored dim matches the active model. */
   searchVector(
     queryEmbedding: number[],
@@ -59,28 +59,28 @@ export interface KnowledgeChunkRepo {
   ): Promise<SearchHit[]>;
   /** Lexical fallback via `websearch_to_tsquery` + `ts_rank`. */
   searchLexical(query: string, limit: number, filters: SearchFilters): Promise<SearchHit[]>;
-  /** Derived per-doc index state: pending (no chunks) | lexical-only (chunks, null embeddings) | indexed. */
-  getIndexingStatus(documentId: string): Promise<IndexingStatus>;
+  /** Derived per-page index state: pending (no chunks) | lexical-only (chunks, null embeddings) | indexed. */
+  getIndexingStatus(pageId: string): Promise<IndexingStatus>;
   /** Batch variant — one grouped query; ids absent from the result default to "pending". */
-  getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>>;
+  getIndexingStatuses(pageIds: string[]): Promise<Map<string, IndexingStatus>>;
 }
 
 export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
   constructor(private readonly q: Queryable) {}
 
-  async deleteByDocument(documentId: string): Promise<void> {
-    await this.q.query("DELETE FROM knowledge_chunks WHERE document_id = $1", [documentId]);
+  async deleteByPage(pageId: string): Promise<void> {
+    await this.q.query("DELETE FROM knowledge_chunks WHERE page_id = $1", [pageId]);
   }
 
-  async insertMany(documentId: string, chunks: ChunkInput[]): Promise<void> {
+  async insertMany(pageId: string, chunks: ChunkInput[]): Promise<void> {
     for (const chunk of chunks) {
       await this.q.query(
         `INSERT INTO knowledge_chunks
-           (id, document_id, chunk_index, content, embedding, tsv, model, dim, created_at)
+           (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
          VALUES ($1, $2, $3, $4, $5::vector, to_tsvector('english', $4), $6, $7, now())`,
         [
           randomUUID(),
-          documentId,
+          pageId,
           chunk.chunkIndex,
           chunk.content,
           chunk.embedding === null ? null : JSON.stringify(chunk.embedding),
@@ -98,14 +98,14 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
     filters: SearchFilters
   ): Promise<SearchHit[]> {
     const params: unknown[] = [JSON.stringify(queryEmbedding), dim];
-    const conds = docFilterConditions(filters, params);
+    const conds = pageFilterConditions(filters, params);
     const filterSql = conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT c.id AS chunk_id, c.document_id, c.content, d.title, d.source,
+      `SELECT c.id AS chunk_id, c.page_id, c.content, p.title, p.source,
               (c.embedding <=> $1::vector) AS distance
-       FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id
-       WHERE c.embedding IS NOT NULL AND c.dim = $2 AND d.active = true${filterSql}
+       FROM knowledge_chunks c JOIN knowledge_pages p ON p.id = c.page_id
+       WHERE c.embedding IS NOT NULL AND c.dim = $2 AND p.active = true${filterSql}
        ORDER BY c.embedding <=> $1::vector
        LIMIT $${params.length}`,
       params
@@ -116,14 +116,14 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
 
   async searchLexical(query: string, limit: number, filters: SearchFilters): Promise<SearchHit[]> {
     const params: unknown[] = [query];
-    const conds = docFilterConditions(filters, params);
+    const conds = pageFilterConditions(filters, params);
     const filterSql = conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT c.id AS chunk_id, c.document_id, c.content, d.title, d.source,
+      `SELECT c.id AS chunk_id, c.page_id, c.content, p.title, p.source,
               ts_rank(c.tsv, websearch_to_tsquery('english', $1)) AS rank
-       FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id
-       WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND d.active = true${filterSql}
+       FROM knowledge_chunks c JOIN knowledge_pages p ON p.id = c.page_id
+       WHERE c.tsv @@ websearch_to_tsquery('english', $1) AND p.active = true${filterSql}
        ORDER BY rank DESC
        LIMIT $${params.length}`,
       params
@@ -131,26 +131,26 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
     return rows.map((r) => rowToHit(r, Number((r as { rank: number }).rank)));
   }
 
-  async getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>> {
+  async getIndexingStatuses(pageIds: string[]): Promise<Map<string, IndexingStatus>> {
     const result = new Map<string, IndexingStatus>();
-    if (documentIds.length === 0) return result;
-    for (const id of documentIds) result.set(id, "pending");
+    if (pageIds.length === 0) return result;
+    for (const id of pageIds) result.set(id, "pending");
     const { rows } = await this.q.query(
-      `SELECT document_id,
+      `SELECT page_id,
               CASE WHEN bool_and(embedding IS NOT NULL) THEN 'indexed' ELSE 'lexical-only' END AS status
        FROM knowledge_chunks
-       WHERE document_id = ANY($1::uuid[])
-       GROUP BY document_id`,
-      [documentIds]
+       WHERE page_id = ANY($1::uuid[])
+       GROUP BY page_id`,
+      [pageIds]
     );
-    for (const r of rows as Array<{ document_id: string; status: IndexingStatus }>) {
-      result.set(r.document_id, r.status);
+    for (const r of rows as Array<{ page_id: string; status: IndexingStatus }>) {
+      result.set(r.page_id, r.status);
     }
     return result;
   }
 
-  async getIndexingStatus(documentId: string): Promise<IndexingStatus> {
-    const statuses = await this.getIndexingStatuses([documentId]);
-    return statuses.get(documentId) ?? "pending";
+  async getIndexingStatus(pageId: string): Promise<IndexingStatus> {
+    const statuses = await this.getIndexingStatuses([pageId]);
+    return statuses.get(pageId) ?? "pending";
   }
 }

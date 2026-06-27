@@ -221,14 +221,14 @@ describe("SoulLoader", () => {
   });
 
   describe("integrations", () => {
-    it("parses connection.yaml", async () => {
+    it("parses config.yaml", async () => {
       await write(
-        join(TMP, "integrations", "github", "connection.yaml"),
+        join(TMP, "integrations", "github", "config.yaml"),
         "token: ghp_xxx\nowner: tulipfarm\n"
       );
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
-      expect(loader.integrations.get("github")?.connection).toMatchObject({
+      expect(loader.integrations.get("github")?.config).toMatchObject({
         token: "ghp_xxx",
         owner: "tulipfarm",
       });

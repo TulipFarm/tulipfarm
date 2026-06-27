@@ -1,8 +1,8 @@
 import { EmbeddingUnavailableError } from "@tulipfarm/llm";
 import { chunkText } from "./chunk";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
-import type { KnowledgeDocumentRepo } from "./repo";
-import type { ChunkInput, EmbeddingPort, KnowledgeDocument } from "./types";
+import type { KnowledgePageRepo } from "./repo";
+import type { ChunkInput, EmbeddingPort, KnowledgePage } from "./types";
 
 export interface IndexResult {
   chunkCount: number;
@@ -10,17 +10,17 @@ export interface IndexResult {
 }
 
 /**
- * (Re)index one document: chunk its plain text, embed the chunks if a provider is
+ * (Re)index one page: chunk its plain text, embed the chunks if a provider is
  * available (else store them lexical-only with NULL embeddings), and replace the
- * document's chunks atomically (delete-then-insert — idempotent for retries/updates).
+ * page's chunks atomically (delete-then-insert — idempotent for retries/updates).
  */
-export async function indexDocument(
-  doc: KnowledgeDocument,
+export async function indexPage(
+  page: KnowledgePage,
   chunksRepo: KnowledgeChunkRepo,
   embeddings: EmbeddingPort
 ): Promise<IndexResult> {
-  const textChunks = chunkText(doc.plainText);
-  await chunksRepo.deleteByDocument(doc._id);
+  const textChunks = chunkText(page.plainText);
+  await chunksRepo.deleteByPage(page._id);
   if (textChunks.length === 0) return { chunkCount: 0, embedded: false };
 
   let vectors: (number[] | null)[] = textChunks.map(() => null);
@@ -50,19 +50,19 @@ export async function indexDocument(
     model: embedded ? model : null,
     dim: embedded ? dim : null,
   }));
-  await chunksRepo.insertMany(doc._id, inputs);
+  await chunksRepo.insertMany(page._id, inputs);
   return { chunkCount: inputs.length, embedded };
 }
 
-/** Full re-index of every active document (used after a dimension-change guard fires). */
+/** Full re-index of every active page (used after a dimension-change guard fires). */
 export async function reindexAll(
-  docRepo: KnowledgeDocumentRepo,
+  pageRepo: KnowledgePageRepo,
   chunksRepo: KnowledgeChunkRepo,
   embeddings: EmbeddingPort
 ): Promise<number> {
-  const docs = await docRepo.listActive();
-  for (const doc of docs) {
-    await indexDocument(doc, chunksRepo, embeddings);
+  const pages = await pageRepo.listActive();
+  for (const page of pages) {
+    await indexPage(page, chunksRepo, embeddings);
   }
-  return docs.length;
+  return pages.length;
 }

@@ -1,18 +1,18 @@
 import { Link } from "@remix-run/react";
 import { Library } from "lucide-react";
-import type { KnowledgeBundle } from "~/lib/knowledge-api";
+import type { KnowledgeSpace } from "~/lib/knowledge-api";
 
 /*
- * OKF bundles overview — a Confluence-style "spaces" card grid. Each card is the entry point into a
- * bundle's wiki workspace (tree + pages). cursor-pointer + ruby hover on every card.
+ * OKF spaces overview — a Confluence-style "spaces" card grid. Each card is the entry point into a
+ * space's wiki workspace (tree + pages). cursor-pointer + ruby hover on every card.
  */
-export function BundleList({ items }: { items: KnowledgeBundle[] }) {
+export function SpaceList({ items }: { items: KnowledgeSpace[] }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       {items.map((b) => (
         <Link
           key={b.id}
-          to={`/knowledge/bundles/${encodeURIComponent(b.id)}`}
+          to={`/knowledge/spaces/${encodeURIComponent(b.id)}`}
           className="group flex cursor-pointer flex-col gap-1.5 rounded-md border border-border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-accent"
         >
           <div className="flex items-center gap-2">

@@ -45,7 +45,7 @@ function byName(a: SoulCatalogueEntry, b: SoulCatalogueEntry): number {
  * (the two platform agents first, then soul agents) so the catalogue surfaces the GeneralAssistant
  * / InformationArchitect an agent may hand off to. Skills are the FULL set (eager + lazy) minus
  * pending-audit; descriptions are read from each type's own metadata (frontmatter / schema /
- * config / connection), falling back through `title` and then "". An absent loader yields all
+ * config), falling back through `title` and then "". An absent loader yields all
  * empty sections, so the block is omitted entirely.
  */
 export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCatalogue {
@@ -75,7 +75,7 @@ export function buildSoulCatalogue(soulLoader: SoulLoader | undefined): SoulCata
   const integrations = values(soulLoader?.integrations)
     .map((i) => ({
       name: i.name,
-      description: asDesc(i.connection.description) || asDesc(i.connection.title),
+      description: asDesc(i.config.description) || asDesc(i.config.title),
     }))
     .sort(byName);
 

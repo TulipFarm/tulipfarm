@@ -2,8 +2,9 @@
 
 **Status:** binding. This is the single source of truth for what every concept is
 called, at every layer (code, DB, REST, URL, UI, docs). Linked from AGENTS.md —
-all agents and contributors MUST follow it. Prescriptive: where a layer disagrees
-today, the canonical term wins and the divergence is logged under *Deferred Renames*.
+all agents and contributors MUST follow it. The cross-layer renames it prescribes have
+been applied across the repo (see *Completed Renames*); where any new divergence appears,
+the canonical term wins.
 
 ## How to read this
 
@@ -71,33 +72,45 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 
 ## Banned / retired terms (quick lookup)
 
-| Don't write | Write instead | Where it currently leaks |
+| Don't write | Write instead | Status |
 |---|---|---|
-| conversation (in UI/URL/REST) | chat | — |
-| chat (in entity/DB/domain) | conversation | — |
-| resource (meaning one instance) | record | code |
-| workflow (meaning a routine) | routine | code/spec |
-| execution (of a routine) | run | code |
-| connection / connector | integration | code |
-| plugin (meaning a skill) | skill | — |
-| capability (meaning a skill) | skill | spec |
-| bundle | space | UI/URL/code |
-| collection (meaning a knowledge group) | space | UI/code |
-| concept (knowledge node) | page | UI/URL/code |
-| document (knowledge node) | page | spec/DB/tools |
+| conversation (in UI/URL/REST) | chat | clean |
+| chat (in entity/DB/domain) | conversation | clean |
+| resource (meaning one instance) | record | clean (see Completed Renames) |
+| workflow (meaning a routine) | routine | clean (only CNCF/CI uses remain) |
+| execution (of a routine) | run | clean (only tool-execution uses remain) |
+| connection / connector | integration | clean (only DB/SSE uses remain) |
+| plugin (meaning a skill) | skill | clean (only build-tool uses remain) |
+| capability (meaning a skill) | skill | clean |
+| bundle | space | clean (only build-bundle uses remain) |
+| collection (meaning a knowledge group) | space | retired (see Completed Renames) |
+| concept (knowledge node) | page | clean |
+| document (knowledge node) | page | clean |
 
-## Deferred Renames (refactor backlog — prescriptive consequences)
+## Completed Renames (done 2026-06-27)
 
-These are the cross-layer mismatches this doc resolves on paper; the code catch-up
-is tracked, not done here:
+The cross-layer mismatches this doc prescribed have been applied across code, DB, REST,
+URL, UI, and docs. Migration `v18` renamed the physical Knowledge tables/columns/indexes.
 
-1. **Knowledge → Space/Page** (largest): rename `bundle`→`space`, `concept`→`page`
-   in UI/routes/URL/code; `collection`→`space`, `document`→`page` in spec/DB/agent
-   tools (`create_knowledge_collection`→`create_knowledge_space`, etc.). Graph stays.
-2. **Chat REST**: `conversation-routes.ts` REST surface → align to `/api/v1/chats`
-   (entity stays `Conversation` internally).
-3. **Resource instance**: purge bare "resource"-as-instance usages → "record".
-4. **Routine**: purge "workflow"/"execution" as concept words → "routine"/"run".
-5. **Integration**: purge "connection"/"connector" as concept words → "integration".
-
-Each becomes its own ticket; none block adopting this glossary for NEW work.
+1. **Knowledge → Space/Page** (largest): `bundle`→`space`, `concept`/`document`→`page`
+   across DB (tables `knowledge_spaces`/`knowledge_pages`/`knowledge_space_overrides`,
+   columns `space_id`/`page_id`/`target_space_*`), REST (`/api/v1/knowledge/spaces`,
+   `/api/v1/knowledge/pages`), URL routes (`/knowledge/spaces`, `/knowledge/pages/:id`),
+   types, components, agent tools (`create_knowledge_page`), and the synthesized listing
+   heading (`# Pages`). The backlink graph is unchanged.
+   - **Deviation — collections retired (not renamed):** the legacy flat `collection`
+     grouping (its UI already removed) could not become `space` without colliding with
+     `bundle`→`space`, so its tables, repo/service/routes/types, and the two agent tools
+     (`create_knowledge_collection`, `list_knowledge_collections`) were **dropped**.
+     `collection` now means only a Postgres/Mongo collection (infra).
+2. **Chat REST**: REST surface aligned to `/api/v1/chats*` (entity, table, repo, and
+   internal `Conversation` names stay — only the wire path changed).
+3. **Resource instance**: agent tools `resource_*`→`record_*`; bare "resource"-as-instance
+   wording → "record". REST `/api/v1/resources/:type/:id` and the `ResourceRecord` type
+   stay (canonical). The `resource_id` storage column + its `resourceId` (type, id)
+   addressing in domain events are kept as part of the unchanged Resources storage layer.
+4. **Routine/Run**: already canonical — no concept-meaning `workflow`/`execution` leaks
+   existed; remaining uses are the CNCF Serverless Workflow spec and tool-execution.
+5. **Integration**: `SoulIntegration.connection`→`config` (file `connection.yaml`→
+   `config.yaml`). "connection" now means only a DB pool / SSE stream.
+6. **Skill**: `capability`-as-synonym removed from Skill Forge copy.

@@ -27,7 +27,7 @@ export interface SoulRoutine {
 
 export interface SoulIntegration {
   name: string;
-  connection: Record<string, unknown>;
+  config: Record<string, unknown>;
 }
 
 /** Minimal logger surface (pino/console compatible) shared across soul services. */

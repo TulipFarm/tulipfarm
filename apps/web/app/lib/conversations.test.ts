@@ -38,7 +38,7 @@ describe("conversations client", () => {
       ],
     }));
     const out = await listConversations();
-    expect(calls[0].url).toMatch(/\/api\/v1\/conversations$/);
+    expect(calls[0].url).toMatch(/\/api\/v1\/chats$/);
     expect(calls[0].init.method ?? "GET").toBe("GET");
     expect(out).toHaveLength(1);
     expect(out[0].title).toBe("Inventory");
@@ -61,7 +61,7 @@ describe("conversations client", () => {
       updatedAt: "t",
     }));
     const out = await renameConversation("c1", "Renamed");
-    expect(calls[0].url).toContain("/api/v1/conversations/c1");
+    expect(calls[0].url).toContain("/api/v1/chats/c1");
     expect(calls[0].init.method).toBe("PUT");
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ title: "Renamed" });
     expect(out.title).toBe("Renamed");
@@ -77,7 +77,7 @@ describe("conversations client", () => {
       updatedAt: "t",
     }));
     const out = await setConversationStarred("c1", true);
-    expect(calls[0].url).toContain("/api/v1/conversations/c1");
+    expect(calls[0].url).toContain("/api/v1/chats/c1");
     expect(calls[0].init.method).toBe("PUT");
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ starred: true });
     expect(out.starred).toBe(true);
@@ -94,7 +94,7 @@ describe("conversations client", () => {
       updatedAt: "t",
     }));
     const out = await getConversation("c1");
-    expect(calls[0].url).toContain("/api/v1/conversations/c1");
+    expect(calls[0].url).toContain("/api/v1/chats/c1");
     expect(out.agentId).toBe("GeneralAssistant");
   });
 
@@ -104,7 +104,7 @@ describe("conversations client", () => {
       nextCursor: null,
     }));
     const out = await getConversationMessages("c1");
-    expect(calls[0].url).toContain("/api/v1/conversations/c1/messages");
+    expect(calls[0].url).toContain("/api/v1/chats/c1/messages");
     expect(out[0].role).toBe("user");
   });
 
@@ -119,6 +119,6 @@ describe("conversations client", () => {
       updatedAt: "t",
     }));
     await getConversation("a/b");
-    expect(calls[0].url).toContain("/api/v1/conversations/a%2Fb");
+    expect(calls[0].url).toContain("/api/v1/chats/a%2Fb");
   });
 });

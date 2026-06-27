@@ -28,7 +28,7 @@ test("linkifies inline [n] citation markers to their cited page, leaving unknown
     {
       path: "/",
       Component: () => (
-        <MarkdownView citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
+        <MarkdownView citations={[{ ref: 1, url: "/knowledge/pages/d1" }]}>
           {"Refunds take 5 days [1] but disputes differ [2]."}
         </MarkdownView>
       ),
@@ -37,7 +37,7 @@ test("linkifies inline [n] citation markers to their cited page, leaving unknown
   render(<Stub initialEntries={["/"]} />);
   // [1] has a resolved source → in-app link; [2] has no source → stays literal text.
   const cite = screen.getByRole("link", { name: "[1]" });
-  expect(cite).toHaveAttribute("href", "/knowledge/concepts/d1");
+  expect(cite).toHaveAttribute("href", "/knowledge/pages/d1");
   expect(cite).not.toHaveAttribute("target", "_blank");
   expect(screen.queryByRole("link", { name: "[2]" })).toBeNull();
   expect(screen.getByText(/disputes differ \[2\]\./)).toBeInTheDocument();
@@ -48,7 +48,7 @@ test("linkifies every occurrence of a known ref and leaves an interleaved unknow
     {
       path: "/",
       Component: () => (
-        <MarkdownView citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
+        <MarkdownView citations={[{ ref: 1, url: "/knowledge/pages/d1" }]}>
           {"a [1] b [2] c [1] d"}
         </MarkdownView>
       ),
@@ -89,9 +89,9 @@ test("leaves a plain blockquote untouched (no callout)", () => {
 });
 
 test("wikiLinks: renders an internal page link as a client link (no new tab)", () => {
-  renderWiki("See [Runbook](/knowledge/concepts/abc/runbook).");
+  renderWiki("See [Runbook](/knowledge/pages/abc/runbook).");
   const link = screen.getByRole("link", { name: "Runbook" });
-  expect(link).toHaveAttribute("href", "/knowledge/concepts/abc/runbook");
+  expect(link).toHaveAttribute("href", "/knowledge/pages/abc/runbook");
   expect(link).not.toHaveAttribute("target");
 });
 
@@ -118,8 +118,8 @@ test("wikiLinks + citations compose: both an internal page link and a [n] citati
     {
       path: "/",
       Component: () => (
-        <MarkdownView wikiLinks citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
-          {"See [Runbook](/knowledge/concepts/abc/runbook) for refunds [1]."}
+        <MarkdownView wikiLinks citations={[{ ref: 1, url: "/knowledge/pages/d1" }]}>
+          {"See [Runbook](/knowledge/pages/abc/runbook) for refunds [1]."}
         </MarkdownView>
       ),
     },
@@ -127,10 +127,10 @@ test("wikiLinks + citations compose: both an internal page link and a [n] citati
   render(<Stub initialEntries={["/"]} />);
   // Wiki internal link is still a client link (not lost to the citation renderer)…
   const wiki = screen.getByRole("link", { name: "Runbook" });
-  expect(wiki).toHaveAttribute("href", "/knowledge/concepts/abc/runbook");
+  expect(wiki).toHaveAttribute("href", "/knowledge/pages/abc/runbook");
   expect(wiki).not.toHaveAttribute("target");
   // …and the citation marker still linkifies to its cited page.
   const cite = screen.getByRole("link", { name: "[1]" });
-  expect(cite).toHaveAttribute("href", "/knowledge/concepts/d1");
+  expect(cite).toHaveAttribute("href", "/knowledge/pages/d1");
   expect(cite).not.toHaveAttribute("target", "_blank");
 });

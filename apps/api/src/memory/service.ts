@@ -19,7 +19,7 @@ export class WorkingMemoryService {
     writtenByAgentId?: string
   ): Promise<UpdateOutcome> {
     if (value.length > MAX_VALUE_CHARS) {
-      return { kind: "rejected_oversize" }; // AC-V1-004: document-sized → caller redirects to knowledge
+      return { kind: "rejected_oversize" }; // AC-V1-004: long-form → caller redirects to knowledge
     }
 
     const existing = (await this.repo.listByUser(userId)).find((e) => e.key === key);

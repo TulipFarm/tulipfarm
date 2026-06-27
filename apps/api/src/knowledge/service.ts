@@ -1,36 +1,30 @@
 import { randomUUID } from "node:crypto";
 import type { PaginatedResult } from "../pagination";
-import type { KnowledgeBundleOverrideRepo } from "./bundle-overrides-repo";
-import type { BundlePatch, KnowledgeBundleRepo } from "./bundles-repo";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
-import { indexDocument, reindexAll } from "./index-service";
+import { indexPage, reindexAll } from "./index-service";
 import type { KnowledgeLinksRepo } from "./links-repo";
-import { parseOkf, resolveLink, rewriteCrossPageBundleName } from "./okf/parse";
+import { parseOkf, resolveLink, rewriteCrossPageSpaceName } from "./okf/parse";
 import { type IndexEntry, renderIndex } from "./okf/synthesize";
-import type {
-  DocumentListOpts,
-  KnowledgeCollectionRepo,
-  KnowledgeDocumentRepo,
-  KnowledgeRevisionRepo,
-} from "./repo";
+import type { KnowledgePageRepo, KnowledgeRevisionRepo, PageListOpts } from "./repo";
 import { search } from "./search-service";
+import type { KnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
+import type { KnowledgeSpaceRepo, SpacePatch } from "./spaces-repo";
 import type {
   Backlink,
-  BundlePageRef,
-  BundleWithActivity,
   EmbeddingPort,
   IndexingStatus,
-  KnowledgeBundle,
-  KnowledgeCollection,
-  KnowledgeDocument,
+  KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
+  KnowledgeSpace,
   RecentPage,
   SearchFilters,
   SearchResults,
+  SpacePageRef,
+  SpaceWithActivity,
 } from "./types";
 
-function normalizeConceptPath(p: string): string {
+function normalizePagePath(p: string): string {
   return p.replace(/^\/+|\/+$/g, "").replace(/\.md$/i, "");
 }
 
@@ -38,7 +32,7 @@ function dirOf(path: string): string {
   return path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
 }
 
-/** First non-heading, non-empty body line — a concept's index/preview description. */
+/** First non-heading, non-empty body line — a page's index/preview description. */
 function snippet(text: string, max = 140): string | null {
   const line = text
     .split("\n")
@@ -48,7 +42,7 @@ function snippet(text: string, max = 140): string | null {
   return line.length > max ? `${line.slice(0, max)}…` : line;
 }
 
-export interface CreateDocumentInput {
+export interface CreatePageInput {
   title: string;
   content: string;
   domain?: string | null;
@@ -56,7 +50,7 @@ export interface CreateDocumentInput {
   alwaysLoadForAgents?: boolean;
 }
 
-export interface UpdateDocumentInput {
+export interface UpdatePageInput {
   title?: string;
   content?: string;
   domain?: string | null;
@@ -65,23 +59,9 @@ export interface UpdateDocumentInput {
   active?: boolean;
 }
 
-export interface CreateCollectionInput {
-  name: string;
-  description?: string | null;
-  domain?: string | null;
-}
-
-export interface UpdateCollectionInput {
-  name?: string;
-  description?: string | null;
-  domain?: string | null;
-}
-
 export type WriteOutcome<T> =
   | { ok: true; value: T }
   | { ok: false; reason: "not_found" | "conflict" };
-
-export type AddToCollectionResult = "ok" | "collection_not_found" | "document_not_found";
 
 export interface IngestSourceInput {
   source: KnowledgeSource;
@@ -92,64 +72,63 @@ export interface IngestSourceInput {
   tags?: string[];
 }
 
-export interface CreateBundleInput {
+export interface CreateSpaceInput {
   name: string;
   description?: string | null;
 }
 
-export type CreateBundleResult =
-  | { ok: true; bundle: KnowledgeBundle }
+export type CreateSpaceResult =
+  | { ok: true; space: KnowledgeSpace }
   | { ok: false; reason: "name_taken" | "okf_unavailable" };
 
-export interface WriteConceptInput {
-  bundleId: string;
+export interface WritePageInput {
+  spaceId: string;
   path: string;
-  /** Full OKF concept markdown (frontmatter + body). */
+  /** Full OKF page markdown (frontmatter + body). */
   content: string;
   /** Reason recorded on the history revision this write snapshots (internal callers, e.g. rename). */
   reason?: string | null;
 }
 
-export type WriteConceptResult =
-  | { ok: true; document: KnowledgeDocument }
+export type WritePageResult =
+  | { ok: true; page: KnowledgePage }
   | { ok: true; override: true }
-  | { ok: false; reason: "okf_unavailable" | "bundle_not_found" | "invalid_okf" };
+  | { ok: false; reason: "okf_unavailable" | "space_not_found" | "invalid_okf" };
 
-/** Thrown when a bundle rename collides with a name another bundle already holds (→ HTTP 409). */
-export class BundleNameTakenError extends Error {
+/** Thrown when a space rename collides with a name another space already holds (→ HTTP 409). */
+export class SpaceNameTakenError extends Error {
   constructor(name: string) {
-    super(`bundle name already in use: ${name}`);
-    this.name = "BundleNameTakenError";
+    super(`space name already in use: ${name}`);
+    this.name = "SpaceNameTakenError";
   }
 }
 
-export interface BundleGraph {
+export interface SpaceGraph {
   nodes: Array<{ id: string; path: string | null; title: string }>;
   edges: Array<{
     sourceId: string;
     targetId: string | null;
     targetPath: string;
     broken: boolean;
-    /** Set when the edge points into another bundle (cross-space); null for same-bundle edges. */
-    targetBundleName: string | null;
-    /** The resolved id of that other bundle, when it exists; null while unresolved. */
-    targetBundleId: string | null;
+    /** Set when the edge points into another space (cross-space); null for same-space edges. */
+    targetSpaceName: string | null;
+    /** The resolved id of that other space, when it exists; null while unresolved. */
+    targetSpaceId: string | null;
   }>;
   truncated: boolean;
 }
 
 export interface KnowledgeServiceDeps {
-  documents: KnowledgeDocumentRepo;
+  pages: KnowledgePageRepo;
   chunks: KnowledgeChunkRepo;
-  collections: KnowledgeCollectionRepo;
   revisions: KnowledgeRevisionRepo;
   embeddings: EmbeddingPort;
-  /** When set, document writes enqueue async (re)indexing instead of indexing inline. */
-  enqueueIndex?: (documentId: string) => Promise<void>;
-  /** OKF bundle repos — optional; required only for the OKF bundle/concept methods. */
-  bundles?: KnowledgeBundleRepo;
+  /** When set, page writes enqueue async (re)indexing instead of indexing inline. */
+  enqueueIndex?: (pageId: string) => Promise<void>;
+  /** OKF space repos — optional; required only for the OKF space/page methods. */
+  spaces?: KnowledgeSpaceRepo;
   links?: KnowledgeLinksRepo;
-  overrides?: KnowledgeBundleOverrideRepo;
+  overrides?: KnowledgeSpaceOverrideRepo;
 }
 
 /**
@@ -160,12 +139,12 @@ export interface KnowledgeServiceDeps {
 export class KnowledgeService {
   constructor(private readonly deps: KnowledgeServiceDeps) {}
 
-  // ── documents ────────────────────────────────────────────────────────────────
+  // ── pages ────────────────────────────────────────────────────────────────────
 
-  async createDocument(input: CreateDocumentInput): Promise<KnowledgeDocument> {
+  async createPage(input: CreatePageInput): Promise<KnowledgePage> {
     const now = new Date();
     const id = randomUUID();
-    const doc: KnowledgeDocument = {
+    const page: KnowledgePage = {
       _id: id,
       title: input.title,
       content: input.content,
@@ -180,53 +159,53 @@ export class KnowledgeService {
       createdAt: now,
       updatedAt: now,
     };
-    await this.deps.documents.insert(doc);
-    await this.afterWrite(doc);
-    return doc;
+    await this.deps.pages.insert(page);
+    await this.afterWrite(page);
+    return page;
   }
 
-  getDocument(id: string): Promise<KnowledgeDocument | null> {
-    return this.deps.documents.getById(id);
+  getPage(id: string): Promise<KnowledgePage | null> {
+    return this.deps.pages.getById(id);
   }
 
   /**
-   * A document fetched only when live — a missing OR soft-deleted page reads as null. Agent tools use
+   * A page fetched only when live — a missing OR soft-deleted page reads as null. Agent tools use
    * this so a deleted page is never surfaced or cited (its wiki url would 404 for the user).
    */
-  async getActiveDocument(id: string): Promise<KnowledgeDocument | null> {
-    const doc = await this.deps.documents.getById(id);
-    return doc?.active ? doc : null;
+  async getActivePage(id: string): Promise<KnowledgePage | null> {
+    const page = await this.deps.pages.getById(id);
+    return page?.active ? page : null;
   }
 
-  /** Fetch one OKF concept by its bundle + path — an exact lookup (no ranking), path normalized. */
-  getConceptByPath(bundleId: string, path: string): Promise<KnowledgeDocument | null> {
-    return this.deps.documents.getByBundlePath(bundleId, normalizeConceptPath(path));
+  /** Fetch one OKF page by its space + path — an exact lookup (no ranking), path normalized. */
+  getPageByPath(spaceId: string, path: string): Promise<KnowledgePage | null> {
+    return this.deps.pages.getBySpacePath(spaceId, normalizePagePath(path));
   }
 
-  listDocuments(opts: DocumentListOpts): Promise<PaginatedResult<KnowledgeDocument>> {
-    return this.deps.documents.list(opts);
+  listPages(opts: PageListOpts): Promise<PaginatedResult<KnowledgePage>> {
+    return this.deps.pages.list(opts);
   }
 
-  /** Derived read-only index state for a document (from its chunks). */
-  getIndexingStatus(documentId: string): Promise<IndexingStatus> {
-    return this.deps.chunks.getIndexingStatus(documentId);
+  /** Derived read-only index state for a page (from its chunks). */
+  getIndexingStatus(pageId: string): Promise<IndexingStatus> {
+    return this.deps.chunks.getIndexingStatus(pageId);
   }
 
-  /** Batch index states keyed by document id (for list responses). */
-  getIndexingStatuses(documentIds: string[]): Promise<Map<string, IndexingStatus>> {
-    return this.deps.chunks.getIndexingStatuses(documentIds);
+  /** Batch index states keyed by page id (for list responses). */
+  getIndexingStatuses(pageIds: string[]): Promise<Map<string, IndexingStatus>> {
+    return this.deps.chunks.getIndexingStatuses(pageIds);
   }
 
-  async updateDocument(
+  async updatePage(
     id: string,
-    input: UpdateDocumentInput,
+    input: UpdatePageInput,
     expectedVersion: number
-  ): Promise<WriteOutcome<KnowledgeDocument>> {
-    const existing = await this.deps.documents.getById(id);
+  ): Promise<WriteOutcome<KnowledgePage>> {
+    const existing = await this.deps.pages.getById(id);
     if (!existing) return { ok: false, reason: "not_found" };
 
     const content = input.content ?? existing.content;
-    const next: KnowledgeDocument = {
+    const next: KnowledgePage = {
       ...existing,
       title: input.title ?? existing.title,
       content,
@@ -238,7 +217,7 @@ export class KnowledgeService {
       version: existing.version + 1,
       updatedAt: new Date(),
     };
-    const ok = await this.deps.documents.replaceOne(id, expectedVersion, next);
+    const ok = await this.deps.pages.replaceOne(id, expectedVersion, next);
     if (!ok) return { ok: false, reason: "conflict" };
 
     // Snapshot the prior state as a revision.
@@ -248,33 +227,33 @@ export class KnowledgeService {
     return { ok: true, value: next };
   }
 
-  async deleteDocument(id: string): Promise<boolean> {
-    const deleted = await this.deps.documents.softDelete(id);
-    if (deleted) await this.deps.chunks.deleteByDocument(id);
+  async deletePage(id: string): Promise<boolean> {
+    const deleted = await this.deps.pages.softDelete(id);
+    if (deleted) await this.deps.chunks.deleteByPage(id);
     return deleted;
   }
 
   // ── revisions ────────────────────────────────────────────────────────────────
 
   async createRevision(
-    documentId: string,
+    pageId: string,
     content: string,
     plainText: string,
     reason: string | null
   ): Promise<number | null> {
-    if (!(await this.deps.documents.getById(documentId))) return null;
-    return this.deps.revisions.append(randomUUID(), documentId, content, plainText, reason);
+    if (!(await this.deps.pages.getById(pageId))) return null;
+    return this.deps.revisions.append(randomUUID(), pageId, content, plainText, reason);
   }
 
-  listRevisions(documentId: string): Promise<KnowledgeRevision[]> {
-    return this.deps.revisions.list(documentId);
+  listRevisions(pageId: string): Promise<KnowledgeRevision[]> {
+    return this.deps.revisions.list(pageId);
   }
 
   // ── search + governance ──────────────────────────────────────────────────────
 
   /**
    * Vector/lexical search. With `expandGraph`, each hit's directly-linked OKF neighbors are
-   * appended (score 0) so related concepts travel together (graph-aware retrieval).
+   * appended (score 0) so related pages travel together (graph-aware retrieval).
    */
   async search(
     query: string,
@@ -287,159 +266,92 @@ export class KnowledgeService {
       chunksRepo: this.deps.chunks,
     });
     if (!opts?.expandGraph || !this.deps.links) return base;
-    const hitIds = [...new Set(base.results.map((r) => r.documentId))];
-    const neighborIds = (await this.deps.links.getLinkedDocumentIds(hitIds)).filter(
+    const hitIds = [...new Set(base.results.map((r) => r.pageId))];
+    const neighborIds = (await this.deps.links.getLinkedPageIds(hitIds)).filter(
       (id) => !hitIds.includes(id)
     );
     if (neighborIds.length === 0) return base;
-    const neighbors = await Promise.all(neighborIds.map((id) => this.deps.documents.getById(id)));
+    const neighbors = await Promise.all(neighborIds.map((id) => this.deps.pages.getById(id)));
     const extra = neighbors
-      .filter((d): d is KnowledgeDocument => Boolean(d?.active))
-      // Scope-preserving: a bundle-scoped search must not leak neighbors from other bundles. Graph
-      // links cross spaces, so without this a b1 page that links to a b2 page would surface b2.
-      .filter((d) => !filters.bundleId || d.bundleId === filters.bundleId)
-      .map((d) => ({
-        documentId: d._id,
-        chunkId: `graph:${d._id}`,
-        title: d.title,
-        content: d.plainText.slice(0, 800),
-        source: d.source,
+      .filter((p): p is KnowledgePage => Boolean(p?.active))
+      // Scope-preserving: a space-scoped search must not leak neighbors from other spaces. Graph
+      // links cross spaces, so without this a s1 page that links to a s2 page would surface s2.
+      .filter((p) => !filters.spaceId || p.spaceId === filters.spaceId)
+      .map((p) => ({
+        pageId: p._id,
+        chunkId: `graph:${p._id}`,
+        title: p.title,
+        content: p.plainText.slice(0, 800),
+        source: p.source,
         score: 0,
       }));
     return { results: [...base.results, ...extra], warnings: base.warnings };
   }
 
-  governanceDocuments(): Promise<KnowledgeDocument[]> {
-    return this.deps.documents.governanceDocuments();
+  governancePages(): Promise<KnowledgePage[]> {
+    return this.deps.pages.governancePages();
   }
 
-  // ── collections ──────────────────────────────────────────────────────────────
-
-  async createCollection(input: CreateCollectionInput): Promise<KnowledgeCollection> {
-    const now = new Date();
-    const c: KnowledgeCollection = {
-      _id: randomUUID(),
-      name: input.name,
-      description: input.description ?? null,
-      domain: input.domain ?? null,
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await this.deps.collections.insert(c);
-    return c;
-  }
-
-  getCollection(id: string): Promise<KnowledgeCollection | null> {
-    return this.deps.collections.getById(id);
-  }
-
-  listCollections(opts: {
-    limit: number;
-    after?: { createdAt: Date; _id: string };
-  }): Promise<PaginatedResult<KnowledgeCollection>> {
-    return this.deps.collections.list(opts);
-  }
-
-  async updateCollection(
-    id: string,
-    input: UpdateCollectionInput,
-    expectedVersion: number
-  ): Promise<WriteOutcome<KnowledgeCollection>> {
-    const existing = await this.deps.collections.getById(id);
-    if (!existing) return { ok: false, reason: "not_found" };
-    const next: KnowledgeCollection = {
-      ...existing,
-      name: input.name ?? existing.name,
-      description: input.description !== undefined ? input.description : existing.description,
-      domain: input.domain !== undefined ? input.domain : existing.domain,
-      version: existing.version + 1,
-      updatedAt: new Date(),
-    };
-    const ok = await this.deps.collections.replaceOne(id, expectedVersion, next);
-    return ok ? { ok: true, value: next } : { ok: false, reason: "conflict" };
-  }
-
-  deleteCollection(id: string): Promise<boolean> {
-    return this.deps.collections.delete(id);
-  }
-
-  async addToCollection(collectionId: string, documentId: string): Promise<AddToCollectionResult> {
-    if (!(await this.deps.collections.getById(collectionId))) return "collection_not_found";
-    const doc = await this.deps.documents.getById(documentId);
-    if (!doc?.active) return "document_not_found";
-    await this.deps.collections.addDocument(collectionId, documentId);
-    return "ok";
-  }
-
-  removeFromCollection(collectionId: string, documentId: string): Promise<boolean> {
-    return this.deps.collections.removeDocument(collectionId, documentId);
-  }
-
-  listCollectionDocumentIds(collectionId: string): Promise<string[]> {
-    return this.deps.collections.listDocumentIds(collectionId);
-  }
-
-  // ── OKF bundles ──────────────────────────────────────────────────────────────
+  // ── OKF spaces ───────────────────────────────────────────────────────────────
 
   private okf(): {
-    bundles: KnowledgeBundleRepo;
+    spaces: KnowledgeSpaceRepo;
     links: KnowledgeLinksRepo;
-    overrides: KnowledgeBundleOverrideRepo;
+    overrides: KnowledgeSpaceOverrideRepo;
   } | null {
-    const { bundles, links, overrides } = this.deps;
-    return bundles && links && overrides ? { bundles, links, overrides } : null;
+    const { spaces, links, overrides } = this.deps;
+    return spaces && links && overrides ? { spaces, links, overrides } : null;
   }
 
-  async createBundle(input: CreateBundleInput): Promise<CreateBundleResult> {
+  async createSpace(input: CreateSpaceInput): Promise<CreateSpaceResult> {
     const okf = this.okf();
     if (!okf) return { ok: false, reason: "okf_unavailable" };
-    if (await okf.bundles.getByName(input.name)) return { ok: false, reason: "name_taken" };
+    if (await okf.spaces.getByName(input.name)) return { ok: false, reason: "name_taken" };
     const now = new Date();
-    const bundle: KnowledgeBundle = {
+    const space: KnowledgeSpace = {
       _id: randomUUID(),
       name: input.name,
       description: input.description ?? null,
       createdAt: now,
       updatedAt: now,
     };
-    await okf.bundles.insert(bundle);
-    return { ok: true, bundle };
+    await okf.spaces.insert(space);
+    return { ok: true, space };
   }
 
-  async getBundle(id: string): Promise<KnowledgeBundle | null> {
+  async getSpace(id: string): Promise<KnowledgeSpace | null> {
     const okf = this.okf();
-    return okf ? okf.bundles.getById(id) : null;
+    return okf ? okf.spaces.getById(id) : null;
   }
 
-  async listBundles(opts: {
+  async listSpaces(opts: {
     limit: number;
     after?: { createdAt: Date; _id: string };
-  }): Promise<PaginatedResult<KnowledgeBundle>> {
+  }): Promise<PaginatedResult<KnowledgeSpace>> {
     const okf = this.okf();
     if (!okf) return { items: [], nextCursor: null };
-    return okf.bundles.list(opts);
+    return okf.spaces.list(opts);
   }
 
-  async updateBundle(id: string, patch: BundlePatch): Promise<KnowledgeBundle | null> {
+  async updateSpace(id: string, patch: SpacePatch): Promise<KnowledgeSpace | null> {
     const okf = this.okf();
     if (!okf) return null;
-    const before = await okf.bundles.getById(id);
+    const before = await okf.spaces.getById(id);
     if (!before) return null;
-    // Reject a rename onto a name another bundle already holds (the UNIQUE index is the backstop).
+    // Reject a rename onto a name another space already holds (the UNIQUE index is the backstop).
     if (patch.name && patch.name !== before.name) {
-      const clash = await okf.bundles.getByName(patch.name);
-      if (clash && clash._id !== id) throw new BundleNameTakenError(patch.name);
+      const clash = await okf.spaces.getByName(patch.name);
+      if (clash && clash._id !== id) throw new SpaceNameTakenError(patch.name);
     }
-    let updated: KnowledgeBundle | null;
+    let updated: KnowledgeSpace | null;
     try {
-      updated = await okf.bundles.update(id, patch, new Date());
+      updated = await okf.spaces.update(id, patch, new Date());
     } catch (err) {
       // The UNIQUE(name) index is the backstop if the pre-check raced a concurrent rename. Only a
       // name-column violation maps to "taken" — scoped here so 23505s from the rename rewrite below
-      // (knowledge_links / knowledge_documents) propagate as real errors, not a misleading 409.
+      // (knowledge_links / knowledge_pages) propagate as real errors, not a misleading 409.
       if (patch.name && (err as { code?: string }).code === "23505") {
-        throw new BundleNameTakenError(patch.name);
+        throw new SpaceNameTakenError(patch.name);
       }
       throw err;
     }
@@ -450,63 +362,62 @@ export class KnowledgeService {
   }
 
   /**
-   * After a bundle is renamed, rewrite the `tf:page/<old>/…` links embedded in every doc that
-   * references it (across all bundles) to the new name, re-running `writeConcept` so each doc's
-   * body AND its `knowledge_links` rows re-extract consistently. Each rewritten doc gets a tagged
-   * history revision. A final global resolve pass backfills any ids the per-doc writes missed.
+   * After a space is renamed, rewrite the `tf:page/<old>/…` links embedded in every page that
+   * references it (across all spaces) to the new name, re-running `writePage` so each page's
+   * body AND its `knowledge_links` rows re-extract consistently. Each rewritten page gets a tagged
+   * history revision. A final global resolve pass backfills any ids the per-page writes missed.
    * No DB transaction (none available): order is rename → rewrite → resolve, so a partial failure
-   * leaves at most a few stale inbound links rather than a half-renamed bundle.
+   * leaves at most a few stale inbound links rather than a half-renamed space.
    */
   private async renameCrossLinks(oldName: string, newName: string): Promise<void> {
     const okf = this.okf();
     if (!okf) return;
-    const sourceIds = await okf.links.listSourceIdsByTargetBundleName(oldName);
+    const sourceIds = await okf.links.listSourceIdsByTargetSpaceName(oldName);
     for (const sourceId of sourceIds) {
-      const doc = await this.deps.documents.getById(sourceId);
+      const page = await this.deps.pages.getById(sourceId);
       // Skip soft-deleted sources: their link rows persist, but re-writing one would flip it back to
       // active (upsertBySource forces active=true) — a rename must not resurrect a deleted page.
-      if (!doc?.bundleId || doc.path == null || !doc.active) continue;
-      const next = rewriteCrossPageBundleName(doc.content, oldName, newName);
-      if (next === doc.content) continue;
-      await this.writeConcept({
-        bundleId: doc.bundleId,
-        path: doc.path,
+      if (!page?.spaceId || page.path == null || !page.active) continue;
+      const next = rewriteCrossPageSpaceName(page.content, oldName, newName);
+      if (next === page.content) continue;
+      await this.writePage({
+        spaceId: page.spaceId,
+        path: page.path,
         content: next,
-        reason: `bundle renamed ${oldName} → ${newName}`,
+        reason: `space renamed ${oldName} → ${newName}`,
       });
     }
-    // Safety net: a rename leaves the bundle's id (and each target page's id) intact, so any link row
-    // still naming the old bundle — e.g. a doc whose body rewrite was skipped — only has a stale name
-    // column. Fix it directly so backlinks/graph stay consistent regardless of the per-doc rewrites.
-    await okf.links.renameTargetBundle(oldName, newName);
-    await okf.links.resolveCrossBundleLinks();
+    // Safety net: a rename leaves the space's id (and each target page's id) intact, so any link row
+    // still naming the old space — e.g. a page whose body rewrite was skipped — only has a stale name
+    // column. Fix it directly so backlinks/graph stay consistent regardless of the per-page rewrites.
+    await okf.links.renameTargetSpace(oldName, newName);
+    await okf.links.resolveCrossSpaceLinks();
   }
 
-  async deleteBundle(id: string): Promise<boolean> {
+  async deleteSpace(id: string): Promise<boolean> {
     const okf = this.okf();
-    return okf ? okf.bundles.delete(id) : false;
+    return okf ? okf.spaces.delete(id) : false;
   }
 
-  listBundleDocuments(bundleId: string): Promise<KnowledgeDocument[]> {
-    return this.deps.documents.listByBundle(bundleId);
+  listSpacePages(spaceId: string): Promise<KnowledgePage[]> {
+    return this.deps.pages.listBySpace(spaceId);
   }
 
   /**
-   * Author or update one OKF concept from its full markdown. A reserved final path segment
-   * (`index`/`log`) is stored as a directory override instead of a concept. Recomputes the
-   * concept's outbound cross-links and (re)indexes only when the body changed.
+   * Author or update one OKF page from its full markdown. A reserved final path segment
+   * (`index`/`log`) is stored as a directory override instead of a page. Recomputes the
+   * page's outbound cross-links and (re)indexes only when the body changed.
    */
-  async writeConcept(input: WriteConceptInput): Promise<WriteConceptResult> {
+  async writePage(input: WritePageInput): Promise<WritePageResult> {
     const okf = this.okf();
     if (!okf) return { ok: false, reason: "okf_unavailable" };
-    if (!(await okf.bundles.getById(input.bundleId)))
-      return { ok: false, reason: "bundle_not_found" };
+    if (!(await okf.spaces.getById(input.spaceId))) return { ok: false, reason: "space_not_found" };
 
-    const path = normalizeConceptPath(input.path);
+    const path = normalizePagePath(input.path);
     const last = path.split("/").at(-1);
     if (last === "index" || last === "log") {
       await okf.overrides.upsert({
-        bundleId: input.bundleId,
+        spaceId: input.spaceId,
         dirPath: dirOf(path),
         file: `${last}.md` as "index.md" | "log.md",
         content: input.content,
@@ -515,38 +426,38 @@ export class KnowledgeService {
       return { ok: true, override: true };
     }
 
-    const concept = parseOkf(input.content);
-    if (!concept) return { ok: false, reason: "invalid_okf" };
+    const parsed = parseOkf(input.content);
+    if (!parsed) return { ok: false, reason: "invalid_okf" };
 
-    const prior = await this.deps.documents.getByBundlePath(input.bundleId, path);
+    const prior = await this.deps.pages.getBySpacePath(input.spaceId, path);
     const now = new Date();
-    const draft: KnowledgeDocument = {
+    const draft: KnowledgePage = {
       _id: prior?._id ?? randomUUID(),
-      title: concept.title ?? last ?? path,
+      title: parsed.title ?? last ?? path,
       content: input.content,
-      plainText: concept.body,
-      // Bundle concepts are always authored content — keeps the (source, source_id) upsert key
-      // stable so it can't collide with the partial unique (bundle_id, path) index.
+      plainText: parsed.body,
+      // Space pages are always authored content — keeps the (source, source_id) upsert key
+      // stable so it can't collide with the partial unique (space_id, path) index.
       source: "authored",
-      sourceId: `okf:${input.bundleId}:${path}`,
-      domain: concept.tf.domain,
-      tags: concept.tags,
-      active: concept.tf.active ?? true,
-      alwaysLoadForAgents: concept.tf.alwaysLoadForAgents ?? false,
+      sourceId: `okf:${input.spaceId}:${path}`,
+      domain: parsed.tf.domain,
+      tags: parsed.tags,
+      active: parsed.tf.active ?? true,
+      alwaysLoadForAgents: parsed.tf.alwaysLoadForAgents ?? false,
       version: 1,
-      bundleId: input.bundleId,
+      spaceId: input.spaceId,
       path,
-      resource: concept.resource,
-      type: concept.type,
-      frontmatterExtra: concept.extra,
+      resource: parsed.resource,
+      type: parsed.type,
+      frontmatterExtra: parsed.extra,
       createdAt: prior?.createdAt ?? now,
-      updatedAt: concept.timestamp ? new Date(concept.timestamp) : now,
+      updatedAt: parsed.timestamp ? new Date(parsed.timestamp) : now,
     };
-    const { _id } = await this.deps.documents.upsertBySource(draft);
+    const { _id } = await this.deps.pages.upsertBySource(draft);
 
-    // History: snapshot the prior content as a revision whenever an existing concept's content
+    // History: snapshot the prior content as a revision whenever an existing page's content
     // actually changes (creates have no prior; unchanged re-writes stay silent). `reason` is set by
-    // internal callers like bundle rename; ordinary edits leave it null.
+    // internal callers like space rename; ordinary edits leave it null.
     if (prior && prior.content !== input.content) {
       await this.deps.revisions.append(
         randomUUID(),
@@ -558,65 +469,65 @@ export class KnowledgeService {
     }
 
     const sameSpace = await Promise.all(
-      concept.links.map(async (raw) => {
+      parsed.links.map(async (raw) => {
         const targetPath = resolveLink(path, raw);
-        const target = await this.deps.documents.getByBundlePath(input.bundleId, targetPath);
+        const target = await this.deps.pages.getBySpacePath(input.spaceId, targetPath);
         // A soft-deleted target must read as broken (targetId null), not as a resolved live link.
         return { targetPath, targetId: target?.active ? target._id : null };
       })
     );
     const crossSpace = await Promise.all(
-      concept.crossLinks.map(async (cl) => {
-        const targetBundle = await okf.bundles.getByName(cl.bundleName);
-        const target = targetBundle
-          ? await this.deps.documents.getByBundlePath(targetBundle._id, cl.path)
+      parsed.crossLinks.map(async (cl) => {
+        const targetSpace = await okf.spaces.getByName(cl.spaceName);
+        const target = targetSpace
+          ? await this.deps.pages.getBySpacePath(targetSpace._id, cl.path)
           : null;
         return {
           targetPath: cl.path,
           targetId: target?.active ? target._id : null,
-          targetBundleName: cl.bundleName,
-          targetBundleId: targetBundle?._id ?? null,
+          targetSpaceName: cl.spaceName,
+          targetSpaceId: targetSpace?._id ?? null,
         };
       })
     );
-    await okf.links.replaceForDocument(_id, input.bundleId, [...sameSpace, ...crossSpace]);
+    await okf.links.replaceForPage(_id, input.spaceId, [...sameSpace, ...crossSpace]);
 
-    const canonical = await this.deps.documents.getById(_id);
+    const canonical = await this.deps.pages.getById(_id);
     if (!canonical) return { ok: false, reason: "invalid_okf" };
-    if (!prior || prior.plainText !== concept.body) await this.afterWrite(canonical);
-    return { ok: true, document: canonical };
+    if (!prior || prior.plainText !== parsed.body) await this.afterWrite(canonical);
+    return { ok: true, page: canonical };
   }
 
   /** Progressive-disclosure listing for a directory: an authored index.md override, else synthesized. */
-  async navigateBundle(bundleId: string, dirPath: string): Promise<string | null> {
+  async navigateSpace(spaceId: string, dirPath: string): Promise<string | null> {
     const okf = this.okf();
     if (!okf) return null;
-    if (!(await okf.bundles.getById(bundleId))) return null;
-    const dir = normalizeConceptPath(dirPath);
-    const override = await okf.overrides.get(bundleId, dir, "index.md");
+    if (!(await okf.spaces.getById(spaceId))) return null;
+    const dir = normalizePagePath(dirPath);
+    const override = await okf.overrides.get(spaceId, dir, "index.md");
     if (override) return override.content;
-    const docs = await this.deps.documents.listByBundle(bundleId);
-    const entries: IndexEntry[] = docs.map((d) => ({
-      path: d.path ?? "",
-      title: d.title,
-      description: snippet(d.plainText),
+    const pages = await this.deps.pages.listBySpace(spaceId);
+    const entries: IndexEntry[] = pages.map((p) => ({
+      path: p.path ?? "",
+      title: p.title,
+      description: snippet(p.plainText),
     }));
     return renderIndex(dir, entries);
   }
 
-  /** Node + edge list for a bundle's cross-link graph (capped for payload safety). */
-  async getBundleGraph(bundleId: string): Promise<BundleGraph | null> {
+  /** Node + edge list for a space's cross-link graph (capped for payload safety). */
+  async getSpaceGraph(spaceId: string): Promise<SpaceGraph | null> {
     const okf = this.okf();
     if (!okf) return null;
-    if (!(await okf.bundles.getById(bundleId))) return null;
+    if (!(await okf.spaces.getById(spaceId))) return null;
     const NODE_CAP = 500;
     const EDGE_CAP = 1000;
-    const docs = await this.deps.documents.listByBundle(bundleId);
-    const allEdges = await okf.links.getGraphForBundle(bundleId);
-    const nodes = docs.slice(0, NODE_CAP).map((d) => ({
-      id: d._id,
-      path: d.path ?? null,
-      title: d.title,
+    const pages = await this.deps.pages.listBySpace(spaceId);
+    const allEdges = await okf.links.getGraphForSpace(spaceId);
+    const nodes = pages.slice(0, NODE_CAP).map((p) => ({
+      id: p._id,
+      path: p.path ?? null,
+      title: p.title,
     }));
     const nodeIds = new Set(nodes.map((n) => n.id));
     const edges = allEdges
@@ -627,63 +538,63 @@ export class KnowledgeService {
         targetId: e.targetId,
         targetPath: e.targetPath,
         broken: e.targetId === null,
-        targetBundleName: e.targetBundleName,
-        targetBundleId: e.targetBundleId,
+        targetSpaceName: e.targetSpaceName,
+        targetSpaceId: e.targetSpaceId,
       }));
-    return { nodes, edges, truncated: docs.length > NODE_CAP || allEdges.length > EDGE_CAP };
+    return { nodes, edges, truncated: pages.length > NODE_CAP || allEdges.length > EDGE_CAP };
   }
 
-  /** Pages that link to a concept (same- or cross-space) — the "Linked from" panel. */
-  async getBacklinks(documentId: string): Promise<Backlink[] | null> {
+  /** Pages that link to a page (same- or cross-space) — the "Linked from" panel. */
+  async getBacklinks(pageId: string): Promise<Backlink[] | null> {
     const okf = this.okf();
     if (!okf) return null;
-    const doc = await this.deps.documents.getById(documentId);
-    if (!doc?.bundleId || doc.path == null) return null;
-    const bundle = await okf.bundles.getById(doc.bundleId);
-    if (!bundle) return null;
+    const page = await this.deps.pages.getById(pageId);
+    if (!page?.spaceId || page.path == null) return null;
+    const space = await okf.spaces.getById(page.spaceId);
+    if (!space) return null;
     return okf.links.getBacklinks({
-      documentId,
-      bundleId: doc.bundleId,
-      bundleName: bundle.name,
-      path: doc.path,
+      pageId: pageId,
+      spaceId: page.spaceId,
+      spaceName: space.name,
+      path: page.path,
     });
   }
 
-  /** Flat list of every OKF page across all bundles — feeds the editor's `@`-mention Pages section. */
-  async listAllPages(): Promise<BundlePageRef[]> {
+  /** Flat list of every OKF page across all spaces — feeds the editor's `@`-mention Pages section. */
+  async listAllPages(): Promise<SpacePageRef[]> {
     const okf = this.okf();
     if (!okf) return [];
-    return this.deps.documents.listAllBundlePages();
+    return this.deps.pages.listAllSpacePages();
   }
 
   /** Knowledge home overview: every space with page count + last activity, plus recently-edited pages. */
   async getKnowledgeOverview(
     recentLimit: number
-  ): Promise<{ spaces: BundleWithActivity[]; recent: RecentPage[] }> {
+  ): Promise<{ spaces: SpaceWithActivity[]; recent: RecentPage[] }> {
     const okf = this.okf();
     if (!okf) return { spaces: [], recent: [] };
     const [spaces, recent] = await Promise.all([
-      okf.bundles.listWithActivity(),
-      this.deps.documents.listRecentPages(recentLimit),
+      okf.spaces.listWithActivity(),
+      this.deps.pages.listRecentPages(recentLimit),
     ]);
     return { spaces, recent };
   }
 
   // ── indexing (used by the pg-boss worker + adapters) ─────────────────────────
 
-  indexDocument(doc: KnowledgeDocument): Promise<unknown> {
-    return indexDocument(doc, this.deps.chunks, this.deps.embeddings);
+  indexPage(page: KnowledgePage): Promise<unknown> {
+    return indexPage(page, this.deps.chunks, this.deps.embeddings);
   }
 
   async reindexById(id: string): Promise<void> {
-    const doc = await this.deps.documents.getById(id);
-    if (doc?.active) await this.indexDocument(doc);
+    const page = await this.deps.pages.getById(id);
+    if (page?.active) await this.indexPage(page);
   }
 
-  /** Upsert a resource/conversation-sourced document and (re)index it. */
-  async ingestSource(input: IngestSourceInput): Promise<KnowledgeDocument | null> {
+  /** Upsert a resource/conversation-sourced page and (re)index it. */
+  async ingestSource(input: IngestSourceInput): Promise<KnowledgePage | null> {
     const now = new Date();
-    const draft: KnowledgeDocument = {
+    const draft: KnowledgePage = {
       _id: randomUUID(),
       title: input.title,
       content: input.content,
@@ -698,14 +609,14 @@ export class KnowledgeService {
       createdAt: now,
       updatedAt: now,
     };
-    const { _id } = await this.deps.documents.upsertBySource(draft);
-    const canonical = await this.deps.documents.getById(_id);
-    if (canonical) await this.indexDocument(canonical);
+    const { _id } = await this.deps.pages.upsertBySource(draft);
+    const canonical = await this.deps.pages.getById(_id);
+    if (canonical) await this.indexPage(canonical);
     return canonical;
   }
 
   reindexAll(): Promise<number> {
-    return reindexAll(this.deps.documents, this.deps.chunks, this.deps.embeddings);
+    return reindexAll(this.deps.pages, this.deps.chunks, this.deps.embeddings);
   }
 
   /** Full re-index when the embedding dimension changed (KN-V1-002 guard). */
@@ -715,8 +626,8 @@ export class KnowledgeService {
     return true;
   }
 
-  private async afterWrite(doc: KnowledgeDocument): Promise<void> {
-    if (this.deps.enqueueIndex) await this.deps.enqueueIndex(doc._id);
-    else await this.indexDocument(doc);
+  private async afterWrite(page: KnowledgePage): Promise<void> {
+    if (this.deps.enqueueIndex) await this.deps.enqueueIndex(page._id);
+    else await this.indexPage(page);
   }
 }

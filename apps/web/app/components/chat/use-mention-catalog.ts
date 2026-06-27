@@ -79,9 +79,9 @@ export function useMentionCatalog(): MentionCatalog {
         out.push({
           kind: "knowledge",
           phrase: `~${pg.title}`,
-          id: pg.documentId,
+          id: pg.pageId,
           label: pg.title,
-          description: `${pg.bundleName} · ${pg.path}`,
+          description: `${pg.spaceName} · ${pg.path}`,
         });
       }
       setEntries(out);

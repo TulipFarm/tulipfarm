@@ -31,9 +31,9 @@ const routine = (name: string, config: Record<string, unknown>): SoulRoutine => 
   config,
   hasHooks: false,
 });
-const integration = (name: string, connection: Record<string, unknown>): SoulIntegration => ({
+const integration = (name: string, config: Record<string, unknown>): SoulIntegration => ({
   name,
-  connection,
+  config,
 });
 
 function fakeLoader(

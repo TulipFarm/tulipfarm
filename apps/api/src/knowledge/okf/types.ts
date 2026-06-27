@@ -1,4 +1,4 @@
-// Open Knowledge Format (OKF) layer types — the parsed/serializable shape of a concept file.
+// Open Knowledge Format (OKF) layer types — the parsed/serializable shape of a page file.
 // These are NOT the DB row types (those live in ../types.ts); the service maps between them.
 
 /** TulipFarm-specific frontmatter extension fields (parsed from `x-tf-*` keys). All optional. */
@@ -10,14 +10,14 @@ export interface OkfTfFields {
   version: number | null;
 }
 
-/** A cross-space link target parsed from a `tf:page/<BundleName>/<path>` href. */
+/** A cross-space link target parsed from a `tf:page/<SpaceName>/<path>` href. */
 export interface CrossPageLink {
-  bundleName: string;
+  spaceName: string;
   path: string;
 }
 
-/** The parsed representation of a single OKF concept file (frontmatter + body). */
-export interface OkfConcept {
+/** The parsed representation of a single OKF page file (frontmatter + body). */
+export interface OkfPage {
   title: string | null;
   /** The `type` frontmatter field (e.g. "table", "playbook") — surfaced for the search `type` facet. */
   type: string | null;
@@ -32,8 +32,8 @@ export interface OkfConcept {
   tf: OkfTfFields;
   /** Markdown body (everything after the frontmatter). */
   body: string;
-  /** Raw bundle-relative link targets captured from the body, as written (resolve via resolveLink). */
+  /** Raw space-relative link targets captured from the body, as written (resolve via resolveLink). */
   links: string[];
-  /** Cross-space links (`tf:page/<BundleName>/<path>`) captured from the body. */
+  /** Cross-space links (`tf:page/<SpaceName>/<path>`) captured from the body. */
   crossLinks: CrossPageLink[];
 }

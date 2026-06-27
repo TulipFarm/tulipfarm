@@ -29,7 +29,7 @@ separately-named ProseMirror node with its own suggestion `pluginKey`:
 | `@agent` | `listAgents()` | first one → POST `agentId` (routes the turn; overrides the panel's active agent) |
 | `/skill` | `listSkills()` | POST `skills: string[]` — eagerly injected into the agent's context for the turn |
 | `#resource` | `listResourceTypes()` | POST `resources: string[]` — type schema injected for the turn |
-| `~knowledge` | `searchDocuments(query)` (async, per keystroke) | POST `knowledgePages: string[]` (documentIds) — full page content pinned into `<pinned-knowledge>` for the turn |
+| `~knowledge` | `searchKnowledge(query)` (async, per keystroke) | POST `knowledgePages: string[]` (pageIds) — full page content pinned into `<pinned-knowledge>` for the turn |
 
 `editor/serialize.ts` is the pure, DOM-free core (unit-tested): `serializeDoc(editor.getJSON())` →
 `{ text (markdown, mentions as literal `@/ / /# / ~` tokens), agentId, skills, resources, knowledge }`; link hrefs are
@@ -47,14 +47,14 @@ Note: ProseMirror can't be driven under jsdom — the editor's behavior is cover
 Conversations persist server-side (UUID id, auto-created on the first turn). On that first turn the API
 generates a **title** from the message via the quick LLM tier (async, non-blocking — see
 `apps/api/src/chat/title.ts`). The shell holds the list in `lib/conversations-context.tsx`
-(`GET /api/v1/conversations`, refetched on route change + on each turn via `onConversationChange`), which
+(`GET /api/v1/chats`, refetched on route change + on each turn via `onConversationChange`), which
 `app-sidebar.tsx` renders below a clickable **Chats** header (the entry point to the `/chats` browse
 page — there is no standalone "Chat" nav item). Clicking a row opens `/chat/:id` (`_app.chat.$id.tsx`),
 whose loader fetches the conversation + messages and rehydrates the timeline via `lib/chat/hydrate.ts`
 (`messagesToTimeline`) so `useChatStream({ initialMessages })` seeds a sealed transcript; follow-up turns
 reuse the same id. "+ new chat" links back to `/`. The **Chats** page (`_app.chats.tsx`) lists every chat
 with server-side title search (`?q=`), and a three-dots menu to **star** (pin) or **rename** a chat
-inline (`PUT /api/v1/conversations/:id` → `renameConversation` / `setConversationStarred`).
+inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarred`).
 
 ## Component → event
 

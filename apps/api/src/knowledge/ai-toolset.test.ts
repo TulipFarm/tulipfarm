@@ -17,18 +17,16 @@ describe("knowledge tools via ToolRegistry", () => {
         .sort()
     ).toEqual([
       "cite_sources",
-      "create_bundle",
-      "create_knowledge_collection",
-      "create_knowledge_document",
+      "create_knowledge_page",
+      "create_space",
       "get_backlinks",
-      "get_bundle_graph",
-      "get_concept_by_path",
-      "get_document",
-      "list_bundles",
-      "list_knowledge_collections",
-      "navigate_bundle",
+      "get_page",
+      "get_page_by_path",
+      "get_space_graph",
+      "list_spaces",
+      "navigate_space",
       "query_knowledge",
-      "write_concept",
+      "write_page",
     ]);
   });
 });
