@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
+import { PG_MIGRATIONS } from "../pg-migrations";
 import { makePglite } from "../test/pglite";
 
 async function seedPage(
@@ -46,9 +47,58 @@ describe("002_knowledge migration on PGlite", () => {
     await db.close();
   });
 
-  it("bumps schema_version to the latest (18)", async () => {
+  it("bumps schema_version to the latest (20)", async () => {
     const { rows } = await db.query("SELECT version FROM schema_version WHERE id = true");
-    expect(Number((rows[0] as { version: number }).version)).toBe(18);
+    expect(Number((rows[0] as { version: number }).version)).toBe(20);
+  });
+
+  it("adds knowledge_chunks.content_hash (019)", async () => {
+    const col = await db.query(
+      "SELECT column_name FROM information_schema.columns WHERE table_name = 'knowledge_chunks' AND column_name = 'content_hash'"
+    );
+    expect((col.rows as { column_name: string }[]).map((r) => r.column_name)).toEqual([
+      "content_hash",
+    ]);
+  });
+
+  it("backfills content_hash with md5(content) for pre-existing chunks (019)", async () => {
+    // Simulate a pre-019 row (NULL hash), then replay just the 019 backfill directly — the runner
+    // won't re-run an already-applied version, so invoke its `up` to exercise the backfill SQL.
+    const pageId = await seedPage(db);
+    await seedChunk(db, pageId, "alpha", null);
+    await db.query("UPDATE knowledge_chunks SET content_hash = NULL");
+    const v019 = PG_MIGRATIONS.find((m) => m.version === 19);
+    if (!v019) throw new Error("migration 019 missing");
+    await v019.up(db);
+    const { rows } = await db.query(
+      "SELECT content_hash, md5(content) AS expected FROM knowledge_chunks WHERE content = 'alpha'"
+    );
+    const row = rows[0] as { content_hash: string; expected: string };
+    expect(row.content_hash).toBe(row.expected);
+  });
+
+  it("creates the knowledge_connectors sync-state table (020)", async () => {
+    const { rows } = await db.query("SELECT to_regclass('knowledge_connectors') AS t");
+    expect((rows[0] as { t: string | null }).t).not.toBeNull();
+  });
+
+  it("knowledge_connectors defaults enabled=false with a nullable cursor (020)", async () => {
+    await db.query(
+      "INSERT INTO knowledge_connectors (name, created_at, updated_at) VALUES ('c', now(), now())"
+    );
+    const { rows } = await db.query(
+      "SELECT enabled, cursor, last_run_at, last_error FROM knowledge_connectors WHERE name = 'c'"
+    );
+    const row = rows[0] as {
+      enabled: boolean;
+      cursor: string | null;
+      last_run_at: Date | null;
+      last_error: string | null;
+    };
+    expect(row.enabled).toBe(false);
+    expect(row.cursor).toBeNull();
+    expect(row.last_run_at).toBeNull();
+    expect(row.last_error).toBeNull();
   });
 
   it("creates the three knowledge content tables (collections retired by 018)", async () => {

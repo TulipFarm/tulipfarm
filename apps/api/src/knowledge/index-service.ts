@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EmbeddingUnavailableError } from "@tulipfarm/llm";
 import { chunkText } from "./chunk";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
@@ -9,10 +10,20 @@ export interface IndexResult {
   embedded: boolean;
 }
 
+/** Content address used to skip re-embedding unchanged chunks. md5 matches the SQL `md5()` backfill. */
+function contentHash(content: string): string {
+  return createHash("md5").update(content).digest("hex");
+}
+
 /**
- * (Re)index one page: chunk its plain text, embed the chunks if a provider is
- * available (else store them lexical-only with NULL embeddings), and replace the
- * page's chunks atomically (delete-then-insert — idempotent for retries/updates).
+ * (Re)index one page: chunk its plain text, then embed only the chunks whose content actually
+ * changed since the last index. A chunk reuses its stored embedding when, at the same `chunkIndex`,
+ * the prior chunk's `content_hash` matches AND it was embedded under the currently-active model —
+ * so a one-line edit to a large page re-embeds one chunk instead of all of them. A model/dimension
+ * swap invalidates every reuse (no prior model matches the active one) → full re-embed.
+ *
+ * Chunks with no available provider (or a provider that vanished mid-flight) store lexical-only with
+ * NULL embeddings. Rows are replaced atomically (delete-then-insert — idempotent for retries).
  */
 export async function indexPage(
   page: KnowledgePage,
@@ -20,25 +31,49 @@ export async function indexPage(
   embeddings: EmbeddingPort
 ): Promise<IndexResult> {
   const textChunks = chunkText(page.plainText);
-  await chunksRepo.deleteByPage(page._id);
-  if (textChunks.length === 0) return { chunkCount: 0, embedded: false };
+  if (textChunks.length === 0) {
+    await chunksRepo.deleteByPage(page._id);
+    return { chunkCount: 0, embedded: false };
+  }
 
-  let vectors: (number[] | null)[] = textChunks.map(() => null);
-  let model: string | null = null;
-  let dim: number | null = null;
-  let embedded = false;
+  const available = embeddings.isAvailable();
+  // Snapshot the active model before embedding so a concurrent reload can't swap it under us.
+  const active = available ? embeddings.getActive() : null;
+  const activeModel = active?.model ?? null;
+  const hashes = textChunks.map((c) => contentHash(c.content));
 
-  if (embeddings.isAvailable()) {
+  // Reuse pass: carry forward embeddings of chunks unchanged under the active model.
+  const existing = await chunksRepo.listByPageForDiff(page._id);
+  const priorByIndex = new Map(existing.map((c) => [c.chunkIndex, c]));
+  const vectors: (number[] | null)[] = textChunks.map(() => null);
+  const dims: (number | null)[] = textChunks.map(() => null);
+  textChunks.forEach((c, i) => {
+    const prior = priorByIndex.get(c.index);
+    if (
+      activeModel !== null &&
+      prior &&
+      prior.embedding !== null &&
+      prior.contentHash === hashes[i] &&
+      prior.model === activeModel
+    ) {
+      vectors[i] = prior.embedding;
+      dims[i] = prior.dim;
+    }
+  });
+
+  // Embed only the chunks that couldn't be reused.
+  const toEmbed = textChunks
+    .map((c, i) => ({ content: c.content, i }))
+    .filter(({ i }) => vectors[i] === null);
+  if (available && toEmbed.length > 0) {
     try {
-      // Snapshot the active model before embedding so a concurrent reload can't swap it under us.
-      const active = embeddings.getActive();
-      const out = await embeddings.embedMany(textChunks.map((c) => c.content));
-      vectors = out.embeddings;
-      model = active?.model ?? null;
-      dim = out.dimension;
-      embedded = true;
+      const out = await embeddings.embedMany(toEmbed.map((t) => t.content));
+      out.embeddings.forEach((vec, j) => {
+        vectors[toEmbed[j].i] = vec;
+        dims[toEmbed[j].i] = out.dimension;
+      });
     } catch (err) {
-      // Provider vanished between isAvailable() and embedMany() → fall back to lexical-only.
+      // Provider vanished between isAvailable() and embedMany() → leave these chunks lexical-only.
       if (!(err instanceof EmbeddingUnavailableError)) throw err;
     }
   }
@@ -46,12 +81,14 @@ export async function indexPage(
   const inputs: ChunkInput[] = textChunks.map((c, i) => ({
     chunkIndex: c.index,
     content: c.content,
-    embedding: embedded ? (vectors[i] ?? null) : null,
-    model: embedded ? model : null,
-    dim: embedded ? dim : null,
+    contentHash: hashes[i],
+    embedding: vectors[i],
+    model: vectors[i] !== null ? activeModel : null,
+    dim: vectors[i] !== null ? dims[i] : null,
   }));
+  await chunksRepo.deleteByPage(page._id);
   await chunksRepo.insertMany(page._id, inputs);
-  return { chunkCount: inputs.length, embedded };
+  return { chunkCount: inputs.length, embedded: vectors.some((v) => v !== null) };
 }
 
 /** Full re-index of every active page (used after a dimension-change guard fires). */

@@ -127,6 +127,20 @@ export interface KnowledgeRevision {
 export interface ChunkInput {
   chunkIndex: number;
   content: string;
+  /** `md5(content)` — content address used to skip re-embedding unchanged chunks on re-index. */
+  contentHash: string;
+  embedding: number[] | null;
+  model: string | null;
+  dim: number | null;
+}
+
+/**
+ * Existing-chunk projection used by the re-index diff: enough to decide whether a new chunk at the
+ * same `chunkIndex` can reuse this chunk's embedding (`contentHash` matches AND `model` is current).
+ */
+export interface ExistingChunk {
+  chunkIndex: number;
+  contentHash: string | null;
   embedding: number[] | null;
   model: string | null;
   dim: number | null;
@@ -154,6 +168,30 @@ export interface SearchHit {
 export interface SearchResults {
   results: SearchHit[];
   warnings: string[];
+}
+
+/** Aggregate index health, all derived from our own tables (no counters). */
+export interface IndexStats {
+  activePages: number;
+  totalChunks: number;
+  embeddedChunks: number;
+  lexicalChunks: number;
+  /** Max seconds an active page's content has been newer than its freshest chunk (0 = caught up). */
+  maxLagSeconds: number | null;
+}
+
+/** Operational view of the async index queue (sourced from pg-boss; null when unavailable). */
+export interface IndexQueueStats {
+  pending: number;
+  lastError: { message: string; failedAt: Date } | null;
+}
+
+/** Combined index-status report surfaced by `GET /api/v1/knowledge/index-status`. */
+export interface IndexStatusReport {
+  activePages: number;
+  chunks: { total: number; embedded: number; lexicalOnly: number };
+  indexLagSeconds: number | null;
+  queue: IndexQueueStats | null;
 }
 
 /** Structural subset of `@tulipfarm/llm` EmbeddingService that knowledge depends on. */

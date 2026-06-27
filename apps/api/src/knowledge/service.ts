@@ -13,6 +13,8 @@ import type {
   Backlink,
   EmbeddingPort,
   IndexingStatus,
+  IndexQueueStats,
+  IndexStatusReport,
   KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
@@ -125,6 +127,8 @@ export interface KnowledgeServiceDeps {
   embeddings: EmbeddingPort;
   /** When set, page writes enqueue async (re)indexing instead of indexing inline. */
   enqueueIndex?: (pageId: string) => Promise<void>;
+  /** Operational stats for the async index queue (pg-boss). Absent → index-status omits queue info. */
+  indexQueueStats?: () => Promise<IndexQueueStats>;
   /** OKF space repos — optional; required only for the OKF space/page methods. */
   spaces?: KnowledgeSpaceRepo;
   links?: KnowledgeLinksRepo;
@@ -617,6 +621,59 @@ export class KnowledgeService {
 
   reindexAll(): Promise<number> {
     return reindexAll(this.deps.pages, this.deps.chunks, this.deps.embeddings);
+  }
+
+  /**
+   * Manual re-index. `pageId` re-indexes one page; `spaceId` re-indexes a whole space; neither
+   * falls back to a full re-index. Returns the number of pages re-indexed.
+   */
+  async reindexTargeted(opts: { pageId?: string; spaceId?: string }): Promise<number> {
+    if (opts.pageId) {
+      const page = await this.deps.pages.getById(opts.pageId);
+      if (!page?.active) return 0;
+      await this.indexPage(page);
+      return 1;
+    }
+    if (opts.spaceId) {
+      const pages = await this.deps.pages.listBySpace(opts.spaceId);
+      for (const page of pages) await this.indexPage(page);
+      return pages.length;
+    }
+    return this.reindexAll();
+  }
+
+  /**
+   * One-shot backfill: (re)index every active page that has a chunk which is unembedded or embedded
+   * under a stale model (covers pages authored while no provider was configured). No-op (returns 0)
+   * when no embedding provider is available. Enqueues async (non-blocking) when a queue is wired,
+   * else indexes inline — same dispatch as a normal write. Returns the number of pages dispatched.
+   */
+  async backfillMissing(): Promise<number> {
+    const active = this.deps.embeddings.isAvailable() ? this.deps.embeddings.getActive() : null;
+    if (!active?.model) return 0;
+    const ids = await this.deps.chunks.listPageIdsNeedingEmbedding(active.model);
+    for (const id of ids) {
+      if (this.deps.enqueueIndex) await this.deps.enqueueIndex(id);
+      else await this.reindexById(id);
+    }
+    return ids.length;
+  }
+
+  /** DB-derived index health (+ pg-boss queue stats when wired). */
+  async indexStatus(): Promise<IndexStatusReport> {
+    const stats = await this.deps.chunks.indexStats();
+    let queue: IndexQueueStats | null = null;
+    if (this.deps.indexQueueStats) queue = await this.deps.indexQueueStats();
+    return {
+      activePages: stats.activePages,
+      chunks: {
+        total: stats.totalChunks,
+        embedded: stats.embeddedChunks,
+        lexicalOnly: stats.lexicalChunks,
+      },
+      indexLagSeconds: stats.maxLagSeconds,
+      queue,
+    };
   }
 
   /** Full re-index when the embedding dimension changed (KN-V1-002 guard). */

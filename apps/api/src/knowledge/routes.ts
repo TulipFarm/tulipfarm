@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { UserDoc } from "../auth/users";
 import { parsePaginationQuery } from "../pagination";
 import type { PageHit, PageRetrievalService } from "./retrieval-service";
 import { type KnowledgeService, SpaceNameTakenError } from "./service";
@@ -741,6 +742,114 @@ export function registerKnowledgeRoutes(
           title: p.title,
           updatedAt: p.updatedAt.toISOString(),
         })),
+      });
+    }
+  );
+
+  // ── admin: reindex / backfill / index-status ─────────────────────────────────────
+  // Operational endpoints. Authenticated AND admin-only (mirrors secrets routes): a non-admin gets
+  // 403 even though requireAuth passed.
+  const isAdmin = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    if ((req.user as UserDoc).role !== "admin") {
+      reply.code(403).send({ error: "forbidden" });
+      return false;
+    }
+    return true;
+  };
+
+  app.post(
+    "/api/v1/knowledge/reindex",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Re-index knowledge (admin). Body { pageId } re-indexes one page, { spaceId } a whole space, neither a full re-index.",
+        tags,
+        security: sec,
+        body: {
+          type: "object",
+          properties: { pageId: { type: "string" }, spaceId: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { reindexed: { type: "number" } },
+            required: ["reindexed"],
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!isAdmin(req, reply)) return;
+      const b = (req.body ?? {}) as { pageId?: string; spaceId?: string };
+      const reindexed = await service.reindexTargeted({ pageId: b.pageId, spaceId: b.spaceId });
+      return reply.send({ reindexed });
+    }
+  );
+
+  app.post(
+    "/api/v1/knowledge/backfill",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Backfill embeddings (admin): re-index every active page with an unembedded or stale-model chunk. No-op without a provider.",
+        tags,
+        security: sec,
+        response: {
+          200: {
+            type: "object",
+            properties: { reindexed: { type: "number" } },
+            required: ["reindexed"],
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!isAdmin(req, reply)) return;
+      const reindexed = await service.backfillMissing();
+      return reply.send({ reindexed });
+    }
+  );
+
+  app.get(
+    "/api/v1/knowledge/index-status",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Index health (admin): active pages, chunk embed/lexical counts, max index lag, and pg-boss queue stats.",
+        tags,
+        security: sec,
+        response: {
+          200: { type: "object", additionalProperties: true },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (!isAdmin(req, reply)) return;
+      const status = await service.indexStatus();
+      return reply.send({
+        activePages: status.activePages,
+        chunks: status.chunks,
+        indexLagSeconds: status.indexLagSeconds,
+        queue: status.queue
+          ? {
+              pending: status.queue.pending,
+              lastError: status.queue.lastError
+                ? {
+                    message: status.queue.lastError.message,
+                    failedAt: status.queue.lastError.failedAt.toISOString(),
+                  }
+                : null,
+            }
+          : null,
       });
     }
   );

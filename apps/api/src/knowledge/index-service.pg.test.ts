@@ -28,6 +28,25 @@ function fakeEmbeddings(opts: {
   };
 }
 
+/** Records the size of every embedMany batch so a test can assert how many chunks were embedded. */
+function countingEmbeddings(
+  model = "fake-model",
+  dim = 3
+): { port: EmbeddingPort; batches: number[] } {
+  const batches: number[] = [];
+  const port: EmbeddingPort = {
+    isAvailable: () => true,
+    embedMany: async (values) => {
+      batches.push(values.length);
+      return { embeddings: values.map(() => Array(dim).fill(0.1) as number[]), dimension: dim };
+    },
+    getActive: () => ({ provider: "fake", model, dimension: dim }),
+    getDimension: () => dim,
+    consumePendingReindex: () => false,
+  };
+  return { port, batches };
+}
+
 function page(plainText: string): KnowledgePage {
   const now = new Date();
   return {
@@ -113,6 +132,46 @@ describe("indexPage", () => {
     await pages.insert(p);
     const res = await indexPage(p, chunks, fakeEmbeddings({ available: true }));
     expect(res.chunkCount).toBe(0);
+  });
+
+  it("re-embeds only the changed chunk on re-index (content-hash dedup)", async () => {
+    // 2000 chars → 3 windows (step 700): chunk0 [0,800), chunk1 [700,1500), chunk2 [1400,2000).
+    const text = "x".repeat(2000);
+    const p = page(text);
+    await pages.insert(p);
+    const e = countingEmbeddings();
+
+    const first = await indexPage(p, chunks, e.port);
+    expect(first.chunkCount).toBe(3);
+    expect(e.batches).toEqual([3]); // first index embeds all three chunks
+
+    // Edit one char in chunk0's exclusive region (pos < 700) — keeps length so later windows are
+    // byte-identical and reusable.
+    const editedText = `y${text.slice(1)}`;
+    const edited = { ...p, content: editedText, plainText: editedText };
+    const second = await indexPage(edited, chunks, e.port);
+    expect(second.chunkCount).toBe(3);
+    expect(e.batches).toEqual([3, 1]); // only the changed chunk is re-embedded
+    expect(await embeddedCount()).toBe(3); // 2 reused + 1 fresh — all rows still embedded
+  });
+
+  it("embeds nothing when re-indexing unchanged content under the same model", async () => {
+    const p = page("x".repeat(2000));
+    await pages.insert(p);
+    const e = countingEmbeddings();
+    await indexPage(p, chunks, e.port);
+    await indexPage(p, chunks, e.port);
+    expect(e.batches).toEqual([3]); // second pass reuses every chunk — no new embed call
+  });
+
+  it("re-embeds every chunk when the active model changes", async () => {
+    const p = page("x".repeat(2000));
+    await pages.insert(p);
+    const a = countingEmbeddings("model-a");
+    await indexPage(p, chunks, a.port);
+    const b = countingEmbeddings("model-b");
+    await indexPage(p, chunks, b.port); // same content, different model → no reuse
+    expect(b.batches).toEqual([3]);
   });
 
   it("reindexAll re-embeds every active page", async () => {
