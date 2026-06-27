@@ -189,6 +189,20 @@ export class KnowledgeService {
     return this.deps.documents.getById(id);
   }
 
+  /**
+   * A document fetched only when live — a missing OR soft-deleted page reads as null. Agent tools use
+   * this so a deleted page is never surfaced or cited (its wiki url would 404 for the user).
+   */
+  async getActiveDocument(id: string): Promise<KnowledgeDocument | null> {
+    const doc = await this.deps.documents.getById(id);
+    return doc?.active ? doc : null;
+  }
+
+  /** Fetch one OKF concept by its bundle + path — an exact lookup (no ranking), path normalized. */
+  getConceptByPath(bundleId: string, path: string): Promise<KnowledgeDocument | null> {
+    return this.deps.documents.getByBundlePath(bundleId, normalizeConceptPath(path));
+  }
+
   listDocuments(opts: DocumentListOpts): Promise<PaginatedResult<KnowledgeDocument>> {
     return this.deps.documents.list(opts);
   }
@@ -281,6 +295,9 @@ export class KnowledgeService {
     const neighbors = await Promise.all(neighborIds.map((id) => this.deps.documents.getById(id)));
     const extra = neighbors
       .filter((d): d is KnowledgeDocument => Boolean(d?.active))
+      // Scope-preserving: a bundle-scoped search must not leak neighbors from other bundles. Graph
+      // links cross spaces, so without this a b1 page that links to a b2 page would surface b2.
+      .filter((d) => !filters.bundleId || d.bundleId === filters.bundleId)
       .map((d) => ({
         documentId: d._id,
         chunkId: `graph:${d._id}`,
@@ -620,7 +637,7 @@ export class KnowledgeService {
     const okf = this.okf();
     if (!okf) return null;
     const doc = await this.deps.documents.getById(documentId);
-    if (!doc || !doc.bundleId || doc.path == null) return null;
+    if (!doc?.bundleId || doc.path == null) return null;
     const bundle = await okf.bundles.getById(doc.bundleId);
     if (!bundle) return null;
     return okf.links.getBacklinks({

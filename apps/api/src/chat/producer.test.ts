@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
-import { attachToStream, mapStreamPart, runChatStream } from "./producer";
+import {
+  attachToStream,
+  mapStreamPart,
+  runChatStream,
+  sourcesEventForToolResult,
+} from "./producer";
 import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
@@ -133,6 +138,33 @@ describe("mapStreamPart", () => {
         data: { toolCallId: "c3", toolName: "t", result: truncated },
       });
     });
+  });
+});
+
+describe("sourcesEventForToolResult", () => {
+  it("maps a successful cite_sources result to a sources payload", () => {
+    expect(
+      sourcesEventForToolResult("cite_sources", {
+        success: true,
+        data: { sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/concepts/d" }] },
+      })
+    ).toEqual({ sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/concepts/d" }] });
+  });
+
+  it("returns null for other tools, failures, and empty/malformed source lists", () => {
+    expect(
+      sourcesEventForToolResult("query_knowledge", { success: true, data: { sources: [] } })
+    ).toBeNull();
+    expect(
+      sourcesEventForToolResult("cite_sources", { success: true, data: { sources: [] } })
+    ).toBeNull();
+    expect(
+      sourcesEventForToolResult("cite_sources", {
+        success: false,
+        error: { code: "internal_error", message: "x" },
+      })
+    ).toBeNull();
+    expect(sourcesEventForToolResult("cite_sources", { success: true, data: {} })).toBeNull();
   });
 });
 
@@ -646,6 +678,54 @@ describe("runChatStream a2ui follow-on", () => {
           toolCallId: "c2",
           toolName: "list_things",
           output: { success: true, data: { items: [] } },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: captureEmitter(emitted), hub, log }
+    );
+    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "finish"]);
+  });
+
+  it("emits a sources event after a cite_sources tool-result", async () => {
+    const hub = new StreamHub();
+    const sid = randomUUID();
+    const emitted: Emitted[] = [];
+    await runChatStream(
+      sid,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "cite_sources",
+          output: {
+            success: true,
+            data: {
+              sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/concepts/d" }],
+            },
+          },
+        },
+        { type: "finish", finishReason: "stop" },
+      ]),
+      { emitter: captureEmitter(emitted), hub, log }
+    );
+    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "sources", "finish"]);
+    expect(emitted.find((e) => e.eventType === "sources")?.data).toEqual({
+      sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/concepts/d" }],
+    });
+  });
+
+  it("emits no sources event for a cite_sources result with an empty list", async () => {
+    const hub = new StreamHub();
+    const sid = randomUUID();
+    const emitted: Emitted[] = [];
+    await runChatStream(
+      sid,
+      fromArray([
+        {
+          type: "tool-result",
+          toolCallId: "c1",
+          toolName: "cite_sources",
+          output: { success: true, data: { sources: [] } },
         },
         { type: "finish", finishReason: "stop" },
       ]),

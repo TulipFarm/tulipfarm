@@ -30,6 +30,27 @@ describe("mention highlighting + cards", () => {
     expect(card?.textContent).toContain("Handles Billing Assistant work.");
   });
 
+  it("wraps a known ~knowledge page mention in a chip with a Knowledge hover card", () => {
+    const mentions: MentionEntry[] = [
+      {
+        kind: "knowledge",
+        phrase: "~Refund Policy",
+        id: "doc-1",
+        label: "Refund Policy",
+        description: "Billing · policies/refunds",
+      },
+    ];
+    const { container } = render(
+      <MarkdownView mentions={mentions}>{"summarize ~Refund Policy please"}</MarkdownView>
+    );
+    const chips = container.querySelectorAll(".tf-mention");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.textContent).toBe("~Refund Policy");
+    const card = container.querySelector('[role="tooltip"]');
+    expect(card?.textContent).toContain("Knowledge");
+    expect(card?.textContent).toContain("Billing · policies/refunds");
+  });
+
   it("does not highlight anything without a catalog (e.g. assistant messages)", () => {
     const { container } = render(<MarkdownView>{"@Billing Assistant hi"}</MarkdownView>);
     expect(container.querySelector(".tf-mention")).toBeNull();

@@ -1,5 +1,5 @@
 import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
 import { MessagePartView } from "./parts";
@@ -27,8 +27,6 @@ function messageText(message: ChatMessage): string {
 const toolbarBase =
   "flex items-center gap-1 pt-1 text-xs text-muted-foreground transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100";
 const toolbar = `${toolbarBase} opacity-0`;
-const actionBtn =
-  "rounded-sm px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-foreground";
 // `active:scale-90` gives a press cue on click; `transition` (not just colors) animates the scale.
 const iconBtn = "rounded-sm p-1 transition hover:bg-accent hover:text-foreground active:scale-90";
 
@@ -219,6 +217,17 @@ function Message({
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
   onA2uiAgent?: (payload: unknown) => void;
 }) {
+  // Cited-source links for this message, gathered from its `sources` part(s), so inline `[n]` markers
+  // in the text become clickable. Memoized on `parts` so the markdown isn't re-parsed each render.
+  // Computed before the user-message early return so the hook order stays stable (Rules of Hooks).
+  const citations = useMemo(
+    () =>
+      message.parts
+        .filter((p) => p.kind === "sources")
+        .flatMap((p) => (p as Extract<TimelinePart, { kind: "sources" }>).sources)
+        .flatMap((s) => (s.ref != null && s.url ? [{ ref: s.ref, url: s.url }] : [])),
+    [message.parts]
+  );
   if (message.role === "user") {
     return <UserMessage message={message} mentions={mentions} />;
   }
@@ -235,6 +244,7 @@ function Message({
           key={partKey(part, i)}
           part={part}
           streaming={streaming && i === lastIndex && part.kind === "text"}
+          citations={citations}
           onApprove={onApprove}
           onA2uiAgent={onA2uiAgent}
         />

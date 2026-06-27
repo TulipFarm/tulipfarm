@@ -2,15 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { Autonomy } from "~/lib/agents";
 import { listAgents } from "~/lib/agents";
 import { listResourceTypes } from "~/lib/api";
+import { listAllPages } from "~/lib/knowledge-api";
 import { listSkills } from "~/lib/skills";
 import type { MentionKind } from "./editor/mention-config";
 
 /*
- * The catalog of mentionable entities (agents / skills / resource types) used to highlight and
- * explain `@`/`/`/`#` tags inside rendered user messages. Each entry pairs the literal serialized
- * phrase ("@<label>", "/<name>", "#<name>") with the entity's metadata, so a chip in the transcript
- * can both match (highlight) and describe (hover card) the tag. Fetched once on mount; failures per
- * kind degrade to empty (the message still renders, just without that kind's chips).
+ * The catalog of mentionable entities (agents / skills / resource types / knowledge pages) used to
+ * highlight and explain `@`/`/`/`#`/`~` tags inside rendered user messages. Each entry pairs the
+ * literal serialized phrase ("@<label>", "/<name>", "#<name>", "~<title>") with the entity's metadata,
+ * so a chip in the transcript can both match (highlight) and describe (hover card) the tag. Fetched
+ * once on mount; failures per kind degrade to empty (the message still renders, just without that
+ * kind's chips). Knowledge pages come from the full page list — same "fetch the whole set" approach as
+ * the other kinds, so a persisted `~knowledge` mention rehydrates without any per-message storage.
  */
 export interface MentionEntry {
   kind: MentionKind;
@@ -41,7 +44,8 @@ export function useMentionCatalog(): MentionCatalog {
       listAgents().catch(() => []),
       listSkills().catch(() => []),
       listResourceTypes().catch(() => []),
-    ]).then(([agents, skills, types]) => {
+      listAllPages().catch(() => ({ items: [] })),
+    ]).then(([agents, skills, types, pages]) => {
       if (!active) return;
       const out: MentionEntry[] = [];
       for (const a of agents) {
@@ -69,6 +73,16 @@ export function useMentionCatalog(): MentionCatalog {
       }
       for (const t of types) {
         out.push({ kind: "resource", phrase: `#${t.name}`, id: t.name, label: t.name });
+      }
+      for (const pg of pages.items) {
+        if (!pg.title) continue; // a blank title would make a bare `~` phrase that matches everything
+        out.push({
+          kind: "knowledge",
+          phrase: `~${pg.title}`,
+          id: pg.documentId,
+          label: pg.title,
+          description: `${pg.bundleName} · ${pg.path}`,
+        });
       }
       setEntries(out);
     });

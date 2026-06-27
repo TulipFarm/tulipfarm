@@ -29,6 +29,7 @@ export interface SerializedMessage {
   agentId?: string;
   skills: string[];
   resources: string[];
+  knowledge: string[];
 }
 
 export interface MentionItem {
@@ -101,7 +102,12 @@ function uniq(values: string[]): string[] {
 }
 
 export function serializeDoc(doc: PMNode): SerializedMessage {
-  const collected: Record<MentionKind, string[]> = { agent: [], skill: [], resource: [] };
+  const collected: Record<MentionKind, string[]> = {
+    agent: [],
+    skill: [],
+    resource: [],
+    knowledge: [],
+  };
   const blocks = (doc.content ?? []).map((block) => serializeInline(block.content, collected));
   const text = blocks.join("\n\n").trim();
   return {
@@ -109,6 +115,7 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
     agentId: collected.agent[0],
     skills: uniq(collected.skill),
     resources: uniq(collected.resource),
+    knowledge: uniq(collected.knowledge),
   };
 }
 

@@ -30,7 +30,8 @@ export type ApprovalOutcome = "approved" | "denied" | "timeout";
 export type StepStatus = "pending" | "running" | "done" | "error";
 
 export type PlanStep = { id: string; label: string; status: StepStatus };
-export type SourceRef = { id?: string; title?: string; url?: string };
+// `ref` is the inline citation number the agent wrote (`[ref]`); it ties a source to its `[n]` marker.
+export type SourceRef = { id?: string; title?: string; url?: string; ref?: number };
 
 // Discriminated union over every event the wire can carry; `data` is typed per `type`.
 export type ChatEvent =

@@ -40,6 +40,7 @@ import {
   availableToolsFor,
   buildTurnLog,
   type ChatBody,
+  canGroundKnowledge,
   corsPassthrough,
   type PersistableStep,
   patchToolResult,
@@ -237,8 +238,21 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     .map((type) => soulLoader?.resources.get(type))
     .filter((r): r is NonNullable<typeof r> => r != null)
     .map((r) => ({ name: r.name, schema: stringifyYaml(r.schema) }));
-  const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string =>
-    assembleAgentSystemPrompt({
+  // Per-turn `~knowledge` pins: resolve each documentId to its full page, drop unknown/inactive ones,
+  // and inject as `<pinned-knowledge>` so the agent answers from (and cites) the user's chosen pages.
+  const turnPinnedKnowledge = knowledge
+    ? (await Promise.all((body.knowledgePages ?? []).map((id) => knowledge.getDocument(id))))
+        .filter((d): d is NonNullable<typeof d> => d?.active === true)
+        .map((d) => ({ id: d._id, title: d.title, content: d.content }))
+    : [];
+  const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string => {
+    // Tools THIS agent may call — per-agent, so a handoff target gets its own scoped index.
+    const tools = availableToolsFor(toolRegistry, pa);
+    // Grounding+citation guidance AND the user's ~knowledge pins move together: both only go to an
+    // agent that can actually cite (cite_sources in its scoped toolset). Otherwise a handoff target
+    // without cite_sources (e.g. the IA) would receive pinned pages telling it to call a tool it lacks.
+    const canCite = canGroundKnowledge(knowledge, tools);
+    return assembleAgentSystemPrompt({
       agent: a,
       platformAgent: pa,
       memory: memoryList,
@@ -247,9 +261,11 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       eagerSkills: mergedEagerSkills,
       taggedResources: turnTaggedResources,
       soulCatalogue,
-      // Tools THIS agent may call — per-agent, so a handoff target gets its own scoped index.
-      availableTools: availableToolsFor(toolRegistry, pa),
+      availableTools: tools,
+      pinnedKnowledge: canCite ? turnPinnedKnowledge : [],
+      knowledgeGrounding: canCite,
     });
+  };
   const system = buildSystemFor(agent, platformAgent);
   // Compaction (CTX-V1-001/002): over budget → summarize the oldest turns once into a durable
   // `summary` row; recent turns stay verbatim. Best-effort — a summarize failure falls back to

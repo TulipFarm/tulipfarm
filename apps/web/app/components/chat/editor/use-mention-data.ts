@@ -13,7 +13,14 @@ import type { MentionItem } from "./serialize";
  */
 export type GetItems = (kind: MentionKind) => MentionItem[];
 
-const EMPTY: Record<MentionKind, MentionItem[]> = { agent: [], skill: [], resource: [] };
+// `knowledge` is search-powered (server fuzzy search per keystroke), not a static list — its menu
+// items come from `searchDocuments` in mentions.ts, so this static reader always returns [] for it.
+const EMPTY: Record<MentionKind, MentionItem[]> = {
+  agent: [],
+  skill: [],
+  resource: [],
+  knowledge: [],
+};
 
 export function useMentionData(): GetItems {
   const dataRef = useRef<Record<MentionKind, MentionItem[]>>(EMPTY);
@@ -41,6 +48,8 @@ export function useMentionData(): GetItems {
           })),
           skill: skills.map((s) => ({ id: s.name, label: s.name, description: s.description })),
           resource: types.map((t) => ({ id: t.name, label: t.name, description: "resource type" })),
+          // Populated per-keystroke via server search (mentions.ts), not from this one-shot fetch.
+          knowledge: [],
         };
       } catch {
         // menus unavailable — leave them empty

@@ -23,6 +23,50 @@ test("renders headings, lists, and external links from markdown", () => {
   expect(link).toHaveAttribute("target", "_blank");
 });
 
+test("linkifies inline [n] citation markers to their cited page, leaving unknown refs plain", () => {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <MarkdownView citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
+          {"Refunds take 5 days [1] but disputes differ [2]."}
+        </MarkdownView>
+      ),
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+  // [1] has a resolved source → in-app link; [2] has no source → stays literal text.
+  const cite = screen.getByRole("link", { name: "[1]" });
+  expect(cite).toHaveAttribute("href", "/knowledge/concepts/d1");
+  expect(cite).not.toHaveAttribute("target", "_blank");
+  expect(screen.queryByRole("link", { name: "[2]" })).toBeNull();
+  expect(screen.getByText(/disputes differ \[2\]\./)).toBeInTheDocument();
+});
+
+test("linkifies every occurrence of a known ref and leaves an interleaved unknown ref as text", () => {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <MarkdownView citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
+          {"a [1] b [2] c [1] d"}
+        </MarkdownView>
+      ),
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+  // Both `[1]` markers link; the unknown `[2]` stays literal text.
+  expect(screen.getAllByRole("link", { name: "[1]" })).toHaveLength(2);
+  expect(screen.queryByRole("link", { name: "[2]" })).toBeNull();
+  expect(screen.getByText(/b \[2\] c/)).toBeInTheDocument();
+});
+
+test("renders no citation links when none are provided (plain [n] text)", () => {
+  render(<MarkdownView>{"see note [1] here"}</MarkdownView>);
+  expect(screen.queryByRole("link")).toBeNull();
+  expect(screen.getByText(/see note \[1\] here/)).toBeInTheDocument();
+});
+
 test("renders GFM tables", () => {
   render(<MarkdownView>{"| a | b |\n| - | - |\n| 1 | 2 |"}</MarkdownView>);
   expect(screen.getByRole("table")).toBeInTheDocument();
@@ -67,4 +111,26 @@ test("wikiLinks: renders an unresolved tf: link as muted text, not a link", () =
 test("without wikiLinks, external links still open in a new tab", () => {
   render(<MarkdownView>{"[docs](https://example.com)"}</MarkdownView>);
   expect(screen.getByRole("link", { name: "docs" })).toHaveAttribute("target", "_blank");
+});
+
+test("wikiLinks + citations compose: both an internal page link and a [n] citation linkify", () => {
+  const Stub = createRemixStub([
+    {
+      path: "/",
+      Component: () => (
+        <MarkdownView wikiLinks citations={[{ ref: 1, url: "/knowledge/concepts/d1" }]}>
+          {"See [Runbook](/knowledge/concepts/abc/runbook) for refunds [1]."}
+        </MarkdownView>
+      ),
+    },
+  ]);
+  render(<Stub initialEntries={["/"]} />);
+  // Wiki internal link is still a client link (not lost to the citation renderer)…
+  const wiki = screen.getByRole("link", { name: "Runbook" });
+  expect(wiki).toHaveAttribute("href", "/knowledge/concepts/abc/runbook");
+  expect(wiki).not.toHaveAttribute("target");
+  // …and the citation marker still linkifies to its cited page.
+  const cite = screen.getByRole("link", { name: "[1]" });
+  expect(cite).toHaveAttribute("href", "/knowledge/concepts/d1");
+  expect(cite).not.toHaveAttribute("target", "_blank");
 });

@@ -88,6 +88,42 @@ describe("PgKnowledgeChunkRepo", () => {
     expect(await chunks.searchLexical("secret", 10, {})).toHaveLength(0);
   });
 
+  it("scopes search to one bundle via the bundleId filter (vector + lexical)", async () => {
+    const now = new Date();
+    const b1 = randomUUID();
+    const b2 = randomUUID();
+    for (const [id, name] of [
+      [b1, "B1"],
+      [b2, "B2"],
+    ] as const) {
+      await db.query(
+        "INSERT INTO knowledge_bundles (id, name, description, created_at, updated_at) VALUES ($1,$2,null,$3,$3)",
+        [id, name, now]
+      );
+    }
+    const d1 = doc({ bundleId: b1, path: "p1" });
+    const d2 = doc({ bundleId: b2, path: "p2" });
+    await docs.insert(d1);
+    await docs.insert(d2);
+    await chunks.insertMany(d1._id, [
+      chunk({ content: "the quick brown fox", embedding: [1, 0, 0], model: "m", dim: 3 }),
+    ]);
+    await chunks.insertMany(d2._id, [
+      chunk({ content: "the quick brown fox", embedding: [1, 0, 0], model: "m", dim: 3 }),
+    ]);
+
+    // Unscoped lexical sees both; bundleId narrows to one space.
+    expect(await chunks.searchLexical("fox", 10, {})).toHaveLength(2);
+    const lex = await chunks.searchLexical("fox", 10, { bundleId: b1 });
+    expect(lex).toHaveLength(1);
+    expect(lex[0].documentId).toBe(d1._id);
+
+    // The vector path inherits the same predicate.
+    const vec = await chunks.searchVector([1, 0, 0], 3, 10, { bundleId: b2 });
+    expect(vec).toHaveLength(1);
+    expect(vec[0].documentId).toBe(d2._id);
+  });
+
   it("lexical search matches via websearch_to_tsquery and honors domain filter", async () => {
     const d = doc({ domain: "ops" });
     await docs.insert(d);

@@ -34,7 +34,7 @@ function walk(node: HastNode): void {
 
 function applyCallout(bq: HastNode): void {
   const firstEl = bq.children?.find((c) => c.type === "element");
-  if (!firstEl || firstEl.tagName !== "p" || !firstEl.children) return;
+  if (firstEl?.tagName !== "p" || !firstEl.children) return;
   const firstText = firstEl.children.find((c) => c.type === "text");
   if (!firstText || typeof firstText.value !== "string") return;
 

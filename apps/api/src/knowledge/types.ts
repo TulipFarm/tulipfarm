@@ -144,6 +144,8 @@ export interface SearchFilters {
   domain?: string;
   source?: KnowledgeSource;
   tags?: string[];
+  /** Scope search to one OKF bundle (space). Matched against the document's `bundle_id`. */
+  bundleId?: string;
 }
 
 export interface SearchHit {

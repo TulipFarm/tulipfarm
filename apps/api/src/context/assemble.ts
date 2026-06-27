@@ -55,6 +55,19 @@ export interface AssembleContext {
    * scoped to the agent's allowlist (the same set used to build its toolset). Unset → block omitted.
    */
   availableTools?: { name: string; description: string }[];
+  /**
+   * Per-turn `~knowledge` pins from the composer — full page content the user explicitly attached for
+   * this turn, injected into `<pinned-knowledge>`. Each carries its documentId so the agent can cite
+   * it with `cite_sources`. Ephemeral (varies per turn); dropped whole when over budget.
+   */
+  pinnedKnowledge?: { id: string; title: string; content: string }[];
+  /**
+   * When true, append the `<knowledge-grounding>` block instructing the agent to search stored
+   * knowledge (`query_knowledge`) and cite the pages it used (`cite_sources`). Set per turn only
+   * when a knowledge service is wired, so knowledge-less souls never see it. Fixed text → the block
+   * stays byte-stable and is appended last, leaving the rest of the prefix untouched when off.
+   */
+  knowledgeGrounding?: boolean;
 }
 
 function block(tag: string, body: string): string {
@@ -221,6 +234,57 @@ function renderAvailableTools(ctx: AssembleContext): string {
 }
 
 /**
+ * `<pinned-knowledge>` budget — total chars across all pinned page `title`+`content` pairs. Over
+ * this the whole block is dropped (never half-rendered), mirroring the other block budgets. Pages
+ * can be large, so the budget is generous.
+ */
+const MAX_PINNED_KNOWLEDGE_CHARS = 32000;
+
+/**
+ * `<pinned-knowledge>` block — full knowledge pages the user attached this turn via `~knowledge`.
+ * One `## title — documentId: id` section per page so the agent can answer from them and cite each
+ * via `cite_sources`. Omitted when none pinned; dropped whole when over budget.
+ */
+function renderPinnedKnowledge(ctx: AssembleContext): string {
+  const pages = ctx.pinnedKnowledge ?? [];
+  if (pages.length === 0) return "";
+  const total = pages.reduce((n, p) => n + p.title.length + p.content.length, 0);
+  if (total > MAX_PINNED_KNOWLEDGE_CHARS) return "";
+  const intro =
+    "The user pinned these knowledge pages for this turn. Prefer them when answering, and cite each one you use with cite_sources using its documentId.";
+  // Strip newlines from the (user-authored) title so it can't break out of its `##` heading line and
+  // inject structure into the prompt. Page content stays verbatim (same trust as governance docs).
+  const body = pages
+    .map((p) => `## ${p.title.replace(/[\r\n]+/g, " ")} — documentId: ${p.id}\n${p.content}`)
+    .join("\n\n");
+  return block("pinned-knowledge", `${intro}\n\n${body}`);
+}
+
+/**
+ * `<knowledge-grounding>` block. Fixed guidance (no interpolation → byte-stable) telling the agent
+ * to ground answers in stored knowledge and cite what it used. Gated on `knowledgeGrounding` so it
+ * only renders when a knowledge service is wired for the turn; appended last so the rest of the
+ * prefix is unchanged when off. The agentic-search contract: search first, mark claims inline, cite.
+ */
+const KNOWLEDGE_GROUNDING_TEXT = [
+  "When the user asks something that stored knowledge could answer (policies, how-tos, domain facts,",
+  "records, or a named document/runbook), call query_knowledge first and ground your answer in what",
+  "you retrieve. Prefer searching over asking the user to clarify: if a request is terse, abbreviated,",
+  "or ambiguous but could plausibly be answered from stored knowledge, run query_knowledge with your",
+  "best interpretation before asking what they mean. Search with a plain natural-language query and do",
+  "not set domain, tags, or bundleId unless the user named a specific space or category. If a search",
+  "returns nothing, retry once with simpler, broader keywords (and no filters); only ask for",
+  "clarification when that still finds nothing. Do not search for greetings or small talk. Mark each",
+  "claim drawn from a source with an inline [n] reference, numbered from 1 in order of first use. After",
+  "writing the answer, call cite_sources once with { citations: [{ ref, documentId }] }, mapping each",
+  "[n] to the documentId of the result it came from. Cite only pages you actually used.",
+].join(" ");
+
+function renderKnowledgeGrounding(ctx: AssembleContext): string {
+  return ctx.knowledgeGrounding ? block("knowledge-grounding", KNOWLEDGE_GROUNDING_TEXT) : "";
+}
+
+/**
  * Assemble the agent system prompt from the 10 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
  * and synchronous. Each block renders to a string or "" (when empty or over budget); empty blocks
  * are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders eager skill
@@ -242,6 +306,8 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderTaggedResources(ctx),
     renderSoulContext(ctx),
     renderAvailableTools(ctx),
+    renderPinnedKnowledge(ctx),
+    renderKnowledgeGrounding(ctx),
   ];
   return blocks.filter((b) => b.length > 0).join("\n");
 }

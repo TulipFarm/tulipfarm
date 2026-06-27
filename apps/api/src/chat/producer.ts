@@ -1,5 +1,6 @@
 import type { ServerResponse } from "node:http";
 import type { A2uiSurfaceStore } from "../a2ui/surface-store";
+import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import { clientActionEvent } from "../platform/frontend-tools";
 import type { ToolCallResult } from "../tools/types";
 import { a2uiEventsForToolResult } from "./a2ui-surface";
@@ -54,6 +55,22 @@ export function mapStreamPart(
     default:
       return null;
   }
+}
+
+/**
+ * Map a `cite_sources` tool-result to the `sources` SSE payload the web reducer already renders
+ * (`SourcesPart`). Returns `null` for any other tool, a failed result, or an empty/malformed list —
+ * so only a successful, non-empty citation declaration surfaces a sources footer.
+ */
+export function sourcesEventForToolResult(
+  toolName: string,
+  result: ToolCallResult
+): { sources: unknown[] } | null {
+  if (toolName !== CITE_SOURCES_TOOL || !result.success) return null;
+  const data = result.data as { sources?: unknown };
+  const sources = data?.sources;
+  if (!Array.isArray(sources) || sources.length === 0) return null;
+  return { sources };
 }
 
 /** Output guard verdict over one buffered text segment (block, or pass-through/transform). */
@@ -199,6 +216,9 @@ export async function runChatStream(
         // Frontend-action tools (navigate_to, …) also emit a `client-action` the web shell executes.
         const action = clientActionEvent(toolName, result);
         if (action) await deps.emitter.emit("client-action", action);
+        // `cite_sources` emits a `sources` event so the answer's citations render as clickable links.
+        const sources = sourcesEventForToolResult(toolName, result);
+        if (sources) await deps.emitter.emit("sources", sources);
       }
       if (isTerminalEvent(mapped.eventType)) sawTerminal = true;
     }

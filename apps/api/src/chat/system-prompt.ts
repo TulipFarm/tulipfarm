@@ -22,6 +22,8 @@ export function assembleAgentSystemPrompt(args: {
   taggedResources: AssembleContext["taggedResources"];
   soulCatalogue: SoulCatalogue;
   availableTools: AssembleContext["availableTools"];
+  pinnedKnowledge?: AssembleContext["pinnedKnowledge"];
+  knowledgeGrounding?: boolean;
 }): string {
   const {
     agent,
@@ -33,6 +35,8 @@ export function assembleAgentSystemPrompt(args: {
     taggedResources,
     soulCatalogue,
     availableTools,
+    pinnedKnowledge,
+    knowledgeGrounding,
   } = args;
   // Platform forge skills surface in <available-skills> alongside the soul's own (loadable via load_skill).
   const forgeAvailable = (platformAgent?.forgeSkills ?? [])
@@ -51,5 +55,7 @@ export function assembleAgentSystemPrompt(args: {
     taggedResources,
     soulCatalogue,
     availableTools,
+    pinnedKnowledge,
+    knowledgeGrounding,
   });
 }
