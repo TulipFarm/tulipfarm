@@ -19,6 +19,8 @@ export interface CrossPageLink {
 /** The parsed representation of a single OKF concept file (frontmatter + body). */
 export interface OkfConcept {
   title: string | null;
+  /** The `type` frontmatter field (e.g. "table", "playbook") — surfaced for the search `type` facet. */
+  type: string | null;
   description: string | null;
   resource: string | null;
   tags: string[];

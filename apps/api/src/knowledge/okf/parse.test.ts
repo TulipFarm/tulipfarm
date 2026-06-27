@@ -46,6 +46,13 @@ describe("parseOkf", () => {
     expect(c?.extra).toEqual({ confidence: "high", owner: "data-team" });
   });
 
+  it("surfaces the `type` frontmatter field (excluded from extra)", () => {
+    const c = parseOkf(`---\ntype: Metric\nowner: data-team\n---\n\nbody`);
+    expect(c?.type).toBe("Metric");
+    expect(c?.extra).toEqual({ owner: "data-team" });
+    expect(parseOkf("---\ntitle: No type\n---\n\nbody")?.type).toBeNull();
+  });
+
   it("tolerates a non-array tags value", () => {
     expect(parseOkf("---\ntype: X\ntags: nope\n---\n\nb")?.tags).toEqual([]);
   });

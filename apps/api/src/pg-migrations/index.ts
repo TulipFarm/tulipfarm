@@ -521,4 +521,42 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query("ALTER TABLE knowledge_documents DROP COLUMN IF EXISTS okf_type");
     },
   },
+  {
+    version: 15,
+    description:
+      "knowledge-search: knowledge_documents.title_tsv generated tsvector (weight A) + GIN index",
+    up: async (q) => {
+      await q.query(
+        "ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS title_tsv tsvector GENERATED ALWAYS AS (setweight(to_tsvector('english', coalesce(title, '')), 'A')) STORED"
+      );
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS knowledge_documents_title_tsv_gin ON knowledge_documents USING gin (title_tsv)"
+      );
+    },
+  },
+  {
+    version: 16,
+    description:
+      "knowledge-search: re-add knowledge_documents.type (text) + index + backfill from frontmatter_extra",
+    up: async (q) => {
+      await q.query("ALTER TABLE knowledge_documents ADD COLUMN IF NOT EXISTS type text");
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS knowledge_documents_type_idx ON knowledge_documents (type)"
+      );
+      await q.query(
+        "UPDATE knowledge_documents SET type = frontmatter_extra->>'type' WHERE type IS NULL AND frontmatter_extra ? 'type'"
+      );
+    },
+  },
+  {
+    version: 17,
+    description:
+      "knowledge-search: pg_trgm extension + title trigram GIN index (typo-tolerant recall)",
+    up: async (q) => {
+      await q.query("CREATE EXTENSION IF NOT EXISTS pg_trgm");
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS knowledge_documents_title_trgm ON knowledge_documents USING gin (title gin_trgm_ops)"
+      );
+    },
+  },
 ];

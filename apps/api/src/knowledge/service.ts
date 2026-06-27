@@ -537,6 +537,7 @@ export class KnowledgeService {
       bundleId: input.bundleId,
       path,
       resource: concept.resource,
+      type: concept.type,
       frontmatterExtra: concept.extra,
       createdAt: prior?.createdAt ?? now,
       updatedAt: concept.timestamp ? new Date(concept.timestamp) : now,

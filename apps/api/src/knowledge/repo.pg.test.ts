@@ -82,6 +82,37 @@ describe("PgKnowledgeDocumentRepo", () => {
     expect(found?.title).toBe("v2");
   });
 
+  it("round-trips the OKF type column through insert and upsert (null tolerated)", async () => {
+    const withType = doc({ type: "playbook" });
+    await repo.insert(withType);
+    expect((await repo.getById(withType._id))?.type).toBe("playbook");
+
+    const u = doc({ source: "resource", sourceId: "rt-type", type: "guide" });
+    const a = await repo.upsertBySource(u);
+    expect((await repo.getById(a._id))?.type).toBe("guide");
+    await repo.upsertBySource(doc({ source: "resource", sourceId: "rt-type", type: "metric" }));
+    expect((await repo.getById(a._id))?.type).toBe("metric"); // upsert overwrites type
+
+    const noType = doc();
+    await repo.insert(noType);
+    expect((await repo.getById(noType._id))?.type).toBeNull();
+  });
+
+  it("the v016 backfill populates type from frontmatter_extra for legacy rows", async () => {
+    const id = randomUUID();
+    // A legacy row: type NULL, but `type` still present in frontmatter_extra (the pre-v016 shape).
+    await db.query(
+      `INSERT INTO knowledge_documents
+         (id, title, content, plain_text, source, source_id, frontmatter_extra, type, created_at, updated_at)
+       VALUES ($1, 'L', 'c', 'c', 'authored', $2, '{"type":"legacy-type"}'::jsonb, NULL, now(), now())`,
+      [id, randomUUID()]
+    );
+    await db.query(
+      "UPDATE knowledge_documents SET type = frontmatter_extra->>'type' WHERE type IS NULL AND frontmatter_extra ? 'type'"
+    );
+    expect((await repo.getById(id))?.type).toBe("legacy-type");
+  });
+
   it("lists with filters + keyset, excluding inactive by default", async () => {
     const base = Date.now();
     await repo.insert(doc({ domain: "a", tags: ["x"], createdAt: new Date(base) }));

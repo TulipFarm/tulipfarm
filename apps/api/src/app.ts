@@ -30,6 +30,7 @@ import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
+import type { PageRetrievalService } from "./knowledge/retrieval-service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -71,6 +72,7 @@ export interface AppOptions {
   workingMemoryService?: WorkingMemoryService;
   kvService?: KvService;
   knowledgeService?: KnowledgeService;
+  retrievalService?: PageRetrievalService;
   toolRegistry?: ToolRegistry;
   approvalRegistry?: ApprovalRegistry;
   guardrailsService?: GuardrailsService;
@@ -281,8 +283,11 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
     }
+    // The retrieval spine is optional — only the page-search branch needs it (index.ts wires it in
+    // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk
+    // search if the spine is absent, rather than dropping the whole knowledge surface.
     if (opts.knowledgeService) {
-      registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth);
+      registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth, opts.retrievalService);
     }
   }
 
