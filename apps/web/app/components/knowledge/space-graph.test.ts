@@ -1,32 +1,32 @@
 import { describe, expect, it } from "vitest";
-import { buildConceptResolver } from "~/lib/concept-href";
-import type { BundleGraph, BundleGraphEdge, BundlePageRef } from "~/lib/knowledge-api";
-import { buildSimGraph } from "./bundle-graph";
+import type { SpaceGraph, SpaceGraphEdge, SpacePageRef } from "~/lib/knowledge-api";
+import { buildPageResolver } from "~/lib/page-href";
+import { buildSimGraph } from "./space-graph";
 
-function graph(partial: Partial<BundleGraph>): BundleGraph {
+function graph(partial: Partial<SpaceGraph>): SpaceGraph {
   return { nodes: [], edges: [], truncated: false, ...partial };
 }
 
-// A same-bundle edge (no cross-space fields) unless overridden.
-function edge(over: Partial<BundleGraphEdge> & Pick<BundleGraphEdge, "sourceId">): BundleGraphEdge {
+// A same-space edge (no cross-space fields) unless overridden.
+function edge(over: Partial<SpaceGraphEdge> & Pick<SpaceGraphEdge, "sourceId">): SpaceGraphEdge {
   return {
     targetId: null,
     targetPath: "",
     broken: true,
-    targetBundleName: null,
-    targetBundleId: null,
+    targetSpaceName: null,
+    targetSpaceId: null,
     ...over,
   };
 }
 
-// Resolver that knows the cross-space target Sales/pricing → document "p" (Unknown/ghost stays unresolved).
-const PAGES: BundlePageRef[] = [
-  { documentId: "p", bundleId: "sales", bundleName: "Sales", path: "pricing", title: "Pricing" },
+// Resolver that knows the cross-space target Sales/pricing → page "p" (Unknown/ghost stays unresolved).
+const PAGES: SpacePageRef[] = [
+  { pageId: "p", spaceId: "sales", spaceName: "Sales", path: "pricing", title: "Pricing" },
 ];
-const resolver = buildConceptResolver(PAGES);
+const resolver = buildPageResolver(PAGES);
 
 describe("buildSimGraph", () => {
-  it("links two same-bundle nodes and routes them to their concept UUID pages", () => {
+  it("links two same-space nodes and routes them to their page UUID pages", () => {
     const g = graph({
       nodes: [
         { id: "a", path: "runbook", title: "Runbook" },
@@ -37,7 +37,7 @@ describe("buildSimGraph", () => {
     const { nodes, links } = buildSimGraph(g, resolver);
     expect(nodes).toHaveLength(2);
     expect(nodes.every((n) => !n.crossSpace)).toBe(true);
-    expect(nodes.find((n) => n.id === "a")?.href).toBe("/knowledge/concepts/a/runbook");
+    expect(nodes.find((n) => n.id === "a")?.href).toBe("/knowledge/pages/a/runbook");
     expect(links).toHaveLength(1);
     expect(links[0]?.crossSpace).toBe(false);
   });
@@ -51,15 +51,15 @@ describe("buildSimGraph", () => {
           targetId: "p",
           targetPath: "pricing",
           broken: false,
-          targetBundleName: "Sales",
-          targetBundleId: "sales",
+          targetSpaceName: "Sales",
+          targetSpaceId: "sales",
         }),
       ],
     });
     const { nodes, links } = buildSimGraph(g, resolver);
     const stub = nodes.find((n) => n.crossSpace);
     expect(stub?.title).toBe("Sales:pricing");
-    expect(stub?.href).toBe("/knowledge/concepts/p/pricing");
+    expect(stub?.href).toBe("/knowledge/pages/p/pricing");
     expect(links[0]?.crossSpace).toBe(true);
   });
 
@@ -70,8 +70,8 @@ describe("buildSimGraph", () => {
         edge({
           sourceId: "a",
           targetPath: "ghost",
-          targetBundleName: "Unknown",
-          targetBundleId: null,
+          targetSpaceName: "Unknown",
+          targetSpaceId: null,
         }),
       ],
     });
@@ -101,16 +101,16 @@ describe("buildSimGraph", () => {
           targetId: "p",
           targetPath: "pricing",
           broken: false,
-          targetBundleName: "Sales",
-          targetBundleId: "sales",
+          targetSpaceName: "Sales",
+          targetSpaceId: "sales",
         }),
         edge({
           sourceId: "b",
           targetId: "p",
           targetPath: "pricing",
           broken: false,
-          targetBundleName: "Sales",
-          targetBundleId: "sales",
+          targetSpaceName: "Sales",
+          targetSpaceId: "sales",
         }),
       ],
     });

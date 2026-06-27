@@ -393,6 +393,106 @@ const OKF_CROSSLINK_STATEMENTS: string[] = [
     ON knowledge_links (target_bundle_name) WHERE target_bundle_name IS NOT NULL`,
 ];
 
+// ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
+// ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
+// keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
+async function tableExists(q: Queryable, name: string): Promise<boolean> {
+  const r = await q.query(
+    "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1",
+    [name]
+  );
+  return r.rows.length > 0;
+}
+async function columnExists(q: Queryable, table: string, column: string): Promise<boolean> {
+  const r = await q.query(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+    [table, column]
+  );
+  return r.rows.length > 0;
+}
+async function indexExists(q: Queryable, name: string): Promise<boolean> {
+  const r = await q.query(
+    "SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = $1",
+    [name]
+  );
+  return r.rows.length > 0;
+}
+async function renameTableIfExists(q: Queryable, from: string, to: string): Promise<void> {
+  if ((await tableExists(q, from)) && !(await tableExists(q, to))) {
+    await q.query(`ALTER TABLE ${from} RENAME TO ${to}`);
+  }
+}
+async function renameColumnIfExists(
+  q: Queryable,
+  table: string,
+  from: string,
+  to: string
+): Promise<void> {
+  if ((await columnExists(q, table, from)) && !(await columnExists(q, table, to))) {
+    await q.query(`ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`);
+  }
+}
+async function renameIndexIfExists(q: Queryable, from: string, to: string): Promise<void> {
+  if ((await indexExists(q, from)) && !(await indexExists(q, to))) {
+    await q.query(`ALTER INDEX ${from} RENAME TO ${to}`);
+  }
+}
+
+/**
+ * Terminology rename (metadata/terminologies.md): the Knowledge subsystem adopts the canonical
+ * Space/Page vocabulary — `bundle`→`space`, `document`/`concept`→`page`. The legacy flat
+ * `collection` grouping (its UI already removed) is retired; the glossary reserves "collection"
+ * for infra (a Postgres/Mongo collection), never a knowledge grouping. Column/table renames cascade
+ * to their FKs and index definitions automatically; only index *names* embedding a retired term are
+ * renamed explicitly. The OKF synthetic source_id `okf:<spaceId>:<path>` is unchanged (the UUID
+ * value is identical — only the variable name moves), so no data backfill is needed.
+ */
+const TERMINOLOGY_RENAME_STATEMENTS = async (q: Queryable): Promise<void> => {
+  // Retire the legacy collections grouping. Join table first (FK), then the parent.
+  await q.query("DROP TABLE IF EXISTS knowledge_documents_collections");
+  await q.query("DROP TABLE IF EXISTS knowledge_collections");
+
+  // Columns — run against the current (pre-rename) table names.
+  await renameColumnIfExists(q, "knowledge_documents", "bundle_id", "space_id");
+  await renameColumnIfExists(q, "knowledge_chunks", "document_id", "page_id");
+  await renameColumnIfExists(q, "knowledge_revisions", "document_id", "page_id");
+  await renameColumnIfExists(q, "knowledge_links", "bundle_id", "space_id");
+  await renameColumnIfExists(q, "knowledge_links", "target_bundle_id", "target_space_id");
+  await renameColumnIfExists(q, "knowledge_links", "target_bundle_name", "target_space_name");
+  await renameColumnIfExists(q, "knowledge_bundle_overrides", "bundle_id", "space_id");
+
+  // Tables.
+  await renameTableIfExists(q, "knowledge_bundles", "knowledge_spaces");
+  await renameTableIfExists(q, "knowledge_documents", "knowledge_pages");
+  await renameTableIfExists(q, "knowledge_bundle_overrides", "knowledge_space_overrides");
+
+  // Index names embedding a retired term (definitions already followed the column/table renames).
+  await renameIndexIfExists(q, "knowledge_chunks_document_idx", "knowledge_chunks_page_idx");
+  await renameIndexIfExists(
+    q,
+    "knowledge_documents_bundle_path_idx",
+    "knowledge_pages_space_path_idx"
+  );
+  await renameIndexIfExists(q, "knowledge_links_bundle_idx", "knowledge_links_space_idx");
+  await renameIndexIfExists(
+    q,
+    "knowledge_links_target_bundle_idx",
+    "knowledge_links_target_space_idx"
+  );
+  await renameIndexIfExists(
+    q,
+    "knowledge_links_target_bundle_name_idx",
+    "knowledge_links_target_space_name_idx"
+  );
+  await renameIndexIfExists(
+    q,
+    "knowledge_documents_title_tsv_gin",
+    "knowledge_pages_title_tsv_gin"
+  );
+  await renameIndexIfExists(q, "knowledge_documents_type_idx", "knowledge_pages_type_idx");
+  await renameIndexIfExists(q, "knowledge_documents_title_trgm", "knowledge_pages_title_trgm");
+};
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -558,5 +658,11 @@ export const PG_MIGRATIONS: PgMigration[] = [
         "CREATE INDEX IF NOT EXISTS knowledge_documents_title_trgm ON knowledge_documents USING gin (title gin_trgm_ops)"
       );
     },
+  },
+  {
+    version: 18,
+    description:
+      "terminology: rename knowledge bundle→space, document/concept→page (tables, columns, indexes); retire legacy collections",
+    up: TERMINOLOGY_RENAME_STATEMENTS,
   },
 ];

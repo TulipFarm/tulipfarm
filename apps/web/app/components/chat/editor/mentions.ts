@@ -13,7 +13,7 @@ import Mention from "@tiptap/extension-mention";
 import { PluginKey } from "@tiptap/pm/state";
 import { ReactRenderer } from "@tiptap/react";
 import type { SuggestionKeyDownProps, SuggestionProps } from "@tiptap/suggestion";
-import { searchDocuments } from "~/lib/knowledge-api";
+import { searchKnowledge } from "~/lib/knowledge-api";
 import { MENTION_KINDS, type MentionKind } from "./mention-config";
 import { MentionList, type MentionListRef } from "./mention-list";
 import { filterItems, type MentionItem } from "./serialize";
@@ -25,14 +25,14 @@ import type { GetItems } from "./use-mention-data";
 async function searchKnowledgeItems(query: string): Promise<MentionItem[]> {
   if (query.trim() === "") return [];
   try {
-    const { results } = await searchDocuments(query, 8);
-    // De-dupe by document — search returns one hit per matching chunk, so a page can appear twice.
+    const { results } = await searchKnowledge(query, 8);
+    // De-dupe by page — search returns one hit per matching chunk, so a page can appear twice.
     const seen = new Set<string>();
     const items: MentionItem[] = [];
     for (const r of results) {
-      if (seen.has(r.documentId)) continue;
-      seen.add(r.documentId);
-      items.push({ id: r.documentId, label: r.title, description: r.content.slice(0, 80) });
+      if (seen.has(r.pageId)) continue;
+      seen.add(r.pageId);
+      items.push({ id: r.pageId, label: r.title, description: r.content.slice(0, 80) });
     }
     return items;
   } catch {

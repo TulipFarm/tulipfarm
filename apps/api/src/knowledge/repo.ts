@@ -1,21 +1,20 @@
 import type { Queryable } from "../db";
 import { type PaginatedResult, toPage } from "../pagination";
 import type {
-  BundlePageRef,
-  KnowledgeCollection,
-  KnowledgeDocument,
+  KnowledgePage,
   KnowledgeRevision,
   KnowledgeSource,
   RecentPage,
   SearchFilters,
+  SpacePageRef,
 } from "./types";
 
-// OKF columns (bundle_id..frontmatter_extra) sit between version and the timestamps. frontmatter_extra
+// OKF columns (space_id..frontmatter_extra) sit between version and the timestamps. frontmatter_extra
 // is jsonb — bound as a JSON string with an explicit ::jsonb cast (works on both pg.Pool and PGlite).
-const DOC_COLS =
-  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, bundle_id, path, resource, frontmatter_extra, type, created_at, updated_at";
+const PAGE_COLS =
+  "id, title, content, plain_text, source, source_id, domain, tags, active, always_load_for_agents, version, space_id, path, resource, frontmatter_extra, type, created_at, updated_at";
 
-function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
+function rowToPage(row: Record<string, unknown>): KnowledgePage {
   return {
     _id: row.id as string,
     title: row.title as string,
@@ -28,7 +27,7 @@ function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
     active: row.active as boolean,
     alwaysLoadForAgents: row.always_load_for_agents as boolean,
     version: Number(row.version),
-    bundleId: (row.bundle_id as string | null) ?? null,
+    spaceId: (row.space_id as string | null) ?? null,
     path: (row.path as string | null) ?? null,
     resource: (row.resource as string | null) ?? null,
     type: (row.type as string | null) ?? null,
@@ -38,96 +37,95 @@ function rowToDocument(row: Record<string, unknown>): KnowledgeDocument {
   };
 }
 
-function docParams(doc: KnowledgeDocument): unknown[] {
+function pageParams(page: KnowledgePage): unknown[] {
   return [
-    doc._id,
-    doc.title,
-    doc.content,
-    doc.plainText,
-    doc.source,
-    doc.sourceId,
-    doc.domain,
-    doc.tags,
-    doc.active,
-    doc.alwaysLoadForAgents,
-    doc.version,
-    doc.bundleId ?? null,
-    doc.path ?? null,
-    doc.resource ?? null,
-    JSON.stringify(doc.frontmatterExtra ?? {}),
-    doc.type ?? null,
-    doc.createdAt,
-    doc.updatedAt,
+    page._id,
+    page.title,
+    page.content,
+    page.plainText,
+    page.source,
+    page.sourceId,
+    page.domain,
+    page.tags,
+    page.active,
+    page.alwaysLoadForAgents,
+    page.version,
+    page.spaceId ?? null,
+    page.path ?? null,
+    page.resource ?? null,
+    JSON.stringify(page.frontmatterExtra ?? {}),
+    page.type ?? null,
+    page.createdAt,
+    page.updatedAt,
   ];
 }
 
-export interface DocumentListOpts extends SearchFilters {
+export interface PageListOpts extends SearchFilters {
   limit: number;
   after?: { createdAt: Date; _id: string };
   includeInactive?: boolean;
 }
 
-export interface KnowledgeDocumentRepo {
-  insert(doc: KnowledgeDocument): Promise<void>;
+export interface KnowledgePageRepo {
+  insert(page: KnowledgePage): Promise<void>;
   /** Idempotent for resource/conversation sources; returns the canonical id + version. */
-  upsertBySource(doc: KnowledgeDocument): Promise<{ _id: string; version: number }>;
-  getById(id: string): Promise<KnowledgeDocument | null>;
-  list(opts: DocumentListOpts): Promise<PaginatedResult<KnowledgeDocument>>;
-  replaceOne(id: string, expectedVersion: number, doc: KnowledgeDocument): Promise<boolean>;
+  upsertBySource(page: KnowledgePage): Promise<{ _id: string; version: number }>;
+  getById(id: string): Promise<KnowledgePage | null>;
+  list(opts: PageListOpts): Promise<PaginatedResult<KnowledgePage>>;
+  replaceOne(id: string, expectedVersion: number, page: KnowledgePage): Promise<boolean>;
   softDelete(id: string): Promise<boolean>;
-  /** Active docs flagged for agents (governance.ts handles domain scoping + caps). */
-  governanceDocuments(): Promise<KnowledgeDocument[]>;
-  /** Active docs, for a full re-index pass. */
-  listActive(): Promise<KnowledgeDocument[]>;
-  /** Resolve a concept by (bundleId, path) — used for cross-link resolution. */
-  getByBundlePath(bundleId: string, path: string): Promise<KnowledgeDocument | null>;
-  /** Active concepts in a bundle, ordered by path (export / navigate / graph / index synthesis). */
-  listByBundle(bundleId: string): Promise<KnowledgeDocument[]>;
-  /** Flat list of every active OKF page across all bundles (id, bundle, path, title) — @-mention source. */
-  listAllBundlePages(): Promise<BundlePageRef[]>;
-  /** The N most-recently-updated active OKF pages across all bundles — Knowledge home "Recently edited". */
+  /** Active pages flagged for agents (governance.ts handles domain scoping + caps). */
+  governancePages(): Promise<KnowledgePage[]>;
+  /** Active pages, for a full re-index pass. */
+  listActive(): Promise<KnowledgePage[]>;
+  /** Resolve a page by (spaceId, path) — used for cross-link resolution. */
+  getBySpacePath(spaceId: string, path: string): Promise<KnowledgePage | null>;
+  /** Active pages in a space, ordered by path (export / navigate / graph / index synthesis). */
+  listBySpace(spaceId: string): Promise<KnowledgePage[]>;
+  /** Flat list of every active OKF page across all spaces (id, space, path, title) — @-mention source. */
+  listAllSpacePages(): Promise<SpacePageRef[]>;
+  /** The N most-recently-updated active OKF pages across all spaces — Knowledge home "Recently edited". */
   listRecentPages(limit: number): Promise<RecentPage[]>;
 }
 
-export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
+export class PgKnowledgePageRepo implements KnowledgePageRepo {
   constructor(private readonly q: Queryable) {}
 
-  async insert(doc: KnowledgeDocument): Promise<void> {
+  async insert(page: KnowledgePage): Promise<void> {
     await this.q.query(
-      `INSERT INTO knowledge_documents (${DOC_COLS})
+      `INSERT INTO knowledge_pages (${PAGE_COLS})
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)`,
-      docParams(doc)
+      pageParams(page)
     );
   }
 
-  async upsertBySource(doc: KnowledgeDocument): Promise<{ _id: string; version: number }> {
+  async upsertBySource(page: KnowledgePage): Promise<{ _id: string; version: number }> {
     const { rows } = await this.q.query(
-      `INSERT INTO knowledge_documents (${DOC_COLS})
+      `INSERT INTO knowledge_pages (${PAGE_COLS})
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::text[],$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
        ON CONFLICT (source, source_id) DO UPDATE SET
          title = EXCLUDED.title, content = EXCLUDED.content, plain_text = EXCLUDED.plain_text,
          domain = EXCLUDED.domain, tags = EXCLUDED.tags,
          always_load_for_agents = EXCLUDED.always_load_for_agents,
-         bundle_id = EXCLUDED.bundle_id, path = EXCLUDED.path,
+         space_id = EXCLUDED.space_id, path = EXCLUDED.path,
          resource = EXCLUDED.resource, frontmatter_extra = EXCLUDED.frontmatter_extra,
          type = EXCLUDED.type,
-         active = true, version = knowledge_documents.version + 1, updated_at = EXCLUDED.updated_at
+         active = true, version = knowledge_pages.version + 1, updated_at = EXCLUDED.updated_at
        RETURNING id, version`,
-      docParams(doc)
+      pageParams(page)
     );
     const row = rows[0] as { id: string; version: number };
     return { _id: row.id, version: Number(row.version) };
   }
 
-  async getById(id: string): Promise<KnowledgeDocument | null> {
-    const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents WHERE id = $1`,
-      [id]
-    );
-    return rows[0] ? rowToDocument(rows[0]) : null;
+  async getById(id: string): Promise<KnowledgePage | null> {
+    const { rows } = await this.q.query(`SELECT ${PAGE_COLS} FROM knowledge_pages WHERE id = $1`, [
+      id,
+    ]);
+    return rows[0] ? rowToPage(rows[0]) : null;
   }
 
-  async list(opts: DocumentListOpts): Promise<PaginatedResult<KnowledgeDocument>> {
+  async list(opts: PageListOpts): Promise<PaginatedResult<KnowledgePage>> {
     const conditions: string[] = [];
     const params: unknown[] = [];
     if (!opts.includeInactive) conditions.push("active = true");
@@ -150,36 +148,36 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     params.push(opts.limit + 1);
     const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents ${where}
+      `SELECT ${PAGE_COLS} FROM knowledge_pages ${where}
        ORDER BY created_at, id LIMIT $${params.length}`,
       params
     );
-    return toPage(rows.map(rowToDocument), opts.limit);
+    return toPage(rows.map(rowToPage), opts.limit);
   }
 
-  async replaceOne(id: string, expectedVersion: number, doc: KnowledgeDocument): Promise<boolean> {
+  async replaceOne(id: string, expectedVersion: number, page: KnowledgePage): Promise<boolean> {
     const { rows } = await this.q.query(
-      `UPDATE knowledge_documents
+      `UPDATE knowledge_pages
        SET title=$1, content=$2, plain_text=$3, domain=$4, tags=$5::text[],
            always_load_for_agents=$6, active=$7, version=$8,
-           resource=$9, bundle_id=$10, path=$11, frontmatter_extra=$12::jsonb,
+           resource=$9, space_id=$10, path=$11, frontmatter_extra=$12::jsonb,
            type=$13, updated_at=$14
        WHERE id=$15 AND version=$16 RETURNING id`,
       [
-        doc.title,
-        doc.content,
-        doc.plainText,
-        doc.domain,
-        doc.tags,
-        doc.alwaysLoadForAgents,
-        doc.active,
-        doc.version,
-        doc.resource ?? null,
-        doc.bundleId ?? null,
-        doc.path ?? null,
-        JSON.stringify(doc.frontmatterExtra ?? {}),
-        doc.type ?? null,
-        doc.updatedAt,
+        page.title,
+        page.content,
+        page.plainText,
+        page.domain,
+        page.tags,
+        page.alwaysLoadForAgents,
+        page.active,
+        page.version,
+        page.resource ?? null,
+        page.spaceId ?? null,
+        page.path ?? null,
+        JSON.stringify(page.frontmatterExtra ?? {}),
+        page.type ?? null,
+        page.updatedAt,
         id,
         expectedVersion,
       ]
@@ -189,59 +187,59 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
 
   async softDelete(id: string): Promise<boolean> {
     const { rows } = await this.q.query(
-      `UPDATE knowledge_documents SET active=false, version=version+1, updated_at=now()
+      `UPDATE knowledge_pages SET active=false, version=version+1, updated_at=now()
        WHERE id=$1 AND active=true RETURNING id`,
       [id]
     );
     return rows.length === 1;
   }
 
-  async governanceDocuments(): Promise<KnowledgeDocument[]> {
+  async governancePages(): Promise<KnowledgePage[]> {
     const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents
+      `SELECT ${PAGE_COLS} FROM knowledge_pages
        WHERE active=true AND always_load_for_agents=true ORDER BY created_at, id`
     );
-    return rows.map(rowToDocument);
+    return rows.map(rowToPage);
   }
 
-  async listActive(): Promise<KnowledgeDocument[]> {
+  async listActive(): Promise<KnowledgePage[]> {
     const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents WHERE active=true ORDER BY created_at, id`
+      `SELECT ${PAGE_COLS} FROM knowledge_pages WHERE active=true ORDER BY created_at, id`
     );
-    return rows.map(rowToDocument);
+    return rows.map(rowToPage);
   }
 
-  async getByBundlePath(bundleId: string, path: string): Promise<KnowledgeDocument | null> {
+  async getBySpacePath(spaceId: string, path: string): Promise<KnowledgePage | null> {
     const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents WHERE bundle_id = $1 AND path = $2`,
-      [bundleId, path]
+      `SELECT ${PAGE_COLS} FROM knowledge_pages WHERE space_id = $1 AND path = $2`,
+      [spaceId, path]
     );
-    return rows[0] ? rowToDocument(rows[0]) : null;
+    return rows[0] ? rowToPage(rows[0]) : null;
   }
 
-  async listByBundle(bundleId: string): Promise<KnowledgeDocument[]> {
+  async listBySpace(spaceId: string): Promise<KnowledgePage[]> {
     const { rows } = await this.q.query(
-      `SELECT ${DOC_COLS} FROM knowledge_documents
-       WHERE bundle_id = $1 AND active = true ORDER BY path`,
-      [bundleId]
+      `SELECT ${PAGE_COLS} FROM knowledge_pages
+       WHERE space_id = $1 AND active = true ORDER BY path`,
+      [spaceId]
     );
-    return rows.map(rowToDocument);
+    return rows.map(rowToPage);
   }
 
-  async listAllBundlePages(): Promise<BundlePageRef[]> {
+  async listAllSpacePages(): Promise<SpacePageRef[]> {
     const { rows } = await this.q.query(
-      `SELECT d.id, d.bundle_id, b.name AS bundle_name, d.path, d.title
-       FROM knowledge_documents d
-       JOIN knowledge_bundles b ON b.id = d.bundle_id
-       WHERE d.bundle_id IS NOT NULL AND d.path IS NOT NULL AND d.active = true
-       ORDER BY b.name, d.path`
+      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title
+       FROM knowledge_pages p
+       JOIN knowledge_spaces s ON s.id = p.space_id
+       WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
+       ORDER BY s.name, p.path`
     );
     return rows.map((r) => {
       const row = r as Record<string, unknown>;
       return {
-        documentId: row.id as string,
-        bundleId: row.bundle_id as string,
-        bundleName: row.bundle_name as string,
+        pageId: row.id as string,
+        spaceId: row.space_id as string,
+        spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
       };
@@ -250,20 +248,20 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
 
   async listRecentPages(limit: number): Promise<RecentPage[]> {
     const { rows } = await this.q.query(
-      `SELECT d.id, d.bundle_id, b.name AS bundle_name, d.path, d.title, d.updated_at
-       FROM knowledge_documents d
-       JOIN knowledge_bundles b ON b.id = d.bundle_id
-       WHERE d.bundle_id IS NOT NULL AND d.path IS NOT NULL AND d.active = true
-       ORDER BY d.updated_at DESC, d.id
+      `SELECT p.id, p.space_id, s.name AS space_name, p.path, p.title, p.updated_at
+       FROM knowledge_pages p
+       JOIN knowledge_spaces s ON s.id = p.space_id
+       WHERE p.space_id IS NOT NULL AND p.path IS NOT NULL AND p.active = true
+       ORDER BY p.updated_at DESC, p.id
        LIMIT $1`,
       [limit]
     );
     return rows.map((r) => {
       const row = r as Record<string, unknown>;
       return {
-        documentId: row.id as string,
-        bundleId: row.bundle_id as string,
-        bundleName: row.bundle_name as string,
+        pageId: row.id as string,
+        spaceId: row.space_id as string,
+        spaceName: row.space_name as string,
         path: row.path as string,
         title: row.title as string,
         updatedAt: row.updated_at as Date,
@@ -272,131 +270,12 @@ export class PgKnowledgeDocumentRepo implements KnowledgeDocumentRepo {
   }
 }
 
-// ── Collections ───────────────────────────────────────────────────────────────
-
-const COLLECTION_COLS = "id, name, description, domain, version, created_at, updated_at";
-
-function rowToCollection(row: Record<string, unknown>): KnowledgeCollection {
-  return {
-    _id: row.id as string,
-    name: row.name as string,
-    description: (row.description as string | null) ?? null,
-    domain: (row.domain as string | null) ?? null,
-    version: Number(row.version),
-    createdAt: row.created_at as Date,
-    updatedAt: row.updated_at as Date,
-  };
-}
-
-export interface KnowledgeCollectionRepo {
-  insert(c: KnowledgeCollection): Promise<void>;
-  getById(id: string): Promise<KnowledgeCollection | null>;
-  getByName(name: string): Promise<KnowledgeCollection | null>;
-  list(opts: {
-    limit: number;
-    after?: { createdAt: Date; _id: string };
-  }): Promise<PaginatedResult<KnowledgeCollection>>;
-  replaceOne(id: string, expectedVersion: number, c: KnowledgeCollection): Promise<boolean>;
-  delete(id: string): Promise<boolean>;
-  addDocument(collectionId: string, documentId: string): Promise<void>;
-  removeDocument(collectionId: string, documentId: string): Promise<boolean>;
-  listDocumentIds(collectionId: string): Promise<string[]>;
-}
-
-export class PgKnowledgeCollectionRepo implements KnowledgeCollectionRepo {
-  constructor(private readonly q: Queryable) {}
-
-  async insert(c: KnowledgeCollection): Promise<void> {
-    await this.q.query(
-      `INSERT INTO knowledge_collections (${COLLECTION_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [c._id, c.name, c.description, c.domain, c.version, c.createdAt, c.updatedAt]
-    );
-  }
-
-  async getById(id: string): Promise<KnowledgeCollection | null> {
-    const { rows } = await this.q.query(
-      `SELECT ${COLLECTION_COLS} FROM knowledge_collections WHERE id = $1`,
-      [id]
-    );
-    return rows[0] ? rowToCollection(rows[0]) : null;
-  }
-
-  async getByName(name: string): Promise<KnowledgeCollection | null> {
-    const { rows } = await this.q.query(
-      `SELECT ${COLLECTION_COLS} FROM knowledge_collections WHERE name = $1`,
-      [name]
-    );
-    return rows[0] ? rowToCollection(rows[0]) : null;
-  }
-
-  async list(opts: {
-    limit: number;
-    after?: { createdAt: Date; _id: string };
-  }): Promise<PaginatedResult<KnowledgeCollection>> {
-    const params: unknown[] = [];
-    let where = "";
-    if (opts.after) {
-      params.push(opts.after.createdAt, opts.after._id);
-      where = "WHERE (created_at, id) > ($1, $2)";
-    }
-    params.push(opts.limit + 1);
-    const { rows } = await this.q.query(
-      `SELECT ${COLLECTION_COLS} FROM knowledge_collections ${where}
-       ORDER BY created_at, id LIMIT $${params.length}`,
-      params
-    );
-    return toPage(rows.map(rowToCollection), opts.limit);
-  }
-
-  async replaceOne(id: string, expectedVersion: number, c: KnowledgeCollection): Promise<boolean> {
-    const { rows } = await this.q.query(
-      `UPDATE knowledge_collections SET name=$1, description=$2, domain=$3, version=$4, updated_at=$5
-       WHERE id=$6 AND version=$7 RETURNING id`,
-      [c.name, c.description, c.domain, c.version, c.updatedAt, id, expectedVersion]
-    );
-    return rows.length === 1;
-  }
-
-  async delete(id: string): Promise<boolean> {
-    const { rows } = await this.q.query(
-      "DELETE FROM knowledge_collections WHERE id = $1 RETURNING id",
-      [id]
-    );
-    return rows.length === 1;
-  }
-
-  async addDocument(collectionId: string, documentId: string): Promise<void> {
-    await this.q.query(
-      `INSERT INTO knowledge_documents_collections (document_id, collection_id)
-       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [documentId, collectionId]
-    );
-  }
-
-  async removeDocument(collectionId: string, documentId: string): Promise<boolean> {
-    const { rows } = await this.q.query(
-      `DELETE FROM knowledge_documents_collections
-       WHERE collection_id=$1 AND document_id=$2 RETURNING document_id`,
-      [collectionId, documentId]
-    );
-    return rows.length === 1;
-  }
-
-  async listDocumentIds(collectionId: string): Promise<string[]> {
-    const { rows } = await this.q.query(
-      "SELECT document_id FROM knowledge_documents_collections WHERE collection_id = $1",
-      [collectionId]
-    );
-    return rows.map((r) => (r as { document_id: string }).document_id);
-  }
-}
-
 // ── Revisions ─────────────────────────────────────────────────────────────────
 
 function rowToRevision(row: Record<string, unknown>): KnowledgeRevision {
   return {
     _id: row.id as string,
-    documentId: row.document_id as string,
+    pageId: row.page_id as string,
     revisionNumber: Number(row.revision_number),
     content: row.content as string,
     plainText: row.plain_text as string,
@@ -409,12 +288,12 @@ export interface KnowledgeRevisionRepo {
   /** Appends with the next revision_number (computed atomically); returns that number. */
   append(
     id: string,
-    documentId: string,
+    pageId: string,
     content: string,
     plainText: string,
     reason: string | null
   ): Promise<number>;
-  list(documentId: string): Promise<KnowledgeRevision[]>;
+  list(pageId: string): Promise<KnowledgeRevision[]>;
 }
 
 export class PgKnowledgeRevisionRepo implements KnowledgeRevisionRepo {
@@ -422,27 +301,27 @@ export class PgKnowledgeRevisionRepo implements KnowledgeRevisionRepo {
 
   async append(
     id: string,
-    documentId: string,
+    pageId: string,
     content: string,
     plainText: string,
     reason: string | null
   ): Promise<number> {
     const { rows } = await this.q.query(
-      `INSERT INTO knowledge_revisions (id, document_id, revision_number, content, plain_text, reason, created_at)
+      `INSERT INTO knowledge_revisions (id, page_id, revision_number, content, plain_text, reason, created_at)
        VALUES ($1, $2,
-         (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM knowledge_revisions WHERE document_id = $2),
+         (SELECT COALESCE(MAX(revision_number), 0) + 1 FROM knowledge_revisions WHERE page_id = $2),
          $3, $4, $5, now())
        RETURNING revision_number`,
-      [id, documentId, content, plainText, reason]
+      [id, pageId, content, plainText, reason]
     );
     return Number((rows[0] as { revision_number: number }).revision_number);
   }
 
-  async list(documentId: string): Promise<KnowledgeRevision[]> {
+  async list(pageId: string): Promise<KnowledgeRevision[]> {
     const { rows } = await this.q.query(
-      `SELECT id, document_id, revision_number, content, plain_text, reason, created_at
-       FROM knowledge_revisions WHERE document_id = $1 ORDER BY revision_number DESC`,
-      [documentId]
+      `SELECT id, page_id, revision_number, content, plain_text, reason, created_at
+       FROM knowledge_revisions WHERE page_id = $1 ORDER BY revision_number DESC`,
+      [pageId]
     );
     return rows.map(rowToRevision);
   }

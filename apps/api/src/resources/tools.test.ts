@@ -114,11 +114,11 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
   };
 }
 
-describe("resource_create", () => {
+describe("record_create", () => {
   it("creates a record and returns it with id + version:1", async () => {
     const factory = new FakeRepoFactory();
     const ctx = makeCtx(factory);
-    const tool = getTool("resource_create");
+    const tool = getTool("record_create");
     const result = await tool.handler({ type: "ticket", data: { title: "Hello" } }, ctx);
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -129,25 +129,25 @@ describe("resource_create", () => {
   });
 
   it("returns not_found for unknown type", async () => {
-    const tool = getTool("resource_create");
+    const tool = getTool("record_create");
     const result = await tool.handler({ type: "unknown", data: {} }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
   it("returns validation_error for missing required field", async () => {
-    const tool = getTool("resource_create");
+    const tool = getTool("record_create");
     const result = await tool.handler({ type: "ticket", data: {} }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
   it("returns validation_error for bad args (no type)", async () => {
-    const tool = getTool("resource_create");
+    const tool = getTool("record_create");
     const result = await tool.handler({ data: {} }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
 
-describe("resource_list", () => {
+describe("record_list", () => {
   it("lists records for a type", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
@@ -159,7 +159,7 @@ describe("resource_list", () => {
       updatedAt: now,
       title: "T1",
     });
-    const tool = getTool("resource_list");
+    const tool = getTool("record_list");
     const result = await tool.handler({ type: "ticket" }, makeCtx(factory));
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -168,20 +168,20 @@ describe("resource_list", () => {
   });
 
   it("returns not_found for unknown type", async () => {
-    const tool = getTool("resource_list");
+    const tool = getTool("record_list");
     const result = await tool.handler({ type: "unknown" }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 });
 
-describe("resource_get", () => {
+describe("record_get", () => {
   it("returns a record by id", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
     const id = randomUUID();
     const now = new Date();
     await repo.insert({ _id: id, version: 1, createdAt: now, updatedAt: now, title: "T1" });
-    const tool = getTool("resource_get");
+    const tool = getTool("record_get");
     const result = await tool.handler({ type: "ticket", id }, makeCtx(factory));
     expect(result.success).toBe(true);
     if (!result.success) return;
@@ -189,7 +189,7 @@ describe("resource_get", () => {
   });
 
   it("returns not_found for missing id", async () => {
-    const tool = getTool("resource_get");
+    const tool = getTool("record_get");
     const result = await tool.handler({ type: "ticket", id: randomUUID() }, makeCtx());
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
@@ -207,20 +207,20 @@ describe("resource_get", () => {
       deletedAt: now,
       title: "T1",
     });
-    const tool = getTool("resource_get");
+    const tool = getTool("record_get");
     const result = await tool.handler({ type: "ticket", id }, makeCtx(factory));
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 });
 
-describe("resource_update", () => {
+describe("record_update", () => {
   it("merge-updates and returns new version", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
     const id = randomUUID();
     const now = new Date();
     await repo.insert({ _id: id, version: 1, createdAt: now, updatedAt: now, title: "Old" });
-    const tool = getTool("resource_update");
+    const tool = getTool("record_update");
     const result = await tool.handler(
       { type: "ticket", id, version: 1, data: { title: "New" } },
       makeCtx(factory)
@@ -238,7 +238,7 @@ describe("resource_update", () => {
     const id = randomUUID();
     const now = new Date();
     await repo.insert({ _id: id, version: 2, createdAt: now, updatedAt: now, title: "T" });
-    const tool = getTool("resource_update");
+    const tool = getTool("record_update");
     const result = await tool.handler(
       { type: "ticket", id, version: 1, data: { title: "X" } },
       makeCtx(factory)
@@ -247,14 +247,14 @@ describe("resource_update", () => {
   });
 });
 
-describe("resource_delete", () => {
+describe("record_delete", () => {
   it("soft-deletes and returns id", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
     const id = randomUUID();
     const now = new Date();
     await repo.insert({ _id: id, version: 1, createdAt: now, updatedAt: now, title: "T" });
-    const tool = getTool("resource_delete");
+    const tool = getTool("record_delete");
     const result = await tool.handler({ type: "ticket", id, version: 1 }, makeCtx(factory));
     expect(result).toMatchObject({ success: true, data: { id } });
     const stored = repo.docs.get(id);
@@ -267,7 +267,7 @@ describe("resource_delete", () => {
     const id = randomUUID();
     const now = new Date();
     await repo.insert({ _id: id, version: 2, createdAt: now, updatedAt: now, title: "T" });
-    const tool = getTool("resource_delete");
+    const tool = getTool("record_delete");
     const result = await tool.handler({ type: "ticket", id, version: 1 }, makeCtx(factory));
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
@@ -299,7 +299,7 @@ describe("resource_delete", () => {
     } as unknown as SoulLoader;
 
     const ctx = { ...makeCtx(factory), soulLoader, hookExecutor };
-    const tool = getTool("resource_delete");
+    const tool = getTool("record_delete");
     const result = await tool.handler({ type: "ticket", id, version: 1 }, ctx);
     expect(result).toMatchObject({ success: true, data: { id } });
     expect(runBeforeHook).toHaveBeenCalledOnce();
@@ -333,7 +333,7 @@ describe("resource_delete", () => {
     } as unknown as SoulLoader;
 
     const ctx = { ...makeCtx(factory), soulLoader, hookExecutor };
-    const tool = getTool("resource_delete");
+    const tool = getTool("record_delete");
     const result = await tool.handler({ type: "ticket", id, version: 1 }, ctx);
     expect(result).toMatchObject({
       success: false,
@@ -345,7 +345,7 @@ describe("resource_delete", () => {
   });
 });
 
-describe("resource_search", () => {
+describe("record_search", () => {
   it("returns only matching records", async () => {
     const factory = new FakeRepoFactory();
     const repo = factory.forType("ticket") as FakeRepo;
@@ -366,7 +366,7 @@ describe("resource_search", () => {
       title: "closed-ticket",
       status: "closed",
     });
-    const tool = getTool("resource_search");
+    const tool = getTool("record_search");
     const result = await tool.handler(
       { type: "ticket", filters: { status: "open" } },
       makeCtx(factory)
@@ -395,7 +395,7 @@ describe("resource_search", () => {
       updatedAt: now,
       title: "B",
     });
-    const tool = getTool("resource_search");
+    const tool = getTool("record_search");
     const result = await tool.handler({ type: "ticket" }, makeCtx(factory));
     expect(result.success).toBe(true);
     if (!result.success) return;

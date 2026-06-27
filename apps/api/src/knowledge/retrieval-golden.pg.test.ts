@@ -90,23 +90,23 @@ describe("golden retrieval eval (recall@5)", () => {
   beforeEach(async () => {
     db = await makePglite();
     await runPgMigrations(db);
-    const bundleId = randomUUID();
+    const spaceId = randomUUID();
     await db.query(
-      `INSERT INTO knowledge_bundles (id, name, description, created_at, updated_at)
+      `INSERT INTO knowledge_spaces (id, name, description, created_at, updated_at)
        VALUES ($1, 'engineering', NULL, now(), now())`,
-      [bundleId]
+      [spaceId]
     );
     for (const p of CORPUS) {
       const id = randomUUID();
       await db.query(
-        `INSERT INTO knowledge_documents
+        `INSERT INTO knowledge_pages
            (id, title, content, plain_text, source, source_id, tags, active, always_load_for_agents,
-            version, bundle_id, path, frontmatter_extra, created_at, updated_at)
+            version, space_id, path, frontmatter_extra, created_at, updated_at)
          VALUES ($1,$2,$3,$3,'authored',$4,'{}',true,false,1,$5,$6,'{}'::jsonb,now(),now())`,
-        [id, p.title, p.body, `okf:${bundleId}:${p.path}`, bundleId, p.path]
+        [id, p.title, p.body, `okf:${spaceId}:${p.path}`, spaceId, p.path]
       );
       await db.query(
-        `INSERT INTO knowledge_chunks (id, document_id, chunk_index, content, embedding, tsv, model, dim, created_at)
+        `INSERT INTO knowledge_chunks (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
          VALUES ($1,$2,0,$3,NULL,to_tsvector('english',$3),'m',3,now())`,
         [randomUUID(), id, `${p.title}. ${p.body}`]
       );

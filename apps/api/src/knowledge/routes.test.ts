@@ -5,11 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import {
-  PgKnowledgeCollectionRepo,
-  PgKnowledgeDocumentRepo,
-  PgKnowledgeRevisionRepo,
-} from "./repo";
+import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import { PageRetrievalService } from "./retrieval-service";
 import { registerKnowledgeRoutes } from "./routes";
 import { KnowledgeService } from "./service";
@@ -31,9 +27,8 @@ async function buildKnowledgeApp(
   withRetrieval = true
 ): Promise<FastifyInstance> {
   const service = new KnowledgeService({
-    documents: new PgKnowledgeDocumentRepo(db),
+    pages: new PgKnowledgePageRepo(db),
     chunks: new PgKnowledgeChunkRepo(db),
-    collections: new PgKnowledgeCollectionRepo(db),
     revisions: new PgKnowledgeRevisionRepo(db),
     embeddings: fakeEmbeddings(available),
   });
@@ -64,50 +59,50 @@ describe("knowledge routes", () => {
     await db.close();
   });
 
-  async function createDoc(title = "Paris", content = "the capital of france"): Promise<string> {
+  async function createPage(title = "Paris", content = "the capital of france"): Promise<string> {
     const res = await app.inject({
       method: "POST",
-      url: `${base}/documents`,
+      url: `${base}/pages`,
       payload: { title, content },
     });
     expect(res.statusCode).toBe(201);
     return res.json<{ id: string }>().id;
   }
 
-  // Raw-insert a bundle page (the route's page mode reads via PageRetrievalService's SQL, not the
+  // Raw-insert a space page (the route's page mode reads via PageRetrievalService's SQL, not the
   // chunk-mode service deps). A title match needs no chunks (title_tsv hit path).
-  async function seedBundlePage(
+  async function seedSpacePage(
     title: string,
     opts: { path?: string; type?: string } = {}
-  ): Promise<{ bundleId: string; docId: string }> {
-    const bundleId = randomUUID();
-    const docId = randomUUID();
+  ): Promise<{ spaceId: string; pageId: string }> {
+    const spaceId = randomUUID();
+    const pageId = randomUUID();
     await db.query(
-      `INSERT INTO knowledge_bundles (id, name, description, created_at, updated_at)
+      `INSERT INTO knowledge_spaces (id, name, description, created_at, updated_at)
        VALUES ($1, $2, NULL, now(), now())`,
-      [bundleId, `b-${bundleId}`]
+      [spaceId, `b-${spaceId}`]
     );
     await db.query(
-      `INSERT INTO knowledge_documents
+      `INSERT INTO knowledge_pages
          (id, title, content, plain_text, source, source_id, tags, active, always_load_for_agents,
-          version, bundle_id, path, type, frontmatter_extra, created_at, updated_at)
+          version, space_id, path, type, frontmatter_extra, created_at, updated_at)
        VALUES ($1,$2,$3,$3,'authored',$4,'{}',true,false,1,$5,$6,$7,'{}'::jsonb,now(),now())`,
       [
-        docId,
+        pageId,
         title,
         `${title} body`,
-        `okf:${bundleId}:${opts.path ?? "p"}`,
-        bundleId,
+        `okf:${spaceId}:${opts.path ?? "p"}`,
+        spaceId,
         opts.path ?? "p",
         opts.type ?? null,
       ]
     );
-    return { bundleId, docId };
+    return { spaceId, pageId };
   }
 
   it("page-mode search returns whole-page hits and honors the type facet", async () => {
-    const { bundleId, docId } = await seedBundlePage("Orders Table", { type: "table" });
-    await seedBundlePage("Customers", { path: "c" });
+    const { spaceId, pageId } = await seedSpacePage("Orders Table", { type: "table" });
+    await seedSpacePage("Customers", { path: "c" });
 
     const res = await app.inject({
       method: "POST",
@@ -117,8 +112,8 @@ describe("knowledge routes", () => {
     expect(res.statusCode).toBe(200);
     const hit = res
       .json<{ results: Array<Record<string, unknown>> }>()
-      .results.find((r) => r.documentId === docId);
-    expect(hit).toMatchObject({ documentId: docId, title: "Orders Table", bundleId, path: "p" });
+      .results.find((r) => r.pageId === pageId);
+    expect(hit).toMatchObject({ pageId: pageId, title: "Orders Table", spaceId, path: "p" });
     expect(hit).toHaveProperty("snippet");
     expect(hit).toHaveProperty("highlightRanges");
     expect(hit).not.toHaveProperty("chunkId"); // page shape, not chunk
@@ -129,12 +124,12 @@ describe("knowledge routes", () => {
       payload: { query: "orders", granularity: "page", type: "table" },
     });
     expect(
-      typed.json<{ results: Array<{ documentId: string }> }>().results.map((r) => r.documentId)
-    ).toEqual([docId]);
+      typed.json<{ results: Array<{ pageId: string }> }>().results.map((r) => r.pageId)
+    ).toEqual([pageId]);
   });
 
   it("page-mode blank query returns recent pages", async () => {
-    const { docId } = await seedBundlePage("Recent Page");
+    const { pageId } = await seedSpacePage("Recent Page");
     const res = await app.inject({
       method: "POST",
       url: `${base}/search`,
@@ -142,13 +137,13 @@ describe("knowledge routes", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(
-      res.json<{ results: Array<{ documentId: string }> }>().results.map((r) => r.documentId)
-    ).toContain(docId);
+      res.json<{ results: Array<{ pageId: string }> }>().results.map((r) => r.pageId)
+    ).toContain(pageId);
   });
 
   it("falls back to chunk results for granularity=page when the retrieval spine is absent", async () => {
     const noRetrieval = await buildKnowledgeApp(db, false, false); // lexical, no spine
-    const id = await createDoc("Paris", "the capital of france");
+    const id = await createPage("Paris", "the capital of france");
     const res = await noRetrieval.inject({
       method: "POST",
       url: `${base}/search`,
@@ -157,39 +152,39 @@ describe("knowledge routes", () => {
     expect(res.statusCode).toBe(200);
     const body = res.json<{ results: Array<Record<string, unknown>>; warnings: string[] }>();
     // chunk-shaped hits (chunkId present) prove the chunk path ran despite granularity=page.
-    expect(body.results.some((r) => r.documentId === id && "chunkId" in r)).toBe(true);
+    expect(body.results.some((r) => r.pageId === id && "chunkId" in r)).toBe(true);
     await noRetrieval.close();
   });
 
-  it("creates, fetches, lists, and 404s documents", async () => {
-    const id = await createDoc();
-    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+  it("creates, fetches, lists, and 404s pages", async () => {
+    const id = await createPage();
+    const got = await app.inject({ method: "GET", url: `${base}/pages/${id}` });
     expect(got.statusCode).toBe(200);
     expect(got.json<{ id: string }>().id).toBe(id);
 
-    const list = await app.inject({ method: "GET", url: `${base}/documents` });
+    const list = await app.inject({ method: "GET", url: `${base}/pages` });
     expect(list.json<{ items: unknown[] }>().items).toHaveLength(1);
 
     const missing = await app.inject({
       method: "GET",
-      url: `${base}/documents/00000000-0000-0000-0000-000000000000`,
+      url: `${base}/pages/00000000-0000-0000-0000-000000000000`,
     });
     expect(missing.statusCode).toBe(404);
   });
 
   it("updates with If-Match (400 without, 409 wrong, 200 right) and snapshots a revision", async () => {
-    const id = await createDoc();
+    const id = await createPage();
 
     const noMatch = await app.inject({
       method: "PUT",
-      url: `${base}/documents/${id}`,
+      url: `${base}/pages/${id}`,
       payload: { content: "x" },
     });
     expect(noMatch.statusCode).toBe(400);
 
     const wrong = await app.inject({
       method: "PUT",
-      url: `${base}/documents/${id}`,
+      url: `${base}/pages/${id}`,
       headers: { "if-match": "99" },
       payload: { content: "x" },
     });
@@ -197,27 +192,27 @@ describe("knowledge routes", () => {
 
     const ok = await app.inject({
       method: "PUT",
-      url: `${base}/documents/${id}`,
+      url: `${base}/pages/${id}`,
       headers: { "if-match": "1" },
       payload: { content: "updated" },
     });
     expect(ok.statusCode).toBe(200);
     expect(ok.json<{ version: number }>().version).toBe(2);
 
-    const revs = await app.inject({ method: "GET", url: `${base}/documents/${id}/revisions` });
+    const revs = await app.inject({ method: "GET", url: `${base}/pages/${id}/revisions` });
     expect(revs.json<{ items: unknown[] }>().items).toHaveLength(1);
   });
 
-  it("soft-deletes a document", async () => {
-    const id = await createDoc();
-    const del = await app.inject({ method: "DELETE", url: `${base}/documents/${id}` });
+  it("soft-deletes a page", async () => {
+    const id = await createPage();
+    const del = await app.inject({ method: "DELETE", url: `${base}/pages/${id}` });
     expect(del.statusCode).toBe(204);
-    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+    const got = await app.inject({ method: "GET", url: `${base}/pages/${id}` });
     expect(got.statusCode).toBe(404);
   });
 
   it("searches and returns ranked hits", async () => {
-    await createDoc();
+    await createPage();
     const res = await app.inject({
       method: "POST",
       url: `${base}/search`,
@@ -230,20 +225,20 @@ describe("knowledge routes", () => {
   });
 
   it("reports indexingStatus=indexed on get + list when embeddings are available", async () => {
-    const id = await createDoc();
-    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+    const id = await createPage();
+    const got = await app.inject({ method: "GET", url: `${base}/pages/${id}` });
     expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("indexed");
 
-    const list = await app.inject({ method: "GET", url: `${base}/documents` });
+    const list = await app.inject({ method: "GET", url: `${base}/pages` });
     expect(list.json<{ items: { indexingStatus: string }[] }>().items[0].indexingStatus).toBe(
       "indexed"
     );
   });
 
-  it("reports indexingStatus=pending when a document has no chunks", async () => {
-    const id = await createDoc();
-    await new PgKnowledgeChunkRepo(db).deleteByDocument(id);
-    const got = await app.inject({ method: "GET", url: `${base}/documents/${id}` });
+  it("reports indexingStatus=pending when a page has no chunks", async () => {
+    const id = await createPage();
+    await new PgKnowledgeChunkRepo(db).deleteByPage(id);
+    const got = await app.inject({ method: "GET", url: `${base}/pages/${id}` });
     expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("pending");
   });
 
@@ -254,89 +249,15 @@ describe("knowledge routes", () => {
     try {
       const res = await app2.inject({
         method: "POST",
-        url: `${base}/documents`,
+        url: `${base}/pages`,
         payload: { title: "x", content: "lexical only body" },
       });
       const id = res.json<{ id: string }>().id;
-      const got = await app2.inject({ method: "GET", url: `${base}/documents/${id}` });
+      const got = await app2.inject({ method: "GET", url: `${base}/pages/${id}` });
       expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("lexical-only");
     } finally {
       await app2.close();
       await db2.close();
     }
-  });
-
-  it("manages collections and membership", async () => {
-    const docId = await createDoc();
-    const colRes = await app.inject({
-      method: "POST",
-      url: `${base}/collections`,
-      payload: { name: "kb" },
-    });
-    expect(colRes.statusCode).toBe(201);
-    const colId = colRes.json<{ id: string }>().id;
-
-    const add = await app.inject({
-      method: "POST",
-      url: `${base}/collections/${colId}/documents`,
-      payload: { documentId: docId },
-    });
-    expect(add.statusCode).toBe(204);
-
-    const ids = await app.inject({
-      method: "GET",
-      url: `${base}/collections/${colId}/documents`,
-    });
-    expect(ids.json<{ documentIds: string[] }>().documentIds).toEqual([docId]);
-
-    const remove = await app.inject({
-      method: "DELETE",
-      url: `${base}/collections/${colId}/documents/${docId}`,
-    });
-    expect(remove.statusCode).toBe(204);
-  });
-
-  it("gets a collection by id and 404s a missing one", async () => {
-    const colRes = await app.inject({
-      method: "POST",
-      url: `${base}/collections`,
-      payload: { name: "kb2", description: "desc" },
-    });
-    const colId = colRes.json<{ id: string }>().id;
-    const got = await app.inject({ method: "GET", url: `${base}/collections/${colId}` });
-    expect(got.statusCode).toBe(200);
-    expect(got.json<{ name: string }>().name).toBe("kb2");
-    const missing = await app.inject({
-      method: "GET",
-      url: `${base}/collections/00000000-0000-0000-0000-000000000000`,
-    });
-    expect(missing.statusCode).toBe(404);
-  });
-
-  it("refuses to add a soft-deleted document to a collection", async () => {
-    const docId = await createDoc();
-    const colRes = await app.inject({
-      method: "POST",
-      url: `${base}/collections`,
-      payload: { name: "kb3" },
-    });
-    const colId = colRes.json<{ id: string }>().id;
-    await app.inject({ method: "DELETE", url: `${base}/documents/${docId}` });
-    const add = await app.inject({
-      method: "POST",
-      url: `${base}/collections/${colId}/documents`,
-      payload: { documentId: docId },
-    });
-    expect(add.statusCode).toBe(404);
-  });
-
-  it("404s adding to a missing collection", async () => {
-    const docId = await createDoc();
-    const add = await app.inject({
-      method: "POST",
-      url: `${base}/collections/11111111-1111-1111-1111-111111111111/documents`,
-      payload: { documentId: docId },
-    });
-    expect(add.statusCode).toBe(404);
   });
 });

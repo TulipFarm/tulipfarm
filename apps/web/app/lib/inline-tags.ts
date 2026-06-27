@@ -1,5 +1,5 @@
 /*
- * Extract inline `#tag` tokens from a markdown body so they can be unioned into the concept's
+ * Extract inline `#tag` tokens from a markdown body so they can be unioned into the page's
  * frontmatter `tags` on save — keeping the stored `tags[]` (and its server-side filtering)
  * authoritative. Headings (`# Heading`, hash + space) never match; fenced/inline code is stripped
  * first so `#include`-style tokens in code blocks aren't harvested as tags.

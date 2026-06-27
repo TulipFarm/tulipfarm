@@ -6,7 +6,7 @@
 export interface MentionItem {
   /** Display + inserted link text. */
   label: string;
-  /** Link href: `path.md` (same-space page), `tf:page/<Bundle>/<path>`, `tf:agent/<name>`, `tf:resource/<type>`. */
+  /** Link href: `path.md` (same-space page), `tf:page/<Space>/<path>`, `tf:agent/<name>`, `tf:resource/<type>`. */
   href: string;
   /** Secondary text (e.g. the space name for a cross-space page, or a short description). */
   hint?: string;

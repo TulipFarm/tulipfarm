@@ -10,11 +10,11 @@ export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
  * pages swap. The main app sidebar auto-collapses to its icon rail whenever the path is under
  * /knowledge (wired in _app.tsx via `forceCollapsed`), giving the tree rail the freed space. On mobile
  * the tree stacks above the content. Children own their data; the tree self-fetches + refreshes on the
- * `okf:bundle-changed` event.
+ * `okf:space-changed` event.
  */
 export default function KnowledgeLayout() {
-  // `params.id` is the active bundle on space routes (home/new/graph); concept-reader routes carry
-  // `conceptId` instead, so the scope toggle defaults to all-spaces there.
+  // `params.id` is the active space on space routes (home/new/graph); page-reader routes carry
+  // `pageId` instead, so the scope toggle defaults to all-spaces there.
   const params = useParams();
   return (
     <div className="flex h-full min-h-0 flex-col md:flex-row">
@@ -24,7 +24,7 @@ export default function KnowledgeLayout() {
       <div className="min-w-0 flex-1 overflow-y-auto">
         <Outlet />
       </div>
-      <CommandPalette bundleId={params.id} />
+      <CommandPalette spaceId={params.id} />
     </div>
   );
 }

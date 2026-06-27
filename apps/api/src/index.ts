@@ -27,19 +27,15 @@ import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
-import { PgKnowledgeBundleOverrideRepo } from "./knowledge/bundle-overrides-repo";
-import { PgKnowledgeBundleRepo } from "./knowledge/bundles-repo";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { subscribeKnowledgeIndexing } from "./knowledge/events";
 import { enqueueIndex, registerKnowledgeIndexing } from "./knowledge/indexing";
 import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
-import {
-  PgKnowledgeCollectionRepo,
-  PgKnowledgeDocumentRepo,
-  PgKnowledgeRevisionRepo,
-} from "./knowledge/repo";
+import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./knowledge/repo";
 import { PageRetrievalService } from "./knowledge/retrieval-service";
 import { KnowledgeService } from "./knowledge/service";
+import { PgKnowledgeSpaceOverrideRepo } from "./knowledge/space-overrides-repo";
+import { PgKnowledgeSpaceRepo } from "./knowledge/spaces-repo";
 import { PgKvRepo } from "./kv/repo";
 import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
@@ -130,16 +126,14 @@ async function boot() {
     await boss.start();
 
     const knowledgeService = new KnowledgeService({
-      documents: new PgKnowledgeDocumentRepo(pool),
+      pages: new PgKnowledgePageRepo(pool),
       chunks: new PgKnowledgeChunkRepo(pool),
-      collections: new PgKnowledgeCollectionRepo(pool),
       revisions: new PgKnowledgeRevisionRepo(pool),
-      bundles: new PgKnowledgeBundleRepo(pool),
+      spaces: new PgKnowledgeSpaceRepo(pool),
       links: new PgKnowledgeLinksRepo(pool),
-      overrides: new PgKnowledgeBundleOverrideRepo(pool),
+      overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
-      enqueueIndex: (documentId) =>
-        enqueueIndex(boss, { kind: "document", documentId }).then(() => undefined),
+      enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
     });
 
     // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).

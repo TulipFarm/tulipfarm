@@ -6,28 +6,28 @@ description: The searchable corpus agents draw on, backed by vector search.
 import { Callout } from "fumadocs-ui/components/callout";
 
 The knowledge base is the searchable body of text your agents draw on. It is built from
-documents, organized into collections, indexed in the background, and queried by vector
+pages, organized into spaces, indexed in the background, and queried by vector
 search.
 
 ## How knowledge gets in
 
 Knowledge is populated from a few sources, not by file upload:
 
-- **Authored documents** — markdown text created through the knowledge API or by an
+- **Authored pages** — markdown text created through the knowledge API or by an
   agent tool.
 - **Resource records** — your resource data is indexed so agents can search it.
 - **Agent conversations** — completed conversations are indexed as knowledge.
 
-There is no file upload in V1, so authored content is markdown text only. Documents carry
+There is no file upload in V1, so authored content is markdown text only. Pages carry
 revisions, so edits are tracked over time.
 
-Knowledge is organised into **collections** — named groups of documents you can target
-for search or inject into agents. Create and manage both documents and collections in
-the **Knowledge** section of the web UI, or through the API.
+Knowledge is organised into **spaces** — wiki-like groups of cross-linked **pages** you
+can browse, target for search, or inject into agents. Create and manage spaces and pages
+in the **Knowledge** section of the web UI, or through the API.
 
 ## Indexing and search
 
-When a document changes, a background job re-indexes it: it splits the document into
+When a page changes, a background job re-indexes it: it splits the page into
 chunks, embeds each chunk, and stores the vectors. Search then ranks chunks by vector
 similarity and returns the best matches. Indexing is idempotent and retries on failure,
 so a transient error does not leave the index half-written.
@@ -45,7 +45,7 @@ you have configured a cloud provider:
 
 ## Governance knowledge
 
-A document flagged to always load is injected into every agent's context as a
+A page flagged to always load is injected into every agent's context as a
 governance block — your operating rules and policies, available to every turn without the
 agent having to search for them. Injection respects size caps; content that would
-overflow the budget is skipped rather than truncated mid-document.
+overflow the budget is skipped rather than truncated mid-page.

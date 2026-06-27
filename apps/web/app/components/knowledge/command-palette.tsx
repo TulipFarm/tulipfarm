@@ -7,8 +7,8 @@
 import { useNavigate } from "@remix-run/react";
 import { Command } from "cmdk";
 import { type ReactNode, useEffect, useState } from "react";
-import { conceptHref } from "~/lib/concept-href";
-import { type KnowledgeBundle, listBundles, type PageSearchHit } from "~/lib/knowledge-api";
+import { type KnowledgeSpace, listSpaces, type PageSearchHit } from "~/lib/knowledge-api";
+import { pageHref } from "~/lib/page-href";
 import { cn } from "~/lib/utils";
 import { usePageSearch } from "./use-page-search";
 
@@ -70,12 +70,12 @@ function SearchSkeleton() {
   );
 }
 
-export function CommandPalette({ bundleId }: { bundleId?: string | null }) {
+export function CommandPalette({ spaceId }: { spaceId?: string | null }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
-  const [bundleNames, setBundleNames] = useState<Map<string, string>>(new Map());
+  const [spaceNames, setSpaceNames] = useState<Map<string, string>>(new Map());
   const { query, setQuery, scope, setScope, results, loading, isZeroQuery } =
-    usePageSearch(bundleId);
+    usePageSearch(spaceId);
 
   // ⌘K / Ctrl-K toggles; the sidebar box opens via the shared event.
   useEffect(() => {
@@ -96,23 +96,23 @@ export function CommandPalette({ bundleId }: { bundleId?: string | null }) {
 
   // Space-name lookup for the result group headers (small, cached once the palette first opens).
   useEffect(() => {
-    if (!open || bundleNames.size > 0) return;
-    listBundles()
-      .then((p) => setBundleNames(new Map(p.items.map((b: KnowledgeBundle) => [b.id, b.name]))))
+    if (!open || spaceNames.size > 0) return;
+    listSpaces()
+      .then((p) => setSpaceNames(new Map(p.items.map((b: KnowledgeSpace) => [b.id, b.name]))))
       .catch(() => {});
-  }, [open, bundleNames.size]);
+  }, [open, spaceNames.size]);
 
   const go = (hit: PageSearchHit) => {
     setOpen(false);
-    navigate(conceptHref(hit.documentId, hit.path));
+    navigate(pageHref(hit.pageId, hit.path));
   };
 
   // Stable group order by first appearance (results already ranked).
-  const groups: Array<{ bundleId: string | null; hits: PageSearchHit[] }> = [];
+  const groups: Array<{ spaceId: string | null; hits: PageSearchHit[] }> = [];
   for (const hit of results) {
-    const g = groups.find((x) => x.bundleId === hit.bundleId);
+    const g = groups.find((x) => x.spaceId === hit.spaceId);
     if (g) g.hits.push(hit);
-    else groups.push({ bundleId: hit.bundleId, hits: [hit] });
+    else groups.push({ spaceId: hit.spaceId, hits: [hit] });
   }
 
   return (
@@ -131,7 +131,7 @@ export function CommandPalette({ bundleId }: { bundleId?: string | null }) {
           placeholder="Search knowledge…"
           className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
         />
-        {bundleId ? (
+        {spaceId ? (
           <div className="flex shrink-0 items-center gap-1 border-b border-border px-3 py-1.5 text-xs">
             {(["space", "all"] as const).map((s) => (
               <button
@@ -165,16 +165,16 @@ export function CommandPalette({ bundleId }: { bundleId?: string | null }) {
               ) : null}
               {groups.map((group) => (
                 <Command.Group
-                  key={group.bundleId ?? "none"}
+                  key={group.spaceId ?? "none"}
                   heading={
-                    !isZeroQuery ? (bundleNames.get(group.bundleId ?? "") ?? "Other") : undefined
+                    !isZeroQuery ? (spaceNames.get(group.spaceId ?? "") ?? "Other") : undefined
                   }
                   className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1 [&_[cmdk-group-heading]]:text-[0.625rem] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-[0.15em] [&_[cmdk-group-heading]]:text-muted-foreground"
                 >
                   {group.hits.map((hit) => (
                     <Command.Item
-                      key={hit.documentId}
-                      value={hit.documentId}
+                      key={hit.pageId}
+                      value={hit.pageId}
                       onSelect={() => go(hit)}
                       className="flex cursor-pointer flex-col gap-0.5 rounded-sm px-3 py-2 text-sm data-[selected=true]:bg-accent"
                     >

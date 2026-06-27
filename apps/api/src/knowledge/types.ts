@@ -1,13 +1,13 @@
-// Knowledge/vector subsystem data types (P3, spec KN-V1). Internal docs use `_id`
+// Knowledge/vector subsystem data types (P3, spec KN-V1). Internal pages use `_id`
 // (mapped to `id` at the API boundary, like the rest of the codebase). Markdown lives
 // in `content`; `plainText` is the indexed form.
 
 export type KnowledgeSource = "authored" | "resource" | "conversation";
 
-/** Per-document index state derived from its chunks (read-only; not persisted). */
+/** Per-page index state derived from its chunks (read-only; not persisted). */
 export type IndexingStatus = "indexed" | "lexical-only" | "pending";
 
-export interface KnowledgeDocument {
+export interface KnowledgePage {
   _id: string;
   title: string;
   content: string;
@@ -19,24 +19,24 @@ export interface KnowledgeDocument {
   active: boolean;
   alwaysLoadForAgents: boolean;
   version: number;
-  // OKF fields — optional in drafts; always populated on reads from the DB. A flat (non-bundle)
-  // document leaves bundleId/path/resource null and frontmatterExtra {}.
-  /** OKF: the bundle this concept lives in, or null for a legacy/flat document. */
-  bundleId?: string | null;
-  /** OKF: slash-delimited concept path within the bundle, e.g. "tables/orders" (no leading slash). */
+  // OKF fields — optional in drafts; always populated on reads from the DB. A flat (non-space)
+  // page leaves spaceId/path/resource null and frontmatterExtra {}.
+  /** OKF: the space this page lives in, or null for a legacy/flat page. */
+  spaceId?: string | null;
+  /** OKF: slash-delimited page path within the space, e.g. "tables/orders" (no leading slash). */
   path?: string | null;
   /** OKF: the `resource` frontmatter field — canonical URI of the underlying asset. */
   resource?: string | null;
   /** OKF: the `type` frontmatter field — categorizes the page for the search `type` facet. */
   type?: string | null;
-  /** OKF: round-trip store for unknown frontmatter keys from imported foreign bundles. */
+  /** OKF: round-trip store for unknown frontmatter keys from imported foreign spaces. */
   frontmatterExtra?: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }
 
-/** An OKF bundle: the root of a hierarchical, cross-linked tree of concept documents. */
-export interface KnowledgeBundle {
+/** An OKF space: the root of a hierarchical, cross-linked tree of pages. */
+export interface KnowledgeSpace {
   _id: string;
   name: string;
   description: string | null;
@@ -45,56 +45,56 @@ export interface KnowledgeBundle {
 }
 
 /**
- * A directed cross-link parsed from a concept body. `targetId` null = broken/unresolved link.
- * `targetBundleName` null = the link stays inside the source's own bundle; non-null = a cross-space
- * link (`tf:page/<name>/<path>`) whose `targetBundleId` is filled once that bundle exists.
+ * A directed cross-link parsed from a page body. `targetId` null = broken/unresolved link.
+ * `targetSpaceName` null = the link stays inside the source's own space; non-null = a cross-space
+ * link (`tf:page/<name>/<path>`) whose `targetSpaceId` is filled once that space exists.
  */
 export interface KnowledgeLink {
   _id: string;
-  bundleId: string;
+  spaceId: string;
   sourceId: string;
   targetPath: string;
   targetId: string | null;
-  targetBundleId: string | null;
-  targetBundleName: string | null;
+  targetSpaceId: string | null;
+  targetSpaceName: string | null;
   createdAt: Date;
 }
 
-/** An inbound link to a concept — one row per page that links to it (the "Linked from" panel). */
+/** An inbound link to a page — one row per page that links to it (the "Linked from" panel). */
 export interface Backlink {
   sourceId: string;
   title: string;
   path: string | null;
-  bundleId: string;
-  bundleName: string;
+  spaceId: string;
+  spaceName: string;
 }
 
-/** A flat reference to one OKF page across all bundles — feeds the editor's `@`-mention Pages section. */
-export interface BundlePageRef {
-  documentId: string;
-  bundleId: string;
-  bundleName: string;
+/** A flat reference to one OKF page across all spaces — feeds the editor's `@`-mention Pages section. */
+export interface SpacePageRef {
+  pageId: string;
+  spaceId: string;
+  spaceName: string;
   path: string;
   title: string;
 }
 
 /** A space plus its active page count and last activity — feeds the Knowledge home space grid. */
-export interface BundleWithActivity {
-  bundle: KnowledgeBundle;
+export interface SpaceWithActivity {
+  space: KnowledgeSpace;
   pageCount: number;
-  /** Latest of the bundle's own update or any of its pages' updates. */
+  /** Latest of the space's own update or any of its pages' updates. */
   lastActivity: Date;
 }
 
 /** A recently-edited page across all spaces — feeds the Knowledge home "Recently edited" list. */
-export interface RecentPage extends BundlePageRef {
+export interface RecentPage extends SpacePageRef {
   updatedAt: Date;
 }
 
 /** A hand-authored index.md/log.md that overrides the auto-synthesized listing/changelog. */
-export interface KnowledgeBundleOverride {
-  bundleId: string;
-  /** Directory the override applies to; "" = bundle root. */
+export interface KnowledgeSpaceOverride {
+  spaceId: string;
+  /** Directory the override applies to; "" = space root. */
   dirPath: string;
   file: "index.md" | "log.md";
   content: string;
@@ -103,7 +103,7 @@ export interface KnowledgeBundleOverride {
 
 export interface KnowledgeChunk {
   _id: string;
-  documentId: string;
+  pageId: string;
   chunkIndex: number;
   content: string;
   /** NULL when no embedding provider was available at index time (lexical-only). */
@@ -113,19 +113,9 @@ export interface KnowledgeChunk {
   createdAt: Date;
 }
 
-export interface KnowledgeCollection {
-  _id: string;
-  name: string;
-  description: string | null;
-  domain: string | null;
-  version: number;
-  createdAt: Date;
-  updatedAt: Date;
-}
-
 export interface KnowledgeRevision {
   _id: string;
-  documentId: string;
+  pageId: string;
   revisionNumber: number;
   content: string;
   plainText: string;
@@ -146,14 +136,14 @@ export interface SearchFilters {
   domain?: string;
   source?: KnowledgeSource;
   tags?: string[];
-  /** Scope search to one OKF bundle (space). Matched against the document's `bundle_id`. */
-  bundleId?: string;
-  /** Filter to one OKF `type` (e.g. "table", "playbook"). Matched against the document's `type`. */
+  /** Scope search to one OKF space. Matched against the page's `space_id`. */
+  spaceId?: string;
+  /** Filter to one OKF `type` (e.g. "table", "playbook"). Matched against the page's `type`. */
   type?: string;
 }
 
 export interface SearchHit {
-  documentId: string;
+  pageId: string;
   chunkId: string;
   title: string;
   content: string;

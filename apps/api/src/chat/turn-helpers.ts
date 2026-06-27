@@ -57,7 +57,7 @@ export interface ChatBody {
   // into `<eager-resources>` — for THIS turn only. Unknown names are ignored.
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` pins from the composer: documentIds whose full page content is injected
+  // Per-turn `~knowledge` pins from the composer: pageIds whose full page content is injected
   // into `<pinned-knowledge>` for THIS turn only. Unknown/inactive ids are dropped.
   knowledgePages?: string[];
   // What the user is viewing this turn (A2UI P3) — exposed to the agent via `get_client_context`.

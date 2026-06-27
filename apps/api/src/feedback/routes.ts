@@ -93,7 +93,7 @@ export function registerFeedbackRoutes(
   );
 
   app.get(
-    "/api/v1/conversations/:id/feedback",
+    "/api/v1/chats/:id/feedback",
     {
       preHandler: requireAuth,
       schema: {

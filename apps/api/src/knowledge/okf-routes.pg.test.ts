@@ -4,18 +4,14 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { PgKnowledgeBundleOverrideRepo } from "./bundle-overrides-repo";
-import { PgKnowledgeBundleRepo } from "./bundles-repo";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PgKnowledgeLinksRepo } from "./links-repo";
-import {
-  PgKnowledgeCollectionRepo,
-  PgKnowledgeDocumentRepo,
-  PgKnowledgeRevisionRepo,
-} from "./repo";
+import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import { PageRetrievalService } from "./retrieval-service";
 import { registerKnowledgeRoutes } from "./routes";
 import { KnowledgeService } from "./service";
+import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
+import { PgKnowledgeSpaceRepo } from "./spaces-repo";
 import type { EmbeddingPort } from "./types";
 
 function lexicalOnly(): EmbeddingPort {
@@ -30,13 +26,12 @@ function lexicalOnly(): EmbeddingPort {
 
 async function buildApp(db: PGlite): Promise<FastifyInstance> {
   const service = new KnowledgeService({
-    documents: new PgKnowledgeDocumentRepo(db),
+    pages: new PgKnowledgePageRepo(db),
     chunks: new PgKnowledgeChunkRepo(db),
-    collections: new PgKnowledgeCollectionRepo(db),
     revisions: new PgKnowledgeRevisionRepo(db),
-    bundles: new PgKnowledgeBundleRepo(db),
+    spaces: new PgKnowledgeSpaceRepo(db),
     links: new PgKnowledgeLinksRepo(db),
-    overrides: new PgKnowledgeBundleOverrideRepo(db),
+    overrides: new PgKnowledgeSpaceOverrideRepo(db),
     embeddings: lexicalOnly(),
   });
   const app = Fastify();
@@ -49,7 +44,7 @@ const base = "/api/v1/knowledge";
 const ORDERS = `---\ntype: BigQuery Table\ntitle: Orders\n---\n\n# Schema\n\nJoined with [customers](/tables/customers.md).`;
 const CUSTOMERS = `---\ntype: BigQuery Table\ntitle: Customers\n---\n\nProfiles.`;
 
-describe("OKF bundle routes", () => {
+describe("OKF space routes", () => {
   let db: PGlite;
   let app: FastifyInstance;
   beforeEach(async () => {
@@ -62,88 +57,84 @@ describe("OKF bundle routes", () => {
     await db.close();
   });
 
-  async function createBundle(name = "sales"): Promise<string> {
-    const res = await app.inject({ method: "POST", url: `${base}/bundles`, payload: { name } });
+  async function createSpace(name = "sales"): Promise<string> {
+    const res = await app.inject({ method: "POST", url: `${base}/spaces`, payload: { name } });
     expect(res.statusCode).toBe(201);
     return res.json<{ id: string }>().id;
   }
 
-  async function writeConcept(id: string, path: string, content: string) {
+  async function writePage(id: string, path: string, content: string) {
     return app.inject({
       method: "POST",
-      url: `${base}/bundles/${id}/concepts`,
+      url: `${base}/spaces/${id}/pages`,
       payload: { path, content },
     });
   }
 
-  it("does bundle CRUD with duplicate-name 409", async () => {
-    const id = await createBundle();
-    expect((await app.inject({ method: "GET", url: `${base}/bundles/${id}` })).statusCode).toBe(
-      200
-    );
+  it("does space CRUD with duplicate-name 409", async () => {
+    const id = await createSpace();
+    expect((await app.inject({ method: "GET", url: `${base}/spaces/${id}` })).statusCode).toBe(200);
     expect(
-      (await app.inject({ method: "GET", url: `${base}/bundles` })).json<{ items: unknown[] }>()
+      (await app.inject({ method: "GET", url: `${base}/spaces` })).json<{ items: unknown[] }>()
         .items
     ).toHaveLength(1);
 
     const dup = await app.inject({
       method: "POST",
-      url: `${base}/bundles`,
+      url: `${base}/spaces`,
       payload: { name: "sales" },
     });
     expect(dup.statusCode).toBe(409);
 
     const upd = await app.inject({
       method: "PUT",
-      url: `${base}/bundles/${id}`,
+      url: `${base}/spaces/${id}`,
       payload: { description: "d" },
     });
     expect(upd.json<{ description: string }>().description).toBe("d");
 
-    expect((await app.inject({ method: "DELETE", url: `${base}/bundles/${id}` })).statusCode).toBe(
+    expect((await app.inject({ method: "DELETE", url: `${base}/spaces/${id}` })).statusCode).toBe(
       204
     );
-    expect((await app.inject({ method: "GET", url: `${base}/bundles/${id}` })).statusCode).toBe(
-      404
-    );
+    expect((await app.inject({ method: "GET", url: `${base}/spaces/${id}` })).statusCode).toBe(404);
   });
 
-  it("writes concepts and exposes documents, navigate, and the graph", async () => {
-    const id = await createBundle();
-    await writeConcept(id, "tables/customers", CUSTOMERS);
-    const wc = await writeConcept(id, "tables/orders", ORDERS);
+  it("writes pages and exposes pages, navigate, and the graph", async () => {
+    const id = await createSpace();
+    await writePage(id, "tables/customers", CUSTOMERS);
+    const wc = await writePage(id, "tables/orders", ORDERS);
     expect(wc.statusCode).toBe(201);
     expect(wc.json<{ path: string }>().path).toBe("tables/orders");
 
-    const docs = await app.inject({ method: "GET", url: `${base}/bundles/${id}/documents` });
+    const docs = await app.inject({ method: "GET", url: `${base}/spaces/${id}/pages` });
     expect(docs.json<{ items: unknown[] }>().items).toHaveLength(2);
 
     const nav = await app.inject({
       method: "GET",
-      url: `${base}/bundles/${id}/navigate?dirPath=tables`,
+      url: `${base}/spaces/${id}/navigate?dirPath=tables`,
     });
     expect(nav.json<{ listing: string }>().listing).toContain("[Orders](orders.md)");
 
-    const graph = await app.inject({ method: "GET", url: `${base}/bundles/${id}/graph` });
+    const graph = await app.inject({ method: "GET", url: `${base}/spaces/${id}/graph` });
     const g = graph.json<{ edges: Array<{ broken: boolean }> }>();
     expect(g.edges).toHaveLength(1);
     expect(g.edges[0]?.broken).toBe(false);
   });
 
-  it("renames a bundle (rewriting inbound links) and 409s a name collision", async () => {
-    const eng = await createBundle("Engineering");
-    const sales = await createBundle("Sales");
-    await writeConcept(
+  it("renames a space (rewriting inbound links) and 409s a name collision", async () => {
+    const eng = await createSpace("Engineering");
+    const sales = await createSpace("Sales");
+    await writePage(
       eng,
       "runbook",
       "---\ntype: Playbook\ntitle: Runbook\n---\n\n[p](tf:page/Sales/pricing)."
     );
-    await writeConcept(sales, "pricing", "---\ntype: Doc\ntitle: Pricing\n---\n\nbody");
+    await writePage(sales, "pricing", "---\ntype: Doc\ntitle: Pricing\n---\n\nbody");
 
     // Renaming onto an existing name is rejected.
     const collide = await app.inject({
       method: "PUT",
-      url: `${base}/bundles/${sales}`,
+      url: `${base}/spaces/${sales}`,
       payload: { name: "Engineering" },
     });
     expect(collide.statusCode).toBe(409);
@@ -151,65 +142,65 @@ describe("OKF bundle routes", () => {
     // A clean rename succeeds and rewrites the Engineering graph's cross-space edge to the new name.
     const rename = await app.inject({
       method: "PUT",
-      url: `${base}/bundles/${sales}`,
+      url: `${base}/spaces/${sales}`,
       payload: { name: "Revenue" },
     });
     expect(rename.statusCode).toBe(200);
 
-    const graph = (await app.inject({ method: "GET", url: `${base}/bundles/${eng}/graph` })).json<{
-      edges: Array<{ targetBundleName: string | null; targetBundleId: string | null }>;
+    const graph = (await app.inject({ method: "GET", url: `${base}/spaces/${eng}/graph` })).json<{
+      edges: Array<{ targetSpaceName: string | null; targetSpaceId: string | null }>;
     }>();
-    const edge = graph.edges.find((e) => e.targetBundleName === "Revenue");
-    expect(edge?.targetBundleId).toBe(sales);
+    const edge = graph.edges.find((e) => e.targetSpaceName === "Revenue");
+    expect(edge?.targetSpaceId).toBe(sales);
   });
 
   it("treats a reserved index path as an override", async () => {
-    const id = await createBundle();
-    const res = await writeConcept(id, "index", "# Root");
+    const id = await createSpace();
+    const res = await writePage(id, "index", "# Root");
     expect(res.statusCode).toBe(200);
     expect(res.json<{ override: boolean }>().override).toBe(true);
   });
 
-  it("404s a concept write to an unknown bundle", async () => {
-    const res = await writeConcept(randomUUID(), "a", CUSTOMERS);
+  it("404s a page write to an unknown space", async () => {
+    const res = await writePage(randomUUID(), "a", CUSTOMERS);
     expect(res.statusCode).toBe(404);
   });
 
-  it("lists all pages across bundles and returns a concept's backlinks", async () => {
-    const eng = await createBundle("Engineering");
-    const sales = await createBundle("Sales");
-    await writeConcept(
+  it("lists all pages across spaces and returns a page's backlinks", async () => {
+    const eng = await createSpace("Engineering");
+    const sales = await createSpace("Sales");
+    await writePage(
       eng,
       "runbook",
       "---\ntype: Playbook\ntitle: Runbook\n---\n\nPricing: [pricing](tf:page/Sales/pricing)."
     );
-    await writeConcept(sales, "pricing", "---\ntype: Doc\ntitle: Pricing\n---\n\nbody");
+    await writePage(sales, "pricing", "---\ntype: Doc\ntitle: Pricing\n---\n\nbody");
 
-    const pages = (await app.inject({ method: "GET", url: `${base}/pages` })).json<{
-      items: Array<{ bundleName: string; path: string }>;
+    const pages = (await app.inject({ method: "GET", url: `${base}/pages/mentions` })).json<{
+      items: Array<{ spaceName: string; path: string }>;
     }>().items;
-    expect(pages.map((p) => `${p.bundleName}/${p.path}`).sort()).toEqual([
+    expect(pages.map((p) => `${p.spaceName}/${p.path}`).sort()).toEqual([
       "Engineering/runbook",
       "Sales/pricing",
     ]);
 
-    const salesDocs = (
-      await app.inject({ method: "GET", url: `${base}/bundles/${sales}/documents` })
+    const salesPages = (
+      await app.inject({ method: "GET", url: `${base}/spaces/${sales}/pages` })
     ).json<{ items: Array<{ id: string; path: string }> }>().items;
-    const pricingId = salesDocs.find((d) => d.path === "pricing")?.id as string;
+    const pricingId = salesPages.find((d) => d.path === "pricing")?.id as string;
 
     const backlinks = await app.inject({
       method: "GET",
-      url: `${base}/documents/${pricingId}/backlinks`,
+      url: `${base}/pages/${pricingId}/backlinks`,
     });
     expect(backlinks.statusCode).toBe(200);
-    const items = backlinks.json<{ items: Array<{ title: string; bundleName: string }> }>().items;
+    const items = backlinks.json<{ items: Array<{ title: string; spaceName: string }> }>().items;
     expect(items).toHaveLength(1);
     expect(items[0]?.title).toBe("Runbook");
-    expect(items[0]?.bundleName).toBe("Engineering");
+    expect(items[0]?.spaceName).toBe("Engineering");
 
     expect(
-      (await app.inject({ method: "GET", url: `${base}/documents/${randomUUID()}/backlinks` }))
+      (await app.inject({ method: "GET", url: `${base}/pages/${randomUUID()}/backlinks` }))
         .statusCode
     ).toBe(404);
   });

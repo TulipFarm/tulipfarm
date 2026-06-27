@@ -17,11 +17,11 @@ import { EMPTY_OKF_FIELDS, type OkfFields, parseOkf, serializeOkf } from "~/lib/
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
-export type ConceptFormProps = {
+export type PageFormProps = {
   mode: "create" | "edit";
-  /** The bundle this concept lives in — drives the `@`/`#` editor mention menus. */
-  bundleId: string;
-  /** Fixed bundle path of the concept on edit (read-only); seed/initial on create. */
+  /** The space this page lives in — drives the `@`/`#` editor mention menus. */
+  spaceId: string;
+  /** Fixed space path of the page on edit (read-only); seed/initial on create. */
   initialPath?: string;
   /** Lock the path field even on create (e.g. authoring the reserved `index` front page). */
   lockPath?: boolean;
@@ -37,9 +37,9 @@ export type ConceptFormProps = {
 
 type Tab = "guided" | "raw";
 
-export function ConceptForm({
+export function PageForm({
   mode,
-  bundleId,
+  spaceId,
   initialPath,
   lockPath,
   initialContent,
@@ -48,7 +48,7 @@ export function ConceptForm({
   submitting,
   formError,
   cancelTo,
-}: ConceptFormProps) {
+}: PageFormProps) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "guided");
   const [path, setPath] = useState(initialPath ?? "");
   const [fields, setFields] = useState<OkfFields>(() =>
@@ -56,7 +56,7 @@ export function ConceptForm({
   );
   const [raw, setRaw] = useState(() => initialContent ?? serializeOkf({ ...EMPTY_OKF_FIELDS }));
   const pathLocked = mode === "edit" || !!lockPath;
-  const mentionExtensions = useWikiMentionExtensions(bundleId);
+  const mentionExtensions = useWikiMentionExtensions(spaceId);
 
   function setField<K extends keyof OkfFields>(key: K, value: OkfFields[K]) {
     setFields((prev) => ({ ...prev, [key]: value }));

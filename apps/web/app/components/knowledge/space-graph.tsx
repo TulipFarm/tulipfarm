@@ -1,14 +1,14 @@
 import { useNavigate } from "@remix-run/react";
 import { forceCenter, forceLink, forceManyBody, forceSimulation, forceX, forceY } from "d3-force";
 import { useEffect, useMemo, useState } from "react";
-import { buildConceptResolver, type ConceptResolver, conceptHref } from "~/lib/concept-href";
-import type { BundleGraph, BundlePageRef } from "~/lib/knowledge-api";
+import type { SpaceGraph, SpacePageRef } from "~/lib/knowledge-api";
+import { buildPageResolver, type PageResolver, pageHref } from "~/lib/page-href";
 
 /*
- * Force-directed view of a bundle's cross-link graph. Runs a headless d3-force simulation (ticked to
+ * Force-directed view of a space's cross-link graph. Runs a headless d3-force simulation (ticked to
  * a stable layout, then frozen — no animation loop) and renders the result as SVG: nodes are circles
- * coloured by kind (concept vs cross-space stub), edges are directed lines (dashed when `broken`). Clicking a node navigates to
- * its concept detail. Pure render once the simulation settles; the parent owns the data fetch.
+ * coloured by kind (page vs cross-space stub), edges are directed lines (dashed when `broken`). Clicking a node navigates to
+ * its page detail. Pure render once the simulation settles; the parent owns the data fetch.
  */
 
 const WIDTH = 720;
@@ -21,27 +21,27 @@ type SimNode = {
   title: string;
   /** SPA navigation target; null = inert (no detail route, e.g. an unresolved cross-space stub). */
   href: string | null;
-  /** A stub standing in for a page in ANOTHER bundle (rendered faded + labelled with the bundle). */
+  /** A stub standing in for a page in ANOTHER space (rendered faded + labelled with the space). */
   crossSpace: boolean;
   x: number;
   y: number;
 };
 type SimEdge = { source: SimNode; target: SimNode; broken: boolean; crossSpace: boolean };
 
-// Build the node + link sets for the simulation. Same-bundle nodes link to their concept's stable
-// UUID route via `conceptHref(n.id, …)`; an edge whose target lives in another bundle (`targetBundleName`
+// Build the node + link sets for the simulation. Same-space nodes link to their page's stable
+// UUID route via `pageHref(n.id, …)`; an edge whose target lives in another space (`targetSpaceName`
 // set) gets a faded stub node so the link is drawn instead of silently dropped — clickable through when
-// the resolver maps `(targetBundleName, targetPath)` to a document id. Pure + deterministic (seeds every
+// the resolver maps `(targetSpaceName, targetPath)` to a page id. Pure + deterministic (seeds every
 // node at center) so it's unit-testable without running d3.
 export function buildSimGraph(
-  graph: BundleGraph,
-  resolver: ConceptResolver
+  graph: SpaceGraph,
+  resolver: PageResolver
 ): { nodes: SimNode[]; links: SimEdge[] } {
   const nodes: SimNode[] = graph.nodes.map((n) => ({
     id: n.id,
     path: n.path,
     title: n.title,
-    href: n.path ? conceptHref(n.id, n.path) : null,
+    href: n.path ? pageHref(n.id, n.path) : null,
     crossSpace: false,
     x: WIDTH / 2,
     y: HEIGHT / 2,
@@ -52,17 +52,17 @@ export function buildSimGraph(
   for (const e of graph.edges) {
     const source = byId.get(e.sourceId);
     if (!source) continue;
-    if (e.targetBundleName) {
-      const key = `x:${e.targetBundleName}/${e.targetPath}`;
+    if (e.targetSpaceName) {
+      const key = `x:${e.targetSpaceName}/${e.targetPath}`;
       let stub = stubByKey.get(key);
       if (!stub) {
         const lastSeg = e.targetPath.split("/").at(-1) || e.targetPath;
-        const ref = resolver.byBundleNamePath(e.targetBundleName, e.targetPath);
+        const ref = resolver.bySpaceNamePath(e.targetSpaceName, e.targetPath);
         stub = {
           id: key,
           path: null,
-          title: `${e.targetBundleName}:${lastSeg}`,
-          href: ref ? conceptHref(ref.documentId, ref.path) : null,
+          title: `${e.targetSpaceName}:${lastSeg}`,
+          href: ref ? pageHref(ref.pageId, ref.path) : null,
           crossSpace: true,
           x: WIDTH / 2,
           y: HEIGHT / 2,
@@ -79,11 +79,11 @@ export function buildSimGraph(
   return { nodes, links };
 }
 
-export function BundleGraphView({ graph, pages }: { graph: BundleGraph; pages: BundlePageRef[] }) {
+export function SpaceGraphView({ graph, pages }: { graph: SpaceGraph; pages: SpacePageRef[] }) {
   const navigate = useNavigate();
   const [nodes, setNodes] = useState<SimNode[]>([]);
   const [edges, setEdges] = useState<SimEdge[]>([]);
-  const resolver = useMemo(() => buildConceptResolver(pages), [pages]);
+  const resolver = useMemo(() => buildPageResolver(pages), [pages]);
 
   useEffect(() => {
     const { nodes: simNodes, links: simLinks } = buildSimGraph(graph, resolver);
@@ -114,7 +114,7 @@ export function BundleGraphView({ graph, pages }: { graph: BundleGraph; pages: B
   }, [graph, resolver]);
 
   if (graph.nodes.length === 0) {
-    return <p className="text-muted-foreground">0 concepts — nothing to graph</p>;
+    return <p className="text-muted-foreground">0 pages — nothing to graph</p>;
   }
 
   return (
@@ -127,11 +127,11 @@ export function BundleGraphView({ graph, pages }: { graph: BundleGraph; pages: B
           viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
           className="h-auto w-full"
           role="img"
-          aria-label="bundle cross-link graph"
+          aria-label="space cross-link graph"
         >
           <defs>
             <marker
-              id="bundle-graph-arrow"
+              id="space-graph-arrow"
               viewBox="0 0 10 10"
               refX="9"
               refY="5"
@@ -154,7 +154,7 @@ export function BundleGraphView({ graph, pages }: { graph: BundleGraph; pages: B
                 strokeWidth={1}
                 strokeDasharray={e.broken || e.crossSpace ? "4 3" : undefined}
                 opacity={e.crossSpace ? 0.5 : 1}
-                markerEnd="url(#bundle-graph-arrow)"
+                markerEnd="url(#space-graph-arrow)"
               />
             ))}
           </g>
@@ -170,7 +170,7 @@ export function BundleGraphView({ graph, pages }: { graph: BundleGraph; pages: B
   );
 }
 
-// A single graph node. A concept node wraps its visuals in an SVG <a> (a real link element — keeps
+// A single graph node. A page node wraps its visuals in an SVG <a> (a real link element — keeps
 // the a11y linter happy and gives keyboard focus for free); the click is intercepted for SPA routing
 // via the router's navigate. A node with no path (no detail route) renders an inert group.
 function GraphNode({

@@ -2,12 +2,12 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 /*
  * Client-side OKF (Open Knowledge Format) serialize/parse — a small mirror of the backend's
- * `apps/api/src/knowledge/okf/{serialize,parse}.ts`, used only to round-trip the concept editor
+ * `apps/api/src/knowledge/okf/{serialize,parse}.ts`, used only to round-trip the page editor
  * between its "Guided" (structured fields) and "Raw" (whole markdown) tabs. The server remains the
  * source of truth: it re-parses/validates the submitted `content` and is the only authority on
- * whether a concept is valid OKF.
+ * whether a page is valid OKF.
  *
- * An OKF concept is YAML frontmatter (delimited by `---`) followed by a markdown body. There are no
+ * An OKF page is YAML frontmatter (delimited by `---`) followed by a markdown body. There are no
  * required fields; every frontmatter scalar is optional and omitted when empty (no frontmatter at all
  * when nothing is set).
  */

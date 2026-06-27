@@ -6,10 +6,10 @@ import { makePglite } from "../test/pglite";
 import { DEFAULT_RANKING } from "./retrieval-config";
 import { extractHighlights, PageRetrievalService, toPrefixTsQuery } from "./retrieval-service";
 
-async function seedBundle(db: PGlite, name = `b-${randomUUID()}`): Promise<string> {
+async function seedSpace(db: PGlite, name = `b-${randomUUID()}`): Promise<string> {
   const id = randomUUID();
   await db.query(
-    `INSERT INTO knowledge_bundles (id, name, description, created_at, updated_at)
+    `INSERT INTO knowledge_spaces (id, name, description, created_at, updated_at)
      VALUES ($1, $2, NULL, now(), now())`,
     [id, name]
   );
@@ -17,7 +17,7 @@ async function seedBundle(db: PGlite, name = `b-${randomUUID()}`): Promise<strin
 }
 
 interface SeedPage {
-  bundleId: string;
+  spaceId: string;
   path: string;
   title: string;
   /** Becomes plain_text and (unless `chunks` given) the single chunk body. */
@@ -32,25 +32,16 @@ async function seedPage(db: PGlite, p: SeedPage): Promise<string> {
   const id = randomUUID();
   const updated = p.updatedAt ?? new Date();
   await db.query(
-    `INSERT INTO knowledge_documents
+    `INSERT INTO knowledge_pages
        (id, title, content, plain_text, source, source_id, tags, active, always_load_for_agents,
-        version, bundle_id, path, type, frontmatter_extra, created_at, updated_at)
+        version, space_id, path, type, frontmatter_extra, created_at, updated_at)
      VALUES ($1,$2,$3,$3,'authored',$4,'{}',true,false,1,$5,$6,$7,'{}'::jsonb,now(),$8)`,
-    [
-      id,
-      p.title,
-      p.body,
-      `okf:${p.bundleId}:${p.path}`,
-      p.bundleId,
-      p.path,
-      p.type ?? null,
-      updated,
-    ]
+    [id, p.title, p.body, `okf:${p.spaceId}:${p.path}`, p.spaceId, p.path, p.type ?? null, updated]
   );
   const chunks = p.chunks ?? [p.body];
   for (let i = 0; i < chunks.length; i += 1) {
     await db.query(
-      `INSERT INTO knowledge_chunks (id, document_id, chunk_index, content, embedding, tsv, model, dim, created_at)
+      `INSERT INTO knowledge_chunks (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
        VALUES ($1,$2,$3,$4,NULL,to_tsvector('english',$4),'m',3,now())`,
       [randomUUID(), id, i, chunks[i]]
     );
@@ -75,15 +66,15 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("groups chunks to one page hit, scored by the best (max) chunk", async () => {
-    const b = await seedBundle(db);
+    const b = await seedSpace(db);
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "strong",
       title: "Strong",
       body: "intro",
       chunks: ["alpha alpha alpha beta", "totally unrelated text"],
     });
-    await seedPage(db, { bundleId: b, path: "weak", title: "Weak", body: "alpha once only" });
+    await seedPage(db, { spaceId: b, path: "weak", title: "Weak", body: "alpha once only" });
 
     const hits = await svc.searchPages({ query: "alpha", filters: {}, limit: 10 });
     const strong = hits.filter((h) => h.path === "strong");
@@ -92,10 +83,10 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("ranks an exact title match above a body-only mention", async () => {
-    const b = await seedBundle(db);
-    await seedPage(db, { bundleId: b, path: "guide", title: "Onboarding Guide", body: "welcome" });
+    const b = await seedSpace(db);
+    await seedPage(db, { spaceId: b, path: "guide", title: "Onboarding Guide", body: "welcome" });
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "misc",
       title: "Misc Notes",
       body: "a stray onboarding reference buried in the body",
@@ -106,17 +97,17 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("breaks ties by recency (more recent updated_at ranks higher)", async () => {
-    const b = await seedBundle(db);
+    const b = await seedSpace(db);
     const now = Date.now();
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "fresh",
       title: "Quarterly Metrics",
       body: "quarterly metrics report",
       updatedAt: new Date(now - 5 * DAY),
     });
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "stale",
       title: "Quarterly Metrics",
       body: "quarterly metrics report",
@@ -127,31 +118,31 @@ describe("PageRetrievalService.searchPages", () => {
     expect(hits.map((h) => h.path)).toEqual(["fresh", "stale"]);
   });
 
-  it("narrows by the bundle (space) facet", async () => {
-    const b1 = await seedBundle(db);
-    const b2 = await seedBundle(db);
+  it("narrows by the space facet", async () => {
+    const b1 = await seedSpace(db);
+    const b2 = await seedSpace(db);
     await seedPage(db, {
-      bundleId: b1,
+      spaceId: b1,
       path: "a",
       title: "Report One",
       body: "shared term widget",
     });
     await seedPage(db, {
-      bundleId: b2,
+      spaceId: b2,
       path: "b",
       title: "Report Two",
       body: "shared term widget",
     });
 
-    const scoped = await svc.searchPages({ query: "widget", filters: { bundleId: b1 }, limit: 10 });
-    expect(scoped.map((h) => h.bundleId)).toEqual([b1]);
+    const scoped = await svc.searchPages({ query: "widget", filters: { spaceId: b1 }, limit: 10 });
+    expect(scoped.map((h) => h.spaceId)).toEqual([b1]);
   });
 
   it("narrows by the type facet", async () => {
-    const b = await seedBundle(db);
-    await seedPage(db, { bundleId: b, path: "t1", title: "Orders", body: "schema", type: "table" });
+    const b = await seedSpace(db);
+    await seedPage(db, { spaceId: b, path: "t1", title: "Orders", body: "schema", type: "table" });
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "p1",
       title: "Runbook",
       body: "schema",
@@ -167,9 +158,9 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("returns a title-only page (no chunks) using plain_text for the snippet", async () => {
-    const b = await seedBundle(db);
+    const b = await seedSpace(db);
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "titleonly",
       title: "Kubernetes Deployment",
       body: "this body never gets chunked",
@@ -182,9 +173,9 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("matches a word prefix (as-you-type): 'frid' finds a body 'Friday'", async () => {
-    const b = await seedBundle(db);
+    const b = await seedSpace(db);
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "rb",
       title: "Deploy Runbook",
       body: "Never deploy on a Friday.",
@@ -194,16 +185,16 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("recovers a typo via the pg_trgm recall pass when the primary finds nothing", async () => {
-    const b = await seedBundle(db);
-    await seedPage(db, { bundleId: b, path: "pb", title: "Playbook", body: "incident steps" });
+    const b = await seedSpace(db);
+    await seedPage(db, { spaceId: b, path: "pb", title: "Playbook", body: "incident steps" });
 
     const hits = await svc.searchPages({ query: "playbok", filters: {}, limit: 10 });
     expect(hits.map((h) => h.path)).toContain("pb");
   });
 
   it("does NOT run the trgm pass when disabled", async () => {
-    const b = await seedBundle(db);
-    await seedPage(db, { bundleId: b, path: "pb", title: "Playbook", body: "incident steps" });
+    const b = await seedSpace(db);
+    await seedPage(db, { spaceId: b, path: "pb", title: "Playbook", body: "incident steps" });
     const noTrgm = new PageRetrievalService(db, { ...DEFAULT_RANKING, trgmFallback: false });
 
     const hits = await noTrgm.searchPages({ query: "playbok", filters: {}, limit: 10 });
@@ -211,9 +202,9 @@ describe("PageRetrievalService.searchPages", () => {
   });
 
   it("populates highlightRanges for a body match", async () => {
-    const b = await seedBundle(db);
+    const b = await seedSpace(db);
     await seedPage(db, {
-      bundleId: b,
+      spaceId: b,
       path: "h",
       title: "Doc",
       body: "the quick brown widget jumps",
@@ -239,38 +230,38 @@ describe("PageRetrievalService.recentPages", () => {
     await db.close();
   });
 
-  it("returns pages by updated_at desc, honoring the limit and bundle filter", async () => {
-    const b1 = await seedBundle(db);
-    const b2 = await seedBundle(db);
+  it("returns pages by updated_at desc, honoring the limit and space filter", async () => {
+    const b1 = await seedSpace(db);
+    const b2 = await seedSpace(db);
     const now = Date.now();
     await seedPage(db, {
-      bundleId: b1,
+      spaceId: b1,
       path: "old",
       title: "Old",
       body: "x",
       updatedAt: new Date(now - 9 * DAY),
     });
     await seedPage(db, {
-      bundleId: b1,
+      spaceId: b1,
       path: "new",
       title: "New",
       body: "y",
       updatedAt: new Date(now - 1 * DAY),
     });
     await seedPage(db, {
-      bundleId: b2,
+      spaceId: b2,
       path: "other",
       title: "Other",
       body: "z",
       updatedAt: new Date(now),
     });
 
-    const recent = await svc.recentPages(10, { bundleId: b1 });
+    const recent = await svc.recentPages(10, { spaceId: b1 });
     expect(recent.map((h) => h.path)).toEqual(["new", "old"]);
 
     const capped = await svc.recentPages(1);
     expect(capped).toHaveLength(1);
-    expect(capped[0].path).toBe("other"); // most recent across all bundles
+    expect(capped[0].path).toBe("other"); // most recent across all spaces
   });
 });
 

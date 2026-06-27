@@ -97,7 +97,7 @@ export type ChatRequestBody = {
   // context for this turn only (ephemeral, like `model`). Names resolve server-side.
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` page pins (documentIds) — their content is injected server-side this turn.
+  // Per-turn `~knowledge` page pins (pageIds) — their content is injected server-side this turn.
   knowledgePages?: string[];
   // What the user is viewing this turn — the agent reads it via the `get_client_context` tool (P3).
   clientContext?: { route?: string; title?: string };

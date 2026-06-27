@@ -187,11 +187,11 @@ export class SoulLoader {
     const map = new Map<string, SoulIntegration>();
     const names = await subdirs(join(this.soulPath, "integrations"));
     for (const name of names) {
-      const connPath = join(this.soulPath, "integrations", name, "connection.yaml");
+      const configPath = join(this.soulPath, "integrations", name, "config.yaml");
       try {
-        const content = await readFile(connPath, "utf8");
-        const connection = (parseYaml(content) ?? {}) as Record<string, unknown>;
-        map.set(name, { name, connection });
+        const content = await readFile(configPath, "utf8");
+        const config = (parseYaml(content) ?? {}) as Record<string, unknown>;
+        map.set(name, { name, config });
       } catch (err) {
         this.logger.warn(
           `Soul: skipping integration "${name}" — ${err instanceof Error ? err.message : String(err)}`

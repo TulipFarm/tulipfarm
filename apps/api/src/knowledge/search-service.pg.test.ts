@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
-import { indexDocument } from "./index-service";
-import { PgKnowledgeDocumentRepo } from "./repo";
+import { indexPage } from "./index-service";
+import { PgKnowledgePageRepo } from "./repo";
 import { search } from "./search-service";
-import type { EmbeddingPort, KnowledgeDocument } from "./types";
+import type { EmbeddingPort, KnowledgePage } from "./types";
 
 function fakeEmbeddings(available: boolean, dim = 3): EmbeddingPort {
   return {
@@ -23,7 +23,7 @@ function fakeEmbeddings(available: boolean, dim = 3): EmbeddingPort {
   };
 }
 
-function doc(plainText: string): KnowledgeDocument {
+function page(plainText: string): KnowledgePage {
   const now = new Date();
   return {
     _id: randomUUID(),
@@ -45,22 +45,22 @@ function doc(plainText: string): KnowledgeDocument {
 describe("knowledge search", () => {
   let db: PGlite;
   let chunks: PgKnowledgeChunkRepo;
-  let docs: PgKnowledgeDocumentRepo;
+  let pages: PgKnowledgePageRepo;
 
   beforeEach(async () => {
     db = await makePglite();
     await runPgMigrations(db);
     chunks = new PgKnowledgeChunkRepo(db);
-    docs = new PgKnowledgeDocumentRepo(db);
+    pages = new PgKnowledgePageRepo(db);
   });
   afterEach(async () => {
     await db.close();
   });
 
   it("uses vector search with no warnings when embeddings are available", async () => {
-    const d = doc("the capital of france is paris");
-    await docs.insert(d);
-    await indexDocument(d, chunks, fakeEmbeddings(true));
+    const p = page("the capital of france is paris");
+    await pages.insert(p);
+    await indexPage(p, chunks, fakeEmbeddings(true));
 
     const res = await search("france", {}, 10, {
       embeddings: fakeEmbeddings(true),
@@ -72,10 +72,10 @@ describe("knowledge search", () => {
   });
 
   it("falls back to lexical with a warning when no embedding provider", async () => {
-    const d = doc("the capital of france is paris");
-    await docs.insert(d);
+    const p = page("the capital of france is paris");
+    await pages.insert(p);
     // index lexical-only (no provider)
-    await indexDocument(d, chunks, fakeEmbeddings(false));
+    await indexPage(p, chunks, fakeEmbeddings(false));
 
     const res = await search("paris", {}, 10, {
       embeddings: fakeEmbeddings(false),
@@ -96,9 +96,9 @@ describe("knowledge search", () => {
   });
 
   it("uses lexical WITHOUT a warning when an available provider returns no vector", async () => {
-    const d = doc("paris is the capital of france");
-    await docs.insert(d);
-    await indexDocument(d, chunks, fakeEmbeddings(true));
+    const p = page("paris is the capital of france");
+    await pages.insert(p);
+    await indexPage(p, chunks, fakeEmbeddings(true));
 
     const emptyProvider: EmbeddingPort = {
       isAvailable: () => true,

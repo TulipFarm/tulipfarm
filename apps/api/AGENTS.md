@@ -14,7 +14,7 @@ src/
   guardrails/     # 3-stage guard framework (input/tool-call/output) + pattern guards — see guardrails/README.md
   platform/       # platform-tier tool implementations + tool-result helpers
   hooks/          # isolated-vm hook sandbox + worker
-  knowledge/      # RAG: documents, chunks, pgvector + tsvector search; governance block
+  knowledge/      # RAG: pages, chunks, pgvector + tsvector search; governance block
   kv/             # generic scoped key-value store (system/user/agent) — see kv/README.md
   memory/         # per-user working memory
   secrets/        # secret storage
@@ -68,7 +68,7 @@ SDK `ToolSet`. Tools are defined as plain `ToolDef` objects (`tools/types.ts`):
 
 ```ts
 interface ToolDef {
-  name: string;            // unique, snake_case (e.g. "resource_create")
+  name: string;            // unique, snake_case (e.g. "record_create")
   tier: "system" | "platform" | "integration";
   mutating: boolean;       // false = read (parallelizable), true = write (sequential)
   description: string;     // LLM-facing

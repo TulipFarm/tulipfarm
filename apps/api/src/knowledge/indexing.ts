@@ -5,15 +5,15 @@ export const KNOWLEDGE_INDEX_QUEUE = "knowledge-index";
 
 /** What an indexing job carries — one variant per source adapter (KN-V1-003). */
 export type IndexJob =
-  | { kind: "document"; documentId: string }
+  | { kind: "page"; pageId: string }
   | { kind: "resource"; resourceType: string; resourceId: string; record: Record<string, unknown> }
   | { kind: "conversation"; conversationId: string };
 
 /** Deterministic key so repeated events for the same source collapse to one job. */
 export function jobKey(job: IndexJob): string {
   switch (job.kind) {
-    case "document":
-      return `document:${job.documentId}`;
+    case "page":
+      return `page:${job.pageId}`;
     case "resource":
       return `resource:${job.resourceId}`;
     case "conversation":
@@ -70,8 +70,8 @@ export interface KnowledgeIndexingDeps {
 /** The worker body — exported so it can be unit-tested without pg-boss. */
 export async function handleIndexJob(job: IndexJob, deps: KnowledgeIndexingDeps): Promise<void> {
   switch (job.kind) {
-    case "document":
-      await deps.service.reindexById(job.documentId);
+    case "page":
+      await deps.service.reindexById(job.pageId);
       return;
     case "resource": {
       const { title, content } = resourceToText(job.resourceType, job.record);

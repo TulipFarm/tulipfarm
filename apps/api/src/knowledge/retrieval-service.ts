@@ -3,15 +3,15 @@
 // with a pg_trgm typo-tolerance pass. Chunk-level search stays in search-service.ts; this is page mode.
 
 import type { Queryable } from "../db";
-import { docFilterConditions } from "./chunks-repo";
+import { pageFilterConditions } from "./chunks-repo";
 import { DEFAULT_RANKING, type RankingConfig } from "./retrieval-config";
 import type { SearchFilters } from "./types";
 
-/** A whole-page search hit (one row per document, best chunk supplies the snippet). */
+/** A whole-page search hit (one row per page, best chunk supplies the snippet). */
 export interface PageHit {
-  documentId: string;
+  pageId: string;
   title: string;
-  bundleId: string | null;
+  spaceId: string | null;
   path: string | null;
   /** Plain-text snippet with highlight markers already stripped. */
   snippet: string;
@@ -79,9 +79,9 @@ export function extractHighlights(marked: string): {
 function rowToPageHit(row: Record<string, unknown>, score: number): PageHit {
   const { snippet, highlightRanges } = extractHighlights((row.snippet as string | null) ?? "");
   return {
-    documentId: row.document_id as string,
+    pageId: row.page_id as string,
     title: row.title as string,
-    bundleId: (row.bundle_id as string | null) ?? null,
+    spaceId: (row.space_id as string | null) ?? null,
     path: (row.path as string | null) ?? null,
     snippet,
     highlightRanges,
@@ -103,10 +103,8 @@ export class PageRetrievalService {
     const primary = tsq === "" ? [] : await this.runPrimary(tsq, filters, limit);
     if (!this.cfg.trgmFallback || primary.length >= this.cfg.trgmThreshold) return primary;
 
-    const seen = new Set(primary.map((h) => h.documentId));
-    const fuzzy = (await this.runTrgm(query, filters, limit)).filter(
-      (h) => !seen.has(h.documentId)
-    );
+    const seen = new Set(primary.map((h) => h.pageId));
+    const fuzzy = (await this.runTrgm(query, filters, limit)).filter((h) => !seen.has(h.pageId));
     // Primary (relevance-ranked) hits stay on top; trgm-only hits fill the tail, sorted by similarity.
     return [...primary, ...fuzzy].slice(0, limit);
   }
@@ -117,11 +115,11 @@ export class PageRetrievalService {
     const filterSql = this.filterSql(filters, params);
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT d.id AS document_id, d.title, d.bundle_id, d.path,
-              left(d.plain_text, 200) AS snippet
-       FROM knowledge_documents d
-       WHERE d.active = true AND d.bundle_id IS NOT NULL AND d.path IS NOT NULL${filterSql}
-       ORDER BY d.updated_at DESC, d.id
+      `SELECT p.id AS page_id, p.title, p.space_id, p.path,
+              left(p.plain_text, 200) AS snippet
+       FROM knowledge_pages p
+       WHERE p.active = true AND p.space_id IS NOT NULL AND p.path IS NOT NULL${filterSql}
+       ORDER BY p.updated_at DESC, p.id
        LIMIT $${params.length}`,
       params
     );
@@ -141,23 +139,23 @@ export class PageRetrievalService {
     const { rows } = await this.q.query(
       `WITH q AS (SELECT to_tsquery('english', $1) AS tsq),
        chunk_hits AS (
-         SELECT c.document_id,
+         SELECT c.page_id,
                 max(ts_rank(c.tsv, q.tsq)) AS max_chunk_rank,
                 (array_agg(c.content ORDER BY ts_rank(c.tsv, q.tsq) DESC))[1] AS best_chunk
          FROM knowledge_chunks c, q
          WHERE c.tsv @@ q.tsq
-         GROUP BY c.document_id)
-       SELECT d.id AS document_id, d.title, d.bundle_id, d.path,
-              ( $2::float8 * ts_rank(d.title_tsv, q.tsq)
+         GROUP BY c.page_id)
+       SELECT p.id AS page_id, p.title, p.space_id, p.path,
+              ( $2::float8 * ts_rank(p.title_tsv, q.tsq)
               + $3::float8 * COALESCE(ch.max_chunk_rank, 0) )
-                * exp(-extract(epoch FROM (now() - d.updated_at)) * ln(2) / $4::float8) AS score,
-              ts_headline('english', COALESCE(ch.best_chunk, d.plain_text), q.tsq,
+                * exp(-extract(epoch FROM (now() - p.updated_at)) * ln(2) / $4::float8) AS score,
+              ts_headline('english', COALESCE(ch.best_chunk, p.plain_text), q.tsq,
                 'StartSel=${SEL_START},StopSel=${SEL_STOP},MaxFragments=2,MinWords=5,MaxWords=18') AS snippet
-       FROM knowledge_documents d
+       FROM knowledge_pages p
        CROSS JOIN q
-       LEFT JOIN chunk_hits ch ON ch.document_id = d.id
-       WHERE d.active = true AND d.bundle_id IS NOT NULL AND d.path IS NOT NULL
-         AND (d.title_tsv @@ q.tsq OR ch.document_id IS NOT NULL)${filterSql}
+       LEFT JOIN chunk_hits ch ON ch.page_id = p.id
+       WHERE p.active = true AND p.space_id IS NOT NULL AND p.path IS NOT NULL
+         AND (p.title_tsv @@ q.tsq OR ch.page_id IS NOT NULL)${filterSql}
        ORDER BY score DESC
        LIMIT $${params.length}`,
       params
@@ -171,22 +169,22 @@ export class PageRetrievalService {
     const filterSql = this.filterSql(filters, params);
     params.push(limit);
     const { rows } = await this.q.query(
-      `SELECT d.id AS document_id, d.title, d.bundle_id, d.path,
-              left(d.plain_text, 200) AS snippet,
-              similarity(d.title, $1) AS sim
-       FROM knowledge_documents d
-       WHERE d.active = true AND d.bundle_id IS NOT NULL AND d.path IS NOT NULL
-         AND d.title % $1${filterSql}
-       ORDER BY sim DESC, d.id
+      `SELECT p.id AS page_id, p.title, p.space_id, p.path,
+              left(p.plain_text, 200) AS snippet,
+              similarity(p.title, $1) AS sim
+       FROM knowledge_pages p
+       WHERE p.active = true AND p.space_id IS NOT NULL AND p.path IS NOT NULL
+         AND p.title % $1${filterSql}
+       ORDER BY sim DESC, p.id
        LIMIT $${params.length}`,
       params
     );
     return rows.map((r) => rowToPageHit(r, Number((r as { sim: number }).sim)));
   }
 
-  /** Build the `{filterSql}` fragment (reuses docFilterConditions — `d.`-aliased, type/bundle/etc.). */
+  /** Build the `{filterSql}` fragment (reuses pageFilterConditions — `p.`-aliased, type/space/etc.). */
   private filterSql(filters: SearchFilters, params: unknown[]): string {
-    const conds = docFilterConditions(filters, params);
+    const conds = pageFilterConditions(filters, params);
     return conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";
   }
 }

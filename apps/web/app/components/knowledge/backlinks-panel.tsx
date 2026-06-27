@@ -1,9 +1,9 @@
 import { Link } from "@remix-run/react";
-import { conceptHref } from "~/lib/concept-href";
 import type { Backlink } from "~/lib/knowledge-api";
+import { pageHref } from "~/lib/page-href";
 
 /*
- * "Linked from" panel — the inbound links to the current concept (same- and cross-space), computed
+ * "Linked from" panel — the inbound links to the current page (same- and cross-space), computed
  * server-side by reverse-querying the link graph. Renders nothing when there are no backlinks.
  */
 export function BacklinksPanel({ backlinks }: { backlinks: Backlink[] }) {
@@ -16,8 +16,8 @@ export function BacklinksPanel({ backlinks }: { backlinks: Backlink[] }) {
       <ul className="flex flex-col gap-1.5">
         {backlinks.map((b) => {
           const to = b.path
-            ? conceptHref(b.sourceId, b.path)
-            : `/knowledge/bundles/${encodeURIComponent(b.bundleId)}`;
+            ? pageHref(b.sourceId, b.path)
+            : `/knowledge/spaces/${encodeURIComponent(b.spaceId)}`;
           return (
             <li key={b.sourceId} className="flex items-center justify-between gap-2 text-xs">
               <Link
@@ -27,7 +27,7 @@ export function BacklinksPanel({ backlinks }: { backlinks: Backlink[] }) {
                 {b.title}
               </Link>
               <span className="shrink-0 text-[0.65rem] uppercase tracking-[0.1em] text-muted-foreground">
-                {b.bundleName}
+                {b.spaceName}
               </span>
             </li>
           );

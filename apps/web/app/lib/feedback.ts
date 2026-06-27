@@ -37,7 +37,7 @@ export async function getConversationFeedback(
   conversationId: string
 ): Promise<ConversationFeedback[]> {
   const body = await apiGet<{ feedback: ConversationFeedback[] }>(
-    `/api/v1/conversations/${encodeURIComponent(conversationId)}/feedback`
+    `/api/v1/chats/${encodeURIComponent(conversationId)}/feedback`
   );
   return body.feedback;
 }

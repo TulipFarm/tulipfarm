@@ -16,7 +16,7 @@ export function assembleAgentSystemPrompt(args: {
   agent: SoulAgent;
   platformAgent: PlatformAgent | undefined;
   memory: AssembleContext["memory"];
-  governanceDocs: AssembleContext["governanceDocs"];
+  governancePages: AssembleContext["governancePages"];
   availableSkills: AvailableSkill[];
   eagerSkills: AssembleContext["eagerSkills"];
   taggedResources: AssembleContext["taggedResources"];
@@ -29,7 +29,7 @@ export function assembleAgentSystemPrompt(args: {
     agent,
     platformAgent,
     memory,
-    governanceDocs,
+    governancePages,
     availableSkills,
     eagerSkills,
     taggedResources,
@@ -49,7 +49,7 @@ export function assembleAgentSystemPrompt(args: {
     tenantId: "default",
     personality: agent.body,
     memory,
-    governanceDocs,
+    governancePages,
     availableSkills: [...availableSkills, ...forgeAvailable],
     eagerSkills,
     taggedResources,

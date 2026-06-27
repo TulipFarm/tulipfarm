@@ -1,7 +1,7 @@
 /*
  * Shared debounced page-search hook for the knowledge wiki (⌘K palette + sidebar box). Latest-wins
- * (a sequence guard drops out-of-order responses), dedupes by documentId, and on a blank query falls
- * back to the Knowledge "Recently edited" overview. Scope "space" passes the active bundleId so results
+ * (a sequence guard drops out-of-order responses), dedupes by pageId, and on a blank query falls
+ * back to the Knowledge "Recently edited" overview. Scope "space" passes the active spaceId so results
  * stay within the current space; "all" searches every space.
  */
 import { useEffect, useRef, useState } from "react";
@@ -18,9 +18,9 @@ const DEBOUNCE_MS = 150;
 
 function recentToHit(r: RecentPage): PageSearchHit {
   return {
-    documentId: r.documentId,
+    pageId: r.pageId,
     title: r.title,
-    bundleId: r.bundleId,
+    spaceId: r.spaceId,
     path: r.path,
     snippet: "",
     highlightRanges: [],
@@ -31,8 +31,8 @@ function recentToHit(r: RecentPage): PageSearchHit {
 function dedupe(hits: PageSearchHit[]): PageSearchHit[] {
   const seen = new Set<string>();
   return hits.filter((h) => {
-    if (seen.has(h.documentId)) return false;
-    seen.add(h.documentId);
+    if (seen.has(h.pageId)) return false;
+    seen.add(h.pageId);
     return true;
   });
 }
@@ -47,20 +47,20 @@ export interface UsePageSearch {
   isZeroQuery: boolean;
 }
 
-export function usePageSearch(bundleId?: string | null): UsePageSearch {
+export function usePageSearch(spaceId?: string | null): UsePageSearch {
   const [query, setQuery] = useState("");
-  // The palette mounts once and `bundleId` changes on navigation (no remount), so the default must be
+  // The palette mounts once and `spaceId` changes on navigation (no remount), so the default must be
   // derived reactively — but an explicit user choice (override) sticks across routes.
   const [scopeOverride, setScopeOverride] = useState<SearchScope | null>(null);
-  const scope: SearchScope = scopeOverride ?? (bundleId ? "space" : "all");
+  const scope: SearchScope = scopeOverride ?? (spaceId ? "space" : "all");
   const [results, setResults] = useState<PageSearchHit[]>([]);
   const [loading, setLoading] = useState(false);
   const seq = useRef(0);
 
   const trimmed = query.trim();
   const isZeroQuery = trimmed === "";
-  // Only scope to a bundle when "space" is selected AND we actually know the active bundle.
-  const scopedBundle = scope === "space" && bundleId ? bundleId : undefined;
+  // Only scope to a space when "space" is selected AND we actually know the active space.
+  const scopedSpace = scope === "space" && spaceId ? spaceId : undefined;
 
   useEffect(() => {
     const mySeq = seq.current + 1;
@@ -71,7 +71,7 @@ export function usePageSearch(bundleId?: string | null): UsePageSearch {
         const hits =
           trimmed === ""
             ? (await getKnowledgeOverview(8)).recent.map(recentToHit)
-            : await searchPages(trimmed, { bundleId: scopedBundle, limit: 10 });
+            : await searchPages(trimmed, { spaceId: scopedSpace, limit: 10 });
         if (mySeq === seq.current) setResults(dedupe(hits));
       } catch {
         if (mySeq === seq.current) setResults([]);
@@ -80,7 +80,7 @@ export function usePageSearch(bundleId?: string | null): UsePageSearch {
       }
     }, DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [trimmed, scopedBundle]);
+  }, [trimmed, scopedSpace]);
 
   return { query, setQuery, scope, setScope: setScopeOverride, results, loading, isZeroQuery };
 }

@@ -209,7 +209,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   // the agent's body + its inbuilt forge skills (frontmatter only; bodies pulled on demand via
   // load_skill). Only the Information Architect carries forge skills today.
   const memoryList = workingMemory ? await workingMemory.list(user._id) : [];
-  const governanceDocs = knowledge ? await knowledge.governanceDocuments() : [];
+  const governancePages = knowledge ? await knowledge.governancePages() : [];
   const soulAvailableSkills = listAvailableSkills(soulLoader);
   const soulEagerSkills = listEagerSkills(soulLoader);
   // Repo catalogue for <soul-context> — conversation-scoped (same for the front desk and any
@@ -238,10 +238,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     .map((type) => soulLoader?.resources.get(type))
     .filter((r): r is NonNullable<typeof r> => r != null)
     .map((r) => ({ name: r.name, schema: stringifyYaml(r.schema) }));
-  // Per-turn `~knowledge` pins: resolve each documentId to its full page, drop unknown/inactive ones,
+  // Per-turn `~knowledge` pins: resolve each pageId to its full page, drop unknown/inactive ones,
   // and inject as `<pinned-knowledge>` so the agent answers from (and cites) the user's chosen pages.
   const turnPinnedKnowledge = knowledge
-    ? (await Promise.all((body.knowledgePages ?? []).map((id) => knowledge.getDocument(id))))
+    ? (await Promise.all((body.knowledgePages ?? []).map((id) => knowledge.getPage(id))))
         .filter((d): d is NonNullable<typeof d> => d?.active === true)
         .map((d) => ({ id: d._id, title: d.title, content: d.content }))
     : [];
@@ -256,7 +256,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       agent: a,
       platformAgent: pa,
       memory: memoryList,
-      governanceDocs,
+      governancePages,
       availableSkills: soulAvailableSkills,
       eagerSkills: mergedEagerSkills,
       taggedResources: turnTaggedResources,

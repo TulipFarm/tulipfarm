@@ -1,19 +1,19 @@
 /*
  * Pure helpers for the unified knowledge tree. `parseListing` turns the `navigate` endpoint's markdown
- * index into direct child entries; `mergeEntries` collapses a concept (`a.md`) and a sibling directory
+ * index into direct child entries; `mergeEntries` collapses a page (`a.md`) and a sibling directory
  * (`a/`) that share a basename into ONE node — a page that has both its own body AND child pages (the
- * Notion "page with sub-pages"). The link rewriters resolve OKF path references to a concept's stable
- * UUID route via a `ConceptResolver` (built once from `listAllPages()`). No path mutation, no backend conversion.
+ * Notion "page with sub-pages"). The link rewriters resolve OKF path references to a page's stable
+ * UUID route via a `PageResolver` (built once from `listAllPages()`). No path mutation, no backend conversion.
  */
-import { type ConceptResolver, conceptHref } from "./concept-href";
+import { type PageResolver, pageHref } from "./page-href";
 
-export type ConceptEntry = { kind: "concept"; label: string; path: string };
+export type PageEntry = { kind: "page"; label: string; path: string };
 export type DirEntry = { kind: "dir"; label: string; path: string };
-export type Entry = ConceptEntry | DirEntry;
+export type Entry = PageEntry | DirEntry;
 
 /** A merged tree node: clickable when it has a body, expandable when it has children. */
 export interface PageNode {
-  /** Full bundle-relative path (the concept route param + the navigate dirPath). */
+  /** Full space-relative path (the page route param + the navigate dirPath). */
   path: string;
   label: string;
   hasBody: boolean;
@@ -21,8 +21,8 @@ export interface PageNode {
 }
 
 // Parse the `navigate` markdown listing into direct child entries for `dirPath`. Only list items of
-// the form `* [label](target)` count; `target/` ⇒ subdir, `target.md` ⇒ concept. External links and
-// absolute log targets are resolved to full bundle-relative paths.
+// the form `* [label](target)` count; `target/` ⇒ subdir, `target.md` ⇒ page. External links and
+// absolute log targets are resolved to full space-relative paths.
 export function parseListing(dirPath: string, listing: string): Entry[] {
   const base = dirPath ? `${dirPath.replace(/\/+$/, "")}/` : "";
   const entries: Entry[] = [];
@@ -47,13 +47,13 @@ export function parseListing(dirPath: string, listing: string): Entry[] {
       const path = target.startsWith("/") ? rel : `${base}${rel}`;
       if (seen.has(`c:${path}`)) continue;
       seen.add(`c:${path}`);
-      entries.push({ kind: "concept", label: label || rel, path });
+      entries.push({ kind: "page", label: label || rel, path });
     }
   }
   return entries;
 }
 
-/** Collapse concept + dir entries sharing a basename path into one PageNode, preserving order. */
+/** Collapse page + dir entries sharing a basename path into one PageNode, preserving order. */
 export function mergeEntries(entries: Entry[]): PageNode[] {
   const order: string[] = [];
   const map = new Map<string, PageNode>();
@@ -64,9 +64,9 @@ export function mergeEntries(entries: Entry[]): PageNode[] {
       map.set(e.path, node);
       order.push(e.path);
     }
-    if (e.kind === "concept") {
+    if (e.kind === "page") {
       node.hasBody = true;
-      node.label = e.label; // a concept's own title wins over the directory label
+      node.label = e.label; // a page's own title wins over the directory label
     } else {
       node.hasChildren = true;
       if (!node.hasBody) node.label = e.label;
@@ -83,21 +83,17 @@ export function listingToNodes(dirPath: string, listing: string): PageNode[] {
 /**
  * Heuristic: is this `navigate("")` output the SYNTHESIZED contents listing (auto-generated) rather
  * than an authored index.md override? The synthesizer emits an empty doc or one starting with the
- * reserved `# Subdirectories` / `# Concepts` headings. Used so "Edit front page" doesn't freeze the
+ * reserved `# Subdirectories` / `# Pages` headings. Used so "Edit front page" doesn't freeze the
  * auto-contents as a static override.
  */
 export function isSynthesizedIndex(listing: string): boolean {
   const t = listing.trim();
-  return t === "" || /^#\s+(Subdirectories|Concepts)\b/.test(t);
+  return t === "" || /^#\s+(Subdirectories|Pages)\b/.test(t);
 }
 
-// Resolve a same-bundle OKF link target (`<dir>/` or `<path>.md`) to a concept's UUID href, or null
-// when it isn't a concept link or doesn't resolve. The resolver normalizes the path (slashes + `.md`).
-function sameBundleHref(
-  target: string,
-  bundleId: string,
-  resolver: ConceptResolver
-): string | null {
+// Resolve a same-space OKF link target (`<dir>/` or `<path>.md`) to a page's UUID href, or null
+// when it isn't a page link or doesn't resolve. The resolver normalizes the path (slashes + `.md`).
+function sameSpaceHref(target: string, spaceId: string, resolver: PageResolver): string | null {
   let path: string | null = null;
   if (target.endsWith("/")) path = target.replace(/^\/+/, "").replace(/\/+$/, "");
   else if (target.endsWith(".md"))
@@ -106,43 +102,39 @@ function sameBundleHref(
       .replace(/^\/+/, "")
       .replace(/\.md$/i, "");
   if (!path) return null;
-  const ref = resolver.byBundleIdPath(bundleId, path);
-  return ref ? conceptHref(ref.documentId, ref.path) : null;
+  const ref = resolver.bySpaceIdPath(spaceId, path);
+  return ref ? pageHref(ref.pageId, ref.path) : null;
 }
 
 /**
- * Rewrite a bundle's (root-relative) OKF markdown links into stable concept UUID routes so a rendered
- * index page is navigable. `[x](orders.md)` / `[x](tables/)` resolve their same-bundle path to a
- * document id via `resolver`, then emit `/knowledge/concepts/<id>/<slug>`. External (http/mailto/#),
- * already-absolute (`/…`), and unresolved (a pure directory with no concept) links are left untouched.
+ * Rewrite a space's (root-relative) OKF markdown links into stable page UUID routes so a rendered
+ * index page is navigable. `[x](orders.md)` / `[x](tables/)` resolve their same-space path to a
+ * page id via `resolver`, then emit `/knowledge/pages/<id>/<slug>`. External (http/mailto/#),
+ * already-absolute (`/…`), and unresolved (a pure directory with no page) links are left untouched.
  */
-export function rewriteOkfLinks(
-  markdown: string,
-  bundleId: string,
-  resolver: ConceptResolver
-): string {
+export function rewriteOkfLinks(markdown: string, spaceId: string, resolver: PageResolver): string {
   return markdown.replace(/\]\(([^)]+)\)/g, (whole, raw: string) => {
     const target = raw.trim();
     if (/^(https?:|mailto:|#|\/)/.test(target)) return whole;
-    const href = sameBundleHref(target, bundleId, resolver);
+    const href = sameSpaceHref(target, spaceId, resolver);
     return href ? `](${href})` : whole;
   });
 }
 
 /**
- * Rewrite a CONCEPT BODY's links into stable concept UUID routes for the read view. Handles everything
+ * Rewrite a PAGE BODY's links into stable page UUID routes for the read view. Handles everything
  * the `@`/`#` editor inserts plus authored OKF links:
  * - `tf:agent/<name>` → `/agents/<name>`, `tf:resource/<type>` → `/resources/<type>`
- * - `tf:page/<Bundle>/<path>` → `/knowledge/concepts/<id>/<slug>` (cross-space, resolved by
- *   `(bundleName, path)`; an unknown/renamed target is left as a `tf:` href so the view renders it muted)
- * - same-bundle `/<path>.md`, `<path>.md`, `<dir>/` → `/knowledge/concepts/<id>/<slug>` (resolved by
- *   `(bundleId, path)`; unresolved is left untouched)
- * `bundleId` is the concept's own bundle (for same-space resolution).
+ * - `tf:page/<Space>/<path>` → `/knowledge/pages/<id>/<slug>` (cross-space, resolved by
+ *   `(spaceName, path)`; an unknown/renamed target is left as a `tf:` href so the view renders it muted)
+ * - same-space `/<path>.md`, `<path>.md`, `<dir>/` → `/knowledge/pages/<id>/<slug>` (resolved by
+ *   `(spaceId, path)`; unresolved is left untouched)
+ * `spaceId` is the page's own space (for same-space resolution).
  */
 export function rewriteWikiLinks(
   markdown: string,
-  bundleId: string,
-  resolver: ConceptResolver
+  spaceId: string,
+  resolver: PageResolver
 ): string {
   // Match the whole `[label](target)`; `(?<!!)` before the `[` skips image syntax `![alt](src)` so an
   // image source is never rewritten into a page route. Each branch rebuilds `${label}(<newtarget>)`.
@@ -162,11 +154,11 @@ export function rewriteWikiLinks(
       if (slash <= 0) return whole;
       const name = decodeURIComponent(rest.slice(0, slash));
       const path = rest.slice(slash + 1).replace(/\.md$/i, "");
-      const ref = path ? resolver.byBundleNamePath(name, path) : null;
-      return ref ? `${label}(${conceptHref(ref.documentId, ref.path)})` : whole;
+      const ref = path ? resolver.bySpaceNamePath(name, path) : null;
+      return ref ? `${label}(${pageHref(ref.pageId, ref.path)})` : whole;
     }
     if (/^(https?:|mailto:|#)/.test(target)) return whole;
-    const href = sameBundleHref(target, bundleId, resolver);
+    const href = sameSpaceHref(target, spaceId, resolver);
     return href ? `${label}(${href})` : whole;
   });
 }

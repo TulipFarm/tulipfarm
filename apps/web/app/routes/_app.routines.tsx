@@ -8,7 +8,7 @@ export default function RoutinesPage() {
     <EmptyState
       section="routines"
       title="Routines"
-      hint="No routines yet. Durable workflows appear here once defined."
+      hint="No routines yet. Durable automations appear here once defined."
     />
   );
 }

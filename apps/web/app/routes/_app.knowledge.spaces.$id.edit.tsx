@@ -6,40 +6,40 @@ import {
   useRouteError,
 } from "@remix-run/react";
 import { useState } from "react";
-import { BundleForm } from "~/components/knowledge/bundle-form";
+import { SpaceForm } from "~/components/knowledge/space-form";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { type BundleInput, getBundle, updateBundle } from "~/lib/knowledge-api";
+import { getSpace, type SpaceInput, updateSpace } from "~/lib/knowledge-api";
 
-export const meta: MetaFunction = () => [{ title: "Edit · Bundles · Knowledge · tulipfarm" }];
+export const meta: MetaFunction = () => [{ title: "Edit · Spaces · Knowledge · tulipfarm" }];
 
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id;
-  if (!id) throw new ApiError(404, "missing bundle id");
-  const bundle = await getBundle(id);
-  return { bundle };
+  if (!id) throw new ApiError(404, "missing space id");
+  const space = await getSpace(id);
+  return { space };
 }
 
-export default function BundleEdit() {
-  const { bundle } = useLoaderData<typeof clientLoader>();
+export default function SpaceEdit() {
+  const { space } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const detailPath = `/knowledge/bundles/${encodeURIComponent(bundle.id)}`;
+  const detailPath = `/knowledge/spaces/${encodeURIComponent(space.id)}`;
 
-  async function onSubmit(body: BundleInput) {
+  async function onSubmit(body: SpaceInput) {
     setSubmitting(true);
     setFormError(null);
     try {
-      await updateBundle(bundle.id, body);
-      window.dispatchEvent(new Event("okf:bundle-changed")); // reflect the renamed space in the tree
+      await updateSpace(space.id, body);
+      window.dispatchEvent(new Event("okf:space-changed")); // reflect the renamed space in the tree
       navigate(detailPath);
     } catch (err) {
       const message =
         err instanceof ApiError && err.status === 409
-          ? "a bundle with that name already exists"
+          ? "a space with that name already exists"
           : err instanceof Error
             ? err.message
             : "request failed";
@@ -50,15 +50,15 @@ export default function BundleEdit() {
 
   const crumbs = [
     { label: "knowledge", to: "/knowledge" },
-    { label: bundle.name, to: detailPath },
+    { label: space.name, to: detailPath },
     { label: "settings" },
   ];
 
   return (
     <ResourcePanel crumbs={crumbs}>
-      <BundleForm
+      <SpaceForm
         mode="edit"
-        initial={{ name: bundle.name, description: bundle.description }}
+        initial={{ name: space.name, description: space.description }}
         onSubmit={onSubmit}
         submitting={submitting}
         formError={formError}

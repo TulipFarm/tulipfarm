@@ -671,7 +671,7 @@ describe("chat routes", () => {
       );
 
       // The durable summary row surfaces in the messages list (schema enum includes "summary").
-      const list = await get(`/api/v1/conversations/${convoId}/messages?limit=100`);
+      const list = await get(`/api/v1/chats/${convoId}/messages?limit=100`);
       expect(list.statusCode).toBe(200);
       expect(list.json().messages.some((m: MessageDoc) => m.role === "summary")).toBe(true);
     });
@@ -1697,9 +1697,9 @@ describe("chat routes", () => {
     });
   });
 
-  describe("GET /api/v1/conversations (Recent chats list)", () => {
+  describe("GET /api/v1/chats (Recent chats list)", () => {
     it("401 without auth", async () => {
-      const res = await get("/api/v1/conversations", { session: null });
+      const res = await get("/api/v1/chats", { session: null });
       expect(res.statusCode).toBe(401);
     });
 
@@ -1727,7 +1727,7 @@ describe("chat routes", () => {
         updatedAt: new Date(),
       });
 
-      const res = await get("/api/v1/conversations");
+      const res = await get("/api/v1/chats");
       expect(res.statusCode).toBe(200);
       const { conversations } = res.json() as {
         conversations: Array<{ id: string; title: string | null; starred: boolean }>;
@@ -1747,20 +1747,20 @@ describe("chat routes", () => {
       await repo.setTitle(match, "Budget Review Q3");
       await repo.setTitle(noMatch, "Inventory Planning");
 
-      const res = await get("/api/v1/conversations?q=budget");
+      const res = await get("/api/v1/chats?q=budget");
       const { conversations } = res.json() as { conversations: Array<{ id: string }> };
       expect(conversations.map((c) => c.id)).toEqual([match]);
     });
 
     it("rejects a limit above the 200 cap (querystring validation)", async () => {
-      const res = await get("/api/v1/conversations?limit=500");
+      const res = await get("/api/v1/chats?limit=500");
       expect(res.statusCode).toBe(400);
     });
   });
 
-  describe("GET /api/v1/conversations/:id", () => {
+  describe("GET /api/v1/chats/:id", () => {
     it("401 without auth", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}`, { session: null });
+      const res = await get(`/api/v1/chats/${randomUUID()}`, { session: null });
       expect(res.statusCode).toBe(401);
     });
 
@@ -1769,7 +1769,7 @@ describe("chat routes", () => {
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
       await repo.setTitle(convoId, "Budget Review");
-      const res = await get(`/api/v1/conversations/${convoId}`);
+      const res = await get(`/api/v1/chats/${convoId}`);
       expect(res.json().title).toBe("Budget Review");
     });
 
@@ -1784,7 +1784,7 @@ describe("chat routes", () => {
         createdAt: now,
         updatedAt: now,
       });
-      const res = await get(`/api/v1/conversations/${convoId}`);
+      const res = await get(`/api/v1/chats/${convoId}`);
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({
         id: convoId,
@@ -1797,7 +1797,7 @@ describe("chat routes", () => {
     });
 
     it("404 for a missing conversation", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}`);
+      const res = await get(`/api/v1/chats/${randomUUID()}`);
       expect(res.statusCode).toBe(404);
     });
 
@@ -1806,13 +1806,13 @@ describe("chat routes", () => {
       const convoId = randomUUID();
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
-      const res = await get(`/api/v1/conversations/${convoId}`, { session: otherSid });
+      const res = await get(`/api/v1/chats/${convoId}`, { session: otherSid });
       expect(res.statusCode).toBe(200);
       expect(res.json().id).toBe(convoId);
     });
   });
 
-  describe("PUT /api/v1/conversations/:id (rename / star)", () => {
+  describe("PUT /api/v1/chats/:id (rename / star)", () => {
     function put(
       id: string,
       payload: InjectOptions["payload"],
@@ -1828,7 +1828,7 @@ describe("chat routes", () => {
       }
       return app.inject({
         method: "PUT",
-        url: `/api/v1/conversations/${id}`,
+        url: `/api/v1/chats/${id}`,
         cookies,
         headers,
         payload,
@@ -1886,7 +1886,7 @@ describe("chat routes", () => {
     });
   });
 
-  describe("GET /api/v1/conversations/:id/messages", () => {
+  describe("GET /api/v1/chats/:id/messages", () => {
     function seedMessages(convoId: string, n: number): void {
       const base = Date.now();
       for (let i = 0; i < n; i++) {
@@ -1895,12 +1895,12 @@ describe("chat routes", () => {
     }
 
     it("401 without auth", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}/messages`, { session: null });
+      const res = await get(`/api/v1/chats/${randomUUID()}/messages`, { session: null });
       expect(res.statusCode).toBe(401);
     });
 
     it("404 for a missing conversation", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}/messages`);
+      const res = await get(`/api/v1/chats/${randomUUID()}/messages`);
       expect(res.statusCode).toBe(404);
     });
 
@@ -1908,7 +1908,7 @@ describe("chat routes", () => {
       const convoId = randomUUID();
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
-      const res = await get(`/api/v1/conversations/${convoId}/messages?cursor=not-base64!!`);
+      const res = await get(`/api/v1/chats/${convoId}/messages?cursor=not-base64!!`);
       expect(res.statusCode).toBe(400);
     });
 
@@ -1918,7 +1918,7 @@ describe("chat routes", () => {
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
       seedMessages(convoId, 5);
 
-      const page1 = await get(`/api/v1/conversations/${convoId}/messages?limit=2`);
+      const page1 = await get(`/api/v1/chats/${convoId}/messages?limit=2`);
       expect(page1.statusCode).toBe(200);
       const body1 = page1.json();
       expect(body1.messages).toHaveLength(2);
@@ -1926,9 +1926,7 @@ describe("chat routes", () => {
       expect(body1.messages.map((m: MessageDoc) => m.content)).toEqual(["m0", "m1"]);
 
       const page2 = await get(
-        `/api/v1/conversations/${convoId}/messages?limit=2&cursor=${encodeURIComponent(
-          body1.nextCursor
-        )}`
+        `/api/v1/chats/${convoId}/messages?limit=2&cursor=${encodeURIComponent(body1.nextCursor)}`
       );
       expect(page2.statusCode).toBe(200);
       const body2 = page2.json();
@@ -1941,13 +1939,13 @@ describe("chat routes", () => {
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
       seedMessages(convoId, 2);
-      const res = await get(`/api/v1/conversations/${convoId}/messages`, { session: otherSid });
+      const res = await get(`/api/v1/chats/${convoId}/messages`, { session: otherSid });
       expect(res.statusCode).toBe(200);
       expect(res.json().messages).toHaveLength(2);
     });
   });
 
-  describe("GET /api/v1/conversations/:id/debug-context (dev-only raw state)", () => {
+  describe("GET /api/v1/chats/:id/debug-context (dev-only raw state)", () => {
     // Seeds one of every persisted role, incl. tool-call/tool-result parts and a compaction summary,
     // so the assertions prove the debug payload surfaces the full raw rows (not just user/assistant).
     function seedAllRoles(convoId: string): void {
@@ -1991,14 +1989,14 @@ describe("chat routes", () => {
     }
 
     it("401 without auth", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}/debug-context`, {
+      const res = await get(`/api/v1/chats/${randomUUID()}/debug-context`, {
         session: null,
       });
       expect(res.statusCode).toBe(401);
     });
 
     it("404 for a missing conversation", async () => {
-      const res = await get(`/api/v1/conversations/${randomUUID()}/debug-context`);
+      const res = await get(`/api/v1/chats/${randomUUID()}/debug-context`);
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toBe("conversation not found");
     });
@@ -2015,7 +2013,7 @@ describe("chat routes", () => {
       });
       seedAllRoles(convoId);
 
-      const res = await get(`/api/v1/conversations/${convoId}/debug-context`);
+      const res = await get(`/api/v1/chats/${convoId}/debug-context`);
       expect(res.statusCode).toBe(200);
       const body = res.json();
       expect(body.conversationId).toBe(convoId);
@@ -2059,7 +2057,7 @@ describe("chat routes", () => {
         // A registered route would 200 for a seeded convo; a 404 here proves the gate omitted it.
         const res = await prodApp.inject({
           method: "GET",
-          url: `/api/v1/conversations/${convoId}/debug-context`,
+          url: `/api/v1/chats/${convoId}/debug-context`,
           cookies: { [SESSION_COOKIE]: sid },
         });
         expect(res.statusCode).toBe(404);

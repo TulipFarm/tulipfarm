@@ -141,7 +141,7 @@ describe("feedback routes", () => {
 
     const get = await app.inject({
       method: "GET",
-      url: `/api/v1/conversations/${conversationId}/feedback`,
+      url: `/api/v1/chats/${conversationId}/feedback`,
       cookies: authed(),
     });
     expect(get.statusCode).toBe(200);
@@ -159,7 +159,7 @@ describe("feedback routes", () => {
 
     const after = await app.inject({
       method: "GET",
-      url: `/api/v1/conversations/${conversationId}/feedback`,
+      url: `/api/v1/chats/${conversationId}/feedback`,
       cookies: authed(),
     });
     expect(after.json()).toEqual({ feedback: [] });

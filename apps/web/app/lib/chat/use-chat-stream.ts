@@ -28,7 +28,7 @@ export type SendOptions = {
   // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` page pins (documentIds) — full page content injected server-side this turn.
+  // Per-turn `~knowledge` page pins (pageIds) — full page content injected server-side this turn.
   knowledgePages?: string[];
 };
 

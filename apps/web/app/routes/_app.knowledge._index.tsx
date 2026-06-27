@@ -2,8 +2,8 @@ import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-ru
 import { BookText, FileText, Plus } from "lucide-react";
 import { ErrorState } from "~/components/states";
 import { ApiError } from "~/lib/api";
-import { conceptHref } from "~/lib/concept-href";
 import { getKnowledgeOverview } from "~/lib/knowledge-api";
+import { pageHref } from "~/lib/page-href";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
 
@@ -42,7 +42,7 @@ export default function KnowledgeIndex() {
           {spaces.map((s) => (
             <li key={s.id}>
               <Link
-                to={`/knowledge/bundles/${encodeURIComponent(s.id)}`}
+                to={`/knowledge/spaces/${encodeURIComponent(s.id)}`}
                 className="flex h-full cursor-pointer flex-col gap-2 rounded-sm border border-border bg-card px-4 py-3 transition-colors hover:border-primary/50 hover:bg-accent"
               >
                 <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
@@ -68,14 +68,14 @@ export default function KnowledgeIndex() {
           <h2 className="text-base font-bold text-foreground">Recently edited</h2>
           <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
             {recent.map((p) => (
-              <li key={p.documentId}>
+              <li key={p.pageId}>
                 <Link
-                  to={conceptHref(p.documentId, p.path)}
+                  to={pageHref(p.pageId, p.path)}
                   className="flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors hover:bg-accent"
                 >
                   <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
                   <span className="min-w-0 flex-1 truncate text-sm text-foreground">{p.title}</span>
-                  <span className="shrink-0 text-xs text-muted-foreground">{p.bundleName}</span>
+                  <span className="shrink-0 text-xs text-muted-foreground">{p.spaceName}</span>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     · {timeAgo(p.updatedAt)}
                   </span>
@@ -92,7 +92,7 @@ export default function KnowledgeIndex() {
 function NewSpaceLink() {
   return (
     <Link
-      to="/knowledge/bundles/new"
+      to="/knowledge/spaces/new"
       className="inline-flex cursor-pointer items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90"
     >
       <Plus className="size-3.5" aria-hidden />

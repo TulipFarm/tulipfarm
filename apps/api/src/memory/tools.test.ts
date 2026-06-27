@@ -44,7 +44,7 @@ describe("updateMemoryTool", () => {
     expect(res.success).toBe(false);
     if (res.success) throw new Error("expected failure");
     expect(res.error.code).toBe("oversize_value");
-    expect(res.error.message).toContain("create_knowledge_document");
+    expect(res.error.message).toContain("create_knowledge_page");
     expect(repo.docs).toHaveLength(0);
   });
 
@@ -62,7 +62,7 @@ describe("updateMemoryTool", () => {
 
   it("documents the appropriate-use guidance in its description (AC-V1-004 #4)", () => {
     expect(updateMemoryTool.description).toContain("small, stable, personal facts");
-    expect(updateMemoryTool.description).toContain("create_knowledge_document");
+    expect(updateMemoryTool.description).toContain("create_knowledge_page");
     expect(updateMemoryTool.mutating).toBe(true);
   });
 });
