@@ -113,4 +113,65 @@ describe("KnowledgeService", () => {
     expect(await svc.runReindexIfPending()).toBe(true);
     expect(await svc.runReindexIfPending()).toBe(false); // flag consumed
   });
+
+  async function embeddedCount(): Promise<number> {
+    const { rows } = await db.query(
+      "SELECT count(*)::int AS n FROM knowledge_chunks WHERE embedding IS NOT NULL"
+    );
+    return (rows[0] as { n: number }).n;
+  }
+
+  it("reindexTargeted re-indexes one page, a whole reindex on no args, and 0 for a missing page", async () => {
+    const svc = makeService(db, fakeEmbeddings(true));
+    const a = await svc.createPage({ title: "A", content: "alpha body" });
+    await svc.createPage({ title: "B", content: "beta body" });
+    expect(await svc.reindexTargeted({ pageId: a._id })).toBe(1);
+    expect(await svc.reindexTargeted({})).toBe(2);
+    expect(await svc.reindexTargeted({ pageId: "00000000-0000-0000-0000-000000000000" })).toBe(0);
+  });
+
+  it("backfillMissing embeds pages authored before a provider existed, idempotently", async () => {
+    // Author a page with no provider → chunk stored lexical-only (NULL embedding).
+    const offline = makeService(db, fakeEmbeddings(false));
+    await offline.createPage({ title: "T", content: "france content here" });
+    expect(await embeddedCount()).toBe(0);
+
+    // Provider now available → backfill embeds the stale page.
+    const online = makeService(db, fakeEmbeddings(true));
+    expect(await online.backfillMissing()).toBe(1);
+    expect(await embeddedCount()).toBeGreaterThan(0);
+    // Nothing left to backfill.
+    expect(await online.backfillMissing()).toBe(0);
+  });
+
+  it("backfillMissing is a no-op when no provider is available", async () => {
+    const offline = makeService(db, fakeEmbeddings(false));
+    await offline.createPage({ title: "T", content: "body text" });
+    expect(await offline.backfillMissing()).toBe(0);
+  });
+
+  it("indexStatus reports DB-derived counts and a null queue when unwired", async () => {
+    const svc = makeService(db, fakeEmbeddings(true));
+    await svc.createPage({ title: "A", content: "alpha body" });
+    const status = await svc.indexStatus();
+    expect(status.activePages).toBe(1);
+    expect(status.chunks.total).toBeGreaterThan(0);
+    expect(status.chunks.embedded).toBe(status.chunks.total);
+    expect(status.chunks.lexicalOnly).toBe(0);
+    expect(status.queue).toBeNull();
+  });
+
+  it("indexStatus surfaces pg-boss queue stats when wired", async () => {
+    const failedAt = new Date();
+    const svc = new KnowledgeService({
+      pages: new PgKnowledgePageRepo(db),
+      chunks: new PgKnowledgeChunkRepo(db),
+      revisions: new PgKnowledgeRevisionRepo(db),
+      embeddings: fakeEmbeddings(true),
+      indexQueueStats: async () => ({ pending: 3, lastError: { message: "boom", failedAt } }),
+    });
+    const status = await svc.indexStatus();
+    expect(status.queue?.pending).toBe(3);
+    expect(status.queue?.lastError?.message).toBe("boom");
+  });
 });

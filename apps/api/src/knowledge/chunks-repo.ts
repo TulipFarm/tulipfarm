@@ -2,11 +2,27 @@ import { randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
 import type {
   ChunkInput,
+  ExistingChunk,
   IndexingStatus,
+  IndexStats,
   KnowledgeSource,
   SearchFilters,
   SearchHit,
 } from "./types";
+
+/** Parse a pgvector value (returned as a `"[1,2,3]"` string) back into a number[] for reuse. */
+function parseVector(value: unknown): number[] | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value as number[];
+  const text = String(value).trim();
+  // An empty/degenerate vector string means "no usable embedding" → null, so the reuse check
+  // (`prior.embedding !== null`) correctly treats it as not reusable.
+  if (text.length === 0 || text === "[]") return null;
+  return text
+    .replace(/^\[|\]$/g, "")
+    .split(",")
+    .map((n) => Number(n));
+}
 
 /** Push `p.*` filter conditions onto `params` and return the SQL fragments. */
 export function pageFilterConditions(filters: SearchFilters, params: unknown[]): string[] {
@@ -50,6 +66,8 @@ function rowToHit(row: Record<string, unknown>, score: number): SearchHit {
 export interface KnowledgeChunkRepo {
   deleteByPage(pageId: string): Promise<void>;
   insertMany(pageId: string, chunks: ChunkInput[]): Promise<void>;
+  /** Existing chunks (ordered by chunk_index) projected for the re-index content-hash diff. */
+  listByPageForDiff(pageId: string): Promise<ExistingChunk[]>;
   /** Cosine exact-scan over chunks whose stored dim matches the active model. */
   searchVector(
     queryEmbedding: number[],
@@ -63,6 +81,10 @@ export interface KnowledgeChunkRepo {
   getIndexingStatus(pageId: string): Promise<IndexingStatus>;
   /** Batch variant — one grouped query; ids absent from the result default to "pending". */
   getIndexingStatuses(pageIds: string[]): Promise<Map<string, IndexingStatus>>;
+  /** Active pages with a chunk that is unembedded or embedded under a stale model — backfill targets. */
+  listPageIdsNeedingEmbedding(activeModel: string): Promise<string[]>;
+  /** Aggregate index health (counts + max lag), all from our own tables. */
+  indexStats(): Promise<IndexStats>;
 }
 
 export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
@@ -76,19 +98,43 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
     for (const chunk of chunks) {
       await this.q.query(
         `INSERT INTO knowledge_chunks
-           (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
-         VALUES ($1, $2, $3, $4, $5::vector, to_tsvector('english', $4), $6, $7, now())`,
+           (id, page_id, chunk_index, content, content_hash, embedding, tsv, model, dim, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6::vector, to_tsvector('english', $4), $7, $8, now())`,
         [
           randomUUID(),
           pageId,
           chunk.chunkIndex,
           chunk.content,
+          chunk.contentHash,
           chunk.embedding === null ? null : JSON.stringify(chunk.embedding),
           chunk.model,
           chunk.dim,
         ]
       );
     }
+  }
+
+  async listByPageForDiff(pageId: string): Promise<ExistingChunk[]> {
+    const { rows } = await this.q.query(
+      `SELECT chunk_index, content_hash, embedding, model, dim
+       FROM knowledge_chunks WHERE page_id = $1 ORDER BY chunk_index`,
+      [pageId]
+    );
+    return (
+      rows as Array<{
+        chunk_index: number;
+        content_hash: string | null;
+        embedding: unknown;
+        model: string | null;
+        dim: number | null;
+      }>
+    ).map((r) => ({
+      chunkIndex: Number(r.chunk_index),
+      contentHash: r.content_hash,
+      embedding: parseVector(r.embedding),
+      model: r.model,
+      dim: r.dim === null ? null : Number(r.dim),
+    }));
   }
 
   async searchVector(
@@ -152,5 +198,49 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
   async getIndexingStatus(pageId: string): Promise<IndexingStatus> {
     const statuses = await this.getIndexingStatuses([pageId]);
     return statuses.get(pageId) ?? "pending";
+  }
+
+  async listPageIdsNeedingEmbedding(activeModel: string): Promise<string[]> {
+    const { rows } = await this.q.query(
+      `SELECT DISTINCT p.id
+       FROM knowledge_pages p
+       JOIN knowledge_chunks c ON c.page_id = p.id
+       WHERE p.active = true AND (c.embedding IS NULL OR c.model IS DISTINCT FROM $1)`,
+      [activeModel]
+    );
+    return (rows as Array<{ id: string }>).map((r) => r.id);
+  }
+
+  async indexStats(): Promise<IndexStats> {
+    const { rows } = await this.q.query(
+      `WITH per_page AS (
+         SELECT p.id, p.updated_at, MAX(c.created_at) AS last_chunk
+         FROM knowledge_pages p
+         LEFT JOIN knowledge_chunks c ON c.page_id = p.id
+         WHERE p.active = true
+         GROUP BY p.id, p.updated_at
+       )
+       SELECT
+         (SELECT count(*) FROM knowledge_pages WHERE active = true)::int AS active_pages,
+         (SELECT count(*) FROM knowledge_chunks)::int AS total_chunks,
+         (SELECT count(*) FROM knowledge_chunks WHERE embedding IS NOT NULL)::int AS embedded_chunks,
+         (SELECT count(*) FROM knowledge_chunks WHERE embedding IS NULL)::int AS lexical_chunks,
+         (SELECT MAX(EXTRACT(EPOCH FROM (updated_at - last_chunk)))
+            FROM per_page WHERE last_chunk IS NOT NULL AND updated_at > last_chunk) AS max_lag_seconds`
+    );
+    const r = rows[0] as {
+      active_pages: number;
+      total_chunks: number;
+      embedded_chunks: number;
+      lexical_chunks: number;
+      max_lag_seconds: number | null;
+    };
+    return {
+      activePages: Number(r.active_pages),
+      totalChunks: Number(r.total_chunks),
+      embeddedChunks: Number(r.embedded_chunks),
+      lexicalChunks: Number(r.lexical_chunks),
+      maxLagSeconds: r.max_lag_seconds === null ? null : Number(r.max_lag_seconds),
+    };
   }
 }

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "welcome",
+    "title": "Welcome to the Sample Source",
+    "body": "This page was ingested by the SampleConnector to exercise the connector framework end to end.",
+    "updatedAt": "2026-06-01T00:00:00.000Z",
+    "tags": ["sample-connector", "intro"],
+    "domain": "sample"
+  },
+  {
+    "id": "runbook",
+    "title": "Sample Runbook",
+    "body": "A second sample record so listChanged returns more than one id and the cursor advances past the newest record.",
+    "updatedAt": "2026-06-02T00:00:00.000Z",
+    "tags": ["sample-connector", "runbook"],
+    "domain": "sample"
+  }
+]

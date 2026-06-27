@@ -28,8 +28,11 @@ import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
+import { buildDefaultRegistry } from "./knowledge/connectors/registry";
+import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
+import { registerConnectorSync } from "./knowledge/connectors/sync";
 import { subscribeKnowledgeIndexing } from "./knowledge/events";
-import { enqueueIndex, registerKnowledgeIndexing } from "./knowledge/indexing";
+import { enqueueIndex, makeIndexQueueStats, registerKnowledgeIndexing } from "./knowledge/indexing";
 import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./knowledge/repo";
 import { PageRetrievalService } from "./knowledge/retrieval-service";
@@ -134,6 +137,7 @@ async function boot() {
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
+      indexQueueStats: makeIndexQueueStats(boss, pool),
     });
 
     // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).
@@ -229,6 +233,11 @@ async function boot() {
       },
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
+    await registerConnectorSync(boss, {
+      registry: buildDefaultRegistry(),
+      state: new PgConnectorStateRepo(pool),
+      service: knowledgeService,
+    });
 
     app.listen({ port, host: "0.0.0.0" }, (err) => {
       if (err) {

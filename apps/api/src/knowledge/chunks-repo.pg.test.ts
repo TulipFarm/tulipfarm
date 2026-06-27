@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
@@ -28,7 +28,16 @@ function page(over: Partial<KnowledgePage> = {}): KnowledgePage {
 }
 
 function chunk(over: Partial<ChunkInput> = {}): ChunkInput {
-  return { chunkIndex: 0, content: "hello", embedding: null, model: null, dim: null, ...over };
+  const content = over.content ?? "hello";
+  return {
+    chunkIndex: 0,
+    content,
+    contentHash: createHash("md5").update(content).digest("hex"),
+    embedding: null,
+    model: null,
+    dim: null,
+    ...over,
+  };
 }
 
 describe("PgKnowledgeChunkRepo", () => {

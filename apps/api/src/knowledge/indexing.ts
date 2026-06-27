@@ -1,7 +1,46 @@
 import type { PgBoss } from "pg-boss";
+import type { Queryable } from "../db";
 import type { KnowledgeService } from "./service";
+import type { IndexQueueStats } from "./types";
 
 export const KNOWLEDGE_INDEX_QUEUE = "knowledge-index";
+
+// pg-boss internal table names are safe identifiers; still validated before interpolation.
+const SAFE_TABLE = /^[A-Za-z0-9_."]+$/;
+
+/**
+ * Operational stats for the index queue, read from pg-boss (`getQueueStats` + the queue's job table).
+ * Degrades to `{ pending: 0, lastError: null }` if the pg-boss schema isn't present or its shape
+ * changes — index-status should never fail because the queue introspection did.
+ */
+export function makeIndexQueueStats(boss: PgBoss, db: Queryable): () => Promise<IndexQueueStats> {
+  return async (): Promise<IndexQueueStats> => {
+    let pending = 0;
+    let lastError: IndexQueueStats["lastError"] = null;
+    try {
+      const stats = await boss.getQueueStats(KNOWLEDGE_INDEX_QUEUE);
+      pending = stats.readyCount + stats.activeCount;
+      if (stats.failedCount > 0 && stats.table && SAFE_TABLE.test(stats.table)) {
+        const table = stats.table.includes(".") ? stats.table : `pgboss.${stats.table}`;
+        const { rows } = await db.query(
+          `SELECT output, completed_on FROM ${table}
+           WHERE state = 'failed' ORDER BY completed_on DESC NULLS LAST LIMIT 1`
+        );
+        const row = rows[0] as { output: unknown; completed_on: Date } | undefined;
+        if (row) {
+          const message =
+            row.output && typeof row.output === "object" && "message" in row.output
+              ? String((row.output as { message: unknown }).message)
+              : JSON.stringify(row.output ?? null);
+          lastError = { message, failedAt: row.completed_on };
+        }
+      }
+    } catch {
+      // pg-boss schema absent (e.g. tests) or shape changed → degrade gracefully.
+    }
+    return { pending, lastError };
+  };
+}
 
 /** What an indexing job carries — one variant per source adapter (KN-V1-003). */
 export type IndexJob =

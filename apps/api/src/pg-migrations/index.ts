@@ -393,6 +393,40 @@ const OKF_CROSSLINK_STATEMENTS: string[] = [
     ON knowledge_links (target_bundle_name) WHERE target_bundle_name IS NOT NULL`,
 ];
 
+/**
+ * Chunk-level content hash (embeddings pipeline hardening). `content_hash` is `md5(content)` —
+ * cheap, non-cryptographic, and matchable in both SQL (`md5()`) and Node (`createHash("md5")`).
+ * On re-index the indexer reuses an existing chunk's embedding when its `(content_hash, model)`
+ * still matches the active model, so a one-line edit re-embeds only the changed chunk instead of
+ * the whole page. The backfill seeds hashes for existing rows so the first post-upgrade re-index
+ * already reuses untouched chunks.
+ */
+const CHUNK_CONTENT_HASH_STATEMENTS = async (q: Queryable): Promise<void> => {
+  await q.query("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS content_hash text");
+  await q.query(
+    "UPDATE knowledge_chunks SET content_hash = md5(content) WHERE content_hash IS NULL"
+  );
+};
+
+/**
+ * Connector sync state (connector framework). One row per registered external-source connector,
+ * keyed by `name`. `cursor` persists incremental sync position (opaque per connector) so syncs
+ * resume where they left off; `last_run_at`/`last_error` give the index-status surface operational
+ * visibility. The connector only ever writes pages through the existing funnels — it never touches
+ * `knowledge_chunks` or embeddings.
+ */
+const CONNECTOR_STATE_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS knowledge_connectors (
+    name        text PRIMARY KEY,
+    enabled     boolean NOT NULL DEFAULT false,
+    cursor      text,
+    last_run_at timestamptz,
+    last_error  text,
+    created_at  timestamptz NOT NULL,
+    updated_at  timestamptz NOT NULL
+  )`,
+];
+
 // ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
 // ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
 // keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
@@ -664,5 +698,21 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description:
       "terminology: rename knowledge bundle→space, document/concept→page (tables, columns, indexes); retire legacy collections",
     up: TERMINOLOGY_RENAME_STATEMENTS,
+  },
+  {
+    version: 19,
+    description:
+      "knowledge: knowledge_chunks.content_hash (md5) + backfill — chunk-level re-index dedup",
+    up: CHUNK_CONTENT_HASH_STATEMENTS,
+  },
+  {
+    version: 20,
+    description:
+      "knowledge: knowledge_connectors sync-state table (name, enabled, cursor, last_run_at, last_error)",
+    up: async (q) => {
+      for (const sql of CONNECTOR_STATE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
   },
 ];
