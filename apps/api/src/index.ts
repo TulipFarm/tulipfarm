@@ -128,6 +128,9 @@ async function boot() {
     const boss = new PgBoss({ connectionString: process.env.DATABASE_URL as string });
     await boss.start();
 
+    // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).
+    const retrievalService = new PageRetrievalService(pool);
+
     const knowledgeService = new KnowledgeService({
       pages: new PgKnowledgePageRepo(pool),
       chunks: new PgKnowledgeChunkRepo(pool),
@@ -136,12 +139,10 @@ async function boot() {
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
+      retrieval: retrievalService,
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
     });
-
-    // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).
-    const retrievalService = new PageRetrievalService(pool);
 
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only

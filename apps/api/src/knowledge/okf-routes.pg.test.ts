@@ -33,6 +33,7 @@ async function buildApp(db: PGlite): Promise<FastifyInstance> {
     links: new PgKnowledgeLinksRepo(db),
     overrides: new PgKnowledgeSpaceOverrideRepo(db),
     embeddings: lexicalOnly(),
+    retrieval: new PageRetrievalService(db),
   });
   const app = Fastify();
   registerKnowledgeRoutes(app, service, async () => {}, new PageRetrievalService(db));

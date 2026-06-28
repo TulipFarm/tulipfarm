@@ -6,6 +6,7 @@ import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PgKnowledgeLinksRepo } from "./links-repo";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
+import { PageRetrievalService } from "./retrieval-service";
 import { KnowledgeService } from "./service";
 import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
 import { PgKnowledgeSpaceRepo } from "./spaces-repo";
@@ -43,6 +44,7 @@ describe("OKF agent tools", () => {
       links: new PgKnowledgeLinksRepo(db),
       overrides: new PgKnowledgeSpaceOverrideRepo(db),
       embeddings: lexicalOnly(),
+      retrieval: new PageRetrievalService(db),
     });
     ctx = { userId: "u", service };
   });

@@ -5,6 +5,7 @@ import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
+import { PageRetrievalService } from "./retrieval-service";
 import { registerKnowledgeRoutes } from "./routes";
 import { KnowledgeService } from "./service";
 import type { EmbeddingPort } from "./types";
@@ -33,6 +34,7 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
       chunks: new PgKnowledgeChunkRepo(db),
       revisions: new PgKnowledgeRevisionRepo(db),
       embeddings: fakeEmbeddings(),
+      retrieval: new PageRetrievalService(db),
     });
     app = Fastify();
     // Stub auth: set req.user from the x-role header so the admin guard can be exercised.

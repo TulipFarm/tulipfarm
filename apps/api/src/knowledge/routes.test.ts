@@ -31,6 +31,7 @@ async function buildKnowledgeApp(
     chunks: new PgKnowledgeChunkRepo(db),
     revisions: new PgKnowledgeRevisionRepo(db),
     embeddings: fakeEmbeddings(available),
+    retrieval: new PageRetrievalService(db),
   });
   const app = Fastify();
   registerKnowledgeRoutes(

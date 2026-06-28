@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { EMBEDDING_UNAVAILABLE_WARNING, EmbeddingUnavailableError } from "@tulipfarm/llm";
 import type { PaginatedResult } from "../pagination";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import { indexPage, reindexAll } from "./index-service";
@@ -6,6 +7,8 @@ import type { KnowledgeLinksRepo } from "./links-repo";
 import { parseOkf, resolveLink, rewriteCrossPageSpaceName } from "./okf/parse";
 import { type IndexEntry, renderIndex } from "./okf/synthesize";
 import type { KnowledgePageRepo, KnowledgeRevisionRepo, PageListOpts } from "./repo";
+import { resolveRerank } from "./rerank";
+import type { PageRetrievalService } from "./retrieval-service";
 import { search } from "./search-service";
 import type { KnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
 import type { KnowledgeSpaceRepo, SpacePatch } from "./spaces-repo";
@@ -19,6 +22,7 @@ import type {
   KnowledgeRevision,
   KnowledgeSource,
   KnowledgeSpace,
+  QueryKnowledgeHit,
   RecentPage,
   SearchFilters,
   SearchResults,
@@ -125,6 +129,8 @@ export interface KnowledgeServiceDeps {
   chunks: KnowledgeChunkRepo;
   revisions: KnowledgeRevisionRepo;
   embeddings: EmbeddingPort;
+  /** Page-level lexical retrieval — the lexical arm of `hybridSearchPages`. */
+  retrieval: PageRetrievalService;
   /** When set, page writes enqueue async (re)indexing instead of indexing inline. */
   enqueueIndex?: (pageId: string) => Promise<void>;
   /** Operational stats for the async index queue (pg-boss). Absent → index-status omits queue info. */
@@ -290,6 +296,86 @@ export class KnowledgeService {
         score: 0,
       }));
     return { results: [...base.results, ...extra], warnings: base.warnings };
+  }
+
+  /**
+   * Page-level hybrid retrieval for the `query_knowledge` tool. Runs a vector arm (chunk hits
+   * grouped to their max-score page) and a lexical arm (whole-page FTS) in parallel, then fuses them
+   * with Reciprocal Rank Fusion (k=60, by rank not score) so neither arm's score scale dominates.
+   * The top `limit` pages are hydrated and passed through the (default no-op) rerank seam.
+   */
+  async hybridSearchPages(
+    query: string,
+    filters: SearchFilters,
+    limit: number
+  ): Promise<{ results: QueryKnowledgeHit[]; warnings: string[] }> {
+    const N = Math.max(limit * 4, 20);
+    const warnings: string[] = [];
+
+    // ── vector arm: chunk hits → max-score-per-page, keeping that chunk's content as the snippet ──
+    const vectorSnippet = new Map<string, string>();
+    let pagesV: string[] = [];
+    if (this.deps.embeddings.isAvailable()) {
+      try {
+        const out = await this.deps.embeddings.embedMany([query]);
+        const vec = out.embeddings[0];
+        const hits = vec ? await this.deps.chunks.searchVector(vec, out.dimension, N, filters) : [];
+        const best = new Map<string, { content: string; score: number }>();
+        for (const hit of hits) {
+          const prior = best.get(hit.pageId);
+          if (!prior || hit.score > prior.score) {
+            best.set(hit.pageId, { content: hit.content, score: hit.score });
+          }
+        }
+        pagesV = [...best.entries()].sort((a, b) => b[1].score - a[1].score).map(([id]) => id);
+        for (const [id, { content }] of best) vectorSnippet.set(id, content);
+      } catch (err) {
+        if (!(err instanceof EmbeddingUnavailableError)) throw err;
+        warnings.push(EMBEDDING_UNAVAILABLE_WARNING);
+      }
+    } else {
+      warnings.push(EMBEDDING_UNAVAILABLE_WARNING);
+    }
+
+    // ── lexical arm: whole-page FTS ──
+    const lexHits = await this.deps.retrieval.searchPages({ query, filters, limit: N });
+    const pagesL = lexHits.map((h) => h.pageId);
+    const lexicalSnippet = new Map(lexHits.map((h) => [h.pageId, h.snippet]));
+
+    // ── RRF fuse (k=60), by 0-based rank across both arms ──
+    const K = 60;
+    const fused = new Map<string, number>();
+    for (const list of [pagesV, pagesL]) {
+      list.forEach((id, rank) => {
+        fused.set(id, (fused.get(id) ?? 0) + 1 / (K + rank));
+      });
+    }
+    const topIds = [...fused.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([id]) => id);
+
+    // ── hydrate (drop pages deleted since indexing) ──
+    const pages = await Promise.all(topIds.map((id) => this.deps.pages.getById(id)));
+    const hits: QueryKnowledgeHit[] = [];
+    for (const page of pages) {
+      if (!page) continue;
+      const snippet =
+        vectorSnippet.get(page._id) ?? lexicalSnippet.get(page._id) ?? page.plainText.slice(0, 800);
+      hits.push({
+        pageId: page._id,
+        title: page.title,
+        snippet,
+        source: page.source,
+        score: fused.get(page._id) ?? 0,
+        spaceId: page.spaceId ?? undefined,
+        path: page.spaceId ? (page.path ?? undefined) : undefined,
+      });
+    }
+
+    // ── rerank seam: default identity; the NotImplemented stub (when enabled) throws by design ──
+    const results = await resolveRerank().rerank(query, hits, limit);
+    return { results, warnings };
   }
 
   governancePages(): Promise<KnowledgePage[]> {

@@ -44,9 +44,14 @@ const QUERY_SCHEMA = {
     domain: { type: "string" },
     tags: { type: "array", items: { type: "string" } },
     limit: { type: "number" },
-    spaceId: { type: "string", minLength: 1 },
+    // No minLength: agents tend to fill optional params with placeholders ("", "global", "*").
+    // The handler normalizes these to "no filter" rather than rejecting or crashing on a bad UUID.
+    spaceId: { type: "string" },
   },
 } as const;
+
+/** Canonical UUID shape — a `spaceId` that isn't one is ignored (treated as no space filter). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const validateQuery = ajv.compile(QUERY_SCHEMA);
 
 const CITE_SOURCES_SCHEMA = {
@@ -87,7 +92,7 @@ const validateCreatePage = ajv.compile(CREATE_PAGE_SCHEMA);
 const queryKnowledge: KnowledgeTool = {
   name: "query_knowledge",
   description:
-    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked chunks with their source page. Use to ground answers in stored pages. Pass `spaceId` to scope the search to a single space (wiki).",
+    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked pages, each with a matching snippet for orientation — read the whole page with `get_page` before answering. Use to ground answers in stored pages. Pass `spaceId` to scope the search to a single space (wiki).",
   mutating: false,
   inputSchema: QUERY_SCHEMA,
   handler: async (args, ctx) => {
@@ -99,14 +104,20 @@ const queryKnowledge: KnowledgeTool = {
       limit?: number;
       spaceId?: string;
     };
+    // Normalize agent-supplied filters: blank/placeholder values mean "no filter", and a non-UUID
+    // spaceId is ignored (rather than crashing the space_id = $n UUID comparison in the DB).
+    const domain = a.domain?.trim() ? a.domain.trim() : undefined;
+    const tags = a.tags && a.tags.length > 0 ? a.tags : undefined;
+    const rawSpaceId = a.spaceId?.trim();
+    const spaceId = rawSpaceId && UUID_RE.test(rawSpaceId) ? rawSpaceId : undefined;
+    const filterWarnings = rawSpaceId && !spaceId ? ["ignored-invalid-spaceId"] : [];
     try {
-      const res = await ctx.service.search(
+      const res = await ctx.service.hybridSearchPages(
         a.query,
-        { domain: a.domain, tags: a.tags, spaceId: a.spaceId },
-        Math.min(Math.max(a.limit ?? 10, 1), 50),
-        { expandGraph: true }
+        { domain, tags, spaceId },
+        Math.min(Math.max(a.limit ?? 10, 1), 50)
       );
-      return ok({ results: res.results, warnings: res.warnings });
+      return ok({ results: res.results, warnings: [...filterWarnings, ...res.warnings] });
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -123,7 +134,7 @@ const citeSources: KnowledgeTool = {
     if (!validateCite(args)) return err("validation_error", firstError(validateCite));
     const a = args as { citations: { ref: number; pageId: string }[] };
     try {
-      const sources: { ref: number; id: string; title: string; url?: string }[] = [];
+      const sources: { ref: number; id: string; title: string; url?: string; path?: string }[] = [];
       const seen = new Set<string>();
       for (const c of a.citations) {
         // Dedup by pageId — a page cited under several [n] refs lists once in the footer (keep the
@@ -134,7 +145,15 @@ const citeSources: KnowledgeTool = {
         const page = await ctx.service.getActivePage(c.pageId);
         if (!page) continue;
         const url = pageUrl(page);
-        sources.push({ ref: c.ref, id: page._id, title: page.title, ...(url ? { url } : {}) });
+        // `path` only for space (OKF) pages — flat pages have no spaceId/path and stay path-less.
+        const path = page.spaceId && page.path ? page.path : undefined;
+        sources.push({
+          ref: c.ref,
+          id: page._id,
+          title: page.title,
+          ...(url ? { url } : {}),
+          ...(path ? { path } : {}),
+        });
       }
       return ok({ sources });
     } catch (e) {
