@@ -1,6 +1,6 @@
 import * as remix from "@remix-run/react";
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import ChatRoute, { clientLoader } from "~/routes/_app._index";
 
@@ -17,10 +17,18 @@ vi.mock("~/lib/agents", () => ({
   getAgent: vi.fn(),
   listAgents: vi.fn(() => Promise.resolve([])),
 }));
-vi.mock("~/lib/onboarding", () => ({ listOnboardingSuggestions: vi.fn() }));
+vi.mock("~/lib/onboarding", () => ({
+  listOnboardingSuggestions: vi.fn(),
+  getOnboardingChecklist: vi.fn(),
+  dismissOnboardingChecklist: vi.fn(),
+}));
 
 import { getAgent } from "~/lib/agents";
-import { listOnboardingSuggestions } from "~/lib/onboarding";
+import {
+  dismissOnboardingChecklist,
+  getOnboardingChecklist,
+  listOnboardingSuggestions,
+} from "~/lib/onboarding";
 
 // jsdom has no layout engine; the transcript's auto-scroll calls scrollIntoView.
 Element.prototype.scrollIntoView = vi.fn();
@@ -38,6 +46,7 @@ test("default view is the live chat empty state with adaptive suggestions (AC-V1
         prompt: "Help me set up ticket management.",
       },
     ],
+    checklist: null,
   });
   render(<Stub initialEntries={["/"]} />);
 
@@ -57,6 +66,7 @@ test("default view is the live chat empty state with adaptive suggestions (AC-V1
 test("clientLoader never blocks chat: a failed suggestions fetch yields [] (AC-V1-001)", async () => {
   vi.mocked(getAgent).mockRejectedValue(new Error("api down"));
   vi.mocked(listOnboardingSuggestions).mockRejectedValue(new Error("api down"));
+  vi.mocked(getOnboardingChecklist).mockRejectedValue(new Error("api down"));
 
   const data = await clientLoader({
     request: new Request("http://localhost/"),
@@ -64,5 +74,31 @@ test("clientLoader never blocks chat: a failed suggestions fetch yields [] (AC-V
   } as Parameters<typeof clientLoader>[0]);
 
   expect(data.suggestions).toEqual([]);
+  expect(data.checklist).toBeNull();
   expect(data.defaultModel).toBe("standard");
+});
+
+test("the Getting-started card renders and route-level dismissal hides it (persists API call)", () => {
+  vi.mocked(remix.useLoaderData).mockReturnValue({
+    agentId: undefined,
+    defaultModel: "standard",
+    suggestions: [],
+    checklist: {
+      dismissed: false,
+      steps: [
+        { id: "resource", label: "Create a resource type", status: "todo", prompt: "Help me." },
+      ],
+      recommendations: [],
+    },
+  });
+  vi.mocked(dismissOnboardingChecklist).mockResolvedValue();
+  render(<Stub initialEntries={["/"]} />);
+
+  // Card visible (dismissal state lives in the route, above the newChatNonce-keyed ChatPanel).
+  expect(screen.getByText(/Getting started/)).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Dismiss getting started"));
+
+  // Optimistically hidden + the persistence call fired.
+  expect(screen.queryByText(/Getting started/)).toBeNull();
+  expect(dismissOnboardingChecklist).toHaveBeenCalledOnce();
 });
