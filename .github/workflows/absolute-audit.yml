@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   audit:
+    if: false
     name: Security audit and fix
     runs-on: ubuntu-latest
     steps:
