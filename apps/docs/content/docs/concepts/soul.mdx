@@ -10,6 +10,10 @@ definitions that make your TulipFarm what it is: resource schemas, agents, and s
 A fresh instance creates the soul at `~/.tulipfarm/soul`, controlled by the `SOUL_PATH`
 environment variable.
 
+You rarely touch the soul directly — agents write to it when you
+[build by chat](/docs/concepts/building). This page is about what that store *is* and how
+it behaves.
+
 ## Why a git repository
 
 TulipFarm treats the soul as a configuration database that happens to sync over git.
@@ -32,14 +36,14 @@ soul/
   agents/{name}/       AGENT.md
   skills/{name}/       SKILL.md (+ references/)
   routines/{name}/     routine definitions
-  integrations/{name}/ connection config
+  integrations/{name}/ integration config
   llm.config.yaml      LLM provider tiers
   guardrails.yaml      input / tool-call / output guard rules
   soul.yaml            root manifest
   skills-lock.json     installed-skill provenance
 ```
 
-Records, knowledge, and conversations are **not** in the soul — those are data, and
+Records, knowledge, and chats are **not** in the soul — those are data, and
 they live in the datastore.
 
 ## How the soul syncs

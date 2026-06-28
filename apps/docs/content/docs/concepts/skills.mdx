@@ -30,6 +30,14 @@ committed, and recorded in `skills-lock.json` with its source URL, ref, and hash
 
 See [Install a skill](/docs/guides/install-a-skill) for the walkthrough.
 
+## Authoring a skill by chat
+
+You do not have to find a skill in a repository — you can ask for one. Tell the assistant
+"make a skill that drafts refund replies in our tone", and the Information Architect loads
+its `skill-forge`, interviews you, and writes the `SKILL.md`. A skill authored this way
+lands in a **pending** state, runs through SkillAudit just like an installed one, and goes
+live only once you activate it. The audit is part of creation, not an afterthought.
+
 ## SkillAudit: advisory, not a boundary
 
 Every skill — whether installed from a repository or authored locally — is reviewed by a
@@ -40,7 +48,7 @@ rating of low, medium, or high.
 
 <Callout type="warn">
 SkillAudit is advisory, not a guarantee. A skill is natural-language instruction, not
-code, so it cannot be sandboxed — it may read benign yet behave badly in conversation,
+code, so it cannot be sandboxed — it may read benign yet behave badly in a chat,
 and injection can be obscured. A "low risk" rating does not auto-install anything.
 </Callout>
 

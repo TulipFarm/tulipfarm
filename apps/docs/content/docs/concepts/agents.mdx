@@ -3,14 +3,20 @@ title: Agents
 description: The actors that run turns, each defined by an AGENT.md file.
 ---
 
-An agent is an actor that runs turns against an LLM with access to TulipFarm's tools.
-Every instance ships with one built-in agent, **GeneralAssistant**, and you can define
-more in the [soul](/docs/concepts/soul).
+An agent is an actor that runs turns against an LLM with access to TulipFarm's tools. Two
+agents are built in: the **General Assistant** (your front desk) and the **Information
+Architect** (the builder) — see [Building by chat](/docs/concepts/building). You create
+your own agents by describing them to the assistant: "create a support agent that answers
+customer questions and files tickets." The Information Architect interviews you and builds
+it.
 
-## Defined by AGENT.md
+## What an agent is made of
 
-A soul agent is a single `AGENT.md` file: YAML frontmatter plus a markdown body. The body
-is the agent's system prompt; the frontmatter is its metadata.
+Each agent the assistant builds is a single `AGENT.md` file in the
+[soul](/docs/concepts/soul): YAML frontmatter plus a markdown body. The body is the
+agent's system prompt; the frontmatter is its metadata. You do not write this — it is what
+the assistant produces from your description, shown here so you know what each setting
+means when you ask for it.
 
 ```markdown title="agents/support/AGENT.md"
 ---
@@ -27,7 +33,7 @@ knowledge base and create tickets as resources when follow-up is needed.
 
 Names are flat and kebab-cased. `domain` is display-only — it groups agents in the UI but
 grants no special access. Agents are loaded into the registry at startup, with
-GeneralAssistant listed first.
+the General Assistant listed first.
 
 ## Autonomy: how much an agent can do unsupervised
 
@@ -63,6 +69,8 @@ the instance falls back to built-in safe defaults.
 
 ## Creating agents
 
-Agents are created and edited through agent tools and forges, which write the `AGENT.md`
-directly and commit it to the soul — no approval step. The web UI lists agents and shows
-each one's prompt, but does not yet edit them.
+Ask the assistant — "create a support agent", "make me an agent that triages bugs". The
+Information Architect loads its `agent-forge`, asks what the agent should do and how much
+autonomy it gets, then writes the `AGENT.md` and commits it to the soul. There is no
+approval step, and the agent is selectable as soon as it is built. The web UI lists your
+agents and shows each one's prompt; to change an agent, ask the assistant to edit it.

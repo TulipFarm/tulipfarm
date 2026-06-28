@@ -1,0 +1,66 @@
+---
+title: Use the knowledge wiki
+description: Create a space, write linked pages, and navigate them through backlinks, the graph, and search.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide builds a small wiki by hand in the **Knowledge** section of the web UI: a
+space, a few cross-linked pages, and the tools to navigate them. It assumes a running
+instance and an account that can write knowledge. For how knowledge fits the wider system,
+see [Knowledge](/docs/concepts/knowledge).
+
+<Callout type="info">
+You can also just ask the assistant — "create a space for our refund policies and add a
+page on 30-day returns". It writes spaces and pages the same way you do here. This guide
+covers the manual editor for when you want to write knowledge yourself.
+</Callout>
+
+## Create a space
+
+In the sidebar, choose **Knowledge**, then **New space**. Give it a name and an optional
+description, and save. The space opens with an empty page tree.
+
+## Add a page
+
+With the space open, choose **New page**. A page needs a **path** — its address within
+the space, such as `tables/orders` or `policies/refunds`. Give it a title, write the body
+in markdown, and save. The page appears in the space tree at its path.
+
+## Link pages together
+
+Pages link like a wiki, from inside the editor:
+
+- Type `@` to open a menu of pages, agents, and resource types. Pick one to insert a link
+  to it. A page in the same space links directly; a page in another space is linked by
+  name and resolved when the page is indexed.
+- Type `#` to tag the page. Tags become filters you can search by.
+
+<Callout type="info">
+You do not write `tf:` link syntax by hand — selecting a cross-space target from the `@`
+menu encodes it for you.
+</Callout>
+
+## See what links to a page
+
+Open any page. Below its body, a **Linked from** list shows every page that links to it.
+This backlink list is maintained automatically — it is the reverse of the links you
+authored, so there is nothing to keep in sync.
+
+## Browse the space graph
+
+From the space, open its **graph** view. Pages are nodes and links are edges; links that
+leave the space show as faded stub nodes. Use it to see how the space hangs together and
+to find orphan pages that nothing links to.
+
+## Search with ⌘K
+
+Press **⌘K** (or **Ctrl-K**), or click the sidebar search box, to open the knowledge
+command palette. Type to search pages by title and body — results are grouped by space
+and tolerate typos. Filter to a single space when you only want results from there.
+
+## Restore a previous version
+
+Every edit is snapshotted. To roll a page back, open it, open the `⋯` overflow menu, and
+choose **History**. Read any past revision, then **Restore** it. The restored content
+becomes current and is itself snapshotted, so you can always move forward again.

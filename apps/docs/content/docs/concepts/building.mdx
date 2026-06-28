@@ -1,0 +1,86 @@
+---
+title: Building by chat
+description: How you build your system in TulipFarm — you describe what you want, and agents build it.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+You do not configure TulipFarm by editing files. You **describe what you want in chat**,
+and agents build it for you — resource types, agents, skills, and your day-to-day
+records and knowledge. The files in the [soul](/docs/concepts/soul) are the *result* of
+those chats, not something you normally write by hand.
+
+## The assistant is your front desk
+
+The default agent in every chat is the **General Assistant**. It answers questions, reads
+your resources and knowledge, and handles everyday data work directly — creating records,
+writing knowledge pages, searching. If your intent is clear, it acts; it does not ask for
+confirmation it does not need.
+
+What the assistant does **not** do is build your system itself. The moment you ask for
+something that changes what your instance *is* — a new resource type, an agent, a skill,
+or first-time setup — it hands the chat to a specialist.
+
+## Building hands off to the Information Architect
+
+When you ask to build or change your system, the assistant transfers the chat to
+the **Information Architect** — the agent that owns system-building. You see the handoff
+in the chat. The Information Architect then interviews you for exactly what it needs,
+builds the artifact, and hands control back.
+
+A request like any of these triggers the handoff on the first turn:
+
+- "Create an invoices resource" · "Track support tickets" · "Store our customers"
+- "Build me a CRM" · "Set up a hiring pipeline"
+- "Create a support agent" · "Make a skill that drafts replies"
+- "Set up my business" (first-time onboarding)
+
+You do not phrase these in any special way and you do not write schema. You say what you
+want in plain language; the Information Architect asks the few questions it needs and
+does the rest.
+
+## Forges guide the build
+
+The Information Architect does not improvise. For each kind of artifact it loads a
+built-in **forge** — a structured interview that walks from intent to a finished
+artifact:
+
+| Forge | Builds |
+|---|---|
+| `resource-forge` | a resource type and its schema |
+| `agent-forge` | an agent |
+| `skill-forge` | a skill |
+| `onboarding` | a whole starter setup, in one guided session |
+
+Forges ship with TulipFarm. They are not something you install or edit — they are how
+building works.
+
+## The result lives in the soul
+
+When the Information Architect finishes, the artifact is written to your
+[soul repository](/docs/concepts/soul) and committed — a resource type becomes
+`resources/{name}/schema.yml`, an agent becomes `agents/{name}/AGENT.md`. There is no
+approval step for soul writes, and the change takes effect immediately — a new resource
+type's table is ready without a restart. The git history is your audit trail of every
+build.
+
+You *can* edit those files by hand if you want to — they are plain text in a git repo —
+but that is the power-user path, not the everyday one. Each concept page shows the
+underlying format for readers who want it.
+
+## What you still do in Settings
+
+Two things are deliberately kept out of chat, because they are operator decisions, not
+building:
+
+<Callout type="info">
+Agents cannot set **secrets** or change your **LLM providers**. You configure those under
+**Settings** as an admin — see [Configure LLM providers](/docs/guides/configure-llm-providers)
+and [Store a secret](/docs/guides/store-a-secret). Everything else, you build by chatting.
+</Callout>
+
+## Where to go next
+
+- [Define a resource type](/docs/guides/define-a-resource-type) — the build chat, step by step.
+- [Resources](/docs/concepts/resources), [Agents](/docs/concepts/agents), [Skills](/docs/concepts/skills) — what you can build, and the format each produces.
+- [Soul](/docs/concepts/soul) — where everything you build is stored and versioned.

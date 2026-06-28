@@ -5,18 +5,24 @@ description: Schema-defined data types and the records that fill them.
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A resource is a data type you define with a JSON Schema. A resource *type* is the schema;
-a *record* is one instance of that type. Define a `customer` type once, and you get
-validated storage and a CRUD interface for customer records.
+A resource is a data type, like `customer` or `ticket`. A resource *type* is its shape; a
+*record* is one instance of that type. You create a type by describing it to the
+assistant — "track customers with a name and an email" — and from then on you get
+validated storage and a full interface for its records.
+
+You never have to write the shape yourself. The rest of this page describes what the
+assistant builds on your behalf and how it behaves, so you know what is possible to ask
+for. To do it, see [Define a resource type](/docs/guides/define-a-resource-type).
 
 ## Two halves: schema and data
 
-The schema lives in the [soul](/docs/concepts/soul) as
-`resources/{name}/schema.yml`. The records live in the datastore. When TulipFarm boots,
-it reads each schema and materializes a table for it — this is called reconciliation. Add
-a schema, restart, and the type is ready to hold records.
+Under the hood a type is a **JSON Schema** the assistant writes into the
+[soul](/docs/concepts/soul) at `resources/{name}/schema.yml`; the records live in the
+datastore. TulipFarm reads each schema and materializes a table for it — this is called
+reconciliation. A type the assistant creates is reconciled immediately, ready to hold
+records with no restart.
 
-A schema is plain JSON Schema written in YAML:
+The schema it writes is plain JSON Schema in YAML — for the `customer` example, this:
 
 ```yaml title="resources/customer/schema.yml"
 type: object
@@ -69,11 +75,14 @@ write:
   `uuid`, `sequence`.
 
 These cover the common before-write cases without code. For arbitrary logic, a resource
-type can include a `hooks.ts` file executed in an isolated sandbox (`isolated-vm`).
+type can include a `hooks.ts` file executed in an isolated sandbox (`isolated-vm`). You
+ask for these in plain language too — "auto-number tickets as `TICK-1`", "lowercase the
+email" — and the assistant wires up the right extension.
 
 <Callout type="info">
-Resource types are authored in the soul today — there is no in-app form to create a new
-type yet. See [Define a resource type](/docs/guides/define-a-resource-type) for the
-workflow, and [Work with records](/docs/guides/work-with-records) to manage data once a
-type exists.
+You create resource types by asking the assistant — see
+[Define a resource type](/docs/guides/define-a-resource-type). You can also edit
+`schema.yml` in the soul by hand if you prefer; that is the power-user path. Either way,
+[Work with records](/docs/guides/work-with-records) covers managing data once a type
+exists.
 </Callout>

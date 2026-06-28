@@ -6,8 +6,9 @@ description: The AI-native business operating system — install it, give it a s
 import { Cards, Card } from "fumadocs-ui/components/card";
 
 TulipFarm is a self-hosted control panel where autonomous agents run your business
-operations. You define your business as data and configuration — resources, agents,
-skills, knowledge — and TulipFarm gives those agents the tools to act on it.
+operations. You **describe what you want in chat** — "track our customers", "create a
+support agent", "set up a hiring pipeline" — and agents build and run it for you. You do
+not configure it by editing files.
 
 It runs on your own machine. A single command sets up the datastore, generates your
 secrets, and boots the API and web UI. The first account you create is the admin.
@@ -17,19 +18,21 @@ secrets, and boots the API and web UI. The first account you create is the admin
 A TulipFarm instance has two halves:
 
 - **The soul** — a git-backed configuration store. Your resource schemas, agents, and
-  skills live here as files. Editing the soul is how you change what your instance
-  knows and can do.
+  skills live here as files. Agents write to the soul when you ask them to build
+  something; the git history is your audit trail.
 - **The runtime** — the API and workers that load the soul, store your records, index
   your knowledge, and run agent turns against your configured LLM providers.
 
-Everything you configure is a file in the soul; everything your business produces is a
-record in the datastore. Read [Concepts](/docs/concepts) for the full picture.
+Everything you build, an agent writes to the soul; everything your business produces is a
+record in the datastore. [Building by chat](/docs/concepts/building) is how the two come
+together — read [Concepts](/docs/concepts) for the full picture.
 
 ## Where to start
 
 <Cards>
   <Card title="Install" href="/docs/installation" description="One-line self-hosted install on Linux, macOS, or Windows (WSL2)." />
-  <Card title="Get started" href="/docs/getting-started" description="Set up a local dev environment and define your first resource type." />
+  <Card title="Get started" href="/docs/getting-started" description="Run it, configure a model, and build your first resource type by chatting." />
+  <Card title="Building by chat" href="/docs/concepts/building" description="The core idea — describe what you want, and agents build it for you." />
   <Card title="Concepts" href="/docs/concepts" description="How the soul, resources, agents, skills, knowledge, and LLM tiers fit together." />
   <Card title="Guides" href="/docs/guides" description="Task recipes: define a resource, install a skill, configure providers." />
   <Card title="Reference" href="/docs/reference" description="Environment variables and the commands that run the project." />
