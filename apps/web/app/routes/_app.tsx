@@ -23,16 +23,17 @@ export async function clientLoader() {
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending
 // approvals (sidebar badge + Approvals page); ConversationsProvider holds the Recent chats list.
 export default function AppLayout() {
-  // The Knowledge wiki provides its own page-tree rail, so the main nav auto-collapses to its icon
-  // rail under /knowledge (transient — the persisted collapse preference is untouched).
-  const onKnowledge = useLocation().pathname.startsWith("/knowledge");
+  // Knowledge and Settings each provide their own section rail, so the main nav auto-collapses to
+  // its icon rail under those paths (transient — the persisted collapse preference is untouched).
+  const { pathname } = useLocation();
+  const collapseRail = pathname.startsWith("/knowledge") || pathname.startsWith("/settings");
   return (
     <ApprovalsProvider>
       <ConversationsProvider>
         {/* Desktop shell is capped to the viewport (h-svh + overflow-hidden) so the sidebar nav and
             the main panel each scroll internally instead of growing the whole page. */}
         <div className="md:flex md:h-svh md:overflow-hidden">
-          <AppSidebar forceCollapsed={onKnowledge} />
+          <AppSidebar forceCollapsed={collapseRail} />
           <main className="min-h-[calc(100svh-3rem)] flex-1 overflow-auto md:h-svh md:min-h-0">
             <Outlet />
           </main>

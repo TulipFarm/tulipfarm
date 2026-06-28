@@ -103,8 +103,6 @@ export default function SettingsSecrets() {
 
   return (
     <div className="flex flex-col gap-6">
-      <p className="text-sm text-muted-foreground">Secret values are never shown.</p>
-
       {error ? (
         <p
           role="alert"

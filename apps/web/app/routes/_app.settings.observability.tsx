@@ -68,11 +68,7 @@ export default function SettingsObservability() {
 
   return (
     <div className={cn("flex flex-col gap-6", loading && "opacity-60 transition-opacity")}>
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          What your agents are spending and doing. Cost is computed from token usage at a
-          best-effort price; unpriced models are counted but show no cost.
-        </p>
+      <div className="flex items-center justify-end">
         <nav className="flex shrink-0 gap-1">
           {RANGES.map((r) => (
             <button

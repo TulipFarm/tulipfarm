@@ -8,6 +8,7 @@ import {
   ScrollRestoration,
 } from "@remix-run/react";
 import "@fontsource-variable/jetbrains-mono";
+import { NuqsAdapter } from "nuqs/adapters/remix";
 import { type ReactNode, useEffect } from "react";
 import "~/app.css";
 
@@ -70,7 +71,10 @@ export default function App() {
 
   return (
     <Document>
-      <Outlet />
+      {/* NuqsAdapter wires type-safe URL search-param state (useQueryState) to the Remix router. */}
+      <NuqsAdapter>
+        <Outlet />
+      </NuqsAdapter>
     </Document>
   );
 }
