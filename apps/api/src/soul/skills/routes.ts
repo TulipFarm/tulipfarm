@@ -8,6 +8,7 @@ import { LlmNotConfiguredError, type LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";
+import type { ActivityService } from "../../activity/service";
 import { ErrorSchema } from "../../auth/schemas";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 
@@ -269,7 +270,9 @@ export function registerSkillRoutes(
   soulLoader: SoulLoader,
   gitSync: GitSyncService,
   llmService: LlmService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  // Optional: record skill installs in the activity feed.
+  activity?: ActivityService
 ): void {
   app.get(
     "/api/v1/skills",
@@ -674,6 +677,15 @@ export function registerSkillRoutes(
 
       await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
       await soulLoader.reload();
+      await activity?.record({
+        category: "skill",
+        action: "skill.installed",
+        actorId: (req.user as { _id: string } | undefined)?._id,
+        targetType: "skill",
+        targetId: installed.join(", "),
+        summary: `Installed skill(s): ${installed.join(", ")}`,
+        metadata: { skills: installed, source: entry.source, ref: entry.ref },
+      });
       return { installed };
     }
   );

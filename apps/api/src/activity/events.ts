@@ -1,0 +1,63 @@
+import type { EventEmitter } from "node:events";
+import {
+  type ConversationCreatedPayload,
+  DOMAIN_EVENTS,
+  type ResourceEventPayload,
+} from "../domain-events";
+import type { ActivityService } from "./service";
+
+function fireAndForget(p: Promise<unknown>): void {
+  p.catch((err) =>
+    console.error(
+      `[activity] subscriber failed: ${err instanceof Error ? err.message : String(err)}`
+    )
+  );
+}
+
+/** Best human label for a resource: its title, then name, falling back to the id. */
+function describeResource(record: Record<string, unknown>, resourceId: string): string {
+  if (typeof record.title === "string" && record.title.length > 0) return record.title;
+  if (typeof record.name === "string" && record.name.length > 0) return record.name;
+  return resourceId;
+}
+
+/**
+ * Wire the activity feed to the domain-event bus: every resource write and new conversation is
+ * recorded as one feed row. Mirrors `subscribeKnowledgeIndexing`. `ActivityService.record` is
+ * already best-effort (never throws), so a failed write only logs. Conversation *completion* is
+ * intentionally NOT recorded — it fires every turn, which would flood the feed; "chat created"
+ * (one row per conversation) is the signal users want.
+ */
+export function subscribeActivityLogging(emitter: EventEmitter, activity: ActivityService): void {
+  const onResource =
+    (verb: "created" | "updated") =>
+    (p: ResourceEventPayload): void => {
+      const label = describeResource(p.record, p.resourceId);
+      fireAndForget(
+        activity.record({
+          category: "resource",
+          action: `resource.${verb}`,
+          actorId: p.actorId ?? null,
+          targetType: "resource",
+          targetId: p.resourceId,
+          summary: `${verb === "created" ? "Created" : "Updated"} ${p.resourceType} ${label}`,
+          metadata: { resourceType: p.resourceType },
+        })
+      );
+    };
+  emitter.on(DOMAIN_EVENTS.RESOURCE_CREATED, onResource("created"));
+  emitter.on(DOMAIN_EVENTS.RESOURCE_UPDATED, onResource("updated"));
+  emitter.on(DOMAIN_EVENTS.CONVERSATION_CREATED, (p: ConversationCreatedPayload): void => {
+    fireAndForget(
+      activity.record({
+        category: "chat",
+        action: "conversation.created",
+        actorId: p.actorId ?? null,
+        targetType: "conversation",
+        targetId: p.conversationId,
+        summary: p.agentId ? `Started a chat with ${p.agentId}` : "Started a chat",
+        metadata: p.agentId ? { agentId: p.agentId } : {},
+      })
+    );
+  });
+}

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { ActivityService } from "../activity/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { parsePaginationQuery } from "../pagination";
@@ -114,7 +115,9 @@ export function registerKnowledgeRoutes(
   requireAuth: PreHandler,
   // Optional: only the page-search branch needs it. When absent, page-mode requests fall back to
   // chunk search so the knowledge routes never disappear just because the spine wasn't wired.
-  retrieval?: PageRetrievalService
+  retrieval?: PageRetrievalService,
+  // Optional: record page/space creation in the activity feed.
+  activity?: ActivityService
 ): void {
   const sec: Array<Record<string, string[]>> = [{ sessionCookie: [] }, { bearerToken: [] }];
   const tags = ["knowledge"];
@@ -152,6 +155,15 @@ export function registerKnowledgeRoutes(
         alwaysLoadForAgents?: boolean;
       };
       const page = await service.createPage(b);
+      await activity?.record({
+        category: "knowledge",
+        action: "page.created",
+        actorId: (req.user as UserDoc | undefined)?._id,
+        targetType: "page",
+        targetId: page._id,
+        summary: `Created knowledge page "${page.title}"`,
+        metadata: { title: page.title },
+      });
       const status = await service.getIndexingStatus(page._id);
       return reply.code(201).send(toApiPage(page, status));
     }
@@ -445,6 +457,15 @@ export function registerKnowledgeRoutes(
       if (!res.ok) {
         return reply.code(res.reason === "name_taken" ? 409 : 400).send({ error: res.reason });
       }
+      await activity?.record({
+        category: "knowledge",
+        action: "space.created",
+        actorId: (req.user as UserDoc | undefined)?._id,
+        targetType: "space",
+        targetId: res.space._id,
+        summary: `Created knowledge space "${res.space.name}"`,
+        metadata: { name: res.space.name },
+      });
       return reply.code(201).send(toApiSpace(res.space));
     }
   );

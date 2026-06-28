@@ -427,6 +427,32 @@ const CONNECTOR_STATE_STATEMENTS: string[] = [
   )`,
 ];
 
+/**
+ * Workspace activity log (Activities page). A single append-only feed of "work done" written at
+ * event time by `ActivityService.record()`: resource/chat/knowledge/skill/connector/job/soul events.
+ * `actor_type` is 'user' (with `actor_id`) or 'system'; `target_id` is text since some targets are
+ * names (skills, agents) not UUIDs. `metadata` carries event-specific detail (counts, error, source).
+ * The `(created_at DESC, id DESC)` index backs the newest-first keyset feed; the category index backs
+ * the filtered feed. No pruning in v1 — retention is a deferred GC job.
+ */
+const ACTIVITY_LOG_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS activity_log (
+    id          uuid PRIMARY KEY,
+    category    text NOT NULL,
+    action      text NOT NULL,
+    actor_type  text NOT NULL,
+    actor_id    uuid,
+    target_type text,
+    target_id   text,
+    summary     text NOT NULL,
+    status      text NOT NULL DEFAULT 'ok',
+    metadata    jsonb NOT NULL DEFAULT '{}',
+    created_at  timestamptz NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS activity_log_created_idx ON activity_log (created_at DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS activity_log_category_created_idx ON activity_log (category, created_at DESC, id DESC)",
+];
+
 // ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
 // ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
 // keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
@@ -711,6 +737,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "knowledge: knowledge_connectors sync-state table (name, enabled, cursor, last_run_at, last_error)",
     up: async (q) => {
       for (const sql of CONNECTOR_STATE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 21,
+    description:
+      "activity: activity_log workspace feed (category/action/actor/target/metadata) + keyset indexes",
+    up: async (q) => {
+      for (const sql of ACTIVITY_LOG_STATEMENTS) {
         await q.query(sql);
       }
     },
