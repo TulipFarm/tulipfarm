@@ -70,6 +70,11 @@ export async function resolveSafe(soulRoot: string, rel: string): Promise<string
   if (decoded.includes("\0")) throw new UnsafePathError("invalid path");
   if (isAbsolute(decoded)) throw new UnsafePathError("absolute path not allowed");
 
+  const inputSegments = decoded.split(/[\\/]+/);
+  if (inputSegments.some((s) => s.length === 0 || s === "." || s === "..")) {
+    throw new UnsafePathError("path traversal not allowed");
+  }
+
   const rootReal = await realpath(soulRoot);
   const candidate = resolve(rootReal, decoded);
   const candReal = await realpath(candidate); // resolves symlinks; ENOENT bubbles → 404
