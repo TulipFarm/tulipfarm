@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_ENTRIES, MAX_TOTAL_CHARS, MAX_VALUE_CHARS } from "./limits";
 import { WorkingMemoryService } from "./service";
 import { assertValidEntry, type WorkingMemoryDoc, type WorkingMemoryRepo } from "./working-memory";
 
@@ -73,47 +74,46 @@ describe("WorkingMemoryService.update", () => {
     expect(await repo.listByUser(U)).toHaveLength(0);
   });
 
-  it("LRU-evicts the oldest entry once over the 30-entry cap, keeping the just-written key", async () => {
+  it("LRU-evicts the oldest entry once over the entry-count cap, keeping the just-written key", async () => {
     const repo = new FakeWorkingMemoryRepo();
     const svc = new WorkingMemoryService(repo);
 
-    for (let i = 0; i < 30; i++) await svc.update(U, `k${i}`, `v${i}`);
-    expect(await repo.listByUser(U)).toHaveLength(30);
+    // Short values so the COUNT cap binds (not the total-char cap).
+    for (let i = 0; i < MAX_ENTRIES; i++) await svc.update(U, `k${i}`, `v${i}`);
+    expect(await repo.listByUser(U)).toHaveLength(MAX_ENTRIES);
 
-    await svc.update(U, "k30", "v30");
+    await svc.update(U, `k${MAX_ENTRIES}`, "v");
     const keys = (await repo.listByUser(U)).map((e) => e.key);
-    expect(keys).toHaveLength(30);
+    expect(keys).toHaveLength(MAX_ENTRIES);
     expect(keys).not.toContain("k0"); // oldest evicted
-    expect(keys).toContain("k30"); // just-written survives
+    expect(keys).toContain(`k${MAX_ENTRIES}`); // just-written survives
   });
 
-  it("LRU-evicts oldest entries once over the ~2k total-char cap", async () => {
+  it("LRU-evicts to keep within both the count and total-char caps", async () => {
     const repo = new FakeWorkingMemoryRepo();
     const svc = new WorkingMemoryService(repo);
-    const big = "x".repeat(600); // 4 × ~602 chars = ~2408 > 2048
+    const big = "x".repeat(MAX_VALUE_CHARS); // max-size values → keys push the sum over the total cap
 
-    await svc.update(U, "k0", big);
-    await svc.update(U, "k1", big);
-    await svc.update(U, "k2", big);
-    await svc.update(U, "k3", big);
+    for (let i = 0; i <= MAX_ENTRIES; i++) await svc.update(U, `k${i}`, big);
 
     const entries = await repo.listByUser(U);
     const total = entries.reduce((s, e) => s + e.key.length + e.value.length, 0);
-    expect(total).toBeLessThanOrEqual(2048);
+    expect(entries.length).toBeLessThanOrEqual(MAX_ENTRIES);
+    expect(total).toBeLessThanOrEqual(MAX_TOTAL_CHARS);
     const keys = entries.map((e) => e.key);
-    expect(keys).not.toContain("k0");
-    expect(keys).toContain("k3");
+    expect(keys).not.toContain("k0"); // oldest evicted
+    expect(keys).toContain(`k${MAX_ENTRIES}`); // just-written survives
   });
 
   it("re-writing an existing key while at the entry cap does not evict", async () => {
     const repo = new FakeWorkingMemoryRepo();
     const svc = new WorkingMemoryService(repo);
 
-    for (let i = 0; i < 30; i++) await svc.update(U, `k${i}`, `v${i}`);
+    for (let i = 0; i < MAX_ENTRIES; i++) await svc.update(U, `k${i}`, `v${i}`);
     await svc.update(U, "k5", "updated");
 
     const entries = await repo.listByUser(U);
-    expect(entries).toHaveLength(30);
+    expect(entries).toHaveLength(MAX_ENTRIES);
     expect(entries.map((e) => e.key)).toContain("k0");
     expect(entries.find((e) => e.key === "k5")?.value).toBe("updated");
   });

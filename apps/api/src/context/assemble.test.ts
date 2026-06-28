@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { KnowledgePage } from "../knowledge/types";
+import { MAX_TOTAL_CHARS } from "../memory/limits";
 import type { WorkingMemoryDoc } from "../memory/working-memory";
 import { type AssembleContext, assembleSystemPrompt } from "./assemble";
 
@@ -210,9 +211,13 @@ describe("assembleSystemPrompt — memory", () => {
 
   it("keeps the block at exactly MAX_TOTAL_CHARS, drops it one char over", () => {
     // budget = sum(key.length + value.length); "m" key = 1 char, so value pads to the boundary.
-    const atCap = assembleSystemPrompt(baseCtx({ memory: [mem("m", "x".repeat(2047))] }));
+    const atCap = assembleSystemPrompt(
+      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS - 1))] })
+    );
     expect(atCap).toContain("<memory>");
-    const overCap = assembleSystemPrompt(baseCtx({ memory: [mem("m", "x".repeat(2048))] }));
+    const overCap = assembleSystemPrompt(
+      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS))] })
+    );
     expect(overCap).not.toContain("<memory>");
   });
 });

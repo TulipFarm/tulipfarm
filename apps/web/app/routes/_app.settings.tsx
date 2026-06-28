@@ -8,6 +8,7 @@ const tabs = [
   { to: "/settings/llm", label: "LLM", end: false },
   { to: "/settings/soul", label: "Soul", end: false },
   { to: "/settings/activities", label: "Activities", end: false },
+  { to: "/settings/memory", label: "Memory", end: false },
 ];
 
 // Layout for the Settings subtree: shared header + tab nav, each child owns its own data + form.
