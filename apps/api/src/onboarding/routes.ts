@@ -1,21 +1,41 @@
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import type { UserDoc } from "../auth/users";
+import type { KvService } from "../kv/service";
+import { buildChecklist } from "./checklist";
 import { deriveSuggestions } from "./suggestions";
 
 /*
- * Read-only HTTP surface for the onboarding / Information Architect suggestion layer
- * (ONBOARDING ONB-V1-002/003, AC-V1-002). Suggestions are derived from the current soul state
- * (the SoulLoader's resource set) — a candidate is omitted once the resource it would create
- * already exists. Non-blocking by design: the chat landing surface renders whatever this returns.
+ * Read-only HTTP surface for the onboarding / Information Architect layer (ONBOARDING ONB-V1).
+ *
+ * - `/suggestions` — the adaptive empty-state chips, derived from the soul resource set (a candidate
+ *   is omitted once the resource it would create already exists). No persistence.
+ * - `/checklist` — the "Getting started" card: the core build-block steps (status auto-derived from
+ *   real soul/knowledge state) plus deterministic "recommended next" items, plus the user's
+ *   dismissed flag (persisted in the user-scoped KV store, namespace `onboarding`, key `checklist`).
+ *   Registered only when a KvService is wired so the suggestions route stays dependency-light.
+ *
+ * Non-blocking by design: the chat landing surface renders whatever these return.
  */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
+const KV_NAMESPACE = "onboarding";
+const KV_KEY = "checklist";
+
+interface OnboardingDeps {
+  /** Cheap "any active knowledge page?" check for the knowledge step (absent → treated as none). */
+  hasAnyKnowledgePage?: () => Promise<boolean>;
+  /** User-scoped store for the dismissed flag; the checklist route is registered only when present. */
+  kvService?: KvService;
+}
+
 export function registerOnboardingRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  deps: OnboardingDeps = {}
 ): void {
   app.get(
     "/api/v1/onboarding/suggestions",
@@ -50,6 +70,67 @@ export function registerOnboardingRoutes(
     },
     async () => {
       return { suggestions: deriveSuggestions(soulLoader) };
+    }
+  );
+
+  const { kvService } = deps;
+  if (!kvService) return;
+
+  app.get(
+    "/api/v1/onboarding/checklist",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Getting-started checklist: core build-block steps (status auto-derived from real state), " +
+          "deterministic next-step recommendations, and the user's dismissed flag.",
+        tags: ["onboarding"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["dismissed", "steps", "recommendations"],
+            properties: {
+              dismissed: { type: "boolean" },
+              steps: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["id", "label", "status"],
+                  properties: {
+                    id: { type: "string" },
+                    label: { type: "string" },
+                    status: { type: "string", enum: ["done", "todo", "coming-soon"] },
+                    prompt: { type: "string" },
+                  },
+                },
+              },
+              recommendations: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["id", "label", "prompt"],
+                  properties: {
+                    id: { type: "string" },
+                    label: { type: "string" },
+                    prompt: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req) => {
+      const ownerId = (req.user as UserDoc)._id;
+      const entry = await kvService.get("user", ownerId, KV_NAMESPACE, KV_KEY);
+      const value = entry?.value as { dismissed?: unknown } | undefined;
+      const dismissed = value?.dismissed === true;
+      const hasKnowledge = (await deps.hasAnyKnowledgePage?.()) ?? false;
+      const { steps, recommendations } = buildChecklist(soulLoader, hasKnowledge);
+      return { dismissed, steps, recommendations };
     }
   );
 }

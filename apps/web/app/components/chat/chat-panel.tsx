@@ -5,9 +5,10 @@ import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { useConversations } from "~/lib/conversations-context";
 import { errorAction } from "~/lib/error-actions";
-import type { Suggestion } from "~/lib/onboarding";
+import type { OnboardingChecklist, Suggestion } from "~/lib/onboarding";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
+import { GettingStartedCard } from "./getting-started-card";
 import { asTier } from "./model-selector";
 import { Transcript } from "./transcript";
 import { useMentionCatalog } from "./use-mention-catalog";
@@ -18,6 +19,8 @@ function EmptyState({
   domain,
   autonomy,
   suggestions = [],
+  checklist,
+  onDismissChecklist,
   onPick,
 }: {
   agent: string;
@@ -25,6 +28,8 @@ function EmptyState({
   domain?: string;
   autonomy?: Autonomy;
   suggestions?: Suggestion[];
+  checklist?: OnboardingChecklist | null;
+  onDismissChecklist?: () => void;
   onPick: (text: string) => void;
 }) {
   return (
@@ -59,12 +64,19 @@ function EmptyState({
             key={s.id}
             type="button"
             onClick={() => onPick(s.prompt)}
-            className="rounded-sm border border-border bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+            className="cursor-pointer rounded-sm border border-border bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
           >
             {s.label}
           </button>
         ))}
       </div>
+      {checklist && !checklist.dismissed ? (
+        <GettingStartedCard
+          checklist={checklist}
+          onPick={onPick}
+          onDismiss={() => onDismissChecklist?.()}
+        />
+      ) : null}
     </div>
   );
 }
@@ -75,6 +87,8 @@ export function ChatPanel({
   title,
   defaultModel = "standard",
   suggestions = [],
+  checklist,
+  onDismissChecklist,
   initialConversationId,
   initialMessages,
   onConversationChange,
@@ -84,6 +98,8 @@ export function ChatPanel({
   title?: string;
   defaultModel?: ModelTier;
   suggestions?: Suggestion[];
+  checklist?: OnboardingChecklist | null;
+  onDismissChecklist?: () => void;
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
   onConversationChange?: (conversationId: string | undefined) => void;
@@ -171,6 +187,8 @@ export function ChatPanel({
           domain={agentInfo?.domain}
           autonomy={agentInfo?.autonomy}
           suggestions={suggestions}
+          checklist={checklist}
+          onDismissChecklist={onDismissChecklist}
           onPick={(text) => send(text, { model: activeAgentTier ?? defaultModel, agentId })}
         />
       )}

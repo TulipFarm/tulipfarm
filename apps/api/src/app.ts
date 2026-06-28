@@ -250,7 +250,13 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.rateLimiter
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
-        registerOnboardingRoutes(app, opts.soulLoader, requireAuth);
+        const knowledgeService = opts.knowledgeService;
+        registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
+          kvService: opts.kvService,
+          hasAnyKnowledgePage: knowledgeService
+            ? () => knowledgeService.hasAnyKnowledgePage()
+            : undefined,
+        });
         if (opts.llmService) {
           registerSkillRoutes(
             app,

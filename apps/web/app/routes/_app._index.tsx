@@ -1,10 +1,14 @@
 import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from "@remix-run/react";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { getAgent } from "~/lib/agents";
 import type { ModelTier } from "~/lib/chat/types";
 import { useConversations } from "~/lib/conversations-context";
-import { listOnboardingSuggestions } from "~/lib/onboarding";
+import {
+  dismissOnboardingChecklist,
+  getOnboardingChecklist,
+  listOnboardingSuggestions,
+} from "~/lib/onboarding";
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
@@ -22,15 +26,22 @@ export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   } catch {
     // Unknown agent / transient API error — keep the standard default rather than break the page.
   }
-  // Adaptive onboarding suggestions (ONB-V1-002/003). Non-blocking (AC-V1-001): a failed fetch
-  // resolves to [] so chat always renders (mirrors the agent lookup above — no hard dependency).
-  const suggestions = await listOnboardingSuggestions().catch(() => []);
-  return { agentId, defaultModel, suggestions };
+  // Adaptive onboarding suggestions (ONB-V1-002/003) + the Getting-started checklist (ONB-V1).
+  // Both non-blocking (AC-V1-001): a failed fetch resolves to a benign default so chat always
+  // renders (mirrors the agent lookup above — no hard dependency).
+  const [suggestions, checklist] = await Promise.all([
+    listOnboardingSuggestions().catch(() => []),
+    getOnboardingChecklist().catch(() => null),
+  ]);
+  return { agentId, defaultModel, suggestions, checklist };
 }
 
 export default function ChatRoute() {
-  const { agentId, defaultModel, suggestions } = useLoaderData<typeof clientLoader>();
+  const { agentId, defaultModel, suggestions, checklist } = useLoaderData<typeof clientLoader>();
   const { refresh, setActiveChatId, newChatNonce } = useConversations();
+  // Dismissal lives here, ABOVE the `newChatNonce`-keyed ChatPanel, so "+ new chat" (which remounts
+  // ChatPanel) doesn't resurrect a card the user already dismissed. Seeded from the persisted flag.
+  const [checklistDismissed, setChecklistDismissed] = useState(checklist?.dismissed ?? false);
   // First turn of a fresh chat: refresh the Recent chats sidebar AND reflect the new conversation in
   // the URL so a reload restores it. We use `history.replaceState` rather than a router navigate so the
   // in-flight stream keeps streaming on this mounted route — no remount, no message re-fetch race.
@@ -55,6 +66,11 @@ export default function ChatRoute() {
       agentId={agentId}
       defaultModel={defaultModel}
       suggestions={suggestions}
+      checklist={checklistDismissed ? null : checklist}
+      onDismissChecklist={() => {
+        setChecklistDismissed(true); // optimistic — survives ChatPanel remount
+        void dismissOnboardingChecklist().catch(() => {});
+      }}
       onConversationChange={onConversationChange}
     />
   );
