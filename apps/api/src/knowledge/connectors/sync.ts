@@ -1,4 +1,6 @@
 import type { PgBoss } from "pg-boss";
+import { recordJobRun } from "../../activity/job-run";
+import type { ActivityService } from "../../activity/service";
 import type { KnowledgeService } from "../service";
 import type { ConnectorStateRepo } from "./state-repo";
 import type { Connector, ConnectorRegistry } from "./types";
@@ -11,6 +13,8 @@ export interface ConnectorSyncDeps {
   registry: ConnectorRegistry;
   state: ConnectorStateRepo;
   service: KnowledgeService;
+  /** Optional: record the job run + per-connector sync results in the activity feed. */
+  activity?: ActivityService;
 }
 
 export interface ConnectorSyncResult {
@@ -90,8 +94,36 @@ export async function runConnectorSync(deps: ConnectorSyncDeps): Promise<Connect
 /** Register the scheduled connector-sync job (mirrors soul-sync / stream-gc). */
 export async function registerConnectorSync(boss: PgBoss, deps: ConnectorSyncDeps): Promise<void> {
   await boss.createQueue(CONNECTOR_SYNC_QUEUE);
-  await boss.work(CONNECTOR_SYNC_QUEUE, async () => {
-    await runConnectorSync(deps);
-  });
+  await boss.work(CONNECTOR_SYNC_QUEUE, () =>
+    recordJobRun(
+      deps.activity,
+      CONNECTOR_SYNC_QUEUE,
+      async () => {
+        const results = await runConnectorSync(deps);
+        // A connector that actually synced records (or errored) gets its own feed row; silent
+        // no-op connectors stay out of the 'connector' category (the job-run row still covers them).
+        for (const r of results) {
+          if (r.synced > 0 || r.error) {
+            await deps.activity?.record({
+              category: "connector",
+              action: "connector.synced",
+              targetType: "connector",
+              targetId: r.connector,
+              status: r.error ? "error" : "ok",
+              summary: r.error
+                ? `Connector ${r.connector} sync failed`
+                : `Connector ${r.connector} synced ${r.synced} record(s)`,
+              metadata: { synced: r.synced, ...(r.error ? { error: r.error } : {}) },
+            });
+          }
+        }
+        return results;
+      },
+      (results) => ({
+        summary: `Connector sync ran (${results.reduce((n, r) => n + r.synced, 0)} synced)`,
+        metadata: { connectors: results.length },
+      })
+    )
+  );
   await boss.schedule(CONNECTOR_SYNC_QUEUE, CONNECTOR_SYNC_CRON);
 }

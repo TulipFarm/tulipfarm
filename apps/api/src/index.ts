@@ -11,6 +11,9 @@ import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
 import { PgA2uiSurfaceStore } from "./a2ui/surface-store";
+import { subscribeActivityLogging } from "./activity/events";
+import { PgActivityRepo } from "./activity/repo";
+import { ActivityService } from "./activity/service";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
@@ -119,6 +122,7 @@ async function boot() {
     const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const kvService = new KvService(new PgKvRepo(pool));
+    const activityService = new ActivityService(new PgActivityRepo(pool));
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
@@ -198,6 +202,7 @@ async function boot() {
       knowledgeService,
       retrievalService,
       toolRegistry,
+      activityService,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
@@ -218,8 +223,11 @@ async function boot() {
     logEnvironmentStatus(app.log);
     await bootstrapAdmin(userRepo, app.log);
 
-    await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL);
-    await registerStreamGc(boss, streamResumeRepo);
+    await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL, {
+      activity: activityService,
+      soulLoader,
+    });
+    await registerStreamGc(boss, streamResumeRepo, activityService);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {
@@ -232,12 +240,15 @@ async function boot() {
           ? { title: `Conversation ${conversationId}`, content: text }
           : null;
       },
+      activity: activityService,
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
+    subscribeActivityLogging(domainEventEmitter, activityService);
     await registerConnectorSync(boss, {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
       service: knowledgeService,
+      activity: activityService,
     });
 
     app.listen({ port, host: "0.0.0.0" }, (err) => {

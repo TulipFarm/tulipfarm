@@ -1,4 +1,6 @@
 import type { PgBoss } from "pg-boss";
+import { recordJobRun } from "../activity/job-run";
+import type { ActivityService } from "../activity/service";
 import type { StreamResumeRepo } from "./stream-resume";
 
 export const STREAM_GC_QUEUE = "stream-resume-gc";
@@ -12,10 +14,16 @@ export const STREAM_RESUME_TTL_MS = 60 * 60 * 1000;
  * row older than the TTL — covering both finished turns and abandoned ones with one
  * time-based rule. Mirrors `registerSoulSync`.
  */
-export async function registerStreamGc(boss: PgBoss, repo: StreamResumeRepo): Promise<void> {
+export async function registerStreamGc(
+  boss: PgBoss,
+  repo: StreamResumeRepo,
+  activity?: ActivityService
+): Promise<void> {
   await boss.createQueue(STREAM_GC_QUEUE);
-  await boss.work(STREAM_GC_QUEUE, async () => {
-    await repo.deleteOlderThan(new Date(Date.now() - STREAM_RESUME_TTL_MS));
-  });
+  await boss.work(STREAM_GC_QUEUE, () =>
+    recordJobRun(activity, STREAM_GC_QUEUE, async () => {
+      await repo.deleteOlderThan(new Date(Date.now() - STREAM_RESUME_TTL_MS));
+    })
+  );
   await boss.schedule(STREAM_GC_QUEUE, STREAM_GC_CRON);
 }

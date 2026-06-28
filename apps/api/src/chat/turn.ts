@@ -121,6 +121,11 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     };
     await repo.create(convo);
     isNew = true;
+    events?.emit(DOMAIN_EVENTS.CONVERSATION_CREATED, {
+      conversationId: convo._id,
+      actorId: user._id,
+      agentId: body.agentId,
+    });
     // Best-effort, off the turn's critical path: derive a title from the first message via the
     // quick tier and persist it asynchronously. The stream below is never blocked on this, and a
     // failure (quick tier down, persistence error) degrades to a truncated-prompt fallback.
@@ -598,7 +603,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     }
 
     // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
-    events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, { conversationId: convo._id });
+    events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, {
+      conversationId: convo._id,
+      actorId: user._id,
+    });
     yield { type: "finish", finishReason: "stop" };
   }
 

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks + 013_drop_bundle_domain + 014_drop_okf_type + 015_title_tsv + 016_doc_type + 017_pg_trgm + 018_terminology_rename + 019_chunk_content_hash + 020_knowledge_connectors on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks + 013_drop_bundle_domain + 014_drop_okf_type + 015_title_tsv + 016_doc_type + 017_pg_trgm + 018_terminology_rename + 019_chunk_content_hash + 020_knowledge_connectors + 021_activity_log on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (20)", async () => {
+  it("advances schema_version to the latest (21)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([20]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([21]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -35,6 +35,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     );
     expect(res.rows.map((r) => r.table_name)).toEqual([
       "a2ui_surfaces",
+      "activity_log",
       "api_tokens",
       "approvals",
       "conversations",
@@ -80,11 +81,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 20", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 21", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([20]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([21]);
   });
 
   it("adds knowledge_pages.title_tsv (generated tsvector) + its GIN index (015, renamed by 018)", async () => {
@@ -222,6 +223,21 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
         "INSERT INTO kv_store (scope, owner_id, namespace, key, value, created_at, updated_at) VALUES ('user', '', 'n', 'k', '1'::jsonb, now(), now())"
       )
     ).rejects.toThrow();
+  });
+
+  it("creates activity_log and its keyset + category indexes (021)", async () => {
+    await runPgMigrations(db);
+    const tbl = await db.query<{ table_name: string }>(
+      "SELECT table_name FROM information_schema.tables WHERE table_name = 'activity_log'"
+    );
+    expect(tbl.rows.map((r) => r.table_name)).toEqual(["activity_log"]);
+    const idx = await db.query<{ indexname: string }>(
+      "SELECT indexname FROM pg_indexes WHERE indexname IN ('activity_log_created_idx', 'activity_log_category_created_idx') ORDER BY indexname"
+    );
+    expect(idx.rows.map((r) => r.indexname)).toEqual([
+      "activity_log_category_created_idx",
+      "activity_log_created_idx",
+    ]);
   });
 
   it("creates wrapped_deks, its active-label index, and the secrets.dek_id column (010)", async () => {

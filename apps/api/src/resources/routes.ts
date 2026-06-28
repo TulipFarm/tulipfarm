@@ -118,6 +118,7 @@ export function registerResourceRoutes(
         resourceType: type,
         resourceId: id,
         record: toApiRecord(doc),
+        actorId: (req.user as { _id: string } | undefined)?._id,
       });
 
       return reply.code(201).send(toApiRecord(doc));
@@ -290,6 +291,7 @@ export function registerResourceRoutes(
         resourceType: type,
         resourceId: id,
         record: toApiRecord(newDoc),
+        actorId: (req.user as { _id: string } | undefined)?._id,
       });
 
       return reply.send(toApiRecord(newDoc));
@@ -384,6 +386,7 @@ export function registerResourceRoutes(
         resourceType: type,
         resourceId: id,
         record: toApiRecord(newDoc),
+        actorId: (req.user as { _id: string } | undefined)?._id,
       });
 
       return reply.send(toApiRecord(newDoc));

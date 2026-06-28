@@ -12,6 +12,8 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
 import type { A2uiSurfaceStore } from "./a2ui/surface-store";
+import { registerActivityRoutes } from "./activity/routes";
+import type { ActivityService } from "./activity/service";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
@@ -78,6 +80,7 @@ export interface AppOptions {
   guardrailsService?: GuardrailsService;
   pendingInteractionRepo?: PendingInteractionRepo;
   a2uiSurfaceStore?: A2uiSurfaceStore;
+  activityService?: ActivityService;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -213,6 +216,9 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth);
     }
+    if (opts.activityService) {
+      registerActivityRoutes(app, opts.activityService, requireAuth);
+    }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);
       if (opts.soulLoader) {
@@ -227,7 +233,14 @@ export async function buildApp(opts: AppOptions = {}) {
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
         registerOnboardingRoutes(app, opts.soulLoader, requireAuth);
         if (opts.llmService) {
-          registerSkillRoutes(app, opts.soulLoader, opts.gitSync, opts.llmService, requireAuth);
+          registerSkillRoutes(
+            app,
+            opts.soulLoader,
+            opts.gitSync,
+            opts.llmService,
+            requireAuth,
+            opts.activityService
+          );
           if (opts.secretsService) {
             registerLlmConfigRoutes(
               app,
@@ -288,7 +301,13 @@ export async function buildApp(opts: AppOptions = {}) {
     // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk
     // search if the spine is absent, rather than dropping the whole knowledge surface.
     if (opts.knowledgeService) {
-      registerKnowledgeRoutes(app, opts.knowledgeService, requireAuth, opts.retrievalService);
+      registerKnowledgeRoutes(
+        app,
+        opts.knowledgeService,
+        requireAuth,
+        opts.retrievalService,
+        opts.activityService
+      );
     }
   }
 

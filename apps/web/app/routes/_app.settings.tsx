@@ -6,6 +6,7 @@ export const meta: MetaFunction = () => [{ title: "Settings · tulipfarm" }];
 const tabs = [
   { to: "/settings/secrets", label: "Secrets", end: false },
   { to: "/settings/llm", label: "LLM", end: false },
+  { to: "/settings/activities", label: "Activities", end: false },
 ];
 
 // Layout for the Settings subtree: shared header + tab nav, each child owns its own data + form.

@@ -1,4 +1,6 @@
 import type { PgBoss } from "pg-boss";
+import { recordJobRun } from "../activity/job-run";
+import type { ActivityService } from "../activity/service";
 import type { Queryable } from "../db";
 import type { KnowledgeService } from "./service";
 import type { IndexQueueStats } from "./types";
@@ -104,6 +106,8 @@ export interface KnowledgeIndexingDeps {
   loadConversationText?: (
     conversationId: string
   ) => Promise<{ title: string; content: string } | null>;
+  /** Optional: record each batch run in the activity feed (category 'job'). */
+  activity?: ActivityService;
 }
 
 /** The worker body — exported so it can be unit-tested without pg-boss. */
@@ -143,9 +147,17 @@ export async function registerKnowledgeIndexing(
   deps: KnowledgeIndexingDeps
 ): Promise<void> {
   await boss.createQueue(KNOWLEDGE_INDEX_QUEUE);
-  await boss.work(KNOWLEDGE_INDEX_QUEUE, async (jobs: { data: IndexJob }[]) => {
-    for (const job of jobs) {
-      await handleIndexJob(job.data, deps);
-    }
-  });
+  await boss.work(KNOWLEDGE_INDEX_QUEUE, (jobs: { data: IndexJob }[]) =>
+    recordJobRun(
+      deps.activity,
+      KNOWLEDGE_INDEX_QUEUE,
+      async () => {
+        for (const job of jobs) {
+          await handleIndexJob(job.data, deps);
+        }
+        return jobs.length;
+      },
+      (count) => ({ summary: `Indexed ${count} job(s)`, metadata: { jobs: count } })
+    )
+  );
 }
