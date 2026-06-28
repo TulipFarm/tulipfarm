@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   simplify:
+    if: false
     name: Simplify PR diff
     runs-on: ubuntu-latest
     steps:

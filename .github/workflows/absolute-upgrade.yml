@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   upgrade:
+    if: false
     name: Upgrade one dependency
     runs-on: ubuntu-latest
     steps:

@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   update-docs:
+    if: false
     name: Auto-update documentation
     runs-on: ubuntu-latest
     steps:

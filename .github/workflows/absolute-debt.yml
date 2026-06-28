@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   debt:
+    if: false
     name: Pay down one lint/type rule
     runs-on: ubuntu-latest
     steps:

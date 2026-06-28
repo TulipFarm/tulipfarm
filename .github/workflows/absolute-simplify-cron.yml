@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   simplify:
+    if: false
     name: Simplify target directory
     runs-on: ubuntu-latest
     steps:

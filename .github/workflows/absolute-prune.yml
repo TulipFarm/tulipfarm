@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   prune:
+    if: false
     name: Remove dead code
     runs-on: ubuntu-latest
     steps:
