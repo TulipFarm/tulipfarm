@@ -39,12 +39,38 @@ export class EmbeddingUnavailableError extends Error {
 /** Warning surfaced to search callers when no embedding provider is available. */
 export const EMBEDDING_UNAVAILABLE_WARNING = "embedding-unavailable";
 
+// Curated model spec, resolved from LiteLLM's model_prices_and_context_window.json at config time and
+// pinned into the soul (deterministic + git-audited). Field names follow LiteLLM's where they map, so
+// the shape is a recognizable standard. Costs are USD per token (LiteLLM's unit). `additionalProperties`
+// stays open so future LiteLLM fields don't fail validation.
+const ModelSpecSchema = Type.Object(
+  {
+    litellm_key: Type.Optional(Type.String()),
+    input_cost_per_token: Type.Optional(Type.Number({ minimum: 0 })),
+    output_cost_per_token: Type.Optional(Type.Number({ minimum: 0 })),
+    cache_read_input_token_cost: Type.Optional(Type.Number({ minimum: 0 })),
+    cache_creation_input_token_cost: Type.Optional(Type.Number({ minimum: 0 })),
+    max_input_tokens: Type.Optional(Type.Integer({ minimum: 1 })),
+    max_output_tokens: Type.Optional(Type.Integer({ minimum: 1 })),
+    mode: Type.Optional(Type.String()),
+    supports_function_calling: Type.Optional(Type.Boolean()),
+    supports_vision: Type.Optional(Type.Boolean()),
+    supports_prompt_caching: Type.Optional(Type.Boolean()),
+    supports_reasoning: Type.Optional(Type.Boolean()),
+    deprecation_date: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    /** ISO date the spec was resolved/refreshed from LiteLLM. */
+    fetched_at: Type.Optional(Type.String()),
+  },
+  { additionalProperties: true }
+);
+
 const ProviderEntrySchema = Type.Object({
   provider: Type.String(),
   model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
   api_key_ref: Type.Optional(Type.String()),
   base_url: Type.Optional(Type.String()),
   resource_name: Type.Optional(Type.String()),
+  spec: Type.Optional(ModelSpecSchema),
 });
 
 const TierConfigSchema = Type.Object({
@@ -73,6 +99,7 @@ export const LlmConfigSchema = Type.Object({
   embeddings: Type.Optional(EmbeddingsConfigSchema),
 });
 
+export type ModelSpec = Static<typeof ModelSpecSchema>;
 export type ProviderEntry = Static<typeof ProviderEntrySchema>;
 export type TierConfig = Static<typeof TierConfigSchema>;
 export type EmbeddingProviderEntry = Static<typeof EmbeddingProviderEntrySchema>;

@@ -47,6 +47,7 @@ export class SoulLoader {
   integrations: Map<string, SoulIntegration> = new Map();
   llmConfig: Record<string, unknown> | null = null;
   guardrailsConfig: Record<string, unknown> | null = null;
+  observabilityConfig: Record<string, unknown> | null = null;
   manifest: Record<string, unknown> | null = null;
 
   constructor(
@@ -63,6 +64,7 @@ export class SoulLoader {
       integrations,
       llmConfig,
       guardrailsConfig,
+      observabilityConfig,
       manifest,
     ] = await Promise.all([
       this.loadAgents(),
@@ -72,6 +74,10 @@ export class SoulLoader {
       this.loadIntegrations(),
       this.loadYamlFile(join(this.soulPath, "llm.config.yaml"), "llm.config.yaml"),
       this.loadYamlFile(join(this.soulPath, "guardrails.yaml"), "guardrails.yaml"),
+      this.loadYamlFile(
+        join(this.soulPath, "observability.config.yaml"),
+        "observability.config.yaml"
+      ),
       this.loadYamlFile(join(this.soulPath, "soul.yaml"), "soul.yaml"),
     ]);
 
@@ -82,6 +88,7 @@ export class SoulLoader {
     this.integrations = integrations;
     this.llmConfig = llmConfig;
     this.guardrailsConfig = guardrailsConfig;
+    this.observabilityConfig = observabilityConfig;
     this.manifest = manifest;
 
     this.logger.info(

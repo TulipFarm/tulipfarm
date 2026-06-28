@@ -47,6 +47,13 @@ import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
 import { WorkingMemoryService } from "./memory/service";
 import { PgWorkingMemoryRepo } from "./memory/working-memory";
+import { parseObservabilityConfig } from "./observability/config";
+import { subscribeObservability } from "./observability/events";
+import { OtlpMetricsExporter } from "./observability/metrics";
+import { registerObsPrune } from "./observability/prune";
+import { PgObsRepo } from "./observability/repo";
+import { ObservabilityService } from "./observability/service";
+import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
@@ -123,6 +130,8 @@ async function boot() {
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const kvService = new KvService(new PgKvRepo(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
+    const observabilityService = new ObservabilityService(new PgObsRepo(pool));
+    const obsConfig = parseObservabilityConfig(soulLoader.observabilityConfig);
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
@@ -203,6 +212,8 @@ async function boot() {
       retrievalService,
       toolRegistry,
       activityService,
+      observabilityService,
+      observabilityConfig: obsConfig,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
@@ -228,6 +239,10 @@ async function boot() {
       soulLoader,
     });
     await registerStreamGc(boss, streamResumeRepo, activityService);
+    await registerObsPrune(boss, new PgObsRepo(pool), activityService, {
+      obs: observabilityService,
+      retentionMs: obsConfig.retentionDays * 24 * 60 * 60 * 1000,
+    });
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {
@@ -244,6 +259,38 @@ async function boot() {
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
+    // Optional Grafana Cloud OTLP metrics export (gated). Only constructed when enabled + targeted +
+    // the token resolves — the default path loads nothing extra.
+    let metricsSink: OtlpMetricsExporter | undefined;
+    let tracesSink: OtlpTracesExporter | undefined;
+    if (obsConfig.enabled && obsConfig.otlp) {
+      const ref = obsConfig.otlp.token;
+      const token = ref.startsWith("env://")
+        ? process.env[ref.slice(6)]
+        : await secretsService.get(ref).catch(() => undefined);
+      if (token) {
+        const target = {
+          endpoint: obsConfig.otlp.endpoint,
+          instanceId: obsConfig.otlp.instanceId,
+          token,
+        };
+        metricsSink = new OtlpMetricsExporter(target);
+        metricsSink.start();
+        tracesSink = new OtlpTracesExporter(target);
+        tracesSink.start();
+        console.info("[observability] OTLP metrics + traces export enabled");
+      } else {
+        console.warn("[observability] OTLP enabled but token unresolved — export disabled");
+      }
+    }
+    // Cost is computed primarily from each model's pinned soul spec (resolved from LiteLLM when the
+    // model was added in Settings); the built-in price map + config overrides are the fallback.
+    subscribeObservability(domainEventEmitter, observabilityService, {
+      pricingOverrides: obsConfig.pricingOverrides,
+      metrics: metricsSink,
+      traces: tracesSink,
+      captureContent: obsConfig.captureContent,
+    });
     await registerConnectorSync(boss, {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
@@ -273,6 +320,11 @@ async function boot() {
       try {
         await app.close();
         await boss.stop({ graceful: false });
+        // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.
+        await metricsSink?.flush();
+        metricsSink?.stop();
+        await tracesSink?.flush();
+        tracesSink?.stop();
         await hookExecutor?.close();
         await pool.end();
       } catch (err) {

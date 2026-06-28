@@ -6,6 +6,7 @@ export const meta: MetaFunction = () => [{ title: "Settings · tulipfarm" }];
 const tabs = [
   { to: "/settings/secrets", label: "Secrets", end: false },
   { to: "/settings/llm", label: "LLM", end: false },
+  { to: "/settings/observability", label: "Observability", end: false },
   { to: "/settings/soul", label: "Soul", end: false },
   { to: "/settings/activities", label: "Activities", end: false },
   { to: "/settings/memory", label: "Memory", end: false },

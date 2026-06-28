@@ -1,0 +1,62 @@
+# TulipFarm AI Observability — starter alert rules (Prometheus/Mimir ruler format).
+#
+# Import into Grafana Cloud via the Mimir ruler (or paste into a Grafana alert rule group pointed at
+# your Prometheus/Mimir data source). Metrics arrive over OTLP from TulipFarm when observability is
+# enabled (soul/observability.config.yaml). All metrics are cumulative counters, so rates/increases
+# are taken over a window. Tune thresholds (the `> N` values) to your workload.
+groups:
+  - name: tulipfarm-observability
+    rules:
+      # Daily LLM spend crossed the budget. Mirror of spend_alert_usd in observability.config.yaml.
+      - alert: TulipFarmHighDailySpend
+        expr: sum(increase(llm_cost_usd_total[24h])) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent LLM spend over budget"
+          description: "Last-24h spend is {{ $value | printf \"%.2f\" }} USD (threshold 50)."
+
+      # Turn error rate is high — agents are failing to complete turns.
+      - alert: TulipFarmHighTurnErrorRate
+        expr: >
+          sum(increase(turns_total{status="error"}[1h]))
+            / clamp_min(sum(increase(turns_total[1h])), 1) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Chat turn error rate above 5%"
+          description: "{{ $value | humanizePercentage }} of turns errored in the last hour."
+
+      # Provider fallbacks spiking — a primary provider is likely degraded.
+      - alert: TulipFarmFallbackSpike
+        expr: sum(increase(llm_calls_total{status="fallback"}[15m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM provider fallbacks spiking"
+          description: "{{ $value }} fallback calls in the last 15m — check primary provider health."
+
+      # Tool error rate high — a capability is broken.
+      - alert: TulipFarmHighToolErrorRate
+        expr: >
+          sum(increase(tool_calls_total{status="error"}[1h]))
+            / clamp_min(sum(increase(tool_calls_total[1h])), 1) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tool call error rate above 10%"
+          description: "{{ $value | humanizePercentage }} of tool calls errored in the last hour."
+
+      # Background jobs failing (indexing, connector sync, prune).
+      - alert: TulipFarmJobFailures
+        expr: sum(increase(job_runs_total{status="error"}[1h])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Background job failures"
+          description: "{{ $value }} job run(s) failed in the last hour."

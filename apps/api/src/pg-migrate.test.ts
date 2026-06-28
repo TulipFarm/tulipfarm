@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "./pg-migrate";
 import { makePglite } from "./test/pglite";
 
-describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks + 013_drop_bundle_domain + 014_drop_okf_type + 015_title_tsv + 016_doc_type + 017_pg_trgm + 018_terminology_rename + 019_chunk_content_hash + 020_knowledge_connectors + 021_activity_log on PGlite", () => {
+describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004_approvals + 005_conversation_title + 006_message_feedback + 007_conversation_starred + 008_hitl + 009_kv_store + 010_wrapped_deks + 011_okf + 012_okf_crosslinks + 013_drop_bundle_domain + 014_drop_okf_type + 015_title_tsv + 016_doc_type + 017_pg_trgm + 018_terminology_rename + 019_chunk_content_hash + 020_knowledge_connectors + 021_activity_log + 022_obs_event on PGlite", () => {
   let db: PGlite;
 
   beforeEach(async () => {
@@ -14,10 +14,10 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     await db.close();
   });
 
-  it("advances schema_version to the latest (21)", async () => {
+  it("advances schema_version to the latest (22)", async () => {
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([21]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([22]);
   });
 
   it("creates the vector and citext extensions", async () => {
@@ -50,6 +50,7 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
       "kv_store",
       "message_feedback",
       "messages",
+      "obs_event",
       "pending_interactions",
       "rate_limits",
       "schema_version",
@@ -81,11 +82,11 @@ describe("runPgMigrations — 001_init + 002_knowledge + 003_stream_resume + 004
     ]);
   });
 
-  it("is idempotent — a second run does not throw and leaves version at 21", async () => {
+  it("is idempotent — a second run does not throw and leaves version at 22", async () => {
     await runPgMigrations(db);
     await runPgMigrations(db);
     const res = await db.query<{ version: number }>("SELECT version FROM schema_version");
-    expect(res.rows.map((r) => Number(r.version))).toEqual([21]);
+    expect(res.rows.map((r) => Number(r.version))).toEqual([22]);
   });
 
   it("adds knowledge_pages.title_tsv (generated tsvector) + its GIN index (015, renamed by 018)", async () => {

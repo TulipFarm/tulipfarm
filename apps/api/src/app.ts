@@ -39,6 +39,9 @@ import { registerKvRoutes } from "./kv/routes";
 import type { KvService } from "./kv/service";
 import { registerMemoryRoutes } from "./memory/routes";
 import type { WorkingMemoryService } from "./memory/service";
+import type { ObservabilityConfig } from "./observability/config";
+import { registerObservabilityRoutes } from "./observability/routes";
+import type { ObservabilityService } from "./observability/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
@@ -82,6 +85,8 @@ export interface AppOptions {
   pendingInteractionRepo?: PendingInteractionRepo;
   a2uiSurfaceStore?: A2uiSurfaceStore;
   activityService?: ActivityService;
+  observabilityService?: ObservabilityService;
+  observabilityConfig?: ObservabilityConfig;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -224,6 +229,14 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.workingMemoryService) {
       registerMemoryRoutes(app, opts.workingMemoryService, requireAuth);
+    }
+    if (opts.observabilityService) {
+      registerObservabilityRoutes(
+        app,
+        opts.observabilityService,
+        requireAuth,
+        opts.observabilityConfig
+      );
     }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);

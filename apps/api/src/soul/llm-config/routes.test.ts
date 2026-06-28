@@ -12,8 +12,19 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+import { __resetLlmCatalogCache } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
+
+/** A stubbed `fetch` returning a LiteLLM catalog (or empty). Resets the module cache so each test's
+ *  stub is used deterministically (no real network, no cross-test catalog leakage). */
+function stubCatalog(catalog: Record<string, unknown>): void {
+  __resetLlmCatalogCache();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => catalog }) as unknown as Response)
+  );
+}
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -125,9 +136,14 @@ describe("llm-config routes", () => {
       llmService,
       secretsService,
     });
+    // Default: empty catalog, so PUT's auto-enrich is a no-op (no specs pinned) and no real network
+    // call happens. Tests that exercise enrichment/resolve override with their own catalog.
+    stubCatalog({});
   });
 
   afterEach(async () => {
+    vi.unstubAllGlobals();
+    __resetLlmCatalogCache();
     await app.close();
     for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
@@ -255,6 +271,92 @@ describe("llm-config routes", () => {
       expect(withSync).not.toHaveBeenCalled();
       expect(init).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "llm.config.yaml"))).rejects.toThrow();
+    });
+  });
+
+  const CATALOG = {
+    "azure_ai/kimi-k2.5": {
+      input_cost_per_token: 0.00000057,
+      output_cost_per_token: 0.0000023,
+      max_input_tokens: 256000,
+      mode: "chat",
+      supports_function_calling: true,
+    },
+  };
+
+  describe("GET /api/v1/llm-config/resolve-spec", () => {
+    it("is admin-only (403 for a member)", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/resolve-spec?provider=azure&model=kimi-k2.5",
+        cookies: cookies(memberSid),
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("resolves a model spec from the LiteLLM catalog for an admin", async () => {
+      stubCatalog(CATALOG);
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/resolve-spec?provider=azure&model=kimi-k2.5",
+        cookies: cookies(adminSid),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as {
+        spec: { input_cost_per_token: number; litellm_key: string } | null;
+        matchedKey: string | null;
+        candidates: string[];
+      };
+      expect(body.matchedKey).toBe("azure_ai/kimi-k2.5");
+      expect(body.spec?.input_cost_per_token).toBe(0.00000057);
+      expect(body.spec?.litellm_key).toBe("azure_ai/kimi-k2.5");
+    });
+  });
+
+  describe("PUT auto-resolves + pins model specs", () => {
+    it("pins a LiteLLM spec onto a spec-less model on save", async () => {
+      stubCatalog(CATALOG);
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: { providers: [{ provider: "azure", model: "kimi-k2.5" }] },
+            standard: { providers: [{ provider: "azure", model: "kimi-k2.5" }] },
+            complex: { providers: [{ provider: "azure", model: "kimi-k2.5" }] },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      // The written soul file should now carry the pinned spec (auto-resolved from LiteLLM).
+      const written = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8")) as {
+        tiers: { quick: { providers: Array<{ spec?: { input_cost_per_token: number } }> } };
+      };
+      expect(written.tiers.quick.providers[0].spec?.input_cost_per_token).toBe(0.00000057);
+    });
+
+    it("leaves a model unpriced (no spec) when LiteLLM has no match", async () => {
+      stubCatalog(CATALOG); // catalog has only kimi-k2.5
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: { providers: [{ provider: "azure", model: "some-unknown-model-xyz" }] },
+            standard: { providers: [{ provider: "azure", model: "some-unknown-model-xyz" }] },
+            complex: { providers: [{ provider: "azure", model: "some-unknown-model-xyz" }] },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      const written = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8")) as {
+        tiers: { quick: { providers: Array<{ spec?: unknown }> } };
+      };
+      expect(written.tiers.quick.providers[0].spec).toBeUndefined();
     });
   });
 });
