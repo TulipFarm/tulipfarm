@@ -24,12 +24,15 @@ export default function SettingsSoul() {
     );
   }
 
+  // One unified explorer shell (VS Code-style): a single hairline border wraps the tree + viewer,
+  // split by one internal divider — no floating cards, no gap. Stacks the tree above the viewer on
+  // mobile; side-by-side on md+. Fills the remaining viewport height on desktop.
   return (
-    <div className="flex h-[70vh] min-h-0 gap-4">
-      <aside className="w-64 shrink-0 overflow-y-auto rounded-sm border border-border bg-card px-1">
+    <div className="flex h-[32rem] min-h-0 flex-col overflow-hidden rounded-sm border border-border bg-card md:h-[calc(100svh-11rem)] md:flex-row">
+      <aside className="flex max-h-56 shrink-0 flex-col overflow-y-auto border-b border-border px-1 py-1 md:max-h-none md:w-64 md:border-b-0 md:border-r">
         <SoulTree root={root} selected={selected} onSelect={setSelected} />
       </aside>
-      <section className="min-w-0 flex-1 overflow-hidden rounded-sm border border-border bg-card">
+      <section className="min-h-0 min-w-0 flex-1 overflow-hidden">
         <SoulFileViewer path={selected} />
       </section>
     </div>

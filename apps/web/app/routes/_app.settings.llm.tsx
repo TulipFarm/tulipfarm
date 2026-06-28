@@ -56,9 +56,6 @@ export default function SettingsLlm() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">
-        Tiers run their providers as a fallback chain (top first).
-      </p>
       {noneEnabled ? (
         <p className="rounded-sm border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
           No provider secrets yet — add one in the <span className="text-foreground">Secrets</span>{" "}

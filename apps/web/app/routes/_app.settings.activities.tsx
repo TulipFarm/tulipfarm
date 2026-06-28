@@ -9,7 +9,8 @@ import {
   Sparkles,
   Wrench,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { parseAsString, useQueryState } from "nuqs";
+import { useEffect, useRef, useState } from "react";
 import { ErrorState } from "~/components/states";
 import { Sheet } from "~/components/ui/sheet";
 import { type ActivityItem, listActivities } from "~/lib/activities";
@@ -58,31 +59,43 @@ export default function SettingsActivities() {
   const { initial } = useLoaderData<typeof clientLoader>();
   const [items, setItems] = useState<ActivityItem[]>(initial.items);
   const [cursor, setCursor] = useState<string | null>(initial.nextCursor);
-  const [category, setCategory] = useState<string | undefined>(undefined);
+  // Category filter lives in the URL (?category=job) so it survives reload + is shareable. `null` = All.
+  const [category, setCategory] = useQueryState("category", parseAsString);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<ActivityItem | null>(null);
-  // Generation guard: discard a category fetch whose response loses the race to a newer click.
+  // Generation guard: discard a category fetch whose response loses the race to a newer change.
   const requestId = useRef(0);
+  const firstRun = useRef(true);
 
-  async function applyCategory(next: string | undefined): Promise<void> {
-    setCategory(next);
+  // Refetch whenever the URL category changes. Skip the very first run when there's no filter — the
+  // loader already provided the unfiltered page (deep-linking to ?category=… still fetches on mount).
+  useEffect(() => {
+    if (firstRun.current) {
+      firstRun.current = false;
+      if (!category) return;
+    }
     const id = ++requestId.current;
     setLoading(true);
-    try {
-      const page = await listActivities({ category: next, limit: PAGE_SIZE });
-      if (id !== requestId.current) return; // a newer click superseded this one — drop stale data
-      setItems(page.items);
-      setCursor(page.nextCursor);
-    } finally {
-      if (id === requestId.current) setLoading(false);
-    }
-  }
+    listActivities({ category: category ?? undefined, limit: PAGE_SIZE })
+      .then((page) => {
+        if (id !== requestId.current) return; // a newer change superseded this one — drop stale data
+        setItems(page.items);
+        setCursor(page.nextCursor);
+      })
+      .finally(() => {
+        if (id === requestId.current) setLoading(false);
+      });
+  }, [category]);
 
   async function loadMore(): Promise<void> {
     if (!cursor) return;
     setLoading(true);
     try {
-      const page = await listActivities({ category, cursor, limit: PAGE_SIZE });
+      const page = await listActivities({
+        category: category ?? undefined,
+        cursor,
+        limit: PAGE_SIZE,
+      });
       setItems((prev) => [...prev, ...page.items]);
       setCursor(page.nextCursor);
     } finally {
@@ -92,24 +105,19 @@ export default function SettingsActivities() {
 
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-sm text-muted-foreground">
-        Everything that happens in this workspace — records, chats, knowledge, skills, syncs, and
-        background jobs.
-      </p>
-
-      <nav className="flex flex-wrap gap-1">
+      <nav className="flex flex-wrap gap-1.5">
         {CATEGORIES.map((c) => {
-          const active = c.key === category;
+          const active = (c.key ?? null) === category;
           return (
             <button
               key={c.label}
               type="button"
-              onClick={() => applyCategory(c.key)}
+              onClick={() => setCategory(c.key ?? null)}
               className={cn(
                 "cursor-pointer rounded-sm border px-2.5 py-1 text-xs transition-colors",
                 active
-                  ? "border-primary text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground"
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground"
               )}
             >
               {c.label}
@@ -119,11 +127,16 @@ export default function SettingsActivities() {
       </nav>
 
       {items.length === 0 ? (
-        <p className="rounded-sm border border-border bg-muted/40 px-3 py-6 text-center text-sm text-muted-foreground">
+        <p className="rounded-sm border border-border bg-muted/40 px-3 py-10 text-center text-sm text-muted-foreground">
           No activity yet.
         </p>
       ) : (
-        <ul className="flex flex-col">
+        <ul
+          className={cn(
+            "flex flex-col rounded-sm border border-border divide-y divide-border transition-opacity",
+            loading && "opacity-60"
+          )}
+        >
           {items.map((it) => {
             const Icon = CATEGORY_ICON[it.category] ?? Box;
             return (
@@ -131,28 +144,29 @@ export default function SettingsActivities() {
                 <button
                   type="button"
                   onClick={() => setSelected(it)}
-                  className="flex w-full cursor-pointer items-start gap-3 border-border border-b px-1 py-2.5 text-left transition-colors hover:bg-accent/50"
+                  className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-accent/50"
                 >
                   <Icon
                     className={cn(
-                      "mt-0.5 size-4 shrink-0",
+                      "size-4 shrink-0",
                       it.status === "error" ? "text-destructive" : "text-muted-foreground"
                     )}
                     aria-hidden
                   />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm text-foreground">{it.summary}</span>
-                    <span className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{it.actorType === "system" ? "system" : "user"}</span>
-                      <span aria-hidden>·</span>
-                      <span>{formatWhen(it.createdAt)}</span>
-                      {it.status === "error" ? (
-                        <span className="rounded-sm bg-destructive/10 px-1 text-destructive">
-                          error
-                        </span>
-                      ) : null}
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-sm text-foreground">{it.summary}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {it.actorType === "system" ? "system" : "user"}
                     </span>
                   </span>
+                  {it.status === "error" ? (
+                    <span className="shrink-0 rounded-sm bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">
+                      error
+                    </span>
+                  ) : null}
+                  <time className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {formatWhen(it.createdAt)}
+                  </time>
                 </button>
               </li>
             );
