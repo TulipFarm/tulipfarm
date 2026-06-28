@@ -37,6 +37,7 @@ import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
 import type { KvService } from "./kv/service";
+import { registerMemoryRoutes } from "./memory/routes";
 import type { WorkingMemoryService } from "./memory/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
@@ -86,7 +87,9 @@ export interface AppOptions {
 export async function buildApp(opts: AppOptions = {}) {
   // forceCloseConnections: destroy lingering keep-alive / SSE (chat stream) connections on close,
   // so `app.close()` frees the port immediately instead of hanging on an open EventSource.
-  const app = Fastify({ logger: true, forceCloseConnections: true });
+  // maxParamLength: lift the find-my-way default (100) so path params like a memory `:key` (up to
+  // MAX_KEY_CHARS=128) route instead of 404ing.
+  const app = Fastify({ logger: true, forceCloseConnections: true, maxParamLength: 512 });
 
   // Single-image SPA serving (AC-010 / ARCH-V1-006): when the built web client is
   // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
@@ -218,6 +221,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
+    }
+    if (opts.workingMemoryService) {
+      registerMemoryRoutes(app, opts.workingMemoryService, requireAuth);
     }
     if (opts.gitSync) {
       registerSoulRoutes(app, opts.gitSync, requireAuth);
