@@ -38,7 +38,8 @@ test("linkifies inline [n] citation markers to their cited page, leaving unknown
   // [1] has a resolved source → in-app link; [2] has no source → stays literal text.
   const cite = screen.getByRole("link", { name: "[1]" });
   expect(cite).toHaveAttribute("href", "/knowledge/pages/d1");
-  expect(cite).not.toHaveAttribute("target", "_blank");
+  // Citations open the source in a new tab (so the chat thread isn't navigated away from).
+  expect(cite).toHaveAttribute("target", "_blank");
   expect(screen.queryByRole("link", { name: "[2]" })).toBeNull();
   expect(screen.getByText(/disputes differ \[2\]\./)).toBeInTheDocument();
 });
@@ -129,8 +130,8 @@ test("wikiLinks + citations compose: both an internal page link and a [n] citati
   const wiki = screen.getByRole("link", { name: "Runbook" });
   expect(wiki).toHaveAttribute("href", "/knowledge/pages/abc/runbook");
   expect(wiki).not.toHaveAttribute("target");
-  // …and the citation marker still linkifies to its cited page.
+  // …and the citation marker still linkifies to its cited page, opening in a new tab.
   const cite = screen.getByRole("link", { name: "[1]" });
   expect(cite).toHaveAttribute("href", "/knowledge/pages/d1");
-  expect(cite).not.toHaveAttribute("target", "_blank");
+  expect(cite).toHaveAttribute("target", "_blank");
 });

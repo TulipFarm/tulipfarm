@@ -146,9 +146,17 @@ describe("sourcesEventForToolResult", () => {
     expect(
       sourcesEventForToolResult("cite_sources", {
         success: true,
-        data: { sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/pages/d" }] },
+        data: {
+          sources: [
+            { ref: 1, id: "d", title: "T", url: "/knowledge/pages/d", path: "policies/refunds" },
+          ],
+        },
       })
-    ).toEqual({ sources: [{ ref: 1, id: "d", title: "T", url: "/knowledge/pages/d" }] });
+    ).toEqual({
+      sources: [
+        { ref: 1, id: "d", title: "T", url: "/knowledge/pages/d", path: "policies/refunds" },
+      ],
+    });
   });
 
   it("returns null for other tools, failures, and empty/malformed source lists", () => {

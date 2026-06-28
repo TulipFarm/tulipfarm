@@ -268,16 +268,23 @@ function renderPinnedKnowledge(ctx: AssembleContext): string {
  */
 const KNOWLEDGE_GROUNDING_TEXT = [
   "When the user asks something that stored knowledge could answer (policies, how-tos, domain facts,",
-  "records, or a named document/runbook), call query_knowledge first and ground your answer in what",
-  "you retrieve. Prefer searching over asking the user to clarify: if a request is terse, abbreviated,",
-  "or ambiguous but could plausibly be answered from stored knowledge, run query_knowledge with your",
-  "best interpretation before asking what they mean. Search with a plain natural-language query and do",
-  "not set domain, tags, or spaceId unless the user named a specific space or category. If a search",
-  "returns nothing, retry once with simpler, broader keywords (and no filters); only ask for",
-  "clarification when that still finds nothing. Do not search for greetings or small talk. Mark each",
-  "claim drawn from a source with an inline [n] reference, numbered from 1 in order of first use. After",
-  "writing the answer, call cite_sources once with { citations: [{ ref, pageId }] }, mapping each",
-  "[n] to the pageId of the result it came from. Cite only pages you actually used.",
+  "records, or a named page/runbook), ground your answer in stored knowledge by running an",
+  "anchor-read-expand-cite loop. Prefer searching over asking the user to clarify: if a request is",
+  "terse, abbreviated, or ambiguous but could plausibly be answered from stored knowledge, search with",
+  "your best interpretation before asking what they mean. Do not search for greetings or small talk.",
+  "ANCHOR: call query_knowledge first with a plain natural-language query. Do not set domain, tags, or",
+  "spaceId unless the user explicitly named a space or category — never invent or guess a spaceId or",
+  "domain value (there is no 'default' space; an unknown filter matches nothing). When unsure, pass the",
+  "query alone with no filters. If a search returns nothing, retry once with simpler, broader keywords",
+  "(and no filters); only ask for clarification when that still finds nothing.",
+  "READ: query_knowledge returns ranked pages each with a short snippet. Call get_page on the top",
+  "hit(s) to read the whole page before answering, and synthesize from the full page, not the snippet.",
+  "EXPAND: when one page is not enough, follow at most 1-2 hops via get_backlinks or get_space_graph to",
+  "pull in curator-linked neighbors, then get_page those that look relevant. Cap traversal at 2 hops",
+  "and stop as soon as you have enough evidence; do not over-expand.",
+  "CITE: mark each claim drawn from a source with an inline [n] reference, numbered from 1 in order of",
+  "first use. After writing the answer, call cite_sources once with { citations: [{ ref, pageId }] },",
+  "mapping each [n] to the pageId of the page it came from. Cite only pages you actually used.",
 ].join(" ");
 
 function renderKnowledgeGrounding(ctx: AssembleContext): string {

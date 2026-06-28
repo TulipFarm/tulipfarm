@@ -34,8 +34,10 @@ function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): C
       return (
         <Link
           to={target}
+          target="_blank"
+          rel="noreferrer"
           className="font-medium text-primary no-underline hover:underline cursor-pointer"
-          title="cited source"
+          title={`Open cited source (${target}) in a new tab`}
         >
           {children}
         </Link>

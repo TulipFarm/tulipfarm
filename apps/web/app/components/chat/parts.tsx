@@ -199,6 +199,7 @@ function SourcesPart({ sources }: { sources: SourceRef[] }) {
               ) : (
                 <span className="text-muted-foreground">{label}</span>
               )}
+              {s.path ? <div className="text-xs text-muted-foreground">{s.path}</div> : null}
             </li>
           );
         })}
@@ -228,6 +229,9 @@ export function MessagePartView({
     case "reasoning":
       return <ReasoningPart text={part.text} />;
     case "tool":
+      // cite_sources is citation plumbing — its output already renders as the source chips and the
+      // inline [n] links, so its tool row is noise. Hide it (it never needs approval).
+      if (part.toolName === "cite_sources") return null;
       return (
         <ToolPart
           toolName={part.toolName}

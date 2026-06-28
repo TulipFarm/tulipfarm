@@ -165,6 +165,21 @@ export interface SearchHit {
   score: number;
 }
 
+/**
+ * One page-level hit from the hybrid `query_knowledge` tool. Distinct from
+ * `PageHit` in retrieval-service.ts (which carries highlightRanges); named to avoid that collision.
+ * `snippet` is the best-matching chunk content for orientation — read the whole page with get_page.
+ */
+export interface QueryKnowledgeHit {
+  pageId: string;
+  title: string;
+  snippet: string;
+  source: KnowledgeSource;
+  score: number;
+  path?: string;
+  spaceId?: string;
+}
+
 export interface SearchResults {
   results: SearchHit[];
   warnings: string[];

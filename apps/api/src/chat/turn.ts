@@ -455,7 +455,9 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
             (c) =>
               c.toolName === "transfer_to_agent" ||
               c.toolName === "complete_task" ||
-              c.toolName === "ask_user" // HITL: end the turn cleanly with the form rendered
+              c.toolName === "ask_user" || // HITL: end the turn cleanly with the form rendered
+              c.toolName === "cite_sources" // terminal: cite_sources is the answer's last act —
+            // stopping here prevents the model running another step that restates the whole answer
           );
         },
         onError: ({ error }) => {

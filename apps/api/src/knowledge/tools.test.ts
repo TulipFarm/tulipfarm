@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KnowledgeService } from "./service";
 import { KNOWLEDGE_TOOLS, type KnowledgeTool, type KnowledgeToolContext } from "./tools";
+import type { QueryKnowledgeHit } from "./types";
 
 function getTool(name: string): KnowledgeTool {
   const t = KNOWLEDGE_TOOLS.find((x) => x.name === name);
@@ -29,17 +30,36 @@ describe("knowledge tools", () => {
     ]);
   });
 
-  it("query_knowledge forwards an optional spaceId filter to the service", async () => {
-    const search = vi.fn(async () => ({ results: [], warnings: [] }));
+  it("query_knowledge forwards a valid UUID spaceId filter to the service", async () => {
+    const hybridSearchPages = vi.fn(async () => ({ results: [], warnings: [] }));
+    const uuid = "cf653c1b-e20a-4edd-81ec-dc92c7ae193f";
     await getTool("query_knowledge").handler(
-      { query: "sla", spaceId: "b1" },
-      ctx({ search } as never)
+      { query: "sla", spaceId: uuid },
+      ctx({ hybridSearchPages } as never)
     );
-    expect(search).toHaveBeenCalledWith(
+    expect(hybridSearchPages).toHaveBeenCalledWith(
       "sla",
-      expect.objectContaining({ spaceId: "b1" }),
-      expect.any(Number),
-      expect.anything()
+      expect.objectContaining({ spaceId: uuid }),
+      expect.any(Number)
+    );
+  });
+
+  it("query_knowledge normalizes placeholder filters: ignores non-UUID spaceId and blank domain", async () => {
+    const hybridSearchPages = vi.fn(async () => ({ results: [], warnings: [] }));
+    // Agents often fill optional params with placeholders ("global", "default", "", "*").
+    const res = await getTool("query_knowledge").handler(
+      { query: "pooling", spaceId: "global", domain: "", tags: [] },
+      ctx({ hybridSearchPages } as never)
+    );
+    expect(hybridSearchPages).toHaveBeenCalledWith(
+      "pooling",
+      { spaceId: undefined, domain: undefined, tags: undefined },
+      expect.any(Number)
+    );
+    // No throw, and the dropped spaceId is surfaced as a debuggable warning.
+    expect(res).toMatchObject({ success: true });
+    expect((res as { data: { warnings: string[] } }).data.warnings).toContain(
+      "ignored-invalid-spaceId"
     );
   });
 
@@ -134,11 +154,11 @@ describe("knowledge tools", () => {
     });
   });
 
-  it("cite_sources resolves pageIds to refs (wiki url only for space pages) and dedups by pageId", async () => {
+  it("cite_sources resolves pageIds to refs (wiki url + path for space pages) and dedups by pageId", async () => {
     // getActivePage already filters soft-deleted/missing → returns null for those.
     const getActivePage = vi.fn(async (id: string) =>
       id === "page-1"
-        ? { _id: "page-1", title: "Orders", spaceId: "b1" }
+        ? { _id: "page-1", title: "Orders", spaceId: "b1", path: "tables/orders" }
         : id === "flat-1"
           ? { _id: "flat-1", title: "Memo", spaceId: null }
           : null
@@ -155,12 +175,18 @@ describe("knowledge tools", () => {
       },
       ctx({ getActivePage } as never)
     );
-    // Space page → wiki url; flat page → no url key; soft-deleted + missing → dropped; dup deduped.
+    // Space page → wiki url + path; flat page → no url/path key; soft-deleted + missing → dropped; dup deduped.
     expect(res).toEqual({
       success: true,
       data: {
         sources: [
-          { ref: 1, id: "page-1", title: "Orders", url: "/knowledge/pages/page-1" },
+          {
+            ref: 1,
+            id: "page-1",
+            title: "Orders",
+            url: "/knowledge/pages/page-1",
+            path: "tables/orders",
+          },
           { ref: 2, id: "flat-1", title: "Memo" },
         ],
       },
@@ -180,21 +206,31 @@ describe("knowledge tools", () => {
     ).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 
-  it("query_knowledge validates input and returns results", async () => {
-    const search = vi.fn(async () => ({
-      results: [
-        { pageId: "d", chunkId: "c", title: "T", content: "x", source: "authored", score: 0.9 },
-      ],
-      warnings: [],
-    }));
+  it("query_knowledge validates input and returns page-level hits (no chunkId)", async () => {
+    const hits: QueryKnowledgeHit[] = [
+      {
+        pageId: "d1",
+        title: "France",
+        snippet: "Paris is the capital",
+        source: "authored",
+        score: 0.9,
+        path: "geo/france",
+        spaceId: "b1",
+      },
+      { pageId: "d2", title: "Memo", snippet: "flat page", source: "conversation", score: 0.5 },
+    ];
+    const hybridSearchPages = vi.fn(async () => ({ results: hits, warnings: [] }));
     const t = getTool("query_knowledge");
     expect(await t.handler({}, ctx({}))).toMatchObject({
       success: false,
       error: { code: "validation_error" },
     });
-    const good = await t.handler({ query: "france" }, ctx({ search } as never));
-    expect(good).toMatchObject({ success: true });
-    expect(search).toHaveBeenCalled();
+    const good = await t.handler({ query: "france" }, ctx({ hybridSearchPages } as never));
+    expect(good).toMatchObject({ success: true, data: { results: hits, warnings: [] } });
+    expect(hybridSearchPages).toHaveBeenCalled();
+    // Page-level hits carry no chunkId.
+    const results = (good as { data: { results: QueryKnowledgeHit[] } }).data.results;
+    for (const hit of results) expect(hit).not.toHaveProperty("chunkId");
   });
 
   it("create_knowledge_page validates and returns the id", async () => {
@@ -206,10 +242,13 @@ describe("knowledge tools", () => {
   });
 
   it("returns internal_error (never throws) when the service fails", async () => {
-    const search = vi.fn(async () => {
+    const hybridSearchPages = vi.fn(async () => {
       throw new Error("db down");
     });
-    const res = await getTool("query_knowledge").handler({ query: "x" }, ctx({ search } as never));
+    const res = await getTool("query_knowledge").handler(
+      { query: "x" },
+      ctx({ hybridSearchPages } as never)
+    );
     expect(res).toMatchObject({
       success: false,
       error: { code: "internal_error", message: "db down" },

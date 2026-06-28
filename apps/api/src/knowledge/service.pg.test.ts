@@ -4,6 +4,7 @@ import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
+import { PageRetrievalService } from "./retrieval-service";
 import { KnowledgeService } from "./service";
 import type { EmbeddingPort } from "./types";
 
@@ -31,6 +32,7 @@ function makeService(db: PGlite, embeddings: EmbeddingPort): KnowledgeService {
     chunks: new PgKnowledgeChunkRepo(db),
     revisions: new PgKnowledgeRevisionRepo(db),
     embeddings,
+    retrieval: new PageRetrievalService(db),
   });
 }
 
@@ -168,6 +170,7 @@ describe("KnowledgeService", () => {
       chunks: new PgKnowledgeChunkRepo(db),
       revisions: new PgKnowledgeRevisionRepo(db),
       embeddings: fakeEmbeddings(true),
+      retrieval: new PageRetrievalService(db),
       indexQueueStats: async () => ({ pending: 3, lastError: { message: "boom", failedAt } }),
     });
     const status = await svc.indexStatus();

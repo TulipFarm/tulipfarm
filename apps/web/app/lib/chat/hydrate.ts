@@ -1,4 +1,4 @@
-import type { ChatMessage, TimelinePart } from "~/lib/chat/types";
+import type { ChatMessage, SourceRef, TimelinePart } from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 
 /*
@@ -33,7 +33,16 @@ function assistantParts(content: string | WireMessagePart[]): TimelinePart[] {
   return parts;
 }
 
-// Fold a `tool` turn's results into the matching tool parts of the assistant turn it answers.
+// Pull the SourceRef[] out of a persisted cite_sources tool-result (`{ data: { sources } }`), so a
+// restored transcript can rebuild its citation chips. Defensive — unknown/legacy shapes yield [].
+function sourcesFromResult(result: unknown): SourceRef[] {
+  const sources = (result as { data?: { sources?: unknown } })?.data?.sources;
+  return Array.isArray(sources) ? (sources as SourceRef[]) : [];
+}
+
+// Fold a `tool` turn's results into the matching tool parts of the assistant turn it answers. A
+// cite_sources result also reconstructs the `sources` part the live reducer would have appended, so
+// citations (and inline [n] links) survive a page refresh.
 function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): void {
   for (const part of content) {
     if (part.type !== "tool-result") continue;
@@ -41,6 +50,10 @@ function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): v
       if (p.kind === "tool" && p.toolCallId === part.toolCallId) {
         p.result = part.result;
         p.status = "done";
+        if (p.toolName === "cite_sources") {
+          const sources = sourcesFromResult(part.result);
+          if (sources.length > 0) assistant.parts.push({ kind: "sources", sources });
+        }
       }
     }
   }
