@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "conventions": {
+    "packageManager": "pnpm",
+    "languages": ["typescript"],
+    "test": "pnpm test",
+    "lint": "pnpm lint",
+    "typecheck": "pnpm typecheck",
+    "format": "pnpm exec biome check --write",
+    "build": "pnpm build",
+    "ci": ".github/workflows/ci.yml",
+    "defaultBranch": "main",
+    "ui": {
+      "framework": "react",
+      "styling": "tailwind",
+      "iconLibrary": "lucide-react",
+      "componentLib": "shadcn",
+      "tokensPath": "apps/web/app/tokens.css"
+    },
+    "docs": {
+      "stack": "fumadocs",
+      "dir": "apps/docs"
+    }
+  },
+  "preferences": {
+    "outputStyle": "terse",
+    "autonomy": "gate-all",
+    "tdd": "strict",
+    "specDir": "docs/plans",
+    "boardTracking": "gitignored",
+    "families": ["build", "health"],
+    "health": {
+      "protectedPaths": ["**/dist/**", "**/out/**", "**/node_modules/**", "**/*.generated.*"],
+      "deflakeRuns": 20
+    }
+  }
+}
