@@ -5,22 +5,24 @@ description: How TulipFarm's parts fit together — soul, resources, agents, ski
 
 import { Cards, Card } from "fumadocs-ui/components/card";
 
-TulipFarm models a business as **configuration** and **data**, and lets agents act on
-both. The separation is deliberate, and it is the single idea that explains everything
-else:
+You operate TulipFarm by **talking to it**. You describe what you want, and agents build
+and run it for you — see [Building by chat](/docs/concepts/building). Underneath, two
+things make that work, and the separation between them explains everything else:
 
 - **Definitions live in the soul** (a git repository): resource schemas, agents,
-  skills. These are files you can read, diff, and version.
+  skills. These are files agents write when you ask them to — readable, diffable, and
+  versioned.
 - **Data lives in the datastore** (PostgreSQL): the records your resources hold, your
-  knowledge base, conversations, and secrets.
+  knowledge base, chats, and secrets.
 
-Editing the soul changes what your instance *is*. Writing to the datastore changes what
+Building the soul changes what your instance *is*. Writing to the datastore changes what
 it *knows*. Agents do both — but the two are governed differently. Soul writes are never
 gated; real-world actions an agent takes are gated by its autonomy level.
 
 ## The parts
 
 <Cards>
+  <Card title="Building by chat" href="/docs/concepts/building" description="How you build your system — describe it, and agents build it for you." />
   <Card title="Soul" href="/docs/concepts/soul" description="The git-backed configuration store that defines your instance." />
   <Card title="Resources" href="/docs/concepts/resources" description="Schema-defined data types and the records that fill them." />
   <Card title="Agents" href="/docs/concepts/agents" description="The actors that run turns, defined by an AGENT.md file." />

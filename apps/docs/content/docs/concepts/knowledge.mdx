@@ -1,36 +1,84 @@
 ---
 title: Knowledge
-description: The searchable corpus agents draw on, backed by vector search.
+description: The searchable, interlinked corpus your agents and your team draw on.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-The knowledge base is the searchable body of text your agents draw on. It is built from
-pages, organized into spaces, indexed in the background, and queried by vector
-search.
+The knowledge base is the searchable body of text your agents and your team draw on. It
+is built from pages, organized into spaces, cross-linked like a wiki, indexed in the
+background, and queried by search.
 
 ## How knowledge gets in
 
 Knowledge is populated from a few sources, not by file upload:
 
-- **Authored pages** — markdown text created through the knowledge API or by an
-  agent tool.
+- **Authored pages** — markdown text created through the knowledge UI, the knowledge
+  API, or an agent tool.
 - **Resource records** — your resource data is indexed so agents can search it.
-- **Agent conversations** — completed conversations are indexed as knowledge.
+- **Chats** — completed chats are indexed as knowledge.
 
-There is no file upload in V1, so authored content is markdown text only. Pages carry
-revisions, so edits are tracked over time.
+There is no file upload in V1, so authored content is markdown text only. Every page
+carries revisions, so edits are tracked over time.
 
-Knowledge is organised into **spaces** — wiki-like groups of cross-linked **pages** you
-can browse, target for search, or inject into agents. Create and manage spaces and pages
-in the **Knowledge** section of the web UI, or through the API.
+## Spaces and pages
+
+Knowledge is organised into **spaces** — wiki-like groups of cross-linked **pages**. A
+page is markdown stored at a path within its space, such as `tables/orders`. You browse
+spaces and pages in the **Knowledge** section of the web UI, target a single space for
+search, or inject a space into an agent. Create and manage them in the UI or through the
+API — see [Use the knowledge wiki](/docs/guides/use-the-knowledge-wiki).
+
+## Pages link to each other
+
+While editing a page, typing `@` opens a menu of other pages, agents, and resource types
+to link to; typing `#` tags the page. A link to a page in the same space points straight
+at it; a link to a page in another space is encoded as `tf:page/<Space>/<path>` and
+resolved when the page is indexed.
+
+Links are kept honest as the wiki changes. Renaming a space rewrites the inbound links
+that pointed at its old name. A link whose target cannot be resolved renders as muted
+text rather than a dead link, so a broken reference is visible instead of silently
+wrong. This is what makes the knowledge base a navigable wiki rather than a flat list.
+
+## Backlinks show what points here
+
+Every inbound link is tracked, so each page shows a **Linked from** list of the pages
+that reference it. Backlinks are the reverse of the links you author — there is nothing
+extra to maintain. They surface context you would otherwise miss: the policies that cite
+a procedure, the runbooks that reference a service.
+
+## Pages keep their history
+
+Every edit snapshots the previous version. A page's overflow menu opens its **History**,
+where you can read any past revision and restore it. Restoring is itself a write: the
+restored content becomes the current version and is snapshotted in turn, so no revision
+is ever lost.
+
+## The space graph
+
+Each space also renders as a graph — pages are nodes and the links between them are
+edges. Links that leave the space appear as faded stub nodes pointing outward. The graph
+is a fast way to see how a body of knowledge hangs together and to spot orphan pages that
+nothing links to.
 
 ## Indexing and search
 
-When a page changes, a background job re-indexes it: it splits the page into
-chunks, embeds each chunk, and stores the vectors. Search then ranks chunks by vector
-similarity and returns the best matches. Indexing is idempotent and retries on failure,
-so a transient error does not leave the index half-written.
+When a page changes, a background job re-indexes it: it splits the page into chunks,
+embeds each chunk, and stores the vectors. Indexing is idempotent and retries on failure,
+so a transient error never leaves the index half-written. An edit only re-embeds the
+chunks that actually changed, so large pages stay cheap to update.
+
+There are two ways to search:
+
+- **Meaning-based search** ranks chunks by vector similarity. Agents use it through the
+  `query_knowledge` tool, and it powers semantic lookups across the corpus.
+- **Lexical page search** ranks whole pages by title, body, and recency, with typo
+  tolerance. The ⌘K command palette and the sidebar search box both use it; you can
+  filter results by space, tag, domain, or source.
+
+Operators can re-index pages or inspect index health through admin API endpoints
+(`reindex`, `backfill`, and `index-status`). There is no UI for these in V1.
 
 ## Embeddings degrade gracefully
 
@@ -43,9 +91,20 @@ you have configured a cloud provider:
    Results come back flagged with an `embedding-unavailable` warning so you know you are
    in fallback mode.
 
+## Knowledge in chat
+
+Agents draw on knowledge during a chat in two ways:
+
+- They search it themselves and **cite what they used** — the answer carries inline `[1]`,
+  `[2]` markers that link to the source pages.
+- You can **pin a specific page** into a turn by typing `~` in the composer, so the agent
+  answers from exactly that page.
+
+See [Cite knowledge in chat](/docs/guides/cite-knowledge-in-chat) for the workflow.
+
 ## Governance knowledge
 
-A page flagged to always load is injected into every agent's context as a
-governance block — your operating rules and policies, available to every turn without the
-agent having to search for them. Injection respects size caps; content that would
-overflow the budget is skipped rather than truncated mid-page.
+A page flagged to always load is injected into every agent's context as a governance
+block — your operating rules and policies, available to every turn without the agent
+having to search for them. Injection respects size caps; content that would overflow the
+budget is skipped rather than truncated mid-page.

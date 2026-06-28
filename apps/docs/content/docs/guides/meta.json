@@ -1,11 +1,23 @@
 {
   "title": "Guides",
   "pages": [
-    "define-a-resource-type",
-    "work-with-records",
-    "install-a-skill",
+    "---Setup---",
     "configure-llm-providers",
     "store-a-secret",
-    "issue-an-api-token"
+    "issue-an-api-token",
+    "---Resources---",
+    "define-a-resource-type",
+    "work-with-records",
+    "---Skills---",
+    "install-a-skill",
+    "---Agents---",
+    "create-an-agent",
+    "---Routines---",
+    "routines",
+    "---Integrations---",
+    "integrations",
+    "---Knowledge---",
+    "use-the-knowledge-wiki",
+    "cite-knowledge-in-chat"
   ]
 }

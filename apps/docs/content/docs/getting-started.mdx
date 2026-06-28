@@ -126,35 +126,32 @@ Skills, Knowledge, and Settings.
 
 <Step>
 
-### Define your first resource type
+### Give the assistant a model
 
-A resource type is a JSON Schema stored in your soul repo. Create one for a simple
-`customer` type:
+You build everything else by talking to the assistant, so it needs a model to run.
+Open **Settings → Secrets**, add an API key for a provider (Anthropic, OpenAI, Azure, or
+any OpenAI-compatible endpoint), then open **Settings → LLM** and assign a model to each
+tier. The walkthrough is in [Configure LLM providers](/docs/guides/configure-llm-providers).
 
-```bash
-mkdir -p ~/.tulipfarm/soul/resources/customer
-cat > ~/.tulipfarm/soul/resources/customer/schema.yml <<'YAML'
-type: object
-properties:
-  name:
-    type: string
-  email:
-    type: string
-    format: email
-required:
-  - name
-YAML
+</Step>
+
+<Step>
+
+### Build your first resource type — by asking
+
+Open **Chat** and type what you want in plain language:
+
+```prompt
+Create a customer resource type with a name and an email.
 ```
 
-Commit it to the soul repo so the change is recorded:
+The assistant hands the request to the **Information Architect**, which confirms a couple
+of details and builds the type for you. There is no schema to write and no restart — the
+new `customer` table is ready the moment it finishes. Open **Resources** and you will see
+`customer` in the list.
 
-```bash
-git -C ~/.tulipfarm/soul add .
-git -C ~/.tulipfarm/soul commit -m "Add customer resource type"
-```
-
-Restart `pnpm dev`. On boot, TulipFarm reconciles the soul: it reads
-`resources/customer/schema.yml` and materializes a `customer` table.
+This is the normal way to build in TulipFarm; see [Building by chat](/docs/concepts/building)
+for the full picture.
 
 </Step>
 
@@ -162,10 +159,14 @@ Restart `pnpm dev`. On boot, TulipFarm reconciles the soul: it reads
 
 ### Create a record
 
-In the web UI, open **Resources**. You now see `customer` in the list. Open it, choose
-**New**, fill in a name and email, and save.
+Ask the assistant to add one:
 
-You have a running TulipFarm instance with a custom resource type and your first record.
+```prompt
+Add a customer named Ada Lovelace with email ada@example.com.
+```
+
+Or open **Resources → customer → New** and fill in the form by hand. Either way you now
+have a running TulipFarm instance with a custom resource type and your first record.
 
 </Step>
 
@@ -173,6 +174,6 @@ You have a running TulipFarm instance with a custom resource type and your first
 
 ## Next steps
 
-- Read how the [soul](/docs/concepts/soul) and [resources](/docs/concepts/resources) work.
-- [Configure an LLM provider](/docs/guides/configure-llm-providers) so agents can run.
+- Read how [building by chat](/docs/concepts/building), the [soul](/docs/concepts/soul), and [resources](/docs/concepts/resources) fit together.
+- Ask the assistant to "create a support agent" — see [Agents](/docs/concepts/agents).
 - [Install a skill](/docs/guides/install-a-skill) from a git repository.

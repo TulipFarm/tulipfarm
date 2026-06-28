@@ -1,72 +1,48 @@
 ---
 title: Define a resource type
-description: Author a schema in the soul repo and have TulipFarm materialize it.
+description: Create a new resource type by describing it to the assistant.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-This guide creates a new resource type by writing its schema into the
-[soul repo](/docs/concepts/soul). It assumes a running instance and shell access to the
-soul directory (`~/.tulipfarm/soul` by default).
+This guide creates a new [resource type](/docs/concepts/resources) by asking the
+assistant for it. It assumes a running instance with a model configured (so agents can
+run) and that you are signed in. For the bigger picture, see
+[Building by chat](/docs/concepts/building).
 
-A resource type's name must start with a lowercase letter and contain only lowercase
-letters, digits, and hyphens.
+## Ask the assistant
 
-## Write the schema
+Open **Chat** and describe the type you want in plain language. Name the fields, and call
+out anything special — an auto-numbered reference, a link to another type, a field that
+should be normalized:
 
-Create a directory for the type and a `schema.yml` inside it. The schema is JSON Schema,
-written in YAML:
-
-```bash
-mkdir -p ~/.tulipfarm/soul/resources/ticket
-cat > ~/.tulipfarm/soul/resources/ticket/schema.yml <<'YAML'
-type: object
-properties:
-  ref:
-    type: string
-  subject:
-    type: string
-  status:
-    type: string
-    enum: [open, closed]
-  customerId:
-    type: string
-    "x-links":
-      target: customer
-required:
-  - subject
-"x-id-strategy":
-  field: ref
-  prefix: "TICK-"
-  sequence: true
-YAML
+```prompt
+Create a ticket resource. It has a subject, a status that is either open or closed,
+and a customer it belongs to. Auto-number each ticket as TICK-1, TICK-2, and link the
+customer to our existing customer type.
 ```
 
-This declares a `ticket` type whose `ref` field is auto-assigned as `TICK-1`, `TICK-2`,
-and so on, and whose `customerId` links to a `customer` record.
+The assistant hands the request to the **Information Architect**, which loads its
+`resource-forge` and confirms the details it needs — the fields, which one is the
+human-friendly identifier, and which fields link to other types. Answer its questions,
+and it builds the type.
 
 <Callout type="info">
-A field's `x-links.target` must name a resource type that exists, and on write the linked
-record must exist too — see [Resources](/docs/concepts/resources).
+The Information Architect builds one type at a time, in dependency order. If your `ticket`
+links to a `customer`, create the `customer` type first (or ask for both, and it will
+sequence them) — a link can only point at a type that exists.
 </Callout>
 
-## Commit the change
+## What it builds for you
 
-The soul is a git repository. Commit so the change is recorded:
+From that description the Information Architect writes the schema, wires up the
+extensions, and commits it — no schema for you to write:
 
-```bash
-git -C ~/.tulipfarm/soul add .
-git -C ~/.tulipfarm/soul commit -m "Add ticket resource type"
-```
+- the `subject` and `status` fields, with `status` constrained to `open` or `closed`
+- an auto-assigned `ref` (`TICK-1`, `TICK-2`, …) via the `x-id-strategy` extension
+- a `customerId` that links to the `customer` type, checked on every write
 
-## Reconcile
-
-Restart the instance. On boot, TulipFarm reads the new schema and materializes a table
-for it:
-
-```bash
-pnpm dev
-```
+The new `ticket` table is reconciled immediately — there is no restart.
 
 ## Verify
 

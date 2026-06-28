@@ -1,0 +1,48 @@
+---
+title: Create an agent
+description: Describe an agent to the assistant and have it built for you.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+This guide creates a custom [agent](/docs/concepts/agents) by describing it to the
+assistant. It assumes a running instance with a model configured so agents can run. For
+the bigger picture, see [Building by chat](/docs/concepts/building).
+
+## Ask the assistant
+
+Open **Chat** and describe the agent you want — what it does, and what it should reach
+for:
+
+```prompt
+Create a support agent that answers customer questions from our knowledge base
+and files a ticket when a question needs follow-up.
+```
+
+The assistant hands the request to the **Information Architect**, which loads its
+`agent-forge` and asks the few things it needs: what the agent is responsible for, and how
+much it may do on its own.
+
+## Choose its autonomy
+
+The forge asks for an [autonomy](/docs/concepts/agents) level — how far the agent acts
+before pausing for a human:
+
+- `full` — acts without pausing
+- `supervised` — acts, but surfaces what it does
+- `approval-required` — pauses for explicit approval before a gated action
+- `manual` — driven step by step
+
+Pick the level that matches how much you trust the agent to run unattended. The Information
+Architect writes the `AGENT.md`, commits it to the soul, and the agent is ready — no
+approval step and no restart.
+
+## Use it
+
+Your new agent appears in the **Agents** list. To talk to it, select it in the chat agent
+picker, or mention it with `@` in the composer to route a single turn to it.
+
+<Callout type="info">
+To change an agent later — adjust its prompt, its autonomy, what it focuses on — just ask
+the assistant to edit it. You never edit the `AGENT.md` by hand unless you want to.
+</Callout>

@@ -20,6 +20,7 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | --- | --- |
 | [`apps/api`](apps/api/AGENTS.md) | Fastify API server. PostgreSQL (pgvector + pg-boss), migration-on-boot, soul git store. |
 | [`apps/web`](apps/web/AGENTS.md) | Remix + React web UI. |
+| [`apps/docs`](apps/docs/AGENTS.md) | Fumadocs public documentation site (static export). Prompt-first docs conventions. |
 | [`packages/llm`](packages/llm/AGENTS.md) | LLM provider abstraction + tiered fallback chains (`@tulipfarm/llm`). |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loader + git sync (`@tulipfarm/soul`). |
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage + key rotation (`@tulipfarm/secrets`). |

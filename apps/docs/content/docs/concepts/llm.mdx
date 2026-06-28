@@ -3,23 +3,26 @@ title: LLM tiers
 description: How TulipFarm chooses a model and falls back across providers.
 ---
 
-TulipFarm talks to language models through a single adapter (the Vercel AI SDK), so the
-same configuration works across 55+ providers. You do not wire a model into each agent.
-Instead you define **tiers**, and the runtime picks a tier per turn.
+TulipFarm talks to language models through a single adapter (the Vercel AI SDK). It
+ships four provider integrations — **Anthropic**, **OpenAI**, **Azure OpenAI**, and any
+**OpenAI-compatible** endpoint (which covers gateways like OpenRouter, Together, and
+Groq through their compatible APIs). You do not wire a model into each agent. Instead you
+define **tiers**, and the runtime picks a tier per turn.
 
 ## Three tiers
 
 Every instance configures three tiers, from cheapest and fastest to most capable:
 
-| Tier | Default model |
+| Tier | Recommended model |
 |---|---|
 | `quick` | `claude-haiku-4-5` |
 | `standard` | `claude-sonnet-4-6` |
 | `complex` | `claude-opus-4-8` |
 
-The tier configuration lives in `soul/llm.config.yaml` and is edited through
-**Settings → LLM** in the web UI. Each tier is an *ordered list* of providers — and the
-order is the fallback chain.
+These are recommended models, not enforced defaults — each tier needs at least one
+provider and model assigned before agents can run. The tier configuration lives in
+`soul/llm.config.yaml` and is edited through **Settings → LLM** in the web UI. Each tier
+is an *ordered list* of providers — and the order is the fallback chain.
 
 ## Fallback chains
 
@@ -31,10 +34,17 @@ provider outage degrades to the backup instead of failing the turn.
 ## Automatic tier selection
 
 A turn does not have to name a tier. With `model: auto`, TulipFarm picks one from
-context:
+context. The starting point is the agent's [autonomy](/docs/concepts/agents):
 
-- An agent's [autonomy](/docs/concepts/agents) maps to a tier — for example,
-  `supervised` selects `standard`.
+| Autonomy | Starting tier |
+|---|---|
+| `full` | `quick` |
+| `supervised` | `standard` |
+| `approval-required` | `complex` |
+| `manual` | `standard` |
+
+An agent with no autonomy set starts at `standard`. Two adjustments then apply on top:
+
 - Tasks flagged as decisions escalate to `complex`.
 - A `quick` turn is bumped to `standard` when tools are in scope.
 
