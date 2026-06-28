@@ -261,3 +261,56 @@ describe("LlmService.select", () => {
     expect(() => svc.select({ model: "auto" })).toThrow(LlmNotConfiguredError);
   });
 });
+
+describe("LlmService.resolve", () => {
+  // A tier with two providers so chain ordering (config order) is observable.
+  const multiConfig = {
+    tiers: {
+      quick: {
+        providers: [
+          { provider: "azure", model: "gpt-4o-mini", api_key_ref: "key" },
+          { provider: "anthropic", model: "claude-haiku-4-5", api_key_ref: "key" },
+        ],
+      },
+      standard: {
+        providers: [{ provider: "anthropic", model: "claude-sonnet-4-6", api_key_ref: "key" }],
+      },
+      complex: {
+        providers: [{ provider: "anthropic", model: "claude-opus-4-8", api_key_ref: "key" }],
+      },
+    },
+  };
+  const init = async () => {
+    const svc = new LlmService();
+    await svc.init(multiConfig, fakeSecrets);
+    return svc;
+  };
+
+  it("resolves a tier with its ordered provider/model chain + primary id", async () => {
+    const r = (await init()).resolve({ model: "quick" });
+    expect(r.tier).toBe("quick");
+    expect(r.modelId).toBe("gpt-4o-mini");
+    expect(r.chain).toEqual([
+      { provider: "azure", modelId: "gpt-4o-mini" },
+      { provider: "anthropic", modelId: "claude-haiku-4-5" },
+    ]);
+  });
+
+  it("auto selection carries tier metadata", async () => {
+    const r = (await init()).resolve({ model: "auto", autonomy: "supervised" });
+    expect(r.tier).toBe("standard");
+    expect(r.modelId).toBe("claude-sonnet-4-6");
+  });
+
+  it("raw model id resolves to a single-entry chain with provider, no tier", async () => {
+    const r = (await init()).resolve({ model: "claude-opus-4-8" });
+    expect(r.tier).toBeUndefined();
+    expect(r.modelId).toBe("claude-opus-4-8");
+    expect(r.chain).toEqual([{ provider: "anthropic", modelId: "claude-opus-4-8" }]);
+  });
+
+  it("unknown raw model id throws UnknownModelError", async () => {
+    const svc = await init();
+    expect(() => svc.resolve({ model: "no-such-model" })).toThrow(UnknownModelError);
+  });
+});

@@ -1,9 +1,12 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  fetchLiteLlmCatalog,
+  type LiteLlmCatalog,
   type LlmConfig,
   LlmConfigValidationError,
   type LlmService,
+  resolveModelSpec,
   validateLlmConfig,
 } from "@tulipfarm/llm";
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
@@ -15,11 +18,65 @@ import type { UserDoc } from "../../auth/users";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
+// In-memory LiteLLM catalog cache (the JSON is ~large; refetch at most hourly). Shared across
+// resolve-spec calls so adding several models doesn't re-download each time.
+const CATALOG_TTL_MS = 60 * 60 * 1000;
+let catalogCache: { at: number; catalog: LiteLlmCatalog | null } | null = null;
+
+/** Test-only: clear the module-level catalog cache so each test controls its own stubbed catalog. */
+export function __resetLlmCatalogCache(): void {
+  catalogCache = null;
+}
+
+async function getCatalog(force = false): Promise<LiteLlmCatalog | null> {
+  if (!force && catalogCache && Date.now() - catalogCache.at < CATALOG_TTL_MS) {
+    return catalogCache.catalog;
+  }
+  const catalog = await fetchLiteLlmCatalog();
+  // Cache even a null (failed) result briefly so a flaky network doesn't hammer GitHub per keystroke
+  // (a `force` refresh always re-fetches first, so a transient failure isn't sticky for the UI).
+  if (catalog || !catalogCache) catalogCache = { at: Date.now(), catalog };
+  return catalog;
+}
+
 // Returned by GET when no llm.config.yaml exists yet, so the editor opens with empty tiers instead of
 // erroring. Not itself schema-valid for PUT (tiers need ≥1 provider) — the user fills it in and saves.
 const EMPTY_LLM_CONFIG = {
   tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
 } as const;
+
+const TIER_KEYS = ["quick", "standard", "complex"] as const;
+
+/**
+ * Auto-resolve + pin a LiteLLM spec onto every model that doesn't already have one, so that simply
+ * adding a model and saving is enough for cost tracking (no per-model "Fetch spec" click). Best-effort:
+ * if the catalog is unreachable, the config is saved unchanged; models with no LiteLLM match are left
+ * spec-less (and show as "unpriced"). Existing specs are preserved — use the form's Refresh to update.
+ * `force` re-resolves ALL models against a freshly-fetched catalog.
+ */
+async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig> {
+  const all = TIER_KEYS.flatMap((t) => config.tiers[t].providers);
+  if (!force && all.every((p) => p.spec)) return config; // nothing missing → no fetch
+  const catalog = await getCatalog(force);
+  if (!catalog) return config; // can't reach LiteLLM → save as-is
+  const fetchedAt = new Date().toISOString().slice(0, 10);
+  const enrichTier = (tier: { providers: LlmConfig["tiers"]["quick"]["providers"] }) => ({
+    ...tier,
+    providers: tier.providers.map((p) => {
+      if (p.spec && !force) return p;
+      const { spec } = resolveModelSpec(p.provider, p.model, catalog, fetchedAt);
+      return spec ? { ...p, spec } : p;
+    }),
+  });
+  return {
+    ...config,
+    tiers: {
+      quick: enrichTier(config.tiers.quick),
+      standard: enrichTier(config.tiers.standard),
+      complex: enrichTier(config.tiers.complex),
+    },
+  };
+}
 
 /*
  * LLM config editing (UI-V1-003 / LLM-V1-003). Reads and full-replaces soul/llm.config.yaml.
@@ -119,15 +176,64 @@ export function registerLlmConfigRoutes(
     }
   );
 
+  app.get(
+    "/api/v1/llm-config/resolve-spec",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Resolve a model's spec (pricing/context/capabilities) from LiteLLM for a given provider+model, to pin into llm.config. Admin only. `spec` is null when no confident match was found (use `candidates`).",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          required: ["provider", "model"],
+          properties: {
+            provider: { type: "string" },
+            model: { type: "string" },
+            base_url: { type: "string" },
+            refresh: { type: "boolean" },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["spec", "matchedKey", "candidates"],
+            properties: {
+              spec: { type: "object", additionalProperties: true, nullable: true },
+              matchedKey: { type: "string", nullable: true },
+              candidates: { type: "array", items: { type: "string" } },
+            },
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+          502: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+      const q = req.query as { provider: string; model: string; refresh?: boolean };
+      const catalog = await getCatalog(q.refresh === true);
+      if (!catalog) {
+        return reply.code(502).send({ error: "could not reach the LiteLLM model catalog" });
+      }
+      const fetchedAt = new Date().toISOString().slice(0, 10);
+      return reply.send(resolveModelSpec(q.provider, q.model, catalog, fetchedAt));
+    }
+  );
+
   app.put(
     "/api/v1/llm-config",
     {
       preHandler: requireAuth,
       schema: {
         description:
-          "Replace the LLM config (admin only). Validated before write; the soul is committed and the LlmService reloaded.",
+          "Replace the LLM config (admin only). Each model's spec (pricing/context/capabilities) is auto-resolved from LiteLLM and pinned (best-effort); `?refresh=true` re-resolves all. Validated before write; the soul is committed and the LlmService reloaded.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: { type: "object", properties: { refresh: { type: "boolean" } } },
         body: { type: "object", additionalProperties: true },
         response: {
           200: { type: "object", additionalProperties: true },
@@ -152,6 +258,11 @@ export function registerLlmConfigRoutes(
         }
         throw err;
       }
+
+      // Auto-pin specs for any model missing one (or all, with ?refresh=true) so cost tracking works
+      // without a per-model click. Best-effort — a LiteLLM outage saves the config unchanged.
+      const { refresh } = req.query as { refresh?: boolean };
+      config = await enrichSpecs(config, refresh === true);
 
       await writeFile(join(gitSync.path, "llm.config.yaml"), stringifyYaml(config), "utf8");
       await gitSync.withSync("soul: update llm config");

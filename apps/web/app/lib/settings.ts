@@ -9,13 +9,51 @@ import { apiDelete, apiGet, apiWrite } from "./api";
 
 // --- LLM config (mirrors @tulipfarm/llm LlmConfig; embeddings is read/preserved but not UI-editable) ---
 
+// Pinned model spec (pricing/context/capabilities), resolved from LiteLLM at config time. Mirrors
+// @tulipfarm/llm ModelSpec. Costs are USD per token.
+export type ModelSpec = {
+  litellm_key?: string;
+  input_cost_per_token?: number;
+  output_cost_per_token?: number;
+  cache_read_input_token_cost?: number;
+  cache_creation_input_token_cost?: number;
+  max_input_tokens?: number;
+  max_output_tokens?: number;
+  mode?: string;
+  supports_function_calling?: boolean;
+  supports_vision?: boolean;
+  supports_prompt_caching?: boolean;
+  supports_reasoning?: boolean;
+  deprecation_date?: string | null;
+  fetched_at?: string;
+};
+
 export type ProviderEntry = {
   provider: string;
   model: string;
   api_key_ref?: string;
   base_url?: string;
   resource_name?: string;
+  spec?: ModelSpec;
 };
+
+export type SpecResolution = {
+  spec: ModelSpec | null;
+  matchedKey: string | null;
+  candidates: string[];
+};
+
+/** Resolve a model's spec from LiteLLM (admin) so it can be pinned into the config. `refresh` forces
+ *  a re-fetch of the catalog past the server's cache. */
+export async function resolveModelSpec(
+  provider: string,
+  model: string,
+  refresh = false
+): Promise<SpecResolution> {
+  const q = new URLSearchParams({ provider, model });
+  if (refresh) q.set("refresh", "true");
+  return apiGet<SpecResolution>(`/api/v1/llm-config/resolve-spec?${q.toString()}`);
+}
 
 // Provider registry (served from @tulipfarm/secrets via GET /api/v1/llm-providers). Each provider
 // declares the full set of fields it needs — some secret (API keys), some plain config (resource

@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
-import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
+import {
+  LlmNotConfiguredError,
+  type LlmService,
+  type ResolvedModel,
+  UnknownModelError,
+} from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -12,6 +17,12 @@ import type { GuardContext, GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
+import {
+  attributeModel,
+  extractStepUsage,
+  extractToolCalls,
+  type ObservableStep,
+} from "../observability/capture";
 import {
   GENERAL_ASSISTANT_NAME,
   getAgent,
@@ -172,9 +183,9 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
 
   // 2. Resolve the model synchronously so a bad request returns before headers go out.
   //    sessionModel = per-turn override (ephemeral); model = conversation default (persisted).
-  let selected: ReturnType<LlmService["select"]>;
+  let resolved: ResolvedModel;
   try {
-    selected = llmService.select({
+    resolved = llmService.resolve({
       sessionModel: body.model,
       model: convo.model,
       autonomy: body.autonomy,
@@ -186,9 +197,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     if (err instanceof LlmNotConfiguredError) return reply.code(503).send({ error: err.message });
     throw err;
   }
-  // The concrete model id that served this turn — stamped into each assistant message's
-  // provenance (the tier is otherwise ephemeral: never persisted on the conversation).
-  const resolvedModelId = (selected as { modelId?: string }).modelId;
+  // The primary model id for this turn — stamped into each assistant message's provenance (the tier
+  // is otherwise ephemeral: never persisted on the conversation). Under fallback the served model
+  // can differ; observability reconciles via `resolved.chain` + the step's response model id.
+  const resolvedModelId = resolved.modelId;
 
   // 3. Per-turn observability log (AC4).
   req.log.info(
@@ -411,6 +423,32 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     // so the next iteration runs that wrap-up turn and then ends.
     let closingTurn = false;
 
+    // Observability accumulators (best-effort, off the critical path). Each finished step emits an
+    // LLM_STEP_FINISHED; totals roll up across steps + handoffs into one TURN_FINISHED at the end.
+    const turnStart = Date.now();
+    let lastStepAt = turnStart;
+    let turnSteps = 0;
+    let turnTokensIn = 0;
+    let turnTokensOut = 0;
+    // Idempotent: the first call wins. A `finally` (below) emits "aborted" for stop/throw paths that
+    // never reach a normal exit, so the turn always closes out and no trace spans leak.
+    let turnFinishedEmitted = false;
+    const emitTurnFinished = (status: string): void => {
+      if (turnFinishedEmitted) return;
+      turnFinishedEmitted = true;
+      events?.emit(DOMAIN_EVENTS.TURN_FINISHED, {
+        conversationId: convo._id,
+        agentId: activeAgent.name,
+        status,
+        steps: turnSteps,
+        tokensIn: turnTokensIn,
+        tokensOut: turnTokensOut,
+        model: resolvedModelId,
+        tier: resolved.tier,
+        durationMs: Date.now() - turnStart,
+      });
+    };
+
     // A user @mention switched the active agent before the turn began — surface it as the same
     // agent-handoff event a transfer would, ahead of the new agent's first output, so the client
     // renders the inline marker and moves the current-agent indicator.
@@ -423,191 +461,244 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       };
     }
 
-    for (let depth = 0; depth < MAX_HANDOFF_DEPTH; depth++) {
-      const turnTools =
-        toolRegistry && toolRegistry.getAll().length > 0
-          ? toolRegistry.buildToolSet(
-              {
-                userId: user._id,
-                agentId: activeAgent.name,
-                autonomy: body.autonomy,
-                clientContext: body.clientContext,
-                contextRead,
-              },
-              coordinator,
-              fullResultCache,
-              makeApprovalGate(approvalRegistry, emitter),
-              runToolCallGuard,
-              allowedToolNamesFor(toolRegistry, activePlatform)
-            )
-          : undefined;
+    // The `finally` guarantees a TURN_FINISHED on every exit — including stop-aborts (consumer calls
+    // generator.return() at a `yield`) and unexpected throws — so observability always closes the
+    // turn out and no buffered trace spans leak. emitTurnFinished is idempotent (first status wins).
+    try {
+      for (let depth = 0; depth < MAX_HANDOFF_DEPTH; depth++) {
+        const turnTools =
+          toolRegistry && toolRegistry.getAll().length > 0
+            ? toolRegistry.buildToolSet(
+                {
+                  userId: user._id,
+                  agentId: activeAgent.name,
+                  autonomy: body.autonomy,
+                  clientContext: body.clientContext,
+                  contextRead,
+                },
+                coordinator,
+                fullResultCache,
+                makeApprovalGate(approvalRegistry, emitter),
+                runToolCallGuard,
+                allowedToolNamesFor(toolRegistry, activePlatform)
+              )
+            : undefined;
 
-      const result = streamText({
-        model: selected,
-        messages: turnMessages,
-        // AI SDK v7 rejects `role: "system"` entries in `messages` by default; the per-turn prompt
-        // is assembled as a leading system message (and re-seeded on handoff), so opt back in.
-        allowSystemInMessages: true,
-        tools: turnTools,
-        // The stop endpoint aborts this signal to halt generation mid-turn (see streamControllers).
-        abortSignal: abortController.signal,
-        // Stop the agent's own loop at the step budget, or as soon as it hands off / completes —
-        // so control returns to this loop without the agent rambling after the control tool.
-        stopWhen: ({ steps }) => {
-          if (steps.length >= MAX_TOOL_STEPS) return true;
-          const last = steps[steps.length - 1];
-          return (last?.toolCalls ?? []).some(
-            (c) =>
-              c.toolName === "transfer_to_agent" ||
-              c.toolName === "complete_task" ||
-              c.toolName === "ask_user" || // HITL: end the turn cleanly with the form rendered
-              c.toolName === "cite_sources" // terminal: cite_sources is the answer's last act —
-            // stopping here prevents the model running another step that restates the whole answer
-          );
-        },
-        onError: ({ error }) => {
-          req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
-        },
-        // Persist each finished step (text and/or tool-call + tool-result) so the durable history
-        // captures the whole tool loop across every agent in the chain. `activeAgent.name` is the
-        // agent that produced THIS step (it changes across handoffs), recorded as provenance.
-        onStepFinish: (step) =>
-          persistStep(
-            messageRepo,
-            convo._id,
-            step as unknown as PersistableStep,
-            (e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"),
-            replyIdHolder,
-            { model: resolvedModelId, agentId: activeAgent.name }
-          ),
-      });
-
-      let control:
-        | { type: "transfer"; target: string; reason?: string }
-        | { type: "complete"; summary?: string }
-        | undefined;
-      // Set when this agent calls `ask_user`: the turn ends with the form rendered and a pending
-      // interaction is persisted so the next request resumes with the user's answer.
-      let pendingAsk:
-        | { toolCallId: string; surfaceId: string | null; schema: Record<string, unknown> }
-        | undefined;
-      let errored = false;
-      for await (const part of result.fullStream) {
-        const p = part as { type?: string; toolName?: string; toolCallId?: string };
-        // Suppress each agent's own terminal `finish`; one synthetic finish closes the whole turn.
-        if (p.type === "finish") continue;
-        if (p.type === "error") errored = true;
-        if (p.type === "tool-result" && p.toolName === "ask_user") {
-          const full = fullResultCache.get(p.toolCallId as string);
-          if (full?.success) {
-            const data = full.data as Record<string, unknown>;
-            pendingAsk = {
-              toolCallId: p.toolCallId as string,
-              surfaceId: typeof data.surfaceId === "string" ? data.surfaceId : null,
-              schema: (data.schema as Record<string, unknown>) ?? {},
-            };
-          }
-        }
-        if (
-          p.type === "tool-result" &&
-          (p.toolName === "transfer_to_agent" || p.toolName === "complete_task")
-        ) {
-          const full = fullResultCache.get(p.toolCallId as string);
-          if (full?.success) {
-            const data = full.data as Record<string, unknown>;
-            control =
-              p.toolName === "transfer_to_agent"
-                ? {
-                    type: "transfer",
-                    target: String(data.agentId),
-                    reason: data.message ? String(data.message) : undefined,
-                  }
-                : {
-                    type: "complete",
-                    summary: data.summary ? String(data.summary) : undefined,
-                  };
-          }
-        }
-        yield part;
-      }
-
-      if (errored) return; // a terminal `error` was already yielded by the producer
-      if (pendingAsk) {
-        // HITL: end the turn with the form on screen and record the pause. The next request injects
-        // the user's answer as this tool-call's result and resumes the run (see the resume path).
-        await pendingInteractions.create({
-          id: randomUUID(),
-          conversationId: convo._id,
-          toolCallId: pendingAsk.toolCallId,
-          toolName: "ask_user",
-          awaitedSchema: pendingAsk.schema,
-          surfaceId: pendingAsk.surfaceId,
-          createdAt: new Date(),
-          resolvedAt: null,
+        const result = streamText({
+          model: resolved.model,
+          messages: turnMessages,
+          // AI SDK v7 rejects `role: "system"` entries in `messages` by default; the per-turn prompt
+          // is assembled as a leading system message (and re-seeded on handoff), so opt back in.
+          allowSystemInMessages: true,
+          tools: turnTools,
+          // The stop endpoint aborts this signal to halt generation mid-turn (see streamControllers).
+          abortSignal: abortController.signal,
+          // Stop the agent's own loop at the step budget, or as soon as it hands off / completes —
+          // so control returns to this loop without the agent rambling after the control tool.
+          stopWhen: ({ steps }) => {
+            if (steps.length >= MAX_TOOL_STEPS) return true;
+            const last = steps[steps.length - 1];
+            return (last?.toolCalls ?? []).some(
+              (c) =>
+                c.toolName === "transfer_to_agent" ||
+                c.toolName === "complete_task" ||
+                c.toolName === "ask_user" || // HITL: end the turn cleanly with the form rendered
+                c.toolName === "cite_sources" // terminal: cite_sources is the answer's last act —
+              // stopping here prevents the model running another step that restates the whole answer
+            );
+          },
+          onError: ({ error }) => {
+            req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
+          },
+          // Persist each finished step (text and/or tool-call + tool-result) so the durable history
+          // captures the whole tool loop across every agent in the chain. `activeAgent.name` is the
+          // agent that produced THIS step (it changes across handoffs), recorded as provenance.
+          onStepFinish: (step) => {
+            // Observability (best-effort, sync emit onto the in-process bus — never blocks the step).
+            // Read usage/response off the real step (PersistableStep omits them) and attribute the
+            // served model against the resolved chain so fallback turns record the real model.
+            const observableStep = step as unknown as ObservableStep;
+            const usage = extractStepUsage(observableStep);
+            const { model, provider, fellBack, entry } = attributeModel(
+              usage.servedModelId,
+              resolved.chain,
+              resolvedModelId
+            );
+            const now = Date.now();
+            turnSteps += 1;
+            turnTokensIn += usage.tokensIn;
+            turnTokensOut += usage.tokensOut;
+            events?.emit(DOMAIN_EVENTS.LLM_STEP_FINISHED, {
+              conversationId: convo._id,
+              agentId: activeAgent.name,
+              model,
+              provider,
+              tier: resolved.tier,
+              tokensIn: usage.tokensIn,
+              tokensOut: usage.tokensOut,
+              durationMs: now - lastStepAt,
+              // A step served by a non-primary provider means the chain fell back (reliability signal).
+              status: fellBack ? "fallback" : "ok",
+              // Authoritative per-token cost from the served model's pinned soul spec (if resolved).
+              costInPerToken: entry?.spec?.input_cost_per_token,
+              costOutPerToken: entry?.spec?.output_cost_per_token,
+              cacheRead: usage.cacheRead,
+              cacheWrite: usage.cacheWrite,
+              reasoning: usage.reasoning,
+              tools: extractToolCalls(observableStep),
+              // In-memory already; the subscriber persists it only when content capture is enabled.
+              completionText: observableStep.text,
+            });
+            lastStepAt = now;
+            return persistStep(
+              messageRepo,
+              convo._id,
+              step as unknown as PersistableStep,
+              (e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"),
+              replyIdHolder,
+              { model: resolvedModelId, agentId: activeAgent.name }
+            );
+          },
         });
+
+        let control:
+          | { type: "transfer"; target: string; reason?: string }
+          | { type: "complete"; summary?: string }
+          | undefined;
+        // Set when this agent calls `ask_user`: the turn ends with the form rendered and a pending
+        // interaction is persisted so the next request resumes with the user's answer.
+        let pendingAsk:
+          | { toolCallId: string; surfaceId: string | null; schema: Record<string, unknown> }
+          | undefined;
+        let errored = false;
+        for await (const part of result.fullStream) {
+          const p = part as { type?: string; toolName?: string; toolCallId?: string };
+          // Suppress each agent's own terminal `finish`; one synthetic finish closes the whole turn.
+          if (p.type === "finish") continue;
+          if (p.type === "error") errored = true;
+          if (p.type === "tool-result" && p.toolName === "ask_user") {
+            const full = fullResultCache.get(p.toolCallId as string);
+            if (full?.success) {
+              const data = full.data as Record<string, unknown>;
+              pendingAsk = {
+                toolCallId: p.toolCallId as string,
+                surfaceId: typeof data.surfaceId === "string" ? data.surfaceId : null,
+                schema: (data.schema as Record<string, unknown>) ?? {},
+              };
+            }
+          }
+          if (
+            p.type === "tool-result" &&
+            (p.toolName === "transfer_to_agent" || p.toolName === "complete_task")
+          ) {
+            const full = fullResultCache.get(p.toolCallId as string);
+            if (full?.success) {
+              const data = full.data as Record<string, unknown>;
+              control =
+                p.toolName === "transfer_to_agent"
+                  ? {
+                      type: "transfer",
+                      target: String(data.agentId),
+                      reason: data.message ? String(data.message) : undefined,
+                    }
+                  : {
+                      type: "complete",
+                      summary: data.summary ? String(data.summary) : undefined,
+                    };
+            }
+          }
+          yield part;
+        }
+
+        if (errored) {
+          emitTurnFinished("error");
+          return; // a terminal `error` was already yielded by the producer
+        }
+        if (pendingAsk) {
+          // HITL: end the turn with the form on screen and record the pause. The next request injects
+          // the user's answer as this tool-call's result and resumes the run (see the resume path).
+          await pendingInteractions.create({
+            id: randomUUID(),
+            conversationId: convo._id,
+            toolCallId: pendingAsk.toolCallId,
+            toolName: "ask_user",
+            awaitedSchema: pendingAsk.schema,
+            surfaceId: pendingAsk.surfaceId,
+            createdAt: new Date(),
+            resolvedAt: null,
+          });
+          // A HITL pause is not a completed turn — record it as 'paused' so it isn't counted as a
+          // success (the resumed continuation emits its own TURN_FINISHED). Idempotent: wins over the
+          // "ok" below.
+          emitTurnFinished("paused");
+          break;
+        }
+        if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
+        if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
+          const fromAgent = activeAgent.name;
+          await repo.setAgent(convo._id, control.target);
+          activeAgent = resolveAgent(soulLoader, control.target);
+          activePlatform = getPlatformAgent(activeAgent.name);
+          // Surface the live switch so the client's current-agent indicator follows the handoff.
+          yield {
+            type: "agent-handoff",
+            from: fromAgent,
+            to: activeAgent.name,
+            reason: control.reason,
+          };
+          const handoffUser = control.reason
+            ? `${userContent}\n\n(Handoff context: ${control.reason})`
+            : userContent;
+          // Clean slate for the target: its own system prompt + the user's original request.
+          turnMessages = [
+            { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
+            { role: "user", content: handoffUser },
+          ];
+          continue;
+        }
+        if (control?.type === "complete" && depth < MAX_HANDOFF_DEPTH - 1) {
+          // Control returns to the front desk, which streams a brief confirmation of what the
+          // specialist just did — otherwise the turn ends on a silent (collapsed) tool result.
+          const fromAgent = activeAgent.name;
+          await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
+          activeAgent = resolveAgent(soulLoader, GENERAL_ASSISTANT_NAME);
+          activePlatform = getPlatformAgent(activeAgent.name);
+          // Hand the indicator back to the front desk for the closing confirmation turn.
+          yield { type: "agent-handoff", from: fromAgent, to: activeAgent.name };
+          const summary = control.summary ?? "completed the requested work";
+          turnMessages = [
+            { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
+            { role: "user", content: userContent },
+            {
+              role: "assistant",
+              content: `(Internal note — the Information Architect handled that and reported: ${summary})`,
+            },
+            {
+              role: "user",
+              content:
+                "In one short, friendly sentence, confirm what was just created or done, and suggest one relevant next step. Do not call any tools.",
+            },
+          ];
+          closingTurn = true;
+          continue;
+        }
+        if (control?.type === "complete") {
+          await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
+        }
         break;
       }
-      if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
-      if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
-        const fromAgent = activeAgent.name;
-        await repo.setAgent(convo._id, control.target);
-        activeAgent = resolveAgent(soulLoader, control.target);
-        activePlatform = getPlatformAgent(activeAgent.name);
-        // Surface the live switch so the client's current-agent indicator follows the handoff.
-        yield {
-          type: "agent-handoff",
-          from: fromAgent,
-          to: activeAgent.name,
-          reason: control.reason,
-        };
-        const handoffUser = control.reason
-          ? `${userContent}\n\n(Handoff context: ${control.reason})`
-          : userContent;
-        // Clean slate for the target: its own system prompt + the user's original request.
-        turnMessages = [
-          { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
-          { role: "user", content: handoffUser },
-        ];
-        continue;
-      }
-      if (control?.type === "complete" && depth < MAX_HANDOFF_DEPTH - 1) {
-        // Control returns to the front desk, which streams a brief confirmation of what the
-        // specialist just did — otherwise the turn ends on a silent (collapsed) tool result.
-        const fromAgent = activeAgent.name;
-        await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
-        activeAgent = resolveAgent(soulLoader, GENERAL_ASSISTANT_NAME);
-        activePlatform = getPlatformAgent(activeAgent.name);
-        // Hand the indicator back to the front desk for the closing confirmation turn.
-        yield { type: "agent-handoff", from: fromAgent, to: activeAgent.name };
-        const summary = control.summary ?? "completed the requested work";
-        turnMessages = [
-          { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
-          { role: "user", content: userContent },
-          {
-            role: "assistant",
-            content: `(Internal note — the Information Architect handled that and reported: ${summary})`,
-          },
-          {
-            role: "user",
-            content:
-              "In one short, friendly sentence, confirm what was just created or done, and suggest one relevant next step. Do not call any tools.",
-          },
-        ];
-        closingTurn = true;
-        continue;
-      }
-      if (control?.type === "complete") {
-        await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
-      }
-      break;
-    }
 
-    // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
-    events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, {
-      conversationId: convo._id,
-      actorId: user._id,
-    });
-    yield { type: "finish", finishReason: "stop" };
+      // A completed turn feeds the knowledge AgentConversationSource (AC-V1-002).
+      events?.emit(DOMAIN_EVENTS.CONVERSATION_COMPLETED, {
+        conversationId: convo._id,
+        actorId: user._id,
+      });
+      emitTurnFinished("ok");
+      yield { type: "finish", finishReason: "stop" };
+    } finally {
+      // No-op when a normal/errored exit already emitted; fires only for stop-aborts and throws.
+      emitTurnFinished("aborted");
+    }
   }
 
   // Attach this connection (live from seq 0) and start the detached producer over the loop.

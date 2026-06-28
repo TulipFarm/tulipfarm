@@ -428,7 +428,15 @@ describe("chat routes", () => {
     otherSid = await store.create(other._id);
 
     select = vi.fn(() => makeFakeModel("claude-opus-4-8"));
-    llmService = { select } as unknown as LlmService;
+    // `resolve` wraps `select` so every test's custom select behavior (throws, specific models)
+    // flows through unchanged — turn.ts calls resolve() and reads `.model`. Mirrors the real
+    // LlmService, where select() delegates to resolve().model.
+    const resolve = vi.fn((req: unknown) => {
+      const model = (select as (r: unknown) => { modelId?: string })(req);
+      const modelId = model.modelId ?? "";
+      return { model, modelId, tier: undefined, chain: [{ provider: "test", modelId }] };
+    });
+    llmService = { select, resolve } as unknown as LlmService;
 
     app = await buildApp({
       sessionStore: store,

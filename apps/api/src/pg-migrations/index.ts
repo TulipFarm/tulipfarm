@@ -453,6 +453,36 @@ const ACTIVITY_LOG_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS activity_log_category_created_idx ON activity_log (category, created_at DESC, id DESC)",
 ];
 
+const OBS_EVENT_STATEMENTS: string[] = [
+  // AI observability event spine. Append-only; one row per llm_call (model step), tool_call, turn
+  // summary, or background job run. Hot query/aggregate fields are promoted to typed columns; the
+  // long tail (token cache breakdown, error codes, job names) rides in `attributes`. cost_usd is
+  // frozen at write time (computed from the model price map) so historical cost survives price
+  // changes; NULL means the served model was unpriced. Pruned on a schedule (retention window).
+  `CREATE TABLE IF NOT EXISTS obs_event (
+    id              uuid PRIMARY KEY,
+    ts              timestamptz NOT NULL,
+    type            text NOT NULL,
+    agent_id        text,
+    conversation_id text,
+    model           text,
+    provider        text,
+    tier            text,
+    tokens_in       integer,
+    tokens_out      integer,
+    cost_usd        numeric,
+    duration_ms     integer,
+    status          text,
+    tool_name       text,
+    attributes      jsonb NOT NULL DEFAULT '{}',
+    created_at      timestamptz NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS obs_event_ts_idx ON obs_event (ts DESC)",
+  "CREATE INDEX IF NOT EXISTS obs_event_type_ts_idx ON obs_event (type, ts DESC)",
+  "CREATE INDEX IF NOT EXISTS obs_event_agent_ts_idx ON obs_event (agent_id, ts DESC)",
+  "CREATE INDEX IF NOT EXISTS obs_event_model_ts_idx ON obs_event (model, ts DESC)",
+];
+
 // ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
 // ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
 // keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
@@ -747,6 +777,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "activity: activity_log workspace feed (category/action/actor/target/metadata) + keyset indexes",
     up: async (q) => {
       for (const sql of ACTIVITY_LOG_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 22,
+    description:
+      "observability: obs_event AI event spine (llm_call/tool_call/turn/job) + ts/type/agent/model indexes",
+    up: async (q) => {
+      for (const sql of OBS_EVENT_STATEMENTS) {
         await q.query(sql);
       }
     },
