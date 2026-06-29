@@ -4,7 +4,7 @@ description: How TulipFarm chooses a model and falls back across providers.
 ---
 
 TulipFarm talks to language models through a single adapter (the Vercel AI SDK). It
-ships four provider integrations — **Anthropic**, **OpenAI**, **Azure OpenAI**, and any
+ships four provider integrations — **Anthropic**, **OpenAI**, **Azure Foundry**, and any
 **OpenAI-compatible** endpoint (which covers gateways like OpenRouter, Together, and
 Groq through their compatible APIs). You do not wire a model into each agent. Instead you
 define **tiers**, and the runtime picks a tier per turn.

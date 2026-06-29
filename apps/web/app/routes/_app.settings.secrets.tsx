@@ -40,6 +40,8 @@ export default function SettingsSecrets() {
   const storedKeys = useMemo(() => new Set(secrets.map((s) => s.key)), [secrets]);
 
   const [providerId, setProviderId] = useState(providers[0]?.id ?? CUSTOM);
+  // Id of the configured provider whose inline editor is open (null = all collapsed).
+  const [openId, setOpenId] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [customKey, setCustomKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -49,7 +51,16 @@ export default function SettingsSecrets() {
     fn: () => Promise<unknown>;
   } | null>(null);
 
-  const selected = providers.find((p) => p.id === providerId);
+  // A provider with any stored field is managed (edited/deleted) from its own list row; the "Add a
+  // provider" picker below only offers ones with nothing set yet, so you can't re-add an existing one.
+  const unconfiguredProviders = providers.filter(
+    (p) => !p.fields.some((f) => storedKeys.has(f.key))
+  );
+  // Keep the add-form selection valid even if `providerId` went stale (its provider got configured).
+  const addProviderId = unconfiguredProviders.some((p) => p.id === providerId)
+    ? providerId
+    : (unconfiguredProviders[0]?.id ?? CUSTOM);
+  const adding = providers.find((p) => p.id === addProviderId);
 
   // One list row per CONFIGURED provider (any of its fields stored); leftover keys not owned by a
   // provider (custom/bootstrap secrets) list individually.
@@ -62,10 +73,17 @@ export default function SettingsSecrets() {
   const ownedKeys = new Set(providers.flatMap((p) => p.fields.map((f) => f.key)));
   const customSecrets = secrets.filter((s) => !ownedKeys.has(s.key));
 
-  const filled = (key: string) => (values[key] ?? "").trim().length > 0 || storedKeys.has(key);
-  const canSubmit = selected
-    ? selected.fields.filter((f) => !f.optional).every((f) => filled(f.key))
+  const typed = (key: string) => (values[key] ?? "").trim().length > 0;
+  const filled = (key: string) => typed(key) || storedKeys.has(key);
+  // Adding a new provider needs every required field actually typed (nothing is stored yet).
+  const canAdd = adding
+    ? adding.fields.filter((f) => !f.optional).every((f) => typed(f.key))
     : customKey.trim().length > 0 && (values[CUSTOM] ?? "").length > 0;
+  // Editing an existing provider: enabled once a field was changed and required fields are satisfied
+  // (a stored secret counts as satisfied — leaving it blank keeps it).
+  const canSaveEdit = (p: (typeof providers)[number]) =>
+    p.fields.some((f) => typed(f.key)) &&
+    p.fields.filter((f) => !f.optional).every((f) => filled(f.key));
 
   function setVal(key: string, v: string) {
     setValues((prev) => ({ ...prev, [key]: v }));
@@ -84,22 +102,50 @@ export default function SettingsSecrets() {
     }
   }
 
-  function onSubmit(e: FormEvent) {
-    e.preventDefault();
+  // Persist only the fields the user actually typed into (blank = keep current value). Shared by the
+  // inline edit rows and the add form.
+  function saveFields(fields: { key: string }[]) {
     void run(async () => {
-      if (selected) {
-        await Promise.all(
-          selected.fields
-            .filter((f) => (values[f.key] ?? "").trim().length > 0)
-            .map((f) => putSecret(f.key, values[f.key].trim()))
-        );
-      } else {
-        await putSecret(customKey.trim(), values[CUSTOM]);
-      }
+      await Promise.all(
+        fields.filter((f) => typed(f.key)).map((f) => putSecret(f.key, values[f.key].trim()))
+      );
+      setValues({});
+    });
+  }
+
+  function onAddSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (adding) {
+      saveFields(adding.fields);
+      return;
+    }
+    void run(async () => {
+      await putSecret(customKey.trim(), values[CUSTOM]);
       setValues({});
       setCustomKey("");
     });
   }
+
+  // A provider field input + label. `ownerId` namespaces the aria-label so two providers with a same-
+  // role field don't collide. Secret values are never returned by the API, so a stored secret renders
+  // as a blank field with a "leave blank to keep" hint; config values (e.g. resource name) prefill.
+  const renderField = (field: (typeof providers)[number]["fields"][number], ownerId: string) => (
+    <label key={field.key} className="flex flex-col gap-1 text-xs text-muted-foreground">
+      <span>
+        {field.label}
+        {field.optional ? " (optional)" : ""}
+        {field.kind === "secret" && storedKeys.has(field.key) ? " — set, leave blank to keep" : ""}
+      </span>
+      <input
+        className={inputClass}
+        type={field.kind === "secret" ? "password" : "text"}
+        value={values[field.key] ?? (field.kind === "config" ? (config[field.key] ?? "") : "")}
+        onChange={(e) => setVal(field.key, e.target.value)}
+        placeholder={field.placeholder ?? (field.kind === "secret" ? "••••••••" : "")}
+        aria-label={`${ownerId} ${field.role}`}
+      />
+    </label>
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -116,13 +162,14 @@ export default function SettingsSecrets() {
         <p className="text-sm text-muted-foreground">No secrets set.</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {providerGroups.map((g) => (
-            <li key={g.provider.id}>
-              <details className="group rounded-sm border border-border">
-                <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 [&::-webkit-details-marker]:hidden">
+          {providerGroups.map((g) => {
+            const open = openId === g.provider.id;
+            return (
+              <li key={g.provider.id} className="rounded-sm border border-border">
+                <div className="flex items-center gap-2 px-3 py-2">
                   <span
                     aria-hidden
-                    className="text-primary transition-transform group-open:rotate-90"
+                    className={`text-primary transition-transform ${open ? "rotate-90" : ""}`}
                   >
                     ▸
                   </span>
@@ -134,48 +181,55 @@ export default function SettingsSecrets() {
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="ml-auto rounded-sm"
+                    className="ml-auto cursor-pointer rounded-sm"
                     disabled={busy}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setProviderId(g.provider.id);
+                    onClick={() => {
+                      setOpenId(open ? null : g.provider.id);
                       setValues({});
+                      setError(null);
                     }}
                   >
-                    Edit
+                    {open ? "Close" : "Edit"}
                   </Button>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="rounded-sm"
+                    className="cursor-pointer rounded-sm"
                     disabled={busy}
-                    onClick={(e) => {
-                      e.preventDefault();
+                    onClick={() =>
                       setPendingDelete({
                         label: g.provider.label,
                         fn: () => Promise.all(g.keys.map((k) => deleteSecret(k))),
-                      });
-                    }}
+                      })
+                    }
                   >
                     Delete
                   </Button>
-                </summary>
-                <dl className="flex flex-col gap-1 border-t border-border px-3 py-2 text-sm">
-                  {g.provider.fields
-                    .filter((f) => storedKeys.has(f.key))
-                    .map((f) => (
-                      <div key={f.key} className="flex gap-2">
-                        <dt className="text-muted-foreground">{f.label}</dt>
-                        <dd className="text-foreground">
-                          {f.kind === "secret" ? "•••••••• (set)" : (config[f.key] ?? "(set)")}
-                        </dd>
-                      </div>
-                    ))}
-                </dl>
-              </details>
-            </li>
-          ))}
+                </div>
+                {open ? (
+                  <div className="flex flex-col gap-3 border-t border-border px-3 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      Edit any field, then Save. Secret values are never shown — leave a field blank
+                      to keep it.
+                    </p>
+                    {g.provider.fields.map((f) => renderField(f, g.provider.id))}
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="cursor-pointer rounded-sm"
+                        disabled={busy || !canSaveEdit(g.provider)}
+                        onClick={() => saveFields(g.provider.fields)}
+                      >
+                        {busy ? "Saving…" : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
 
           {customSecrets.map((secret) => (
             <li
@@ -190,7 +244,7 @@ export default function SettingsSecrets() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="ml-auto rounded-sm"
+                className="ml-auto cursor-pointer rounded-sm"
                 disabled={busy}
                 onClick={() =>
                   setPendingDelete({
@@ -206,21 +260,24 @@ export default function SettingsSecrets() {
         </ul>
       )}
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-3 rounded-sm border border-border p-4">
-        <p className="text-sm font-medium text-foreground">Configure a provider</p>
+      <form
+        onSubmit={onAddSubmit}
+        className="flex flex-col gap-3 rounded-sm border border-border p-4"
+      >
+        <p className="text-sm font-medium text-foreground">Add a provider</p>
 
         <label className="flex flex-col gap-1 text-xs text-muted-foreground">
           provider
           <select
             className={inputClass}
-            value={providerId}
+            value={addProviderId}
             onChange={(e) => {
               setProviderId(e.target.value);
               setValues({});
             }}
             aria-label="secret provider"
           >
-            {providers.map((p) => (
+            {unconfiguredProviders.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.label}
               </option>
@@ -229,24 +286,8 @@ export default function SettingsSecrets() {
           </select>
         </label>
 
-        {selected ? (
-          selected.fields.map((field) => (
-            <label key={field.key} className="flex flex-col gap-1 text-xs text-muted-foreground">
-              {field.label}
-              {field.optional ? " (optional)" : ""}
-              {storedKeys.has(field.key) ? <span className="text-primary"> · set</span> : ""}
-              <input
-                className={inputClass}
-                type={field.kind === "secret" ? "password" : "text"}
-                value={
-                  values[field.key] ?? (field.kind === "config" ? (config[field.key] ?? "") : "")
-                }
-                onChange={(e) => setVal(field.key, e.target.value)}
-                placeholder={field.placeholder ?? (field.kind === "secret" ? "••••••••" : "")}
-                aria-label={`${selected.id} ${field.role}`}
-              />
-            </label>
-          ))
+        {adding ? (
+          adding.fields.map((field) => renderField(field, adding.id))
         ) : (
           <>
             <label className="flex flex-col gap-1 text-xs text-muted-foreground">
@@ -274,7 +315,12 @@ export default function SettingsSecrets() {
         )}
 
         <div className="flex justify-end">
-          <Button type="submit" size="sm" className="rounded-sm" disabled={busy || !canSubmit}>
+          <Button
+            type="submit"
+            size="sm"
+            className="cursor-pointer rounded-sm"
+            disabled={busy || !canAdd}
+          >
             {busy ? "Saving…" : "Save provider"}
           </Button>
         </div>

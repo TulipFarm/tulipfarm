@@ -6,6 +6,7 @@ import {
   type LlmConfig,
   LlmConfigValidationError,
   type LlmService,
+  litellmModelsForProvider,
   resolveModelSpec,
   validateLlmConfig,
 } from "@tulipfarm/llm";
@@ -221,6 +222,52 @@ export function registerLlmConfigRoutes(
       }
       const fetchedAt = new Date().toISOString().slice(0, 10);
       return reply.send(resolveModelSpec(q.provider, q.model, catalog, fetchedAt));
+    }
+  );
+
+  app.get(
+    "/api/v1/llm-config/model-options",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Suggested model ids for a provider (from the LiteLLM catalog), to populate the Settings model picker. Admin only. `source: catalog` lists known ids; `source: unavailable` (+ `reason`) means the catalog couldn't be reached and the UI falls back to free-text entry.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          required: ["provider"],
+          properties: { provider: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["models", "source"],
+            properties: {
+              models: { type: "array", items: { type: "string" } },
+              source: { type: "string", enum: ["catalog", "unavailable"] },
+              reason: { type: "string" },
+            },
+          },
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+      const { provider } = req.query as { provider: string };
+
+      const catalog = await getCatalog();
+      if (!catalog) {
+        return reply.send({
+          models: [],
+          source: "unavailable",
+          reason: "Couldn't reach the model catalog.",
+        });
+      }
+      return reply.send({ models: litellmModelsForProvider(provider, catalog), source: "catalog" });
     }
   );
 

@@ -135,3 +135,28 @@ export function resolveModelSpec(
   const loose = keys.filter((k) => k.toLowerCase().includes(m)).slice(0, 10);
   return { spec: null, matchedKey: null, candidates: loose };
 }
+
+/**
+ * Bare, chat-capable model ids for a provider, derived from the catalog — used to populate the model
+ * picker's suggestions in Settings. Strips the provider prefix (so `anthropic/claude-x` → `claude-x`),
+ * keeps only entries that look like chat models (priced, `mode` chat/unset), dedupes and sorts.
+ */
+export function litellmModelsForProvider(provider: string, catalog: LiteLlmCatalog): string[] {
+  const prefixes = PROVIDER_PREFIXES[provider] ?? [""];
+  const out = new Set<string>();
+  for (const key of Object.keys(catalog)) {
+    if (key === "sample_spec") continue;
+    const entry = catalog[key];
+    if (typeof entry?.input_cost_per_token !== "number") continue; // skip cost-less / non-chat
+    const mode = typeof entry.mode === "string" ? entry.mode : undefined;
+    if (mode && mode !== "chat") continue; // embeddings/image/rerank etc. aren't tier models
+    for (const prefix of prefixes) {
+      if (prefix === "") {
+        if (!key.includes("/")) out.add(key); // bare ids only, for the "" prefix
+      } else if (key.startsWith(prefix)) {
+        out.add(key.slice(prefix.length));
+      }
+    }
+  }
+  return [...out].sort();
+}

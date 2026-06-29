@@ -7,7 +7,7 @@ import { pruneLlmConfig } from "./prune";
 
 const azure: LlmProviderInfo = {
   id: "azure",
-  label: "Azure OpenAI",
+  label: "Azure Foundry",
   fields: [
     { key: "azure-openai-api-key", label: "API key", role: "api_key", kind: "secret" },
     {

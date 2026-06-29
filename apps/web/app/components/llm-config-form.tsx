@@ -1,9 +1,11 @@
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
 import {
+  getModelOptions,
   isProviderConfigured,
   type LlmConfig,
   type LlmProviderInfo,
+  type ModelOptions,
   type ModelSpec,
   resolveModelSpec,
 } from "~/lib/settings";
@@ -52,21 +54,23 @@ function cloneTiers(config: LlmConfig): Tiers {
 
 const perMtok = (n?: number): string => (n != null ? `$${(n * 1_000_000).toFixed(2)}` : "—");
 
-/** One-line spec summary: cost per Mtok · context · capabilities. */
-function specSummary(spec: ModelSpec): string {
-  const cost = `${perMtok(spec.input_cost_per_token)} / ${perMtok(spec.output_cost_per_token)} per Mtok`;
-  const ctx = spec.max_input_tokens ? ` · ${Math.round(spec.max_input_tokens / 1000)}k ctx` : "";
-  const caps = [
-    spec.supports_function_calling && "tools",
-    spec.supports_vision && "vision",
-    spec.supports_prompt_caching && "cache",
-    spec.supports_reasoning && "reasoning",
-  ]
-    .filter(Boolean)
-    .join(", ");
-  const dep = spec.deprecation_date ? ` · deprecates ${spec.deprecation_date}` : "";
-  return `${cost}${ctx}${caps ? ` · ${caps}` : ""}${dep}`;
+/** Spec → compact metadata pills: cost · context · capabilities · matched key · deprecation. */
+function specBadges(spec: ModelSpec): string[] {
+  const out = [
+    `${perMtok(spec.input_cost_per_token)} / ${perMtok(spec.output_cost_per_token)} per Mtok`,
+  ];
+  if (spec.max_input_tokens) out.push(`${Math.round(spec.max_input_tokens / 1000)}k ctx`);
+  if (spec.supports_function_calling) out.push("tools");
+  if (spec.supports_vision) out.push("vision");
+  if (spec.supports_prompt_caching) out.push("cache");
+  if (spec.supports_reasoning) out.push("reasoning");
+  if (spec.litellm_key) out.push(`↳ ${spec.litellm_key}`);
+  if (spec.deprecation_date) out.push(`deprecates ${spec.deprecation_date}`);
+  return out;
 }
+
+const badgeClass =
+  "rounded-sm border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground";
 
 export type LlmConfigFormProps = {
   initial: LlmConfig;
@@ -87,10 +91,43 @@ export function LlmConfigForm({
 }: LlmConfigFormProps) {
   const [tiers, setTiers] = useState<Tiers>(() => cloneTiers(initial));
   const [localError, setLocalError] = useState<string | null>(null);
+  // Per-provider model suggestions for the picker, loaded lazily when a provider is focused/selected.
+  const [modelOptions, setModelOptions] = useState<Record<string, ModelOptions>>({});
+  const [optionsLoading, setOptionsLoading] = useState<Record<string, boolean>>({});
 
   const isEnabled = (p: LlmProviderInfo) => isProviderConfigured(p, secretKeys);
   const known = new Set(providers.map((p) => p.id));
   const firstEnabled = providers.find(isEnabled);
+
+  // Fetch + cache a provider's model suggestions. Azure returns a best-effort LIVE list of the
+  // resource's callable models; other providers come from the LiteLLM catalog. `force` re-fetches
+  // (used by Azure's "Reload deployments"). Failures cache an "unavailable" result so the picker
+  // quietly falls back to free-text entry.
+  async function loadModelOptions(provider: string, force = false) {
+    // Azure deployment names can't be reliably listed — its model field stays free-text (no datalist).
+    if (!provider || provider === "azure" || !known.has(provider)) return;
+    if (!force && (modelOptions[provider] || optionsLoading[provider])) return;
+    setOptionsLoading((p) => ({ ...p, [provider]: true }));
+    try {
+      const opts = await getModelOptions(provider);
+      setModelOptions((p) => ({ ...p, [provider]: opts }));
+    } catch {
+      setModelOptions((p) => ({
+        ...p,
+        [provider]: { models: [], source: "unavailable", reason: "Couldn't load model list." },
+      }));
+    } finally {
+      setOptionsLoading((p) => ({ ...p, [provider]: false }));
+    }
+  }
+
+  // Auto-resolve the spec when a model is committed (on blur), replacing the old manual button. Skips
+  // if the row is empty, already has a spec, or a resolve is in flight.
+  function autoResolve(tier: TierName, idx: number) {
+    const row = tiers[tier][idx];
+    if (!row?.provider || !row.model.trim() || row.spec || row.specState === "loading") return;
+    void fetchSpec(tier, idx);
+  }
 
   function patchRow(tier: TierName, idx: number, patch: Partial<Row>) {
     setTiers((prev) => ({
@@ -222,13 +259,14 @@ export function LlmConfigForm({
                     className={inputClass}
                     value={r.provider}
                     // Changing provider invalidates any pinned spec (it was resolved for the old one).
-                    onChange={(e) =>
+                    onChange={(e) => {
                       patchRow(tier, idx, {
                         provider: e.target.value,
                         spec: undefined,
                         specState: undefined,
-                      })
-                    }
+                      });
+                      void loadModelOptions(e.target.value);
+                    }}
                     aria-label={`${tier} provider ${idx + 1} provider`}
                   >
                     {r.provider && !known.has(r.provider) ? (
@@ -244,9 +282,16 @@ export function LlmConfigForm({
                 </label>
                 <label className="flex flex-col gap-1 text-xs text-muted-foreground">
                   model
+                  {/* Combobox: a native datalist gives a dropdown of suggested models while still
+                      accepting any custom name typed in. Suggestions load lazily per provider. */}
                   <input
                     className={inputClass}
                     value={r.model}
+                    list={
+                      r.provider && r.provider !== "azure" && known.has(r.provider)
+                        ? `models-${r.provider}`
+                        : undefined
+                    }
                     // Changing the model invalidates any pinned spec.
                     onChange={(e) =>
                       patchRow(tier, idx, {
@@ -255,7 +300,9 @@ export function LlmConfigForm({
                         specState: undefined,
                       })
                     }
-                    placeholder="claude-sonnet-4-6"
+                    onFocus={() => void loadModelOptions(r.provider)}
+                    onBlur={() => autoResolve(tier, idx)}
+                    placeholder="pick or type a model name"
                     aria-label={`${tier} provider ${idx + 1} model`}
                   />
                 </label>
@@ -271,38 +318,38 @@ export function LlmConfigForm({
                 </Button>
               </div>
 
-              {/* Spec resolution: pricing/context/capabilities pinned from LiteLLM. */}
-              <div className="flex items-center gap-3 text-xs">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="cursor-pointer rounded-sm"
-                  disabled={!r.provider || !r.model.trim() || r.specState === "loading"}
-                  onClick={() => fetchSpec(tier, idx)}
-                >
-                  {r.specState === "loading"
-                    ? "Resolving…"
-                    : r.spec
-                      ? "Refresh spec"
-                      : "Fetch spec"}
-                </Button>
+              {/* Metadata strip: pricing/context/capabilities auto-resolved from LiteLLM, plus the
+                  Azure deployment picker controls. */}
+              <div className="flex flex-wrap items-center gap-2 text-xs">
                 {r.spec ? (
-                  <span className="truncate text-muted-foreground" title={specSummary(r.spec)}>
-                    {specSummary(r.spec)}
-                  </span>
+                  specBadges(r.spec).map((b) => (
+                    <span key={b} className={badgeClass}>
+                      {b}
+                    </span>
+                  ))
+                ) : r.specState === "loading" ? (
+                  <span className="text-muted-foreground">Resolving spec…</span>
                 ) : r.specState === "unmatched" ? (
                   <span className="text-muted-foreground">
-                    No LiteLLM match — cost stays unpriced (enter pricing_overrides in config, or it
-                    just won&rsquo;t show cost).
+                    No LiteLLM match — cost stays unpriced.
                   </span>
                 ) : r.specState === "error" ? (
                   <span className="text-destructive">Couldn&rsquo;t reach the model catalog.</span>
                 ) : (
-                  <span className="text-muted-foreground">
-                    Spec auto-resolves from LiteLLM on Save (or fetch now to preview).
-                  </span>
+                  <span className="text-muted-foreground">Spec auto-resolves on Save.</span>
                 )}
+                {r.spec ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="cursor-pointer rounded-sm"
+                    disabled={r.specState === "loading"}
+                    onClick={() => fetchSpec(tier, idx)}
+                  >
+                    {r.specState === "loading" ? "Refreshing…" : "Refresh"}
+                  </Button>
+                ) : null}
               </div>
             </div>
           ))}
@@ -319,6 +366,15 @@ export function LlmConfigForm({
             </Button>
           </div>
         </fieldset>
+      ))}
+
+      {/* Model suggestions for the comboboxes above — one datalist per loaded provider. */}
+      {Object.entries(modelOptions).map(([prov, opts]) => (
+        <datalist key={prov} id={`models-${prov}`}>
+          {opts.models.map((m) => (
+            <option key={m} value={m} />
+          ))}
+        </datalist>
       ))}
 
       <div className="flex justify-end">

@@ -38,7 +38,7 @@ const PROVIDERS: LlmProviderInfo[] = [
   },
   {
     id: "azure",
-    label: "Azure OpenAI",
+    label: "Azure Foundry",
     fields: [
       { key: "azure-openai-api-key", label: "API key", role: "api_key", kind: "secret" },
       {
@@ -73,7 +73,7 @@ afterEach(() => {
 
 const meta = { type: "user-provided" as const, createdAt: "x", updatedAt: "y" };
 
-test("groups a provider's stored fields into one collapsible row and shows config values", () => {
+test("groups a provider's stored fields into one collapsible row and shows config values", async () => {
   renderWithData(<SettingsSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
@@ -82,16 +82,18 @@ test("groups a provider's stored fields into one collapsible row and shows confi
     providers: PROVIDERS,
     config: { "azure-openai-resource-name": "my-res" },
   });
-  // "Azure OpenAI" appears in both the row and the configure dropdown — the single grouped row is
-  // proven by one "2 fields" badge + one Delete (not two per-key rows).
-  expect(screen.getAllByText("Azure OpenAI").length).toBeGreaterThanOrEqual(1);
+  // "Azure Foundry" shows as one grouped row (a configured provider is no longer offered in the add
+  // picker) — proven by one "2 fields" badge + one Delete (not two per-key rows).
+  expect(screen.getAllByText("Azure Foundry").length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("2 fields")).toBeInTheDocument();
-  expect(screen.getByText("my-res")).toBeInTheDocument(); // config value shown back
-  expect(screen.getByText("•••••••• (set)")).toBeInTheDocument(); // secret value masked
   expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(1);
+  // Expand to edit: config value (resource name) prefills; the secret stays blank/write-only.
+  await userEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+  expect(screen.getByLabelText("azure resource_name")).toHaveValue("my-res");
+  expect(screen.getByLabelText("azure api_key")).toHaveValue("");
 });
 
-test("editing a provider loads it into the form with config values prefilled", async () => {
+test("editing a provider inline saves only the changed fields", async () => {
   renderWithData(<SettingsSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
@@ -100,9 +102,32 @@ test("editing a provider loads it into the form with config values prefilled", a
     providers: PROVIDERS,
     config: { "azure-openai-resource-name": "my-res" },
   });
-  await userEvent.click(screen.getByRole("button", { name: /edit/i }));
-  expect(screen.getByLabelText("secret provider")).toHaveValue("azure");
-  expect(screen.getByLabelText("azure resource_name")).toHaveValue("my-res");
+  // Edit happens in the row itself (expand it), then change the resource name and Save.
+  await userEvent.click(screen.getByRole("button", { name: /^edit$/i }));
+  const resource = screen.getByLabelText("azure resource_name");
+  await userEvent.clear(resource);
+  await userEvent.type(resource, "new-res");
+  await userEvent.click(screen.getByRole("button", { name: /^save$/i })); // the row's inline Save
+  expect(settings.putSecret).toHaveBeenCalledWith("azure-openai-resource-name", "new-res");
+  // The untouched (blank) API key is left as-is — not re-written.
+  expect(settings.putSecret).not.toHaveBeenCalledWith("azure-openai-api-key", expect.anything());
+});
+
+test("a configured provider is not offered in the add picker (managed via Edit only)", () => {
+  renderWithData(<SettingsSecrets />, {
+    secrets: [
+      { key: "azure-openai-api-key", ...meta },
+      { key: "azure-openai-resource-name", ...meta },
+    ],
+    providers: PROVIDERS,
+    config: {},
+  });
+  const picker = screen.getByLabelText("secret provider");
+  const optionLabels = within(picker)
+    .getAllByRole("option")
+    .map((o) => o.textContent);
+  expect(optionLabels).not.toContain("Azure Foundry"); // already configured → excluded
+  expect(optionLabels).toContain("Anthropic"); // nothing stored → still offered
 });
 
 test("configuring a multi-field provider stores every field under its registry key", async () => {

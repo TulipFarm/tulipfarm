@@ -43,8 +43,11 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
     fields: [{ key: "openai-api-key", label: "API key", role: "api_key", kind: "secret" }],
   },
   {
+    // id stays "azure" (renaming it breaks existing soul/llm.config.yaml `provider: azure` rows and
+    // the `case "azure"` provider switch); only the display label moves to "Azure Foundry". The two
+    // stored keys keep their `azure-openai-*` names so existing secrets aren't orphaned.
     id: "azure",
-    label: "Azure OpenAI",
+    label: "Azure Foundry",
     fields: [
       { key: "azure-openai-api-key", label: "API key", role: "api_key", kind: "secret" },
       {
@@ -53,6 +56,17 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
         role: "resource_name",
         kind: "config",
         placeholder: "my-resource",
+      },
+      {
+        // Optional override for the Azure AI Foundry inference host. When set it flows through as
+        // `base_url` to createAzure (which appends `/v1{path}`); when blank we fall back to the
+        // resource name → https://{name}.openai.azure.com/openai/v1. New key ⇒ no orphan risk.
+        key: "azure-foundry-endpoint",
+        label: "Endpoint",
+        role: "base_url",
+        kind: "config",
+        optional: true,
+        placeholder: "https://my-resource.services.ai.azure.com/openai",
       },
     ],
   },
