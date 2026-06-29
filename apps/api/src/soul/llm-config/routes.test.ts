@@ -177,9 +177,11 @@ describe("llm-config routes", () => {
         expect.objectContaining({ key: "anthropic-api-key", role: "api_key", kind: "secret" })
       );
       const azure = providers.find((p: { id: string }) => p.id === "azure");
+      expect(azure.label).toBe("Azure Foundry");
       expect(azure.fields.map((f: { role: string }) => f.role)).toEqual([
         "api_key",
         "resource_name",
+        "base_url",
       ]);
     });
   });
@@ -310,6 +312,36 @@ describe("llm-config routes", () => {
       expect(body.matchedKey).toBe("azure_ai/kimi-k2.5");
       expect(body.spec?.input_cost_per_token).toBe(0.00000057);
       expect(body.spec?.litellm_key).toBe("azure_ai/kimi-k2.5");
+    });
+  });
+
+  describe("GET /api/v1/llm-config/model-options", () => {
+    it("is admin-only (403 for a member)", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/model-options?provider=openai",
+        cookies: cookies(memberSid),
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("returns LiteLLM catalog ids (chat only) for a non-azure provider", async () => {
+      stubCatalog({
+        "gpt-4o": { input_cost_per_token: 1, mode: "chat" },
+        "openai/gpt-4o-mini": { input_cost_per_token: 1, mode: "chat" },
+        "text-embedding-3-small": { input_cost_per_token: 1, mode: "embedding" },
+      });
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/model-options?provider=openai",
+        cookies: cookies(adminSid),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { models: string[]; source: string };
+      expect(body.source).toBe("catalog");
+      expect(body.models).toContain("gpt-4o");
+      expect(body.models).toContain("gpt-4o-mini");
+      expect(body.models).not.toContain("text-embedding-3-small"); // embeddings excluded
     });
   });
 

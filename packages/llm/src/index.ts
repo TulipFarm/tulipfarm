@@ -28,6 +28,7 @@ export { LlmService } from "./llm-service";
 export {
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
+  litellmModelsForProvider,
   resolveModelSpec,
   type SpecResolution,
 } from "./model-spec";

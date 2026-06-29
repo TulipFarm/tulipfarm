@@ -55,6 +55,21 @@ export async function resolveModelSpec(
   return apiGet<SpecResolution>(`/api/v1/llm-config/resolve-spec?${q.toString()}`);
 }
 
+// Suggested model ids for a provider (from the LiteLLM catalog), to populate the model picker.
+// `source: "unavailable"` (+ reason) means the catalog was unreachable and the picker degrades to
+// free-text entry. Azure is intentionally not listed here (deployment names can't be reliably
+// discovered) — its model field is free-text.
+export type ModelOptions = {
+  models: string[];
+  source: "catalog" | "unavailable";
+  reason?: string;
+};
+
+export async function getModelOptions(provider: string): Promise<ModelOptions> {
+  const q = new URLSearchParams({ provider });
+  return apiGet<ModelOptions>(`/api/v1/llm-config/model-options?${q.toString()}`);
+}
+
 // Provider registry (served from @tulipfarm/secrets via GET /api/v1/llm-providers). Each provider
 // declares the full set of fields it needs — some secret (API keys), some plain config (resource
 // name, base URL). The Secrets tab renders all of a provider's fields; the LLM form enables a
