@@ -153,15 +153,37 @@ else
   # Give services a moment to start
   sleep 2
 
-  # Create the Postgres database (idempotent)
-  if command -v createdb &> /dev/null; then
+  # On Linux, apt-installed Postgres uses peer auth via Unix socket for the postgres superuser.
+  # The current OS user has no Postgres role yet, so we must create one via sudo -u postgres.
+  # We switch DATABASE_URL to a Unix socket URL with ?host=<socket-dir> because node-postgres
+  # treats an empty host as TCP localhost — the explicit socket path triggers peer auth.
+  if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    if sudo -u postgres createuser --superuser "$USER" 2>/dev/null; then
+      echo "✅ Created Postgres role '$USER'"
+    else
+      echo "✅ Postgres role '$USER' already exists"
+    fi
     if createdb tulipfarm 2>/dev/null; then
       echo "✅ Created Postgres database 'tulipfarm'"
     else
       echo "✅ Postgres database 'tulipfarm' already exists"
     fi
+    # node-postgres ignores an empty host and falls back to TCP; we must pass the socket
+    # directory explicitly via ?host= so peer auth is used (no password required).
+    PG_SOCKET_DIR="$(psql -Atqc "SHOW unix_socket_directories" 2>/dev/null | tr ',' '\n' | head -1 | tr -d ' ')"
+    PG_SOCKET_DIR="${PG_SOCKET_DIR:-/var/run/postgresql}"
+    DATABASE_URL_OVERRIDE="postgres:///tulipfarm?host=${PG_SOCKET_DIR}"
   else
-    echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
+    # macOS Homebrew: initdb creates a superuser role for the OS user automatically
+    if command -v createdb &> /dev/null; then
+      if createdb tulipfarm 2>/dev/null; then
+        echo "✅ Created Postgres database 'tulipfarm'"
+      else
+        echo "✅ Postgres database 'tulipfarm' already exists"
+      fi
+    else
+      echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
+    fi
   fi
 fi
 
@@ -174,9 +196,9 @@ if [ ! -d "$SOUL_DIR/.git" ]; then
 
   # Create stub files. NOTE: no llm.config.yaml stub — an empty/comment-only one fails LLM-config
   # validation (requires `tiers`). Absent config = LLM features disabled until the UI wizard writes it.
+  # soul.yaml is intentionally minimal — setupComplete is set by the setup wizard, not here.
   cat > "$SOUL_DIR/soul.yaml" << 'EOF'
 # TulipFarm Soul Configuration
-# Root soul manifest — populated during UI setup
 EOF
 
   cat > "$SOUL_DIR/skills-lock.json" << 'EOF'
@@ -204,10 +226,6 @@ if [ ! -f ".env.local" ]; then
   ENCRYPTION_KEY=$(openssl rand -base64 32)
   JWT_SECRET=$(openssl rand -base64 32)
   WEBHOOK_SECRET=$(openssl rand -base64 32)
-  # Fixed dev admin password — deterministic, not random (matches the app's bootstrapAdmin dev
-  # default and the login screen's prefilled value). Hashed with Argon2id at boot. Change it in
-  # .env.local for anything beyond local dev.
-  ADMIN_PASSWORD=password123
 
   # Replace placeholders by matching each full KEY=<placeholder> line so every substitution
   # is unique and order-independent (a bare s/// on the shared placeholder would overwrite
@@ -217,12 +235,10 @@ if [ ! -f ".env.local" ]; then
     sed -i '' "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
     sed -i '' "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
     sed -i '' "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
-    sed -i '' "s|ADMIN_PASSWORD=<set a strong password>|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env.local
   else
     sed -i "s|ENCRYPTION_KEY=<generate: openssl rand -base64 32>|ENCRYPTION_KEY=$ENCRYPTION_KEY|" .env.local
     sed -i "s|JWT_SECRET=<generate: openssl rand -base64 32>|JWT_SECRET=$JWT_SECRET|" .env.local
     sed -i "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
-    sed -i "s|ADMIN_PASSWORD=<set a strong password>|ADMIN_PASSWORD=$ADMIN_PASSWORD|" .env.local
   fi
 
   # Docker mode: point the dev app at the bundled container (host port + password).
@@ -243,14 +259,9 @@ if [ ! -f ".env.local" ]; then
     sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
   fi
 
-  ADMIN_EMAIL=$(grep -E '^ADMIN_EMAIL=' .env.local | cut -d= -f2-)
   echo "✅ .env.local created with generated secrets"
-  echo ""
-  echo "   🔑 Sign in with these admin credentials (also saved in .env.local):"
-  echo "        email:    ${ADMIN_EMAIL:-admin@tulipfarm.dev}"
-  echo "        password: $ADMIN_PASSWORD"
 else
-  echo "✅ .env.local already exists (sign-in creds: ADMIN_EMAIL / ADMIN_PASSWORD in .env.local)"
+  echo "✅ .env.local already exists"
   if [ -n "$DATABASE_URL_OVERRIDE" ]; then
     echo "ℹ Docker mode: ensure DATABASE_URL in .env.local is:"
     echo "    $DATABASE_URL_OVERRIDE"
@@ -270,9 +281,8 @@ echo "✨ Setup complete!"
 echo ""
 echo "Next steps:"
 echo "  1. Run: pnpm dev"
-echo "  2. Web UI:  http://localhost:4000   (API: http://localhost:4010)"
-echo "  3. Sign in at /login with the admin email + password above"
-echo "     (or read them from .env.local: ADMIN_EMAIL / ADMIN_PASSWORD)"
+echo "  2. Open: http://localhost:4000"
+echo "  3. Complete the setup wizard in the browser (creates your admin account)"
 echo ""
 echo "To verify the datastore is running:"
 if [ "$DB_MODE" = "docker" ]; then

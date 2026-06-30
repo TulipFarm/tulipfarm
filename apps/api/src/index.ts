@@ -17,7 +17,7 @@ import { ActivityService } from "./activity/service";
 import { buildApp } from "./app";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
-import { bootstrapAdmin, PgUserRepo } from "./auth/users";
+import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgPendingInteractionRepo } from "./chat/pending-interactions";
@@ -58,6 +58,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { bootstrapFromEnv } from "./setup/bootstrap";
 import { PLATFORM_AGENTS } from "./soul/agents/platform-agents";
 import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
 import { registerSoulSync } from "./soul-sync";
@@ -232,7 +233,12 @@ async function boot() {
     registerGuardrailsReload(gitSync, soulLoader, guardrailsService, app.log);
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
-    await bootstrapAdmin(userRepo, app.log);
+    await bootstrapFromEnv({
+      userRepo,
+      secretsService,
+      soulPath: process.env.SOUL_PATH as string,
+      log: app.log,
+    });
 
     await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL, {
       activity: activityService,

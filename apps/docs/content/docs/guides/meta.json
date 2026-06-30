@@ -5,6 +5,7 @@
     "configure-llm-providers",
     "store-a-secret",
     "issue-an-api-token",
+    "deploy-headless",
     "---Resources---",
     "define-a-resource-type",
     "work-with-records",

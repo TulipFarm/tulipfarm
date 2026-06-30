@@ -1,0 +1,111 @@
+---
+title: First-run setup and boot modes
+description: How TulipFarm decides whether to open the setup wizard or seed from environment variables.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+When TulipFarm starts for the first time it has no admin and no configuration. It needs
+to reach a usable state before it can serve requests. There are two paths to get there:
+**wizard mode** (the default) and **headless mode** (for automated deployments).
+
+## How the instance decides which mode to use
+
+At startup the API checks three signals, in order:
+
+1. **Environment variables** — if `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` are
+   all set, the instance enters headless mode. It seeds the admin account and LLM key from
+   those values and writes `setupComplete: true` to `soul.yaml`. The web wizard never
+   appears.
+
+2. **`setupComplete` in `soul.yaml`** — if the flag is `true` and the env check did not
+   trigger, setup is already done. Normal boot proceeds.
+
+3. **User count** — if no users exist in the database and no env vars are set, the wizard
+   is still open. The instance registers the setup-wizard routes and returns
+   `needsSetup: true` from `GET /api/v1/setup/status`.
+
+The result of the first check that resolves to "done" is cached for the life of the
+process so subsequent requests never re-query the database or filesystem.
+
+<Callout type="info">
+`GET /api/v1/setup/status` is always registered, regardless of boot mode. The web client
+polls it on load to decide whether to redirect to `/setup` or to the main app.
+</Callout>
+
+## Wizard mode
+
+Wizard mode is the default for `curl | bash` self-hosted installs and local development.
+No environment variables need to be set. When `GET /api/v1/setup/status` returns
+`needsSetup: true`, the web app redirects to `/setup` and walks the operator through
+four steps:
+
+1. **Admin account** — creates the first user and logs them in. The route locks once any
+   user exists, so it cannot be used to create a second admin.
+2. **Business profile** — stores `businessName` and `businessDescription` in `soul.yaml`.
+3. **LLM provider** — stores the provider credentials (API key, resource name, or base URL
+   depending on the provider) and writes a default `llm.config.yaml` with all three tiers
+   pointing to the chosen provider and model. This step can be skipped and configured later
+   in **Settings → LLM Config**.
+4. **Soul backup** — sets a git remote URL and optional credentials so the soul syncs to
+   a private repository. This step can also be skipped.
+
+After step 4, the wizard calls `POST /api/v1/setup/complete`, which writes
+`setupComplete: true` to `soul.yaml`. Subsequent wizard-step routes return `403`.
+
+## Headless mode
+
+Headless mode is designed for container platforms (Cloud Run, Fly.io, Azure App Service,
+Kubernetes) where all configuration is injected as environment variables and no browser
+interaction is possible.
+
+Set all three required variables:
+
+| Variable | Purpose |
+|---|---|
+| `ADMIN_EMAIL` | Email for the first admin account. |
+| `ADMIN_PASSWORD` | Password for the first admin account. |
+| `LLM_API_KEY` | API key for the default LLM provider (`anthropic` unless `LLM_PROVIDER=openai`). |
+
+On the first boot with these variables present, the instance:
+
+1. Creates the admin account.
+2. Stores the LLM API key in the secrets store.
+3. Optionally writes `businessName`/`businessDescription` to `soul.yaml` if
+   `BUSINESS_NAME` is set.
+4. Writes `setupComplete: true` to `soul.yaml`.
+
+The operation is idempotent. If the admin already exists (a restart of a running instance),
+the seed step is skipped.
+
+<Callout type="warn">
+In production (`NODE_ENV=production`), setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` without
+`LLM_API_KEY` causes the API to refuse to start with a clear error message. This prevents
+a silently half-configured instance. Outside production (local dev), the partial combination
+is allowed: the admin is seeded and you configure LLM credentials later via **Settings**.
+</Callout>
+
+## The `setupComplete` flag
+
+`soul.yaml` holds a `setupComplete: true` key once setup is done. This is the persistent,
+cross-restart signal that the wizard has run. The key is written by:
+
+- `POST /api/v1/setup/complete` (final wizard step), or
+- `bootstrapFromEnv` (headless seeding on first boot).
+
+Nothing else writes it. If you need to re-run the wizard on an existing instance, you must
+manually remove the key from `soul.yaml` and delete all users from the database.
+
+### Recovery when `soul.yaml` is lost
+
+If the soul directory is deleted or restored from a backup that predates setup, `soul.yaml`
+will not have `setupComplete`. The instance falls back to the user-count check: if users
+exist in the database, setup is treated as complete and normal boot proceeds. On the next
+restart a single database query runs to confirm this; the result is then cached for the
+process lifetime.
+
+<Callout type="info">
+The soul directory is the right thing to back up regularly. Losing `soul.yaml` while the
+database is intact is recoverable; losing the database is not. See [Soul](/docs/concepts/soul)
+for backup options.
+</Callout>
