@@ -223,12 +223,16 @@ describe("SoulLoader", () => {
   describe("integrations", () => {
     it("parses config.yaml", async () => {
       await write(
-        join(TMP, "integrations", "github", "config.yaml"),
-        "token: ghp_xxx\nowner: tulipfarm\n"
+        join(TMP, "integrations", "github", "manifest.yml"),
+        "name: github\negress:\n  type: mcp\n  entry:\n    transport: stdio\n    command: echo\n"
+      );
+      await write(
+        join(TMP, "integrations", "github", "connection.yaml"),
+        "enabled: true\nenv:\n  token: ghp_xxx\n  owner: tulipfarm\n"
       );
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
-      expect(loader.integrations.get("github")?.config).toMatchObject({
+      expect(loader.integrations.get("github")?.connection?.env).toMatchObject({
         token: "ghp_xxx",
         owner: "tulipfarm",
       });

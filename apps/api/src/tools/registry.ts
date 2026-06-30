@@ -55,6 +55,11 @@ export class ToolRegistry {
     this.validators.set(tool.name, ajv.compile(tool.inputSchema));
   }
 
+  unregister(name: string): void {
+    this.tools.delete(name);
+    this.validators.delete(name);
+  }
+
   getAll(): ToolDef[] {
     return [...this.tools.values()];
   }

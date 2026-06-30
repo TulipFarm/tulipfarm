@@ -32,6 +32,7 @@ import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
+import { McpClientService } from "./integrations/mcp-client-service";
 import type { PageRetrievalService } from "./knowledge/retrieval-service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
@@ -50,6 +51,7 @@ import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
+import { registerIntegrationRoutes } from "./soul/integrations/routes";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
@@ -82,6 +84,7 @@ export interface AppOptions {
   knowledgeService?: KnowledgeService;
   retrievalService?: PageRetrievalService;
   toolRegistry?: ToolRegistry;
+  mcpClient?: McpClientService;
   approvalRegistry?: ApprovalRegistry;
   guardrailsService?: GuardrailsService;
   pendingInteractionRepo?: PendingInteractionRepo;
@@ -209,6 +212,9 @@ export async function buildApp(opts: AppOptions = {}) {
       rateLimiter: opts.rateLimiter,
     });
     const requireAuth = makeRequireAuth(opts.sessionStore, opts.userRepo, opts.tokenRepo);
+    // MCP client service: created once, shared between integration routes (connect/disconnect) and
+    // the tool registry (dynamic tool registration). Accepts an optional override for testing.
+    const mcpClientSvc = opts.mcpClient ?? new McpClientService(app.log);
     // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
     const soulPath = process.env.SOUL_PATH;
@@ -280,6 +286,7 @@ export async function buildApp(opts: AppOptions = {}) {
             ? () => knowledgeService.hasAnyKnowledgePage()
             : undefined,
         });
+        registerIntegrationRoutes(app, opts.soulLoader, opts.gitSync, mcpClientSvc, requireAuth);
         if (opts.llmService) {
           registerSkillRoutes(
             app,
@@ -320,7 +327,19 @@ export async function buildApp(opts: AppOptions = {}) {
           workingMemory: opts.workingMemoryService,
           kv: opts.kvService,
           knowledge: opts.knowledgeService,
+          mcpClient: mcpClientSvc,
+          soulLoader: opts.soulLoader,
         });
+      // When an external registry is provided (e.g. from index.ts which builds the full registry
+      // separately), the inner buildToolRegistry above is skipped, so mcpClientSvc never gets its
+      // registry wired. Do it here so integration tools registered on connect/disconnect land in
+      // the same registry the chat turn uses.
+      if (opts.toolRegistry) {
+        mcpClientSvc.setRegistry(opts.toolRegistry);
+        if (opts.soulLoader?.integrations) {
+          void mcpClientSvc.startAll(opts.soulLoader.integrations);
+        }
+      }
       const approvalRegistry = opts.approvalRegistry ?? new ApprovalRegistry();
       registerChatRoutes(
         app,

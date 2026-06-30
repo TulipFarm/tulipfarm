@@ -532,8 +532,9 @@ describe("assembleSystemPrompt — available-tools (tool L1)", () => {
   });
 
   it("drops the whole block when over the char budget (never half-rendered)", () => {
+    // budget is 24000 chars; use 25000 to exceed it
     const out = assembleSystemPrompt(
-      baseCtx({ availableTools: [{ name: "big", description: "x".repeat(9000) }] })
+      baseCtx({ availableTools: [{ name: "big", description: "x".repeat(25000) }] })
     );
     expect(out).not.toContain("<available-tools>");
   });
