@@ -48,10 +48,11 @@ they live in the datastore.
 
 ## How the soul syncs
 
-The soul is loaded into the runtime at startup. If you set `GIT_REMOTE_URL`, the
+The soul is loaded into the runtime at startup. If you set `SOUL_GIT_REMOTE_URL`, the
 instance clones the remote on first boot and pulls from it on a periodic schedule;
 `main` wins when histories genuinely diverge, but local commits that are merely ahead
-and un-pushed are preserved and retried, never discarded.
+and un-pushed are preserved and retried, never discarded. Setting the remote from the
+setup wizard instead syncs immediately — no restart required.
 
 With no remote set, the soul is local-only. Writes still commit locally, and your
 configuration is captured by backups of the soul directory.
@@ -60,6 +61,14 @@ configuration is captured by backups of the soul directory.
 Setting a remote is strongly recommended. It turns your soul into a backed-up,
 portable record of your whole instance.
 </Callout>
+
+## Commit authorship
+
+Soul commits are attributed to `tulipfarm-bot <tulipfarmhq@gmail.com>` by default —
+that's the author on every write regardless of whose credential authenticates the
+push to the remote. Override it with the `BOT_GIT_NAME` and `BOT_GIT_EMAIL`
+environment variables if you want soul history attributed to your own name or
+organization instead.
 
 ## Soul writes are never gated
 

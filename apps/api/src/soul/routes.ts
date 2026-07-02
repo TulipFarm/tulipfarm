@@ -1,6 +1,8 @@
+import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { patchSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
 import { readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -12,7 +14,8 @@ function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
 export function registerSoulRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  secretsService?: SecretsService
 ): void {
   // Recursive node schema for the soul tree response (self-referencing children).
   app.addSchema({
@@ -169,6 +172,139 @@ export function registerSoulRoutes(
         }
         throw err;
       }
+    }
+  );
+
+  if (!secretsService) return;
+
+  app.get(
+    "/api/v1/soul/git-config",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Read the soul git remote config and live sync status.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            properties: {
+              remoteUrl: { type: "string" },
+              credentialSet: { type: "boolean" },
+              status: {
+                type: "object",
+                properties: {
+                  remoteConfigured: { type: "boolean" },
+                  ahead: { type: "number" },
+                  behind: { type: "number" },
+                  headSha: { type: ["string", "null"] },
+                  lastSyncError: { type: ["string", "null"] },
+                  lastSyncAt: { type: ["string", "null"] },
+                },
+                required: [
+                  "remoteConfigured",
+                  "ahead",
+                  "behind",
+                  "headSha",
+                  "lastSyncError",
+                  "lastSyncAt",
+                ],
+              },
+            },
+            required: ["credentialSet", "status"],
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      const [config, secrets, status] = await Promise.all([
+        readSoulConfig(gitSync.path),
+        secretsService.list(),
+        gitSync.getStatus(),
+      ]);
+      return reply.send({
+        remoteUrl: config.gitRemoteUrl,
+        credentialSet: secrets.some((s) => s.key === SOUL_GIT_CREDENTIAL_KEY),
+        status: {
+          remoteConfigured: status.remoteConfigured,
+          ahead: status.ahead,
+          behind: status.behind,
+          headSha: status.headSha,
+          lastSyncError: status.lastSyncError,
+          lastSyncAt: status.lastSyncAt,
+        },
+      });
+    }
+  );
+
+  app.post(
+    "/api/v1/soul/sync",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Manually trigger a sync against the configured soul git remote.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      try {
+        await gitSync.syncNow();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: `Sync failed: ${message}` });
+      }
+      return reply.code(204).send();
+    }
+  );
+
+  app.put(
+    "/api/v1/soul/git-config",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Configure (or reconfigure) the soul git remote + credential and sync immediately.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: {
+          type: "object",
+          required: ["remoteUrl"],
+          properties: {
+            remoteUrl: { type: "string", minLength: 1 },
+            credential: { type: "string" },
+          },
+        },
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const body = (req.body ?? {}) as { remoteUrl?: unknown; credential?: unknown };
+      const remoteUrl = typeof body.remoteUrl === "string" ? body.remoteUrl.trim() : "";
+      const credential = typeof body.credential === "string" ? body.credential.trim() : "";
+      if (!remoteUrl) return reply.code(400).send({ error: "remoteUrl is required" });
+
+      await patchSoulConfig(gitSync.path, { gitRemoteUrl: remoteUrl });
+      if (credential) {
+        await secretsService.set(SOUL_GIT_CREDENTIAL_KEY, credential);
+      }
+      try {
+        await gitSync.configureRemote(remoteUrl, credential || undefined);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });
+      }
+      return reply.code(204).send();
     }
   );
 }

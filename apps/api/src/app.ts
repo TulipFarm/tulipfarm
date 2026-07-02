@@ -262,7 +262,7 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     if (opts.gitSync) {
-      registerSoulRoutes(app, opts.gitSync, requireAuth);
+      registerSoulRoutes(app, opts.gitSync, requireAuth, opts.secretsService);
       if (opts.soulLoader) {
         registerResourceTypeRoutes(
           app,

@@ -56,8 +56,10 @@ generates and writes these; they are documented here for reference.
 |---|---|---|
 | `SESSION_TTL_SECONDS` | `604800` | Session cookie lifetime in seconds (7 days). |
 | `VITE_PORT` | `4000` | Port the web UI dev server listens on (local development only). |
-| `GIT_REMOTE_URL` | — | Remote for the soul repository. When set, the instance clones on first boot and syncs on a schedule. |
-| `GIT_CREDENTIALS` | — | Credentials for pushing to `GIT_REMOTE_URL` (e.g. a GitHub personal access token). |
+| `SOUL_GIT_REMOTE_URL` | — | Remote for the soul repository. When set, the instance clones on first boot and syncs on a schedule. Can also be set from the setup wizard, which syncs immediately. |
+| `SOUL_GIT_CREDENTIAL` | — | Credential for pushing to `SOUL_GIT_REMOTE_URL` (e.g. a GitHub personal access token). |
+| `BOT_GIT_NAME` | `tulipfarm-bot` | Git commit author name for soul writes. See [Soul](/docs/concepts/soul#commit-authorship). |
+| `BOT_GIT_EMAIL` | `tulipfarmhq@gmail.com` | Git commit author email for soul writes. See [Soul](/docs/concepts/soul#commit-authorship). |
 | `ENCRYPTION_KEY_PREVIOUS` | — | The prior `ENCRYPTION_KEY` during a key rotation. Decryption tries the current key first, then this one. See [Secrets](/docs/concepts/secrets). |
 | `API_TOKEN_PEPPER` | — | Base64 server secret (32 bytes). When set, API tokens are hashed with `HMAC-SHA256(token, pepper)` instead of plain SHA-256. See [Hashing](/docs/security/hashing). |
 | `HOOKS_DISABLED` | — | Set to `true` to skip resource `hooks.ts` execution entirely. Use to boot an instance whose hooks are failing. |

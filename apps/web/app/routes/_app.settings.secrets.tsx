@@ -63,7 +63,7 @@ export default function SettingsSecrets() {
   const adding = providers.find((p) => p.id === addProviderId);
 
   // One list row per CONFIGURED provider (any of its fields stored); leftover keys not owned by a
-  // provider (custom/bootstrap secrets) list individually.
+  // provider (custom/bootstrap env config) list individually.
   const providerGroups = providers
     .map((p) => ({
       provider: p,

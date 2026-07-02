@@ -1,4 +1,6 @@
+import { promises as soulConfigFs } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import type { SecretMeta, SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,6 +22,21 @@ vi.mock("node:fs/promises", async (importOriginal) => {
     readFile: vi.fn(),
     realpath: vi.fn(),
     stat: vi.fn(),
+  };
+});
+
+// soul-config.ts (git-config routes) reads/writes soul.yaml via `node:fs`'s `promises`, a
+// different module specifier than tree.ts's `node:fs/promises` — mock separately.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    promises: {
+      ...actual.promises,
+      readFile: vi.fn(),
+      mkdir: vi.fn(),
+      writeFile: vi.fn(),
+    },
   };
 });
 
@@ -343,6 +360,225 @@ describe("soul routes", () => {
         cookies: { [SESSION_COOKIE]: sid },
       });
       expect(res.statusCode).toBe(404);
+    });
+  });
+
+  describe("git-config routes", () => {
+    function makeFakeSecretsService(keys: string[] = []) {
+      return {
+        list: vi.fn().mockResolvedValue(keys.map((key) => ({ key }) as SecretMeta)),
+        set: vi.fn().mockResolvedValue(undefined),
+      } as unknown as SecretsService;
+    }
+
+    async function rebuild(gitSyncOverrides: Record<string, unknown>, secretKeys: string[] = []) {
+      gitSync = {
+        ...makeFakeGitSync(),
+        getStatus: vi.fn().mockResolvedValue({
+          remoteConfigured: false,
+          ahead: 0,
+          behind: 0,
+          headSha: null,
+          lastSyncError: null,
+          lastSyncAt: null,
+        }),
+        configureRemote: vi.fn().mockResolvedValue(undefined),
+        syncNow: vi.fn().mockResolvedValue(undefined),
+        ...gitSyncOverrides,
+      } as unknown as GitSyncService;
+      const secretsService = makeFakeSecretsService(secretKeys);
+      await app.close();
+      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, secretsService });
+      return secretsService;
+    }
+
+    beforeEach(() => {
+      vi.mocked(soulConfigFs.readFile).mockRejectedValue(
+        Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+      );
+    });
+
+    describe("GET /api/v1/soul/git-config", () => {
+      it("returns 401 without auth", async () => {
+        await rebuild({});
+        const res = await app.inject({ method: "GET", url: "/api/v1/soul/git-config" });
+        expect(res.statusCode).toBe(401);
+      });
+
+      it("reports not-configured with no remote and no credential", async () => {
+        await rebuild({});
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({
+          credentialSet: false,
+          status: {
+            remoteConfigured: false,
+            ahead: 0,
+            behind: 0,
+            headSha: null,
+            lastSyncError: null,
+            lastSyncAt: null,
+          },
+        });
+      });
+
+      it("reports remote url, credentialSet, and ahead/behind when configured", async () => {
+        vi.mocked(soulConfigFs.readFile).mockResolvedValue(
+          "gitRemoteUrl: https://github.com/acme/soul.git\n"
+        );
+        await rebuild(
+          {
+            getStatus: vi.fn().mockResolvedValue({
+              remoteConfigured: true,
+              remoteUrl: "https://github.com/acme/soul.git",
+              ahead: 1,
+              behind: 2,
+              headSha: "abc1234",
+              lastSyncError: null,
+              lastSyncAt: "2026-07-02T07:00:00.000Z",
+            }),
+          },
+          ["soul-git-credential"]
+        );
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid },
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json()).toEqual({
+          remoteUrl: "https://github.com/acme/soul.git",
+          credentialSet: true,
+          status: {
+            remoteConfigured: true,
+            ahead: 1,
+            behind: 2,
+            headSha: "abc1234",
+            lastSyncError: null,
+            lastSyncAt: "2026-07-02T07:00:00.000Z",
+          },
+        });
+      });
+
+      it("reports a lastSyncError when the last sync attempt failed", async () => {
+        await rebuild({
+          getStatus: vi.fn().mockResolvedValue({
+            remoteConfigured: true,
+            remoteUrl: "https://github.com/acme/soul.git",
+            ahead: 0,
+            behind: 0,
+            headSha: "abc1234",
+            lastSyncError: "could not read Username for 'https://github.com'",
+            lastSyncAt: "2026-07-02T07:00:00.000Z",
+          }),
+        });
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid },
+        });
+        expect(res.json().status.lastSyncError).toBe(
+          "could not read Username for 'https://github.com'"
+        );
+      });
+    });
+
+    describe("POST /api/v1/soul/sync", () => {
+      it("returns 401 without auth", async () => {
+        await rebuild({});
+        const res = await app.inject({ method: "POST", url: "/api/v1/soul/sync" });
+        expect(res.statusCode).toBe(401);
+      });
+
+      it("triggers a manual sync and returns 204 on success", async () => {
+        await rebuild({});
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/v1/soul/sync",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+        });
+        expect(res.statusCode).toBe(204);
+        expect(gitSync.syncNow).toHaveBeenCalled();
+      });
+
+      it("surfaces a syncNow failure as 400", async () => {
+        await rebuild({
+          syncNow: vi.fn().mockRejectedValue(new Error("could not read Username")),
+        });
+        const res = await app.inject({
+          method: "POST",
+          url: "/api/v1/soul/sync",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+        });
+        expect(res.statusCode).toBe(400);
+        expect(res.json().error).toContain("could not read Username");
+      });
+    });
+
+    describe("PUT /api/v1/soul/git-config", () => {
+      it("returns 401 without auth", async () => {
+        await rebuild({});
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          payload: { remoteUrl: "https://github.com/acme/soul.git" },
+        });
+        expect(res.statusCode).toBe(401);
+      });
+
+      it("returns 400 when remoteUrl is missing", async () => {
+        await rebuild({});
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: {},
+        });
+        expect(res.statusCode).toBe(400);
+      });
+
+      it("persists remote url, sets credential secret, and calls configureRemote", async () => {
+        const secretsService = await rebuild({});
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "ghp_test" },
+        });
+        expect(res.statusCode).toBe(204);
+        expect(vi.mocked(soulConfigFs.writeFile)).toHaveBeenCalledWith(
+          expect.stringContaining("soul.yaml"),
+          expect.stringContaining("https://github.com/acme/soul.git"),
+          "utf8"
+        );
+        expect(secretsService.set).toHaveBeenCalledWith("soul-git-credential", "ghp_test");
+        expect(gitSync.configureRemote).toHaveBeenCalledWith(
+          "https://github.com/acme/soul.git",
+          "ghp_test"
+        );
+      });
+
+      it("surfaces a configureRemote failure as 400", async () => {
+        await rebuild({
+          configureRemote: vi.fn().mockRejectedValue(new Error("Authentication failed")),
+        });
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "bad_token" },
+        });
+        expect(res.statusCode).toBe(400);
+      });
     });
   });
 

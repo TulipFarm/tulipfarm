@@ -271,15 +271,16 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   );
 
-  // Step 4 (optional): configure soul git backup. Stores remote URL in soul.yaml and
-  // credentials as an encrypted secret. Git sync activates on next restart with
-  // GIT_REMOTE_URL + GIT_CREDENTIALS env vars; the stored values are for reference.
+  // Step 4 (optional): configure soul git backup. Stores remote URL in soul.yaml (Soul Config)
+  // and credentials as an encrypted Secret ("soul-git-credential"), then syncs immediately —
+  // clones/pulls the remote into the live GitSyncService instance, no restart required.
   app.post(
     "/api/v1/setup/git",
     {
       preHandler: wizardStep,
       schema: {
-        description: "Configure soul git backup (optional). Persists remote URL + credentials.",
+        description:
+          "Configure soul git backup (optional). Persists remote URL + credentials and syncs immediately.",
         tags: ["setup"],
         security: [{ sessionCookie: [] }],
         body: {
@@ -306,9 +307,14 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
 
       await patchSoulConfig(soulPath, { gitRemoteUrl: remoteUrl });
       if (credentials) {
-        await secretsService.set("git-credentials", credentials);
+        await secretsService.set("soul-git-credential", credentials);
       }
-      await gitSync.commit("chore: set git remote config").catch(() => {});
+      try {
+        await gitSync.configureRemote(remoteUrl, credentials || undefined);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });
+      }
       return reply.code(204).send();
     }
   );

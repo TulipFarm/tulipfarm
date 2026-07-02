@@ -2,6 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { parse, stringify } from "yaml";
 
+export const SOUL_GIT_CREDENTIAL_KEY = "soul-git-credential";
+
 export interface SoulConfig {
   businessName?: string;
   businessDescription?: string;

@@ -213,19 +213,39 @@ describe("setup routes", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("git step stores remote URL in soul.yaml", async () => {
+  it("git step stores remote URL in soul.yaml, credential as a secret, and syncs immediately", async () => {
     const cookies = await createAdmin();
+    const configureRemote = vi
+      .spyOn(GitSyncService.prototype, "configureRemote")
+      .mockResolvedValue(undefined);
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/setup/git",
       headers: authHeaders(cookies),
-      payload: { remoteUrl: "https://github.com/acme/soul.git" },
+      payload: { remoteUrl: "https://github.com/acme/soul.git", credentials: "ghp_test" },
     });
     expect(res.statusCode).toBe(204);
+    expect(configureRemote).toHaveBeenCalledWith("https://github.com/acme/soul.git", "ghp_test");
     const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
       gitRemoteUrl?: string;
     };
     expect(cfg.gitRemoteUrl).toBe("https://github.com/acme/soul.git");
+    configureRemote.mockRestore();
+  });
+
+  it("git step surfaces a sync failure (bad remote/credential) as 400", async () => {
+    const cookies = await createAdmin();
+    const configureRemote = vi
+      .spyOn(GitSyncService.prototype, "configureRemote")
+      .mockRejectedValue(new Error("Authentication failed"));
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/git",
+      headers: authHeaders(cookies),
+      payload: { remoteUrl: "https://github.com/acme/soul.git", credentials: "bad_token" },
+    });
+    expect(res.statusCode).toBe(400);
+    configureRemote.mockRestore();
   });
 
   it("business step requires auth", async () => {

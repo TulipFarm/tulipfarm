@@ -59,6 +59,7 @@ import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { bootstrapFromEnv } from "./setup/bootstrap";
+import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { PLATFORM_AGENTS } from "./soul/agents/platform-agents";
 import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
 import { registerSoulSync } from "./soul-sync";
@@ -73,33 +74,8 @@ const port = Number.parseInt(process.env.PORT || "4010", 10);
 
 async function boot() {
   try {
-    const gitSync = new GitSyncService(
-      process.env.SOUL_PATH as string,
-      process.env.GIT_REMOTE_URL,
-      process.env.GIT_CREDENTIALS,
-      console
-    );
-    await gitSync.bootSync();
-
-    await runSoulMigrations(process.env.SOUL_PATH as string, console);
-
-    const soulLoader = new SoulLoader(process.env.SOUL_PATH as string, console);
-    await soulLoader.load();
-
     const pool = await connectPg();
     await runPgMigrations(pool);
-    // Per-type resource tables can't be created lazily (no `db.collection(type)`):
-    // materialise them for every loaded soul type before serving.
-    await reconcileResourceTables(pool, soulLoader, console);
-
-    const ttlSeconds = Number.parseInt(
-      process.env.SESSION_TTL_SECONDS ?? String(DEFAULT_SESSION_TTL_SECONDS),
-      10
-    );
-    const sessionStore = new PgSessionStore(pool, ttlSeconds);
-    const userRepo = new PgUserRepo(pool);
-    const tokenRepo = new PgTokenRepo(pool);
-    const rateLimiter = new PgRateLimiter(pool);
 
     const secretRepo = new PgSecretRepo(pool);
     const dekRepo = new PgDekRepo(pool);
@@ -112,6 +88,46 @@ async function boot() {
     const secretsService = new SecretsService(secretRepo, activeDek, {
       legacyKeys: encryptionKeys,
     });
+
+    const soulPath = process.env.SOUL_PATH as string;
+    // SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL only seed the very first boot. Once Settings → Soul
+    // persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret), that takes
+    // over — otherwise a restart would forget a remote configured after boot.
+    const persistedSoulConfig = await readSoulConfig(soulPath);
+    const gitRemoteUrl = persistedSoulConfig.gitRemoteUrl ?? process.env.SOUL_GIT_REMOTE_URL;
+    const gitCredential =
+      (await secretsService.get(SOUL_GIT_CREDENTIAL_KEY).catch(() => undefined)) ??
+      process.env.SOUL_GIT_CREDENTIAL;
+
+    const gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredential, console);
+    // A stale/invalid remote (revoked PAT, unreachable host) must never crash-loop boot — fall
+    // back to whatever soul state is already on disk and keep serving. `configureRemote` (the
+    // Settings → Soul PUT route) still throws on the same failure so the user sees it there.
+    try {
+      await gitSync.bootSync();
+    } catch (err) {
+      console.error(
+        `Soul: boot sync with remote failed (${err instanceof Error ? err.message : String(err)}) — continuing with local soul state`
+      );
+    }
+
+    await runSoulMigrations(soulPath, console);
+
+    const soulLoader = new SoulLoader(soulPath, console);
+    await soulLoader.load();
+
+    // Per-type resource tables can't be created lazily (no `db.collection(type)`):
+    // materialise them for every loaded soul type before serving.
+    await reconcileResourceTables(pool, soulLoader, console);
+
+    const ttlSeconds = Number.parseInt(
+      process.env.SESSION_TTL_SECONDS ?? String(DEFAULT_SESSION_TTL_SECONDS),
+      10
+    );
+    const sessionStore = new PgSessionStore(pool, ttlSeconds);
+    const userRepo = new PgUserRepo(pool);
+    const tokenRepo = new PgTokenRepo(pool);
+    const rateLimiter = new PgRateLimiter(pool);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -240,7 +256,7 @@ async function boot() {
       log: app.log,
     });
 
-    await registerSoulSync(boss, gitSync, process.env.GIT_REMOTE_URL, {
+    await registerSoulSync(boss, gitSync, gitRemoteUrl, {
       activity: activityService,
       soulLoader,
     });

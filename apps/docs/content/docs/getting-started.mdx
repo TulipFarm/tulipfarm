@@ -47,7 +47,7 @@ The script prompts you to choose how to run PostgreSQL:
   starts the system service.
 
 Either way, the script initializes your soul repository at `~/.tulipfarm/soul` and generates a
-`.env.local` file with random bootstrap secrets (`ENCRYPTION_KEY`, `JWT_SECRET`,
+`.env.local` file with random bootstrap env config (`ENCRYPTION_KEY`, `JWT_SECRET`,
 `WEBHOOK_SIGNING_SECRET`).
 
 For a non-interactive run (CI, scripted environments), set `DB_MODE` before running:
