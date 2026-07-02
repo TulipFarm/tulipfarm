@@ -48,4 +48,23 @@ Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stay
 ## Tests
 
 Vitest, colocated. Mock `node:fs` / `simple-git`; cover loader degradation and the
-pull/commit/push divergence cases.
+pull/commit/push divergence cases. In route tests that touch soul git config, spy on
+`GitSyncService.prototype.configureRemote`/`getStatus` (don't hit real git), and use
+`soulConfigFs.readFile`/`writeFile` (not raw `node:fs`).
+
+## Git-sync gotchas
+
+- Remote/credential env vars are `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL` (soul-scoped,
+  matches `SOUL_PATH`) — not `GIT_REMOTE_URL`/`GIT_CREDENTIALS`. Watch for stale references when
+  touching `.env.local.example`, `specs/SOUL.md`, `specs/INSTALLATION.md`, docs mdx, or secret keys.
+- `GitSyncService` reads its remote from env at boot; a remote set later via Settings → Soul UI
+  persists to `soul.yaml` + a secret — boot must also read that persisted config, or the UI-set
+  remote is silently dropped on restart.
+- `bootSync()` must never throw (a bad/stale remote in `soul.yaml` previously crash-looped the
+  server on boot) — but `configureRemote()` (backs `PUT /soul/git-config`) must keep throwing so
+  the route can 400 on bad credentials. Fix boot-time resilience at the boot call site, not by
+  swallowing errors inside the shared methods.
+- Auth is HTTPS-only: `authUrl()` in `git-sync.ts` injects `SOUL_GIT_CREDENTIAL` (a PAT) as
+  `https://<token>@host/...`. No SSH keygen/agent support — an SSH remote URL will fail.
+- Soul-repo commits are always authored as `BOT_GIT_NAME`/`BOT_GIT_EMAIL` (`tulipfarm-bot`),
+  regardless of whose PAT authenticates the push.

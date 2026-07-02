@@ -110,6 +110,10 @@ Vitest with a dedicated `vitest.config.ts` (`@vitejs/plugin-react` + `jsdom`) â€
 load the Remix Vite plugin. Colocate `*.test.tsx`. Components using `<Link>`/`<NavLink>`/`<Outlet>`
 need a router context: wrap with `createRemixStub` from `@remix-run/testing`.
 
+Known pre-existing issue: the `~/` path alias isn't resolved in web's vitest config, which can
+cause widespread unrelated test failures. If web tests fail broadly and don't relate to your
+change, verify against a clean baseline (main) before treating it as a regression you caused.
+
 ## Prod serving (nginx)
 
 `pnpm --filter @tulipfarm/web build` emits `build/client/` (incl. `index.html`). Serve it static
