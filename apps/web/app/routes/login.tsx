@@ -8,20 +8,14 @@ export const meta: MetaFunction = () => [{ title: "Sign in · tulipfarm" }];
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
-// Dev default admin creds — kept in sync with the API's bootstrapAdmin dev defaults. In dev the
-// form is prefilled so you can sign in in one click; Vite strips this branch from production builds
-// (import.meta.env.DEV === false), so prod ships an empty form.
-const DEV_ADMIN_EMAIL = "admin@tulipfarm.dev";
-const DEV_ADMIN_PASSWORD = "password123";
-
 // Standalone (outside the _app gate) email+password sign-in. On success the API has set the session
 // + CSRF cookies, so we just navigate into the app (honoring ?redirectTo). The _app loader then sees
 // a valid session and renders.
 export default function Login() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [email, setEmail] = useState(import.meta.env.DEV ? DEV_ADMIN_EMAIL : "");
-  const [password, setPassword] = useState(import.meta.env.DEV ? DEV_ADMIN_PASSWORD : "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
