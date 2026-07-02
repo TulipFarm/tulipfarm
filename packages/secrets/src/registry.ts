@@ -3,8 +3,8 @@
  * needs — some secret (API keys), some plain config (Azure resource_name, custom base_url). This is
  * the single source of truth: the Settings UI configures a provider in one place by rendering its
  * fields, every value is stored in the secrets store keyed by the field's `key`, and the LLM layer
- * resolves a provider's credentials/config from the store via this registry (so an llm.config row is
- * just { provider, model }). Lives in @tulipfarm/secrets; consumed by @tulipfarm/llm and the web app
+ * resolves a provider's credentials/config from the store via this registry (so a soul.yaml `llm`
+ * row is just { provider, model }). Lives in @tulipfarm/secrets; consumed by @tulipfarm/llm and the web app
  * (over HTTP). Grows as new providers/integrations are added.
  */
 
@@ -43,7 +43,7 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
     fields: [{ key: "openai-api-key", label: "API key", role: "api_key", kind: "secret" }],
   },
   {
-    // id stays "azure" (renaming it breaks existing soul/llm.config.yaml `provider: azure` rows and
+    // id stays "azure" (renaming it breaks existing soul.yaml `llm` `provider: azure` rows and
     // the `case "azure"` provider switch); only the display label moves to "Azure Foundry". The two
     // stored keys keep their `azure-openai-*` names so existing secrets aren't orphaned.
     id: "azure",

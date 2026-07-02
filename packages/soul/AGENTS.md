@@ -10,7 +10,8 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
 ## Public API (`src/index.ts`)
 
 - **`SoulLoader`** — reads artifacts from disk into in-memory maps; `load()` / reload. Root YAML
-  configs are exposed as fields: `llmConfig`, `guardrailsConfig`, `manifest`.
+  configs are exposed as fields: `llmConfig` (from `soul.yaml`'s nested `llm:` key),
+  `guardrailsConfig`, `manifest` (the full parsed `soul.yaml`).
 - **`GitSyncService`** — `bootSync`, `pull`, `commit`, `push`, `withSync(message)` (commit +
   best-effort push around a write — used by the API's soul-backed tools), periodic sync.
 - **`runSoulMigrations()`** + type `SoulMigration`.
@@ -24,7 +25,7 @@ skills/<name>/SKILL.md
 resources/<name>/schema.yml       # + optional hooks.ts (SHA256-hashed for integrity)
 routines/<name>/routine.yaml      # + optional hooks.ts
 integrations/<name>/config.yaml
-llm.config.yaml   soul.yaml   guardrails.yaml   # repo-root manifests (optional)
+soul.yaml   guardrails.yaml   # repo-root manifests (optional); soul.yaml's `llm:` key holds LLM config
 ```
 
 Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/validation`) on load.
@@ -32,7 +33,8 @@ Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stay
 
 ## File map
 
-- `soul-loader.ts` — the five `load*` readers + frontmatter parsing + hook-hash tracking.
+- `soul-loader.ts` — the `load*` readers + frontmatter parsing + hook-hash tracking; `llmConfig` is
+  derived from `manifest.llm` after `soul.yaml` loads (not a separate file read).
 - `git-sync.ts` — sync engine. Divergence rule (SOUL-V1-004): upstream wins on genuine
   divergence, but **un-pushed local commits are preserved** (retry push, don't blind-reset).
   Commits use `BOT_GIT_NAME` / `BOT_GIT_EMAIL` from `@tulipfarm/constants`.

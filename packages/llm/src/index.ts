@@ -9,6 +9,7 @@ export type {
 export {
   EMBEDDING_UNAVAILABLE_WARNING,
   EmbeddingUnavailableError,
+  LlmConfigSchema,
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,

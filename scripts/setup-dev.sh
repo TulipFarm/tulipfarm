@@ -194,7 +194,7 @@ if [ ! -d "$SOUL_DIR/.git" ]; then
   echo "📁 Initializing soul directory at $SOUL_DIR..."
   mkdir -p "$SOUL_DIR"/{resources,routines,agents,skills,integrations}
 
-  # Create stub files. NOTE: no llm.config.yaml stub — an empty/comment-only one fails LLM-config
+  # Create stub files. NOTE: no `llm:` key in soul.yaml — an empty/comment-only one fails LLM-config
   # validation (requires `tiers`). Absent config = LLM features disabled until the UI wizard writes it.
   # soul.yaml is intentionally minimal — setupComplete is set by the setup wizard, not here.
   cat > "$SOUL_DIR/soul.yaml" << 'EOF'

@@ -99,7 +99,10 @@ describe("llm-config routes", () => {
     // reload re-reads the written file (mirrors SoulLoader), so the PUT response reflects what was saved.
     let current: unknown = validConfig;
     reload = vi.fn(async () => {
-      current = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8"));
+      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+        llm?: unknown;
+      };
+      current = manifest.llm;
     });
     const soulLoader = {
       get llmConfig() {
@@ -230,7 +233,7 @@ describe("llm-config routes", () => {
       });
       expect(res.statusCode).toBe(403);
       expect(withSync).not.toHaveBeenCalled();
-      await expect(access(join(soulPath, "llm.config.yaml"))).rejects.toThrow();
+      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
     });
 
     it("validates, writes, commits, reloads, and re-inits the LlmService", async () => {
@@ -253,8 +256,10 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual(next);
 
-      const written = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8"));
-      expect(written).toEqual(next);
+      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+        llm: unknown;
+      };
+      expect(manifest.llm).toEqual(next);
       expect(withSync).toHaveBeenCalledWith("soul: update llm config");
       expect(reload).toHaveBeenCalledOnce();
       expect(init).toHaveBeenCalledOnce();
@@ -272,7 +277,7 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(422);
       expect(withSync).not.toHaveBeenCalled();
       expect(init).not.toHaveBeenCalled();
-      await expect(access(join(soulPath, "llm.config.yaml"))).rejects.toThrow();
+      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
     });
   });
 
@@ -363,10 +368,12 @@ describe("llm-config routes", () => {
       });
       expect(res.statusCode).toBe(200);
       // The written soul file should now carry the pinned spec (auto-resolved from LiteLLM).
-      const written = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8")) as {
-        tiers: { quick: { providers: Array<{ spec?: { input_cost_per_token: number } }> } };
+      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+        llm: {
+          tiers: { quick: { providers: Array<{ spec?: { input_cost_per_token: number } }> } };
+        };
       };
-      expect(written.tiers.quick.providers[0].spec?.input_cost_per_token).toBe(0.00000057);
+      expect(manifest.llm.tiers.quick.providers[0].spec?.input_cost_per_token).toBe(0.00000057);
     });
 
     it("leaves a model unpriced (no spec) when LiteLLM has no match", async () => {
@@ -385,10 +392,10 @@ describe("llm-config routes", () => {
         },
       });
       expect(res.statusCode).toBe(200);
-      const written = parseYaml(await readFile(join(soulPath, "llm.config.yaml"), "utf8")) as {
-        tiers: { quick: { providers: Array<{ spec?: unknown }> } };
+      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+        llm: { tiers: { quick: { providers: Array<{ spec?: unknown }> } } };
       };
-      expect(written.tiers.quick.providers[0].spec).toBeUndefined();
+      expect(manifest.llm.tiers.quick.providers[0].spec).toBeUndefined();
     });
   });
 });
