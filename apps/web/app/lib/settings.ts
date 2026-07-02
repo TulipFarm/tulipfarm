@@ -2,7 +2,7 @@ import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
  * Client for the Settings section (UI-V1-003). Two independent areas:
- *  - LLM config: read/replace soul/llm.config.yaml tiers (structured, via the LLM config form).
+ *  - LLM config: read/replace soul.yaml's `llm` tiers (structured, via the LLM config form).
  *  - Secrets: list keys (never values) + admin add/update/delete (existing SECRETS backend).
  * Dark mode is handled entirely client-side by ThemeToggle in the sidebar and is not part of this.
  */

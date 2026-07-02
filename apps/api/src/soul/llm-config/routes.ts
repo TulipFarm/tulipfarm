@@ -1,5 +1,3 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
@@ -13,9 +11,9 @@ import {
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
 import type { UserDoc } from "../../auth/users";
+import { writeLlmConfigToSoulYaml } from "./soul-yaml-io";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -40,8 +38,8 @@ async function getCatalog(force = false): Promise<LiteLlmCatalog | null> {
   return catalog;
 }
 
-// Returned by GET when no llm.config.yaml exists yet, so the editor opens with empty tiers instead of
-// erroring. Not itself schema-valid for PUT (tiers need ≥1 provider) — the user fills it in and saves.
+// Returned by GET when soul.yaml has no `llm:` key yet, so the editor opens with empty tiers instead
+// of erroring. Not itself schema-valid for PUT (tiers need ≥1 provider) — the user fills it in and saves.
 const EMPTY_LLM_CONFIG = {
   tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
 } as const;
@@ -80,7 +78,7 @@ async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig
 }
 
 /*
- * LLM config editing (UI-V1-003 / LLM-V1-003). Reads and full-replaces soul/llm.config.yaml.
+ * LLM config editing (UI-V1-003 / LLM-V1-003). Reads and full-replaces soul.yaml's `llm:` key.
  *
  * Write path safety (LLM-V1-003 AC4): the incoming config is validated with `validateLlmConfig`
  * BEFORE it is written, and `LlmService.init` re-validates and rebuilds before mutating its own
@@ -162,7 +160,7 @@ export function registerLlmConfigRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Read the current LLM config. A fresh instance with no llm.config.yaml gets an empty skeleton (three tiers, no providers) so the editor opens ready to configure.",
+          "Read the current LLM config. A fresh instance with no `llm:` key in soul.yaml gets an empty skeleton (three tiers, no providers) so the editor opens ready to configure.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -311,7 +309,7 @@ export function registerLlmConfigRoutes(
       const { refresh } = req.query as { refresh?: boolean };
       config = await enrichSpecs(config, refresh === true);
 
-      await writeFile(join(gitSync.path, "llm.config.yaml"), stringifyYaml(config), "utf8");
+      await writeLlmConfigToSoulYaml(gitSync.path, config);
       await gitSync.withSync("soul: update llm config");
       await soulLoader.reload();
       await llmService.init(soulLoader.llmConfig, secrets, app.log);

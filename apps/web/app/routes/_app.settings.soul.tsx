@@ -17,7 +17,8 @@ export async function clientLoader() {
 export default function SettingsSoul() {
   const { root, gitConfig } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
-  const [selected, setSelected] = useState<string | null>(null);
+  const hasSoulYaml = root.some((node) => node.path === "soul.yaml");
+  const [selected, setSelected] = useState<string | null>(hasSoulYaml ? "soul.yaml" : null);
 
   return (
     <div className="flex flex-col gap-4">
