@@ -4,6 +4,7 @@ import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { type LlmProviderInfo, listProviders, putLlmConfig, putSecret } from "~/lib/settings";
 import { completeSetup, getSetupStatus, setupAdmin, setupBusiness, setupGit } from "~/lib/setup";
+import { friendlyGitError } from "~/lib/soul";
 
 export const meta: MetaFunction = () => [{ title: "Setup · tulipfarm" }];
 
@@ -330,7 +331,9 @@ function GitStep({ onNext }: { onNext: () => void }) {
       await setupGit(remoteUrl.trim(), credentials.trim() || undefined);
       onNext();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to save git config.");
+      setError(
+        err instanceof ApiError ? friendlyGitError(err.message) : "Failed to save git config."
+      );
     } finally {
       setBusy(false);
     }

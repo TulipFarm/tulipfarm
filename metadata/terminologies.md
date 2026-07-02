@@ -52,9 +52,11 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | A connected third-party | **Integration** | `Integration` | `/integrations`, `/api/v1/integrations` | "Integrations" | `connection`/`connector` → retired |
 | Auth material for a provider/integration | **Credential** | `Credential` | — | "Credentials" | API key/token/login; *backed by* a Secret |
 | Encrypted at-rest value (storage primitive) | **Secret** | `Secret` | `/settings/secrets` | "Secrets" | the store; ≠ Credential |
+| Boot-time value from `.env`/`process.env` | **Env Config** | — | — | — | restart-required; not all values are secret (e.g. `SOUL_PATH`) — the one genuinely secret value inside it is the KEK (`ENCRYPTION_KEY`), named directly, not by renaming this bucket |
 | An installable agent capability module | **Skill** | `Skill` | `/skills`, `/api/v1/skills` | "Skills" | `plugin`/`capability` → retired as synonyms¹ |
 | Where skills are browsed/installed | **Marketplace** / **Install** | — | `/skills/marketplace`, `/skills/install` | "Marketplace" | |
 | The git-backed config repo | **Soul** | `Soul` | `/api/v1/soul` | "Soul" | holds agents/routines/skills/integrations/resources |
+| Git-tracked YAML settings inside the Soul repo | **Soul Config** | `SoulConfig` | — | — | e.g. `soul.yaml`, `llm.config.yaml`; non-secret, runtime-editable but reload behavior varies (some apply on `soul.synced`, others require restart) |
 | The knowledge wiki feature | **Knowledge** | — | `/knowledge` | "Knowledge" | a wiki |
 | A grouping of pages | **Space** | `Space` | `/knowledge/spaces/:id` | "Space" | retires `bundle`, `collection`² |
 | A knowledge content node | **Page** | `Page` | `/knowledge/pages/:id` | "Page" | retires `concept`, `document`; pages link pages (backlink graph) |

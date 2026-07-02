@@ -61,7 +61,7 @@ developer's choice (both options satisfy AC-006).
      service, and creates the `tulipfarm` database.
 
    Either way it initializes the soul directory and generates `.env.local` with
-   bootstrap secrets. For a non-interactive run, preset the choice:
+   bootstrap env config. For a non-interactive run, preset the choice:
    ```bash
    DB_MODE=docker bash scripts/setup-dev.sh   # or DB_MODE=native
    ```
@@ -97,21 +97,23 @@ The `scripts/setup-dev.sh` script automatically:
 - Installs and starts PostgreSQL 17 + pgvector
 - Creates the `tulipfarm` database
 - Initializes the soul git repository at `~/.tulipfarm/soul` with the required directory structure
-- Generates `.env.local` with random bootstrap secrets (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
+- Generates `.env.local` with random bootstrap env config (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
 
-**Manual adjustments:** Edit `.env.local` to customize the datastore or add optional variables like `GIT_REMOTE_URL` for syncing soul changes to a remote repository.
+**Manual adjustments:** Edit `.env.local` to customize the datastore or add optional variables like `SOUL_GIT_REMOTE_URL` for syncing soul changes to a remote repository.
 
 ### Soul Repository
 
 The soul lives at `~/.tulipfarm/soul` — a git repository that stores your system configuration (resources, routines, agents, skills, integrations). By default, it is local-only. To enable remote sync:
 
 1. Create a private GitHub repository for your soul
-2. Add the remote and set `GIT_REMOTE_URL` in `.env.local`:
+2. Add the remote and set `SOUL_GIT_REMOTE_URL` in `.env.local`:
    ```bash
    git -C ~/.tulipfarm/soul remote add origin https://github.com/your-org/your-soul.git
    git -C ~/.tulipfarm/soul push -u origin main
    ```
-3. Update `.env.local`: `GIT_REMOTE_URL=https://github.com/your-org/your-soul.git`
+3. Update `.env.local`: `SOUL_GIT_REMOTE_URL=https://github.com/your-org/your-soul.git`
+
+Or configure it from the Settings UI setup wizard, which persists the remote + credential and syncs immediately (no restart needed).
 
 ### Stopping Services
 

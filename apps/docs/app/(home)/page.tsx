@@ -121,8 +121,8 @@ export default function HomePage() {
             <p className="text-sm leading-6 text-fd-muted-foreground">
               One script installs PostgreSQL 17 + pgvector, plants your soul repository at{" "}
               <code className="text-fd-foreground">~/.tulipfarm/soul</code>, and generates your
-              bootstrap secrets. <code className="text-fd-foreground">pnpm dev</code> boots the API
-              and the web UI; the first account you create is the admin.
+              bootstrap env config. <code className="text-fd-foreground">pnpm dev</code> boots the
+              API and the web UI; the first account you create is the admin.
             </p>
             <Link
               href="/docs/getting-started"
