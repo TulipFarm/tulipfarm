@@ -15,6 +15,7 @@ import type { AvailableSkill } from "../soul/skills/registry";
 export function assembleAgentSystemPrompt(args: {
   agent: SoulAgent;
   platformAgent: PlatformAgent | undefined;
+  business?: AssembleContext["business"];
   memory: AssembleContext["memory"];
   governancePages: AssembleContext["governancePages"];
   availableSkills: AvailableSkill[];
@@ -28,6 +29,7 @@ export function assembleAgentSystemPrompt(args: {
   const {
     agent,
     platformAgent,
+    business,
     memory,
     governancePages,
     availableSkills,
@@ -47,6 +49,7 @@ export function assembleAgentSystemPrompt(args: {
     agentId: agent.name,
     domain: typeof agent.frontmatter.domain === "string" ? agent.frontmatter.domain : null,
     tenantId: "default",
+    business,
     personality: agent.body,
     memory,
     governancePages,

@@ -85,4 +85,16 @@ describe("assembleAgentSystemPrompt", () => {
     expect(blockBody(out, "soul-context")).not.toContain("skill-forge");
     expect(out).toContain("skill-forge");
   });
+
+  it("threads business.name/description into the business-context block", () => {
+    const out = assembleAgentSystemPrompt({
+      agent,
+      platformAgent: undefined,
+      business: { name: "Acme Corp", description: "Sells widgets." },
+      ...empty,
+    });
+    expect(blockBody(out, "business-context")).toBe(
+      "\nname: Acme Corp\ndescription: Sells widgets.\n"
+    );
+  });
 });
