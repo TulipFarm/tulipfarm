@@ -21,6 +21,16 @@ export interface AssembleContext {
   domain?: string | null;
   /** Single-tenant V1: "default". */
   tenantId?: string;
+  /**
+   * soul.yaml manifest's business profile — surfaces as `<business-context>`. `name` unset → block
+   * omitted; other fields render as `key: value` lines only when set. Grouped in one object so new
+   * profile fields (industry, website, ...) only touch this shape and the renderer, not every
+   * call site between `soulLoader.manifest` and here.
+   */
+  business?: {
+    name?: string;
+    description?: string;
+  };
   /** The agent's AGENT.md body. */
   personality?: string;
   /** Per-user working memory, store-capped, oldest-written first (MEM-V1-003). */
@@ -86,6 +96,15 @@ function renderAgentIdentity(ctx: AssembleContext): string {
   if (ctx.domain) lines.push(`domain: ${ctx.domain}`);
   if (ctx.tenantId) lines.push(`tenantId: ${ctx.tenantId}`);
   return lines.length > 0 ? block("agent-identity", lines.join("\n")) : "";
+}
+
+function renderBusinessContext(ctx: AssembleContext): string {
+  const name = ctx.business?.name?.trim();
+  if (!name) return "";
+  const lines = [`name: ${name}`];
+  const description = ctx.business?.description?.trim();
+  if (description) lines.push(`description: ${description}`);
+  return block("business-context", lines.join("\n"));
 }
 
 function renderAgentPersonality(ctx: AssembleContext): string {
@@ -292,7 +311,7 @@ function renderKnowledgeGrounding(ctx: AssembleContext): string {
 }
 
 /**
- * Assemble the agent system prompt from the 10 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
+ * Assemble the agent system prompt from the 11 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
  * and synchronous. Each block renders to a string or "" (when empty or over budget); empty blocks
  * are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders eager skill
  * bodies and `<available-skills>` the lazy skill L1 index; `<soul-context>` renders the repo
@@ -303,6 +322,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
   const blocks = [
     renderPlatformInstructions(ctx),
     renderAgentIdentity(ctx),
+    renderBusinessContext(ctx),
     renderAgentPersonality(ctx),
     renderMemory(ctx),
     // V1: governance is tenant-wide. `domain` is display-only on the agent (AGT-V1-007), so it

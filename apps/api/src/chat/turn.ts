@@ -269,9 +269,18 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     // agent that can actually cite (cite_sources in its scoped toolset). Otherwise a handoff target
     // without cite_sources (e.g. the IA) would receive pinned pages telling it to call a tool it lacks.
     const canCite = canGroundKnowledge(knowledge, tools);
+    const manifest = soulLoader?.manifest;
+    const business = {
+      name: typeof manifest?.businessName === "string" ? manifest.businessName : undefined,
+      description:
+        typeof manifest?.businessDescription === "string"
+          ? manifest.businessDescription
+          : undefined,
+    };
     return assembleAgentSystemPrompt({
       agent: a,
       platformAgent: pa,
+      business,
       memory: memoryList,
       governancePages,
       availableSkills: soulAvailableSkills,
