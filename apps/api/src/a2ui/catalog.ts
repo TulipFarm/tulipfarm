@@ -166,33 +166,40 @@ export const A2UI_CATALOG: Record<A2uiNode["component"], CatalogEntry> = {
 
   List: (node, ctx, id) => {
     const n = node as Of<"List">;
-    const items = n.items
+    const items = (ctx.raw(n.items) ?? []) as Array<{ text: A2uiValue; meta?: A2uiValue }>;
+    const body = items
       .map((it) => {
         const meta = it.meta ? `<span data-slot="meta">${ctx.text(it.meta)}</span>` : "";
         return `<li>${ctx.text(it.text)}${meta}</li>`;
       })
       .join("");
-    return `<tf-list${id}><ul>${items}</ul></tf-list>`;
+    return `<tf-list${id}><ul>${body}</ul></tf-list>`;
   },
 
   DetailView: (node, ctx, id) => {
     const n = node as Of<"DetailView">;
-    const rows = n.rows
+    const rows = (ctx.raw(n.rows) ?? []) as Array<{ label: A2uiValue; value: A2uiValue }>;
+    const body = rows
       .map((r) => `<div><dt>${ctx.text(r.label)}</dt><dd>${ctx.text(r.value)}</dd></div>`)
       .join("");
-    return `<tf-detail-view${id}><dl>${rows}</dl></tf-detail-view>`;
+    return `<tf-detail-view${id}><dl>${body}</dl></tf-detail-view>`;
   },
 
   DataTable: (node, ctx, id) => {
     const n = node as Of<"DataTable">;
-    const head = n.columns
+    const columns = (ctx.raw(n.columns) ?? []) as string[];
+    const rows = (ctx.raw(n.rows) ?? []) as unknown[][];
+    const head = columns
       .map((c) => {
         const sorted = n.sort && n.sort.column === c ? ` aria-sort="${n.sort.direction}"` : "";
         return `<th${sorted}>${esc(c)}</th>`;
       })
       .join("");
-    const body = n.rows
-      .map((row) => `<tr>${row.map((cell) => `<td>${ctx.text(cell)}</td>`).join("")}</tr>`)
+    const body = rows
+      .map((row) => {
+        const cells = (Array.isArray(row) ? row : []) as A2uiValue[];
+        return `<tr>${cells.map((cell) => `<td>${ctx.text(cell)}</td>`).join("")}</tr>`;
+      })
       .join("");
     return `<tf-data-table${id}><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></tf-data-table>`;
   },
