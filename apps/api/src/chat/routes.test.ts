@@ -823,6 +823,48 @@ describe("chat routes", () => {
       );
     });
 
+    // Business context — soul.yaml's businessName/businessDescription surface in the system prompt
+    // (not working_memory), per apps/api/AGENTS.md's "Context & streaming" note.
+    it("renders soul.yaml manifest businessName/businessDescription in <business-context>", async () => {
+      await app.close();
+      const soulLoader = {
+        agents: new Map(),
+        skills: new Map(),
+        manifest: { businessName: "Acme Corp", businessDescription: "Sells widgets." },
+      } as unknown as SoulLoader;
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        soulLoader,
+      });
+
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      const system = JSON.stringify(prompt[0]?.content);
+      expect(system).toContain(
+        "<business-context>\\nname: Acme Corp\\ndescription: Sells widgets.\\n</business-context>"
+      );
+    });
+
+    it("omits <business-context> when soul.yaml has no businessName", async () => {
+      const res = await post({ message: userMsg("hi") });
+      expect(res.statusCode).toBe(200);
+      await waitFor(() => capturedPrompts.length >= 1);
+
+      const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
+      expect(JSON.stringify(prompt[0]?.content)).not.toContain("<business-context>");
+    });
+
     // Composer tags (`/skill`, `#resource`) — per-turn eager injection. A tagged skill's body lands
     // in <skills> even when it is NOT marked eager (works for any agent), and a tagged resource
     // type's schema lands in <eager-resources>. Names are ephemeral — supplied per request, never

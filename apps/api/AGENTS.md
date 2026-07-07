@@ -52,6 +52,16 @@ Fake dependencies implement the real interface (class, not `vi.fn()` object) for
 
 Mock `node:fs` / `node:fs/promises` with `vi.mock` at the top of the test file when the route does filesystem I/O.
 
+Always run tests via `pnpm test` (turbo, per-package). A bare root `pnpm exec vitest run` skips
+per-package vitest config (e.g. missing jsdom setup) and gives false failures. Stale CJS files in
+`apps/api/dist/` can also get picked up by vitest when run from repo root — if a failure looks
+unrelated to your change, confirm by scoping the run to the touched package before assuming a
+regression.
+
+`@electric-sql/pglite`'s `vector` export moved packages between versions: pre-0.5 it's
+`@electric-sql/pglite/vector`; 0.5.x+ moved it to `@electric-sql/pglite-pgvector` (same `vector`
+export). Check this import path when bumping pglite.
+
 ## Adding a New Feature
 
 1. Create `src/<feature>/` directory
@@ -103,6 +113,9 @@ knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`k
 - **Durable SSE** (`chat/`): the chat turn streams via an in-memory `StreamHub` (`stream-hub.ts`)
   while persisting each event to the `stream_resume` table (`stream-resume.ts`). Reconnects replay
   from `Last-Event-ID`; `stream-gc.ts` expires old buffers on pg-boss.
+- Static business/identity facts (e.g. `soul.yaml`'s `businessName`/`businessDescription`) belong
+  in the **system prompt** (`assembleSystemPrompt`), not `memory/` working_memory — don't route
+  them through working_memory just because onboarding captured them at runtime.
 
 ## Guardrails (`src/guardrails/`)
 

@@ -47,8 +47,9 @@ four steps:
    depending on the provider) and writes a default `llm.config.yaml` with all three tiers
    pointing to the chosen provider and model. This step can be skipped and configured later
    in **Settings → LLM Config**.
-4. **Soul backup** — sets a git remote URL and optional credentials so the soul syncs to
-   a private repository. This step can also be skipped.
+4. **Soul backup** — sets a git remote URL and optional credential so the soul syncs to
+   a private repository. The instance clones/pulls the remote immediately on submit — no
+   restart required. This step can also be skipped.
 
 After step 4, the wizard calls `POST /api/v1/setup/complete`, which writes
 `setupComplete: true` to `soul.yaml`. Subsequent wizard-step routes return `403`.

@@ -39,6 +39,7 @@ describe("assembleSystemPrompt — block order", () => {
         platformInstructions: "platform rules",
         agentId: "sales",
         tenantId: "default",
+        business: { name: "Acme Corp" },
         personality: "You are helpful.",
         memory: [mem("plan", "enterprise")],
         governancePages: [govDoc("Policy", "Be compliant.")],
@@ -47,6 +48,7 @@ describe("assembleSystemPrompt — block order", () => {
     const order = [
       "<platform-instructions>",
       "<agent-identity>",
+      "<business-context>",
       "<agent-personality>",
       "<memory>",
       "<governance-knowledge>",
@@ -182,6 +184,33 @@ describe("assembleSystemPrompt — agent-identity", () => {
 
     const empty = assembleSystemPrompt(baseCtx());
     expect(empty).not.toContain("<agent-identity>");
+  });
+});
+
+describe("assembleSystemPrompt — business-context", () => {
+  it("renders name and description when both are set", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ business: { name: "Acme Corp", description: "Sells widgets." } })
+    );
+    expect(out).toContain("<business-context>");
+    expect(out).toContain("name: Acme Corp");
+    expect(out).toContain("description: Sells widgets.");
+  });
+
+  it("omits the description line when only name is set", () => {
+    const out = assembleSystemPrompt(baseCtx({ business: { name: "Acme Corp" } }));
+    expect(out).toContain("name: Acme Corp");
+    expect(out).not.toContain("description:");
+  });
+
+  it("omits the block entirely when name is absent", () => {
+    const withDescOnly = assembleSystemPrompt(
+      baseCtx({ business: { description: "Sells widgets." } })
+    );
+    expect(withDescOnly).not.toContain("<business-context>");
+
+    const empty = assembleSystemPrompt(baseCtx());
+    expect(empty).not.toContain("<business-context>");
   });
 });
 

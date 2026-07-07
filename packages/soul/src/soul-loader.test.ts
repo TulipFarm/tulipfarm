@@ -240,22 +240,32 @@ describe("SoulLoader", () => {
   });
 
   describe("llmConfig and manifest", () => {
-    it("parses llm.config.yaml and soul.yaml", async () => {
-      await write(join(TMP, "llm.config.yaml"), "provider: anthropic\nmodel: claude-sonnet-4-6\n");
-      await write(join(TMP, "soul.yaml"), "name: my-instance\n");
+    it("parses llm from soul.yaml's nested `llm:` key", async () => {
+      await write(
+        join(TMP, "soul.yaml"),
+        "name: my-instance\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-6\n"
+      );
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
       expect(loader.llmConfig).toMatchObject({ provider: "anthropic" });
       expect(loader.manifest).toMatchObject({ name: "my-instance" });
     });
 
-    it("returns null for missing llm.config.yaml and soul.yaml without warn", async () => {
+    it("returns null for missing soul.yaml without warn", async () => {
       const logger = makeLogger();
       const loader = new SoulLoader(TMP, logger);
       await loader.load();
       expect(loader.llmConfig).toBeNull();
       expect(loader.manifest).toBeNull();
       expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it("returns null llmConfig when soul.yaml has no `llm:` key", async () => {
+      await write(join(TMP, "soul.yaml"), "name: my-instance\n");
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.llmConfig).toBeNull();
+      expect(loader.manifest).toMatchObject({ name: "my-instance" });
     });
   });
 

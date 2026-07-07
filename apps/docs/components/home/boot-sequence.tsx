@@ -20,7 +20,7 @@ const LINES: Line[] = [
   { kind: "cmd", text: "bash scripts/setup-dev.sh" },
   { kind: "ok", text: "postgres 17 + pgvector ready" },
   { kind: "ok", text: "soul planted at ~/.tulipfarm/soul" },
-  { kind: "ok", text: "bootstrap secrets generated" },
+  { kind: "ok", text: "bootstrap env config generated" },
   { kind: "cmd", text: "pnpm dev" },
   { kind: "svc", text: "api  http://localhost:4010" },
   { kind: "svc", text: "web  http://localhost:4000" },

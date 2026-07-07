@@ -19,6 +19,7 @@
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@node-rs/argon2": "^2.0.2",
     "@scalar/fastify-api-reference": "^1.62.0",
+    "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",

@@ -64,7 +64,6 @@ export class SoulLoader {
       resources,
       routines,
       integrations,
-      llmConfig,
       guardrailsConfig,
       observabilityConfig,
       manifest,
@@ -74,7 +73,6 @@ export class SoulLoader {
       this.loadResources(),
       this.loadRoutines(),
       this.loadIntegrations(),
-      this.loadYamlFile(join(this.soulPath, "llm.config.yaml"), "llm.config.yaml"),
       this.loadYamlFile(join(this.soulPath, "guardrails.yaml"), "guardrails.yaml"),
       this.loadYamlFile(
         join(this.soulPath, "observability.config.yaml"),
@@ -88,7 +86,7 @@ export class SoulLoader {
     this.resources = resources;
     this.routines = routines;
     this.integrations = integrations;
-    this.llmConfig = llmConfig;
+    this.llmConfig = (manifest?.llm as Record<string, unknown> | undefined) ?? null;
     this.guardrailsConfig = guardrailsConfig;
     this.observabilityConfig = observabilityConfig;
     this.manifest = manifest;

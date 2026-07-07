@@ -29,6 +29,8 @@ function makeMockGit(overrides: Record<string, any> = {}) {
       commit: "abc1234",
       summary: { changes: 2, insertions: 0, deletions: 0 },
     }),
+    getRemotes: vi.fn().mockResolvedValue([{ name: "origin", refs: { fetch: "", push: "" } }]),
+    listRemote: vi.fn().mockResolvedValue("abc1234def5678\trefs/heads/main\n"),
     ...overrides,
   };
   git.outputHandler = vi.fn().mockReturnValue(git);
@@ -127,6 +129,27 @@ describe("GitSyncService", () => {
       mockGit.fetch.mockRejectedValue(new Error("timeout"));
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
       await expect(svc.bootSync()).rejects.toThrow("timeout");
+    });
+  });
+
+  describe("bootSync — remote has no main branch yet (freshly created empty repo)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.listRemote.mockResolvedValue(""); // no refs at all on origin
+    });
+
+    it("pushes local main to initialize the remote instead of fetching", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.fetch).not.toHaveBeenCalled();
+      expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
+    });
+
+    it("does not push when local has no commits yet", async () => {
+      mockGit.revparse.mockRejectedValue(new Error("no commits"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.bootSync();
+      expect(mockGit.push).not.toHaveBeenCalled();
     });
   });
 
@@ -280,6 +303,75 @@ describe("GitSyncService", () => {
     });
   });
 
+  describe("configureRemote (setup wizard live sync)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true); // repo dir already exists (booted local-only or already cloned)
+    });
+
+    it("adds origin and syncs when the repo previously had no remote (local-only boot)", async () => {
+      mockGit.getRemotes.mockResolvedValue([]);
+      mockGit.raw.mockResolvedValue("0\t0");
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await svc.configureRemote(REMOTE, "ghp_token");
+      expect(mockGit.remote).toHaveBeenCalledWith([
+        "add",
+        "origin",
+        "https://ghp_token@github.com/user/soul.git",
+      ]);
+      expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
+    });
+
+    it("repoints an existing origin and re-syncs", async () => {
+      mockGit.getRemotes.mockResolvedValue([{ name: "origin", refs: { fetch: "", push: "" } }]);
+      mockGit.raw.mockResolvedValue("0\t2");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.configureRemote("https://github.com/user/other-soul.git", "ghp_new");
+      expect(mockGit.remote).toHaveBeenCalledWith([
+        "set-url",
+        "origin",
+        "https://ghp_new@github.com/user/other-soul.git",
+      ]);
+      expect(mockGit.pull).toHaveBeenCalledWith("origin", "main", ["--ff-only"]);
+    });
+
+    it("propagates a fetch/clone failure (bad URL or bad token)", async () => {
+      mockGit.getRemotes.mockResolvedValue([]);
+      mockGit.fetch.mockRejectedValue(new Error("Authentication failed"));
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await expect(svc.configureRemote(REMOTE, "bad_token")).rejects.toThrow(
+        "Authentication failed"
+      );
+    });
+  });
+
+  describe("syncNow (manual sync)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it("throws when no remote is configured", async () => {
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await expect(svc.syncNow()).rejects.toThrow("no git remote configured");
+    });
+
+    it("pulls and clears lastSyncError on success", async () => {
+      mockGit.raw.mockResolvedValue("0\t0");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await svc.syncNow();
+      const status = await svc.getStatus();
+      expect(status.lastSyncError).toBeNull();
+      expect(status.lastSyncAt).not.toBeNull();
+    });
+
+    it("records lastSyncError and rethrows on failure", async () => {
+      mockGit.fetch.mockRejectedValue(new Error("could not read Username"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.syncNow()).rejects.toThrow("could not read Username");
+      const status = await svc.getStatus();
+      expect(status.lastSyncError).toContain("could not read Username");
+    });
+  });
+
   describe("syncOnce", () => {
     beforeEach(() => {
       mockExistsSync.mockReturnValue(true);
@@ -304,6 +396,102 @@ describe("GitSyncService", () => {
       const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
       await expect(svc.syncOnce()).resolves.toBeUndefined();
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("host unreachable"));
+    });
+  });
+
+  describe("hasRemote", () => {
+    it("is false with no remote configured", () => {
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      expect(svc.hasRemote()).toBe(false);
+    });
+
+    it("is true once a remote is configured", () => {
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      expect(svc.hasRemote()).toBe(true);
+    });
+  });
+
+  describe("getStatus", () => {
+    it("reports not configured with no repo on disk", async () => {
+      mockExistsSync.mockReturnValue(false);
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      await expect(svc.getStatus()).resolves.toEqual({
+        remoteConfigured: false,
+        remoteUrl: undefined,
+        ahead: 0,
+        behind: 0,
+        headSha: null,
+        lastSyncError: null,
+        lastSyncAt: null,
+      });
+    });
+
+    it("reports headSha with no remote configured", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.revparse.mockResolvedValue("abc1234");
+      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const status = await svc.getStatus();
+      expect(status).toEqual({
+        remoteConfigured: false,
+        ahead: 0,
+        behind: 0,
+        headSha: "abc1234",
+        lastSyncError: null,
+        lastSyncAt: null,
+      });
+      expect(mockGit.fetch).not.toHaveBeenCalled();
+    });
+
+    it("reports ahead/behind against origin/main when remote is configured", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.revparse.mockResolvedValue("abc1234");
+      mockGit.raw.mockResolvedValue("1\t2");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const status = await svc.getStatus();
+      expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
+      expect(status).toEqual({
+        remoteConfigured: true,
+        remoteUrl: REMOTE,
+        ahead: 1,
+        behind: 2,
+        headSha: "abc1234",
+        lastSyncError: null,
+        lastSyncAt: expect.any(String),
+      });
+    });
+
+    it("degrades to zero ahead/behind on fetch failure but surfaces lastSyncError, never throws", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.revparse.mockResolvedValue("abc1234");
+      mockGit.fetch.mockRejectedValue(new Error("host unreachable"));
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      await expect(svc.getStatus()).resolves.toEqual({
+        remoteConfigured: true,
+        remoteUrl: REMOTE,
+        ahead: 0,
+        behind: 0,
+        headSha: "abc1234",
+        lastSyncError: "host unreachable",
+        lastSyncAt: expect.any(String),
+      });
+    });
+
+    it("reports zero ahead/behind with no error when remote has no main branch yet", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.revparse.mockResolvedValue("abc1234");
+      mockGit.listRemote.mockResolvedValue("");
+      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const status = await svc.getStatus();
+      expect(mockGit.fetch).not.toHaveBeenCalled();
+      expect(status).toEqual({
+        remoteConfigured: true,
+        remoteUrl: REMOTE,
+        ahead: 0,
+        behind: 0,
+        headSha: "abc1234",
+        lastSyncError: null,
+        lastSyncAt: expect.any(String),
+      });
     });
   });
 });
