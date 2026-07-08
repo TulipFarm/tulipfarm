@@ -17,12 +17,12 @@
     "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/validation": "workspace:*",
-    "ai": "^7.0.2"
+    "ai": "^7.0.17"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^24.13.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
