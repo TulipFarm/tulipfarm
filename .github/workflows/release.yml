@@ -3,8 +3,9 @@ name: Release
 # Cut a release from `main` with release-it: derive the version bump from
 # Conventional Commits, write CHANGELOG.md, commit, tag `v<version>`, push, and
 # create the matching GitHub Release. Pushing the `v*` tag triggers the
-# `publish-image` job in ci.yml, which builds + pushes the multi-arch image to
-# GHCR — so the Docker image ships as a consequence of the release.
+# Publish image workflow (publish-image.yml), which verifies the bundled stack
+# and pushes the multi-arch image to GHCR — so the Docker image ships as a
+# consequence of the release.
 #
 # This is the CI counterpart to running `pnpm release` locally; both use the same
 # .release-it.json so the two paths produce identical releases.

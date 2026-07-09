@@ -135,9 +135,10 @@ Releases are cut with [`release-it`](https://github.com/release-it/release-it) +
 `@release-it/conventional-changelog` (config in `.release-it.json`): it derives the
 version from the commit history, writes `CHANGELOG.md`, bumps `package.json`, commits,
 tags `v<version>`, pushes, and creates the GitHub Release. Pushing the `v*` tag triggers
-the `publish-image` job in `ci.yml`, which builds and pushes the multi-arch Docker image
-to GHCR (`ghcr.io/tulipfarm/app:<version>` + `:latest`) after the `compose-parity` health
-gate — so the image ships as a consequence of the release. Two equivalent ways to cut one:
+the **Publish image** workflow (`publish-image.yml`), which builds and pushes the
+multi-arch Docker image to GHCR (`ghcr.io/tulipfarm/tulipfarm:<version>` + `:latest`)
+after the `compose-parity` health gate — so the image ships as a consequence of the
+release. Two equivalent ways to cut one:
 
 - **CI (recommended):** run the **Release** workflow from the Actions tab
   (`workflow_dispatch`). Optionally choose the bump (`auto`/`patch`/`minor`/`major`) or a
@@ -162,4 +163,4 @@ It runs `release-it --no-git.requireBranch --preRelease <id>`, so it works off
 feature branches and marks the GitHub Release as a prerelease. The `v*` tag still
 triggers the image publish, but `publish-image` only moves `:latest` for **stable**
 tags — prerelease tags (those containing a `-`) publish only
-`ghcr.io/tulipfarm/app:<version>`.
+`ghcr.io/tulipfarm/tulipfarm:<version>`.

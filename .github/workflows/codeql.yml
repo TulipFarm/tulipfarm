@@ -1,5 +1,13 @@
 name: CodeQL
 
+# Prefix run titles so CodeQL runs are distinguishable from CI runs on the same
+# commit (both otherwise default to the commit message / PR title).
+run-name: >-
+  CodeQL scan ·
+  ${{ github.event_name == 'schedule' && 'weekly full scan'
+    || github.event_name == 'pull_request' && github.event.pull_request.title
+    || github.ref_name }}
+
 on:
   push:
     branches: [main]

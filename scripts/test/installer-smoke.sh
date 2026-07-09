@@ -7,12 +7,12 @@
 # the bundled postgres base is pulled. Used both locally and by the CI `installer-smoke` job.
 #
 # Env:
-#   SMOKE_REBUILD=1   force `docker build` even if ghcr.io/tulipfarm/app:ci already exists
+#   SMOKE_REBUILD=1   force `docker build` even if ghcr.io/tulipfarm/tulipfarm:ci already exists
 #   TF_PORT=<port>    host port to bind (default 8099, off the usual 8080 to dodge clashes)
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-IMAGE="ghcr.io/tulipfarm/app:ci"
+IMAGE="ghcr.io/tulipfarm/tulipfarm:ci"
 PORT="${TF_PORT:-8099}"
 INSTALL_DIR="$(mktemp -d)"
 
