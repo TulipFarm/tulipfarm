@@ -14,8 +14,8 @@ installer writes these to `/opt/tulipfarm/.env`; in local development they live 
 | `DATABASE_URL` | — | PostgreSQL 17 connection string. The single datastore (pgvector + pg-boss). Must allow the `vector` and `citext` extensions — the app creates them at boot. |
 | `SOUL_PATH` | — | Absolute path to the soul git repository. Must be outside the project repo — a relative or in-repo path is rejected at boot. |
 | `ENCRYPTION_KEY` | — | Base64-encoded 32-byte key for encrypting application secrets. Startup fails fast if the key is absent or not 32 bytes. Generate with `openssl rand -base64 32`. |
-| `JWT_SECRET` | — | Signing secret for API tokens. Generate with `openssl rand -base64 32`. |
-| `WEBHOOK_SIGNING_SECRET` | — | Secret for signing outbound webhooks. Generate with `openssl rand -base64 32`. |
+| `JWT_SECRET` | — | Required, validated as 32-byte base64 at boot. Reserved for request signing — no feature is wired to it yet (API tokens are stored as hashes, not JWTs — see [Hashing](/docs/security/hashing)). Generate with `openssl rand -base64 32`. |
+| `WEBHOOK_SIGNING_SECRET` | — | Required, validated as 32-byte base64 at boot. Reserved for webhook signature verification — not yet wired (the routine webhook uses a per-trigger shared secret instead). Generate with `openssl rand -base64 32`. |
 
 ## Headless seeding
 
