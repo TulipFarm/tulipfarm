@@ -179,8 +179,13 @@ export class SoulLoader {
       try {
         const content = await readFile(configPath, "utf8");
         const config = (parseYaml(content) ?? {}) as Record<string, unknown>;
-        const hasHooks = await fileExists(join(this.soulPath, "routines", name, "hooks.ts"));
-        map.set(name, { name, config, hasHooks });
+        const hooksPath = join(this.soulPath, "routines", name, "hooks.ts");
+        const hasHooks = await fileExists(hooksPath);
+        const hookSource = hasHooks ? await readFile(hooksPath, "utf8") : undefined;
+        const hookHash = hookSource
+          ? createHash("sha256").update(hookSource).digest("hex")
+          : undefined;
+        map.set(name, { name, config, hasHooks, hookSource, hookHash });
       } catch (err) {
         this.logger.warn(
           `Soul: skipping routine "${name}" — ${err instanceof Error ? err.message : String(err)}`

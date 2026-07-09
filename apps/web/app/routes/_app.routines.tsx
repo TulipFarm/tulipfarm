@@ -1,14 +1,7 @@
-import type { MetaFunction } from "@remix-run/react";
-import { EmptyState } from "~/components/empty-state";
+import { type MetaFunction, Outlet } from "@remix-run/react";
 
 export const meta: MetaFunction = () => [{ title: "Routines · tulipfarm" }];
 
-export default function RoutinesPage() {
-  return (
-    <EmptyState
-      section="routines"
-      title="Routines"
-      hint="No routines yet. Durable automations appear here once defined."
-    />
-  );
+export default function RoutinesLayout() {
+  return <Outlet />;
 }

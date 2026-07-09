@@ -12,9 +12,16 @@ export { sendApprovalDecision } from "./chat/sse-client";
 
 export type PendingApproval = {
   approvalId: string;
-  toolCallId: string;
-  toolName: string;
-  args: unknown;
+  kind?: "tool_call" | "routine_state";
+  // tool_call fields
+  toolCallId?: string;
+  toolName?: string;
+  args?: unknown;
+  // routine_state fields (routine human_approval states, v0.11)
+  routineSlug?: string;
+  runId?: string;
+  stateName?: string;
+  summary?: unknown;
   expiresAt: string;
   createdAt: string;
 };

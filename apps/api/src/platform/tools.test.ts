@@ -525,24 +525,43 @@ describe("delegateToAgentTool", () => {
 // ── trigger_routine ───────────────────────────────────────────────────────────
 
 describe("triggerRoutineTool", () => {
-  it("returns stub receipt for a known routine", async () => {
-    const ctx = makeCtx({}, {}, undefined, { "daily-digest": makeRoutine("daily-digest") });
+  const withTrigger = (ctx: PlatformToolContext): PlatformToolContext => ({
+    ...ctx,
+    triggerRoutine: async (slug) => {
+      if (slug === "ghost") {
+        const err = new Error(`routine "${slug}" not found`);
+        err.name = "RoutineTriggerError";
+        throw err;
+      }
+      return { runId: "run-123" };
+    },
+  });
+
+  it("returns the real runId for a known routine", async () => {
+    const ctx = withTrigger(
+      makeCtx({}, {}, undefined, { "daily-digest": makeRoutine("daily-digest") })
+    );
     const res = await triggerRoutineTool.handler({ name: "daily-digest" }, ctx);
     expect(res).toEqual({
       success: true,
-      data: { routineId: "daily-digest", status: "triggered", runId: null, inputs: null },
+      data: { routineId: "daily-digest", status: "triggered", runId: "run-123", inputs: null },
     });
   });
 
   it("passes inputs through", async () => {
-    const ctx = makeCtx({}, {}, undefined, { notify: makeRoutine("notify") });
+    const ctx = withTrigger(makeCtx({}, {}, undefined, { notify: makeRoutine("notify") }));
     const res = await triggerRoutineTool.handler({ name: "notify", inputs: { userId: "u1" } }, ctx);
     expect(res).toMatchObject({ success: true, data: { inputs: { userId: "u1" } } });
   });
 
   it("returns not_found for unknown routine", async () => {
-    const res = await triggerRoutineTool.handler({ name: "ghost" }, makeCtx());
+    const res = await triggerRoutineTool.handler({ name: "ghost" }, withTrigger(makeCtx()));
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("returns internal_error when the routine engine is unavailable", async () => {
+    const res = await triggerRoutineTool.handler({ name: "x" }, makeCtx());
+    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
   });
 
   it("returns validation_error for missing name", async () => {
@@ -772,7 +791,7 @@ describe("completeStateTool", () => {
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 describe("PLATFORM_TOOLS registry", () => {
-  it("exports exactly 20 platform tools in order", () => {
+  it("exports exactly 21 platform tools in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "load_skill",
@@ -787,6 +806,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "transfer_to_agent",
       "delegate_to_agent",
       "trigger_routine",
+      "routine_forge",
       "routine_picker",
       "begin_soul_batch",
       "end_soul_batch",

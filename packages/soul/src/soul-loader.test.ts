@@ -218,6 +218,22 @@ describe("SoulLoader", () => {
       });
       expect(loader.routines.get("daily-report")?.hasHooks).toBe(true);
     });
+
+    it("reads hookSource and computes hookHash when hooks.ts exists", async () => {
+      const hookSource = "({ beforeHook(ctx) { return ctx; } })";
+      await write(join(TMP, "routines", "hooked", "routine.yaml"), "name: hooked\n");
+      await write(join(TMP, "routines", "hooked", "hooks.ts"), hookSource);
+      await write(join(TMP, "routines", "bare", "routine.yaml"), "name: bare\n");
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      const hooked = loader.routines.get("hooked");
+      expect(hooked?.hookSource).toBe(hookSource);
+      expect(hooked?.hookHash).toMatch(/^[0-9a-f]{64}$/);
+      const bare = loader.routines.get("bare");
+      expect(bare?.hasHooks).toBe(false);
+      expect(bare?.hookSource).toBeUndefined();
+      expect(bare?.hookHash).toBeUndefined();
+    });
   });
 
   describe("integrations", () => {

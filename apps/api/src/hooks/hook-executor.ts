@@ -51,7 +51,10 @@ export class HookExecutor {
     });
   }
 
-  private send(req: Omit<WorkerRequest, "id">): Promise<WorkerResponse> {
+  private send(
+    // Distributive omit: `Omit<union>` collapses the discriminated variants.
+    req: WorkerRequest extends infer R ? (R extends WorkerRequest ? Omit<R, "id"> : never) : never
+  ): Promise<WorkerResponse> {
     if (this.workerError) {
       return Promise.reject(new HookError(`hook worker error: ${this.workerError.message}`));
     }
@@ -59,7 +62,7 @@ export class HookExecutor {
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       try {
-        this.worker.postMessage({ ...req, id } satisfies WorkerRequest);
+        this.worker.postMessage({ ...req, id } as WorkerRequest);
       } catch (err) {
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
@@ -134,7 +137,7 @@ export class HookExecutor {
       );
     }
     this.recordSuccess(resourceType);
-    return res.record;
+    return "record" in res ? res.record : record;
   }
 
   async runAfterHook(
@@ -158,6 +161,89 @@ export class HookExecutor {
     } else {
       this.recordSuccess(resourceType);
     }
+  }
+
+  /**
+   * Evaluate a routine data-flow expression in the sandbox (100ms, no host/fs/net).
+   * Throws HookError on evaluation failure/timeout. `breakerKey` should identify the
+   * routine (e.g. `routine:{slug}`) so a hot-looping expression trips its own breaker.
+   */
+  async runExpression(
+    code: string,
+    scope: Record<string, unknown>,
+    breakerKey: string
+  ): Promise<unknown> {
+    try {
+      analyzeHook(code);
+    } catch (err) {
+      if (err instanceof HookAnalysisError) throw new HookError(err.message);
+      throw err;
+    }
+    const cb = this.breaker.get(breakerKey);
+    if (cb?.disabled) throw new HookError("expression disabled by circuit breaker");
+
+    let res: WorkerResponse;
+    try {
+      res = await this.send({ kind: "expression", code, scope });
+    } catch (err) {
+      this.recordFailure(breakerKey);
+      throw err instanceof HookError
+        ? err
+        : new HookError(`hook worker error: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      this.recordFailure(breakerKey);
+      throw new HookError(
+        res.timedOut ? "expression timed out" : `expression error: ${res.error}`,
+        res.timedOut
+      );
+    }
+    this.recordSuccess(breakerKey);
+    return "value" in res ? res.value : undefined;
+  }
+
+  /**
+   * Run a named function from a routine's hooks.ts (2s budget). Same static-analysis +
+   * hash-integrity + circuit-breaker guards as resource hooks.
+   */
+  async runRoutineHook(
+    hookSource: string,
+    fnName: string,
+    invocation: Record<string, unknown>,
+    args: unknown,
+    breakerKey: string,
+    opts: { expectedHash?: string; optional?: boolean } = {}
+  ): Promise<unknown> {
+    if (process.env.HOOKS_DISABLED === "true") return undefined;
+
+    const guardErr = this.checkGuards(hookSource, breakerKey, opts.expectedHash);
+    if (guardErr) throw guardErr;
+
+    let res: WorkerResponse;
+    try {
+      res = await this.send({
+        kind: "routine-hook",
+        hookSource,
+        fnName,
+        invocation,
+        args,
+        optional: opts.optional,
+      });
+    } catch (err) {
+      this.recordFailure(breakerKey);
+      throw err instanceof HookError
+        ? err
+        : new HookError(`hook worker error: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      this.recordFailure(breakerKey);
+      throw new HookError(
+        res.timedOut ? "routine hook timed out" : `routine hook error: ${res.error}`,
+        res.timedOut
+      );
+    }
+    this.recordSuccess(breakerKey);
+    return "value" in res ? res.value : undefined;
   }
 
   async close(): Promise<void> {

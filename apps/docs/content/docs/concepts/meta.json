@@ -8,6 +8,7 @@
     "resources",
     "agents",
     "skills",
+    "routines",
     "integrations",
     "knowledge",
     "llm",

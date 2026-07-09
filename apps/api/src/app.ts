@@ -14,6 +14,7 @@ import Fastify from "fastify";
 import type { A2uiSurfaceStore } from "./a2ui/surface-store";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
+import type { ApprovalsRepo } from "./approvals/repo";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook } from "./auth/csrf";
@@ -47,6 +48,8 @@ import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
+import type { RoutineRoutesDeps } from "./routines/routes";
+import { registerRoutineRoutes } from "./routines/routes";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
@@ -92,6 +95,10 @@ export interface AppOptions {
   activityService?: ActivityService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
+  /** Routine engine surface (v0.11): registry + runs repo + trigger service + enqueuers. */
+  routines?: RoutineRoutesDeps;
+  /** DB approvals store — enables routine_state approvals on the approvals routes. */
+  approvalsRepo?: ApprovalsRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -359,10 +366,26 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.pendingInteractionRepo,
         opts.a2uiSurfaceStore
       );
-      registerApprovalRoutes(app, approvalRegistry, requireAuth);
+      registerApprovalRoutes(
+        app,
+        approvalRegistry,
+        requireAuth,
+        opts.approvalsRepo && opts.routines
+          ? {
+              approvalsRepo: opts.approvalsRepo,
+              enqueueWake: (job) => {
+                if (!opts.routines) return Promise.resolve();
+                return opts.routines.enqueuers.enqueueWake(job);
+              },
+            }
+          : undefined
+      );
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
+    }
+    if (opts.routines) {
+      registerRoutineRoutes(app, opts.routines, requireAuth);
     }
     // The retrieval spine is optional — only the page-search branch needs it (index.ts wires it in
     // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk

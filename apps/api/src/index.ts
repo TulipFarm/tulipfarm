@@ -15,9 +15,11 @@ import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
 import { buildApp } from "./app";
+import { ApprovalsRepo } from "./approvals/repo";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
+import { ApprovalRegistry } from "./chat/approvals";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgPendingInteractionRepo } from "./chat/pending-interactions";
@@ -58,6 +60,14 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { makeActionExecutor } from "./routines/action-executor";
+import { makeApprovalRequester } from "./routines/approval-channels";
+import { RoutineRunDriver } from "./routines/driver";
+import { makeRoutineEnqueuers, registerRoutineJobs } from "./routines/jobs";
+import { RoutineRegistry, registerRoutineRegistryReload } from "./routines/registry";
+import { RoutineRunsRepo } from "./routines/repo";
+import { reconcileRoutineSchedules, registerRoutineCronWorker } from "./routines/schedules";
+import { RoutineTriggerService, subscribeRoutineEventTriggers } from "./routines/trigger-service";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { PLATFORM_AGENTS } from "./soul/agents/platform-agents";
@@ -174,6 +184,32 @@ async function boot() {
       indexQueueStats: makeIndexQueueStats(boss, pool),
     });
 
+    // Routine engine (v0.11): validated registry over soul routines + runs repo + the
+    // trigger funnel. Built before the tool registry so trigger_routine can enqueue,
+    // and before buildApp so the routes get the surface. Uses a console-backed logger
+    // until Fastify's exists; hot paths re-log through app.log via the reload hooks.
+    const bootLog = {
+      error: (obj: unknown, msg?: string) => console.error(msg ?? "", obj),
+      warn: (obj: unknown, msg?: string) => console.warn(msg ?? "", obj),
+    };
+    const routineRegistry = new RoutineRegistry(soulLoader, bootLog);
+    routineRegistry.refresh();
+    const routineRuns = new RoutineRunsRepo(pool);
+    const approvalsRepo = new ApprovalsRepo(pool);
+    const approvalRegistry = new ApprovalRegistry(approvalsRepo);
+    const routineEnqueuers = makeRoutineEnqueuers(boss);
+    const routineEvalFilter = hookExecutor
+      ? (code: string, scope: Record<string, unknown>) =>
+          hookExecutor.runExpression(code, scope, "routine:event-filter")
+      : undefined;
+    const routineTriggerService = new RoutineTriggerService({
+      registry: routineRegistry,
+      runs: routineRuns,
+      enqueuers: routineEnqueuers,
+      evalFilter: routineEvalFilter,
+      log: bootLog,
+    });
+
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
@@ -198,7 +234,43 @@ async function boot() {
         gitSync,
         builtinSkills: BUILTIN_SKILLS,
         platformAgentNames: new Set(PLATFORM_AGENTS.map((a) => a.name)),
+        triggerRoutine: (slug, inputs) =>
+          routineTriggerService.trigger(slug, { type: "agent", payload: inputs ?? {} }),
+        onRoutinesChanged: async () => {
+          await soulLoader.reload();
+          routineRegistry.refresh();
+          await reconcileRoutineSchedules(boss, routineRegistry, bootLog);
+        },
       },
+    });
+
+    // Driver + action executor close over the tool registry (tool: and agent: actions).
+    const routineDriver = new RoutineRunDriver({
+      runs: routineRuns,
+      registry: routineRegistry,
+      hub: streamHub,
+      sandbox: hookExecutor ?? {
+        runExpression: async () => {
+          throw new Error("routine expressions unavailable: HOOKS_DISABLED=true");
+        },
+        runRoutineHook: async () => {
+          throw new Error("routine hooks unavailable: HOOKS_DISABLED=true");
+        },
+      },
+      actionExecutor: makeActionExecutor({
+        llmService,
+        registry: toolRegistry,
+        soulLoader,
+        log: bootLog,
+      }),
+      requestApproval: makeApprovalRequester({
+        approvals: approvalsRepo,
+        toolRegistry,
+        publicUrl: process.env.PUBLIC_URL,
+        log: bootLog,
+      }),
+      enqueueWake: (args) => routineEnqueuers.enqueueWake(args),
+      log: bootLog,
     });
 
     const app = await buildApp({
@@ -231,6 +303,16 @@ async function boot() {
       activityService,
       observabilityService,
       observabilityConfig: obsConfig,
+      routines: {
+        registry: routineRegistry,
+        runs: routineRuns,
+        triggerService: routineTriggerService,
+        enqueuers: routineEnqueuers,
+        getSecret: (key) => secretsService.get(key),
+        hub: streamHub,
+      },
+      approvalsRepo,
+      approvalRegistry,
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
@@ -260,6 +342,26 @@ async function boot() {
       activity: activityService,
       soulLoader,
     });
+    // Routine engine queues + cron worker + event triggers (v0.11). Schedules are
+    // reconciled at boot and again after every soul.synced registry refresh (D4).
+    await registerRoutineJobs(boss, {
+      driver: routineDriver,
+      runs: routineRuns,
+      approvals: approvalsRepo,
+      log: app.log,
+    });
+    await registerRoutineCronWorker(boss, routineTriggerService, app.log);
+    await reconcileRoutineSchedules(boss, routineRegistry, app.log);
+    registerRoutineRegistryReload(gitSync, soulLoader, routineRegistry, app.log, () =>
+      reconcileRoutineSchedules(boss, routineRegistry, app.log)
+    );
+    subscribeRoutineEventTriggers(
+      domainEventEmitter,
+      routineTriggerService,
+      routineRegistry,
+      routineEvalFilter,
+      app.log
+    );
     await registerStreamGc(boss, streamResumeRepo, activityService);
     await registerObsPrune(boss, new PgObsRepo(pool), activityService, {
       obs: observabilityService,

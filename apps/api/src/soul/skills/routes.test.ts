@@ -287,6 +287,60 @@ describe("skills routes", () => {
       expect(res.json().error).toMatch(/owner\/repo|http/);
     });
 
+    it("rejects a source with an unsafe #ref suffix before cloning", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: "owner/repo#--upload-pack=evil" },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toMatch(/owner\/repo|http/);
+    });
+
+    it("scans a non-default branch when the source carries a #ref suffix", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      // Add a second skill on a feature branch only.
+      const git = (args: string[]) => execFileP("git", args, { cwd: remote });
+      await git(["checkout", "-q", "-b", "feat/branch-skill"]);
+      const branchSkillDir = join(remote, "skills", "branch-skill");
+      await mkdir(branchSkillDir, { recursive: true });
+      await writeFile(
+        join(branchSkillDir, "SKILL.md"),
+        "---\nname: branch-skill\ndescription: Only on the branch.\n---\nBranch only.",
+        "utf8"
+      );
+      await git(["add", "-A"]);
+      await git(["commit", "-q", "-m", "add branch skill"]);
+      await git(["checkout", "-q", "-"]);
+
+      const scan = (source: string) =>
+        app.inject({
+          method: "POST",
+          url: "/api/v1/skills/scan",
+          cookies: auth(),
+          headers,
+          payload: { source },
+        });
+
+      // Default branch: only the original skill.
+      const main = await scan(`file://${remote}`);
+      expect(main.statusCode).toBe(200);
+      expect(main.json().skills.map((s: { name: string }) => s.name)).toEqual(["demo-skill"]);
+
+      // #branch: both skills discovered.
+      const branch = await scan(`file://${remote}#feat/branch-skill`);
+      expect(branch.statusCode).toBe(200);
+      expect(
+        branch
+          .json()
+          .skills.map((s: { name: string }) => s.name)
+          .sort()
+      ).toEqual(["branch-skill", "demo-skill"]);
+    });
+
     it("flags an installed skill and an available update against the lock", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);

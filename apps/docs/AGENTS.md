@@ -63,10 +63,10 @@ Documentation that lies is worse than none. Before writing any factual claim:
   `packages/llm/src`, env vars at their `process.env` read sites, ports in app configs.
   Copy names exactly (`tulip_` token prefix, not `tf_`; four provider integrations, not
   "55+").
-- **Never document an unshipped feature.** Routines and Integrations are empty-state
-  placeholders in the app (`apps/web/app/routes/_app.{routines,integrations}.tsx`) — their
-  guides are honest "not yet available" stubs, not invented how-tos. If a feature isn't in
-  the code, it isn't in the docs.
+- **Never document an unshipped feature.** When a section is still an empty-state
+  placeholder in the app, its guide is an honest "not yet available" stub, not an invented
+  how-to (Routines lived as such a stub until v0.11 shipped). If a feature isn't in the
+  code, it isn't in the docs.
 
 ## Structure (Diátaxis)
 

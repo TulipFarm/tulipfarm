@@ -1,7 +1,8 @@
-import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
-import { ajv } from "@tulipfarm/validation";
+import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/validation";
+import { stringify as stringifyYaml } from "yaml";
 import { A2UI_COMPONENTS_REF, A2UI_SPEC_SCHEMA } from "../a2ui/spec";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
@@ -14,6 +15,10 @@ export interface PlatformToolContext {
   soulPath?: string;
   gitSync?: GitSyncService;
   routineContext?: { routineId: string; runId: string };
+  /** Starts a routine run (agent trigger, v0.11). Errors are thrown with a `.code`-like name. */
+  triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
+  /** Post-write hook after routine_forge: registry revalidate + cron schedule reconcile. */
+  onRoutinesChanged?: () => Promise<void>;
   /**
    * Inbuilt forge skills (resource-forge / skill-forge / agent-forge / onboarding) bundled with the
    * app, not present in the soul. `load_skill` falls back to these by name so the Information
@@ -511,16 +516,102 @@ const validateTriggerRoutine = ajv.compile(TRIGGER_ROUTINE_SCHEMA);
 export const triggerRoutineTool: PlatformTool = {
   name: "trigger_routine",
   description:
-    "Trigger a routine by name. V1 validates the routine exists and records intent, returning a stub receipt. Full async execution is available after Routines v0.11.",
+    "Trigger a routine by name with optional inputs (validated against the routine's x-inputs schema). Returns the run id; watch progress via the routine run APIs.",
   mutating: true,
   inputSchema: TRIGGER_ROUTINE_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateTriggerRoutine(args))
       return err("validation_error", firstError(validateTriggerRoutine.errors));
     const { name, inputs } = args as { name: string; inputs?: Record<string, unknown> };
-    const routine = ctx.soulLoader?.routines?.get(name);
-    if (!routine) return err("not_found", `Routine "${name}" not found in soul.`);
-    return ok({ routineId: name, status: "triggered", runId: null, inputs: inputs ?? null });
+    if (!ctx.triggerRoutine) {
+      return err("internal_error", "Routine engine is not available.");
+    }
+    try {
+      const { runId } = await ctx.triggerRoutine(name, inputs);
+      return ok({ routineId: name, status: "triggered", runId, inputs: inputs ?? null });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (e instanceof Error && e.name === "RoutineTriggerError" && message.includes("not found")) {
+        return err("not_found", message);
+      }
+      return err("validation_error", message);
+    }
+  },
+};
+
+// ── routine_forge ─────────────────────────────────────────────────────────────
+
+const ROUTINE_NAME_RE = /^[a-z][a-z0-9-]*$/;
+
+const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "definition"],
+  properties: {
+    name: {
+      type: "string",
+      minLength: 1,
+      description: "Routine slug (directory under soul/routines/): lowercase, digits, hyphens.",
+    },
+    definition: {
+      type: "object",
+      description:
+        "The routine.yaml document (CNCF Serverless Workflow 0.8 subset + x- extensions). " +
+        "Validated against the V1 meta-schema; deferred constructs are rejected.",
+    },
+    hooks: {
+      type: "string",
+      description:
+        "Optional hooks.ts source: an object-literal expression like " +
+        "({ beforeHook(ctx){}, afterMyState(ctx){}, myStepFn(ctx, args){} }). No import/export.",
+    },
+  },
+};
+const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
+
+export const routineForgeTool: PlatformTool = {
+  name: "routine_forge",
+  description:
+    "Create or update a routine in the soul repo: validates the definition against the V1 meta-schema (deferred constructs rejected), writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits via withSync. No approval step (ROUT-V1-002).",
+  mutating: true,
+  inputSchema: ROUTINE_FORGE_SCHEMA,
+  handler: async (args, ctx) => {
+    if (!validateRoutineForge(args))
+      return err("validation_error", firstError(validateRoutineForge.errors));
+    const { name, definition, hooks } = args as {
+      name: string;
+      definition: Record<string, unknown>;
+      hooks?: string;
+    };
+    if (!ROUTINE_NAME_RE.test(name)) return err("validation_error", "invalid routine name");
+    if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
+
+    try {
+      validateRoutineDefinition(definition);
+    } catch (e) {
+      if (e instanceof TulipFarmValidationError) {
+        return err("validation_error", `${e.path || "/"}: ${e.message}`);
+      }
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    try {
+      const dir = join(ctx.gitSync.path, "routines", name);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "routine.yaml"), stringifyYaml(definition), "utf8");
+      if (hooks) await writeFile(join(dir, "hooks.ts"), hooks, "utf8");
+      await ctx.gitSync.withSync(`soul: forge routine ${name}`);
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    // withSync does not emit soul.synced — revalidate + reconcile schedules explicitly.
+    try {
+      await ctx.onRoutinesChanged?.();
+    } catch (e) {
+      return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+    return ok({ name, committed: true, hasHooks: Boolean(hooks) });
   },
 };
 
@@ -808,6 +899,7 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   transferToAgentTool,
   delegateToAgentTool,
   triggerRoutineTool,
+  routineForgeTool,
   routinePickerTool,
   beginSoulBatchTool,
   endSoulBatchTool,

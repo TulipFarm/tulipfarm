@@ -230,7 +230,7 @@ export default function IntegrationDetailPage() {
   }
 
   const isConnected = integration.status === "connected";
-  const entry = integration.manifest.entry as Record<string, unknown>;
+  const entry = integration.manifest.egress?.entry ?? {};
 
   return (
     <ResourcePanel

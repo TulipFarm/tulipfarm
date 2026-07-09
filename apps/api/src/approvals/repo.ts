@@ -61,4 +61,25 @@ export class ApprovalsRepo {
     );
     return rows.length > 0 ? rowToApproval(rows[0]) : null;
   }
+
+  /** Pending rows (optionally by kind), oldest first — the routine_state approvals list. */
+  async listPending(kind?: ApprovalKind): Promise<ApprovalRow[]> {
+    const { rows } = await this.db.query(
+      `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
+       FROM approvals WHERE status = 'pending' ${kind ? "AND kind = $1" : ""}
+       ORDER BY created_at`,
+      kind ? [kind] : []
+    );
+    return rows.map(rowToApproval);
+  }
+
+  /** Pending rows past their expiry — settled to `timeout` by the routine sweep. */
+  async listExpiredPending(kind: ApprovalKind, now: Date): Promise<ApprovalRow[]> {
+    const { rows } = await this.db.query(
+      `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
+       FROM approvals WHERE status = 'pending' AND kind = $1 AND expires_at <= $2`,
+      [kind, now]
+    );
+    return rows.map(rowToApproval);
+  }
 }

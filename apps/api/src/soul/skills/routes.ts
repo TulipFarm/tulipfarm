@@ -77,22 +77,36 @@ function parseFrontmatter(content: string): { frontmatter: Record<string, unknow
   return { frontmatter, body: match[2].trim() };
 }
 
-// Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
-// http(s)/file URL. ssh:// and scp-style (git@host:path) sources are rejected to avoid the operator's
-// clone reaching internal hosts (SSRF). Single-trust V1; a tighter allowlist is a post-V1 hardening.
-function isAllowedSource(source: string): boolean {
-  return /^[\w.-]+\/[\w.-]+$/.test(source) || /^(https?|file):\/\//.test(source);
+// A source may carry an optional "#<ref>" suffix (branch or tag name — not a commit SHA) so
+// pre-merge branches can be scanned and tested: "owner/repo#my-branch". No "#" ⇒ default branch.
+function splitSourceRef(source: string): { base: string; ref?: string } {
+  const idx = source.indexOf("#");
+  return idx === -1 ? { base: source } : { base: source.slice(0, idx), ref: source.slice(idx + 1) };
 }
 
-// Normalize an allowed source into something `git clone` accepts. A bare "owner/repo" becomes a
-// GitHub https URL; an http(s)/file URL is used as-is.
-function normalizeGitUrl(source: string): string {
-  if (/^[\w.-]+\/[\w.-]+$/.test(source)) return `https://github.com/${source}.git`;
-  return source;
+// Leading dash forbidden so a ref can never be mistaken for a git flag.
+const REF_RE = /^[\w][\w./-]*$/;
+
+// Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
+// http(s)/file URL, each with an optional "#<ref>" suffix. ssh:// and scp-style (git@host:path)
+// sources are rejected to avoid the operator's clone reaching internal hosts (SSRF). Single-trust
+// V1; a tighter allowlist is a post-V1 hardening.
+function isAllowedSource(source: string): boolean {
+  const { base, ref } = splitSourceRef(source);
+  if (ref !== undefined && !REF_RE.test(ref)) return false;
+  return /^[\w.-]+\/[\w.-]+$/.test(base) || /^(https?|file):\/\//.test(base);
+}
+
+// Normalize an allowed source (ref already split off) into something `git clone` accepts. A bare
+// "owner/repo" becomes a GitHub https URL; an http(s)/file URL is used as-is.
+function normalizeGitUrl(base: string): string {
+  if (/^[\w.-]+\/[\w.-]+$/.test(base)) return `https://github.com/${base}.git`;
+  return base;
 }
 
 function sourceType(source: string): "github" | "git" {
-  return /github\.com|^[\w.-]+\/[\w.-]+$/.test(source) ? "github" : "git";
+  const { base } = splitSourceRef(source);
+  return /github\.com|^[\w.-]+\/[\w.-]+$/.test(base) ? "github" : "git";
 }
 
 /**
@@ -129,11 +143,17 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
 }
 
 async function cloneToTemp(source: string): Promise<{ dir: string; ref: string }> {
+  const { base, ref } = splitSourceRef(source);
   const dir = await mkdtemp(join(tmpdir(), "skill-scan-"));
-  await execFileP("git", ["clone", "--depth", "1", normalizeGitUrl(source), dir], {
-    timeout: CLONE_TIMEOUT_MS,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  });
+  // --branch accepts branch or tag names (not commit SHAs) and still works with --depth 1.
+  await execFileP(
+    "git",
+    ["clone", "--depth", "1", ...(ref ? ["--branch", ref] : []), normalizeGitUrl(base), dir],
+    {
+      timeout: CLONE_TIMEOUT_MS,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    }
+  );
   const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], { cwd: dir });
   return { dir, ref: stdout.trim() };
 }
@@ -464,7 +484,8 @@ export function registerSkillRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "Clone a git repo and discover installable SKILL.md files.",
+        description:
+          "Clone a git repo (source accepts an optional #branch suffix) and discover installable SKILL.md files.",
         tags: ["skills"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -502,9 +523,10 @@ export function registerSkillRoutes(
     async (req, reply) => {
       const { source } = req.body as { source: string };
       if (!isAllowedSource(source)) {
-        return reply
-          .code(400)
-          .send({ error: "source must be a github owner/repo slug or an http(s)/file URL" });
+        return reply.code(400).send({
+          error:
+            "source must be a github owner/repo slug or an http(s)/file URL, with an optional #branch suffix",
+        });
       }
       let dir: string | undefined;
       try {

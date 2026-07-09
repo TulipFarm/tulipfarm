@@ -11,6 +11,24 @@ export type {
   ToolBlocklistConfig,
 } from "./guardrails";
 export { validateGuardrailsConfig } from "./guardrails";
+export type {
+  RoutineAction,
+  RoutineDefinition,
+  RoutineOnError,
+  RoutineRetryPolicy,
+  RoutineState,
+  RoutineTrigger,
+} from "./routine";
+export {
+  DEFERRED_STATE_TYPES,
+  DEFERRED_TRIGGER_TYPES,
+  ROUTINE_APPROVAL_CHANNELS,
+  ROUTINE_EVENT_NAMES,
+  ROUTINE_STATE_TYPES,
+  ROUTINE_TRIGGER_TYPES,
+  RoutineDefinitionSchema,
+  validateRoutineDefinition,
+} from "./routine";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

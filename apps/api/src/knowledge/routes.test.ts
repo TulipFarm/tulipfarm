@@ -243,7 +243,11 @@ describe("knowledge routes", () => {
     expect(got.json<{ indexingStatus: string }>().indexingStatus).toBe("pending");
   });
 
-  it("reports indexingStatus=lexical-only when no embedding provider is available", async () => {
+  // Boots a SECOND PGlite + full migration run inside the test body — well over the 5s
+  // default when the suite runs fully parallel, so give it explicit headroom.
+  it("reports indexingStatus=lexical-only when no embedding provider is available", {
+    timeout: 30_000,
+  }, async () => {
     const db2 = await makePglite();
     await runPgMigrations(db2);
     const app2 = await buildKnowledgeApp(db2, false);

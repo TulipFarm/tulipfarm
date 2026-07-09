@@ -39,7 +39,7 @@ export type OAuthConfig = {
 export type IntegrationDetail = IntegrationSummary & {
   manifest: {
     required_env?: RequiredEnvVar[];
-    entry: Record<string, unknown>;
+    egress?: { type?: string; entry?: Record<string, unknown> };
     setup_guide_path?: string;
     oauth?: OAuthConfig;
   };

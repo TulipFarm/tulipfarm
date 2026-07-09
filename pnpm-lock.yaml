@@ -71,6 +71,9 @@ importers:
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@tulipfarm/routine-engine':
+        specifier: workspace:*
+        version: link:../../packages/routine-engine
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
@@ -441,6 +444,25 @@ importers:
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^24.13.2
+        version: 24.13.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/routine-engine:
+    dependencies:
+      '@tulipfarm/validation':
+        specifier: workspace:*
+        version: link:../validation
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
@@ -11554,7 +11576,7 @@ snapshots:
 
   eval@0.1.8:
     dependencies:
-      '@types/node': 22.19.20
+      '@types/node': 24.13.2
       require-like: 0.1.2
 
   event-target-shim@5.0.1: {}

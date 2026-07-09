@@ -20,8 +20,13 @@ interface StreamEmitterDeps {
  * `seq <= lastSeq`, so a reordered live publish silently loses an event. An append failure is logged
  * and does not break the chain (the event is still fanned out; reconnect just won't replay it).
  */
-export function makeStreamEmitter(streamId: string, deps: StreamEmitterDeps): StreamEmitter {
-  let seq = 0;
+export function makeStreamEmitter(
+  streamId: string,
+  deps: StreamEmitterDeps,
+  /** Resume seq allocation after this value (routine runs re-enter across suspensions). */
+  initialSeq = 0
+): StreamEmitter {
+  let seq = initialSeq;
   let tail: Promise<void> = Promise.resolve();
 
   const emit = (eventType: string, data: unknown): Promise<void> => {

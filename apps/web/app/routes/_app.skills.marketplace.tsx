@@ -287,7 +287,7 @@ export default function SkillsMarketplace() {
               <input
                 id="source"
                 className={inputClass}
-                placeholder="https://github.com/owner/repo  or  owner/repo"
+                placeholder="owner/repo[#branch]  or  https://github.com/owner/repo"
                 value={source}
                 onChange={(e) => setSource(e.target.value)}
                 disabled={busy !== null}

@@ -43,5 +43,7 @@ export function hashContent(content: string): string {
 }
 
 export function sourceType(source: string): "github" | "git" {
-  return /github\.com|^[\w.-]+\/[\w.-]+$/.test(source) ? "github" : "git";
+  // Strip an optional "#<ref>" suffix so "owner/repo#branch" still classifies as github.
+  const base = source.split("#", 1)[0];
+  return /github\.com|^[\w.-]+\/[\w.-]+$/.test(base) ? "github" : "git";
 }

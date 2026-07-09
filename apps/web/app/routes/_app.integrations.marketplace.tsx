@@ -161,7 +161,7 @@ export default function IntegrationsMarketplace() {
       <form onSubmit={handleScan} className="flex gap-2">
         <input
           className={inputClass}
-          placeholder="owner/repo or https://..."
+          placeholder="owner/repo[#branch] or https://..."
           value={scanUrl}
           onChange={(e) => setScanUrl(e.target.value)}
         />

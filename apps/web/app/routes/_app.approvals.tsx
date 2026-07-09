@@ -1,4 +1,4 @@
-import type { MetaFunction } from "@remix-run/react";
+import { Link, type MetaFunction } from "@remix-run/react";
 import { useRef } from "react";
 import { ApprovalCard } from "~/components/chat/approval-card";
 import { EmptyState } from "~/components/empty-state";
@@ -27,6 +27,38 @@ function ApprovalRow({
   item: PendingApproval;
   onDecide: (approvalId: string, decision: "approve" | "deny") => void;
 }) {
+  // routine_state approvals (routine human_approval states, v0.11): show which routine/
+  // state is paused + a link to the suspended run; the summary is the run's data context.
+  if (item.kind === "routine_state") {
+    const full = describeArgs(item.summary);
+    const short = full.length > 160 ? `${full.slice(0, 160)}…` : full;
+    return (
+      <li className="flex flex-col gap-1.5 px-3 py-3">
+        <ApprovalCard
+          toolName={`routine ${item.routineSlug ?? "?"} · ${item.stateName ?? "?"}`}
+          approval={{ approvalId: item.approvalId, status: "pending", expiresAt: item.expiresAt }}
+          onDecide={(decision) => onDecide(item.approvalId, decision)}
+        />
+        <p className="flex items-center gap-2 truncate font-mono text-xs text-muted-foreground">
+          <span className="rounded-sm bg-muted px-1.5 py-0.5 uppercase tracking-[0.15em]">
+            routine
+          </span>
+          {item.routineSlug && item.runId ? (
+            <Link
+              to={`/routines/${encodeURIComponent(item.routineSlug)}/runs/${item.runId}`}
+              className="text-primary hover:underline"
+            >
+              view run
+            </Link>
+          ) : null}
+          <span className="min-w-0 truncate" title={full}>
+            {short}
+          </span>
+        </p>
+      </li>
+    );
+  }
+
   const full = describeArgs(item.args);
   const short = full.length > 160 ? `${full.slice(0, 160)}…` : full;
   return (
@@ -34,7 +66,7 @@ function ApprovalRow({
     // (chat rehydration-by-id is deferred in V1).
     <li className="flex flex-col gap-1.5 px-3 py-3" data-tool-call-id={item.toolCallId}>
       <ApprovalCard
-        toolName={item.toolName}
+        toolName={item.toolName ?? "tool"}
         approval={{ approvalId: item.approvalId, status: "pending", expiresAt: item.expiresAt }}
         onDecide={(decision) => onDecide(item.approvalId, decision)}
       />

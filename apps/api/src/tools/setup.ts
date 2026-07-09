@@ -143,7 +143,13 @@ export function buildToolRegistry(services: {
         mutating: t.mutating,
         description: t.description,
         inputSchema: t.inputSchema,
-        execute: (args, _ctx) => t.handler(args, ctx),
+        // routineContext is per-call (routine-spawned headless turns), not a service —
+        // merge it from the RequestContext so call_skill/complete_state see their run.
+        execute: (args, reqCtx) =>
+          t.handler(
+            args,
+            reqCtx.routineContext ? { ...ctx, routineContext: reqCtx.routineContext } : ctx
+          ),
       });
     }
   }

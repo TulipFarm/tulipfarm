@@ -42,6 +42,11 @@ export interface RequestContext {
    * before acting. A mutable holder so the flip is visible to later tool calls in the same turn.
    */
   contextRead?: { value: boolean };
+  /**
+   * Set only on routine-spawned headless agent turns (v0.11). Threaded into the platform
+   * tool context per-call so `call_skill` / `complete_state` see the run they belong to.
+   */
+  routineContext?: { routineId: string; runId: string };
 }
 
 /** Canonical tool shape for the ToolRegistry (TOOL-V1). */

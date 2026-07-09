@@ -23,6 +23,8 @@ export interface SoulRoutine {
   name: string;
   config: Record<string, unknown>;
   hasHooks: boolean;
+  hookSource?: string;
+  hookHash?: string;
 }
 
 export type McpEntry =

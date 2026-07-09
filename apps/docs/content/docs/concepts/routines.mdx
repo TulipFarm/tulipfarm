@@ -1,0 +1,119 @@
+---
+title: Routines
+description: Durable, repeatable automations that run without you — and pause for you when it matters.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+A **routine** is a repeatable automation: a named sequence of steps that runs on a
+trigger instead of being improvised in chat each time. Where an agent decides what to do
+in the moment, a routine does the same thing every time — record the expense, check the
+amount, ask for approval over the limit, file the record.
+
+You build a routine the way you build everything else in TulipFarm — by
+[describing it to the assistant](/docs/concepts/building). The assistant writes a
+`routine.yaml` under `soul/routines/{name}/` and commits it; the definition is the
+*result* of the chat, not something you edit. The
+[Routines guide](/docs/guides/routines) walks through creating and running one.
+
+## Five ways a run starts
+
+A routine declares its triggers, and only declared triggers can start it:
+
+| Trigger | Starts a run when… |
+| --- | --- |
+| `manual` | You press **run now** in the Routines section (or ask the assistant to). Inputs come from a form generated from the routine's input schema. |
+| `cron` | A schedule fires — `0 9 * * 1` for every Monday at 09:00, in the routine's timezone (UTC unless it says otherwise). |
+| `webhook` | An external system POSTs to the routine's webhook URL with its shared secret. |
+| `event` | Something happens inside TulipFarm — a record is created or updated, a chat starts or completes. An optional filter expression narrows which events count. |
+| `agent` | An agent decides mid-chat that the routine should run, via its `trigger_routine` tool. |
+
+Every path funnels through the same gate: the trigger must be declared, and the payload
+is validated against the routine's input schema before a run exists.
+
+## Five kinds of step
+
+A routine's body is a chain of **states**, each one of five types:
+
+- **operation** — do something: call a platform tool, or hand a task to an agent
+  ("summarize this and file it") that reports back when done.
+- **switch** — branch on the data: `context.amount > 500` goes one way, everything
+  else goes another.
+- **foreach** — repeat the same actions for each item in a list (bounded at 1,000
+  items per run).
+- **sleep** — wait: ten minutes, a day, a week. The run costs nothing while it sleeps.
+- **inject** — set data into the run's context for later states to use.
+
+Data flows between states through small JavaScript expressions. Every expression runs in
+a locked-down sandbox — 100 milliseconds, no filesystem, no network, no host access — so
+a generated routine cannot reach anything the platform did not hand it.
+
+## Runs are durable
+
+Starting a routine creates a **run**, and a run is built to survive:
+
+- The run pins a **snapshot of the definition** at start. Editing the routine mid-flight
+  never corrupts runs already in progress — they finish on the version they started with.
+- A sleeping or waiting run holds no process. It is a row in the database with a wake-up
+  call scheduled; restart the server and the run resumes where it left off.
+- Failures follow the routine's own error policy: **retries** with backoff, then
+  **onErrors** routing to a recovery state, then — only if nothing matches — a failed
+  run with the error preserved.
+- Each state can carry its own **timeout**; a stuck step fails into the same error
+  routing instead of hanging the run.
+
+Every run keeps a permanent journal of what happened — state entered, action completed,
+retry scheduled, run finished — and the Routines section streams that journal live while
+a run executes. Reconnecting picks up exactly where the stream left off, however old the
+run is.
+
+## Pausing for a human
+
+A state marked as requiring **human approval** stops the run before executing and files
+a request in the app's **Approvals** section — the same place gated
+[agent](/docs/concepts/agents) tool calls appear. The run shows `waiting approval` until someone decides; approve and it
+continues, deny and the denial routes through the routine's error handling like any
+other failure.
+
+Approval requests always appear in the app. If a Slack integration is connected, the
+request is also posted there. Channels the platform cannot deliver yet (email, SMS) fall
+back to the in-app request with a logged warning — a routine never silently loses its
+gate.
+
+<Callout type="info">
+Routine approvals wait seven days. An undecided request times out, counts as a denial,
+and the run routes through its error handling rather than waiting forever.
+</Callout>
+
+## Hooks: custom logic, still sandboxed
+
+A routine can ship a `hooks.ts` next to its `routine.yaml` for logic that is awkward to
+express in steps — computing a total, normalizing a payload. This is what the assistant
+writes underneath (you never author it by hand):
+
+```ts title="soul/routines/expense-report/hooks.ts"
+({
+  beforeHook(ctx) {
+    // runs once when the run starts
+  },
+  afterCheckAmount(ctx) {
+    // runs after the CheckAmount state completes
+  },
+  computeTotal(ctx, args) {
+    // callable as a step action
+    return args.base + ctx.context.surcharge;
+  },
+})
+```
+
+Hooks run in the same sandbox family as the expressions — isolated, time-boxed, hash-
+verified against the committed source — with `before`/`after` functions for the whole
+run or any state, plus named functions a step can call directly.
+
+## Deferred in V1
+
+Some workflow constructs are recognized but deliberately rejected rather than silently
+ignored: parallel fan-out states, event-correlation states, sub-routine calls, and the
+`datetime` and `integration` trigger types. A definition using one fails validation with
+a "deferred in V1" error, so a routine never half-works. They arrive in later releases
+as real routines demand them.

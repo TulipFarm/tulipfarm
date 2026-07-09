@@ -21,6 +21,7 @@
     "@scalar/fastify-api-reference": "^1.62.0",
     "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/llm": "workspace:*",
+    "@tulipfarm/routine-engine": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
     "@tulipfarm/validation": "workspace:*",

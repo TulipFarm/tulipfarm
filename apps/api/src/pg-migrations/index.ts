@@ -483,6 +483,46 @@ const OBS_EVENT_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS obs_event_model_ts_idx ON obs_event (model, ts DESC)",
 ];
 
+const ROUTINE_RUNS_STATEMENTS: string[] = [
+  // One row per routine run. definition_snapshot pins the routine.yaml at run creation
+  // (ROUT-V1-007) so in-flight runs survive definition edits. wake_at/state_deadline are
+  // sweep bookkeeping: the routine-sweep cron re-enqueues overdue wakes and times out
+  // stuck states across restarts. attempt_counts is per-state retry counters.
+  `CREATE TABLE IF NOT EXISTS routine_runs (
+    id                  uuid PRIMARY KEY,
+    routine_slug        text NOT NULL,
+    definition_snapshot jsonb NOT NULL,
+    definition_hash     text NOT NULL,
+    status              text NOT NULL,
+    current_state       text,
+    context             jsonb NOT NULL DEFAULT '{}',
+    trigger             jsonb NOT NULL,
+    attempt_counts      jsonb NOT NULL DEFAULT '{}',
+    wake_at             timestamptz,
+    state_deadline      timestamptz,
+    approval_id         uuid,
+    output              jsonb,
+    error               jsonb,
+    created_at          timestamptz NOT NULL DEFAULT now(),
+    updated_at          timestamptz NOT NULL DEFAULT now(),
+    finished_at         timestamptz
+  )`,
+  "CREATE INDEX IF NOT EXISTS routine_runs_slug_idx ON routine_runs (routine_slug, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS routine_runs_wake_idx ON routine_runs (wake_at) WHERE wake_at IS NOT NULL",
+  "CREATE INDEX IF NOT EXISTS routine_runs_deadline_idx ON routine_runs (state_deadline) WHERE state_deadline IS NOT NULL",
+  // Durable run journal — run history for the UI AND the SSE replay buffer (a
+  // StreamResumeRepo implementation reads/writes it), so replay works for runs of any
+  // age (stream_resume's 1h GC never applies).
+  `CREATE TABLE IF NOT EXISTS routine_run_events (
+    run_id     uuid NOT NULL,
+    seq        integer NOT NULL,
+    type       text NOT NULL,
+    payload    jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (run_id, seq)
+  )`,
+];
+
 // ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
 // ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
 // keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
@@ -787,6 +827,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "observability: obs_event AI event spine (llm_call/tool_call/turn/job) + ts/type/agent/model indexes",
     up: async (q) => {
       for (const sql of OBS_EVENT_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 23,
+    description:
+      "routines: routine_runs (definition_snapshot pin, status machine, wake/deadline bookkeeping) + routine_run_events journal (doubles as SSE replay buffer)",
+    up: async (q) => {
+      for (const sql of ROUTINE_RUNS_STATEMENTS) {
         await q.query(sql);
       }
     },

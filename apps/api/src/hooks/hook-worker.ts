@@ -3,9 +3,17 @@ import { parentPort, workerData } from "node:worker_threads";
 import ivm from "isolated-vm";
 import { Pool } from "pg";
 import { rowToResourceDoc, tableName } from "../resources/schema";
-import type { WorkerRequest, WorkerResponse } from "./types.js";
+import type {
+  ExpressionRequest,
+  ResourceHookRequest,
+  RoutineHookRequest,
+  WorkerRequest,
+  WorkerResponse,
+} from "./types.js";
 
 const HOOK_TIMEOUT_MS = 2000;
+/** Routine data-flow expressions get a much tighter budget (ROUT-V1-007). */
+const EXPRESSION_TIMEOUT_MS = 100;
 const MEMORY_LIMIT_MB = 128;
 
 let pool: Pool | null = null;
@@ -26,7 +34,109 @@ function docToRecord(doc: Record<string, unknown>): Record<string, unknown> {
   return out;
 }
 
-async function runHook(req: WorkerRequest): Promise<WorkerResponse> {
+/** Deterministic-time / seeded-random preamble shared by every sandbox variant. */
+function determinismPreamble(now: number): string {
+  const seed = (now ^ 0xdeadbeef) >>> 0;
+  return `
+  Date.now = () => ${now};
+  let __rng__ = ${seed};
+  Math.random = function() {
+    __rng__ ^= __rng__ << 13;
+    __rng__ ^= __rng__ >>> 17;
+    __rng__ ^= __rng__ << 5;
+    return (__rng__ >>> 0) / 4294967296;
+  };`;
+}
+
+const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+
+/**
+ * Evaluate a routine data-flow expression: scope keys become locals, the expression's
+ * value is copied back out. No host callbacks are installed — the isolate has no
+ * host/fs/net reach at all.
+ */
+async function runExpression(req: ExpressionRequest): Promise<WorkerResponse> {
+  const { id, code, scope } = req;
+  const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
+  try {
+    const context = await isolate.createContext();
+    const keys = Object.keys(scope).filter((k) => IDENTIFIER_RE.test(k));
+    const values = keys.map((k) => JSON.stringify(scope[k] ?? null));
+    const script = await isolate.compileScript(`
+(() => {
+  ${determinismPreamble(Date.now())}
+  return ((${keys.join(", ")}) => (${code}))(${values.join(", ")});
+})()
+`);
+    const value = await script.run(context, { timeout: EXPRESSION_TIMEOUT_MS, copy: true });
+    return { id, ok: true, value: value ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { id, ok: false, error: msg, timedOut: msg.includes("execution timed out") };
+  } finally {
+    try {
+      isolate.dispose();
+    } catch {
+      // dispose is best-effort
+    }
+  }
+}
+
+/**
+ * Call one function from a routine's hooks.ts object literal
+ * (`({ beforeHook(ctx){}, myFn(ctx, args){} })`). Gets hash/uuid helpers on ctx like
+ * resource hooks, but no patch/resource access — hooks compute, they don't write.
+ */
+async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerResponse> {
+  const { id, hookSource, fnName, invocation, args, optional } = req;
+  const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
+  try {
+    const context = await isolate.createContext();
+    const jail = context.global;
+    await jail.set(
+      "__hash__",
+      new ivm.Callback((str: string) => createHash("sha256").update(str).digest("hex"), {
+        sync: true,
+      })
+    );
+    await jail.set("__uuid__", new ivm.Callback(() => randomUUID(), { sync: true }));
+
+    const script = await isolate.compileScript(`
+(async () => {
+  ${determinismPreamble(Date.now())}
+  const ctx = Object.freeze({
+    ...(${JSON.stringify(invocation)}),
+    hash: __hash__,
+    uuid: __uuid__,
+  });
+  const __hookDef__ = (${hookSource});
+  const __fn__ = __hookDef__[${JSON.stringify(fnName)}];
+  if (typeof __fn__ !== 'function') {
+    if (${optional === true}) return null;
+    throw new Error('hooks.ts does not define function "' + ${JSON.stringify(fnName)} + '"');
+  }
+  return await __fn__(ctx, ${JSON.stringify(args ?? null)});
+})()
+`);
+    const value = await script.run(context, {
+      timeout: HOOK_TIMEOUT_MS,
+      promise: true,
+      copy: true,
+    });
+    return { id, ok: true, value: value ?? null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { id, ok: false, error: msg, timedOut: msg.includes("execution timed out") };
+  } finally {
+    try {
+      isolate.dispose();
+    } catch {
+      // dispose is best-effort
+    }
+  }
+}
+
+async function runHook(req: ResourceHookRequest): Promise<WorkerResponse> {
   const { id, hookType, hookSource, record } = req;
   const patchData: Record<string, unknown> = {};
 
@@ -134,6 +244,13 @@ parentPort?.on("message", async (req: WorkerRequest) => {
     await shutdown();
     process.exit(0);
   }
-  const res = await runHook(req);
+  let res: WorkerResponse;
+  if (req.kind === "expression") {
+    res = await runExpression(req);
+  } else if (req.kind === "routine-hook") {
+    res = await runRoutineHook(req);
+  } else {
+    res = await runHook(req);
+  }
   parentPort?.postMessage(res);
 });
