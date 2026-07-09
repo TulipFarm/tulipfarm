@@ -18,12 +18,12 @@ Each installed integration occupies a directory under `soul/integrations/{name}/
 soul/
   integrations/
     slack/
-      manifest.json      definition: what the server is and how to start it
+      manifest.yml       definition: what the server is and how to start it
       connection.yaml    credential env vars + enabled flag
       setup-guide.md     optional credential walkthrough
 ```
 
-`manifest.json` is written once at install time. `connection.yaml` is written when you
+`manifest.yml` is written once at install time. `connection.yaml` is written when you
 connect the integration; it holds the environment variables the MCP server needs (tokens,
 IDs) and the `enabled: true` flag that tells the runtime to start it on boot.
 
@@ -31,7 +31,7 @@ IDs) and the `enabled: true` flag that tells the runtime to start it on boot.
 
 Installing and connecting are two separate steps.
 
-**Install** copies the integration's `manifest.json` into the soul repo and records it in
+**Install** copies the integration's `manifest.yml` into the soul repo and records it in
 `integrations-lock.json` with its source URL and ref. No server starts. No credentials
 are needed yet.
 
@@ -82,7 +82,7 @@ status changes to `error`. Reconnecting restarts the server and re-registers the
 
 The official TulipFarm integrations are published at `tulipfarm/integrations` on GitHub.
 You can browse and install from there in the web UI, or scan any git URL that contains
-a `manifest.json` file at depth ≤ 6.
+a `manifest.yml` file at depth ≤ 6.
 
 <Callout type="info">
 Scanning clones the repository temporarily. Nothing is written to the soul until you
