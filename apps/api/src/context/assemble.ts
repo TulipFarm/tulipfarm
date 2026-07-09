@@ -234,7 +234,7 @@ function renderSoulContext(ctx: AssembleContext): string {
  * `<available-tools>` budget — total chars across all tool `name`+`description` pairs. Over this
  * the whole block is dropped (never half-rendered), matching `renderAvailableSkills`.
  */
-const MAX_AVAILABLE_TOOLS_CHARS = 8000;
+const MAX_AVAILABLE_TOOLS_CHARS = 24000;
 
 /**
  * `<available-tools>` block (Tools, CONTEXT-ENGINE §1). The tool L1 index: one `- name: description`

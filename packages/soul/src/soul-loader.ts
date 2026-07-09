@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/validation";
 import { parse as parseYaml } from "yaml";
 import type {
+  IntegrationConnection,
+  IntegrationManifest,
   Logger,
   SoulAgent,
   SoulIntegration,
@@ -190,16 +192,55 @@ export class SoulLoader {
 
   private async loadIntegrations(): Promise<Map<string, SoulIntegration>> {
     const map = new Map<string, SoulIntegration>();
-    const names = await subdirs(join(this.soulPath, "integrations"));
-    for (const name of names) {
-      const configPath = join(this.soulPath, "integrations", name, "config.yaml");
+    const slugs = await subdirs(join(this.soulPath, "integrations"));
+    for (const slug of slugs) {
+      const dir = join(this.soulPath, "integrations", slug);
+      // manifest.yml is the V2 format; manifest.json is no longer supported
+      const manifestPath = join(dir, "manifest.yml");
       try {
-        const content = await readFile(configPath, "utf8");
-        const config = (parseYaml(content) ?? {}) as Record<string, unknown>;
-        map.set(name, { name, config });
+        const manifestRaw = (parseYaml(await readFile(manifestPath, "utf8")) ??
+          {}) as IntegrationManifest;
+
+        // Validate egress block minimally
+        if (!manifestRaw.egress?.type) {
+          this.logger.warn(`Soul: skipping integration "${slug}" — manifest.egress.type missing`);
+          continue;
+        }
+        if (manifestRaw.egress.type === "mcp" && !manifestRaw.egress.entry?.transport) {
+          this.logger.warn(
+            `Soul: skipping integration "${slug}" — manifest.egress.entry.transport missing`
+          );
+          continue;
+        }
+
+        let connection: IntegrationConnection | undefined;
+        try {
+          const connRaw = (parseYaml(await readFile(join(dir, "connection.yaml"), "utf8")) ??
+            {}) as IntegrationConnection;
+          connection = connRaw;
+        } catch {
+          // connection.yaml is optional — integration is installed but not yet connected
+        }
+
+        let setupGuide: string | undefined;
+        try {
+          setupGuide = await readFile(join(dir, "setup-guide.md"), "utf8");
+        } catch {
+          // setup-guide.md is optional
+        }
+
+        // sourceIntegration is manifest.name (the integration type from the repo).
+        // slug is the directory name (user-assigned at install time, may differ for multi-instance).
+        map.set(slug, {
+          slug,
+          sourceIntegration: manifestRaw.name,
+          manifest: manifestRaw,
+          connection,
+          setupGuide,
+        });
       } catch (err) {
         this.logger.warn(
-          `Soul: skipping integration "${name}" — ${err instanceof Error ? err.message : String(err)}`
+          `Soul: skipping integration "${slug}" — ${err instanceof Error ? err.message : String(err)}`
         );
       }
     }

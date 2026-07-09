@@ -31,9 +31,14 @@ const routine = (name: string, config: Record<string, unknown>): SoulRoutine => 
   config,
   hasHooks: false,
 });
-const integration = (name: string, config: Record<string, unknown>): SoulIntegration => ({
-  name,
-  config,
+const integration = (slug: string, description?: string): SoulIntegration => ({
+  slug,
+  sourceIntegration: slug,
+  manifest: {
+    name: slug,
+    description,
+    egress: { type: "mcp", entry: { transport: "stdio", command: "echo" } },
+  },
 });
 
 function fakeLoader(
@@ -47,12 +52,14 @@ function fakeLoader(
 ): SoulLoader {
   const toMap = <T extends { name: string }>(xs: T[] = []): Map<string, T> =>
     new Map(xs.map((x) => [x.name, x]));
+  const toSlugMap = (xs: SoulIntegration[] = []): Map<string, SoulIntegration> =>
+    new Map(xs.map((x) => [x.slug, x]));
   return {
     agents: toMap(over.agents),
     skills: toMap(over.skills),
     resources: toMap(over.resources),
     routines: toMap(over.routines),
-    integrations: toMap(over.integrations),
+    integrations: toSlugMap(over.integrations),
   } as unknown as SoulLoader;
 }
 
@@ -67,7 +74,7 @@ describe("buildSoulCatalogue", () => {
         ],
         resources: [resource("ticket", {}), resource("invoice", {})],
         routines: [routine("nightly", {}), routine("hourly", {})],
-        integrations: [integration("slack", {}), integration("github", {})],
+        integrations: [integration("slack"), integration("github")],
       })
     );
     // Platform agents are always present, sorted in among soul agents by name.
@@ -93,7 +100,7 @@ describe("buildSoulCatalogue", () => {
           resource("bare", {}),
         ],
         routines: [routine("r", { title: "Routine title" })],
-        integrations: [integration("i", { title: "Integration title" })],
+        integrations: [integration("i", "Integration title")],
       })
     );
     expect(cat.skills[0]?.description).toBe("Skill desc");
