@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1](https://github.com/TulipFarm/tulipfarm/compare/v0.1.0...v0.1.1) (2026-07-09)
+
+### Bug Fixes
+
+* **release:** derive github.com URLs instead of the SSH remote alias ([edee119](https://github.com/TulipFarm/tulipfarm/commit/edee119f4afeeba1778cb147a2f2abbbc53b5ddf))
+
 ## 0.1.0 (2026-07-09)
 
 ### Features
