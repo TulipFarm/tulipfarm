@@ -12,7 +12,8 @@
   "github": {
     "release": true,
     "releaseName": "v${version}",
-    "autoGenerate": false
+    "autoGenerate": false,
+    "host": "github.com"
   },
   "npm": {
     "publish": false
@@ -20,7 +21,8 @@
   "plugins": {
     "@release-it/conventional-changelog": {
       "preset": { "name": "conventionalcommits" },
-      "infile": "CHANGELOG.md"
+      "infile": "CHANGELOG.md",
+      "context": { "host": "https://github.com" }
     }
   }
 }
