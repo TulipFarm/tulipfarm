@@ -1,23 +1,9 @@
-export type {
-  EmbeddingProviderEntry,
-  EmbeddingsConfig,
-  LlmConfig,
-  ModelSpec,
-  ProviderEntry,
-  TierConfig,
-} from "./config";
+export { createEmbeddingModel } from "./embedding-provider";
 export {
   EMBEDDING_UNAVAILABLE_WARNING,
-  EmbeddingUnavailableError,
-  LlmConfigSchema,
-  LlmConfigValidationError,
-  LlmCredentialError,
-  LlmNotConfiguredError,
-  UnknownModelError,
-  validateLlmConfig,
-} from "./config";
-export { createEmbeddingModel } from "./embedding-provider";
-export { type EmbeddingLogger, EmbeddingService } from "./embeddings";
+  type EmbeddingLogger,
+  EmbeddingService,
+} from "./embeddings";
 export { type FallbackLogger, FallbackModel, isHardFailure } from "./fallback";
 export type {
   ResolvedModel,

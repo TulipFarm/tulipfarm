@@ -1,7 +1,7 @@
+import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import { SecretUnavailableError } from "@tulipfarm/secrets";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { EMBEDDING_UNAVAILABLE_WARNING, EmbeddingUnavailableError } from "./config";
-import { EmbeddingService } from "./embeddings";
+import { EMBEDDING_UNAVAILABLE_WARNING, EmbeddingService } from "./embeddings";
 
 vi.mock("@ai-sdk/openai", () => ({
   createOpenAI: vi.fn(() => ({

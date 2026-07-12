@@ -1,4 +1,4 @@
-import type { GuardrailsConfig } from "@tulipfarm/validation";
+import type { GuardrailsConfig } from "@tulipfarm/schema";
 
 /**
  * Fallback policy used when no `soul/guardrails.yaml` is present or when a

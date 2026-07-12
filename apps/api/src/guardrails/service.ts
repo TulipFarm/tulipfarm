@@ -1,4 +1,4 @@
-import { type GuardrailsConfig, validateGuardrailsConfig } from "@tulipfarm/validation";
+import { type GuardrailsConfig, validateGuardrailsConfig } from "@tulipfarm/schema";
 import { DEFAULT_GUARDRAILS } from "./default-policy";
 import { makeContentFilterGuard } from "./guards/content-filter";
 import { makePromptInjectionGuard } from "./guards/prompt-injection";

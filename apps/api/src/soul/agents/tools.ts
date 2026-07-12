@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/validation";
 import { stringify } from "yaml";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 

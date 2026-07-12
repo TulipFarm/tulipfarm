@@ -1,4 +1,4 @@
-import type { ModelSpec } from "./config";
+import type { ModelSpec } from "@tulipfarm/schema";
 
 /**
  * Config-time model-spec resolution from LiteLLM's community-maintained

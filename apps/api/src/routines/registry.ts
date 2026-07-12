@@ -1,10 +1,10 @@
 import type { EventEmitter } from "node:events";
-import type { SoulLoader, SoulRoutine } from "@tulipfarm/soul";
 import {
   type RoutineDefinition,
   TulipFarmValidationError,
   validateRoutineDefinition,
-} from "@tulipfarm/validation";
+} from "@tulipfarm/schema";
+import type { SoulLoader, SoulRoutine } from "@tulipfarm/soul";
 
 /** Pino-style logger surface (object-first), matching guardrails/reload.ts. */
 type RegistryLogger = {

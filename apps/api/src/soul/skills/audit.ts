@@ -1,5 +1,5 @@
 import type { LlmService } from "@tulipfarm/llm";
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { generateObject, jsonSchema } from "ai";
 
 /*

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
-import { LlmNotConfiguredError, type LlmService, UnknownModelError } from "@tulipfarm/llm";
+import type { LlmService } from "@tulipfarm/llm";
+import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

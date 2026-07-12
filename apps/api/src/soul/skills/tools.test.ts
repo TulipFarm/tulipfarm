@@ -1,5 +1,5 @@
 import type { LlmService } from "@tulipfarm/llm";
-import { LlmNotConfiguredError } from "@tulipfarm/llm";
+import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SKILL_TOOLS, type SkillTool, type SkillToolContext } from "./tools";

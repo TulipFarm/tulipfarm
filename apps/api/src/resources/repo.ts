@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { CounterFn } from "@tulipfarm/validation";
+import type { CounterFn } from "@tulipfarm/schema";
 import type { Queryable } from "../db";
 import { type PaginatedResult, toPage } from "../pagination";
 import { historyTableName, rowToResourceDoc, tableName } from "./schema";
@@ -45,7 +45,7 @@ export interface ResourceRepoFactory {
   forType(type: string): ResourceRepo;
 }
 
-/** Display-id counter source (yields a `@tulipfarm/validation` `CounterFn`). */
+/** Display-id counter source (yields a `@tulipfarm/schema` `CounterFn`). */
 export interface CounterStore {
   makeCounterFn(): CounterFn;
 }

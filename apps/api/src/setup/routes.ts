@@ -1,4 +1,5 @@
-import { createModel, LlmCredentialError } from "@tulipfarm/llm";
+import { createModel } from "@tulipfarm/llm";
+import { LlmCredentialError } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import { generateText } from "ai";

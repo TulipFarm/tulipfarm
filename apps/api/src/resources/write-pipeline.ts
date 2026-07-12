@@ -1,6 +1,6 @@
+import type { CounterFn } from "@tulipfarm/schema";
+import { ajv, applyTransforms, TulipFarmValidationError } from "@tulipfarm/schema";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
-import type { CounterFn } from "@tulipfarm/validation";
-import { ajv, applyTransforms, TulipFarmValidationError } from "@tulipfarm/validation";
 import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import type { ResourceDoc, ResourceRepo, ResourceRepoFactory } from "./repo";
 

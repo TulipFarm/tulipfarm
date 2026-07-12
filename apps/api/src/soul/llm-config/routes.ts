@@ -1,13 +1,11 @@
 import {
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
-  type LlmConfig,
-  LlmConfigValidationError,
   type LlmService,
   litellmModelsForProvider,
   resolveModelSpec,
-  validateLlmConfig,
 } from "@tulipfarm/llm";
+import { type LlmConfig, LlmConfigValidationError, validateLlmConfig } from "@tulipfarm/schema";
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";

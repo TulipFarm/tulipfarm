@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { EMBEDDING_UNAVAILABLE_WARNING, EmbeddingUnavailableError } from "@tulipfarm/llm";
+import { EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
+import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import type { PaginatedResult } from "../pagination";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import { indexPage, reindexAll } from "./index-service";

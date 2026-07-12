@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
-import type { RoutineDefinition } from "@tulipfarm/validation";
+import type { RoutineDefinition } from "@tulipfarm/schema";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";

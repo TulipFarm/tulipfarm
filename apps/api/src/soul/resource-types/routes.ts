@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/validation";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";

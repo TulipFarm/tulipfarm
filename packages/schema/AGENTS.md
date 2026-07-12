@@ -1,6 +1,7 @@
-# Validation — Agent Conventions
+# Schema — Agent Conventions
 
-`@tulipfarm/validation` — runtime schema validation plus declarative resource transforms.
+`@tulipfarm/schema` — single source of truth for all config data shapes: TypeBox schemas +
+inferred types + thin `validate*` wrappers, plus declarative resource transforms.
 Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
 
 ## Public API (`src/index.ts`)
@@ -15,6 +16,12 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
   `ToolBlocklistConfig`, `ContentFilterConfig`) — validates a guardrails policy
   (`soul/guardrails.yaml`): a TypeBox meta-schema with strict per-stage guard unions, so a
   wrong-stage/unknown guard or bad enum is rejected. Consumed by the API's `GuardrailsService`.
+- **`validateLlmConfig`** (+ `LlmConfigSchema`, types `LlmConfig`, `ProviderEntry`, `ModelSpec`,
+  `TierConfig`, `EmbeddingProviderEntry`, `EmbeddingsConfig`) — validates the soul LLM config
+  (tiers + embeddings). Runtime consumed by `@tulipfarm/llm`.
+- **LLM error classes** — `LlmConfigValidationError`, `LlmCredentialError`,
+  `LlmNotConfiguredError`, `UnknownModelError`, `EmbeddingUnavailableError` (thrown by
+  `@tulipfarm/llm` runtime).
 
 ## Boundaries
 

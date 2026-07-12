@@ -1,4 +1,4 @@
-import type { RoutineDefinition } from "@tulipfarm/validation";
+import type { RoutineDefinition } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
 import { executeState } from "./interpreter";
 import type { EnginePorts, ResolvedFunction } from "./ports";

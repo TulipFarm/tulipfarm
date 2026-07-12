@@ -28,7 +28,7 @@ integrations/<name>/config.yaml
 soul.yaml   guardrails.yaml   # repo-root manifests (optional); soul.yaml's `llm:` key holds LLM config
 ```
 
-Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/validation`) on load.
+Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/schema`) on load.
 Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stays up.
 
 ## File map

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
-import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/validation";
 import { stringify as stringifyYaml } from "yaml";
 import { A2UI_COMPONENTS_REF, A2UI_SPEC_SCHEMA } from "../a2ui/spec";
 import { err, ok, type ToolCallResult } from "./tool-result";

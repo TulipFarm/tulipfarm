@@ -1,4 +1,5 @@
-import { EMBEDDING_UNAVAILABLE_WARNING, EmbeddingUnavailableError } from "@tulipfarm/llm";
+import { EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
+import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { EmbeddingPort, SearchFilters, SearchResults } from "./types";
 

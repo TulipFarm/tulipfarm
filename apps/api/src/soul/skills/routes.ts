@@ -4,7 +4,8 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { LlmNotConfiguredError, type LlmService } from "@tulipfarm/llm";
+import type { LlmService } from "@tulipfarm/llm";
+import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml } from "yaml";

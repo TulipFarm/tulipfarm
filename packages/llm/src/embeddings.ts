@@ -1,11 +1,14 @@
-import type { SecretsService } from "@tulipfarm/secrets";
-import { type EmbeddingModel, embedMany } from "ai";
 import {
   type EmbeddingProviderEntry,
   EmbeddingUnavailableError,
   validateLlmConfig,
-} from "./config";
+} from "@tulipfarm/schema";
+import type { SecretsService } from "@tulipfarm/secrets";
+import { type EmbeddingModel, embedMany } from "ai";
 import { createEmbeddingModel } from "./embedding-provider";
+
+/** Warning surfaced to search callers when no embedding provider is available. */
+export const EMBEDDING_UNAVAILABLE_WARNING = "embedding-unavailable";
 
 /** Minimal logger surface (pino/console compatible). */
 export interface EmbeddingLogger {

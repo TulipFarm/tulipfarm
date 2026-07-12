@@ -1,5 +1,5 @@
+import { LlmConfigValidationError } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
-import { LlmConfigValidationError } from "./config";
 import { createEmbeddingModel } from "./embedding-provider";
 
 vi.mock("@ai-sdk/openai", () => ({

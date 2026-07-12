@@ -1,4 +1,4 @@
-import type { ToolBlocklistConfig } from "@tulipfarm/validation";
+import type { ToolBlocklistConfig } from "@tulipfarm/schema";
 import type { Guard } from "../pipeline";
 
 /**

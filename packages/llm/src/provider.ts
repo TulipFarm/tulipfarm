@@ -3,6 +3,8 @@ import { createAzure } from "@ai-sdk/azure";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import type { LanguageModelV4 } from "@ai-sdk/provider";
+import type { ProviderEntry } from "@tulipfarm/schema";
+import { LlmConfigValidationError, LlmCredentialError } from "@tulipfarm/schema";
 import {
   DecryptError,
   llmProviderById,
@@ -10,8 +12,6 @@ import {
   type SecretsService,
   SecretUnavailableError,
 } from "@tulipfarm/secrets";
-import type { ProviderEntry } from "./config";
-import { LlmConfigValidationError, LlmCredentialError } from "./config";
 
 export async function resolveApiKey(
   api_key_ref: string | undefined,

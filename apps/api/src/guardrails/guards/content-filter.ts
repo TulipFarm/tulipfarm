@@ -1,4 +1,4 @@
-import type { ContentFilterConfig } from "@tulipfarm/validation";
+import type { ContentFilterConfig } from "@tulipfarm/schema";
 import type { Guard, Verdict } from "../pipeline";
 
 type Pattern = ContentFilterConfig["patterns"][number];

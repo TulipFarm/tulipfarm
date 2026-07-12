@@ -1,4 +1,4 @@
-import type { RoutineDefinition } from "@tulipfarm/validation";
+import type { RoutineDefinition } from "@tulipfarm/schema";
 
 /** Trigger that started a run. `payload` is the trigger-specific input. */
 export interface RunTrigger {

@@ -1,4 +1,4 @@
-import type { LlmConfig } from "@tulipfarm/llm";
+import type { LlmConfig } from "@tulipfarm/schema";
 import type { LlmProviderInfo } from "@tulipfarm/secrets";
 import { describe, expect, it } from "vitest";
 import { pruneLlmConfig } from "./prune";

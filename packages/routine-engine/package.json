@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tulipfarm/validation": "workspace:*"
+    "@tulipfarm/schema": "workspace:*"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",

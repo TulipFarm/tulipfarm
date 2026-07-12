@@ -1,12 +1,12 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
-import { APICallError } from "ai";
-import { describe, expect, it, vi } from "vitest";
 import {
   LlmConfigValidationError,
   LlmCredentialError,
   LlmNotConfiguredError,
   UnknownModelError,
-} from "./config";
+} from "@tulipfarm/schema";
+import { APICallError } from "ai";
+import { describe, expect, it, vi } from "vitest";
 import { LlmService } from "./llm-service";
 import { createModel } from "./provider";
 

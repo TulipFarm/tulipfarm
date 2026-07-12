@@ -14,9 +14,8 @@
     "@ai-sdk/openai": "^4.0.0",
     "@ai-sdk/openai-compatible": "^3.0.0",
     "@ai-sdk/provider": "^4.0.0",
-    "@sinclair/typebox": "^0.34.49",
+    "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
-    "@tulipfarm/validation": "workspace:*",
     "ai": "^7.0.2"
   },
   "devDependencies": {

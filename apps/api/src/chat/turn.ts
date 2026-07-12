@@ -1,11 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
-import {
-  LlmNotConfiguredError,
-  type LlmService,
-  type ResolvedModel,
-  UnknownModelError,
-} from "@tulipfarm/llm";
+import type { LlmService, ResolvedModel } from "@tulipfarm/llm";
+import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyReply, FastifyRequest } from "fastify";

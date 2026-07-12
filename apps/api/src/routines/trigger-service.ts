@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { DOMAIN_EVENTS } from "../domain-events";
 import type { RoutineEnqueuers } from "./jobs";
 import type { LoadedRoutine, RoutineRegistry } from "./registry";
