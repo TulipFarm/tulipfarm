@@ -1,8 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { type Static, Type } from "@sinclair/typebox";
-import { LlmConfigSchema } from "@tulipfarm/llm";
-import { ajv, TulipFarmValidationError } from "@tulipfarm/validation";
+import { ajv, LlmConfigSchema, TulipFarmValidationError } from "@tulipfarm/schema";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 /**

@@ -12,6 +12,23 @@ export type {
 } from "./guardrails";
 export { validateGuardrailsConfig } from "./guardrails";
 export type {
+  EmbeddingProviderEntry,
+  EmbeddingsConfig,
+  LlmConfig,
+  ModelSpec,
+  ProviderEntry,
+  TierConfig,
+} from "./llm";
+export {
+  EmbeddingUnavailableError,
+  LlmConfigSchema,
+  LlmConfigValidationError,
+  LlmCredentialError,
+  LlmNotConfiguredError,
+  UnknownModelError,
+  validateLlmConfig,
+} from "./llm";
+export type {
   RoutineAction,
   RoutineDefinition,
   RoutineOnError,

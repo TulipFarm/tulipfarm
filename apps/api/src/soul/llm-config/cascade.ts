@@ -1,4 +1,5 @@
-import type { LlmConfig, LlmService } from "@tulipfarm/llm";
+import type { LlmService } from "@tulipfarm/llm";
+import type { LlmConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
 import type { GitSyncService, Logger, SoulLoader } from "@tulipfarm/soul";

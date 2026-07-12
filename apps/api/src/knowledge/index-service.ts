@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { EmbeddingUnavailableError } from "@tulipfarm/llm";
+import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import { chunkText } from "./chunk";
 import type { KnowledgeChunkRepo } from "./chunks-repo";
 import type { KnowledgePageRepo } from "./repo";

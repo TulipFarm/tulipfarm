@@ -1,4 +1,4 @@
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { err, ok, type ToolCallResult } from "../tools/types";
 import type { KnowledgeService } from "./service";
 

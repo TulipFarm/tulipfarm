@@ -10,16 +10,17 @@ for commands/lint.
 - **`createModel(entry, secrets)`** — builds one `LanguageModelV1` from a `ProviderEntry`.
 - **`FallbackModel`** + **`isHardFailure()`** — the fallback chain (itself a `LanguageModelV1`).
 - **`resolveTier(ctx)`** — deterministic auto-tier selection.
-- **`validateLlmConfig()`** + errors `LlmConfigValidationError` / `LlmNotConfiguredError` /
-  `UnknownModelError`.
-- Types: `LlmConfig`, `ProviderEntry`, `TierConfig`, `Tier`, `SelectRequest`, `Autonomy`,
-  `ModelSelector`, `SelectionContext`, `FallbackLogger`.
+- Types: `Tier`, `SelectRequest`, `Autonomy`, `ModelSelector`, `SelectionContext`, `FallbackLogger`.
+
+> Config schemas/validators + LLM error classes (`LlmConfig`, `ProviderEntry`, `TierConfig`,
+> `validateLlmConfig`, `LlmConfigValidationError`, `LlmNotConfiguredError`, `UnknownModelError`,
+> `LlmCredentialError`, `EmbeddingUnavailableError`) live in `@tulipfarm/schema` — import them
+> from there, not from here.
 
 ## File map
 
 | File | Role |
 | --- | --- |
-| `config.ts` | TypeBox schema + `validateLlmConfig`. 3 tiers (`quick`/`standard`/`complex`), ≥1 provider each. |
 | `provider.ts` | `createModel` — routes on `entry.provider` → `@ai-sdk/anthropic` \| `openai` \| `openai-compatible`. |
 | `selection.ts` | `resolveTier` — maps `autonomy` → tier, bumps `quick`→`standard` when tools are present. |
 | `llm-service.ts` | `LlmService`; `select` precedence: per-request `sessionModel` → caller `model` → `"auto"`. |
@@ -33,9 +34,9 @@ for commands/lint.
 - **Tune fallback:** classify errors in `isHardFailure()` — auth / `404` / abort propagate
   immediately; `429` / `5xx` / timeout fall through to the next provider (logged via `FallbackLogger`).
 - **Tier rules:** keep `resolveTier` pure and deterministic — it's covered by `selection.test.ts`.
-- Config is validated (TypeBox → AJV) at `init`; never read partial/unvalidated config.
+- Config is validated (TypeBox → AJV, via `@tulipfarm/schema`) at `init`; never read partial/unvalidated config.
 
 ## Tests
 
-Vitest, colocated `*.test.ts` (`config` / `provider` / `selection` / `llm-service` / `fallback`).
+Vitest, colocated `*.test.ts` (`provider` / `selection` / `llm-service` / `fallback`).
 Use fake `LanguageModelV1` stubs; assert fallback order and hard-vs-transient handling.

@@ -1,5 +1,5 @@
 import { type Static, Type } from "@sinclair/typebox";
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "./ajv";
 
 export class LlmConfigValidationError extends Error {
   constructor(message: string) {
@@ -35,9 +35,6 @@ export class EmbeddingUnavailableError extends Error {
     this.name = "EmbeddingUnavailableError";
   }
 }
-
-/** Warning surfaced to search callers when no embedding provider is available. */
-export const EMBEDDING_UNAVAILABLE_WARNING = "embedding-unavailable";
 
 // Curated model spec, resolved from LiteLLM's model_prices_and_context_window.json at config time and
 // pinned into the soul (deterministic + git-audited). Field names follow LiteLLM's where they map, so

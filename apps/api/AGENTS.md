@@ -127,10 +127,10 @@ by a 5s timeout (timeout/throw → skip-as-pass + log). Input/output blocks emit
 SSE event + `finish`; a tool-call block returns a denial the LLM sees (the turn continues).
 
 `GuardrailsService` (`service.ts`) is built from `soul/guardrails.yaml` (validated by
-`@tulipfarm/validation` `validateGuardrailsConfig`); an absent **or invalid** config falls back to
+`@tulipfarm/schema` `validateGuardrailsConfig`); an absent **or invalid** config falls back to
 `DEFAULT_GUARDRAILS` (`default-policy.ts`) — fail-safe, never unguarded, never crashing. Wired in
 `index.ts` (construct → `init` after `buildApp` → `registerGuardrailsReload` on `soul.synced`) and
 passed through `AppOptions.guardrailsService`. Built-in guards (`guards/`): `prompt_injection`
 (input), `content_filter` (output), `tool_blocklist` (tool-call) — all pattern-only (no LLM). The
-config schema lives in `@tulipfarm/validation` (apps/api can't import TypeBox). See
+config schema lives in `@tulipfarm/schema` (apps/api can't import TypeBox). See
 `guardrails/README.md`.

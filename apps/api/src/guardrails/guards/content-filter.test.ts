@@ -1,4 +1,4 @@
-import type { ContentFilterConfig } from "@tulipfarm/validation";
+import type { ContentFilterConfig } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import type { GuardContext } from "../pipeline";
 import { makeContentFilterGuard } from "./content-filter";

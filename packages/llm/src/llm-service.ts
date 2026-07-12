@@ -1,5 +1,3 @@
-import type { SecretsService } from "@tulipfarm/secrets";
-import type { LanguageModel } from "ai";
 import {
   LlmConfigValidationError,
   LlmCredentialError,
@@ -7,7 +5,9 @@ import {
   type ModelSpec,
   UnknownModelError,
   validateLlmConfig,
-} from "./config";
+} from "@tulipfarm/schema";
+import type { SecretsService } from "@tulipfarm/secrets";
+import type { LanguageModel } from "ai";
 import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
 import { type ModelSelector, resolveTier, type SelectionContext } from "./selection";

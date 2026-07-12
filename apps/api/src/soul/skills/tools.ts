@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { LlmNotConfiguredError, type LlmService } from "@tulipfarm/llm";
+import type { LlmService } from "@tulipfarm/llm";
+import { ajv, LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { ajv } from "@tulipfarm/validation";
 import { stringify } from "yaml";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";

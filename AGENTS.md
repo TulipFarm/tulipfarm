@@ -24,7 +24,7 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | [`packages/llm`](packages/llm/AGENTS.md) | LLM provider abstraction + tiered fallback chains (`@tulipfarm/llm`). |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loader + git sync (`@tulipfarm/soul`). |
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage + key rotation (`@tulipfarm/secrets`). |
-| [`packages/validation`](packages/validation/AGENTS.md) | Schema validation + resource transforms (`@tulipfarm/validation`). |
+| [`packages/schema`](packages/schema/AGENTS.md) | Config schemas (LLM, guardrails, agent, resource) + validators + resource transforms (`@tulipfarm/schema`). |
 | [`packages/ui`](packages/ui/AGENTS.md) | Shared React components (`@tulipfarm/ui`). |
 | [`packages/types`](packages/types/AGENTS.md) | Shared TypeScript types (`@tulipfarm/types`). |
 | [`packages/utils`](packages/utils/AGENTS.md) | Shared utilities (`@tulipfarm/utils`). |

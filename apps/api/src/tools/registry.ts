@@ -1,4 +1,4 @@
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { BatchCoordinator } from "./batch-executor";
 import { truncateResult } from "./truncate";

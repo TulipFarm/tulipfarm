@@ -1,4 +1,4 @@
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the AI SDK so no real model is invoked. `jsonSchema` is kept real (pure wrapper).

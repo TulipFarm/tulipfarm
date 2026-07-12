@@ -1,4 +1,4 @@
-import type { LlmConfig, ProviderEntry } from "@tulipfarm/llm";
+import type { LlmConfig, ProviderEntry } from "@tulipfarm/schema";
 import type { LlmProviderInfo } from "@tulipfarm/secrets";
 
 const TIERS = ["quick", "standard", "complex"] as const;

@@ -1,4 +1,4 @@
-import type { PromptInjectionConfig } from "@tulipfarm/validation";
+import type { PromptInjectionConfig } from "@tulipfarm/schema";
 import type { Guard, Verdict } from "../pipeline";
 
 type Sensitivity = NonNullable<PromptInjectionConfig["sensitivity"]>;

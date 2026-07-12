@@ -3,7 +3,7 @@ import type {
   RoutineDefinition,
   RoutineOnError,
   RoutineState,
-} from "@tulipfarm/validation";
+} from "@tulipfarm/schema";
 import { parseIsoDuration } from "./duration";
 import type { EnginePorts, HookInvocation, ResolvedFunction } from "./ports";
 import { type RunError, type RunSnapshot, type StepOutcome, stateHookNames } from "./types";

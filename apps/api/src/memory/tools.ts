@@ -1,4 +1,4 @@
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
 import type { WorkingMemoryService } from "./service";
 import { err, ok, type ToolCallResult } from "./tool-result";

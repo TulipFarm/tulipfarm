@@ -1,4 +1,4 @@
-import type { RoutineDefinition } from "@tulipfarm/validation";
+import type { RoutineDefinition } from "@tulipfarm/schema";
 import type { Queryable } from "../db";
 
 export type RunStatus =

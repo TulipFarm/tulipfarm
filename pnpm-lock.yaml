@@ -74,15 +74,15 @@ importers:
       '@tulipfarm/routine-engine':
         specifier: workspace:*
         version: link:../../packages/routine-engine
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
       '@tulipfarm/soul':
         specifier: workspace:*
         version: link:../../packages/soul
-      '@tulipfarm/validation':
-        specifier: workspace:*
-        version: link:../../packages/validation
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -432,15 +432,12 @@ importers:
       '@ai-sdk/provider':
         specifier: ^4.0.0
         version: 4.0.0
-      '@sinclair/typebox':
-        specifier: ^0.34.49
-        version: 0.34.49
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../secrets
-      '@tulipfarm/validation':
-        specifier: workspace:*
-        version: link:../validation
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -460,9 +457,31 @@ importers:
 
   packages/routine-engine:
     dependencies:
-      '@tulipfarm/validation':
+      '@tulipfarm/schema':
         specifier: workspace:*
-        version: link:../validation
+        version: link:../schema
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@types/node':
+        specifier: ^24.13.2
+        version: 24.13.2
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/schema:
+    dependencies:
+      '@sinclair/typebox':
+        specifier: ^0.34.49
+        version: 0.34.49
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
@@ -497,9 +516,9 @@ importers:
       '@tulipfarm/constants':
         specifier: workspace:*
         version: link:../constants
-      '@tulipfarm/validation':
+      '@tulipfarm/schema':
         specifier: workspace:*
-        version: link:../validation
+        version: link:../schema
       simple-git:
         specifier: ^3.36.0
         version: 3.36.0
@@ -555,28 +574,6 @@ importers:
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
-
-  packages/validation:
-    dependencies:
-      '@sinclair/typebox':
-        specifier: ^0.34.49
-        version: 0.34.49
-      ajv:
-        specifier: ^8.20.0
-        version: 8.20.0
-    devDependencies:
-      '@tulipfarm/tsconfig':
-        specifier: workspace:*
-        version: link:../tsconfig
-      '@types/node':
-        specifier: ^24.13.2
-        version: 24.13.2
-      typescript:
-        specifier: ^6.0.3
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
 packages:
 

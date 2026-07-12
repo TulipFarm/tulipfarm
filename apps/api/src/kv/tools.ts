@@ -1,4 +1,4 @@
-import { ajv } from "@tulipfarm/validation";
+import { ajv } from "@tulipfarm/schema";
 import { KV_NAME_RE, MAX_KEY_CHARS, MAX_NAMESPACE_CHARS, MAX_VALUE_BYTES } from "./limits";
 import type { KvService } from "./service";
 import { err, ok, type ToolCallResult } from "./tool-result";

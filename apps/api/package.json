@@ -24,7 +24,7 @@
     "@tulipfarm/routine-engine": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
-    "@tulipfarm/validation": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",

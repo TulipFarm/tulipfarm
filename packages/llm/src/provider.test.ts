@@ -1,6 +1,6 @@
+import { LlmConfigValidationError, LlmCredentialError } from "@tulipfarm/schema";
 import { DecryptError, SecretUnavailableError } from "@tulipfarm/secrets";
 import { describe, expect, it, vi } from "vitest";
-import { LlmConfigValidationError, LlmCredentialError } from "./config";
 import { createModel } from "./provider";
 
 vi.mock("@ai-sdk/anthropic", () => ({

@@ -19,7 +19,7 @@ Three-stage safety framework wrapping the chat orchestrator: **input**, **tool-c
 - `reload.ts` — `registerGuardrailsReload`: re-inits on the `soul.synced` git event.
 
 ## Config (`soul/guardrails.yaml`, optional)
-Validated by `@tulipfarm/validation` (`validateGuardrailsConfig`, TypeBox→JSON-Schema + AJV —
+Validated by `@tulipfarm/schema` (`validateGuardrailsConfig`, TypeBox→JSON-Schema + AJV —
 never Zod). Top-level keys are stages; each is an ordered array. Strict per-stage guard unions:
 a guard in the wrong stage / an unknown guard / a bad enum fails validation.
 ```yaml

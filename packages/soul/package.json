@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@tulipfarm/constants": "workspace:*",
-    "@tulipfarm/validation": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
     "simple-git": "^3.36.0",
     "yaml": "^2.9.0"
   },

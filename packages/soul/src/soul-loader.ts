@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { validateResourceSchema } from "@tulipfarm/validation";
+import { validateResourceSchema } from "@tulipfarm/schema";
 import { parse as parseYaml } from "yaml";
 import type {
   IntegrationConnection,

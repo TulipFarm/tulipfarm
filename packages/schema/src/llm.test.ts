@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { LlmConfigValidationError, validateLlmConfig } from "./config";
+import { LlmConfigValidationError, validateLlmConfig } from "./llm";
 
 const validConfig = {
   tiers: {
