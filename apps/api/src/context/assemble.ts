@@ -113,14 +113,46 @@ function renderAgentPersonality(ctx: AssembleContext): string {
 }
 
 /**
+ * True when the `<memory>` block will render this turn: memory is non-empty and within budget.
+ * Shared by `renderMemoryInstructions` and `renderMemory` so the static preamble never orphans —
+ * it appears exactly when the entry block does.
+ */
+function memoryRenders(ctx: AssembleContext): boolean {
+  if (ctx.memory.length === 0) return false;
+  const total = ctx.memory.reduce((n, e) => n + e.key.length + e.value.length, 0);
+  return total <= MAX_TOTAL_CHARS;
+}
+
+/**
+ * Fixed behavioral framing for the `<memory>` entries — tells the agent to *apply* preference-typed
+ * facts (language, tone, format, timezone), not just know them. Kept as static text in its own
+ * block so it stays byte-stable (prompt-cacheable) even as the entry list below it changes.
+ */
+const MEMORY_INSTRUCTIONS_TEXT = [
+  "The <memory> block below holds durable personal facts and preferences for this user. Apply them",
+  "actively: preference entries shape HOW you respond, not just what you know. In particular, reply",
+  "in the user's preferred_language using that language's native script (e.g. Devanagari for Hindi)",
+  "unless the stored value specifies a romanized or transliterated form; match their reply_tone,",
+  "address them by preferred_name, and render every date and time in their timezone and date_format.",
+  "Honor these every turn without waiting for the user to restate them.",
+].join(" ");
+
+/**
+ * `<memory-instructions>` block. Static preamble (no interpolation → byte-stable) rendered directly
+ * before `<memory>` whenever memory renders. Gated on the same condition as `renderMemory` so an
+ * empty or over-budget memory never leaves an orphan preamble.
+ */
+function renderMemoryInstructions(ctx: AssembleContext): string {
+  return memoryRenders(ctx) ? block("memory-instructions", MEMORY_INSTRUCTIONS_TEXT) : "";
+}
+
+/**
  * `<memory>` block (MEM-V1-003). Each entry is one `- key: value` line in store order. Budget is
  * the store's own metric — total key+value chars; over `MAX_TOTAL_CHARS` the whole block is
  * dropped (never half-rendered). Entries already pass write-time caps, so this is a defensive floor.
  */
 function renderMemory(ctx: AssembleContext): string {
-  if (ctx.memory.length === 0) return "";
-  const total = ctx.memory.reduce((n, e) => n + e.key.length + e.value.length, 0);
-  if (total > MAX_TOTAL_CHARS) return "";
+  if (!memoryRenders(ctx)) return "";
   const body = ctx.memory.map((e) => `- ${e.key}: ${e.value}`).join("\n");
   return block("memory", body);
 }
@@ -324,6 +356,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderAgentIdentity(ctx),
     renderBusinessContext(ctx),
     renderAgentPersonality(ctx),
+    renderMemoryInstructions(ctx),
     renderMemory(ctx),
     // V1: governance is tenant-wide. `domain` is display-only on the agent (AGT-V1-007), so it
     // feeds <agent-identity> but does NOT scope governance — preserving prior behavior.

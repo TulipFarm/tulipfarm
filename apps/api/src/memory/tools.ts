@@ -24,7 +24,11 @@ export interface PlatformTool {
 const MEMORY_GUIDANCE =
   "Store small, stable, personal facts only (e.g. 'prefers terse replies', 'enterprise plan'). " +
   "Anything large, document-like, or tenant/business data belongs in knowledge — use " +
-  "create_knowledge_page instead.";
+  "create_knowledge_page instead. When you learn a durable preference, store it under one of these " +
+  "well-known keys so it is applied on every future turn: preferred_language (reply in that " +
+  "language), reply_tone (e.g. 'formal', 'concise', 'casual'), timezone (IANA name, e.g. " +
+  "'America/New_York' — format all datetimes in it), date_format (e.g. 'DD/MM/YYYY'), " +
+  "preferred_name (address the user by this name).";
 
 // Plain JSON Schema literals, matching the codebase's inline-schema convention (see ChatBodySchema).
 // `value` deliberately carries NO maxLength: an oversized write must reach the service so the tool

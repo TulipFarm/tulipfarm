@@ -249,6 +249,23 @@ describe("assembleSystemPrompt — memory", () => {
     );
     expect(overCap).not.toContain("<memory>");
   });
+
+  it("prepends a static <memory-instructions> preamble when entries are present", () => {
+    const out = assembleSystemPrompt(baseCtx({ memory: [mem("preferred_language", "Spanish")] }));
+    expect(out).toContain("<memory-instructions>");
+    expect(out).toMatch(/preferred_language/);
+    expect(out).toMatch(/reply_tone/);
+    // Preamble sits immediately before the entry block.
+    expect(out.indexOf("<memory-instructions>")).toBeLessThan(out.indexOf("<memory>"));
+  });
+
+  it("omits the preamble (no orphan) when memory is empty or dropped over budget", () => {
+    expect(assembleSystemPrompt(baseCtx({ memory: [] }))).not.toContain("<memory-instructions>");
+    const overCap = assembleSystemPrompt(
+      baseCtx({ memory: [mem("m", "x".repeat(MAX_TOTAL_CHARS))] })
+    );
+    expect(overCap).not.toContain("<memory-instructions>");
+  });
 });
 
 describe("assembleSystemPrompt — governance", () => {
