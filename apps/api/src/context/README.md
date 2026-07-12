@@ -15,6 +15,7 @@ lazily fetched) makes the rendered prefix deterministic and therefore prompt-cac
 <platform-instructions>   omit when skipPlatformPrompt or no text
 <agent-identity>          agentId / domain / tenantId lines
 <agent-personality>       AGENT.md body
+<memory-instructions>     static preamble: apply preference facts (language/tone/tz) — renders only with <memory>
 <memory>                  per-user working memory, ≤ MAX_TOTAL_CHARS (drop whole on overflow)
 <governance-knowledge>    alwaysLoadForAgents docs (reuses knowledge/governance.ts, 4k/16k caps)
 <skills>                  eager skill bodies — `## name` + body per `eager: true` skill, 32k cap, drop-whole
