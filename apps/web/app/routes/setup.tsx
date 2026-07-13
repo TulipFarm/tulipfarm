@@ -4,7 +4,7 @@ import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { type LlmProviderInfo, listProviders, putLlmConfig, putSecret } from "~/lib/settings";
 import { completeSetup, getSetupStatus, setupAdmin, setupBusiness, setupGit } from "~/lib/setup";
-import { friendlyGitError } from "~/lib/soul";
+import { friendlyGitError, getGitConfig } from "~/lib/soul";
 
 export const meta: MetaFunction = () => [{ title: "Setup · tulipfarm" }];
 
@@ -21,10 +21,10 @@ type Step = 0 | 1 | 2 | 3;
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
-function StepIndicator({ current }: { current: Step }) {
+function StepIndicator({ steps, current }: { steps: readonly string[]; current: Step }) {
   return (
     <div className="flex items-center gap-2 mb-8">
-      {STEPS.map((label, i) => (
+      {steps.map((label, i) => (
         <div key={label} className="flex items-center gap-2">
           <div
             className={[
@@ -43,7 +43,7 @@ function StepIndicator({ current }: { current: Step }) {
           >
             {label}
           </span>
-          {i < STEPS.length - 1 && <div className="h-px w-4 bg-border" />}
+          {i < steps.length - 1 && <div className="h-px w-4 bg-border" />}
         </div>
       ))}
     </div>
@@ -390,6 +390,14 @@ export default function SetupRoute() {
   const [step, setStep] = useState<Step>(0);
   const [finishing, setFinishing] = useState(false);
   const [finishError, setFinishError] = useState<string | null>(null);
+  // Whether a soul git remote is already live (e.g. seeded by SOUL_GIT_REMOTE_URL /
+  // SOUL_GIT_CREDENTIAL at boot). null = unknown (probe pending/not started) — treated as
+  // "not configured" so the wizard never blocks on the probe and defaults to showing the step.
+  const [gitConfigured, setGitConfigured] = useState<boolean | null>(null);
+
+  // Hide the Soul backup step when the remote already exists. Only while we haven't reached it:
+  // if the probe resolves after the user is already on the step, keep the 4-step layout stable.
+  const steps: readonly string[] = gitConfigured === true && step < 3 ? STEPS.slice(0, 3) : STEPS;
 
   async function finish() {
     setFinishing(true);
@@ -404,11 +412,20 @@ export default function SetupRoute() {
   }
 
   const advance = () => {
-    if (step < 3) {
+    if (step < steps.length - 1) {
       setStep((s) => (s + 1) as Step);
     } else {
       void finish();
     }
+  };
+
+  // The admin step's auto-login makes the (authenticated) git-config probe possible: fire it
+  // once, then advance. Probe failure counts as "not configured" — the step stays visible.
+  const advanceFromAdmin = () => {
+    getGitConfig()
+      .then((cfg) => setGitConfigured(cfg.status.remoteConfigured))
+      .catch(() => setGitConfigured(false));
+    advance();
   };
 
   return (
@@ -420,20 +437,18 @@ export default function SetupRoute() {
       <p className="mt-1 text-sm text-muted-foreground">Let's get you set up.</p>
 
       <div className="mt-8">
-        <StepIndicator current={step} />
+        <StepIndicator steps={steps} current={step} />
 
-        <h2 className="mb-4 text-base font-medium">{STEPS[step]}</h2>
+        <h2 className="mb-4 text-base font-medium">{steps[step]}</h2>
 
         {finishError && <ErrorAlert message={finishError} />}
 
-        {step === 0 && <AdminStep onNext={advance} />}
+        {step === 0 && <AdminStep onNext={advanceFromAdmin} />}
         {step === 1 && <BusinessStep onNext={advance} />}
         {step === 2 && <LlmStep onNext={advance} />}
         {step === 3 && <GitStep onNext={advance} />}
 
-        {step === 3 && finishing && (
-          <p className="mt-4 text-sm text-muted-foreground">Finishing setup…</p>
-        )}
+        {finishing && <p className="mt-4 text-sm text-muted-foreground">Finishing setup…</p>}
       </div>
     </section>
   );
