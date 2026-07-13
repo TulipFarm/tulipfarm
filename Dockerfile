@@ -39,8 +39,9 @@ RUN pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
 FROM node:24-slim AS runtime
-# git: soul backup/sync shells out to it.
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# git: soul backup/sync shells out to it. ca-certificates: git clones soul
+# remotes over https; --no-install-recommends skips it, so name it explicitly.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production \
