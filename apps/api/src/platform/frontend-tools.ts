@@ -64,7 +64,9 @@ const NAVIGATE_TO_SCHEMA: Record<string, unknown> = {
     to: {
       type: "string",
       minLength: 1,
-      pattern: "^/(?!/)",
+      // "/" then not another "/" (blocks protocol-relative //host). Written without regex
+      // lookaround: LLM providers reject tool schemas whose `pattern` uses (?!...)/(?=...).
+      pattern: "^/([^/].*)?$",
       description: 'An internal app path starting with "/", e.g. "/resources/tickets/TICK-1042".',
     },
     reason: {
