@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/TulipFarm/tulipfarm/compare/v0.2.0...v0.2.1) (2026-07-13)
+
+### Bug Fixes
+
+* **tools:** remove regex lookaround from navigate_to input schema ([2438cde](https://github.com/TulipFarm/tulipfarm/commit/2438cde267cedc2d10644a1a62ce8484a816ed8d))
+* **web:** skip soul backup setup step when git remote is env-configured ([4002110](https://github.com/TulipFarm/tulipfarm/commit/40021100c8297fadc20f26fbe22ab2a584f07d3b))
+
 ## [0.2.0](https://github.com/TulipFarm/tulipfarm/compare/v0.1.1...v0.2.0) (2026-07-13)
 
 ### Features
