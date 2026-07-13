@@ -289,6 +289,7 @@ export async function buildApp(opts: AppOptions = {}) {
         const knowledgeService = opts.knowledgeService;
         registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
           kvService: opts.kvService,
+          llmService: opts.llmService,
           hasAnyKnowledgePage: knowledgeService
             ? () => knowledgeService.hasAnyKnowledgePage()
             : undefined,

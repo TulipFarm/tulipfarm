@@ -46,9 +46,15 @@ export interface ChecklistSignals {
   hasKnowledge: boolean;
   /** First resource type name (sorted, for byte-stable recommendation text). */
   firstResourceName?: string;
+  /** Business name from soul.yaml; interpolated into `todo` prompts when set. */
+  businessName?: string;
 }
 
-export function deriveSignals(soul: SoulSlice, hasKnowledge: boolean): ChecklistSignals {
+export function deriveSignals(
+  soul: SoulSlice,
+  hasKnowledge: boolean,
+  businessName?: string
+): ChecklistSignals {
   const resourceNames = [...soul.resources.keys()].sort();
   return {
     hasResource: resourceNames.length > 0,
@@ -56,35 +62,47 @@ export function deriveSignals(soul: SoulSlice, hasKnowledge: boolean): Checklist
     hasAgent: soul.agents.size > 0,
     hasKnowledge,
     firstResourceName: resourceNames[0],
+    businessName,
   };
 }
 
-/** Build the six core steps in fixed order. `todo` steps carry the prompt; done/coming-soon do not. */
+/**
+ * Build the six core steps in fixed order. `todo` steps carry the prompt; done/coming-soon do not.
+ * Prompt text is `${base}${forBiz}.` — the trailing period is added here so the base strings stay
+ * suffix-free and the no-businessName output is byte-identical to the original generic prompts.
+ */
 export function buildSteps(sig: ChecklistSignals): ChecklistStep[] {
+  const forBiz = sig.businessName ? ` for ${sig.businessName}` : "";
   const actionable = (
     id: ChecklistStep["id"],
     label: string,
     done: boolean,
-    prompt: string
+    base: string
   ): ChecklistStep =>
-    done ? { id, label, status: "done" } : { id, label, status: "todo", prompt };
+    done
+      ? { id, label, status: "done" }
+      : { id, label, status: "todo", prompt: `${base}${forBiz}.` };
 
   return [
     actionable(
       "resource",
       "Create a resource type",
       sig.hasResource,
-      "Help me create a resource type."
+      "Help me create a resource type"
     ),
-    actionable("skill", "Add a skill", sig.hasSkill, "Help me add a skill."),
-    actionable("agent", "Create an agent", sig.hasAgent, "Help me create an agent."),
-    actionable("knowledge", "Add knowledge", sig.hasKnowledge, "Help me add a knowledge page."),
+    actionable("skill", "Add a skill", sig.hasSkill, "Help me add a skill"),
+    actionable("agent", "Create an agent", sig.hasAgent, "Help me create an agent"),
+    actionable("knowledge", "Add knowledge", sig.hasKnowledge, "Help me add a knowledge page"),
     { id: "routine", label: "Set up a routine", status: "coming-soon" },
     { id: "integration", label: "Connect an integration", status: "coming-soon" },
   ];
 }
 
-export function buildChecklist(soul: SoulSlice, hasKnowledge: boolean): ChecklistState {
-  const sig = deriveSignals(soul, hasKnowledge);
+export function buildChecklist(
+  soul: SoulSlice,
+  hasKnowledge: boolean,
+  businessName?: string
+): ChecklistState {
+  const sig = deriveSignals(soul, hasKnowledge, businessName);
   return { steps: buildSteps(sig), recommendations: evaluateRules(sig) };
 }
