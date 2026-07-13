@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0](https://github.com/TulipFarm/tulipfarm/compare/v0.1.1...v0.2.0) (2026-07-13)
+
+### Features
+
+* **memory:** apply preference-typed memory entries actively ([#150](https://github.com/TulipFarm/tulipfarm/issues/150)) ([c5e350e](https://github.com/TulipFarm/tulipfarm/commit/c5e350ee9e14071a3ae85ce151f6467d6cdbbcd2))
+* **onboarding:** personalize checklist & suggestions from business context via LLM ([#152](https://github.com/TulipFarm/tulipfarm/issues/152)) ([89a5bd7](https://github.com/TulipFarm/tulipfarm/commit/89a5bd77e2fdf6dd2a98c44026742b0e9bd29fd0)), closes [#130](https://github.com/TulipFarm/tulipfarm/issues/130)
+
+### Bug Fixes
+
+* **docker:** install ca-certificates in runtime image ([ed5c22b](https://github.com/TulipFarm/tulipfarm/commit/ed5c22bff24473c8e1eb14507b68205061ed71c7))
+
 ## [0.1.1](https://github.com/TulipFarm/tulipfarm/compare/v0.1.0...v0.1.1) (2026-07-09)
 
 ### Bug Fixes
