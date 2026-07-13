@@ -73,6 +73,13 @@ describe("buildSteps", () => {
     expect(resource?.prompt).toBeUndefined();
   });
 
+  it("interpolates businessName into todo prompts, unchanged when absent", () => {
+    const generic = buildSteps(empty).find((s) => s.id === "resource")?.prompt;
+    expect(generic).toBe("Help me create a resource type.");
+    const named = buildSteps(deriveSignals(soul(), false, "Acme")).find((s) => s.id === "resource");
+    expect(named?.prompt).toBe("Help me create a resource type for Acme.");
+  });
+
   it("marks all four core steps done when every signal is true", () => {
     const steps = buildSteps(
       deriveSignals(soul({ resources: ["r"], skills: ["s"], agents: ["a"] }), true)

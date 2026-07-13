@@ -1,9 +1,11 @@
+import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { KvService } from "../kv/service";
 import { buildChecklist } from "./checklist";
+import { getPersonalizedOnboarding } from "./personalize";
 import { deriveSuggestions } from "./suggestions";
 
 /*
@@ -29,6 +31,8 @@ interface OnboardingDeps {
   hasAnyKnowledgePage?: () => Promise<boolean>;
   /** User-scoped store for the dismissed flag; the checklist route is registered only when present. */
   kvService?: KvService;
+  /** Powers LLM personalization; absent → static catalog/rules fallback. */
+  llmService?: LlmService;
 }
 
 export function registerOnboardingRoutes(
@@ -68,8 +72,13 @@ export function registerOnboardingRoutes(
         },
       },
     },
-    async () => {
-      return { suggestions: deriveSuggestions(soulLoader) };
+    async (req) => {
+      const personalized = await getPersonalizedOnboarding(soulLoader, {
+        kvService: deps.kvService,
+        llmService: deps.llmService,
+        logger: req.log,
+      });
+      return { suggestions: personalized?.suggestions ?? deriveSuggestions(soulLoader) };
     }
   );
 
@@ -129,8 +138,21 @@ export function registerOnboardingRoutes(
       const value = entry?.value as { dismissed?: unknown } | undefined;
       const dismissed = value?.dismissed === true;
       const hasKnowledge = (await deps.hasAnyKnowledgePage?.()) ?? false;
-      const { steps, recommendations } = buildChecklist(soulLoader, hasKnowledge);
-      return { dismissed, steps, recommendations };
+      const businessName =
+        typeof soulLoader.manifest?.businessName === "string"
+          ? soulLoader.manifest.businessName
+          : undefined;
+      const { steps, recommendations } = buildChecklist(soulLoader, hasKnowledge, businessName);
+      const personalized = await getPersonalizedOnboarding(soulLoader, {
+        kvService,
+        llmService: deps.llmService,
+        logger: req.log,
+      });
+      return {
+        dismissed,
+        steps,
+        recommendations: personalized?.recommendations ?? recommendations,
+      };
     }
   );
 }
