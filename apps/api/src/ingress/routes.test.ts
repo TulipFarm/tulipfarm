@@ -84,12 +84,21 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
 
   function inject(
     payload: Record<string, unknown>,
-    opts: { sign?: boolean; secret?: string; name?: string; timestamp?: string } = {}
+    opts: {
+      sign?: boolean;
+      secret?: string;
+      name?: string;
+      timestamp?: string;
+      extraHeaders?: Record<string, string>;
+    } = {}
   ): Promise<LightMyRequestResponse> {
     const { sign = true, secret = SECRET, name = "chatapp" } = opts;
     const body = JSON.stringify(payload);
     const timestamp = opts.timestamp ?? String(Math.floor(Date.now() / 1000));
-    const headers: Record<string, string> = { "content-type": "application/json" };
+    const headers: Record<string, string> = {
+      "content-type": "application/json",
+      ...opts.extraHeaders,
+    };
     if (sign) {
       headers["x-provider-timestamp"] = timestamp;
       headers["x-provider-signature"] = computeHmacSignature(body, SECURITY, secret, timestamp);
@@ -142,6 +151,30 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     expect(first.statusCode).toBe(200);
     expect(retry.statusCode).toBe(200);
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("dedups on a declared header and forwards context headers into the job", async () => {
+    await app.close();
+    const integration = makeIntegration();
+    const ingress = integration.manifest.ingress;
+    if (ingress) {
+      ingress.webhook.dedup_key = undefined;
+      ingress.webhook.dedup_header = "X-Provider-Delivery";
+      ingress.webhook.context_headers = ["X-Provider-Event"];
+    }
+    await build([integration]);
+
+    const extraHeaders = { "x-provider-delivery": "guid-1", "x-provider-event": "issues" };
+    await inject(EVENT, { extraHeaders });
+    await inject(EVENT, { extraHeaders }); // same delivery guid → deduped
+    await inject(EVENT, { extraHeaders: { ...extraHeaders, "x-provider-delivery": "guid-2" } });
+
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    expect(enqueue.mock.calls[0][0]).toEqual({
+      slug: "chatapp",
+      body: EVENT,
+      headers: { "x-provider-event": "issues" },
+    });
   });
 
   it("enqueues without dedup when the manifest declares no dedup_key", async () => {

@@ -19,8 +19,9 @@ const ERROR_REPLY = "Something went wrong handling that — please try again.";
 
 /**
  * The decision contract for an integration's sandboxed `classify(ctx)` — the ONLY code an
- * integration contributes to the ingress path. `ctx` carries `{ body, hasThreadMapping }`;
- * the returned value is validated structurally here (never trusted).
+ * integration contributes to the ingress path. `ctx` carries `{ body, headers,
+ * hasThreadMapping }` (headers = the manifest-declared context_headers, lowercased); the
+ * returned value is validated structurally here (never trusted).
  */
 export type IngressDecision =
   | { kind: "ignore"; reason?: string }
@@ -87,7 +88,7 @@ export async function handleIngressJob(
   const raw = await deps.hookExecutor.runRoutineHook(
     handler.source,
     "classify",
-    { body, hasThreadMapping },
+    { body, headers: payload.headers ?? {}, hasThreadMapping },
     null,
     `ingress:${slug}`,
     { expectedHash: handler.hash }

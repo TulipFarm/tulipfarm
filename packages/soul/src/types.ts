@@ -80,6 +80,13 @@ export interface WebhookConfig {
   accept?: BodyMatch;
   /** Dot-path into the body used for provider-retry dedup; absent → no dedup. */
   dedup_key?: string;
+  /** Header whose value dedups retries (e.g. X-GitHub-Delivery); takes precedence over dedup_key. */
+  dedup_header?: string;
+  /**
+   * Request headers forwarded into the classifier's ctx.headers, lowercased (e.g. X-GitHub-Event,
+   * whose value names the event type for providers that don't put it in the body).
+   */
+  context_headers?: string[];
 }
 
 /** One outbound call bound to a tool exposed by the integration's own MCP server. */

@@ -9,6 +9,8 @@ import { dotPath, matchesBody, renderBodyTemplate } from "./template";
 export interface IngressJobPayload {
   slug: string;
   body: Record<string, unknown>;
+  /** Manifest-declared context_headers, lowercased — forwarded into the classifier's ctx. */
+  headers?: Record<string, string>;
 }
 
 export interface IngressRoutesDeps {
@@ -113,18 +115,40 @@ export async function registerIngressRoutes(
         // Hot-path accept filter: non-matching deliveries are acked and dropped.
         if (!matchesBody(body, ingress.webhook.accept)) return reply.code(200).send({});
 
-        // Provider-retry dedup on the declared key; first delivery wins.
-        if (ingress.webhook.dedup_key) {
-          const key = dotPath(body, ingress.webhook.dedup_key);
-          if (typeof key === "string" && key) {
-            const first = await deps.deliveries.recordDelivery(name, key);
-            if (!first) return reply.code(200).send({});
+        // Provider-retry dedup: a declared header (e.g. X-GitHub-Delivery) wins over the body
+        // dot-path; first delivery wins.
+        const dedupValue = ingress.webhook.dedup_header
+          ? headerValue(req.headers, ingress.webhook.dedup_header)
+          : ingress.webhook.dedup_key
+            ? dotPath(body, ingress.webhook.dedup_key)
+            : undefined;
+        if (typeof dedupValue === "string" && dedupValue) {
+          const first = await deps.deliveries.recordDelivery(name, dedupValue);
+          if (!first) return reply.code(200).send({});
+        }
+
+        // Forward the manifest-declared context headers (lowercased) — some providers put the
+        // event name there (X-GitHub-Event) rather than in the body.
+        let headers: Record<string, string> | undefined;
+        if (ingress.webhook.context_headers?.length) {
+          headers = {};
+          for (const name_ of ingress.webhook.context_headers) {
+            const value = headerValue(req.headers, name_);
+            if (value !== undefined) headers[name_.toLowerCase()] = value;
           }
         }
 
-        await deps.enqueue({ slug: name, body });
+        await deps.enqueue({ slug: name, body, headers });
         return reply.code(200).send({});
       }
     );
   });
+}
+
+function headerValue(
+  headers: Record<string, string | string[] | undefined>,
+  name: string
+): string | undefined {
+  const value = headers[name.toLowerCase()] ?? headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }

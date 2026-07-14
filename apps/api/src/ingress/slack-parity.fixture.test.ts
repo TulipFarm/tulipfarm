@@ -23,10 +23,7 @@ let source: string;
 let executor: HookExecutor;
 
 beforeAll(async () => {
-  source = await readFile(
-    join(import.meta.dirname, "__fixtures__", "slack-ingress.hook.txt"),
-    "utf8"
-  );
+  source = await readFile(join(__dirname, "__fixtures__", "slack-ingress.hook.txt"), "utf8");
   executor = new HookExecutor(FAKE_DATABASE_URL);
   return async () => {
     await executor.close();

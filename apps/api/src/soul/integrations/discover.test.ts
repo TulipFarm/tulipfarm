@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { discoverIntegrations } from "./routes";
 
-const TMP = join(import.meta.dirname, "__discover_test_tmp__");
+const TMP = join(__dirname, "__discover_test_tmp__");
 
 async function write(path: string, content: string) {
   await mkdir(join(path, ".."), { recursive: true });

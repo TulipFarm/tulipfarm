@@ -169,7 +169,7 @@ describe("handleIngressJob", () => {
       userId: admin._id,
     } as IntegrationConversation);
     await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
-    expect(seen[0]).toEqual({ body: BODY, hasThreadMapping: true });
+    expect(seen[0]).toEqual({ body: BODY, headers: {}, hasThreadMapping: true });
     const exec = deps.hookExecutor.runRoutineHook as ReturnType<typeof vi.fn>;
     expect(exec).toHaveBeenCalledWith(
       HANDLER.source,
@@ -179,6 +179,19 @@ describe("handleIngressJob", () => {
       "ingress:chatapp",
       { expectedHash: HANDLER.hash }
     );
+  });
+
+  it("forwards the payload's context headers into classify()", async () => {
+    const seen: Record<string, unknown>[] = [];
+    deps.hookExecutor = makeHookExecutor((invocation) => {
+      seen.push(invocation);
+      return { kind: "ignore" };
+    });
+    await handleIngressJob(
+      { slug: "chatapp", body: BODY, headers: { "x-provider-event": "issues" } },
+      deps
+    );
+    expect(seen[0]).toMatchObject({ headers: { "x-provider-event": "issues" } });
   });
 
   it("drops jobs for missing/disconnected/handlerless integrations", async () => {
