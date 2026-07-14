@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0-integrations.0](https://github.com/TulipFarm/tulipfarm/compare/v0.2.1...v0.3.0-integrations.0) (2026-07-14)
+
+### Features
+
+* **ingress:** header context + header dedup — enables github-style providers ([2f48379](https://github.com/TulipFarm/tulipfarm/commit/2f48379ed8745d406ae8692d2ae393b4b1e2f593))
+* **ingress:** slack ingress, integration update restart, app update notice ([c6c8bbe](https://github.com/TulipFarm/tulipfarm/commit/c6c8bbe143d026800e1b2e6e6e142746086d105a)), closes [#branch](https://github.com/TulipFarm/tulipfarm/issues/branch)
+
 ## [0.2.1](https://github.com/TulipFarm/tulipfarm/compare/v0.2.0...v0.2.1) (2026-07-13)
 
 ### Bug Fixes
