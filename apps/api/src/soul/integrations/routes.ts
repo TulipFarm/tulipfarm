@@ -397,6 +397,14 @@ export function registerIntegrationRoutes(
               connected: { type: "boolean" },
               setupGuide: { type: "string" },
               toolNames: { type: "array", items: { type: "string" } },
+              ingress: {
+                type: "object",
+                required: ["enabled"],
+                properties: {
+                  enabled: { type: "boolean" },
+                  webhookUrl: { type: "string", nullable: true },
+                },
+              },
             },
           },
           401: ErrorSchema,
@@ -408,6 +416,12 @@ export function registerIntegrationRoutes(
       const { name } = req.params as { name: string };
       const integration = soulLoader.integrations.get(name);
       if (!integration) return reply.code(404).send({ error: `integration not found: ${name}` });
+      // Inbound webhook receiver URL — deterministic from the manifest, shown after install so
+      // the operator can paste it into the provider (e.g. Slack Event Subscriptions Request URL).
+      const ingressCfg = integration.manifest.ingress;
+      const ingressEnabled =
+        ingressCfg !== undefined && ingressCfg.type !== "none" && ingressCfg.webhook !== undefined;
+      const publicUrl = process.env.PUBLIC_URL ?? "http://localhost:8080";
       return {
         name: integration.slug,
         type: integration.manifest.egress.type,
@@ -418,6 +432,12 @@ export function registerIntegrationRoutes(
         connected: integration.connection?.enabled === true,
         setupGuide: integration.setupGuide,
         toolNames: mcpClient.getToolNames(name),
+        ingress: {
+          enabled: ingressEnabled,
+          webhookUrl: ingressEnabled
+            ? `${publicUrl.replace(/\/$/, "")}/api/v1/hooks/integrations/${integration.slug}`
+            : null,
+        },
       };
     }
   );
@@ -574,6 +594,19 @@ export function registerIntegrationRoutes(
       await writeIntegrationsLock(gitSync.path, lock);
       await gitSync.withSync(`soul: install integration(s) ${installed.join(", ")}`);
       await soulLoader.reload();
+      // Updating an already-CONNECTED integration must restart its MCP server so a changed
+      // egress entry takes effect — the running process was spawned from the old manifest.
+      // connect() is an idempotent re-connect; failures degrade to the pre-update process.
+      for (const name of installed) {
+        const reloaded = soulLoader.integrations.get(name);
+        if (reloaded?.connection?.enabled) {
+          try {
+            await mcpClient.connect(name, reloaded.manifest, reloaded.connection);
+          } catch (err) {
+            req.log.warn({ err, integration: name }, "MCP reconnect after update failed");
+          }
+        }
+      }
       return { installed };
     }
   );

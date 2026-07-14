@@ -1,5 +1,7 @@
 import { type MetaFunction, NavLink, Outlet, useLocation } from "@remix-run/react";
 import { Activity, Brain, Cpu, History, KeyRound, type LucideIcon, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { getUpdateCheck, type UpdateCheck } from "~/lib/system";
 import { cn } from "~/lib/utils";
 
 export const meta: MetaFunction = () => [{ title: "Settings · tulipfarm" }];
@@ -63,6 +65,32 @@ const sections: Section[] = [
  * auto-collapses to its icon rail under /settings (wired in _app.tsx via `forceCollapsed`), giving
  * this rail the freed space. On mobile the rail stacks above the content. Children own their data.
  */
+function UpdateNotice() {
+  const [check, setCheck] = useState<UpdateCheck | null>(null);
+  useEffect(() => {
+    getUpdateCheck()
+      .then(setCheck)
+      .catch(() => setCheck(null)); // advisory only — never surface an error for this
+  }, []);
+  if (!check?.updateAvailable || !check.latest) return null;
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-sm border border-border bg-muted px-3 py-2 text-sm">
+      <span className="text-foreground">
+        TulipFarm v{check.latest} is available (running v{check.version}).
+      </span>
+      <a
+        href="https://github.com/tulipfarm/tulipfarm/releases"
+        target="_blank"
+        rel="noreferrer"
+        className="text-primary underline-offset-2 hover:underline"
+      >
+        Release notes
+      </a>
+      <span className="text-muted-foreground">— see the README's update runbook to apply.</span>
+    </div>
+  );
+}
+
 export default function SettingsLayout() {
   const { pathname } = useLocation();
   const active = sections.find((s) => pathname.startsWith(s.to)) ?? sections[0];
@@ -102,6 +130,7 @@ export default function SettingsLayout() {
 
       <div className="min-w-0 flex-1 overflow-y-auto">
         <div className={cn("w-full px-6 py-8 md:px-8", !active.wide && "max-w-4xl")}>
+          <UpdateNotice />
           <header className="mb-6">
             <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
               <span className="text-primary">[</span>settings<span className="text-primary">]</span>

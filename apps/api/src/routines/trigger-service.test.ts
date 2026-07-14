@@ -127,6 +127,53 @@ describe("RoutineTriggerService", () => {
       });
     });
 
+    it("starts routines on integration.event with a protocol/event filter (Slack ingress)", async () => {
+      const routine: Record<string, unknown> = {
+        ...EVENT_ROUTINE,
+        id: "on-slack-join",
+        "x-triggers": [
+          {
+            type: "event",
+            event: "integration.event",
+            filter:
+              "trigger.payload.integration === 'slack' && trigger.payload.event === 'member_joined_channel'",
+          },
+        ],
+      };
+      const registry = makeRegistry({ "on-slack-join": routine });
+      const evalFilter = vi.fn(async (code: string, scope: Record<string, unknown>) => {
+        const fn = new Function(...Object.keys(scope), `return (${code});`);
+        return fn(...Object.values(scope));
+      });
+      const service = makeService(registry, evalFilter);
+      const bus = new EventEmitter();
+      subscribeRoutineEventTriggers(bus, service, registry, evalFilter, LOG);
+
+      bus.emit(DOMAIN_EVENTS.INTEGRATION_EVENT, {
+        integration: "slack",
+        protocol: "slack",
+        event: "reaction_added",
+        eventId: "e1",
+        payload: {},
+      });
+      await vi.waitFor(() => expect(evalFilter).toHaveBeenCalled());
+      expect(enqueued).toHaveLength(0); // wrong event type — filter rejected
+
+      bus.emit(DOMAIN_EVENTS.INTEGRATION_EVENT, {
+        integration: "slack",
+        protocol: "slack",
+        event: "member_joined_channel",
+        eventId: "e2",
+        payload: { channel: "C1", user: "U1" },
+      });
+      await vi.waitFor(() => expect(enqueued).toHaveLength(1));
+      const run = await runs.findById(enqueued[0].runId);
+      expect(run?.trigger).toMatchObject({
+        type: "event",
+        payload: { integration: "slack", event: "member_joined_channel" },
+      });
+    });
+
     it("ignores events no routine subscribes to", async () => {
       const registry = makeRegistry({ "on-ticket": EVENT_ROUTINE });
       const service = makeService(registry);

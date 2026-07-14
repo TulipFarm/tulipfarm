@@ -281,6 +281,33 @@ export default function IntegrationDetailPage() {
           )}
         </div>
 
+        {/* Inbound webhook URL (integrations that declare ingress, e.g. Slack events) */}
+        {integration.ingress?.enabled && integration.ingress.webhookUrl && (
+          <div className="flex flex-col gap-2 rounded-sm border border-border p-3">
+            <h2 className="text-sm font-medium text-foreground">Webhook URL</h2>
+            <p className="text-xs text-muted-foreground">
+              Paste this into the provider's event subscription settings (Slack: Event Subscriptions
+              → Request URL). Connect the integration first — the URL only verifies once a signing
+              secret is saved.
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1 text-xs text-foreground">
+                {integration.ingress.webhookUrl}
+              </code>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(integration.ingress?.webhookUrl ?? "");
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Connect form (only when not connected) */}
         {!isConnected && (
           <div className="flex flex-col gap-3">

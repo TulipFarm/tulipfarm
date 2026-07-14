@@ -115,6 +115,59 @@ The soul lives at `~/.tulipfarm/soul` — a git repository that stores your syst
 
 Or configure it from the Settings UI setup wizard, which persists the remote + credential and syncs immediately (no restart needed).
 
+### Testing a marketplace branch (integrations / skills)
+
+The marketplace endpoints clone their source repo per request, so you can point an instance
+at any repo **and branch** without code changes — useful for testing an integrations or
+skills branch before merging it to main:
+
+```bash
+# integrations marketplace (default: tulipfarm/integrations, remote default branch)
+INTEGRATIONS_MARKETPLACE_SOURCE=tulipfarm/integrations#my-feature-branch
+
+# skills marketplace (default: tulipfarm/skills)
+MARKETPLACE_SOURCE=tulipfarm/skills#my-feature-branch
+```
+
+Accepted forms: `owner/repo`, `owner/repo#branch-or-tag`, a full `https://` git URL (also with
+`#ref`), or `file:///abs/path` for a local checkout. Set in `.env.local` for local dev; on a
+hosted instance (e.g. Azure App Service) set the app setting and restart:
+
+```bash
+az webapp config appsettings set -n <app> -g <rg> \
+  --settings INTEGRATIONS_MARKETPLACE_SOURCE=tulipfarm/integrations#my-feature-branch
+```
+
+Installs record provenance (source URL + resolved commit SHA + content hash) in
+`integrations-lock.json` / `skills-lock.json`; the marketplace shows **Update** when the
+locked hash differs from the source's current content — reinstalling from a branch and later
+from main both flow through the same update path.
+
+### Updating TulipFarm (self-host)
+
+Releases publish the image `ghcr.io/tulipfarm/tulipfarm:<version>` (+ `:latest` for stable).
+Updates are always **manual** (no auto-update by design):
+
+- **OCI lane (installer):** re-run the install command — it preserves `.env` and the Postgres
+  volume, pulls the pinned `TULIPFARM_VERSION` (default `latest`), and restarts.
+- **Compose by hand:** `docker compose pull && docker compose up -d`.
+- **Azure App Service (sitecontainer on `:latest`):** `az webapp restart -n <app> -g <rg>` —
+  the restart pulls the newest image.
+- **Pinned installs:** bump `TULIPFARM_VERSION` in `.env`, then pull + up.
+
+**Database migrations run automatically on boot** — pulling a new image applies pending
+schema migrations before the API starts serving. The corollaries:
+
+- There are **no down-migrations**: rolling back to an older image after a migration ran
+  requires restoring a database backup, not just repointing the image tag.
+- A failed boot migration restart-loops the app — fix forward (patched release) or restore.
+- **Back up before updating**: `pg_dump` the database (or rely on your managed Postgres
+  point-in-time restore) so a bad update is a restore away from recovery.
+
+Installed **integrations and skills** update independently of the app: the marketplace pages
+show an **Update** button when the source repo has newer content (lock-hash comparison).
+Updating a connected integration restarts its MCP server automatically.
+
 ### Stopping Services
 
 To stop PostgreSQL:

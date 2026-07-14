@@ -33,6 +33,7 @@ import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
+import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
 import { McpClientService } from "./integrations/mcp-client-service";
 import type { PageRetrievalService } from "./knowledge/retrieval-service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
@@ -60,6 +61,7 @@ import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
 import { registerSkillRoutes } from "./soul/skills/routes";
+import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
 import type { ToolRegistry } from "./tools/registry";
 import { buildToolRegistry } from "./tools/setup";
 
@@ -99,6 +101,10 @@ export interface AppOptions {
   routines?: RoutineRoutesDeps;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
+  /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
+  ingress?: IngressRoutesDeps;
+  /** System routes overrides (update-check fetch injection for tests). */
+  systemRoutes?: SystemRoutesDeps;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -214,6 +220,13 @@ export async function buildApp(opts: AppOptions = {}) {
     configuration: { spec: { url: "/api/v1/openapi.json" } },
   });
 
+  // Integration ingress is deliberately outside the session-auth block: the hook route carries
+  // its own per-integration HMAC verification and must work without session deps (mirrors the
+  // routines webhook posture — no session auth, no CSRF).
+  if (opts.ingress) {
+    await registerIngressRoutes(app, opts.ingress);
+  }
+
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
@@ -260,6 +273,7 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth);
     }
+    registerSystemRoutes(app, { kv: opts.kvService, ...opts.systemRoutes }, requireAuth);
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }

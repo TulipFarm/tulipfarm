@@ -45,6 +45,7 @@ export type IntegrationDetail = IntegrationSummary & {
   };
   connected: boolean;
   setupGuide?: string;
+  ingress?: { enabled: boolean; webhookUrl: string | null };
 };
 
 export type ScannedIntegration = {

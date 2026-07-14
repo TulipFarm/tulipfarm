@@ -31,8 +31,10 @@ RUN VITE_API_URL="" pnpm --filter @tulipfarm/web build
 # that read their own files at runtime (scalar UI assets) stay external and are
 # supplied by the prod deploy closure below. The datastore driver (pg) and queue
 # (pg-boss) are externalized too — they live in the prod node_modules closure.
-RUN pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
+RUN TF_VERSION=$(node -p "require('./package.json').version") \
+  && pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
   --bundle --platform=node --target=node24 --format=cjs --outfile=dist/server.cjs \
+  --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
   --external:@scalar/fastify-api-reference
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).

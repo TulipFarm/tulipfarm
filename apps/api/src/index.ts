@@ -32,6 +32,13 @@ import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
+import { SlackIdentityResolver } from "./ingress/identity";
+import { makeIngressEnqueuer, registerIngressJobs } from "./ingress/jobs";
+import {
+  IngressDeliveriesRepo,
+  IntegrationConversationsRepo,
+  IntegrationEventsRepo,
+} from "./ingress/repo";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
 import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
@@ -198,6 +205,7 @@ async function boot() {
     const approvalsRepo = new ApprovalsRepo(pool);
     const approvalRegistry = new ApprovalRegistry(approvalsRepo);
     const routineEnqueuers = makeRoutineEnqueuers(boss);
+    const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const routineEvalFilter = hookExecutor
       ? (code: string, scope: Record<string, unknown>) =>
           hookExecutor.runExpression(code, scope, "routine:event-filter")
@@ -313,6 +321,11 @@ async function boot() {
       },
       approvalsRepo,
       approvalRegistry,
+      ingress: {
+        soulLoader,
+        deliveries: ingressDeliveries,
+        enqueue: makeIngressEnqueuer(boss),
+      },
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
@@ -351,6 +364,22 @@ async function boot() {
       log: app.log,
     });
     await registerRoutineCronWorker(boss, routineTriggerService, app.log);
+    // Integration ingress worker (v0.12): consumes verified webhook deliveries queued by the
+    // /hooks/integrations/:name route — chat injection via the shared turn context, or
+    // integration.event domain events for routine triggers.
+    if (app.chatTurnContext) {
+      await registerIngressJobs(boss, {
+        soulLoader,
+        conversations: new IntegrationConversationsRepo(pool),
+        integrationEvents: new IntegrationEventsRepo(pool),
+        users: userRepo,
+        identity: new SlackIdentityResolver(userRepo, app.log),
+        chatCtx: app.chatTurnContext,
+        toolRegistry,
+        events: domainEventEmitter,
+        log: app.log,
+      });
+    }
     await reconcileRoutineSchedules(boss, routineRegistry, app.log);
     registerRoutineRegistryReload(gitSync, soulLoader, routineRegistry, app.log, () =>
       reconcileRoutineSchedules(boss, routineRegistry, app.log)

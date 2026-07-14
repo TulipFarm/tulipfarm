@@ -22,6 +22,13 @@ import { ChatBodySchema, corsPassthrough, parseLastEventId } from "./turn-helper
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
+declare module "fastify" {
+  interface FastifyInstance {
+    /** Set by registerChatRoutes — the shared turn context headless callers reuse. */
+    chatTurnContext?: ChatTurnContext;
+  }
+}
+
 export function registerChatRoutes(
   app: FastifyInstance,
   llmService: LlmService,
@@ -69,6 +76,9 @@ export function registerChatRoutes(
     surfaceStore,
     streamControllers,
   };
+  // Expose the turn context so headless callers (integration ingress worker, wired in index.ts)
+  // run through exactly the same pipeline as the HTTP route.
+  app.decorate("chatTurnContext", turnCtx);
 
   app.post(
     "/api/v1/chat",

@@ -4,7 +4,7 @@ import type { LlmService, ResolvedModel } from "@tulipfarm/llm";
 import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
-import type { FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
 import type { A2uiSurfaceStore } from "../a2ui/surface-store";
 import type { UserDoc } from "../auth/users";
@@ -78,33 +78,72 @@ export interface ChatTurnContext {
   streamControllers: Map<string, AbortController>;
 }
 
+/** Caller-supplied inputs for one turn — everything the HTTP layer contributed beyond the deps. */
+export interface TurnInput {
+  user: UserDoc;
+  body: ChatBody;
+  log: FastifyBaseLogger;
+}
+
+/** Early validation failure from prepareChatTurn; the HTTP wrapper maps it to a status code. */
+export interface PrepareError {
+  status: 400 | 404 | 503;
+  error: string;
+}
+
+export function isPrepareError(value: PreparedTurn | PrepareError): value is PrepareError {
+  return "status" in value;
+}
+
+/** Everything steps 1–4 produced, handed to startChatTurn to stream the reply. */
+export interface PreparedTurn {
+  convo: ConversationDoc;
+  isNew: boolean;
+  userSwitch?: { from: string; to: string; reason: string };
+  agent: ReturnType<typeof resolveAgent>;
+  platformAgent: ReturnType<typeof getPlatformAgent>;
+  resolved: ResolvedModel;
+  resolvedModelId: string;
+  messages: ModelMessage[];
+  pending: Awaited<ReturnType<PendingInteractionRepo["findOpenByConversation"]>>;
+  buildSystemFor: (
+    a: ReturnType<typeof resolveAgent>,
+    pa: ReturnType<typeof getPlatformAgent>
+  ) => string;
+}
+
+/** Handle over a launched turn. `done` resolves when the detached producer finishes. */
+export interface TurnHandle {
+  streamId: string;
+  replyMessageId: string;
+  conversationId: string;
+  agentName: string;
+  isNew: boolean;
+  done: Promise<void>;
+}
+
 /**
- * Run one chat turn (streamed, AI SDK data-stream protocol). Loads/creates the conversation, resolves
- * the model, assembles the per-turn system prompt + history, runs the guardrail input stage, then
- * streams the assistant reply over SSE — including the same-turn agent delegation loop. Hijacks the
- * reply and detaches the producer, so the turn finishes (and keeps buffering) past client disconnect.
+ * Steps 1–4 of a chat turn: load/create the conversation, apply a sticky @mention switch, resolve
+ * the model, assemble the per-turn system prompt + compacted history, and persist the user turn.
+ * Pure of HTTP — callers are the SSE route wrapper (runChatTurn) and the headless entry
+ * (runHeadlessChatTurn). Returns a PrepareError instead of throwing for caller-mappable failures.
  */
-export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx: ChatTurnContext) {
+export async function prepareChatTurn(
+  ctx: ChatTurnContext,
+  input: TurnInput
+): Promise<PreparedTurn | PrepareError> {
   const {
     llmService,
     repo,
     messageRepo,
-    streamRepo,
-    hub,
     workingMemory,
     knowledge,
     soulLoader,
     events,
     toolRegistry,
-    guardrails,
-    approvalRegistry,
     pendingInteractions,
-    surfaceStore,
-    streamControllers,
   } = ctx;
-
-  const user = req.user as UserDoc;
-  const body = req.body as ChatBody;
+  const { user, body, log } = input;
 
   // 1. Load or create the conversation (before any streaming).
   let convo: ConversationDoc;
@@ -112,7 +151,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   if (body.conversationId) {
     const found = await repo.findById(body.conversationId);
     if (!found || found.userId !== user._id) {
-      return reply.code(404).send({ error: "conversation not found" });
+      return { status: 404, error: "conversation not found" };
     }
     convo = found;
     isNew = false;
@@ -141,7 +180,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       getModel: () => llmService.getModel("quick"),
       id: convo._id,
       prompt: body.message.content,
-      log: req.log,
+      log,
     });
   }
 
@@ -168,10 +207,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       } catch (e) {
         // Non-fatal: continue with the mutated in-memory convo.agentId rather than aborting the
         // turn on a transient DB error (other persistence in the stream is treated as non-fatal too).
-        req.log.error(
-          { err: e, conversationId: convo._id },
-          "setAgent (user @mention switch) failed"
-        );
+        log.error({ err: e, conversationId: convo._id }, "setAgent (user @mention switch) failed");
       }
     }
     // unknown agentId → ignore, keep convo.agentId (the composer only offers real agents)
@@ -189,8 +225,8 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       llmDecision: body.llmDecision,
     });
   } catch (err) {
-    if (err instanceof UnknownModelError) return reply.code(400).send({ error: err.message });
-    if (err instanceof LlmNotConfiguredError) return reply.code(503).send({ error: err.message });
+    if (err instanceof UnknownModelError) return { status: 400, error: err.message };
+    if (err instanceof LlmNotConfiguredError) return { status: 503, error: err.message };
     throw err;
   }
   // The primary model id for this turn — stamped into each assistant message's provenance (the tier
@@ -199,7 +235,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   const resolvedModelId = resolved.modelId;
 
   // 3. Per-turn observability log (AC4).
-  req.log.info(
+  log.info(
     buildTurnLog({
       conversationId: convo._id,
       userId: user._id,
@@ -303,7 +339,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
         model: llmService.getModel("quick"),
         prompt: `${SUMMARY_PROMPT}\n\n${transcript}`,
       }).then((r) => r.text),
-    log: req.log,
+    log,
   });
   // HITL resume: if this conversation is paused on an `ask_user`, the incoming message is the
   // ANSWER, not a new user turn — inject it as the pending tool-call's result and continue the run
@@ -321,6 +357,58 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   await messageRepo.create(fromUserText(convo._id, body.message.content));
   await repo.touch(convo._id);
 
+  return {
+    convo,
+    isNew,
+    userSwitch,
+    agent,
+    platformAgent,
+    resolved,
+    resolvedModelId,
+    messages,
+    pending,
+    buildSystemFor,
+  };
+}
+
+/**
+ * Steps 5–6 of a chat turn: register the stream, run the guardrail input stage, and launch the
+ * detached producer over the agent delegation loop. HTTP-free — the SSE route attaches the raw
+ * response to `handle.streamId` afterwards; headless callers subscribe to the hub instead.
+ */
+export async function startChatTurn(
+  ctx: ChatTurnContext,
+  prepared: PreparedTurn,
+  input: TurnInput
+): Promise<TurnHandle> {
+  const {
+    repo,
+    messageRepo,
+    streamRepo,
+    hub,
+    soulLoader,
+    events,
+    toolRegistry,
+    guardrails,
+    approvalRegistry,
+    pendingInteractions,
+    surfaceStore,
+    streamControllers,
+  } = ctx;
+  const { user, body, log } = input;
+  const {
+    convo,
+    isNew,
+    userSwitch,
+    agent,
+    platformAgent,
+    resolved,
+    resolvedModelId,
+    pending,
+    buildSystemFor,
+  } = prepared;
+  const { messages } = prepared;
+
   // 5. Stream the assistant reply over SSE. Each event carries an `id` so a dropped
   //    connection can reconnect via Last-Event-ID; the producer runs detached so the
   //    turn finishes (and keeps buffering) even after the client disconnects.
@@ -334,20 +422,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   // `persistStep` writes the final-text message under it (see the holder below).
   const replyMessageId = randomUUID();
   const replyIdHolder: { id?: string } = { id: replyMessageId };
-  if (isNew) reply.raw.setHeader("X-Conversation-Id", convo._id);
-  writeSseHeaders(reply.raw, {
-    "X-Stream-Id": streamId,
-    "X-Message-Id": replyMessageId,
-    // The agent handling this turn (from the @mention / conversation) so the client's header
-    // indicator reflects it immediately; mid-turn handoffs then update it via agent-handoff events.
-    "X-Agent-Id": agent.name,
-    ...corsPassthrough(reply),
-  });
-  reply.hijack();
   hub.register(streamId);
   // Shared per-turn emitter: the producer loop AND the approval gate emit through it, so
   // out-of-band approval events stay on one monotonic, serialized seq (see stream-emitter.ts).
-  const emitter = makeStreamEmitter(streamId, { repo: streamRepo, hub, log: req.log });
+  const emitter = makeStreamEmitter(streamId, { repo: streamRepo, hub, log });
 
   // 6. Guardrails (GR-V1-001). Captured into `gr` so the tool-call/output closures narrow
   //    cleanly. The input stage runs after the emitter exists (so a block can persist its
@@ -371,8 +449,16 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       });
       await emitter.emit("finish", { reason: "guardrail_block" });
       hub.finish(streamId);
-      void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
-      return; // pending interaction stays open — the user can re-submit the answer
+      // Pending interaction stays open — the user can re-submit the answer. The producer never
+      // launches; subscribers see the buffered guardrail_block + finish on attach/replay.
+      return {
+        streamId,
+        replyMessageId,
+        conversationId: convo._id,
+        agentName: agent.name,
+        isNew,
+        done: Promise.resolve(),
+      };
     }
     // On resume the guarded answer goes back into the pending tool-result, not a trailing user msg.
     if (pending) patchToolResult(messages, pending.toolCallId, { answer: inResult.value });
@@ -513,7 +599,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
             );
           },
           onError: ({ error }) => {
-            req.log.error({ err: error, conversationId: convo._id }, "chat stream error");
+            log.error({ err: error, conversationId: convo._id }, "chat stream error");
           },
           // Persist each finished step (text and/or tool-call + tool-result) so the durable history
           // captures the whole tool loop across every agent in the chain. `activeAgent.name` is the
@@ -559,7 +645,7 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
               messageRepo,
               convo._id,
               step as unknown as PersistableStep,
-              (e) => req.log.error({ err: e, conversationId: convo._id }, "persist failed"),
+              (e) => log.error({ err: e, conversationId: convo._id }, "persist failed"),
               replyIdHolder,
               { model: resolvedModelId, agentId: activeAgent.name }
             );
@@ -706,16 +792,54 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     }
   }
 
-  // Attach this connection (live from seq 0) and start the detached producer over the loop.
-  void attachToStream(reply.raw, streamId, 0, { repo: streamRepo, hub });
-  void runChatStream(streamId, agentTurnStream(), {
+  // Start the detached producer over the loop; callers attach/subscribe via the handle.
+  const done = runChatStream(streamId, agentTurnStream(), {
     emitter,
     hub,
-    log: req.log,
+    log,
     fullResultCache,
     scanOutput,
     surfaceStore,
     conversationId: convo._id,
     abortSignal: abortController.signal,
   }).finally(() => streamControllers.delete(streamId));
+
+  return {
+    streamId,
+    replyMessageId,
+    conversationId: convo._id,
+    agentName: agent.name,
+    isNew,
+    done,
+  };
+}
+
+/**
+ * Run one chat turn (streamed, AI SDK data-stream protocol) over HTTP. Thin wrapper: prepare the
+ * turn (mapping early failures to status codes), write the SSE headers, hijack the reply, launch
+ * the detached producer, and attach this connection to the stream (live from seq 0) — so the turn
+ * finishes (and keeps buffering) even after the client disconnects.
+ */
+export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx: ChatTurnContext) {
+  const input: TurnInput = {
+    user: req.user as UserDoc,
+    body: req.body as ChatBody,
+    log: req.log,
+  };
+  const prepared = await prepareChatTurn(ctx, input);
+  if (isPrepareError(prepared)) {
+    return reply.code(prepared.status).send({ error: prepared.error });
+  }
+  const handle = await startChatTurn(ctx, prepared, input);
+  if (handle.isNew) reply.raw.setHeader("X-Conversation-Id", handle.conversationId);
+  writeSseHeaders(reply.raw, {
+    "X-Stream-Id": handle.streamId,
+    "X-Message-Id": handle.replyMessageId,
+    // The agent handling this turn (from the @mention / conversation) so the client's header
+    // indicator reflects it immediately; mid-turn handoffs then update it via agent-handoff events.
+    "X-Agent-Id": handle.agentName,
+    ...corsPassthrough(reply),
+  });
+  reply.hijack();
+  void attachToStream(reply.raw, handle.streamId, 0, { repo: ctx.streamRepo, hub: ctx.hub });
 }

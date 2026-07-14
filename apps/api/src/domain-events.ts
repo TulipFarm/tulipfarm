@@ -11,6 +11,10 @@ export const DOMAIN_EVENTS = {
   // chat turn. The observability subscriber turns these into obs_event rows; nothing else listens.
   LLM_STEP_FINISHED: "llm.step_finished",
   TURN_FINISHED: "turn.finished",
+  // Webhook-kind integration ingress: raised when an inbound integration event is persisted
+  // (ingress worker). Routine event triggers consume it, narrowed via their `filter` expression
+  // (e.g. trigger.payload.integration === "slack" && trigger.payload.event === "member_joined_channel").
+  INTEGRATION_EVENT: "integration.event",
 } as const;
 
 export interface ResourceEventPayload {
@@ -62,6 +66,20 @@ export interface LlmStepFinishedPayload {
   }>;
   /** The model's text output this step. Stored only when content capture is enabled. */
   completionText?: string;
+}
+
+/** One persisted webhook-kind ingress event (row in integration_events). */
+export interface IntegrationEventPayload {
+  /** Installation slug of the integration that received the webhook (e.g. "slack"). */
+  integration: string;
+  /** Verification protocol / provider family ("slack" | "github"). */
+  protocol: string;
+  /** Provider event type (e.g. "member_joined_channel"). */
+  event: string;
+  /** integration_events.id of the persisted record. */
+  eventId: string;
+  /** Raw provider event payload. */
+  payload: Record<string, unknown>;
 }
 
 /** One completed chat turn, with totals accumulated across its steps (and any handoffs). */

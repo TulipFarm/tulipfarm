@@ -34,6 +34,18 @@ export interface UserRepo {
   insert(user: UserDoc): Promise<void>;
 }
 
+/**
+ * The narrow lookup surface integration ingress needs to resolve an inbound sender to a
+ * TulipFarm user (email match → admin fallback). Kept separate from UserRepo so test fakes
+ * that don't care about ingress don't have to implement findFirstAdmin. PgUserRepo satisfies it.
+ */
+export interface IngressUserLookup {
+  findByEmail(email: string): Promise<UserDoc | null>;
+  findById(id: string): Promise<UserDoc | null>;
+  /** Oldest admin user — the fallback identity for integration ingress turns. */
+  findFirstAdmin(): Promise<UserDoc | null>;
+}
+
 function rowToUser(row: Record<string, unknown>): UserDoc {
   return {
     _id: row.id as string,
@@ -69,6 +81,13 @@ export class PgUserRepo implements UserRepo {
       "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
       [user._id, user.email, user.passwordHash, user.role, user.createdAt]
     );
+  }
+
+  async findFirstAdmin(): Promise<UserDoc | null> {
+    const { rows } = await this.q.query(
+      "SELECT * FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1"
+    );
+    return rows.length > 0 ? rowToUser(rows[0]) : null;
   }
 }
 

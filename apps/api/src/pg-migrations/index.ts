@@ -523,6 +523,43 @@ const ROUTINE_RUNS_STATEMENTS: string[] = [
   )`,
 ];
 
+const INGRESS_STATEMENTS: string[] = [
+  // External thread ↔ conversation mapping for chat-kind ingress. external_key is
+  // protocol-scoped (slack: "{team_id}/{channel}/{thread_ts ?? ts}") so one Slack thread maps
+  // to exactly one TulipFarm conversation. user_id is the owner the turn runs as (first mapped
+  // sender, email-matched or admin fallback).
+  `CREATE TABLE IF NOT EXISTS integration_conversations (
+    integration_slug text NOT NULL,
+    external_key     text NOT NULL,
+    conversation_id  uuid NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id          uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at       timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (integration_slug, external_key)
+  )`,
+  "CREATE INDEX IF NOT EXISTS integration_conversations_convo_idx ON integration_conversations (conversation_id)",
+  // Webhook-kind ingress records. Each row raises an integration.event domain event on
+  // creation (routine event triggers consume it); the row itself is the durable audit copy.
+  `CREATE TABLE IF NOT EXISTS integration_events (
+    id               uuid PRIMARY KEY,
+    integration_slug text NOT NULL,
+    protocol         text NOT NULL,
+    event_type       text NOT NULL,
+    external_id      text,
+    payload          jsonb NOT NULL DEFAULT '{}',
+    created_at       timestamptz NOT NULL DEFAULT now()
+  )`,
+  "CREATE INDEX IF NOT EXISTS integration_events_slug_created_idx ON integration_events (integration_slug, created_at DESC)",
+  // Delivery dedup (webhook providers retry; slack resends with the same event_id). Insert is
+  // ON CONFLICT DO NOTHING so concurrent retries race safely; rows are pruned opportunistically.
+  `CREATE TABLE IF NOT EXISTS ingress_deliveries (
+    integration_slug text NOT NULL,
+    dedup_key        text NOT NULL,
+    received_at      timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (integration_slug, dedup_key)
+  )`,
+  "CREATE INDEX IF NOT EXISTS ingress_deliveries_received_idx ON ingress_deliveries (received_at)",
+];
+
 // ── Guarded rename helpers (terminology migration v18) ───────────────────────────────────────
 // ALTER ... RENAME is not naturally idempotent, so each helper checks the catalog first. This
 // keeps a partial-failure re-run safe and runs statement-by-statement on PGlite (no plpgsql DO).
@@ -837,6 +874,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "routines: routine_runs (definition_snapshot pin, status machine, wake/deadline bookkeeping) + routine_run_events journal (doubles as SSE replay buffer)",
     up: async (q) => {
       for (const sql of ROUTINE_RUNS_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 24,
+    description:
+      "ingress: integration_conversations (external thread↔conversation map), integration_events (webhook-kind records), ingress_deliveries (retry dedup)",
+    up: async (q) => {
+      for (const sql of INGRESS_STATEMENTS) {
         await q.query(sql);
       }
     },

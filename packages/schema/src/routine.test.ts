@@ -113,6 +113,19 @@ describe("validateRoutineDefinition", () => {
     }
   });
 
+  it("accepts an integration.event trigger with a filter", () => {
+    const routine = baseRoutine();
+    routine["x-triggers"] = [
+      {
+        type: "event",
+        event: "integration.event",
+        filter:
+          "trigger.payload.integration === 'slack' && trigger.payload.event === 'member_joined_channel'",
+      },
+    ];
+    expect(() => validateRoutineDefinition(routine)).not.toThrow();
+  });
+
   it("rejects an unknown event name on an event trigger", () => {
     const routine = baseRoutine();
     routine["x-triggers"] = [{ type: "event", event: "nonexistent.event" }];

@@ -35,6 +35,7 @@ export const ROUTINE_EVENT_NAMES = [
   "resource.updated",
   "conversation.created",
   "conversation.completed",
+  "integration.event",
 ] as const;
 
 const ISO_DURATION = "^P(?!$)(\\d+Y)?(\\d+M)?(\\d+W)?(\\d+D)?(T(?=\\d)(\\d+H)?(\\d+M)?(\\d+S)?)?$";
