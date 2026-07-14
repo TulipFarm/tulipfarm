@@ -1,80 +1,53 @@
+import type { ChatIngressConfig } from "@tulipfarm/soul";
 import type { ToolRegistry } from "../tools/registry";
-import type { SlackClient } from "./slack-client";
-
-/** Actor id stamped on tool calls made by the ingress reply path (no human session). */
-export const INGRESS_ACTOR = "integration-ingress";
+import { executeToolBinding } from "./bindings";
 
 type ResponderLogger = {
   warn: (obj: unknown, msg?: string) => void;
   error: (obj: unknown, msg?: string) => void;
 };
 
-export interface SlackResponderDeps {
-  toolRegistry?: ToolRegistry;
-  /** Direct Web API fallback when no MCP send tool is installed or the tool call fails. */
-  client: SlackClient;
-  log: ResponderLogger;
-}
-
-export interface SlackReply {
-  channel: string;
-  text: string;
-  /** Present for channel replies (threaded); omitted for DM roots. */
-  threadTs?: string;
-}
-
 /**
- * Post a reply back to Slack. Prefers an installed integration-tier Slack send tool (same
- * detection contract as routine approval delivery) with args mapped from the tool's own input
- * schema — MCP packages disagree on arg names (channel vs channel_id, thread_ts optionality).
- * Any tool failure falls back to the direct chat.postMessage client. Never throws: the turn
- * result is already durable in the conversation, so a failed reply only logs.
+ * Post a chat reply through the manifest's named reply binding — the classifier's decision
+ * picks the binding ("thread", "default", …) and supplies the vars; the manifest maps them
+ * onto the integration's own MCP send tool. The reply text is always injected as {text}.
+ * Never throws: the turn result is already durable in the conversation, so a failed reply
+ * only logs.
  */
-export async function postSlackReply(deps: SlackResponderDeps, reply: SlackReply): Promise<void> {
-  const tool = deps.toolRegistry
-    ?.getAll()
-    .find(
-      (t) => t.tier === "integration" && /slack/i.test(t.name) && /send|post|message/i.test(t.name)
+export async function postReply(
+  deps: { registry?: ToolRegistry; log: ResponderLogger },
+  opts: {
+    slug: string;
+    reply: ChatIngressConfig["reply"];
+    binding: string;
+    vars: Record<string, string>;
+    text: string;
+  }
+): Promise<void> {
+  const binding = opts.reply[opts.binding] ?? opts.reply.default;
+  if (!binding) {
+    deps.log.error(
+      { slug: opts.slug, binding: opts.binding },
+      "ingress reply binding not declared in manifest; reply dropped"
     );
-
-  if (tool) {
-    try {
-      const props = propertyNames(tool.inputSchema);
-      const args: Record<string, unknown> = {};
-      const channelKey = props.find((p) => /^channel(_id)?$/i.test(p));
-      const textKey = props.find((p) => /^(text|message)$/i.test(p));
-      const threadKey = props.find((p) => /^thread_ts$/i.test(p));
-      if (channelKey && textKey && (reply.threadTs === undefined || threadKey)) {
-        args[channelKey] = reply.channel;
-        args[textKey] = reply.text;
-        if (reply.threadTs && threadKey) args[threadKey] = reply.threadTs;
-        const result = await tool.execute(args, { userId: INGRESS_ACTOR, autonomy: "full" });
-        if (result.success) return;
-        deps.log.warn(
-          { tool: tool.name, error: result.error },
-          "slack reply via MCP tool failed; falling back to direct postMessage"
-        );
-      }
-    } catch (err) {
-      deps.log.warn(
-        { tool: tool.name, err },
-        "slack reply via MCP tool threw; falling back to direct postMessage"
+    return;
+  }
+  if (!deps.registry) {
+    deps.log.error({ slug: opts.slug }, "ingress reply needs the tool registry; reply dropped");
+    return;
+  }
+  try {
+    const result = await executeToolBinding(deps.registry, opts.slug, binding, {
+      ...opts.vars,
+      text: opts.text,
+    });
+    if (!result.success) {
+      deps.log.error(
+        { slug: opts.slug, tool: binding.tool, error: result.error },
+        "ingress reply delivery failed"
       );
     }
-  }
-
-  try {
-    await deps.client.postMessage({
-      channel: reply.channel,
-      text: reply.text,
-      threadTs: reply.threadTs,
-    });
   } catch (err) {
-    deps.log.error({ err, channel: reply.channel }, "slack reply delivery failed");
+    deps.log.error({ slug: opts.slug, tool: binding.tool, err }, "ingress reply delivery threw");
   }
-}
-
-function propertyNames(schema: Record<string, unknown>): string[] {
-  const props = schema.properties;
-  return props && typeof props === "object" ? Object.keys(props) : [];
 }

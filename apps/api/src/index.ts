@@ -32,7 +32,7 @@ import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
-import { SlackIdentityResolver } from "./ingress/identity";
+import { IngressIdentityResolver } from "./ingress/identity";
 import { makeIngressEnqueuer, registerIngressJobs } from "./ingress/jobs";
 import {
   IngressDeliveriesRepo,
@@ -365,20 +365,24 @@ async function boot() {
     });
     await registerRoutineCronWorker(boss, routineTriggerService, app.log);
     // Integration ingress worker (v0.12): consumes verified webhook deliveries queued by the
-    // /hooks/integrations/:name route — chat injection via the shared turn context, or
-    // integration.event domain events for routine triggers.
-    if (app.chatTurnContext) {
+    // /hooks/integrations/:name route, classifies them through the integration's sandboxed
+    // ingress.ts — chat injection via the shared turn context, or integration.event domain
+    // events for routine triggers. Needs the hook sandbox: without it, ingress stays off.
+    if (app.chatTurnContext && hookExecutor) {
       await registerIngressJobs(boss, {
         soulLoader,
         conversations: new IntegrationConversationsRepo(pool),
         integrationEvents: new IntegrationEventsRepo(pool),
         users: userRepo,
-        identity: new SlackIdentityResolver(userRepo, app.log),
+        identity: new IngressIdentityResolver(userRepo, app.log),
         chatCtx: app.chatTurnContext,
+        hookExecutor,
         toolRegistry,
         events: domainEventEmitter,
         log: app.log,
       });
+    } else if (app.chatTurnContext) {
+      app.log.warn("integration ingress disabled: hook sandbox unavailable");
     }
     await reconcileRoutineSchedules(boss, routineRegistry, app.log);
     registerRoutineRegistryReload(gitSync, soulLoader, routineRegistry, app.log, () =>

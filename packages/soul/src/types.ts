@@ -38,37 +38,82 @@ export type EgressConfig =
   | { type: "openapi"; spec: string }
   | { type: "ts-code"; handler: string; toolsSpec: string };
 
-// ── Ingress ───────────────────────────────────────────────────────────────────
+// ── Ingress (declarative, manifest-driven) ────────────────────────────────────
+// The host runs NO integration-specific code: webhook verification, handshake, dedup, and
+// outbound calls are all declared here as templates/bindings, and event classification runs
+// the integration's sandboxed handler module (pure function, no I/O).
 
+/** HMAC webhook verification, fully template-driven. */
 export interface WebhookSecurity {
   type: "hmac_sha256";
+  /** Header carrying the signature (e.g. X-Slack-Signature, X-Hub-Signature-256). */
   header: string;
+  /** Connection env var holding the shared signing secret. */
   secret_env: string;
+  /** Canonical-string template; vars: {timestamp}, {body}. Default "{body}". */
+  signing?: string;
+  /** Signature header format template; var: {hex} (e.g. "v0={hex}", "sha256={hex}"). Default "{hex}". */
+  format?: string;
+  /** Header carrying the request timestamp; required when `signing` uses {timestamp}. */
+  timestamp_header?: string;
+  /** Replay window in seconds, enforced when timestamp_header is set. Default 300. */
+  tolerance_seconds?: number;
+}
+
+/** Dot-path equality match against the parsed JSON body. */
+export interface BodyMatch {
+  path: string;
+  equals: string;
+}
+
+/** Provider URL-verification challenge: when `match` hits, respond with the templated body. */
+export interface WebhookHandshake {
+  match: BodyMatch;
+  /** Response body: literal strings with {<dot.path>} substitutions resolved against the payload. */
+  respond: Record<string, string>;
 }
 
 export interface WebhookConfig {
-  path: string;
-  security?: WebhookSecurity | { type: "none" };
-  dedup_header?: string;
-  verification_protocol?: "slack" | "github";
+  security: WebhookSecurity;
+  handshake?: WebhookHandshake;
+  /** Hot-path filter: non-matching bodies are acked (200) and dropped before enqueue. */
+  accept?: BodyMatch;
+  /** Dot-path into the body used for provider-retry dedup; absent → no dedup. */
+  dedup_key?: string;
 }
 
-export type IngressConfig =
-  | { type: "asyncapi"; spec: string; webhook?: WebhookConfig }
-  | { type: "ts-code"; handler: string; webhook?: WebhookConfig }
-  | { type: "none" };
+/** One outbound call bound to a tool exposed by the integration's own MCP server. */
+export interface ToolBinding {
+  /** Tool name as the MCP server exposes it; the host resolves it within this integration's tools. */
+  tool: string;
+  /** Arg templates: literal strings with {var} substitutions from the caller-provided var map. */
+  args: Record<string, string>;
+}
 
-// ── IngressAction (returned by ingress handlers) ──────────────────────────────
+export interface ChatIngressConfig {
+  /**
+   * Template for the external conversation key, e.g. "{team_id}/{event.channel}/{event.thread_ts|event.ts}".
+   * Vars are body dot-paths; `|` separates fallbacks. Computed by the host BEFORE classification
+   * so the handler receives `hasThreadMapping`.
+   */
+  thread_key: string;
+  /** Sender → TulipFarm user resolution (var: {sender}); omitted → turns run as the admin. */
+  identity?: ToolBinding & { email_path: string };
+  /** Named reply bindings; the handler's chat decision picks one by name. */
+  reply: Record<string, ToolBinding>;
+}
 
-export type IngressAction =
-  | { type: "emit_event"; name: string; payload: unknown }
-  | {
-      type: "inject_message";
-      conversationKey: string;
-      message: { role: "user"; content: string };
-      triggerAgent: boolean;
-    }
-  | { type: "respond"; status: number; body: unknown };
+export interface IngressConfig {
+  /** AsyncAPI doc describing the handled events — documentation artifact, never executed. */
+  spec?: string;
+  /** Filename (within the integration dir) of the sandboxed classifier module. */
+  handler: string;
+  webhook: WebhookConfig;
+  /** Presence enables chat-kind decisions. */
+  chat?: ChatIngressConfig;
+  /** Presence enables event-kind decisions; `types` optionally allowlists provider event types. */
+  events?: { types?: string[] };
+}
 
 // ── Credential helpers ────────────────────────────────────────────────────────
 
@@ -127,6 +172,8 @@ export interface SoulIntegration {
   manifest: IntegrationManifest;
   connection?: IntegrationConnection;
   setupGuide?: string;
+  /** Sandboxed classifier module (present when manifest.ingress.handler is declared and readable). */
+  ingressHandler?: { source: string; hash: string };
 }
 
 /** Minimal logger surface (pino/console compatible) shared across soul services. */

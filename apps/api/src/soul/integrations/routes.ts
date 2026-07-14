@@ -4,12 +4,15 @@ import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
+import type { LlmService } from "@tulipfarm/llm";
 import type { GitSyncService, IntegrationManifest, OAuthConfig, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
+import { analyzeHook } from "../../hooks/hook-analyzer";
 import type { McpClientService } from "../../integrations/mcp-client-service";
-import { hashContent, readIntegrationsLock, sourceType, writeIntegrationsLock } from "./lock";
+import { buildIngressAudit, type IngressAuditReport } from "./ingress-audit";
+import { readIntegrationsLock, sourceType, writeIntegrationsLock } from "./lock";
 
 /*
  * Integrations HTTP surface (INT-V1 / MCP-V1-001). V1 supports type=mcp only.
@@ -35,6 +38,8 @@ export interface DiscoveredIntegration {
   manifestPath: string;
   content: string;
   setupGuideContent?: string;
+  /** Source of the manifest-declared ingress classifier (ingress.ts), when present. */
+  ingressHandlerContent?: string;
 }
 
 interface OAuthStateEntry {
@@ -152,6 +157,19 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
               // setup guide is optional
             }
           }
+          let ingressHandlerContent: string | undefined;
+          const handlerDecl = (parsed.ingress as { handler?: string } | undefined)?.handler;
+          if (handlerDecl) {
+            try {
+              // basename() confines the read to the integration dir (no ../ traversal).
+              ingressHandlerContent = await readFile(
+                join(dirname(full), basename(handlerDecl)),
+                "utf8"
+              );
+            } catch {
+              // declared-but-missing handler → install rejects it later with a clear error
+            }
+          }
           out.push({
             name,
             description: asString(parsed.description),
@@ -159,6 +177,7 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
             manifestPath: relative(root, full),
             content,
             setupGuideContent,
+            ingressHandlerContent,
           });
         } catch {
           // skip invalid manifests
@@ -170,6 +189,33 @@ export async function discoverIntegrations(root: string): Promise<DiscoveredInte
   return out;
 }
 
+function parsedIngressHandler(manifestContent: string): string | undefined {
+  try {
+    const parsed = (parseYaml(manifestContent) ?? {}) as Partial<IntegrationManifest>;
+    return parsed.ingress?.handler;
+  } catch {
+    return undefined;
+  }
+}
+
+function manifestDeclaresIngressHandler(manifestContent: string): boolean {
+  return Boolean(parsedIngressHandler(manifestContent));
+}
+
+/** Install-target filename for the handler — basename-confined, defaults to ingress.ts. */
+function ingressHandlerFileName(manifestContent: string): string {
+  return basename(parsedIngressHandler(manifestContent) ?? "ingress.ts");
+}
+
+/** Lock hash covers manifest + ingress handler so a handler-only change surfaces as an update. */
+function integrationHash(integration: DiscoveredIntegration): string {
+  return createHash("sha256")
+    .update(integration.content)
+    .update("\0")
+    .update(integration.ingressHandlerContent ?? "")
+    .digest("hex");
+}
+
 function installStatus(
   integration: DiscoveredIntegration,
   lock: Awaited<ReturnType<typeof readIntegrationsLock>>,
@@ -177,10 +223,7 @@ function installStatus(
 ): { installed: boolean; updateAvailable: boolean } {
   const installed = soulLoader.integrations.has(integration.name);
   const lockedHash = lock.integrations[integration.name]?.hash;
-  const updateAvailable =
-    installed &&
-    !!lockedHash &&
-    lockedHash !== createHash("sha256").update(integration.content).digest("hex");
+  const updateAvailable = installed && !!lockedHash && lockedHash !== integrationHash(integration);
   return { installed, updateAvailable };
 }
 
@@ -241,7 +284,9 @@ export function registerIntegrationRoutes(
   soulLoader: SoulLoader,
   gitSync: GitSyncService,
   mcpClient: McpClientService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  /** Enables the IngressAudit LLM review of ingress handlers at install; skipped when absent. */
+  llmService?: LlmService
 ): void {
   // List all installed integrations with runtime status
   app.get(
@@ -419,8 +464,7 @@ export function registerIntegrationRoutes(
       // Inbound webhook receiver URL — deterministic from the manifest, shown after install so
       // the operator can paste it into the provider (e.g. Slack Event Subscriptions Request URL).
       const ingressCfg = integration.manifest.ingress;
-      const ingressEnabled =
-        ingressCfg !== undefined && ingressCfg.type !== "none" && ingressCfg.webhook !== undefined;
+      const ingressEnabled = ingressCfg?.webhook !== undefined && Boolean(ingressCfg.handler);
       const publicUrl = process.env.PUBLIC_URL ?? "http://localhost:8080";
       return {
         name: integration.slug,
@@ -545,22 +589,40 @@ export function registerIntegrationRoutes(
           properties: {
             scanId: { type: "string" },
             names: { type: "array", items: { type: "string" }, minItems: 1 },
+            // Install anyway after reviewing a high-risk IngressAudit report.
+            acceptRisk: { type: "boolean" },
           },
         },
         response: {
           200: {
             type: "object",
             required: ["installed"],
-            properties: { installed: { type: "array", items: { type: "string" } } },
+            properties: {
+              installed: { type: "array", items: { type: "string" } },
+              // IngressAudit reports for integrations that shipped an ingress handler.
+              audits: { type: "object", additionalProperties: true },
+            },
           },
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
+          422: {
+            type: "object",
+            required: ["error"],
+            properties: {
+              error: { type: "string" },
+              audit: { type: "object", additionalProperties: true },
+            },
+          },
         },
       },
     },
     async (req, reply) => {
-      const { scanId, names } = req.body as { scanId: string; names: string[] };
+      const { scanId, names, acceptRisk } = req.body as {
+        scanId: string;
+        names: string[];
+        acceptRisk?: boolean;
+      };
       const entry = scans.get(scanId);
       if (!entry) return reply.code(404).send({ error: "scan not found (it may have expired)" });
 
@@ -570,6 +632,50 @@ export function registerIntegrationRoutes(
       if (missing.length > 0)
         return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
 
+      // Gate ingress handlers BEFORE any write: a manifest that declares a handler must ship
+      // it, the source must clear the sandbox's static bans (fail at install, not at first
+      // webhook), and the IngressAudit review must be low/medium risk unless the operator
+      // explicitly accepts.
+      const audits: Record<string, IngressAuditReport> = {};
+      for (const integration of chosen as DiscoveredIntegration[]) {
+        const declaresHandler = manifestDeclaresIngressHandler(integration.content);
+        if (declaresHandler && !integration.ingressHandlerContent) {
+          return reply.code(422).send({
+            error: `integration "${integration.name}" declares ingress.handler but the file is missing from the source repo`,
+          });
+        }
+        if (!integration.ingressHandlerContent) continue;
+        try {
+          analyzeHook(integration.ingressHandlerContent);
+        } catch (e) {
+          return reply.code(422).send({
+            error: `integration "${integration.name}" ingress handler rejected: ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          });
+        }
+        if (llmService) {
+          try {
+            const report = await buildIngressAudit(llmService.select({ model: "standard" }), {
+              name: integration.name,
+              handlerSource: integration.ingressHandlerContent,
+            });
+            audits[integration.name] = report;
+            if (report.riskRating === "high" && acceptRisk !== true) {
+              return reply.code(422).send({
+                error: `integration "${integration.name}" ingress handler was rated high risk by IngressAudit — re-run with acceptRisk: true to install anyway`,
+                audit: report,
+              });
+            }
+          } catch (err) {
+            req.log.warn(
+              { err, integration: integration.name },
+              "IngressAudit failed; proceeding without a report"
+            );
+          }
+        }
+      }
+
       const installed: string[] = [];
       for (const integration of chosen as DiscoveredIntegration[]) {
         const dir = join(gitSync.path, "integrations", integration.name);
@@ -577,6 +683,11 @@ export function registerIntegrationRoutes(
         await writeFile(join(dir, "manifest.yml"), integration.content, "utf8");
         if (integration.setupGuideContent) {
           await writeFile(join(dir, "setup-guide.md"), integration.setupGuideContent, "utf8");
+        }
+        if (integration.ingressHandlerContent) {
+          // Written under the manifest-declared name so SoulLoader finds it (basename-confined).
+          const handlerName = ingressHandlerFileName(integration.content);
+          await writeFile(join(dir, handlerName), integration.ingressHandlerContent, "utf8");
         }
         installed.push(integration.name);
       }
@@ -588,7 +699,7 @@ export function registerIntegrationRoutes(
           sourceType: sourceType(entry.source),
           manifestPath: integration.manifestPath,
           ref: entry.ref,
-          hash: hashContent(integration.content),
+          hash: integrationHash(integration),
         };
       }
       await writeIntegrationsLock(gitSync.path, lock);
@@ -607,7 +718,7 @@ export function registerIntegrationRoutes(
           }
         }
       }
-      return { installed };
+      return { installed, audits };
     }
   );
 

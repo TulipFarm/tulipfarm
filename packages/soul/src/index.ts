@@ -3,8 +3,9 @@ export type { SoulMigration } from "./migrations/index";
 export { SoulLoader } from "./soul-loader";
 export { runSoulMigrations } from "./soul-migrations";
 export type {
+  BodyMatch,
+  ChatIngressConfig,
   EgressConfig,
-  IngressAction,
   IngressConfig,
   IntegrationConnection,
   IntegrationManifest,
@@ -18,6 +19,8 @@ export type {
   SoulResource,
   SoulRoutine,
   SoulSkill,
+  ToolBinding,
   WebhookConfig,
+  WebhookHandshake,
   WebhookSecurity,
 } from "./types";

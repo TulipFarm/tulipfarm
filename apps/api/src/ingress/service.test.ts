@@ -7,10 +7,17 @@ import type { IngressUserLookup, UserDoc } from "../auth/users";
 import { runHeadlessChatTurn } from "../chat/headless-chat-turn";
 import type { ChatTurnContext } from "../chat/turn";
 import { DOMAIN_EVENTS } from "../domain-events";
-import { SlackIdentityResolver } from "./identity";
+import { HookError, type HookExecutor } from "../hooks/hook-executor";
+import type { ToolRegistry } from "../tools/registry";
+import type { ToolDef } from "../tools/types";
+import { IngressIdentityResolver } from "./identity";
 import type { IntegrationConversation } from "./repo";
-import { handleIngressJob, type IngressServiceDeps, resetIngressAuthCache } from "./service";
-import type { SlackClient } from "./slack-client";
+import {
+  handleIngressJob,
+  type IngressDecision,
+  type IngressServiceDeps,
+  parseDecision,
+} from "./service";
 
 vi.mock("../chat/headless-chat-turn", () => ({
   runHeadlessChatTurn: vi.fn(async () => ({
@@ -21,8 +28,6 @@ vi.mock("../chat/headless-chat-turn", () => ({
 }));
 
 const mockTurn = vi.mocked(runHeadlessChatTurn);
-
-const BOT = "UBOT";
 
 const log = {
   debug: vi.fn(),
@@ -35,37 +40,86 @@ function makeUser(email: string, role: "admin" | "member" = "admin"): UserDoc {
   return { _id: randomUUID(), email, passwordHash: "x", role, createdAt: new Date() };
 }
 
-function makeIntegration(): SoulIntegration {
+const HANDLER = { source: "({ classify(ctx) { return { kind: 'ignore' }; } })", hash: "h1" };
+
+function makeIntegration(overrides: Record<string, unknown> = {}): SoulIntegration {
   return {
-    slug: "slack",
-    sourceIntegration: "slack",
+    slug: "chatapp",
+    sourceIntegration: "chatapp",
     manifest: {
-      name: "slack",
+      name: "chatapp",
       egress: { type: "mcp", entry: { transport: "stdio", command: "npx" } },
+      ingress: {
+        handler: "ingress.ts",
+        webhook: {
+          security: { type: "hmac_sha256", header: "X-Sig", secret_env: "SECRET" },
+          dedup_key: "delivery_id",
+        },
+        chat: {
+          thread_key: "{team}/{event.channel}/{event.thread_ts|event.ts}",
+          reply: {
+            default: { tool: "send_message", args: { channel_id: "{channel}", text: "{text}" } },
+          },
+        },
+        events: {},
+      },
     },
-    connection: { enabled: true, env: { SLACK_BOT_TOKEN: "xoxb-test" } },
+    connection: { enabled: true, env: { SECRET: "s" } },
+    ingressHandler: HANDLER,
+    ...overrides,
   } as SoulIntegration;
 }
 
-function envelope(event: Record<string, unknown>): Record<string, unknown> {
-  return { type: "event_callback", team_id: "T1", event_id: "Ev1", event };
+/** Programmable sandbox stand-in: each test sets what classify() "returns". */
+function makeHookExecutor(impl: (invocation: Record<string, unknown>) => unknown): HookExecutor {
+  return {
+    runRoutineHook: vi.fn(async (_src, _fn, invocation: Record<string, unknown>) => {
+      const value = impl(invocation);
+      if (value instanceof Error) throw value;
+      return value;
+    }),
+  } as unknown as HookExecutor;
 }
+
+function makeRegistry(execute: ToolDef["execute"]): ToolRegistry {
+  return {
+    getAll: () => [
+      { name: "integration_chatapp_send_message", tier: "integration", execute } as ToolDef,
+    ],
+  } as unknown as ToolRegistry;
+}
+
+const CHAT_DECISION: IngressDecision = {
+  kind: "chat",
+  sender: "EXT-U1",
+  text: "summarize",
+  reply: { binding: "default", vars: { channel: "C1" } },
+};
+
+const BODY = {
+  team: "T1",
+  delivery_id: "D1",
+  event: { channel: "C1", ts: "100.1" },
+};
 
 describe("handleIngressJob", () => {
   let admin: UserDoc;
   let mappings: Map<string, IntegrationConversation>;
   let insertedEvents: Array<Record<string, unknown>>;
-  let postMessage: ReturnType<typeof vi.fn>;
+  let sendTool: ReturnType<typeof vi.fn>;
   let bus: EventEmitter;
   let deps: IngressServiceDeps;
 
+  function withDecision(decision: unknown) {
+    deps.hookExecutor = makeHookExecutor(() => decision);
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
-    resetIngressAuthCache();
     admin = makeUser("admin@example.com");
     mappings = new Map();
     insertedEvents = [];
-    postMessage = vi.fn(async () => {});
+    sendTool = vi.fn(async () => ({ success: true as const, data: {} }));
     bus = new EventEmitter();
 
     const users: IngressUserLookup = {
@@ -73,15 +127,10 @@ describe("handleIngressJob", () => {
       findById: async (id) => (id === admin._id ? admin : null),
       findFirstAdmin: async () => admin,
     };
-    const client = {
-      authTest: vi.fn(async () => ({ botUserId: BOT, teamId: "T1" })),
-      userEmail: vi.fn(async () => null),
-      postMessage,
-    } as unknown as SlackClient;
 
     deps = {
       soulLoader: {
-        integrations: new Map([["slack", makeIntegration()]]),
+        integrations: new Map([["chatapp", makeIntegration()]]),
       } as unknown as SoulLoader,
       conversations: {
         find: async (slug: string, key: string) => mappings.get(`${slug}:${key}`) ?? null,
@@ -98,190 +147,234 @@ describe("handleIngressJob", () => {
         },
       } as unknown as IngressServiceDeps["integrationEvents"],
       users,
-      identity: new SlackIdentityResolver(users, log),
+      identity: new IngressIdentityResolver(users, log),
       chatCtx: {} as ChatTurnContext,
+      hookExecutor: makeHookExecutor(() => ({ kind: "ignore" })),
+      toolRegistry: makeRegistry(sendTool as unknown as ToolDef["execute"]),
       events: bus,
       log,
-      makeClient: () => client,
     };
   });
 
-  it("runs a chat turn for a mention, creates the thread mapping, and replies in-thread", async () => {
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({
-          type: "app_mention",
-          user: "U1",
-          channel: "C1",
-          ts: "100.1",
-          text: `<@${BOT}> summarize`,
-        }),
-      },
-      deps
-    );
-    expect(mockTurn).toHaveBeenCalledTimes(1);
-    const input = mockTurn.mock.calls[0][1];
-    expect(input.user._id).toBe(admin._id);
-    expect(input.body.message.content).toBe("summarize");
-    expect(input.body.conversationId).toBeUndefined();
-    expect(mappings.get("slack:T1/C1/100.1")?.conversationId).toBe("convo-1");
-    expect(postMessage).toHaveBeenCalledWith({
-      channel: "C1",
-      text: "Here is your answer",
-      threadTs: "100.1",
+  it("passes body + precomputed hasThreadMapping into the sandboxed classify()", async () => {
+    const seen: Record<string, unknown>[] = [];
+    deps.hookExecutor = makeHookExecutor((invocation) => {
+      seen.push(invocation);
+      return { kind: "ignore" };
     });
-  });
-
-  it("reuses an existing mapping (turn continues the conversation)", async () => {
-    mappings.set("slack:T1/C1/100.1", {
-      integrationSlug: "slack",
+    mappings.set("chatapp:T1/C1/100.1", {
+      integrationSlug: "chatapp",
       externalKey: "T1/C1/100.1",
-      conversationId: "convo-1",
+      conversationId: "c",
       userId: admin._id,
-    });
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({
-          type: "message",
-          user: "U1",
-          channel: "C1",
-          ts: "200.2",
-          thread_ts: "100.1",
-          text: "follow-up",
-        }),
-      },
-      deps
+    } as IntegrationConversation);
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(seen[0]).toEqual({ body: BODY, hasThreadMapping: true });
+    const exec = deps.hookExecutor.runRoutineHook as ReturnType<typeof vi.fn>;
+    expect(exec).toHaveBeenCalledWith(
+      HANDLER.source,
+      "classify",
+      expect.anything(),
+      null,
+      "ingress:chatapp",
+      { expectedHash: HANDLER.hash }
     );
+  });
+
+  it("drops jobs for missing/disconnected/handlerless integrations", async () => {
+    await handleIngressJob({ slug: "ghost", body: BODY }, deps);
+    deps.soulLoader = {
+      integrations: new Map([
+        ["chatapp", makeIntegration({ connection: { enabled: false, env: {} } })],
+      ]),
+    } as unknown as SoulLoader;
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    deps.soulLoader = {
+      integrations: new Map([["chatapp", makeIntegration({ ingressHandler: undefined })]]),
+    } as unknown as SoulLoader;
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(mockTurn).not.toHaveBeenCalled();
+    expect(insertedEvents).toHaveLength(0);
+  });
+
+  it("chat decision: identity → headless turn → mapping insert → reply binding with the answer", async () => {
+    withDecision(CHAT_DECISION);
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+
     expect(mockTurn).toHaveBeenCalledTimes(1);
-    expect(mockTurn.mock.calls[0][1].body.conversationId).toBe("convo-1");
-    expect(mappings.size).toBe(1);
-  });
-
-  it("replies unthreaded for DMs", async () => {
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({
-          type: "message",
-          channel_type: "im",
-          user: "U1",
-          channel: "D1",
-          ts: "1.1",
-          text: "hello",
-        }),
-      },
-      deps
-    );
-    expect(postMessage).toHaveBeenCalledWith({
-      channel: "D1",
-      text: "Here is your answer",
-      threadTs: undefined,
+    const turnArgs = mockTurn.mock.calls[0][1];
+    expect(turnArgs.user).toEqual(admin);
+    expect(turnArgs.body).toMatchObject({
+      message: { role: "user", content: "summarize" },
+      autonomy: "full",
     });
-  });
-
-  it("posts a generic reply on guardrail block and error", async () => {
-    mockTurn.mockResolvedValueOnce({ conversationId: "c", text: "", status: "guardrail_block" });
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({ type: "app_mention", user: "U1", channel: "C1", ts: "1.1", text: "bad" }),
-      },
-      deps
-    );
-    expect(postMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "I can't help with that request." })
-    );
-
-    mockTurn.mockResolvedValueOnce({ conversationId: "c", text: "", status: "error" });
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({ type: "app_mention", user: "U1", channel: "C1", ts: "2.2", text: "hi" }),
-      },
-      deps
-    );
-    expect(postMessage).toHaveBeenLastCalledWith(
-      expect.objectContaining({ text: "Something went wrong handling that — please try again." })
+    expect(mappings.get("chatapp:T1/C1/100.1")).toMatchObject({ conversationId: "convo-1" });
+    expect(sendTool).toHaveBeenCalledWith(
+      { channel_id: "C1", text: "Here is your answer" },
+      expect.anything()
     );
   });
 
-  it("persists non-message events and emits integration.event on the bus", async () => {
-    const received: unknown[] = [];
-    bus.on(DOMAIN_EVENTS.INTEGRATION_EVENT, (p) => received.push(p));
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({ type: "member_joined_channel", user: "U9", channel: "C7" }),
-      },
-      deps
-    );
-    expect(mockTurn).not.toHaveBeenCalled();
-    expect(insertedEvents).toHaveLength(1);
-    expect(received).toHaveLength(1);
-    expect(received[0]).toMatchObject({
-      integration: "slack",
-      protocol: "slack",
-      event: "member_joined_channel",
-    });
-  });
-
-  it("attributes a different Slack sender and runs as the mapping owner", async () => {
+  it("reuses an existing conversation mapping and attributes other senders to the owner", async () => {
     const owner = makeUser("owner@example.com", "member");
-    mappings.set("slack:T1/C1/100.1", {
-      integrationSlug: "slack",
+    deps.users = {
+      findByEmail: async () => null,
+      findById: async (id) => (id === owner._id ? owner : null),
+      findFirstAdmin: async () => admin,
+    };
+    mappings.set("chatapp:T1/C1/100.1", {
+      integrationSlug: "chatapp",
       externalKey: "T1/C1/100.1",
-      conversationId: "convo-1",
+      conversationId: "convo-9",
       userId: owner._id,
+    } as IntegrationConversation);
+    withDecision(CHAT_DECISION);
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+
+    const turnArgs = mockTurn.mock.calls[0][1];
+    expect(turnArgs.user).toEqual(owner);
+    expect(turnArgs.body).toMatchObject({
+      conversationId: "convo-9",
+      message: { content: "[From chatapp user EXT-U1] summarize" },
     });
-    deps.users.findById = async (id) => (id === owner._id ? owner : null);
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({
-          type: "message",
-          user: "U2",
-          channel: "C1",
-          ts: "300.3",
-          thread_ts: "100.1",
-          text: "me too",
-        }),
-      },
-      deps
-    );
-    const input = mockTurn.mock.calls[0][1];
-    expect(input.user._id).toBe(owner._id);
-    expect(input.body.message.content).toBe("[From Slack user <@U2>] me too");
   });
 
-  it("drops jobs for missing or disconnected integrations without throwing", async () => {
-    await expect(
-      handleIngressJob(
-        { slug: "ghost", protocol: "slack", body: envelope({ type: "app_mention" }) },
-        deps
-      )
-    ).resolves.toBeUndefined();
+  it("honors requireExistingThread: no mapping → ignored, mapping → chat", async () => {
+    withDecision({ ...CHAT_DECISION, requireExistingThread: true });
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(mockTurn).not.toHaveBeenCalled();
+
+    mappings.set("chatapp:T1/C1/100.1", {
+      integrationSlug: "chatapp",
+      externalKey: "T1/C1/100.1",
+      conversationId: "convo-9",
+      userId: admin._id,
+    } as IntegrationConversation);
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(mockTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops a chat decision when the manifest declares no chat ingress", async () => {
+    const integration = makeIntegration();
+    const ingress = integration.manifest.ingress;
+    if (ingress) ingress.chat = undefined;
+    deps.soulLoader = {
+      integrations: new Map([["chatapp", integration]]),
+    } as unknown as SoulLoader;
+    withDecision(CHAT_DECISION);
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
     expect(mockTurn).not.toHaveBeenCalled();
   });
 
-  it("ignores bot noise end-to-end (no turn, no reply)", async () => {
-    await handleIngressJob(
-      {
-        slug: "slack",
-        protocol: "slack",
-        body: envelope({ type: "message", bot_id: "B1", channel: "C1", ts: "1.1", text: "beep" }),
-      },
-      deps
-    );
+  it("event decision: persists, emits integration.event with sourceIntegration protocol", async () => {
+    const emitted: unknown[] = [];
+    bus.on(DOMAIN_EVENTS.INTEGRATION_EVENT, (p) => emitted.push(p));
+    withDecision({ kind: "event", eventType: "member_joined", payload: { channel: "C1" } });
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+
+    expect(insertedEvents[0]).toMatchObject({
+      integrationSlug: "chatapp",
+      protocol: "chatapp",
+      eventType: "member_joined",
+      externalId: "D1",
+      payload: { channel: "C1" },
+    });
+    expect(emitted[0]).toMatchObject({
+      integration: "chatapp",
+      protocol: "chatapp",
+      event: "member_joined",
+      payload: { channel: "C1" },
+    });
+  });
+
+  it("event decision without payload persists the whole body", async () => {
+    withDecision({ kind: "event", eventType: "member_joined" });
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(insertedEvents[0]).toMatchObject({ payload: BODY });
+  });
+
+  it("drops events when the manifest declares none, and filters by the allowlist", async () => {
+    const integration = makeIntegration();
+    const ingress = integration.manifest.ingress;
+    if (ingress) ingress.events = undefined;
+    deps.soulLoader = {
+      integrations: new Map([["chatapp", integration]]),
+    } as unknown as SoulLoader;
+    withDecision({ kind: "event", eventType: "member_joined" });
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(insertedEvents).toHaveLength(0);
+
+    const allowlisted = makeIntegration();
+    const ingress2 = allowlisted.manifest.ingress;
+    if (ingress2) ingress2.events = { types: ["reaction_added"] };
+    deps.soulLoader = {
+      integrations: new Map([["chatapp", allowlisted]]),
+    } as unknown as SoulLoader;
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(insertedEvents).toHaveLength(0);
+  });
+
+  it("drops a structurally invalid decision without throwing (no retry loop)", async () => {
+    withDecision({ kind: "chat", text: 42 });
+    await expect(handleIngressJob({ slug: "chatapp", body: BODY }, deps)).resolves.toBeUndefined();
     expect(mockTurn).not.toHaveBeenCalled();
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalled();
+  });
+
+  it("rethrows classifier errors/timeouts (pg-boss retry is safe pre-turn)", async () => {
+    deps.hookExecutor = makeHookExecutor(() => new HookError("expression timed out", true));
+    await expect(handleIngressJob({ slug: "chatapp", body: BODY }, deps)).rejects.toThrow(
+      "timed out"
+    );
+  });
+
+  it("replies with the guardrail message on a blocked turn and a generic one on error", async () => {
+    withDecision(CHAT_DECISION);
+    mockTurn.mockResolvedValueOnce({
+      conversationId: "convo-1",
+      text: "",
+      status: "guardrail_block" as const,
+    });
+    await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
+    expect(sendTool).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "I can't help with that request." }),
+      expect.anything()
+    );
+
+    mockTurn.mockRejectedValueOnce(new Error("boom"));
+    await expect(handleIngressJob({ slug: "chatapp", body: BODY }, deps)).resolves.toBeUndefined();
+    expect(sendTool).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: expect.stringContaining("Something went wrong") }),
+      expect.anything()
+    );
+  });
+});
+
+describe("parseDecision", () => {
+  it("accepts the three well-formed kinds", () => {
+    expect(parseDecision({ kind: "ignore" })).toEqual({ kind: "ignore", reason: undefined });
+    expect(parseDecision({ kind: "event", eventType: "x" })).toMatchObject({ kind: "event" });
+    expect(parseDecision(CHAT_DECISION)).toMatchObject({ kind: "chat", sender: "EXT-U1" });
+  });
+
+  it("rejects malformed shapes", () => {
+    expect(parseDecision(null)).toBeNull();
+    expect(parseDecision("chat")).toBeNull();
+    expect(parseDecision({ kind: "nope" })).toBeNull();
+    expect(parseDecision({ kind: "event" })).toBeNull();
+    expect(parseDecision({ kind: "chat", sender: "s", text: "t" })).toBeNull(); // no reply
+    expect(
+      parseDecision({ kind: "chat", sender: "", text: "t", reply: { binding: "b" } })
+    ).toBeNull();
+  });
+
+  it("strips non-string reply vars", () => {
+    const parsed = parseDecision({
+      kind: "chat",
+      sender: "s",
+      text: "t",
+      reply: { binding: "b", vars: { ok: "v", bad: 42 } },
+    });
+    expect(parsed).toMatchObject({ reply: { binding: "b", vars: { ok: "v" } } });
   });
 });

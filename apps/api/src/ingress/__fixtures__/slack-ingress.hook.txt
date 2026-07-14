@@ -1,0 +1,74 @@
+// Slack ingress classifier for TulipFarm. Runs inside the host's isolated-vm sandbox as a pure
+// function — no network, no filesystem, no timers. The host verifies the webhook signature
+// before this runs, pre-computes `ctx.hasThreadMapping` from the manifest's chat.thread_key,
+// and executes the reply/identity tool bindings this module's decisions reference.
+// Authored as an object-literal expression (same contract as routine hooks.ts).
+({
+  classify(ctx) {
+    const body = ctx.body || {};
+    if (body.type !== "event_callback") return { kind: "ignore", reason: "not an event_callback" };
+    const event = body.event || {};
+    // The app's own bot user id ships in every event_callback's authorizations block.
+    const auths = body.authorizations;
+    const botUserId =
+      auths && auths[0] && auths[0].user_id ? String(auths[0].user_id) : null;
+
+    // Bot-loop prevention: never react to the bot's own output or to other bots. Subtyped
+    // messages (edits, deletes, joins rendered as messages, bot_message) are noise for chat.
+    if (event.bot_id) return { kind: "ignore", reason: "bot message" };
+    if (botUserId && event.user === botUserId) return { kind: "ignore", reason: "own message" };
+
+    const mention = botUserId ? "<@" + botUserId + ">" : null;
+    const stripMention = (text) => {
+      let t = String(text == null ? "" : text);
+      if (mention) t = t.split(mention).join("");
+      return t.replace(/\s{2,}/g, " ").trim();
+    };
+    const chat = (isDm) => {
+      const channel = String(event.channel == null ? "" : event.channel);
+      const ts = String(event.ts == null ? "" : event.ts);
+      const sender = String(event.user == null ? "" : event.user);
+      if (!channel || !ts || !sender) return { kind: "ignore", reason: "malformed chat event" };
+      const thread = String(event.thread_ts == null ? ts : event.thread_ts);
+      return {
+        kind: "chat",
+        sender,
+        text: stripMention(event.text),
+        // DMs reply unthreaded at the conversation root; channel replies land in the thread.
+        reply: isDm
+          ? { binding: "default", vars: { channel } }
+          : { binding: "thread", vars: { channel, thread } },
+      };
+    };
+
+    if (event.type === "app_mention") return chat(false);
+
+    if (event.type === "message") {
+      if (event.subtype) return { kind: "ignore", reason: "message subtype " + event.subtype };
+      if (event.channel_type === "im") return chat(true);
+      // A channel message containing the mention arrives ALONGSIDE a paired app_mention event
+      // (different event_id, so delivery dedup can't collapse them) — the app_mention wins.
+      if (mention && typeof event.text === "string" && event.text.indexOf(mention) !== -1) {
+        return { kind: "ignore", reason: "mention handled by paired app_mention" };
+      }
+      // Thread-following: reply in a thread the bot is already part of — thread rooted on a
+      // bot message (parent_user_id) or already mapped to a conversation — no re-mention needed.
+      if (event.thread_ts) {
+        if (botUserId && event.parent_user_id === botUserId) return chat(false);
+        if (ctx.hasThreadMapping) return chat(false);
+        return { kind: "ignore", reason: "thread not followed by the bot" };
+      }
+      // Untargeted channel chatter never becomes an integration event (flood control).
+      return { kind: "ignore", reason: "channel message not addressed to the bot" };
+    }
+
+    // Everything else the workspace subscribed to (member_joined_channel, reaction_added, …)
+    // is a webhook-kind event: persisted + raised as an integration.event domain event that
+    // routines can trigger on.
+    return {
+      kind: "event",
+      eventType: String(event.type == null ? "unknown" : event.type),
+      payload: event,
+    };
+  },
+})

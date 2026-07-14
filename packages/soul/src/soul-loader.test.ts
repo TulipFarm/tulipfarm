@@ -253,6 +253,59 @@ describe("SoulLoader", () => {
         owner: "tulipfarm",
       });
     });
+
+    it("loads and hashes the declared ingress handler module", async () => {
+      const handler = "export function classify(input) { return { kind: 'ignore' }; }\n";
+      await write(
+        join(TMP, "integrations", "chatapp", "manifest.yml"),
+        [
+          "name: chatapp",
+          "egress:",
+          "  type: mcp",
+          "  entry:",
+          "    transport: stdio",
+          "    command: echo",
+          "ingress:",
+          "  handler: ingress.ts",
+          "  webhook:",
+          "    security:",
+          "      type: hmac_sha256",
+          "      header: X-Sig",
+          "      secret_env: SECRET",
+          "",
+        ].join("\n")
+      );
+      await write(join(TMP, "integrations", "chatapp", "ingress.ts"), handler);
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      const loaded = loader.integrations.get("chatapp");
+      expect(loaded?.ingressHandler?.source).toBe(handler);
+      expect(loaded?.ingressHandler?.hash).toBe(createHash("sha256").update(handler).digest("hex"));
+    });
+
+    it("warns and loads without ingressHandler when the declared handler file is missing", async () => {
+      await write(
+        join(TMP, "integrations", "broken", "manifest.yml"),
+        "name: broken\negress:\n  type: mcp\n  entry:\n    transport: stdio\n    command: echo\ningress:\n  handler: ingress.ts\n  webhook:\n    security:\n      type: hmac_sha256\n      header: X-Sig\n      secret_env: SECRET\n"
+      );
+      const logger = makeLogger();
+      const loader = new SoulLoader(TMP, logger);
+      await loader.load();
+      expect(loader.integrations.get("broken")?.ingressHandler).toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("ingress disabled"));
+    });
+
+    it("confines the handler path to the integration dir (basename only)", async () => {
+      await write(join(TMP, "outside.ts"), "export function classify() {}\n");
+      await write(
+        join(TMP, "integrations", "sneaky", "manifest.yml"),
+        "name: sneaky\negress:\n  type: mcp\n  entry:\n    transport: stdio\n    command: echo\ningress:\n  handler: ../../outside.ts\n  webhook:\n    security:\n      type: hmac_sha256\n      header: X-Sig\n      secret_env: SECRET\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      // basename() reduces ../../outside.ts to outside.ts inside the integration dir → missing.
+      expect(loader.integrations.get("sneaky")?.ingressHandler).toBeUndefined();
+    });
   });
 
   describe("llmConfig and manifest", () => {

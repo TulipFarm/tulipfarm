@@ -1,78 +1,133 @@
-import { randomUUID } from "node:crypto";
-import type { FastifyBaseLogger } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import type { IngressUserLookup, UserDoc } from "../auth/users";
-import { SlackIdentityResolver } from "./identity";
-import { SlackApiError, type SlackClient } from "./slack-client";
+import type { ToolRegistry } from "../tools/registry";
+import type { ToolDef } from "../tools/types";
+import { IngressIdentityResolver } from "./identity";
 
-function makeUser(email: string, role: "admin" | "member" = "member"): UserDoc {
-  return { _id: randomUUID(), email, passwordHash: "x", role, createdAt: new Date() };
-}
+const alice: UserDoc = {
+  _id: "u1",
+  email: "alice@example.com",
+  passwordHash: "",
+  role: "member",
+  createdAt: new Date(),
+};
+const admin: UserDoc = {
+  _id: "u0",
+  email: "admin@example.com",
+  passwordHash: "",
+  role: "admin",
+  createdAt: new Date(),
+};
 
-const log = { warn: vi.fn(), error: vi.fn(), info: vi.fn() } as unknown as FastifyBaseLogger;
+const IDENTITY = {
+  tool: "get_user_profile",
+  args: { user_id: "{sender}" },
+  email_path: "profile.email",
+};
 
-function makeClient(emailByUser: Record<string, string | null>) {
-  const userEmail = vi.fn(async (id: string) => {
-    const email = emailByUser[id];
-    if (email === undefined) throw new SlackApiError("users.info", "user_not_found");
-    return email;
-  });
-  return { client: { userEmail } as unknown as SlackClient, userEmail };
-}
-
-function makeUsers(docs: UserDoc[], admin: UserDoc | null) {
-  const lookup: IngressUserLookup = {
-    findByEmail: vi.fn(async (email: string) => docs.find((d) => d.email === email) ?? null),
-    findById: vi.fn(async (id: string) => docs.find((d) => d._id === id) ?? null),
-    findFirstAdmin: vi.fn(async () => admin),
+function makeUsers(overrides: Partial<IngressUserLookup> = {}): IngressUserLookup {
+  return {
+    findByEmail: async (email: string) => (email === alice.email ? alice : null),
+    findById: async () => null,
+    findFirstAdmin: async () => admin,
+    ...overrides,
   };
-  return lookup;
 }
 
-describe("SlackIdentityResolver", () => {
-  it("maps a sender to the TulipFarm user with a matching email", async () => {
-    const mohit = makeUser("mohit@example.com");
-    const admin = makeUser("admin@example.com", "admin");
-    const users = makeUsers([mohit, admin], admin);
-    const { client } = makeClient({ U1: "mohit@example.com" });
-    const resolver = new SlackIdentityResolver(users, log);
-    const resolved = await resolver.resolve(client, "U1");
-    expect(resolved?._id).toBe(mohit._id);
+function makeRegistry(execute: ToolDef["execute"]): ToolRegistry {
+  return {
+    getAll: () => [
+      { name: "integration_chatapp_get_user_profile", tier: "integration", execute } as ToolDef,
+    ],
+  } as unknown as ToolRegistry;
+}
+
+function makeLog() {
+  return { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() } as never;
+}
+
+describe("IngressIdentityResolver", () => {
+  it("resolves via the identity binding: tool call → email_path → user match", async () => {
+    const execute = vi.fn(async (args: unknown) => ({
+      success: true as const,
+      data: {
+        content: [
+          { type: "text", text: JSON.stringify({ profile: { email: "alice@example.com" } }) },
+        ],
+      },
+    }));
+    const resolver = new IngressIdentityResolver(makeUsers(), makeLog());
+    const user = await resolver.resolve({
+      slug: "chatapp",
+      sender: "EXT1",
+      identity: IDENTITY,
+      registry: makeRegistry(execute),
+    });
+    expect(user).toEqual(alice);
+    expect(execute).toHaveBeenCalledWith({ user_id: "EXT1" }, expect.anything());
   });
 
-  it("falls back to the first admin when no email matches", async () => {
-    const admin = makeUser("admin@example.com", "admin");
-    const users = makeUsers([admin], admin);
-    const { client } = makeClient({ U2: "stranger@example.com" });
-    const resolver = new SlackIdentityResolver(users, log);
-    const resolved = await resolver.resolve(client, "U2");
-    expect(resolved?._id).toBe(admin._id);
+  it("falls back to the admin when the email matches no user", async () => {
+    const execute = async () => ({
+      success: true as const,
+      data: { structuredContent: { profile: { email: "stranger@example.com" } } },
+    });
+    const resolver = new IngressIdentityResolver(makeUsers(), makeLog());
+    const user = await resolver.resolve({
+      slug: "chatapp",
+      sender: "EXT2",
+      identity: IDENTITY,
+      registry: makeRegistry(execute),
+    });
+    expect(user).toEqual(admin);
   });
 
-  it("falls back to admin when Slack withholds the email or errors", async () => {
-    const admin = makeUser("admin@example.com", "admin");
-    const users = makeUsers([admin], admin);
-    const { client } = makeClient({ U3: null }); // no email
-    const resolver = new SlackIdentityResolver(users, log);
-    expect((await resolver.resolve(client, "U3"))?._id).toBe(admin._id);
-    expect((await resolver.resolve(client, "UNKNOWN"))?._id).toBe(admin._id); // API error path
+  it("falls back to the admin when the binding tool fails", async () => {
+    const execute = async () => ({
+      success: false as const,
+      error: { code: "internal_error" as const, message: "boom" },
+    });
+    const log = makeLog();
+    const resolver = new IngressIdentityResolver(makeUsers(), log);
+    const user = await resolver.resolve({
+      slug: "chatapp",
+      sender: "EXT3",
+      identity: IDENTITY,
+      registry: makeRegistry(execute),
+    });
+    expect(user).toEqual(admin);
+    expect((log as { warn: ReturnType<typeof vi.fn> }).warn).toHaveBeenCalled();
   });
 
-  it("caches resolutions per sender (users.info called once)", async () => {
-    const mohit = makeUser("mohit@example.com");
-    const admin = makeUser("admin@example.com", "admin");
-    const users = makeUsers([mohit, admin], admin);
-    const { client, userEmail } = makeClient({ U1: "mohit@example.com" });
-    const resolver = new SlackIdentityResolver(users, log);
-    await resolver.resolve(client, "U1");
-    await resolver.resolve(client, "U1");
-    expect(userEmail).toHaveBeenCalledTimes(1);
+  it("goes straight to the admin when no identity binding is declared", async () => {
+    const resolver = new IngressIdentityResolver(makeUsers(), makeLog());
+    const user = await resolver.resolve({ slug: "chatapp", sender: "EXT4" });
+    expect(user).toEqual(admin);
   });
 
-  it("returns null when no admin exists (post-bootstrap this cannot happen)", async () => {
-    const users = makeUsers([], null);
-    const { client } = makeClient({ U9: null });
-    const resolver = new SlackIdentityResolver(users, log);
-    expect(await resolver.resolve(client, "U9")).toBeNull();
+  it("caches resolutions per slug+sender (one tool call for repeat senders)", async () => {
+    const execute = vi.fn(async () => ({
+      success: true as const,
+      data: { structuredContent: { profile: { email: "alice@example.com" } } },
+    }));
+    const resolver = new IngressIdentityResolver(makeUsers(), makeLog());
+    const opts = {
+      slug: "chatapp",
+      sender: "EXT1",
+      identity: IDENTITY,
+      registry: makeRegistry(execute),
+    };
+    await resolver.resolve(opts);
+    await resolver.resolve(opts);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns null only when no admin exists", async () => {
+    const resolver = new IngressIdentityResolver(
+      makeUsers({ findFirstAdmin: async () => null }),
+      makeLog()
+    );
+    const user = await resolver.resolve({ slug: "chatapp", sender: "EXT9" });
+    expect(user).toBeNull();
   });
 });

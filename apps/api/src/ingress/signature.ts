@@ -1,7 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { WebhookSecurity } from "@tulipfarm/soul";
 
-/** Slack rejects requests older than 5 minutes to prevent replay; we mirror that window. */
-const REPLAY_WINDOW_SECONDS = 5 * 60;
+/** Default replay window when the manifest sets a timestamp_header without tolerance_seconds. */
+const DEFAULT_TOLERANCE_SECONDS = 5 * 60;
 
 /** Constant-time string equality (length leak only), same shape as routines/routes.ts. */
 function constantTimeEquals(a: string, b: string): boolean {
@@ -14,42 +15,72 @@ function constantTimeEquals(a: string, b: string): boolean {
 export interface SignatureCheck {
   ok: boolean;
   /** Set when ok=false; safe to log, never echoed to the caller verbatim. */
-  reason?: "missing_headers" | "stale_timestamp" | "malformed_signature" | "mismatch";
+  reason?: "missing_headers" | "stale_timestamp" | "mismatch";
 }
 
 /**
- * Verify a Slack request signature: HMAC-SHA256 over `v0:{timestamp}:{rawBody}` keyed with the
- * app's signing secret, compared constant-time against the `X-Slack-Signature` header
- * (`v0=<hex>`). `nowSeconds` is injectable for tests.
+ * Verify an HMAC-SHA256 webhook signature entirely from the manifest's declarative security
+ * block — no provider-specific code. The canonical string is the `signing` template
+ * (vars: {timestamp}, {body}; default "{body}") and the expected header value is the `format`
+ * template (var: {hex}; default "{hex}"). Header names are matched case-insensitively.
+ * `nowSeconds` is injectable for tests.
  */
-export function verifySlackSignature(
+export function verifyHmacSignature(
   rawBody: Buffer | string,
-  timestampHeader: string | undefined,
-  signatureHeader: string | undefined,
-  signingSecret: string,
+  headers: Record<string, string | string[] | undefined>,
+  security: WebhookSecurity,
+  secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): SignatureCheck {
-  if (!timestampHeader || !signatureHeader) return { ok: false, reason: "missing_headers" };
-  const timestamp = Number(timestampHeader);
-  if (!Number.isFinite(timestamp)) return { ok: false, reason: "stale_timestamp" };
-  if (Math.abs(nowSeconds - timestamp) > REPLAY_WINDOW_SECONDS) {
-    return { ok: false, reason: "stale_timestamp" };
+  const signatureHeader = headerValue(headers, security.header);
+  if (!signatureHeader) return { ok: false, reason: "missing_headers" };
+
+  const signing = security.signing ?? "{body}";
+  let timestamp: string | undefined;
+  if (security.timestamp_header) {
+    timestamp = headerValue(headers, security.timestamp_header);
+    if (!timestamp) return { ok: false, reason: "missing_headers" };
+    const ts = Number(timestamp);
+    if (!Number.isFinite(ts)) return { ok: false, reason: "stale_timestamp" };
+    const tolerance = security.tolerance_seconds ?? DEFAULT_TOLERANCE_SECONDS;
+    if (Math.abs(nowSeconds - ts) > tolerance) return { ok: false, reason: "stale_timestamp" };
+  } else if (signing.includes("{timestamp}")) {
+    // Manifest bug: the canonical string needs a timestamp but none is configured.
+    return { ok: false, reason: "missing_headers" };
   }
-  if (!signatureHeader.startsWith("v0=")) return { ok: false, reason: "malformed_signature" };
-  const expected = computeSlackSignature(rawBody, timestampHeader, signingSecret);
+
+  const expected = computeHmacSignature(rawBody, security, secret, timestamp);
   if (!constantTimeEquals(expected, signatureHeader)) return { ok: false, reason: "mismatch" };
   return { ok: true };
 }
 
-/** Compute the `v0=<hex>` signature Slack would send. Exported for test fixtures. */
-export function computeSlackSignature(
+/**
+ * Compute the signature header value the provider would send for this security config.
+ * Exported for test fixtures (route tests sign synthetic payloads with it).
+ */
+export function computeHmacSignature(
   rawBody: Buffer | string,
-  timestamp: string,
-  signingSecret: string
+  security: Pick<WebhookSecurity, "signing" | "format">,
+  secret: string,
+  timestamp?: string
 ): string {
-  const base = Buffer.concat([
-    Buffer.from(`v0:${timestamp}:`),
-    typeof rawBody === "string" ? Buffer.from(rawBody) : rawBody,
-  ]);
-  return `v0=${createHmac("sha256", signingSecret).update(base).digest("hex")}`;
+  const template = (security.signing ?? "{body}").replaceAll("{timestamp}", timestamp ?? "");
+  // Split around {body} so raw body bytes are concatenated untouched (no string round-trip).
+  const parts = template.split("{body}");
+  const body = typeof rawBody === "string" ? Buffer.from(rawBody) : rawBody;
+  const chunks: Buffer[] = [];
+  parts.forEach((part, i) => {
+    chunks.push(Buffer.from(part));
+    if (i < parts.length - 1) chunks.push(body);
+  });
+  const hex = createHmac("sha256", secret).update(Buffer.concat(chunks)).digest("hex");
+  return (security.format ?? "{hex}").replaceAll("{hex}", hex);
+}
+
+function headerValue(
+  headers: Record<string, string | string[] | undefined>,
+  name: string
+): string | undefined {
+  const value = headers[name.toLowerCase()] ?? headers[name];
+  return Array.isArray(value) ? value[0] : value;
 }

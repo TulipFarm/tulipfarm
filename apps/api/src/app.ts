@@ -308,7 +308,14 @@ export async function buildApp(opts: AppOptions = {}) {
             ? () => knowledgeService.hasAnyKnowledgePage()
             : undefined,
         });
-        registerIntegrationRoutes(app, opts.soulLoader, opts.gitSync, mcpClientSvc, requireAuth);
+        registerIntegrationRoutes(
+          app,
+          opts.soulLoader,
+          opts.gitSync,
+          mcpClientSvc,
+          requireAuth,
+          opts.llmService
+        );
         if (opts.llmService) {
           registerSkillRoutes(
             app,

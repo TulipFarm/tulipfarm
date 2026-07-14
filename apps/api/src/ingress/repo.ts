@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
 
-/** Mapping row: one external chat thread (slack thread, dm) ↔ one TulipFarm conversation. */
+/** Mapping row: one external chat thread (provider thread, DM) ↔ one TulipFarm conversation. */
 export interface IntegrationConversation {
   integrationSlug: string;
   externalKey: string;

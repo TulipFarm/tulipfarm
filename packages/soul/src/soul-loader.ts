@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/schema";
 import { parse as parseYaml } from "yaml";
 import type {
@@ -234,6 +234,25 @@ export class SoulLoader {
           // setup-guide.md is optional
         }
 
+        // Ingress classifier module: SHA256-hashed at load so the hook executor can pin the
+        // exact source it audited (same integrity posture as resource/routine hooks.ts).
+        let ingressHandler: { source: string; hash: string } | undefined;
+        if (manifestRaw.ingress?.handler) {
+          // basename() confines the read to the integration dir (no ../ traversal).
+          const handlerFile = basename(manifestRaw.ingress.handler);
+          try {
+            const source = await readFile(join(dir, handlerFile), "utf8");
+            ingressHandler = {
+              source,
+              hash: createHash("sha256").update(source).digest("hex"),
+            };
+          } catch {
+            this.logger.warn(
+              `Soul: integration "${slug}" declares ingress.handler "${handlerFile}" but the file is missing — ingress disabled`
+            );
+          }
+        }
+
         // sourceIntegration is manifest.name (the integration type from the repo).
         // slug is the directory name (user-assigned at install time, may differ for multi-instance).
         map.set(slug, {
@@ -242,6 +261,7 @@ export class SoulLoader {
           manifest: manifestRaw,
           connection,
           setupGuide,
+          ingressHandler,
         });
       } catch (err) {
         this.logger.warn(

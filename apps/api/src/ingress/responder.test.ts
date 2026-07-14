@@ -1,109 +1,106 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolDef } from "../tools/types";
-import { postSlackReply, type SlackResponderDeps } from "./responder";
-import type { SlackClient } from "./slack-client";
+import { postReply } from "./responder";
 
-const log = { warn: vi.fn(), error: vi.fn() };
+const REPLY = {
+  default: { tool: "send_message", args: { channel_id: "{channel}", text: "{text}" } },
+  thread: {
+    tool: "reply_in_thread",
+    args: { channel_id: "{channel}", thread_ts: "{thread}", text: "{text}" },
+  },
+};
 
-function makeTool(overrides: Partial<ToolDef> = {}): ToolDef {
+function makeRegistry(tools: Record<string, ToolDef["execute"]>): ToolRegistry {
   return {
-    name: "integration_slack_slack_post_message",
-    tier: "integration",
-    mutating: true,
-    description: "post",
-    inputSchema: {
-      type: "object",
-      properties: {
-        channel_id: { type: "string" },
-        text: { type: "string" },
-        thread_ts: { type: "string" },
-      },
-    },
-    execute: vi.fn(async () => ({ success: true as const, data: {} })),
-    ...overrides,
-  } as ToolDef;
+    getAll: () =>
+      Object.entries(tools).map(
+        ([name, execute]) =>
+          ({ name: `integration_chatapp_${name}`, tier: "integration", execute }) as ToolDef
+      ),
+  } as unknown as ToolRegistry;
 }
 
-function makeDeps(
-  tools: ToolDef[],
-  postMessage = vi.fn(async () => {})
-): SlackResponderDeps & {
-  postMessage: ReturnType<typeof vi.fn>;
-} {
-  return {
-    toolRegistry: { getAll: () => tools } as unknown as ToolRegistry,
-    client: { postMessage } as unknown as SlackClient,
-    log: log as unknown as SlackResponderDeps["log"],
-    postMessage,
-  };
+function makeLog() {
+  return { warn: vi.fn(), error: vi.fn() };
 }
 
-describe("postSlackReply", () => {
-  it("prefers the installed MCP slack send tool with schema-mapped args", async () => {
-    const tool = makeTool();
-    const deps = makeDeps([tool]);
-    await postSlackReply(deps, { channel: "C1", text: "hello", threadTs: "100.1" });
-    expect(tool.execute).toHaveBeenCalledWith(
-      { channel_id: "C1", text: "hello", thread_ts: "100.1" },
-      expect.objectContaining({ userId: "integration-ingress" })
+describe("postReply", () => {
+  it("executes the named binding with decision vars + injected {text}", async () => {
+    const execute = vi.fn(async () => ({ success: true as const, data: {} }));
+    const log = makeLog();
+    await postReply(
+      { registry: makeRegistry({ reply_in_thread: execute }), log },
+      {
+        slug: "chatapp",
+        reply: REPLY,
+        binding: "thread",
+        vars: { channel: "C1", thread: "1.1" },
+        text: "the answer",
+      }
     );
-    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(execute).toHaveBeenCalledWith(
+      { channel_id: "C1", thread_ts: "1.1", text: "the answer" },
+      expect.anything()
+    );
+    expect(log.error).not.toHaveBeenCalled();
   });
 
-  it("omits thread_ts for DM replies", async () => {
-    const tool = makeTool();
-    const deps = makeDeps([tool]);
-    await postSlackReply(deps, { channel: "D1", text: "hi" });
-    expect(tool.execute).toHaveBeenCalledWith({ channel_id: "D1", text: "hi" }, expect.anything());
+  it("falls back to the `default` binding when the named one is not declared", async () => {
+    const execute = vi.fn(async () => ({ success: true as const, data: {} }));
+    await postReply(
+      { registry: makeRegistry({ send_message: execute }), log: makeLog() },
+      { slug: "chatapp", reply: REPLY, binding: "nonexistent", vars: { channel: "C1" }, text: "t" }
+    );
+    expect(execute).toHaveBeenCalledWith({ channel_id: "C1", text: "t" }, expect.anything());
   });
 
-  it("falls back to direct postMessage when the tool fails", async () => {
-    const tool = makeTool({
-      execute: vi.fn(async () => ({
-        success: false as const,
-        error: { code: "internal_error" as const, message: "boom" },
-      })),
-    });
-    const deps = makeDeps([tool]);
-    await postSlackReply(deps, { channel: "C1", text: "hello", threadTs: "1.1" });
-    expect(deps.postMessage).toHaveBeenCalledWith({
-      channel: "C1",
-      text: "hello",
-      threadTs: "1.1",
-    });
+  it("logs and drops when the manifest declares no usable binding", async () => {
+    const log = makeLog();
+    await postReply(
+      { registry: makeRegistry({}), log },
+      { slug: "chatapp", reply: {}, binding: "thread", vars: {}, text: "t" }
+    );
+    expect(log.error).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("dropped"));
   });
 
-  it("falls back when the tool schema cannot thread but the reply needs a thread", async () => {
-    const tool = makeTool({
-      inputSchema: {
-        type: "object",
-        properties: { channel: { type: "string" }, text: { type: "string" } },
+  it("never throws: tool failure and tool throw both only log", async () => {
+    const log = makeLog();
+    await postReply(
+      {
+        registry: makeRegistry({
+          send_message: async () => ({
+            success: false as const,
+            error: { code: "internal_error" as const, message: "nope" },
+          }),
+        }),
+        log,
       },
-    });
-    const deps = makeDeps([tool]);
-    await postSlackReply(deps, { channel: "C1", text: "x", threadTs: "1.1" });
-    expect(tool.execute).not.toHaveBeenCalled();
-    expect(deps.postMessage).toHaveBeenCalled();
+      { slug: "chatapp", reply: REPLY, binding: "default", vars: { channel: "C1" }, text: "t" }
+    );
+    expect(log.error).toHaveBeenCalledTimes(1);
+
+    await expect(
+      postReply(
+        {
+          registry: makeRegistry({
+            send_message: async () => {
+              throw new Error("boom");
+            },
+          }),
+          log,
+        },
+        { slug: "chatapp", reply: REPLY, binding: "default", vars: { channel: "C1" }, text: "t" }
+      )
+    ).resolves.toBeUndefined();
   });
 
-  it("uses direct postMessage when no slack tool is installed, and never throws", async () => {
-    const failing = vi.fn(async () => {
-      throw new Error("network down");
-    });
-    const deps = makeDeps([], failing);
-    await expect(postSlackReply(deps, { channel: "C1", text: "x" })).resolves.toBeUndefined();
-    expect(failing).toHaveBeenCalled();
+  it("logs and drops when no registry is available", async () => {
+    const log = makeLog();
+    await postReply(
+      { registry: undefined, log },
+      { slug: "chatapp", reply: REPLY, binding: "default", vars: {}, text: "t" }
+    );
     expect(log.error).toHaveBeenCalled();
-  });
-
-  it("ignores non-integration or non-slack tools", async () => {
-    const wrongTier = makeTool({ name: "slack_send", tier: "platform" });
-    const wrongName = makeTool({ name: "integration_github_create_issue" });
-    const deps = makeDeps([wrongTier, wrongName]);
-    await postSlackReply(deps, { channel: "C1", text: "x" });
-    expect(wrongTier.execute).not.toHaveBeenCalled();
-    expect(wrongName.execute).not.toHaveBeenCalled();
-    expect(deps.postMessage).toHaveBeenCalled();
   });
 });
