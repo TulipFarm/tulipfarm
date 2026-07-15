@@ -9,9 +9,9 @@ import { FORGE_SKILL_NAMES } from "../skills/builtin-skills";
  *   resources/knowledge, and DELEGATES any create/curate request to the Information Architect via
  *   `transfer_to_agent`. The default agent when none is selected.
  * - InformationArchitect — the single creation specialist. Owns the soul-CRUD tools, lazily loads
- *   the inbuilt forge skills (resource-forge / skill-forge / agent-forge / onboarding) via
- *   `load_skill`, does the writes itself, and returns control to the GeneralAssistant via
- *   `complete_task`.
+ *   the inbuilt forge skills (resource-forge / skill-forge / agent-forge / routine-forge /
+ *   onboarding) via `load_skill`, does the writes itself, and returns control to the
+ *   GeneralAssistant via `complete_task`.
  *
  * `toolAllowlist` (which tools the agent may actually call) is ENFORCED per-turn in the chat route
  * (Wave 2). `forgeSkills` are surfaced to the agent in `<available-skills>` and loadable via
@@ -47,12 +47,13 @@ export const EXCLUSIVE_SOUL_WRITE_TOOLS: ReadonlySet<string> = new Set([
   "skill_update",
   "skill_delete",
   "skill_activate",
+  "routine_forge",
   "complete_task",
 ]);
 
 /**
- * The Information Architect's tool set: read the soul, author/edit resource types, skills and
- * agents, load its forge skills, present interview UI, and signal completion back to the front desk.
+ * The Information Architect's tool set: read the soul, author/edit resource types, skills, agents and
+ * routines, load its forge skills, present interview UI, and signal completion back to the front desk.
  * It deliberately has NO `transfer_to_agent` (it never delegates — it only `complete_task`s back)
  * and NO resource-record or knowledge tools (those are day-to-day ops the front desk handles).
  */
@@ -77,6 +78,9 @@ export const INFORMATION_ARCHITECT_TOOL_ALLOWLIST: readonly string[] = [
   "skill_update",
   "skill_activate",
   "skill_delete",
+  // Routines (author + smoke-test)
+  "routine_forge",
+  "trigger_routine",
   // Forge skills (lazy load) + interview UI + validation
   "load_skill",
   "load_skill_reference",
@@ -146,8 +150,10 @@ actions are refused until you've called \`get_client_context\`.
 
 You are the front desk. You answer everyday questions directly (greetings, "what can you do?", reads
 of resources/knowledge). For anything that **builds or edits the soul** — a resource type/schema, an
-agent, a skill, or onboarding — you **transfer** the conversation to the Information Architect using
-\`transfer_to_agent\`. You are the only agent that can transfer.
+agent, a skill, a routine (scheduled/triggered automation), or onboarding — you **transfer** the
+conversation to the Information Architect using \`transfer_to_agent\`. You are the only agent that can
+transfer. Note: *triggering* an existing routine is a day-to-day op you handle yourself
+(\`routine_picker\` + \`trigger_routine\`); only *authoring/editing* one transfers.
 
 ### When to transfer to \`InformationArchitect\`
 
@@ -161,6 +167,7 @@ Soul-building triggers (transfer right away):
   workflow, …).
 - "create a resource", "add a schema", "track [X]", "store [X]".
 - "create an agent", "create a skill".
+- "create a routine", "automate [X]", "every morning/when X happens do Y", "schedule [X]".
 - First-run onboarding ("set up my business").
 
 Example: "create an invoices resource" → \`transfer_to_agent\` to \`InformationArchitect\` with reason
@@ -178,10 +185,10 @@ noun-phrase request like "build a CRM" is NOT ambiguous — transfer.`;
 
 const INFORMATION_ARCHITECT_BODY = `# Information Architect
 
-You are the Information Architect. You own all soul-building: resource types, skills, and agents. You
-were activated because the user wants to create or edit part of their system, or run onboarding. Do
-the work yourself — you do NOT transfer or delegate. You load **forge skills** for guidance and call
-the soul-CRUD tools directly.
+You are the Information Architect. You own all soul-building: resource types, skills, agents, and
+routines. You were activated because the user wants to create or edit part of their system, or run
+onboarding. Do the work yourself — you do NOT transfer or delegate. You load **forge skills** for
+guidance and call the soul-CRUD tools directly.
 
 ## Core principles
 
@@ -190,10 +197,11 @@ the soul-CRUD tools directly.
   - \`load_skill("resource-forge")\` — to build a resource-type schema.
   - \`load_skill("skill-forge")\` — to author a skill.
   - \`load_skill("agent-forge")\` — to define an agent.
+  - \`load_skill("routine-forge")\` — to author a scheduled/triggered automation (routine).
   - \`load_skill("onboarding")\` — to run guided first-time business setup.
   Load only what you need, when you need it.
-- **Build one artifact at a time, in dependency order:** resources → skills → agents. A schema must
-  exist before an agent references it.
+- **Build one artifact at a time, in dependency order:** resources → skills → agents → routines. A
+  schema must exist before an agent references it, and a tool/agent must exist before a routine calls it.
 - **You finish the session, not the forge skills.** Each forge produces one artifact and reports
   back to you. Only you decide when the whole session is done and call \`complete_task\`.
 - Soul writes are direct and ungated — \`create_resource_type\` / \`skill_create\` / \`agent_create\`
@@ -208,8 +216,9 @@ the soul-CRUD tools directly.
 ## Entry
 
 Branch on the request:
-- **Incremental** ("create an invoices resource", "add a support agent", "make a skill that…"):
-  skip discovery. Load the matching forge skill, build that single artifact, then \`complete_task\`.
+- **Incremental** ("create an invoices resource", "add a support agent", "make a skill that…",
+  "automate a daily digest routine"): skip discovery. Load the matching forge skill, build that
+  single artifact, then \`complete_task\`.
 - **Onboarding** ("set up my business", "run onboarding"): \`load_skill("onboarding")\` and follow
   its full discovery → plan → generate → review flow.
 

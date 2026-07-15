@@ -1,6 +1,7 @@
 import type { SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import {
+  EXCLUSIVE_SOUL_WRITE_TOOLS,
   GENERAL_ASSISTANT,
   GENERAL_ASSISTANT_NAME,
   getAgent,
@@ -45,8 +46,21 @@ describe("agent registry", () => {
 
     it("surfaces the inbuilt forge skills it can load", () => {
       expect(INFORMATION_ARCHITECT.forgeSkills).toEqual(
-        expect.arrayContaining(["resource-forge", "skill-forge", "agent-forge", "onboarding"])
+        expect.arrayContaining([
+          "resource-forge",
+          "skill-forge",
+          "agent-forge",
+          "routine-forge",
+          "onboarding",
+        ])
       );
+    });
+
+    it("can author + smoke-test routines (routine_forge in allowlist, exclusive to it)", () => {
+      expect(INFORMATION_ARCHITECT.toolAllowlist).toContain("routine_forge");
+      expect(INFORMATION_ARCHITECT.toolAllowlist).toContain("trigger_routine");
+      // routine_forge is a soul write — stripped from the front desk / user soul agents.
+      expect(EXCLUSIVE_SOUL_WRITE_TOOLS.has("routine_forge")).toBe(true);
     });
   });
 

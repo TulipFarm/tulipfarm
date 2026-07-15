@@ -278,6 +278,17 @@ async function boot() {
         log: bootLog,
       }),
       enqueueWake: (args) => routineEnqueuers.enqueueWake(args),
+      recordRun: ({ slug, runId, status, error }) => {
+        void activityService.record({
+          category: "routine",
+          action: `routine.${status}`,
+          targetType: "routine",
+          targetId: slug,
+          status: status === "succeeded" ? "ok" : "error",
+          summary: status === "succeeded" ? `Routine ${slug} ran` : `Routine ${slug} failed`,
+          metadata: { runId, ...(error ? { error } : {}) },
+        });
+      },
       log: bootLog,
     });
 

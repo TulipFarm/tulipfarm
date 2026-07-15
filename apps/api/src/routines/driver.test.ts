@@ -55,8 +55,10 @@ describe("RoutineRunDriver (PGlite)", () => {
     registry?: RoutineRegistry;
     enqueueWake?: ReturnType<typeof vi.fn>;
     requestApproval?: ReturnType<typeof vi.fn>;
+    recordRun?: ReturnType<typeof vi.fn>;
   }) {
     const enqueueWake = overrides.enqueueWake ?? vi.fn(async () => {});
+    const recordRun = overrides.recordRun ?? vi.fn();
     const driver = new RoutineRunDriver({
       runs,
       registry: overrides.registry ?? makeRegistry(),
@@ -65,9 +67,10 @@ describe("RoutineRunDriver (PGlite)", () => {
       actionExecutor: overrides.actionExecutor ?? vi.fn(async () => ({ ok: true })),
       requestApproval: overrides.requestApproval as never,
       enqueueWake: enqueueWake as never,
+      recordRun: recordRun as never,
       log: LOG,
     });
-    return { driver, enqueueWake };
+    return { driver, enqueueWake, recordRun };
   }
 
   async function createRun(def: RoutineDefinition, context: Record<string, unknown> = {}) {
@@ -344,6 +347,41 @@ describe("RoutineRunDriver (PGlite)", () => {
     const run = await runs.findById(id);
     expect(run?.status).toBe("succeeded");
     expect(run?.stateDeadline).toBeNull();
+  });
+
+  it("reports terminal outcomes via recordRun (activity feed)", async () => {
+    const recordRun = vi.fn();
+    const { driver } = makeDriver({ recordRun });
+    const okId = await createRun(MULTI_STATE);
+    await driver.drive(okId);
+    expect(recordRun).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "test", runId: okId, status: "succeeded" })
+    );
+
+    const doomed = {
+      ...MULTI_STATE,
+      id: "doomed",
+      start: "Work",
+      states: [
+        {
+          name: "Work",
+          type: "operation",
+          actions: [{ functionRef: { refName: "doWork" } }],
+          end: true,
+        },
+      ],
+    } as unknown as RoutineDefinition;
+    const failId = await createRun(doomed);
+    const failDriver = makeDriver({
+      recordRun,
+      actionExecutor: vi.fn(async () => {
+        throw new Error("nope");
+      }),
+    }).driver;
+    await failDriver.drive(failId);
+    expect(recordRun).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: failId, status: "failed" })
+    );
   });
 
   it("does nothing for terminal or unknown runs", async () => {
