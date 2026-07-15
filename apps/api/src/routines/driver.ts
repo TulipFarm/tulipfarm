@@ -59,6 +59,16 @@ export interface DriverDeps {
     token: string;
     startAfter?: Date;
   }) => Promise<void>;
+  /**
+   * Records one activity-feed row per run at its terminal outcome (succeeded/failed), fired once
+   * from the CAS-winning `finish`. Best-effort — the caller must never throw back into the driver.
+   */
+  recordRun?: (r: {
+    slug: string;
+    runId: string;
+    status: "succeeded" | "failed";
+    error?: Record<string, unknown>;
+  }) => void;
   log: DriverLogger;
 }
 
@@ -118,7 +128,10 @@ export class RoutineRunDriver {
     let approvalOutcome = opts.approvalOutcome;
     // sleep-completion: currentState null means "the run finished sleeping into its end".
     if (row.currentState === null) {
-      await this.finish(runId, emitter, { status: "succeeded", output: row.context });
+      await this.finish(runId, row.routineSlug, emitter, {
+        status: "succeeded",
+        output: row.context,
+      });
       return;
     }
 
@@ -212,7 +225,7 @@ export class RoutineRunDriver {
         }
         case "complete": {
           await this.runAfterHook(ports, hookSource, snapshot);
-          await this.finish(runId, emitter, {
+          await this.finish(runId, row.routineSlug, emitter, {
             status: "succeeded",
             output: outcome.output,
             expectState: stateName,
@@ -221,7 +234,7 @@ export class RoutineRunDriver {
         }
         case "fail": {
           await this.runAfterHook(ports, hookSource, snapshot);
-          await this.finish(runId, emitter, {
+          await this.finish(runId, row.routineSlug, emitter, {
             status: "failed",
             error: outcome.error as unknown as Record<string, unknown>,
             expectState: stateName,
@@ -277,7 +290,7 @@ export class RoutineRunDriver {
         }
         case "wait_approval": {
           if (!this.deps.requestApproval || !row) {
-            await this.finish(runId, emitter, {
+            await this.finish(runId, row.routineSlug, emitter, {
               status: "failed",
               error: { name: "approvals_unavailable", message: "approvals are not configured" },
               expectState: stateName,
@@ -324,6 +337,7 @@ export class RoutineRunDriver {
 
   private async finish(
     runId: string,
+    slug: string,
     emitter: { emit(type: string, data: unknown): Promise<void> },
     result: {
       status: "succeeded" | "failed";
@@ -349,6 +363,7 @@ export class RoutineRunDriver {
       }
     );
     if (!ok) return;
+    this.deps.recordRun?.({ slug, runId, status: result.status, error: result.error });
     if (result.status === "succeeded") {
       await emitter.emit("finish", { reason: "completed", output: result.output ?? {} });
     } else {

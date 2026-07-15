@@ -6,8 +6,8 @@
  * repo's tools (`create_resource_type`, `skill_create`/`skill_activate`, `agent_create`, …) and to
  * UUID record ids (RES-V1-001 — `_id` is a UUID, not a Mongo ObjectId).
  *
- * Scope: resource / skill / agent / onboarding. Routine + integration forges are deferred until
- * their `*_create` tools exist.
+ * Scope: resource / skill / agent / routine / onboarding. The integration forge is deferred until
+ * its `*_create` tool exists.
  */
 
 export interface BuiltinSkill {
@@ -253,6 +253,131 @@ satisfied, record completion in working memory (\`update_memory\`:
 with a \`success\` summary listing what was created, so the General Assistant resumes and can suggest
 next steps.`;
 
+const ROUTINE_FORGE = `# Routine Forge Workflow
+
+Guides authoring or editing ONE **routine** — a scheduled/triggered automation that runs a
+deterministic sequence of steps (CNCF Serverless Workflow 0.8 subset + \`x-\` extensions). A routine
+lives at \`soul/routines/<slug>/routine.yaml\` (+ optional \`hooks.ts\`). The Information Architect's
+master flow decides when the session is done and calls \`complete_task\` — this skill never does.
+
+## Decide first: routine, agent, or skill?
+- **Routine** — a repeatable, mostly-deterministic pipeline on a trigger ("every morning at 9, tag
+  overdue tickets and email a digest"; "when a lead is created, score it and notify sales"). Steps
+  call tools, agents, or hook functions and pass data between states.
+- If it needs a persona / free-form conversation → **agent** (\`agent-forge\`). If it is a single
+  stateless instruction an agent loads on demand → **skill** (\`skill-forge\`). Stop and switch.
+
+## V1 surface (anything outside this is rejected at write with a "deferred in V1" error)
+- **States:** \`operation\` (call tools/agents/hooks), \`switch\` (branch), \`foreach\` (iterate,
+  cap 1000), \`sleep\` (ISO-8601 duration), \`inject\` (merge literal data). Deferred: \`parallel\`,
+  \`event\` state, sub-routine (\`subFlowRef\`).
+- **Triggers (\`x-triggers\`, ≥1):** \`manual\`, \`cron\` (\`schedule\` cron expr, optional
+  \`timezone\`), \`webhook\` (\`secret_ref\` → a secret name), \`event\` (\`event\` ∈
+  resource.created·resource.updated·conversation.created·conversation.completed·integration.event,
+  optional \`filter\`), \`agent\`. Deferred: \`datetime\`, \`integration\`.
+- **Approval channels:** \`ui\` (always), \`slack\` (if the Slack integration is present).
+  \`email\`/\`sms\` are schema-accepted but fall back to \`ui\`.
+
+## Create Flow — interview one step at a time, recommend an answer for each
+
+### Step 1 — Purpose & trigger(s)
+Establish the one-sentence purpose and what starts it. Pick trigger type(s) and their config
+(cron \`schedule\`, webhook \`secret_ref\`, event \`event\` name + optional \`filter\`). Most routines
+have exactly one trigger; declare \`{ type: "manual" }\` too if the user should be able to run it
+by hand from the Routines UI.
+
+### Step 2 — Inputs (\`x-inputs\`, optional)
+If a manual/webhook/agent run needs parameters, declare \`x-inputs\` as a JSON Schema. It renders the
+manual-trigger form and validates webhook/agent payloads. Inputs arrive at runtime as
+\`trigger.payload\`.
+
+### Step 3 — Functions
+Every external call a state makes is a named entry in \`functions[]\` with \`operation\`:
+- \`tool:<toolName>\` — a platform tool. Common ones: \`record_search\`, \`record_get\`,
+  \`record_create\`, \`record_update\`, \`record_delete\` (resource-record CRUD). Only reference
+  tools you know exist; a bad name fails at runtime, not at write.
+- \`agent:<agentName>\` — spawn a headless agent turn (pass its brief as an \`arguments.task\`
+  string). Confirm the agent exists with \`agent_list\` first.
+- \`hook:<fnName>\` — a function you define in \`hooks.ts\` (Step 7) for pure in-routine computation.
+
+### Step 4 — States & flow
+Design the state machine. Rules the writer enforces:
+- \`start\` names the first state. Each state is \`operation|switch|foreach|sleep|inject\` and either
+  \`transition\`s to another state's name or sets \`end: true\`. State names match \`^[A-Za-z][A-Za-z0-9]*$\`
+  (PascalCase, no spaces/hyphens). Every \`transition\`/condition target must be a real state name.
+- **operation:** \`actions: [{ functionRef: { refName, arguments? }, actionDataFilter?, retryRef? }]\`.
+  Store a call's result into run data with \`actionDataFilter: { toStateData: "someKey" }\` (optionally
+  transform first with \`results: "\${ result.foo }"\`) so later states can read \`context.someKey\`.
+- **switch:** \`dataConditions: [{ condition: "<js>", transition|end }]\` + optional
+  \`defaultCondition\`. First truthy condition wins.
+- **foreach:** \`inputCollection: "<js yielding an array>"\`, optional \`iterationParam\` (default
+  \`item\`), and \`actions\` run per element. The element is in scope as that param.
+- **sleep:** \`duration: "PT5M"\` (ISO-8601). **inject:** \`data: { ... }\` merged into \`context\`.
+
+### Step 5 — Expressions (\`\${ ... }\`)
+Argument values, switch \`condition\`s, foreach \`inputCollection\`, and data filters are JS strings
+evaluated in an isolated sandbox (100ms, no host/network/fs). In scope: \`context\` (accumulated run
+data), \`trigger.type\` / \`trigger.payload\`, the foreach iteration param, and \`result\` inside an
+\`actionDataFilter.results\`. Argument strings of the form \`"\${ <js> }"\` are evaluated; plain
+strings pass through literally.
+
+### Step 6 — Errors & retries (optional)
+- \`retries: [{ name, maxAttempts, delay?: "PT2S", multiplier? }]\`; reference from an action via
+  \`retryRef\`. Exponential backoff when \`multiplier\` > 1.
+- Per-state \`onErrors: [{ errorRef: "<name>"|"*", transition?|end? }]\` routes failures to a
+  recovery state or a clean end. Retries win while attempts remain, then \`onErrors\`, else the run fails.
+- Optional per-state \`timeouts: { stateExecTimeout: "PT30S" }\`.
+
+### Step 7 — Human approval (optional)
+Gate a step behind a person: on an \`operation\`/\`foreach\` state set
+\`x-autonomy-level: human_approval\` and \`x-approval-channel: ["ui"]\` (add \`"slack"\` when Slack is
+connected). The run pauses in \`waiting_approval\` and resumes on the decision. Only valid on
+operation/foreach states.
+
+### Step 8 — Hooks (\`hooks.ts\`, optional)
+For pure computation the states cannot express, pass a \`hooks\` string: a parenthesized object
+literal, NO import/export:
+\`({ beforeHook(ctx){}, afterHook(ctx){}, before<State>(ctx){}, after<State>(ctx){}, <fnName>(ctx, args){} })\`.
+- \`beforeHook\`/\`afterHook\` fire once around the whole run; \`before<State>\`/\`after<State>\` around
+  that state. Step-callable \`<fnName>\` are invoked by a function with \`operation: "hook:<fnName>"\`
+  and receive \`(ctx, args)\` — the return value is stored like any action result.
+- \`ctx\` provides \`ctx.runId\`, \`ctx.slug\`, \`ctx.stateName\`, \`ctx.context\` (run data),
+  \`ctx.trigger\`. Pure computation only — same **banned patterns** as resource hooks: no
+  \`require\`/\`import\`/\`eval\`/\`Function\`/\`process\`/\`global\`/\`Buffer\`/\`fetch\`/\`setTimeout\`/
+  \`setInterval\`/\`setImmediate\`/\`queueMicrotask\`, no network, no Node APIs.
+
+### Step 9 — Validate, preview, write
+1. Assemble the \`definition\` object (id = the slug, \`version\` e.g. "1.0", \`start\`, \`states\`,
+   \`functions?\`, \`retries?\`, \`x-triggers\`, \`x-inputs?\`).
+2. Preview it concisely (purpose, trigger, the state flow as a short list) with \`render_surface\` or
+   plain text — do NOT dump raw YAML — and get approval via \`present_choices\`.
+3. On approval call \`routine_forge\` with \`name\` (the slug), \`definition\`, and \`hooks?\` (the
+   object-literal source). It validates against the V1 meta-schema, writes
+   \`routines/<slug>/routine.yaml\` (+ \`hooks.ts\`), and commits — no approval step (ROUT-V1-002).
+4. **Iterate on errors:** \`routine_forge\` returns \`validation_error\` with a JSON-pointer path and
+   message (including "deferred in V1" for post-V1 constructs, and "transition target … not found" /
+   "function … not found" for broken refs). Fix the definition and retry — do not work around it.
+
+### Step 10 — Smoke-test (recommended)
+For a routine with a \`manual\` trigger, offer to run it once: on the user's OK call
+\`trigger_routine\` with the slug (+ inputs matching \`x-inputs\`) and report the run outcome. Warn
+first if the routine performs real writes (\`record_create\`/\`update\`/\`delete\`), and skip the
+test run if the user prefers. Otherwise point them to the Routines UI to run/monitor it.
+
+### Step 11 — Report
+Confirm in one sentence (slug + trigger + step count + whether it has hooks). Do NOT call
+\`complete_task\` — the master flow owns session completion.
+
+## Edit Flow
+Read the existing routine (via the Routines UI / prior forge), interview the change, describe the
+diff in plain language, then call \`routine_forge\` again with the SAME \`name\` and the full updated
+\`definition\` (it overwrites). Re-smoke-test if the trigger/flow changed.
+
+## Error handling
+Recoverable (bad ref, schema violation, user changes mind): fix and retry. A hard dead end
+(repeated validation failure, a construct that is genuinely deferred in V1): stop and report the
+specific error so the Information Architect can decide how to proceed.`;
+
 /**
  * The inbuilt forge skills, keyed by name. Surfaced (frontmatter only) to the Information Architect
  * and loaded on demand via `load_skill`.
@@ -276,6 +401,12 @@ export const BUILTIN_SKILLS: Map<string, BuiltinSkill> = new Map(
       description:
         "Forge an agent (AGENT.md): a persona with a system prompt, model and autonomy. Use when the user wants to create/add/build an agent, assistant, or persona. Writes via agent_create.",
       body: AGENT_FORGE,
+    },
+    {
+      name: "routine-forge",
+      description:
+        "Forge a routine (routine.yaml): a scheduled/triggered automation of tool/agent/hook steps (operation/switch/foreach/sleep/inject states; manual/cron/webhook/event/agent triggers). Use when the user wants to create/build/automate a workflow, schedule, pipeline, or 'when X happens do Y'. Writes via routine_forge.",
+      body: ROUTINE_FORGE,
     },
     {
       name: "onboarding",

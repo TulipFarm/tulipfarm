@@ -7,6 +7,7 @@ import {
   MessageSquare,
   Plug,
   Sparkles,
+  Workflow,
   Wrench,
 } from "lucide-react";
 import { parseAsString, useQueryState } from "nuqs";
@@ -22,6 +23,7 @@ const CATEGORIES: { key?: string; label: string }[] = [
   { key: undefined, label: "All" },
   { key: "resource", label: "Resources" },
   { key: "chat", label: "Chats" },
+  { key: "routine", label: "Routines" },
   { key: "knowledge", label: "Knowledge" },
   { key: "skill", label: "Skills" },
   { key: "connector", label: "Integrations" },
@@ -32,6 +34,7 @@ const CATEGORIES: { key?: string; label: string }[] = [
 const CATEGORY_ICON: Record<string, LucideIcon> = {
   resource: Box,
   chat: MessageSquare,
+  routine: Workflow,
   knowledge: BookOpen,
   skill: Wrench,
   connector: Plug,
