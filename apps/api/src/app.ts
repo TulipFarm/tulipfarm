@@ -34,6 +34,7 @@ import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import { resolveConnectionEnv } from "./integrations/connection-env";
 import { McpClientService } from "./integrations/mcp-client-service";
 import type { PageRetrievalService } from "./knowledge/retrieval-service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
@@ -234,7 +235,13 @@ export async function buildApp(opts: AppOptions = {}) {
     const requireAuth = makeRequireAuth(opts.sessionStore, opts.userRepo, opts.tokenRepo);
     // MCP client service: created once, shared between integration routes (connect/disconnect) and
     // the tool registry (dynamic tool registration). Accepts an optional override for testing.
-    const mcpClientSvc = opts.mcpClient ?? new McpClientService(app.log);
+    const secretsSvc = opts.secretsService;
+    const mcpClientSvc =
+      opts.mcpClient ??
+      new McpClientService(
+        app.log,
+        secretsSvc ? (env) => resolveConnectionEnv(env, secretsSvc) : undefined
+      );
     // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
     const soulPath = process.env.SOUL_PATH;
@@ -314,7 +321,8 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.gitSync,
           mcpClientSvc,
           requireAuth,
-          opts.llmService
+          opts.llmService,
+          opts.secretsService
         );
         if (opts.llmService) {
           registerSkillRoutes(

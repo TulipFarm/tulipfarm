@@ -39,6 +39,7 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
+import { resolveSecretRef } from "./integrations/connection-env";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
 import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
@@ -336,6 +337,7 @@ async function boot() {
         soulLoader,
         deliveries: ingressDeliveries,
         enqueue: makeIngressEnqueuer(boss),
+        resolveSecret: (value) => resolveSecretRef(value, secretsService),
       },
     });
 

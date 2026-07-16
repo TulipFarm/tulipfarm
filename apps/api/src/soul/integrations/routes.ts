@@ -10,6 +10,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
 import { analyzeHook } from "../../hooks/hook-analyzer";
+import {
+  type ConnectionSecretStore,
+  deleteConnectionSecrets,
+  sealConnectionEnv,
+} from "../../integrations/connection-env";
 import type { McpClientService } from "../../integrations/mcp-client-service";
 import { buildIngressAudit, type IngressAuditReport } from "./ingress-audit";
 import { readIntegrationsLock, sourceType, writeIntegrationsLock } from "./lock";
@@ -286,8 +291,17 @@ export function registerIntegrationRoutes(
   mcpClient: McpClientService,
   requireAuth: PreHandler,
   /** Enables the IngressAudit LLM review of ingress handlers at install; skipped when absent. */
-  llmService?: LlmService
+  llmService?: LlmService,
+  /** When present, secret-flagged env values are sealed into the secrets store instead of
+   * being written to connection.yaml in the soul git repo. */
+  secretsService?: ConnectionSecretStore
 ): void {
+  const sealEnv = async (
+    name: string,
+    manifest: IntegrationManifest,
+    env: Record<string, string>
+  ): Promise<Record<string, string>> =>
+    secretsService ? await sealConnectionEnv(name, manifest, env, secretsService) : env;
   // List all installed integrations with runtime status
   app.get(
     "/api/v1/integrations",
@@ -764,7 +778,10 @@ export function registerIntegrationRoutes(
       const integration = soulLoader.integrations.get(name);
       if (!integration) return reply.code(404).send({ error: `integration not found: ${name}` });
       const body = (req.body as { env?: Record<string, string> } | null) ?? {};
-      const connection = { enabled: true, env: body.env ?? {} };
+      const connection = {
+        enabled: true,
+        env: await sealEnv(name, integration.manifest, body.env ?? {}),
+      };
 
       // Persist connection.yaml before starting (so a restart re-connects)
       const connPath = join(gitSync.path, "integrations", name, "connection.yaml");
@@ -1002,9 +1019,13 @@ export function registerIntegrationRoutes(
         return reply.redirect(`${webBase}/integrations/${name}?error=${msg}`);
       }
 
-      // Merge token into env and write connection.yaml
+      // Merge token into env and write connection.yaml (secrets sealed to the secrets store)
       const mergedEnv = { ...env, [tf.token_env]: token };
-      const connection = { enabled: true, env: mergedEnv };
+      const integrationForSeal = soulLoader.integrations.get(name);
+      const sealedEnv = integrationForSeal
+        ? await sealEnv(name, integrationForSeal.manifest, mergedEnv)
+        : mergedEnv;
+      const connection = { enabled: true, env: sealedEnv };
       const connPath = join(gitSync.path, "integrations", name, "connection.yaml");
       try {
         await writeFile(connPath, toYaml(connection), "utf8");
@@ -1050,6 +1071,7 @@ export function registerIntegrationRoutes(
 
       await mcpClient.disconnect(name);
       await rm(join(gitSync.path, "integrations", name), { recursive: true, force: true });
+      if (secretsService) await deleteConnectionSecrets(name, secretsService);
 
       const lock = await readIntegrationsLock(gitSync.path);
       delete lock.integrations[name];
