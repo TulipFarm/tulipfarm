@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
 import { analyzeHook, HookAnalysisError } from "./hook-analyzer.js";
@@ -27,8 +28,14 @@ export class HookExecutor {
   private workerError: Error | null = null;
 
   constructor(connectionString: string) {
-    this.worker = new Worker(join(__dirname, "hook-worker.ts"), {
-      execArgv: ["--import", "tsx"],
+    // The production image bundles the worker to a sibling hook-worker.cjs (the runtime ships
+    // neither TS source nor tsx — see Dockerfile); dev/tests run the .ts source under tsx.
+    const bundledWorker = join(__dirname, "hook-worker.cjs");
+    const workerPath = existsSync(bundledWorker)
+      ? bundledWorker
+      : join(__dirname, "hook-worker.ts");
+    this.worker = new Worker(workerPath, {
+      execArgv: workerPath.endsWith(".ts") ? ["--import", "tsx"] : [],
       workerData: { connectionString },
     });
 

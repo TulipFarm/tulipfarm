@@ -36,7 +36,10 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
   --bundle --platform=node --target=node24 --format=cjs --outfile=dist/server.cjs \
   --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
-  --external:@scalar/fastify-api-reference
+  --external:@scalar/fastify-api-reference \
+  && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
+  --bundle --platform=node --target=node24 --format=cjs --outfile=dist/hook-worker.cjs \
+  --external:isolated-vm --external:pg
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
@@ -52,6 +55,9 @@ ENV NODE_ENV=production \
     WEB_DIST=/app/apps/web/build/client
 COPY --from=builder /deploy/node_modules ./node_modules
 COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
+# Hook sandbox worker — spawned as a sibling file by HookExecutor (worker_threads
+# can't run code out of the server.cjs bundle).
+COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 RUN mkdir -p /opt/tulipfarm/soul
 # Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
