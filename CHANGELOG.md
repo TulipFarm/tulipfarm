@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.0-integrations.1](https://github.com/TulipFarm/tulipfarm/compare/v0.3.0-integrations.0...v0.3.0-integrations.1) (2026-07-16)
+
+### Features
+
+* **routines:** forge skill + activities tab + correct record_* tool names ([#157](https://github.com/TulipFarm/tulipfarm/issues/157)) ([aca1f87](https://github.com/TulipFarm/tulipfarm/commit/aca1f8715c3a8cb346f560f085470a7e6ef39b2d))
+
+### Bug Fixes
+
+* **hooks:** bundle hook-worker.cjs so the prod image can spawn the sandbox worker ([7d3d41b](https://github.com/TulipFarm/tulipfarm/commit/7d3d41bcc3ca79394f07ad8c461a1c94ee93e2d6))
+
 ## [0.3.0-integrations.0](https://github.com/TulipFarm/tulipfarm/compare/v0.2.1...v0.3.0-integrations.0) (2026-07-14)
 
 ### Features
