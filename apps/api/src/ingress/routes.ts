@@ -1,6 +1,7 @@
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { isSecretRef } from "../integrations/connection-env";
 import type { IngressDeliveriesRepo } from "./repo";
 import { verifyHmacSignature } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
@@ -17,6 +18,8 @@ export interface IngressRoutesDeps {
   soulLoader: SoulLoader;
   deliveries: IngressDeliveriesRepo;
   enqueue: (job: IngressJobPayload) => Promise<void>;
+  /** Resolves a `secret://` env value to plaintext; plaintext values need no resolver. */
+  resolveSecret?: (value: string) => Promise<string | undefined>;
 }
 
 /** Constant 404 body: never reveal whether the integration exists / is connected / declares ingress. */
@@ -84,7 +87,10 @@ export async function registerIngressRoutes(
           // hmac security is a manifest bug, not a reason to accept unsigned traffic.
           return reply.code(401).send({ error: "webhook security not configured" });
         }
-        const secret = connection.env?.[security.secret_env];
+        let secret = connection.env?.[security.secret_env];
+        if (secret && isSecretRef(secret)) {
+          secret = deps.resolveSecret ? await deps.resolveSecret(secret) : undefined;
+        }
         if (!secret) return reply.code(401).send({ error: "webhook secret not configured" });
 
         const raw = req.body as Buffer;

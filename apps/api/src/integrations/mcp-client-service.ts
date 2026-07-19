@@ -53,7 +53,11 @@ export class McpClientService {
   private readonly connections = new Map<string, ConnectionEntry>();
   private registry: ToolRegistry | null = null;
 
-  constructor(private readonly logger: Logger) {}
+  constructor(
+    private readonly logger: Logger,
+    /** Resolves `secret://` refs in connection env to plaintext; identity when absent. */
+    private readonly resolveEnv?: (env: Record<string, string>) => Promise<Record<string, string>>
+  ) {}
 
   /** Called once after ToolRegistry is built. McpClientService then registers/unregisters tools directly. */
   setRegistry(registry: ToolRegistry): void {
@@ -115,7 +119,9 @@ export class McpClientService {
           `McpClientService.connect called for non-mcp egress type "${manifest.egress.type}"`
         );
       }
-      const transport = buildTransport(manifest.egress.entry, connection.env ?? {});
+      const rawEnv = connection.env ?? {};
+      const env = this.resolveEnv ? await this.resolveEnv(rawEnv) : rawEnv;
+      const transport = buildTransport(manifest.egress.entry, env);
       entry.transport = transport;
 
       // Crash isolation: if the server closes unexpectedly, mark as error

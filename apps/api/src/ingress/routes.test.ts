@@ -55,7 +55,10 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
   let enqueue: ReturnType<typeof vi.fn>;
   let seen: Set<string>;
 
-  async function build(integrations: SoulIntegration[] = [makeIntegration()]) {
+  async function build(
+    integrations: SoulIntegration[] = [makeIntegration()],
+    resolveSecret?: (value: string) => Promise<string | undefined>
+  ) {
     enqueue = vi.fn(async (_job: IngressJobPayload) => {});
     seen = new Set();
     app = await buildApp({
@@ -70,6 +73,7 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
           },
         } as never,
         enqueue: enqueue as (job: IngressJobPayload) => Promise<void>,
+        resolveSecret,
       },
     });
   }
@@ -221,6 +225,45 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
     expect(unknown.json()).toEqual(undeclared.json());
     expect(undeclared.json()).toEqual(handlerless.json());
     expect(handlerless.json()).toEqual(disconnected.json());
+  });
+
+  it("resolves a secret:// signing secret through the resolver and accepts the delivery", async () => {
+    await app.close();
+    await build(
+      [
+        makeIntegration({
+          connection: {
+            enabled: true,
+            env: {
+              PROVIDER_SIGNING_SECRET: "secret://integration.chatapp.PROVIDER_SIGNING_SECRET",
+            },
+          },
+        }),
+      ],
+      async (value) =>
+        value === "secret://integration.chatapp.PROVIDER_SIGNING_SECRET" ? SECRET : undefined
+    );
+    const res = await inject(EVENT);
+    expect(res.statusCode).toBe(200);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("401s a secret:// signing secret that cannot be resolved", async () => {
+    await app.close();
+    await build(
+      [
+        makeIntegration({
+          connection: {
+            enabled: true,
+            env: { PROVIDER_SIGNING_SECRET: "secret://integration.chatapp.MISSING" },
+          },
+        }),
+      ],
+      async () => undefined
+    );
+    const res = await inject(EVENT);
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toEqual({ error: "webhook secret not configured" });
   });
 
   it("401s when the signing secret is missing from the connection env", async () => {
