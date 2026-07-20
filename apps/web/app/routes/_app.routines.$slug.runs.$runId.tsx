@@ -1,11 +1,14 @@
 import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ResourcePanel } from "~/components/resource-panel";
+import { RoutineRunCanvas } from "~/components/routines/routine-run-canvas";
 import { RunStatusBadge } from "~/components/routines/run-status-badge";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { cancelRun, getRun, type RunEvent, runEventsUrl } from "~/lib/routines";
+import { projectRoutineGraph } from "~/lib/routines/graph";
+import { reduceRunOverlay } from "~/lib/routines/run-overlay";
 
 export async function clientLoader({ params }: { params: { slug: string; runId: string } }) {
   const detail = await getRun(params.slug, params.runId);
@@ -61,6 +64,7 @@ function useRunEvents(
       "state.entered",
       "action.completed",
       "state.completed",
+      "state.transitioned",
       "state.retrying",
       "run.sleeping",
       "run.waiting_approval",
@@ -79,16 +83,6 @@ function useRunEvents(
   return events;
 }
 
-function describePayload(payload: unknown): string {
-  if (payload == null) return "";
-  try {
-    const text = JSON.stringify(payload);
-    return text.length > 200 ? `${text.slice(0, 200)}…` : text;
-  } catch {
-    return String(payload);
-  }
-}
-
 export default function RunDetail() {
   const { slug, runId, detail } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
@@ -96,6 +90,18 @@ export default function RunDetail() {
   const isLive = !TERMINAL.has(run.status);
   const revalidate = useMemo(() => () => revalidator.revalidate(), [revalidator.revalidate]);
   const events = useRunEvents(slug, runId, detail.events, isLive, revalidate);
+  const graph = useMemo(
+    () => projectRoutineGraph(run.definitionSnapshot),
+    [run.definitionSnapshot]
+  );
+  const overlay = useMemo(() => {
+    const next = reduceRunOverlay(graph, events);
+    if (run.status === "cancelled" && run.currentState) {
+      const id = `state:${encodeURIComponent(run.currentState)}`;
+      next.nodes[id] = { ...next.nodes[id], status: "cancelled", exact: true };
+    }
+    return next;
+  }, [events, graph, run.currentState, run.status]);
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const handleCancel = async () => {
@@ -140,21 +146,7 @@ export default function RunDetail() {
         </p>
       ) : null}
 
-      <p className="text-xs uppercase tracking-[0.15em] text-muted-foreground">events</p>
-      <ol className="flex flex-col divide-y divide-border rounded-sm border border-border font-mono text-xs">
-        {events.map((event) => (
-          <li key={event.seq} className="flex items-baseline gap-2.5 px-3 py-1.5">
-            <span className="w-8 shrink-0 text-right text-muted-foreground">{event.seq}</span>
-            <span className="shrink-0 font-medium text-foreground">{event.type}</span>
-            <span className="min-w-0 flex-1 truncate text-muted-foreground">
-              {describePayload(event.payload)}
-            </span>
-          </li>
-        ))}
-        {events.length === 0 ? (
-          <li className="px-3 py-2 text-muted-foreground">no events yet</li>
-        ) : null}
-      </ol>
+      <RoutineRunCanvas graph={graph} overlay={overlay} events={events} />
 
       {run.output != null ? (
         <>

@@ -2,9 +2,11 @@ import { EventEmitter } from "node:events";
 import type { PGlite } from "@electric-sql/pglite";
 import type { SoulLoader, SoulRoutine } from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StreamHub } from "../chat/stream-hub";
 import { DOMAIN_EVENTS } from "../domain-events";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
+import { RoutineRunDriver } from "./driver";
 import type { RoutineRunJob } from "./jobs";
 import { RoutineRegistry } from "./registry";
 import { RoutineRunsRepo } from "./repo";
@@ -43,6 +45,22 @@ const EVENT_ROUTINE: Record<string, unknown> = {
   ],
 };
 
+const ALL_TRIGGER_ROUTINE: Record<string, unknown> = {
+  id: "all-triggers",
+  version: "1.0",
+  start: "Done",
+  "x-triggers": [
+    { type: "manual" },
+    { type: "event", event: "resource.created" },
+    { type: "webhook", secret_ref: "first-webhook" },
+    { type: "cron", schedule: "0 9 * * *" },
+    { type: "agent" },
+    { type: "manual" },
+    { type: "event", event: "resource.created" },
+  ],
+  states: [{ name: "Done", type: "inject", data: {}, end: true }],
+};
+
 const LOG = { error: vi.fn(), warn: vi.fn() };
 
 describe("RoutineTriggerService", () => {
@@ -79,6 +97,21 @@ describe("RoutineTriggerService", () => {
     });
   }
 
+  function makeDriver(registry: RoutineRegistry): RoutineRunDriver {
+    return new RoutineRunDriver({
+      runs,
+      registry,
+      hub: new StreamHub(),
+      sandbox: {
+        runExpression: async () => true,
+        runRoutineHook: async () => null,
+      },
+      actionExecutor: async () => ({}),
+      enqueueWake: async () => {},
+      log: LOG,
+    });
+  }
+
   it("rejects undeclared trigger types", async () => {
     const service = makeService(makeRegistry({ "on-ticket": EVENT_ROUTINE }));
     await expect(service.trigger("on-ticket", { type: "cron" })).rejects.toThrow(
@@ -103,6 +136,69 @@ describe("RoutineTriggerService", () => {
     expect(run?.currentState).toBe("S");
   });
 
+  it("accepts a matching explicit Trigger index and persists it", async () => {
+    const service = makeService(makeRegistry({ "all-triggers": ALL_TRIGGER_ROUTINE }));
+    const { runId } = await service.trigger("all-triggers", {
+      type: "manual",
+      triggerIndex: 5,
+    });
+
+    expect((await runs.findById(runId))?.trigger).toMatchObject({
+      type: "manual",
+      triggerIndex: 5,
+    });
+  });
+
+  it.each([
+    ["negative", -1, "manual"],
+    ["out of bounds", 99, "manual"],
+    ["non-integer", 1.5, "manual"],
+    ["type mismatch", 1, "manual"],
+  ] as const)("rejects a %s explicit Trigger index before creating a Run", async (_case, index, type) => {
+    const service = makeService(makeRegistry({ "all-triggers": ALL_TRIGGER_ROUTINE }));
+
+    await expect(
+      service.trigger("all-triggers", { type, triggerIndex: index })
+    ).rejects.toMatchObject({ code: "trigger_not_declared" });
+    expect(enqueued).toHaveLength(0);
+    expect(await runs.listBySlug("all-triggers")).toHaveLength(0);
+  });
+
+  it("deterministically selects the first matching Trigger when no index is supplied", async () => {
+    const service = makeService(makeRegistry({ "all-triggers": ALL_TRIGGER_ROUTINE }));
+    const { runId } = await service.trigger("all-triggers", { type: "manual" });
+
+    expect((await runs.findById(runId))?.trigger).toMatchObject({
+      type: "manual",
+      triggerIndex: 0,
+    });
+  });
+
+  it.each([
+    ["manual", 0],
+    ["event", 1],
+    ["webhook", 2],
+    ["cron", 3],
+    ["agent", 4],
+  ] as const)("persists %s Trigger identity and journals it in run.started", async (type, index) => {
+    const registry = makeRegistry({ "all-triggers": ALL_TRIGGER_ROUTINE });
+    const service = makeService(registry);
+    const { runId } = await service.trigger("all-triggers", { type });
+
+    expect((await runs.findById(runId))?.trigger).toMatchObject({
+      type,
+      triggerIndex: index,
+    });
+
+    await makeDriver(registry).drive(runId);
+    const started = (await runs.listEvents(runId)).find((event) => event.type === "run.started");
+    expect(started?.payload).toMatchObject({
+      slug: "all-triggers",
+      trigger: type,
+      triggerIndex: index,
+    });
+  });
+
   describe("event triggers via the domain bus", () => {
     it("starts matching routines, honoring the filter expression", async () => {
       const registry = makeRegistry({ "on-ticket": EVENT_ROUTINE });
@@ -123,8 +219,22 @@ describe("RoutineTriggerService", () => {
       const run = await runs.findById(enqueued[0].runId);
       expect(run?.trigger).toMatchObject({
         type: "event",
+        triggerIndex: 0,
         payload: { resourceType: "ticket" },
       });
+    });
+
+    it("threads each matching event Trigger's exact array index", async () => {
+      const registry = makeRegistry({ "all-triggers": ALL_TRIGGER_ROUTINE });
+      const service = makeService(registry);
+      const bus = new EventEmitter();
+      subscribeRoutineEventTriggers(bus, service, registry, undefined, LOG);
+
+      bus.emit(DOMAIN_EVENTS.RESOURCE_CREATED, { resourceType: "ticket" });
+      await vi.waitFor(() => expect(enqueued).toHaveLength(2));
+
+      const startedRuns = await Promise.all(enqueued.map((job) => runs.findById(job.runId)));
+      expect(startedRuns.map((run) => run?.trigger.triggerIndex)).toEqual([1, 6]);
     });
 
     it("starts routines on integration.event with a protocol/event filter (Slack ingress)", async () => {

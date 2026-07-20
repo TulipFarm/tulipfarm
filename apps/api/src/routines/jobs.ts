@@ -14,7 +14,7 @@ export const STALE_HEARTBEAT_MS = 2 * 60 * 1000;
 export interface RoutineRunJob {
   runId: string;
   slug: string;
-  trigger: { type: string; payload?: unknown };
+  trigger: { type: string; payload?: unknown; triggerIndex?: number };
 }
 
 export interface RoutineWakeJob {

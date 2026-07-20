@@ -31,7 +31,7 @@ export async function registerRoutineCronWorker(
     for (const job of jobs) {
       const data = job.data as unknown as CronJobData;
       try {
-        await service.trigger(data.slug, { type: "cron" });
+        await service.trigger(data.slug, { type: "cron", triggerIndex: data.triggerIndex });
       } catch (err) {
         // Routine deleted/invalid between unschedule and firing — log, don't retry.
         log.warn({ err, slug: data.slug }, "cron-triggered routine failed to start");

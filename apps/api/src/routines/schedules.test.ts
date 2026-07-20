@@ -2,7 +2,12 @@ import type { SoulLoader, SoulRoutine } from "@tulipfarm/soul";
 import type { PgBoss } from "pg-boss";
 import { describe, expect, it, vi } from "vitest";
 import { RoutineRegistry } from "./registry";
-import { ROUTINE_CRON_QUEUE, reconcileRoutineSchedules } from "./schedules";
+import {
+  ROUTINE_CRON_QUEUE,
+  reconcileRoutineSchedules,
+  registerRoutineCronWorker,
+} from "./schedules";
+import type { RoutineTriggerService } from "./trigger-service";
 
 function makeRegistry(routines: Record<string, Record<string, unknown>>): RoutineRegistry {
   const map = new Map<string, SoulRoutine>();
@@ -99,5 +104,29 @@ describe("reconcileRoutineSchedules", () => {
 
     await reconcileRoutineSchedules(boss, registry, LOG);
     expect(boss.schedule).not.toHaveBeenCalled();
+  });
+});
+
+describe("registerRoutineCronWorker", () => {
+  it("passes the scheduled Trigger index into the trigger service", async () => {
+    type Worker = (jobs: Array<{ data: unknown }>) => Promise<void>;
+    let worker: Worker | undefined;
+    const boss = {
+      createQueue: vi.fn(async () => {}),
+      work: vi.fn(async (_queue: string, handler: unknown) => {
+        worker = handler as Worker;
+      }),
+    } as unknown as PgBoss;
+    const trigger = vi.fn(async () => ({ runId: "run-1" }));
+    const service = { trigger } as unknown as RoutineTriggerService;
+
+    await registerRoutineCronWorker(boss, service, LOG);
+    if (!worker) throw new Error("routine cron worker was not registered");
+    await worker([{ data: { slug: "daily-report", triggerIndex: 3 } }]);
+
+    expect(trigger).toHaveBeenCalledWith("daily-report", {
+      type: "cron",
+      triggerIndex: 3,
+    });
   });
 });

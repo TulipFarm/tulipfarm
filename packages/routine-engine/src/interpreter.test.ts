@@ -1,7 +1,7 @@
 import type { RoutineDefinition } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
 import { executeState } from "./interpreter";
-import type { EnginePorts, ResolvedFunction } from "./ports";
+import type { EnginePorts, HookInvocation, ResolvedFunction } from "./ports";
 import type { RunEvent, RunSnapshot } from "./types";
 
 /**
@@ -72,6 +72,8 @@ describe("inject state", () => {
       type: "continue",
       nextState: "Next",
       context: { keep: 1, greeting: "hi" },
+      route: { kind: "transition", target: "Next" },
+      stateData: { state: "Start", input: { keep: 1 }, output: { keep: 1, greeting: "hi" } },
     });
   });
 
@@ -80,7 +82,12 @@ describe("inject state", () => {
       states: [{ name: "Start", type: "inject", data: { done: true }, end: true }],
     });
     const outcome = await executeState(makeRun(def), makePorts());
-    expect(outcome).toEqual({ type: "complete", output: { done: true } });
+    expect(outcome).toEqual({
+      type: "complete",
+      output: { done: true },
+      route: { kind: "end", end: true },
+      stateData: { state: "Start", input: {}, output: { done: true } },
+    });
   });
 });
 
@@ -100,12 +107,55 @@ describe("switch state", () => {
 
   it("takes the first truthy condition", async () => {
     const outcome = await executeState(makeRun(def, { context: { amount: 700 } }), makePorts());
-    expect(outcome).toMatchObject({ type: "continue", nextState: "Big" });
+    expect(outcome.type).toBe("continue");
+    expect(outcome).toHaveProperty("route", { kind: "condition", index: 0, target: "Big" });
   });
 
   it("falls back to defaultCondition", async () => {
     const outcome = await executeState(makeRun(def, { context: { amount: 10 } }), makePorts());
-    expect(outcome).toMatchObject({ type: "continue", nextState: "Small" });
+    expect(outcome.type).toBe("continue");
+    expect(outcome).toHaveProperty("route", { kind: "default", target: "Small" });
+  });
+
+  it("preserves the ordered condition index when duplicate targets exist", async () => {
+    const duplicateTargets = makeDef({
+      states: [
+        {
+          name: "Start",
+          type: "switch",
+          dataConditions: [
+            { condition: "context.choice === 1", transition: "Same" },
+            { condition: "context.choice === 2", transition: "Same" },
+          ],
+          defaultCondition: { end: true },
+        },
+        { name: "Same", type: "inject", data: {}, end: true },
+      ],
+    });
+    const outcome = await executeState(
+      makeRun(duplicateTargets, { context: { choice: 2 } }),
+      makePorts()
+    );
+    expect(outcome).toMatchObject({ type: "continue", nextState: "Same" });
+    expect(outcome).toHaveProperty("route", { kind: "condition", index: 1, target: "Same" });
+  });
+
+  it.each([
+    [true, { kind: "condition", index: 0, end: true }],
+    [false, { kind: "default", end: true }],
+  ])("preserves switch End route identity", async (finish, route) => {
+    const terminal = makeDef({
+      states: [
+        {
+          name: "Start",
+          type: "switch",
+          dataConditions: [{ condition: "context.finish === true", end: true }],
+          defaultCondition: { end: true },
+        },
+      ],
+    });
+    const outcome = await executeState(makeRun(terminal, { context: { finish } }), makePorts());
+    expect(outcome).toMatchObject({ type: "complete", route });
   });
 
   it("does not mutate the shared definition when branching", async () => {
@@ -177,10 +227,11 @@ describe("operation state", () => {
         throw new Error("boom");
       }),
     });
-    const outcome = await executeState(makeRun(def), ports);
-    expect(outcome).toMatchObject({
+    const outcome = await executeState(makeRun(def, { context: { keep: 1 } }), ports);
+    expect(outcome).toEqual({
       type: "fail",
       error: { name: "action_failed", message: "boom", state: "Start" },
+      stateData: { state: "Start", input: { keep: 1 } },
     });
   });
 });
@@ -252,6 +303,8 @@ describe("sleep state", () => {
       type: "sleep",
       until: new Date("2026-07-06T12:10:00Z"),
       nextState: "Next",
+      route: { kind: "transition", target: "Next" },
+      stateData: { state: "Start", input: {}, output: {} },
     });
   });
 
@@ -260,7 +313,12 @@ describe("sleep state", () => {
       states: [{ name: "Start", type: "sleep", duration: "PT1S", end: true }],
     });
     const outcome = await executeState(makeRun(def), makePorts());
-    expect(outcome).toMatchObject({ type: "sleep", nextState: null });
+    expect(outcome).toMatchObject({
+      type: "sleep",
+      nextState: null,
+      route: { kind: "end", end: true },
+      stateData: { state: "Start", input: {}, output: {} },
+    });
   });
 });
 
@@ -279,7 +337,10 @@ describe("retries and onErrors", () => {
         name: "Start",
         type: "operation",
         actions: [{ functionRef: { refName: "doWork" }, retryRef: "std" }],
-        onErrors: [{ errorRef: "*", transition: "Recover" }],
+        onErrors: [
+          { errorRef: "timeout", end: true },
+          { errorRef: "*", transition: "Recover" },
+        ],
         end: true,
       },
       { name: "Recover", type: "inject", data: { recovered: true }, end: true },
@@ -302,7 +363,17 @@ describe("retries and onErrors", () => {
       makeRun(def, { attemptCounts: { Start: 2 } }),
       failingPorts()
     );
-    expect(outcome).toMatchObject({ type: "continue", nextState: "Recover" });
+    expect(outcome).toMatchObject({
+      type: "continue",
+      nextState: "Recover",
+      route: {
+        kind: "error",
+        index: 1,
+        target: "Recover",
+        error: { name: "action_failed", message: "flaky", state: "Start" },
+      },
+      stateData: { state: "Start", input: {} },
+    });
   });
 
   it("matches onErrors by errorRef name", async () => {
@@ -348,6 +419,12 @@ describe("retries and onErrors", () => {
     expect(outcome).toMatchObject({
       type: "complete",
       output: { error: { name: "action_failed" } },
+      route: {
+        kind: "error",
+        index: 0,
+        end: true,
+        error: { name: "action_failed", state: "Start" },
+      },
     });
   });
 });
@@ -428,12 +505,17 @@ describe("human_approval gate", () => {
   });
 
   it("pauses with wait_approval before executing", async () => {
-    const ports = makePorts();
+    const ports = makePorts({
+      hasHook: vi.fn(() => true),
+    });
     const outcome = await executeState(makeRun(def, { context: { amount: 9 } }), ports);
     expect(outcome).toEqual({
       type: "wait_approval",
       request: { stateName: "Start", channels: ["ui", "slack"], summary: { amount: 9 } },
     });
+    expect(ports.evalExpression).not.toHaveBeenCalled();
+    expect(ports.emit).not.toHaveBeenCalled();
+    expect(ports.runHook).not.toHaveBeenCalled();
     expect(ports.runAction).not.toHaveBeenCalled();
   });
 
@@ -447,6 +529,91 @@ describe("human_approval gate", () => {
   it("routes denial as approval_denied error", async () => {
     const outcome = await executeState(makeRun(def, { approvalOutcome: "denied" }), makePorts());
     expect(outcome).toMatchObject({ type: "fail", error: { name: "approval_denied" } });
+  });
+
+  it("filters, enters, runs Hooks and Action exactly once after approval", async () => {
+    const approved = makeDef({
+      states: [
+        {
+          name: "Start",
+          type: "operation",
+          "x-autonomy-level": "human_approval",
+          actions: [{ functionRef: { refName: "doWork" } }],
+          stateDataFilter: {
+            input: "({ filtered: context.wide })",
+            output: "({ finalized: context.filtered })",
+          },
+          end: true,
+        },
+      ],
+    });
+    const hookInputs: Record<string, unknown>[] = [];
+    const runHook = vi.fn(async (name: string, invocation: HookInvocation) => {
+      hookInputs.push({ ...invocation.context });
+      if (name === "afterStart") invocation.context.afterHook = true;
+    });
+    const ports = makePorts({ runHook, hasHook: vi.fn(() => true) });
+    const outcome = await executeState(
+      makeRun(approved, { context: { wide: 9 }, approvalOutcome: "approved" }),
+      ports
+    );
+
+    expect(outcome).toMatchObject({
+      type: "complete",
+      route: { kind: "end", end: true },
+      stateData: {
+        state: "Start",
+        input: { filtered: 9 },
+        output: { finalized: 9, afterHook: true },
+      },
+    });
+    expect(hookInputs).toEqual([{ filtered: 9 }, { finalized: 9 }]);
+    expect(ports.evalExpression).toHaveBeenCalledTimes(2);
+    expect(ports.emit).toHaveBeenCalledTimes(2);
+    expect(ports.events[0]).toEqual({
+      type: "state.entered",
+      data: { state: "Start", stateType: "operation", input: { filtered: 9 }, attempt: 1 },
+    });
+    expect(ports.runHook).toHaveBeenCalledTimes(2);
+    expect(ports.runAction).toHaveBeenCalledOnce();
+  });
+
+  it("routes denial by onErrors without filters, events, Hooks, or Actions", async () => {
+    const denied = makeDef({
+      states: [
+        {
+          name: "Start",
+          type: "operation",
+          "x-autonomy-level": "human_approval",
+          stateDataFilter: { input: "({ filtered: context.wide })" },
+          actions: [{ functionRef: { refName: "doWork" } }],
+          onErrors: [{ errorRef: "approval_denied", transition: "Denied" }],
+          end: true,
+        },
+        { name: "Denied", type: "inject", data: {}, end: true },
+      ],
+    });
+    const ports = makePorts({ hasHook: vi.fn(() => true) });
+    const outcome = await executeState(
+      makeRun(denied, { context: { wide: 9 }, approvalOutcome: "denied" }),
+      ports
+    );
+
+    expect(outcome).toMatchObject({
+      type: "continue",
+      nextState: "Denied",
+      route: {
+        kind: "error",
+        index: 0,
+        target: "Denied",
+        error: { name: "approval_denied", state: "Start" },
+      },
+      stateData: { state: "Start", input: { wide: 9 } },
+    });
+    expect(ports.evalExpression).not.toHaveBeenCalled();
+    expect(ports.emit).not.toHaveBeenCalled();
+    expect(ports.runHook).not.toHaveBeenCalled();
+    expect(ports.runAction).not.toHaveBeenCalled();
   });
 });
 
@@ -498,8 +665,27 @@ describe("state data filters and events", () => {
     });
     const ports = makePorts();
     const outcome = await executeState(makeRun(def, { context: { wide: 41 } }), ports);
-    expect(outcome).toEqual({ type: "complete", output: { final: 42 } });
-    expect(ports.events.map((e) => e.type)).toEqual(["state.entered", "state.completed"]);
+    expect(outcome).toEqual({
+      type: "complete",
+      output: { final: 42 },
+      route: { kind: "end", end: true },
+      stateData: {
+        state: "Start",
+        input: { narrowed: 41 },
+        output: { final: 42 },
+      },
+    });
+    expect(ports.events).toEqual([
+      {
+        type: "state.entered",
+        data: {
+          state: "Start",
+          stateType: "inject",
+          input: { narrowed: 41 },
+          attempt: 1,
+        },
+      },
+    ]);
   });
 });
 

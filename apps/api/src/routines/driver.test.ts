@@ -8,6 +8,7 @@ import { makePglite } from "../test/pglite";
 import { type ActionExecutor, RoutineRunDriver, type RoutineSandbox } from "./driver";
 import type { RoutineRegistry } from "./registry";
 import { RoutineRunsRepo } from "./repo";
+import { RunJournalStreamRepo, runStreamId } from "./stream-adapter";
 
 function makeSandbox(hookResults: Record<string, unknown> = {}): RoutineSandbox {
   return {
@@ -56,13 +57,14 @@ describe("RoutineRunDriver (PGlite)", () => {
     enqueueWake?: ReturnType<typeof vi.fn>;
     requestApproval?: ReturnType<typeof vi.fn>;
     recordRun?: ReturnType<typeof vi.fn>;
+    hub?: StreamHub;
   }) {
     const enqueueWake = overrides.enqueueWake ?? vi.fn(async () => {});
     const recordRun = overrides.recordRun ?? vi.fn();
     const driver = new RoutineRunDriver({
       runs,
       registry: overrides.registry ?? makeRegistry(),
-      hub: new StreamHub(),
+      hub: overrides.hub ?? new StreamHub(),
       sandbox: overrides.sandbox ?? makeSandbox(),
       actionExecutor: overrides.actionExecutor ?? vi.fn(async () => ({ ok: true })),
       requestApproval: overrides.requestApproval as never,
@@ -125,9 +127,27 @@ describe("RoutineRunDriver (PGlite)", () => {
 
     const events = await runs.listEvents(id);
     const types = events.map((e) => e.type);
-    expect(types[0]).toBe("run.started");
-    expect(types).toContain("state.entered");
-    expect(types[types.length - 1]).toBe("finish");
+    expect(types).toEqual([
+      "run.started",
+      "state.entered",
+      "state.completed",
+      "state.transitioned",
+      "state.entered",
+      "state.completed",
+      "state.transitioned",
+      "state.entered",
+      "action.completed",
+      "state.completed",
+      "state.transitioned",
+      "finish",
+    ]);
+    expect(
+      events.filter((event) => event.type === "state.transitioned").map((e) => e.payload)
+    ).toEqual([
+      { source: "Seed", target: "Gate", route: { kind: "transition" } },
+      { source: "Gate", target: "Work", route: { kind: "condition", index: 0 } },
+      { source: "Work", end: true, route: { kind: "end" } },
+    ]);
     // seqs strictly ascending from 1
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
   });
@@ -153,6 +173,14 @@ describe("RoutineRunDriver (PGlite)", () => {
     expect(enqueueWake).toHaveBeenCalledWith(
       expect.objectContaining({ runId: id, reason: "sleep" })
     );
+    expect((await runs.listEvents(id)).map((event) => event.type)).toEqual([
+      "run.started",
+      "state.entered",
+      "state.completed",
+      "state.transitioned",
+      "run.sleeping",
+      "finish",
+    ]);
 
     // wake delivery (crash-restart equivalent: fresh drive call)
     await driver.drive(id);
@@ -164,6 +192,42 @@ describe("RoutineRunDriver (PGlite)", () => {
     const seqs = (await runs.listEvents(id)).map((e) => e.seq);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(new Set(seqs).size).toBe(seqs.length);
+  });
+
+  it("keeps Sleep End history when cancellation wins during suspension", async () => {
+    const def = {
+      ...MULTI_STATE,
+      start: "Nap",
+      states: [{ name: "Nap", type: "sleep", duration: "PT1S", end: true }],
+    } as unknown as RoutineDefinition;
+    const { driver } = makeDriver({});
+    const id = await createRun(def);
+
+    await driver.drive(id);
+    expect(await runs.findById(id)).toMatchObject({ status: "sleeping", currentState: null });
+    expect(
+      (await runs.listEvents(id)).find((event) => event.type === "state.transitioned")?.payload
+    ).toEqual({ source: "Nap", end: true, route: { kind: "end" } });
+    await runs.transition(id, { status: "sleeping" }, { status: "cancelled", finished: true });
+    await driver.drive(id);
+    expect(await runs.findById(id)).toMatchObject({ status: "cancelled" });
+  });
+
+  it("retains replayable committed events when live fan-out fails", async () => {
+    const hub = new StreamHub();
+    vi.spyOn(hub, "publish").mockImplementation(() => {
+      throw new Error("subscriber failed");
+    });
+    const { driver } = makeDriver({ hub });
+    const id = await createRun(MULTI_STATE);
+
+    await driver.drive(id);
+
+    const journal = await runs.listEvents(id);
+    const replay = await new RunJournalStreamRepo(runs).listAfter(runStreamId(id), 0);
+    expect(LOG.error).toHaveBeenCalled();
+    expect(replay.map((event) => event.seq)).toEqual(journal.map((event) => event.seq));
+    expect(replay.at(-1)?.eventType).toBe("finish");
   });
 
   it("is idempotent under duplicate deliveries (CAS loses quietly)", async () => {
@@ -208,6 +272,10 @@ describe("RoutineRunDriver (PGlite)", () => {
     expect(run?.status).toBe("sleeping");
     expect(run?.attemptCounts).toEqual({ Work: 1 });
     expect(enqueueWake).toHaveBeenCalledWith(expect.objectContaining({ reason: "retry" }));
+    expect((await runs.listEvents(id)).slice(-2).map((event) => event.type)).toEqual([
+      "state.retrying",
+      "finish",
+    ]);
 
     await driver.drive(id);
     run = await runs.findById(id);
@@ -264,18 +332,66 @@ describe("RoutineRunDriver (PGlite)", () => {
     const requestApproval = vi.fn(async () => approvalId);
     const actionExecutor = vi.fn(async () => ({ ok: true }));
     const { driver } = makeDriver({ requestApproval, actionExecutor });
-    const id = await createRun(def);
+    const id = await createRun(def, { amount: 9 });
 
     await driver.drive(id);
     let run = await runs.findById(id);
     expect(run?.status).toBe("waiting_approval");
     expect(run?.approvalId).toBe(approvalId);
     expect(actionExecutor).not.toHaveBeenCalled();
+    expect((await runs.listEvents(id)).slice(-2).map((event) => event.payload)).toEqual([
+      {
+        state: "Gate",
+        approvalId,
+        channels: ["ui"],
+        pendingInput: { amount: 9 },
+      },
+      { reason: "suspended" },
+    ]);
 
     await driver.drive(id, { approvalOutcome: "approved" });
     run = await runs.findById(id);
     expect(run?.status).toBe("succeeded");
     expect(actionExecutor).toHaveBeenCalledOnce();
+  });
+
+  it("journals handled error route identity before continuing", async () => {
+    const def = {
+      ...MULTI_STATE,
+      start: "Work",
+      states: [
+        {
+          name: "Work",
+          type: "operation",
+          actions: [{ functionRef: { refName: "doWork" } }],
+          onErrors: [{ errorRef: "*", transition: "Recover" }],
+        },
+        { name: "Recover", type: "inject", data: { recovered: true }, end: true },
+      ],
+    } as unknown as RoutineDefinition;
+    const { driver } = makeDriver({
+      actionExecutor: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    });
+    const id = await createRun(def);
+
+    await driver.drive(id);
+
+    const transition = (await runs.listEvents(id)).find(
+      (event) =>
+        event.type === "state.transitioned" &&
+        (event.payload as { source?: string }).source === "Work"
+    );
+    expect(transition?.payload).toMatchObject({
+      source: "Work",
+      target: "Recover",
+      route: {
+        kind: "error",
+        index: 0,
+        error: { name: "action_failed", message: "boom", state: "Work" },
+      },
+    });
   });
 
   it("runs lifecycle + step hooks through the sandbox", async () => {

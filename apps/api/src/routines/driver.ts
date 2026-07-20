@@ -6,12 +6,20 @@ import {
   type ResolvedFunction,
   type RunEvent,
   type RunSnapshot,
+  type SelectedRoute,
+  type StateExecutionData,
 } from "@tulipfarm/routine-engine";
-import { makeStreamEmitter } from "../chat/stream-emitter";
 import type { StreamHub } from "../chat/stream-hub";
 import type { RoutineRegistry } from "./registry";
-import type { RoutineRunRow, RoutineRunsRepo, RunStatus } from "./repo";
-import { RunJournalStreamRepo, runStreamId } from "./stream-adapter";
+import type {
+  PendingRunEvent,
+  RoutineRunRow,
+  RoutineRunsRepo,
+  RunStatus,
+  RunTransitionGuard,
+  RunTransitionPatch,
+} from "./repo";
+import { makeRunJournalEmitter, publishRunEvents, runStreamId } from "./stream-adapter";
 
 type DriverLogger = {
   error: (obj: unknown, msg?: string) => void;
@@ -83,6 +91,27 @@ function hookMentions(hookSource: string, fnName: string): boolean {
   return new RegExp(`\\b${fnName}\\s*[(:]`).test(hookSource);
 }
 
+function stateCompleted(data: StateExecutionData): PendingRunEvent {
+  return { type: "state.completed", payload: { state: data.state, output: data.output ?? {} } };
+}
+
+function stateTransitioned(source: string, selected: SelectedRoute): PendingRunEvent {
+  const payload: Record<string, unknown> = { source };
+  if ("target" in selected && selected.target) payload.target = selected.target;
+  if ("end" in selected && selected.end) payload.end = true;
+  switch (selected.kind) {
+    case "condition":
+      payload.route = { kind: selected.kind, index: selected.index };
+      break;
+    case "error":
+      payload.route = { kind: selected.kind, index: selected.index, error: selected.error };
+      break;
+    default:
+      payload.route = { kind: selected.kind };
+  }
+  return { type: "state.transitioned", payload };
+}
+
 /**
  * The run driver: loads a run, loops `executeState`, persists after every outcome
  * (persist-first, enqueue-second — the sweep heals the gap), and exits the loop on any
@@ -102,7 +131,7 @@ export class RoutineRunDriver {
     if (TERMINAL.includes(row.status)) return;
 
     // Claim: pending (fresh) / sleeping (wake) / waiting_approval (decision) → running.
-    const claimed = await runs.transition(
+    const claimed = await this.transition(
       runId,
       { status: row.status },
       { status: "running", wakeAt: null }
@@ -111,13 +140,7 @@ export class RoutineRunDriver {
 
     const streamId = runStreamId(runId);
     hub.register(streamId);
-    const journalRepo = new RunJournalStreamRepo(runs);
-    const lastSeq = (await runs.nextSeq(runId)) - 1;
-    const emitter = makeStreamEmitter(
-      streamId,
-      { repo: journalRepo, hub, log: { error: (obj, msg) => log.error(obj, msg) } },
-      lastSeq
-    );
+    const emitter = makeRunJournalEmitter(runId, { runs, hub, log });
 
     const routine = this.deps.registry.get(row.routineSlug);
     const hookSource = routine?.hookSource;
@@ -125,10 +148,9 @@ export class RoutineRunDriver {
     const breakerKey = `routine:${row.routineSlug}`;
     const sandbox = this.deps.sandbox;
 
-    let approvalOutcome = opts.approvalOutcome;
     // sleep-completion: currentState null means "the run finished sleeping into its end".
     if (row.currentState === null) {
-      await this.finish(runId, row.routineSlug, emitter, {
+      await this.finish(runId, row.routineSlug, {
         status: "succeeded",
         output: row.context,
       });
@@ -146,7 +168,7 @@ export class RoutineRunDriver {
         payload: row.trigger.payload,
       },
       attemptCounts: row.attemptCounts,
-      approvalOutcome,
+      approvalOutcome: opts.approvalOutcome,
     };
 
     const ports: EnginePorts = {
@@ -170,9 +192,15 @@ export class RoutineRunDriver {
       log: { warn: (msg) => log.warn({ runId }, msg) },
     };
 
-    const isFirstState = snapshot.currentState === snapshot.definition.start && lastSeq === 0;
+    const isFirstState =
+      snapshot.currentState === snapshot.definition.start &&
+      (await runs.listEvents(runId)).length === 0;
     if (isFirstState) {
-      await emitter.emit("run.started", { slug: row.routineSlug, trigger: row.trigger.type });
+      await emitter.emit("run.started", {
+        slug: row.routineSlug,
+        trigger: row.trigger.type,
+        triggerIndex: row.trigger.triggerIndex,
+      });
       if (hookSource && hookMentions(hookSource, LIFECYCLE_HOOKS.beforeRun)) {
         try {
           await ports.runHook(LIFECYCLE_HOOKS.beforeRun, {
@@ -195,12 +223,14 @@ export class RoutineRunDriver {
       // out across a crash/restart (the in-process race lives in the engine).
       const stateDef = snapshot.definition.states.find((s) => s.name === stateName);
       const timeoutIso = stateDef?.timeouts?.stateExecTimeout;
-      if (timeoutIso) {
-        await runs.transition(
+      const approvalGate = stateDef?.["x-autonomy-level"] === "human_approval";
+      if (timeoutIso && (!approvalGate || snapshot.approvalOutcome === "approved")) {
+        const deadlineSet = await this.transition(
           runId,
           { status: "running", currentState: stateName },
           { stateDeadline: new Date(Date.now() + parseIsoDuration(timeoutIso)) }
         );
+        if (!deadlineSet) return;
       }
 
       const outcome = await executeState(snapshot, ports);
@@ -208,10 +238,15 @@ export class RoutineRunDriver {
 
       switch (outcome.type) {
         case "continue": {
-          const ok = await runs.transition(
+          const events = [
+            ...(outcome.route.kind === "error" ? [] : [stateCompleted(outcome.stateData)]),
+            stateTransitioned(stateName, outcome.route),
+          ];
+          const ok = await this.transition(
             runId,
             { status: "running", currentState: stateName },
-            { currentState: outcome.nextState, context: outcome.context, stateDeadline: null }
+            { currentState: outcome.nextState, context: outcome.context, stateDeadline: null },
+            events
           );
           if (!ok) return; // raced: cancelled or duplicate delivery advanced it
           snapshot = {
@@ -219,22 +254,30 @@ export class RoutineRunDriver {
             currentState: outcome.nextState,
             context: outcome.context,
           };
-          approvalOutcome = undefined;
           snapshot.approvalOutcome = undefined;
           continue;
         }
         case "complete": {
           await this.runAfterHook(ports, hookSource, snapshot);
-          await this.finish(runId, row.routineSlug, emitter, {
-            status: "succeeded",
-            output: outcome.output,
-            expectState: stateName,
-          });
+          const events = [
+            ...(outcome.route.kind === "error" ? [] : [stateCompleted(outcome.stateData)]),
+            stateTransitioned(stateName, outcome.route),
+          ];
+          await this.finish(
+            runId,
+            row.routineSlug,
+            {
+              status: "succeeded",
+              output: outcome.output,
+              expectState: stateName,
+            },
+            events
+          );
           return;
         }
         case "fail": {
           await this.runAfterHook(ports, hookSource, snapshot);
-          await this.finish(runId, row.routineSlug, emitter, {
+          await this.finish(runId, row.routineSlug, {
             status: "failed",
             error: outcome.error as unknown as Record<string, unknown>,
             expectState: stateName,
@@ -243,7 +286,7 @@ export class RoutineRunDriver {
         }
         case "sleep": {
           const token = `sleep:${stateName}:${outcome.until.getTime()}`;
-          const ok = await runs.transition(
+          const ok = await this.transition(
             runId,
             { status: "running", currentState: stateName },
             {
@@ -252,17 +295,21 @@ export class RoutineRunDriver {
               context: outcome.context,
               wakeAt: outcome.until,
               stateDeadline: null,
-            }
+            },
+            [
+              stateCompleted(outcome.stateData),
+              stateTransitioned(stateName, outcome.route),
+              {
+                type: "run.sleeping",
+                payload: { state: stateName, wakeAt: outcome.until.toISOString() },
+              },
+              {
+                type: "finish",
+                payload: { reason: "suspended", wakeAt: outcome.until.toISOString() },
+              },
+            ]
           );
           if (!ok) return;
-          await emitter.emit("run.sleeping", {
-            state: stateName,
-            until: outcome.until.toISOString(),
-          });
-          await emitter.emit("finish", {
-            reason: "suspended",
-            wakeAt: outcome.until.toISOString(),
-          });
           hub.finish(streamId);
           await this.deps.enqueueWake({ runId, reason: "sleep", token, startAfter: outcome.until });
           return;
@@ -271,26 +318,31 @@ export class RoutineRunDriver {
           const wakeAt = new Date(Date.now() + outcome.delayMs);
           const token = `retry:${stateName}:${outcome.attempt}`;
           const attemptCounts = { ...snapshot.attemptCounts, [stateName]: outcome.attempt };
-          const ok = await runs.transition(
+          const ok = await this.transition(
             runId,
             { status: "running", currentState: stateName },
-            { status: "sleeping", attemptCounts, wakeAt, stateDeadline: null }
+            { status: "sleeping", attemptCounts, wakeAt, stateDeadline: null },
+            [
+              {
+                type: "state.retrying",
+                payload: {
+                  state: stateName,
+                  attempt: outcome.attempt,
+                  delayMs: outcome.delayMs,
+                  error: outcome.error,
+                },
+              },
+              { type: "finish", payload: { reason: "suspended", wakeAt: wakeAt.toISOString() } },
+            ]
           );
           if (!ok) return;
-          await emitter.emit("state.retrying", {
-            state: stateName,
-            attempt: outcome.attempt,
-            delayMs: outcome.delayMs,
-            error: outcome.error,
-          });
-          await emitter.emit("finish", { reason: "suspended", wakeAt: wakeAt.toISOString() });
           hub.finish(streamId);
           await this.deps.enqueueWake({ runId, reason: "retry", token, startAfter: wakeAt });
           return;
         }
         case "wait_approval": {
-          if (!this.deps.requestApproval || !row) {
-            await this.finish(runId, row.routineSlug, emitter, {
+          if (!this.deps.requestApproval) {
+            await this.finish(runId, row.routineSlug, {
               status: "failed",
               error: { name: "approvals_unavailable", message: "approvals are not configured" },
               expectState: stateName,
@@ -298,18 +350,24 @@ export class RoutineRunDriver {
             return;
           }
           const approvalId = await this.deps.requestApproval(row, outcome.request);
-          const ok = await runs.transition(
+          const ok = await this.transition(
             runId,
             { status: "running", currentState: stateName },
-            { status: "waiting_approval", approvalId }
+            { status: "waiting_approval", approvalId, stateDeadline: null },
+            [
+              {
+                type: "run.waiting_approval",
+                payload: {
+                  state: stateName,
+                  approvalId,
+                  channels: outcome.request.channels,
+                  pendingInput: outcome.request.summary,
+                },
+              },
+              { type: "finish", payload: { reason: "suspended" } },
+            ]
           );
           if (!ok) return;
-          await emitter.emit("run.waiting_approval", {
-            state: stateName,
-            approvalId,
-            channels: outcome.request.channels,
-          });
-          await emitter.emit("finish", { reason: "suspended" });
           hub.finish(streamId);
           return;
         }
@@ -338,16 +396,20 @@ export class RoutineRunDriver {
   private async finish(
     runId: string,
     slug: string,
-    emitter: { emit(type: string, data: unknown): Promise<void> },
     result: {
       status: "succeeded" | "failed";
       output?: Record<string, unknown>;
       error?: Record<string, unknown>;
       expectState?: string | null;
-    }
+    },
+    leadingEvents: PendingRunEvent[] = []
   ): Promise<void> {
-    const { runs, hub } = this.deps;
-    const ok = await runs.transition(
+    const { hub } = this.deps;
+    const terminalEvent: PendingRunEvent =
+      result.status === "succeeded"
+        ? { type: "finish", payload: { reason: "completed", output: result.output ?? {} } }
+        : { type: "error", payload: { error: result.error ?? {} } };
+    const ok = await this.transition(
       runId,
       {
         status: "running",
@@ -360,15 +422,22 @@ export class RoutineRunDriver {
         wakeAt: null,
         stateDeadline: null,
         finished: true,
-      }
+      },
+      [...leadingEvents, terminalEvent]
     );
     if (!ok) return;
     this.deps.recordRun?.({ slug, runId, status: result.status, error: result.error });
-    if (result.status === "succeeded") {
-      await emitter.emit("finish", { reason: "completed", output: result.output ?? {} });
-    } else {
-      await emitter.emit("error", { error: result.error ?? {} });
-    }
     hub.finish(runStreamId(runId));
+  }
+
+  private async transition(
+    runId: string,
+    expected: RunTransitionGuard,
+    patch: RunTransitionPatch,
+    events: PendingRunEvent[] = []
+  ): Promise<boolean> {
+    const result = await this.deps.runs.transitionWithEvents(runId, expected, patch, events);
+    publishRunEvents(runId, result.events, this.deps.hub, this.deps.log);
+    return result.transitioned;
   }
 }

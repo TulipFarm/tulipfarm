@@ -47,17 +47,51 @@ export interface ApprovalRequest {
   summary: Record<string, unknown>;
 }
 
+/** Exact outgoing route selected while executing a State. */
+export type SelectedRoute =
+  | { kind: "transition"; target: string }
+  | { kind: "end"; end: true }
+  | { kind: "condition"; index: number; target?: string; end?: true }
+  | { kind: "default"; target?: string; end?: true }
+  | {
+      kind: "error";
+      index: number;
+      target?: string;
+      end?: true;
+      error: RunError;
+    };
+
+/** Effective input and output snapshots for one State execution. */
+export interface StateExecutionData {
+  state: string;
+  input: Record<string, unknown>;
+  output?: Record<string, unknown>;
+}
+
 /** Outcome of executing one state. The driver persists, then acts on it. */
 export type StepOutcome =
-  | { type: "continue"; nextState: string; context: Record<string, unknown> }
-  | { type: "complete"; output: Record<string, unknown> }
-  | { type: "fail"; error: RunError }
+  | {
+      type: "continue";
+      nextState: string;
+      context: Record<string, unknown>;
+      route: SelectedRoute;
+      stateData: StateExecutionData;
+    }
+  | {
+      type: "complete";
+      output: Record<string, unknown>;
+      route: SelectedRoute;
+      stateData: StateExecutionData;
+    }
+  | { type: "fail"; error: RunError; stateData?: StateExecutionData }
   | {
       type: "sleep";
       until: Date;
       /** State to resume at after waking; null ⇒ the run completes on wake. */
       nextState: string | null;
       context: Record<string, unknown>;
+      route: SelectedRoute;
+      stateData: StateExecutionData;
     }
   | { type: "wait_approval"; request: ApprovalRequest }
   | {
@@ -66,6 +100,7 @@ export type StepOutcome =
       delayMs: number;
       attempt: number;
       error: RunError;
+      stateData: StateExecutionData;
     };
 
 /**

@@ -6,7 +6,14 @@ import type {
 } from "@tulipfarm/schema";
 import { parseIsoDuration } from "./duration";
 import type { EnginePorts, HookInvocation, ResolvedFunction } from "./ports";
-import { type RunError, type RunSnapshot, type StepOutcome, stateHookNames } from "./types";
+import {
+  type RunError,
+  type RunSnapshot,
+  type SelectedRoute,
+  type StateExecutionData,
+  type StepOutcome,
+  stateHookNames,
+} from "./types";
 
 /** Max items a foreach state may iterate (V1 bound; `parallel` is deferred anyway). */
 export const FOREACH_CAP = 1000;
@@ -89,34 +96,46 @@ export async function executeState(run: RunSnapshot, ports: EnginePorts): Promis
         run,
         state,
         { name: "approval_denied", message: `state "${state.name}" was denied`, state: state.name },
-        undefined
+        undefined,
+        stateData(state.name, run.context)
       );
     }
   }
 
-  await ports.emit({ type: "state.entered", data: { state: state.name, stateType: state.type } });
-
   const hooks = stateHookNames(state.name);
-  const invocation: HookInvocation = {
-    runId: run.runId,
-    slug: run.slug,
-    stateName: state.name,
-    context: run.context,
-    trigger: run.trigger,
-  };
+  let context = { ...run.context };
+  let executionData = stateData(state.name, context);
+  let emittingEntry = false;
 
   try {
-    if (ports.hasHook(hooks.before)) await ports.runHook(hooks.before, invocation);
-
-    let context = { ...run.context };
     if (state.stateDataFilter?.input) {
       const filtered = await evalExpr(ports, state.stateDataFilter.input, scopeOf(run, context));
       if (isRecord(filtered)) context = filtered;
     }
+    executionData = stateData(state.name, context);
+
+    emittingEntry = true;
+    await ports.emit({
+      type: "state.entered",
+      data: {
+        state: state.name,
+        stateType: state.type,
+        input: executionData.input,
+        attempt: (run.attemptCounts[state.name] ?? 0) + 1,
+      },
+    });
+    emittingEntry = false;
+
+    const invocation: HookInvocation = {
+      runId: run.runId,
+      slug: run.slug,
+      stateName: state.name,
+      context,
+      trigger: run.trigger,
+    };
+    if (ports.hasHook(hooks.before)) await ports.runHook(hooks.before, invocation);
 
     const body = await withStateTimeout(run, state, context, ports);
-    if (body && "type" in body) return body; // sleep suspends here
-    const branch = body?.branch;
 
     if (state.stateDataFilter?.output) {
       const filtered = await evalExpr(ports, state.stateDataFilter.output, scopeOf(run, context));
@@ -127,27 +146,49 @@ export async function executeState(run: RunSnapshot, ports: EnginePorts): Promis
       await ports.runHook(hooks.after, { ...invocation, context });
     }
 
-    await ports.emit({ type: "state.completed", data: { state: state.name } });
+    executionData.output = snapshot(context);
 
-    const end = branch ? branch.end : state.end;
-    const transition = branch ? branch.transition : state.transition;
-    if (end) return { type: "complete", output: context };
-    if (transition) return { type: "continue", nextState: transition, context };
-    return fail({
+    if (body?.sleep) {
+      return {
+        type: "sleep",
+        ...body.sleep,
+        context,
+        route: body.route,
+        stateData: executionData,
+      };
+    }
+
+    const route = body?.route ?? stateRoute(state.name, state.transition, state.end);
+    if ("end" in route) {
+      return { type: "complete", output: context, route, stateData: executionData };
+    }
+    if (route.target) {
+      return {
+        type: "continue",
+        nextState: route.target,
+        context,
+        route,
+        stateData: executionData,
+      };
+    }
+    throw new StateFailure({
       name: "bad_definition",
       message: `state "${state.name}" has neither transition nor end`,
       state: state.name,
     });
   } catch (err) {
-    const failure =
-      err instanceof StateFailure
-        ? err
-        : new StateFailure({
-            name: errorName(err),
-            message: err instanceof Error ? err.message : String(err),
-            state: state.name,
-          });
-    return routeError(run, state, failure.runError, failure.retryRef);
+    if (emittingEntry) throw err;
+    let failure: StateFailure;
+    if (err instanceof StateFailure) {
+      failure = err;
+    } else {
+      failure = new StateFailure({
+        name: errorName(err),
+        message: err instanceof Error ? err.message : String(err),
+        state: state.name,
+      });
+    }
+    return routeError(run, state, failure.runError, failure.retryRef, executionData);
   }
 }
 
@@ -162,7 +203,7 @@ async function withStateTimeout(
   state: RoutineState,
   context: Record<string, unknown>,
   ports: EnginePorts
-): Promise<StepOutcome | BranchResult | undefined> {
+): Promise<StateBodyResult | undefined> {
   const iso = state.timeouts?.stateExecTimeout;
   if (!iso) return runStateBody(run, state, context, ports);
 
@@ -186,22 +227,22 @@ async function withStateTimeout(
   }
 }
 
-/** The switch branch chosen for this execution (overrides the state's transition/end). */
-interface BranchResult {
-  branch: { transition?: string; end?: boolean };
+/** Route or suspension selected by the State body. */
+interface StateBodyResult {
+  route: SelectedRoute;
+  sleep?: { until: Date; nextState: string | null };
 }
 
 /**
- * Executes the state's body against `context` (mutating it). Returns a StepOutcome when
- * the state suspends (sleep), a BranchResult for switch, undefined otherwise — the
- * shared completion path in `executeState` takes over.
+ * Executes the state's body against `context` (mutating it). Returns the selected route
+ * for Sleep/Switch States; the shared completion path in `executeState` takes over.
  */
 async function runStateBody(
   run: RunSnapshot,
   state: RoutineState,
   context: Record<string, unknown>,
   ports: EnginePorts
-): Promise<StepOutcome | BranchResult | undefined> {
+): Promise<StateBodyResult | undefined> {
   switch (state.type) {
     case "inject": {
       Object.assign(context, state.data);
@@ -210,22 +251,32 @@ async function runStateBody(
     case "sleep": {
       const until = new Date(ports.now().getTime() + parseIsoDuration(state.duration));
       return {
-        type: "sleep",
-        until,
-        nextState: state.end ? null : (state.transition ?? null),
-        context: { ...run.context },
+        route: stateRoute(state.name, state.transition, state.end),
+        sleep: { until, nextState: state.end ? null : (state.transition ?? null) },
       };
     }
     case "switch": {
-      for (const cond of state.dataConditions) {
+      for (const [index, cond] of state.dataConditions.entries()) {
         const value = await evalExpr(ports, cond.condition, scopeOf(run, context));
-        if (value) return { branch: { transition: cond.transition, end: cond.end } };
+        if (value) {
+          return {
+            route: {
+              kind: "condition",
+              index,
+              ...routeDestination(state.name, cond.transition, cond.end),
+            },
+          };
+        }
       }
       if (state.defaultCondition) {
         return {
-          branch: {
-            transition: state.defaultCondition.transition,
-            end: state.defaultCondition.end,
+          route: {
+            kind: "default",
+            ...routeDestination(
+              state.name,
+              state.defaultCondition.transition,
+              state.defaultCondition.end
+            ),
           },
         };
       }
@@ -334,7 +385,8 @@ function routeError(
   run: RunSnapshot,
   state: RoutineState,
   error: RunError,
-  retryRef: string | undefined
+  retryRef: string | undefined,
+  executionData: StateExecutionData
 ): StepOutcome {
   if (retryRef) {
     const policy = (run.definition.retries ?? []).find((r) => r.name === retryRef);
@@ -343,26 +395,86 @@ function routeError(
       if (attempt < policy.maxAttempts) {
         const base = policy.delay ? parseIsoDuration(policy.delay) : 1_000;
         const delayMs = Math.round(base * (policy.multiplier ?? 1) ** (attempt - 1));
-        return { type: "retry", delayMs, attempt, error };
+        return { type: "retry", delayMs, attempt, error, stateData: executionData };
       }
     }
   }
 
-  const route = matchOnError(state.onErrors, error);
-  if (route) {
+  const match = matchOnError(state.onErrors, error);
+  if (match) {
+    const { index, route } = match;
+    const selectedRoute: SelectedRoute = {
+      kind: "error",
+      index,
+      error,
+      ...routeDestination(state.name, route.transition, route.end),
+    };
     if (route.transition) {
-      return { type: "continue", nextState: route.transition, context: { ...run.context } };
+      return {
+        type: "continue",
+        nextState: route.transition,
+        context: { ...run.context },
+        route: selectedRoute,
+        stateData: executionData,
+      };
     }
-    if (route.end) return { type: "complete", output: { ...run.context, error } };
+    if (route.end) {
+      return {
+        type: "complete",
+        output: { ...run.context, error },
+        route: selectedRoute,
+        stateData: executionData,
+      };
+    }
   }
-  return { type: "fail", error };
+  return { type: "fail", error, stateData: executionData };
 }
 
 function matchOnError(
   onErrors: RoutineOnError[] | undefined,
   error: RunError
-): RoutineOnError | undefined {
-  return (onErrors ?? []).find((o) => o.errorRef === error.name || o.errorRef === "*");
+): { index: number; route: RoutineOnError } | undefined {
+  const index = (onErrors ?? []).findIndex(
+    (route) => route.errorRef === error.name || route.errorRef === "*"
+  );
+  const route = onErrors?.[index];
+  return route ? { index, route } : undefined;
+}
+
+function stateRoute(
+  state: string,
+  transition: string | undefined,
+  end: boolean | undefined
+): SelectedRoute {
+  if (transition) return { kind: "transition", target: transition };
+  if (end) return { kind: "end", end: true };
+  throw invalidRoute(state);
+}
+
+function routeDestination(
+  state: string,
+  transition: string | undefined,
+  end: boolean | undefined
+): { target: string } | { end: true } {
+  if (transition) return { target: transition };
+  if (end) return { end: true };
+  throw invalidRoute(state);
+}
+
+function invalidRoute(state: string): StateFailure {
+  return new StateFailure({
+    name: "bad_definition",
+    message: `state "${state}" has neither transition nor end`,
+    state,
+  });
+}
+
+function stateData(state: string, input: Record<string, unknown>): StateExecutionData {
+  return { state, input: snapshot(input) };
+}
+
+function snapshot(value: Record<string, unknown>): Record<string, unknown> {
+  return structuredClone(value);
 }
 
 function scopeOf(run: RunSnapshot, context: Record<string, unknown>): Record<string, unknown> {
