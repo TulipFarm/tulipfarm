@@ -9,19 +9,19 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.0",
-    "@ai-sdk/azure": "^4.0.0",
-    "@ai-sdk/openai": "^4.0.0",
-    "@ai-sdk/openai-compatible": "^3.0.0",
-    "@ai-sdk/provider": "^4.0.0",
+    "@ai-sdk/anthropic": "^4.0.16",
+    "@ai-sdk/azure": "^4.0.17",
+    "@ai-sdk/openai": "^4.0.16",
+    "@ai-sdk/openai-compatible": "^3.0.12",
+    "@ai-sdk/provider": "^4.0.3",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
-    "ai": "^7.0.2"
+    "ai": "^7.0.31"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^24.13.2",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
