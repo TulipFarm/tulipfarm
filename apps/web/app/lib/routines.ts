@@ -1,3 +1,4 @@
+import type { RoutineDefinition } from "@tulipfarm/schema";
 import { API_BASE, apiGet, apiWrite } from "./api";
 
 /*
@@ -24,6 +25,16 @@ export type RoutineSummary = {
   loadError?: string | null;
 };
 
+export type RoutineDetail =
+  | {
+      slug: string;
+      valid: true;
+      definition: RoutineDefinition;
+      hash: string;
+      hasHooks: boolean;
+    }
+  | { slug: string; valid: false; loadError: string };
+
 /** The x-inputs JSON Schema subset the manual-trigger form renders. */
 export type RoutineInputsSchema = {
   type?: string;
@@ -48,7 +59,7 @@ export type RunSummary = {
   routineSlug: string;
   status: RunStatus;
   currentState?: string | null;
-  trigger?: { type: string };
+  trigger?: { type: string; triggerIndex?: number };
   output?: unknown;
   error?: { name?: string; message?: string } | null;
   createdAt: string;
@@ -67,6 +78,7 @@ export type RunDetail = {
   run: RunSummary & {
     context?: Record<string, unknown>;
     definitionHash?: string;
+    definitionSnapshot: RoutineDefinition;
     attemptCounts?: Record<string, number>;
     approvalId?: string | null;
   };
@@ -76,6 +88,10 @@ export type RunDetail = {
 export async function listRoutines(): Promise<RoutineSummary[]> {
   const body = await apiGet<{ items: RoutineSummary[] }>("/api/v1/routines");
   return body.items;
+}
+
+export async function getRoutine(slug: string): Promise<RoutineDetail> {
+  return apiGet<RoutineDetail>(`/api/v1/routines/${encodeURIComponent(slug)}`);
 }
 
 export async function listRuns(slug: string, limit = 50): Promise<RunSummary[]> {

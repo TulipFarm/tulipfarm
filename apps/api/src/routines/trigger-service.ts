@@ -1,12 +1,25 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import { ajv } from "@tulipfarm/schema";
 import { DOMAIN_EVENTS } from "../domain-events";
+import { definitionHash } from "./definition-hash";
 import type { RoutineEnqueuers } from "./jobs";
 import type { LoadedRoutine, RoutineRegistry } from "./registry";
 import type { RoutineRunsRepo } from "./repo";
 
 export type TriggerType = "event" | "manual" | "cron" | "webhook" | "agent";
+
+export interface TriggerInvocation {
+  type: TriggerType;
+  payload?: unknown;
+  triggerIndex?: number;
+}
+
+export interface PersistedRunTrigger {
+  type: TriggerType;
+  payload?: unknown;
+  triggerIndex?: number;
+}
 
 export class RoutineTriggerError extends Error {
   constructor(
@@ -42,10 +55,7 @@ export interface TriggerServiceDeps {
 export class RoutineTriggerService {
   constructor(private readonly deps: TriggerServiceDeps) {}
 
-  async trigger(
-    slug: string,
-    trigger: { type: TriggerType; payload?: unknown }
-  ): Promise<{ runId: string }> {
+  async trigger(slug: string, trigger: TriggerInvocation): Promise<{ runId: string }> {
     const { registry, runs, enqueuers } = this.deps;
     const entry = registry.getEntry(slug);
     if (!entry) throw new RoutineTriggerError("not_found", `routine "${slug}" not found`);
@@ -55,8 +65,8 @@ export class RoutineTriggerService {
         `routine "${slug}" failed validation: ${entry.loadError}`
       );
     }
-    const declared = entry.definition["x-triggers"].some((t) => t.type === trigger.type);
-    if (!declared) {
+    const triggerIndex = this.resolveTriggerIndex(entry, trigger);
+    if (triggerIndex === null) {
       throw new RoutineTriggerError(
         "trigger_not_declared",
         `routine "${slug}" does not declare a "${trigger.type}" trigger`
@@ -66,24 +76,41 @@ export class RoutineTriggerService {
     this.validateInputs(entry, trigger);
 
     const runId = randomUUID();
-    const definitionHash = createHash("sha256")
-      .update(JSON.stringify(entry.definition))
-      .digest("hex");
+    const persistedTrigger: PersistedRunTrigger = {
+      type: trigger.type,
+      payload: trigger.payload,
+      triggerIndex,
+    };
     await runs.create({
       id: runId,
       routineSlug: slug,
       definitionSnapshot: entry.definition,
-      definitionHash,
+      definitionHash: definitionHash(entry.definition),
       currentState: entry.definition.start,
       context: this.initialContext(trigger),
-      trigger: { type: trigger.type, payload: trigger.payload },
+      trigger: persistedTrigger,
     });
     await enqueuers.enqueueRun({
       runId,
       slug,
-      trigger: { type: trigger.type, payload: trigger.payload },
+      trigger: persistedTrigger,
     });
     return { runId };
+  }
+
+  private resolveTriggerIndex(
+    routine: LoadedRoutine,
+    invocation: TriggerInvocation
+  ): number | null {
+    const triggers = routine.definition["x-triggers"];
+    if (invocation.triggerIndex === undefined) {
+      const index = triggers.findIndex((trigger) => trigger.type === invocation.type);
+      return index >= 0 ? index : null;
+    }
+
+    const index = invocation.triggerIndex;
+    if (!Number.isInteger(index) || index < 0 || index >= triggers.length) return null;
+    return triggers[index]?.type === invocation.type ? index : null;
   }
 
   /** Trigger payloads that are plain objects seed the run's data-flow context. */
@@ -130,7 +157,7 @@ export function subscribeRoutineEventTriggers(
     events.on(eventName, (payload: unknown) => {
       void (async () => {
         for (const routine of registry.valid()) {
-          for (const trigger of routine.definition["x-triggers"]) {
+          for (const [triggerIndex, trigger] of routine.definition["x-triggers"].entries()) {
             if (trigger.type !== "event" || trigger.event !== eventName) continue;
             try {
               if (trigger.filter && evalFilter) {
@@ -139,7 +166,7 @@ export function subscribeRoutineEventTriggers(
                 });
                 if (!pass) continue;
               }
-              await service.trigger(routine.slug, { type: "event", payload });
+              await service.trigger(routine.slug, { type: "event", payload, triggerIndex });
             } catch (err) {
               log.error(
                 { err, slug: routine.slug, event: eventName },

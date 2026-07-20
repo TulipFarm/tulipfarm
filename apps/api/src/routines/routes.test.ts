@@ -12,6 +12,7 @@ import { StreamHub } from "../chat/stream-hub";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
+import { definitionHash } from "./definition-hash";
 import type { RoutineRunJob, RoutineWakeJob } from "./jobs";
 import { RoutineRegistry } from "./registry";
 import { RoutineRunsRepo } from "./repo";
@@ -100,6 +101,7 @@ describe("routine routes", () => {
   let sid: string;
   let runs: RoutineRunsRepo;
   let registry: RoutineRegistry;
+  let soulLoader: SoulLoader;
   let enqueuedRuns: RoutineRunJob[];
 
   beforeEach(async () => {
@@ -111,10 +113,8 @@ describe("routine routes", () => {
     sid = await store.create(user._id);
 
     const log = { error: vi.fn(), warn: vi.fn() };
-    registry = new RoutineRegistry(
-      makeSoulLoader({ "expense-report": ROUTINE_CONFIG, broken: { id: "broken" } }),
-      log
-    );
+    soulLoader = makeSoulLoader({ "expense-report": ROUTINE_CONFIG, broken: { id: "broken" } });
+    registry = new RoutineRegistry(soulLoader, log);
     registry.refresh();
     runs = new RoutineRunsRepo(db);
     enqueuedRuns = [];
@@ -169,6 +169,68 @@ describe("routine routes", () => {
     expect(res.statusCode).toBe(401);
   });
 
+  describe("GET /routines/:slug detail", () => {
+    it("returns the full valid definition, canonical hash, and Hook presence", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/routines/expense-report",
+        cookies: authed(),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        slug: "expense-report",
+        valid: true,
+        definition: ROUTINE_CONFIG,
+        hasHooks: false,
+      });
+      expect((res.json() as { hash: string }).hash).toBe(definitionHash(ROUTINE_CONFIG));
+      expect(res.json()).not.toHaveProperty("hookSource");
+    });
+
+    it("returns an invalid registry entry as a diagnostic instead of crashing", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/routines/broken",
+        cookies: authed(),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        slug: "broken",
+        valid: false,
+        loadError: expect.any(String),
+      });
+    });
+
+    it("returns 404 for a missing Routine and 401 without auth", async () => {
+      const missing = await app.inject({
+        method: "GET",
+        url: "/api/v1/routines/missing",
+        cookies: authed(),
+      });
+      expect(missing.statusCode).toBe(404);
+
+      const unauthorized = await app.inject({
+        method: "GET",
+        url: "/api/v1/routines/expense-report",
+      });
+      expect(unauthorized.statusCode).toBe(401);
+    });
+
+    it("documents every detail response in OpenAPI", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
+      const spec = res.json() as {
+        paths: Record<string, { get?: { responses?: Record<string, unknown> } }>;
+      };
+      expect(Object.keys(spec.paths["/api/v1/routines/{slug}"].get?.responses ?? {})).toEqual([
+        "200",
+        "401",
+        "404",
+      ]);
+    });
+  });
+
   it("POST manual run validates inputs against x-inputs and enqueues", async () => {
     const bad = await app.inject({
       method: "POST",
@@ -195,7 +257,7 @@ describe("routine routes", () => {
     expect(run?.status).toBe("pending");
     expect(run?.definitionSnapshot.id).toBe("expense-report");
     expect(run?.context).toEqual({ amount: 42 });
-    expect(run?.trigger.type).toBe("manual");
+    expect(run?.trigger).toMatchObject({ type: "manual", triggerIndex: 0 });
   });
 
   it("404 on manual run for unknown routine; 422 for invalid routine", async () => {
@@ -251,6 +313,8 @@ describe("routine routes", () => {
     expect(detail.statusCode).toBe(200);
     const body = detail.json() as { run: Record<string, unknown>; events: unknown[] };
     expect(body.run.status).toBe("pending");
+    expect(body.run.definitionSnapshot).toEqual(ROUTINE_CONFIG);
+    expect(body.run.trigger).toMatchObject({ type: "manual", triggerIndex: 0 });
     expect(body.events).toHaveLength(1);
 
     const wrongSlug = await app.inject({
@@ -259,6 +323,30 @@ describe("routine routes", () => {
       cookies: authed(),
     });
     expect(wrongSlug.statusCode).toBe(404);
+  });
+
+  it("GET run detail keeps using its pinned definition after the live Routine disappears", async () => {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/v1/routines/expense-report/runs",
+      cookies: authed(),
+      headers: csrf,
+      payload: { inputs: { amount: 10 } },
+    });
+    const { runId } = created.json() as { runId: string };
+
+    soulLoader.routines.delete("expense-report");
+    registry.refresh();
+
+    const detail = await app.inject({
+      method: "GET",
+      url: `/api/v1/routines/expense-report/runs/${runId}`,
+      cookies: authed(),
+    });
+    expect(detail.statusCode).toBe(200);
+    expect(
+      (detail.json() as { run: { definitionSnapshot: unknown } }).run.definitionSnapshot
+    ).toEqual(ROUTINE_CONFIG);
   });
 
   it("cancel endpoint cancels a pending run and 409s on terminal runs", async () => {
@@ -290,6 +378,26 @@ describe("routine routes", () => {
   });
 
   describe("run SSE stream (D7)", () => {
+    it("documents enriched Run detail and state.transitioned SSE contracts", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
+      const paths = (res.json() as { paths: Record<string, unknown> }).paths;
+      for (const path of [
+        "/api/v1/routines/{slug}/runs/{runId}",
+        "/api/v1/routines/{slug}/runs/{runId}/events",
+      ]) {
+        const operation = (paths[path] as { get: Record<string, unknown> }).get;
+        expect(operation.security).toEqual([{ sessionCookie: [] }, { bearerToken: [] }]);
+        expect(Object.keys(operation.responses as Record<string, unknown>)).toEqual([
+          "200",
+          "401",
+          "404",
+        ]);
+      }
+      expect(JSON.stringify(paths["/api/v1/routines/{slug}/runs/{runId}/events"])).toContain(
+        "state.transitioned"
+      );
+    });
+
     it("replays journaled events over SSE and closes on the terminal event", async () => {
       const created = await app.inject({
         method: "POST",
@@ -304,6 +412,13 @@ describe("routine routes", () => {
       await runs.appendEvent({
         runId,
         seq: 2,
+        type: "state.transitioned",
+        payload: { source: "Record", end: true, route: { kind: "end" } },
+        createdAt: at,
+      });
+      await runs.appendEvent({
+        runId,
+        seq: 3,
         type: "finish",
         payload: { reason: "completed" },
         createdAt: at,
@@ -317,8 +432,9 @@ describe("routine routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.headers["content-type"]).toContain("text/event-stream");
       expect(res.body).toContain("event: run.started");
+      expect(res.body).toContain("event: state.transitioned");
       expect(res.body).toContain("event: finish");
-      expect(res.body).toContain("id: 2");
+      expect(res.body).toContain("id: 3");
     });
 
     it("resumes from Last-Event-ID, skipping already-seen events", async () => {
@@ -384,7 +500,7 @@ describe("routine routes", () => {
       expect(res.statusCode).toBe(202);
       expect(enqueuedRuns).toHaveLength(1);
       const run = await runs.findById((res.json() as { runId: string }).runId);
-      expect(run?.trigger.type).toBe("webhook");
+      expect(run?.trigger).toMatchObject({ type: "webhook", triggerIndex: 1 });
       expect(run?.context).toEqual({ amount: 7 });
     });
 

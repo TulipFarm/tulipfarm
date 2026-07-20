@@ -5,6 +5,7 @@ import { attachToStream } from "../chat/producer";
 import { writeSseHeaders } from "../chat/sse";
 import type { StreamHub } from "../chat/stream-hub";
 import { corsPassthrough, parseLastEventId } from "../chat/turn-helpers";
+import { definitionHash } from "./definition-hash";
 import type { RoutineEnqueuers } from "./jobs";
 import type { RoutineRegistry } from "./registry";
 import type { RoutineRunsRepo } from "./repo";
@@ -35,7 +36,16 @@ const RUN_SUMMARY_SCHEMA = {
     routineSlug: { type: "string" },
     status: { type: "string" },
     currentState: { type: "string", nullable: true },
-    trigger: {},
+    trigger: {
+      type: "object",
+      additionalProperties: false,
+      required: ["type"],
+      properties: {
+        type: { type: "string", enum: ["event", "manual", "cron", "webhook", "agent"] },
+        payload: {},
+        triggerIndex: { type: "integer", minimum: 0 },
+      },
+    },
     output: {},
     error: {},
     createdAt: { type: "string" },
@@ -44,11 +54,43 @@ const RUN_SUMMARY_SCHEMA = {
   },
 } as const;
 
+const ROUTINE_DETAIL_SCHEMA = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["slug", "valid", "definition", "hash", "hasHooks"],
+      properties: {
+        slug: { type: "string" },
+        valid: { const: true },
+        definition: {},
+        hash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        hasHooks: { type: "boolean" },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["slug", "valid", "loadError"],
+      properties: {
+        slug: { type: "string" },
+        valid: { const: false },
+        loadError: { type: "string" },
+      },
+    },
+  ],
+} as const;
+
+const TRIGGER_ERROR_STATUS = {
+  not_found: 404,
+  invalid_inputs: 400,
+  trigger_not_declared: 422,
+  routine_invalid: 422,
+} as const;
+
 function triggerErrorReply(reply: FastifyReply, err: unknown): FastifyReply | null {
   if (!(err instanceof RoutineTriggerError)) return null;
-  const status =
-    err.code === "not_found" ? 404 : err.code === "invalid_inputs" ? 400 : (422 as const);
-  return reply.code(status).send({ error: err.message });
+  return reply.code(TRIGGER_ERROR_STATUS[err.code]).send({ error: err.message });
 }
 
 function constantTimeEquals(a: string, b: string): boolean {
@@ -130,6 +172,45 @@ export function registerRoutineRoutes(
   );
 
   app.get(
+    "/api/v1/routines/:slug",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Full Routine detail for read-only visualization. Valid Routines include their live " +
+          "definition and canonical hash; invalid Routines include only validation diagnostics.",
+        tags: ["routines"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["slug"],
+          properties: { slug: { type: "string", minLength: 1 } },
+        },
+        response: {
+          200: ROUTINE_DETAIL_SCHEMA,
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { slug } = req.params as { slug: string };
+      const entry = registry.getEntry(slug);
+      if (!entry) return reply.code(404).send({ error: "routine not found" });
+      if (!entry.ok) {
+        return reply.send({ slug: entry.slug, valid: false, loadError: entry.loadError });
+      }
+      return reply.send({
+        slug: entry.slug,
+        valid: true,
+        definition: entry.definition,
+        hash: definitionHash(entry.definition),
+        hasHooks: Boolean(entry.hookSource),
+      });
+    }
+  );
+
+  app.get(
     "/api/v1/routines/:slug/runs",
     {
       preHandler: requireAuth,
@@ -194,10 +275,20 @@ export function registerRoutineRoutes(
             properties: {
               run: {
                 ...RUN_SUMMARY_SCHEMA,
+                required: [
+                  ...RUN_SUMMARY_SCHEMA.required,
+                  "trigger",
+                  "context",
+                  "definitionHash",
+                  "definitionSnapshot",
+                  "attemptCounts",
+                  "approvalId",
+                ],
                 properties: {
                   ...RUN_SUMMARY_SCHEMA.properties,
                   context: {},
                   definitionHash: { type: "string" },
+                  definitionSnapshot: {},
                   attemptCounts: {},
                   approvalId: { type: "string", nullable: true },
                 },
@@ -235,6 +326,7 @@ export function registerRoutineRoutes(
           ...toRunSummary(run),
           context: run.context,
           definitionHash: run.definitionHash,
+          definitionSnapshot: run.definitionSnapshot,
           attemptCounts: run.attemptCounts,
           approvalId: run.approvalId,
         },
@@ -360,7 +452,8 @@ export function registerRoutineRoutes(
           description:
             "Live SSE stream of a run's events (state transitions, outputs). Replays from the " +
             "durable journal via `Last-Event-ID` (or ?lastEventId=) — works for runs of any age. " +
-            'Suspended runs close with a finish event `{reason: "suspended"}`; reconnect on wake.',
+            "Each selected route is emitted as `state.transitioned`, including ordered " +
+            'condition/error identity. Suspended runs close with `{reason: "suspended"}`.',
           tags: ["routines"],
           security: [{ sessionCookie: [] }, { bearerToken: [] }],
           params: {
@@ -375,7 +468,15 @@ export function registerRoutineRoutes(
             type: "object",
             properties: { lastEventId: { type: "integer", minimum: 0 } },
           },
-          response: { 401: ErrorSchema, 404: ErrorSchema },
+          response: {
+            200: {
+              type: "string",
+              description:
+                "Server-sent Run journal events, including state.transitioned route identity.",
+            },
+            401: ErrorSchema,
+            404: ErrorSchema,
+          },
         },
       },
       async (req, reply) => {
@@ -430,7 +531,9 @@ export function registerRoutineRoutes(
     async (req, reply) => {
       const { slug } = req.params as { slug: string };
       const routine = registry.get(slug);
-      const webhookTrigger = routine?.definition["x-triggers"].find((t) => t.type === "webhook");
+      const webhookTriggerIndex =
+        routine?.definition["x-triggers"].findIndex((trigger) => trigger.type === "webhook") ?? -1;
+      const webhookTrigger = routine?.definition["x-triggers"][webhookTriggerIndex];
       if (!routine || !webhookTrigger || webhookTrigger.type !== "webhook") {
         return reply.code(404).send({ error: "routine or webhook trigger not found" });
       }
@@ -451,6 +554,7 @@ export function registerRoutineRoutes(
         const { runId } = await triggerService.trigger(slug, {
           type: "webhook",
           payload: req.body ?? {},
+          triggerIndex: webhookTriggerIndex,
         });
         return reply.code(202).send({ runId });
       } catch (err) {

@@ -113,6 +113,18 @@ If a rule genuinely must be broken, add a scoped suppression on the line — nev
 - Migrations: `apps/api/src/migrations/` run on boot — add new ones there.
 - Env: copy `.env.local.example` → `.env.local`; never commit secrets.
 
+### Product testing must use product surfaces
+
+- For manual, acceptance, or end-to-end testing of Soul-backed behavior, create and update Soul
+  artifacts exclusively through the agentic Chat or the supported UI.
+- Never prepare a test by directly creating or editing YAML, Markdown, or configuration files in
+  the runtime `soul/` repository. This includes shell redirects, patches, scripts, and copied
+  fixtures for Resources, Routines, Agents, Skills, or Integrations.
+- Exercise the same Chat/UI path a user would take. If that path cannot create the required test
+  state, treat it as a product gap instead of bypassing it with a direct Soul filesystem write.
+- Isolated automated unit/integration fixtures outside the runtime `soul/` repository remain
+  allowed; this rule governs product-flow setup against the real Soul repository.
+
 ## API route schemas (OpenAPI)
 
 Every Fastify route **must** have a `schema` option. The spec at `/api/v1/openapi.json` is auto-generated from these schemas — no schema means the endpoint is invisible in docs.

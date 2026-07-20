@@ -7,6 +7,8 @@ export type {
   RunEvent,
   RunSnapshot,
   RunTrigger,
+  SelectedRoute,
+  StateExecutionData,
   StepOutcome,
 } from "./types";
 export { LIFECYCLE_HOOKS, stateHookNames } from "./types";

@@ -1,23 +1,17 @@
 import { Link, useLoaderData, useNavigate, useRevalidator, useRouteError } from "@remix-run/react";
 import { useState } from "react";
 import { ResourcePanel } from "~/components/resource-panel";
+import { RoutineCanvas } from "~/components/routines/routine-canvas";
 import { RunStatusBadge } from "~/components/routines/run-status-badge";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
-import {
-  listRoutines,
-  listRuns,
-  type RoutineInputsSchema,
-  type RoutineSummary,
-  triggerRun,
-} from "~/lib/routines";
+import { getRoutine, listRuns, type RoutineInputsSchema, triggerRun } from "~/lib/routines";
+import { projectRoutineGraph } from "~/lib/routines/graph";
 
 export async function clientLoader({ params }: { params: { slug: string } }) {
   const slug = params.slug;
-  const [routines, runs] = await Promise.all([listRoutines(), listRuns(slug)]);
-  const routine = routines.find((r) => r.slug === slug);
-  if (!routine) throw new ApiError(404, "routine not found");
+  const [routine, runs] = await Promise.all([getRoutine(slug), listRuns(slug)]);
   return { routine, runs };
 }
 
@@ -30,7 +24,7 @@ function TriggerForm({
   routine,
   onTriggered,
 }: {
-  routine: RoutineSummary;
+  routine: { slug: string; inputs?: RoutineInputsSchema | null };
   onTriggered: (runId: string) => void;
 }) {
   const schema: RoutineInputsSchema = routine.inputs ?? {};
@@ -124,24 +118,38 @@ export default function RoutineDetail() {
   const { routine, runs } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
   const revalidator = useRevalidator();
-  const canTriggerManually = (routine.triggers ?? []).some((t) => t.type === "manual");
+
+  if (!routine.valid) {
+    return (
+      <ResourcePanel crumbs={[{ label: "routines", to: "/routines" }, { label: routine.slug }]}>
+        <p className="text-sm text-destructive">{routine.loadError}</p>
+      </ResourcePanel>
+    );
+  }
+
+  const definition = routine.definition;
+  const triggers = definition["x-triggers"];
+  const inputs = definition["x-inputs"] ?? null;
+  const canTriggerManually = triggers.some((trigger) => trigger.type === "manual");
 
   return (
     <ResourcePanel crumbs={[{ label: "routines", to: "/routines" }, { label: routine.slug }]}>
       <div className="flex flex-col gap-1">
-        <h1 className="font-medium text-foreground">{routine.name ?? routine.slug}</h1>
-        {routine.description ? (
-          <p className="text-muted-foreground text-sm">{routine.description}</p>
+        <h1 className="font-medium text-foreground">{definition.name ?? routine.slug}</h1>
+        {definition.description ? (
+          <p className="text-muted-foreground text-sm">{definition.description}</p>
         ) : null}
         <p className="text-xs text-muted-foreground">
-          triggers: {(routine.triggers ?? []).map((t) => t.type).join(", ") || "none"}
+          triggers: {triggers.map((trigger) => trigger.type).join(", ") || "none"}
           {routine.hasHooks ? " · hooks.ts" : ""}
         </p>
       </div>
 
+      <RoutineCanvas graph={projectRoutineGraph(definition)} mode="read" />
+
       {canTriggerManually ? (
         <TriggerForm
-          routine={routine}
+          routine={{ slug: routine.slug, inputs }}
           onTriggered={(runId) =>
             navigate(`/routines/${encodeURIComponent(routine.slug)}/runs/${runId}`)
           }
@@ -149,7 +157,7 @@ export default function RoutineDetail() {
       ) : (
         <p className="text-xs text-muted-foreground">
           This routine has no manual trigger — it starts from{" "}
-          {(routine.triggers ?? []).map((t) => t.type).join("/")}.
+          {triggers.map((trigger) => trigger.type).join("/")}.
         </p>
       )}
 
