@@ -47,7 +47,14 @@ function cspHashPlugin(): Plugin {
   };
 }
 
+// The monorepo root package.json holds the released version; apps/web stays at 0.0.0.
+const appVersion = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"))
+  .version as string;
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     // ignoredRouteFiles keeps colocated *.test.tsx out of the route table (and the client
     // bundle) — otherwise Remix routes them and the browser tries to import vitest.
