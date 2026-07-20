@@ -350,7 +350,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
         >
           {rail ? null : (
             <span className="flex-1 truncate text-xs text-muted-foreground">
-              v1 · local instance
+              v{__APP_VERSION__} · local instance
             </span>
           )}
           <SignOutButton rail={rail} />
