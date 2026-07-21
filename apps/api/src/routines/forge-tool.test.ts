@@ -98,4 +98,12 @@ describe("routine_forge (AC-V1-004)", () => {
     expect(badSchema.success).toBe(false);
     expect(withSync).not.toHaveBeenCalled();
   });
+
+  it("describes the required top-level fields so the model doesn't fall through to skill_create", () => {
+    const { description } = routineForgeTool;
+    for (const field of ["id", "version", "start", "states", "x-triggers"]) {
+      expect(description).toContain(field);
+    }
+    expect(description.toLowerCase()).toContain("not skill_create");
+  });
 });

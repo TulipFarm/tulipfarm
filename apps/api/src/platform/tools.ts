@@ -572,7 +572,20 @@ const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
 export const routineForgeTool: PlatformTool = {
   name: "routine_forge",
   description:
-    "Create or update a routine in the soul repo: validates the definition against the V1 meta-schema (deferred constructs rejected), writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits via withSync. No approval step (ROUT-V1-002).",
+    "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, " +
+    "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
+    "morning do Y' / 'when X happens do Y'. `definition` is a CNCF Serverless Workflow 0.8 subset " +
+    'and MUST include the top-level fields `id` (matches `name`), `version` (e.g. "1.0"), ' +
+    "`start` (the first state's name), `states` (min 1), and `x-triggers` (min 1, e.g. " +
+    "[{ type: 'cron', schedule: '0 9 * * *' }] or [{ type: 'manual' }]) — additional properties " +
+    "are rejected at every level. Minimal example: " +
+    '{ id: "daily-report", version: "1.0", start: "Report", "x-triggers": [{ type: "cron", ' +
+    'schedule: "0 9 * * *" }], functions: [{ name: "send", operation: "tool:resource_search" }], ' +
+    'states: [{ name: "Report", type: "operation", actions: [{ functionRef: { refName: "send" } }], ' +
+    "end: true }] }. Load the routine-forge skill for the full authoring workflow before calling " +
+    "this. Validates the definition against the V1 meta-schema (deferred constructs rejected), " +
+    "writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits via withSync. " +
+    "No approval step (ROUT-V1-002).",
   mutating: true,
   inputSchema: ROUTINE_FORGE_SCHEMA,
   handler: async (args, ctx) => {
