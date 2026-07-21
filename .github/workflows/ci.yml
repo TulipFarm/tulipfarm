@@ -16,6 +16,41 @@ permissions:
   contents: read
 
 jobs:
+  # Detect whether a PR touches anything beyond docs/markdown. Drives the
+  # conditional skip of the (unit + e2e) test suite on docs-only / markdown-only PRs.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      # "true" unless every changed file is under apps/docs or is *.md / *.mdx.
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect non-docs / non-markdown changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          # Default to running the suite; only skip when a PR is proven to touch
+          # nothing but apps/docs or markdown (*.md / *.mdx).
+          code=true
+          if [ "$EVENT" = "pull_request" ] && [ -n "${BASE_SHA:-}" ] && [ -n "${HEAD_SHA:-}" ]; then
+            changed=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true)
+            if [ -n "$changed" ]; then
+              other=$(printf '%s\n' "$changed" | grep -v -E '^apps/docs/' | grep -v -E '\.mdx?$' || true)
+              if [ -z "$other" ]; then
+                code=false
+              fi
+            fi
+          fi
+          echo "Run test suite: $code"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -189,6 +224,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    # Unit + e2e tests. Skipped on docs-only / markdown-only PRs (see `changes`).
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -231,6 +269,9 @@ jobs:
   coverage:
     name: Coverage (apps/api)
     runs-on: ubuntu-latest
+    # Mirror the `test` job's skip: no point running coverage on docs-only PRs.
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
@@ -372,7 +413,9 @@ jobs:
               }
             }
 
-            const failed = coreChecks.filter(([, , r]) => r !== "success");
+            // A "skipped" core check counts as passing so docs-only / markdown-only
+            // PRs (which intentionally skip the test suite) still satisfy the gate.
+            const failed = coreChecks.filter(([, , r]) => r !== "success" && r !== "skipped");
             if (failed.length) {
               core.setFailed(
                 `Required checks not passing: ${failed.map(([l, , r]) => `${l}=${r}`).join(", ")}`
