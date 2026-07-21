@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Worker } from "node:worker_threads";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // isolated-vm 7.x ships prebuilds for Node 24 (abi137) and Node 26 (abi147) but not Node 25 (abi141).
 // Tests that require the isolate to actually execute and return a successful result must be
@@ -281,6 +281,25 @@ describe("HookExecutor", () => {
         correctHash
       );
       expect(result.ok).toBe(true);
+    });
+  });
+
+  describe("close()", () => {
+    it("asks the worker to shut down gracefully instead of hard-terminating it", async () => {
+      const postSpy = vi.spyOn(Worker.prototype, "postMessage");
+      const terminateSpy = vi.spyOn(Worker.prototype, "terminate");
+      const closingExecutor = new HookExecutor(FAKE_DATABASE_URL);
+
+      await closingExecutor.close();
+
+      expect(
+        postSpy.mock.calls.some(([msg]) => (msg as { type?: string })?.type === "shutdown")
+      ).toBe(true);
+      // A clean exit from the graceful shutdown message means terminate() was never needed.
+      expect(terminateSpy).not.toHaveBeenCalled();
+
+      postSpy.mockRestore();
+      terminateSpy.mockRestore();
     });
   });
 });

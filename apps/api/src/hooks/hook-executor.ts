@@ -253,11 +253,46 @@ export class HookExecutor {
     return "value" in res ? res.value : undefined;
   }
 
+  /**
+   * Ask the worker to shut down gracefully (drain its isolate, close its pg pool, exit)
+   * before falling back to a hard `terminate()`. A bare `terminate()` can kill the worker
+   * while an isolate is still executing, which crashes the process with an isolated-vm
+   * native assertion (`IsolateEnvironment::GetCurrent()`) instead of exiting cleanly.
+   */
   async close(): Promise<void> {
-    await this.worker.terminate();
     for (const [id, p] of this.pending) {
       p.reject(new Error("executor closed"));
       this.pending.delete(id);
     }
+    await this.shutdownWorker();
+  }
+
+  private shutdownWorker(): Promise<void> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const hardTerminate = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.worker
+          .terminate()
+          .catch(() => {})
+          .finally(resolve);
+      };
+      const timer = setTimeout(hardTerminate, 2000);
+
+      this.worker.once("exit", () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      });
+
+      try {
+        this.worker.postMessage({ type: "shutdown" });
+      } catch {
+        hardTerminate();
+      }
+    });
   }
 }
