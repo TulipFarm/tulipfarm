@@ -17,6 +17,9 @@ const EXPRESSION_TIMEOUT_MS = 100;
 const MEMORY_LIMIT_MB = 128;
 
 let pool: Pool | null = null;
+let activeRequests = 0;
+let shutdownRequested = false;
+let resolveDrained: (() => void) | undefined;
 
 function getPool(): Pool {
   if (!pool) {
@@ -234,23 +237,51 @@ async function runHook(req: ResourceHookRequest): Promise<WorkerResponse> {
 }
 
 async function shutdown() {
+  if (activeRequests > 0) {
+    await new Promise<void>((resolve) => {
+      resolveDrained = resolve;
+    });
+  }
   if (pool) {
     await pool.end().catch(() => {});
   }
+  // Do not call process.exit(): isolated-vm may still have native cleanup queued for this
+  // worker thread. Closing the port lets Node exit the worker naturally once cleanup drains.
+  parentPort?.close();
 }
 
-parentPort?.on("message", async (req: WorkerRequest) => {
-  if ((req as unknown as { type?: string }).type === "shutdown") {
+type ShutdownRequest = { type: "shutdown" };
+type WorkerMessage = WorkerRequest | ShutdownRequest;
+
+function isShutdownRequest(req: WorkerMessage): req is ShutdownRequest {
+  return "type" in req && req.type === "shutdown";
+}
+
+parentPort?.on("message", async (req: WorkerMessage) => {
+  if (isShutdownRequest(req)) {
+    shutdownRequested = true;
     await shutdown();
-    process.exit(0);
+    return;
   }
+
+  if (shutdownRequested) return;
+
+  activeRequests++;
   let res: WorkerResponse;
-  if (req.kind === "expression") {
-    res = await runExpression(req);
-  } else if (req.kind === "routine-hook") {
-    res = await runRoutineHook(req);
-  } else {
-    res = await runHook(req);
+  try {
+    if (req.kind === "expression") {
+      res = await runExpression(req);
+    } else if (req.kind === "routine-hook") {
+      res = await runRoutineHook(req);
+    } else {
+      res = await runHook(req);
+    }
+    parentPort?.postMessage(res);
+  } finally {
+    activeRequests--;
+    if (activeRequests === 0) {
+      resolveDrained?.();
+      resolveDrained = undefined;
+    }
   }
-  parentPort?.postMessage(res);
 });

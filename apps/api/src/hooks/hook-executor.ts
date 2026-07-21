@@ -26,6 +26,8 @@ export class HookExecutor {
   >();
   private readonly breaker = new Map<string, { failures: number; disabled: boolean }>();
   private workerError: Error | null = null;
+  private closed = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(connectionString: string) {
     // The production image bundles the worker to a sibling hook-worker.cjs (the runtime ships
@@ -62,6 +64,9 @@ export class HookExecutor {
     // Distributive omit: `Omit<union>` collapses the discriminated variants.
     req: WorkerRequest extends infer R ? (R extends WorkerRequest ? Omit<R, "id"> : never) : never
   ): Promise<WorkerResponse> {
+    if (this.closed) {
+      return Promise.reject(new HookError("hook executor is closed"));
+    }
     if (this.workerError) {
       return Promise.reject(new HookError(`hook worker error: ${this.workerError.message}`));
     }
@@ -260,11 +265,14 @@ export class HookExecutor {
    * native assertion (`IsolateEnvironment::GetCurrent()`) instead of exiting cleanly.
    */
   async close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closed = true;
     for (const [id, p] of this.pending) {
       p.reject(new Error("executor closed"));
       this.pending.delete(id);
     }
-    await this.shutdownWorker();
+    this.closePromise = this.shutdownWorker();
+    await this.closePromise;
   }
 
   private shutdownWorker(): Promise<void> {
