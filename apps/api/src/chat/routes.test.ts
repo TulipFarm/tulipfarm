@@ -1852,14 +1852,12 @@ describe("chat routes", () => {
       expect(res.statusCode).toBe(404);
     });
 
-    // tenant-open: reads are NOT owner-scoped (distinct from the POST write path).
-    it("200 for a different authenticated user (tenant-open read)", async () => {
+    it("404 for a different authenticated user (owner-only read)", async () => {
       const convoId = randomUUID();
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
       const res = await get(`/api/v1/chats/${convoId}`, { session: otherSid });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().id).toBe(convoId);
+      expect(res.statusCode).toBe(404);
     });
   });
 
@@ -1984,15 +1982,13 @@ describe("chat routes", () => {
       expect(body2.messages.map((m: MessageDoc) => m.content)).toEqual(["m2", "m3"]);
     });
 
-    // tenant-open: a different authenticated user can read the messages.
-    it("200 for a different authenticated user (tenant-open read)", async () => {
+    it("404 for a different authenticated user (owner-only read)", async () => {
       const convoId = randomUUID();
       const now = new Date();
       await repo.create({ _id: convoId, userId, createdAt: now, updatedAt: now });
       seedMessages(convoId, 2);
       const res = await get(`/api/v1/chats/${convoId}/messages`, { session: otherSid });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().messages).toHaveLength(2);
+      expect(res.statusCode).toBe(404);
     });
   });
 
@@ -2085,6 +2081,21 @@ describe("chat routes", () => {
         toolName: "search",
         args: { q: "x" },
       });
+    });
+
+    it("404 for a different authenticated user (owner-only read)", async () => {
+      const convoId = randomUUID();
+      const now = new Date();
+      await repo.create({
+        _id: convoId,
+        userId,
+        agentId: "agent-x",
+        createdAt: now,
+        updatedAt: now,
+      });
+      seedAllRoles(convoId);
+      const res = await get(`/api/v1/chats/${convoId}/debug-context`, { session: otherSid });
+      expect(res.statusCode).toBe(404);
     });
 
     it("is not registered when NODE_ENV=production (route absent → 404 even for a seeded convo)", async () => {
