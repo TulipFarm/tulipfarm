@@ -94,7 +94,7 @@ describe("POST /api/v1/integrations/:name/connect", () => {
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "soul-integrations-"));
@@ -158,6 +158,120 @@ describe("POST /api/v1/integrations/:name/connect", () => {
     expect(res.statusCode).toBe(200);
     const connection = mcpConnect.mock.calls[0][2];
     expect(connection.env).toEqual({ TOKEN: "existing-secret", NAME: "bar" });
+  });
+});
+
+describe("integration lifecycle routes are admin only", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let sid: string;
+
+  const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
+  const headers = { [CSRF_HEADER]: TEST_CSRF };
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const tokenRepo = new FakeTokenRepo();
+    const user = await createUser(userRepo, "member@example.com", "pass", "member");
+    sid = await store.create(user._id);
+
+    const soulPath = await mkdtemp(join(tmpdir(), "soul-integrations-"));
+    const gitSync = {
+      path: soulPath,
+      withSync: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 }),
+    } as unknown as GitSyncService;
+
+    const soulLoader = {
+      integrations: new Map([
+        ["demo-integration", makeIntegration({ TOKEN: "existing-secret", NAME: "foo" })],
+      ]),
+      reload: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SoulLoader;
+
+    const mcpClient = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi.fn().mockReturnValue("connected"),
+      getToolNames: vi.fn().mockReturnValue([]),
+    } as unknown as McpClientService;
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      gitSync,
+      soulLoader,
+      mcpClient,
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("rejects scan from a member with 403", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/scan",
+      cookies: auth(),
+      headers,
+      payload: { source: "tulipfarm/integrations" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects install from a member with 403", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/install",
+      cookies: auth(),
+      headers,
+      payload: { scanId: "does-not-matter", names: ["demo-integration"] },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects connect from a member with 403", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/demo-integration/connect",
+      cookies: auth(),
+      headers,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects disconnect from a member with 403", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/demo-integration/disconnect",
+      cookies: auth(),
+      headers,
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects oauth start from a member with 403", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/demo-integration/oauth/start",
+      cookies: auth(),
+      headers,
+      payload: { env: {} },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("rejects delete from a member with 403", async () => {
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/api/v1/integrations/demo-integration",
+      cookies: auth(),
+      headers,
+    });
+    expect(res.statusCode).toBe(403);
   });
 });
 

@@ -9,6 +9,7 @@ import type { GitSyncService, IntegrationManifest, OAuthConfig, SoulLoader } fro
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as toYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
+import type { UserDoc } from "../../auth/users";
 import { analyzeHook } from "../../hooks/hook-analyzer";
 import {
   type ConnectionSecretStore,
@@ -521,7 +522,7 @@ export function registerIntegrationRoutes(
       preHandler: limitedAuth,
       schema: {
         description:
-          "Clone a git repo (source accepts an optional #branch suffix) and discover installable MCP integration manifests.",
+          "Clone a git repo (source accepts an optional #branch suffix) and discover installable MCP integration manifests (admin only).",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -554,10 +555,14 @@ export function registerIntegrationRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { source } = req.body as { source: string };
       if (!isAllowedSource(source)) {
         return reply.code(400).send({
@@ -607,7 +612,7 @@ export function registerIntegrationRoutes(
     {
       preHandler: limitedAuth,
       schema: {
-        description: "Install the named integrations from a scan into the soul repo.",
+        description: "Install the named integrations from a scan into the soul repo (admin only).",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -633,6 +638,7 @@ export function registerIntegrationRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           422: {
             type: "object",
@@ -646,6 +652,9 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { scanId, names, acceptRisk } = req.body as {
         scanId: string;
         names: string[];
@@ -757,7 +766,7 @@ export function registerIntegrationRoutes(
       preHandler: limitedAuth,
       schema: {
         description:
-          "Connect an installed integration: write connection config and start the MCP server.",
+          "Connect an installed integration: write connection config and start the MCP server (admin only).",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
@@ -779,12 +788,16 @@ export function registerIntegrationRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           502: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
@@ -825,18 +838,23 @@ export function registerIntegrationRoutes(
     {
       preHandler: limitedAuth,
       schema: {
-        description: "Disconnect an integration: stop the MCP server and mark as disabled.",
+        description:
+          "Disconnect an integration: stop the MCP server and mark as disabled (admin only).",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
         response: {
           200: { type: "object", required: ["status"], properties: { status: { type: "string" } } },
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
@@ -867,7 +885,7 @@ export function registerIntegrationRoutes(
       preHandler: limitedAuth,
       schema: {
         description:
-          "Begin OAuth authorization flow. Returns an authUrl to open in a new tab. The user's client_id and other env values must be supplied so the redirect can be pre-filled on callback.",
+          "Begin OAuth authorization flow (admin only). Returns an authUrl to open in a new tab. The user's client_id and other env values must be supplied so the redirect can be pre-filled on callback.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
@@ -887,11 +905,15 @@ export function registerIntegrationRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { name } = req.params as { name: string };
       const integration = soulLoader.integrations.get(name);
       if (!integration) return reply.code(404).send({ error: `integration not found: ${name}` });
@@ -1071,18 +1093,23 @@ export function registerIntegrationRoutes(
     {
       preHandler: limitedAuth,
       schema: {
-        description: "Remove an integration from the soul repo (disconnects first if connected).",
+        description:
+          "Remove an integration from the soul repo (disconnects first if connected; admin only).",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
         response: {
           204: { type: "null" },
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
