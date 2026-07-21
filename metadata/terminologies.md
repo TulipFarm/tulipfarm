@@ -58,8 +58,8 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | The git-backed config repo | **Soul** | `Soul` | `/api/v1/soul` | "Soul" | holds agents/routines/skills/integrations/resources |
 | Git-tracked YAML settings inside the Soul repo | **Soul Config** | `SoulConfig` | — | — | e.g. `soul.yaml`, `llm.config.yaml`; non-secret, runtime-editable but reload behavior varies (some apply on `soul.synced`, others require restart) |
 | The knowledge wiki feature | **Knowledge** | — | `/knowledge` | "Knowledge" | a wiki |
-| A grouping of pages | **Space** | `Space` | `/knowledge/spaces/:id` | "Space" | retires `bundle`, `collection`² |
-| A knowledge content node | **Page** | `Page` | `/knowledge/pages/:id` | "Page" | retires `concept`, `document`; pages link pages (backlink graph) |
+| A grouping of pages | **Space** | `Space` | `/knowledge/spaces/:id` | "Space" | retires `bundle`, `collection`²; DB: knowledge_spaces, knowledge_space_overrides |
+| A knowledge content node | **Page** | `Page` | `/knowledge/pages/:id` | "Page" | retires `concept`, `document`; pages link pages (backlink graph); DB: knowledge_pages |
 | A runtime human-decision gate | **Approval** | `Approval` | `/approvals`, `/api/v1/approvals` | "Approvals" | not "review"/"request" |
 | A policy constraining agent/tool behavior | **Guardrail** | `Guardrail` | `/api/v1/guardrails` | "Guardrails" | `policy`/`rule` are subordinate parts, not the concept |
 | A callable function exposed to agents | **Tool** | `Tool` | — | "Tool" | includes MCP tools |
@@ -70,7 +70,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Agent-to-UI rendering protocol | **A2UI** | `A2UI` | `/dev/a2ui` | "A2UI" | acronym, verbatim |
 
 ¹ `plugin` remains valid ONLY for build/library tooling (vite, rehype, Chart.js) — never for a Skill.
-² `collection` is reserved exclusively for "a MongoDB collection" (infra). It never means a knowledge grouping.
+² `collection` is reserved exclusively for "a Postgres/MongoDB collection" (infra). It never means a knowledge grouping.
 
 ## Banned / retired terms (quick lookup)
 
