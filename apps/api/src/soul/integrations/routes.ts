@@ -778,9 +778,13 @@ export function registerIntegrationRoutes(
       const integration = soulLoader.integrations.get(name);
       if (!integration) return reply.code(404).send({ error: `integration not found: ${name}` });
       const body = (req.body as { env?: Record<string, string> } | null) ?? {};
+      // Merge over the existing stored env (not replace) — a bare reconnect (no body env, e.g.
+      // the idempotent re-connect after an update) must not wipe previously stored credentials.
+      const existingEnv = integration.connection?.env ?? {};
+      const mergedEnv = { ...existingEnv, ...(body.env ?? {}) };
       const connection = {
         enabled: true,
-        env: await sealEnv(name, integration.manifest, body.env ?? {}),
+        env: await sealEnv(name, integration.manifest, mergedEnv),
       };
 
       // Persist connection.yaml before starting (so a restart re-connects)
