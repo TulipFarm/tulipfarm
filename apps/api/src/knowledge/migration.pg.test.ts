@@ -23,15 +23,16 @@ async function seedChunk(
   db: PGlite,
   pageId: string,
   content: string,
-  embedding: string | null
+  embedding: string | null,
+  chunkIndex = 0
 ): Promise<void> {
   await db.query(
     `INSERT INTO knowledge_chunks (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
-     VALUES ($1, $2, 0, $3, ${embedding === null ? "NULL" : "$4::vector"}, to_tsvector('english', $3),
+     VALUES ($1, $2, $3, $4, ${embedding === null ? "NULL" : "$5::vector"}, to_tsvector('english', $4),
              'm', 3, now())`,
     embedding === null
-      ? [randomUUID(), pageId, content]
-      : [randomUUID(), pageId, content, embedding]
+      ? [randomUUID(), pageId, chunkIndex, content]
+      : [randomUUID(), pageId, chunkIndex, content, embedding]
   );
 }
 
@@ -125,7 +126,7 @@ describe("002_knowledge migration on PGlite", () => {
   it("stores a nullable vector + tsvector and ranks by cosine exact-scan", async () => {
     const pageId = await seedPage(db);
     await seedChunk(db, pageId, "alpha", "[1,0,0]");
-    await seedChunk(db, pageId, "beta", "[0.2,0.9,0]");
+    await seedChunk(db, pageId, "beta", "[0.2,0.9,0]", 1);
 
     const { rows } = await db.query(
       `SELECT content, (embedding <=> $1::vector) AS dist
