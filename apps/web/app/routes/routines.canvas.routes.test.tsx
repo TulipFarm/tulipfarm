@@ -4,7 +4,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import RoutineDetail from "./_app.routines.$slug";
-import RunDetail from "./_app.routines.$slug.runs.$runId";
+import RunDetail from "./_app.routines.$slug_.runs.$runId";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
