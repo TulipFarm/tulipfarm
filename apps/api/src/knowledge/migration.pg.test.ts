@@ -47,9 +47,9 @@ describe("002_knowledge migration on PGlite", () => {
     await db.close();
   });
 
-  it("bumps schema_version to the latest (24)", async () => {
+  it("bumps schema_version to the latest (25)", async () => {
     const { rows } = await db.query("SELECT version FROM schema_version WHERE id = true");
-    expect(Number((rows[0] as { version: number }).version)).toBe(24);
+    expect(Number((rows[0] as { version: number }).version)).toBe(25);
   });
 
   it("adds knowledge_chunks.content_hash (019)", async () => {
