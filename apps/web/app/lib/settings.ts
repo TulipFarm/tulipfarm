@@ -55,13 +55,14 @@ export async function resolveModelSpec(
   return apiGet<SpecResolution>(`/api/v1/llm-config/resolve-spec?${q.toString()}`);
 }
 
-// Suggested model ids for a provider (from the LiteLLM catalog), to populate the model picker.
-// `source: "unavailable"` (+ reason) means the catalog was unreachable and the picker degrades to
-// free-text entry. Azure is intentionally not listed here (deployment names can't be reliably
-// discovered) — its model field is free-text.
+// Suggested model ids for a provider, to populate the model picker. `source: "live"` (openai-compatible
+// only) lists the configured proxy's actually-deployed models; `source: "catalog"` falls back to the
+// LiteLLM catalog; `source: "unavailable"` (+ reason) means neither was reachable and the picker
+// degrades to free-text entry. Azure is intentionally not listed here (deployment names can't be
+// reliably discovered) — its model field is free-text.
 export type ModelOptions = {
   models: string[];
-  source: "catalog" | "unavailable";
+  source: "catalog" | "live" | "unavailable";
   reason?: string;
 };
 

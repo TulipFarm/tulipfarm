@@ -82,6 +82,7 @@ describe("llm-config routes", () => {
   let withSync: ReturnType<typeof vi.fn>;
   let reload: ReturnType<typeof vi.fn>;
   let init: ReturnType<typeof vi.fn>;
+  let secretsGet: ReturnType<typeof vi.fn>;
   const temps: string[] = [];
 
   beforeEach(async () => {
@@ -119,13 +120,15 @@ describe("llm-config routes", () => {
     } as unknown as GitSyncService;
     init = vi.fn().mockResolvedValue(undefined);
     const llmService = { init, select: vi.fn() } as never;
+    // resource-name (config) is set; everything else (incl. api keys, base URLs) is unavailable by
+    // default — tests that exercise the openai-compatible live-fetch path override this.
+    secretsGet = vi.fn(async (key: string) => {
+      if (key === "azure-openai-resource-name") return "my-res";
+      throw new Error("unset");
+    });
     const secretsService = {
       list: vi.fn().mockResolvedValue([]),
-      // resource-name (config) is set; everything else (incl. api keys) is unavailable.
-      get: vi.fn(async (key: string) => {
-        if (key === "azure-openai-resource-name") return "my-res";
-        throw new Error("unset");
-      }),
+      get: secretsGet,
       set: vi.fn(),
       delete: vi.fn(),
     } as never;
@@ -347,6 +350,67 @@ describe("llm-config routes", () => {
       expect(body.models).toContain("gpt-4o");
       expect(body.models).toContain("gpt-4o-mini");
       expect(body.models).not.toContain("text-embedding-3-small"); // embeddings excluded
+    });
+
+    it("returns live proxy models for openai-compatible when base_url is configured", async () => {
+      secretsGet.mockImplementation(async (key: string) => {
+        if (key === "openai-compatible-base-url") return "http://localhost:11434/v1";
+        if (key === "openai-compatible-api-key") return "sk-test";
+        throw new Error("unset");
+      });
+      const catalogFetch = vi.fn();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (url === "http://localhost:11434/v1/models") {
+            expect((init?.headers as Record<string, string>).Authorization).toBe("Bearer sk-test");
+            return {
+              ok: true,
+              json: async () => ({ data: [{ id: "llama3" }, { id: "mixtral" }] }),
+            };
+          }
+          return catalogFetch();
+        })
+      );
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/model-options?provider=openai-compatible",
+        cookies: cookies(adminSid),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { models: string[]; source: string };
+      expect(body.source).toBe("live");
+      expect(body.models).toEqual(["llama3", "mixtral"]);
+      expect(catalogFetch).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the catalog when the live proxy fetch fails", async () => {
+      secretsGet.mockImplementation(async (key: string) => {
+        if (key === "openai-compatible-base-url") return "http://localhost:11434/v1";
+        throw new Error("unset");
+      });
+      __resetLlmCatalogCache();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) => {
+          if (url === "http://localhost:11434/v1/models") {
+            return { ok: false, json: async () => ({}) };
+          }
+          return {
+            ok: true,
+            json: async () => ({ "custom-model": { input_cost_per_token: 1, mode: "chat" } }),
+          };
+        })
+      );
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/llm-config/model-options?provider=openai-compatible",
+        cookies: cookies(adminSid),
+      });
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { models: string[]; source: string };
+      expect(body.source).toBe("catalog");
+      expect(body.models).toContain("custom-model");
     });
   });
 
