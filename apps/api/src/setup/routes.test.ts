@@ -17,7 +17,7 @@ import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { MemorySessionStore } from "../auth/session-store";
-import type { UserDoc, UserRepo } from "../auth/users";
+import { AdminAlreadyExistsError, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 
 class FakeUserRepo implements UserRepo {
@@ -31,7 +31,12 @@ class FakeUserRepo implements UserRepo {
   async count() {
     return this.users.length;
   }
+  // Mirrors the production `users_single_admin_idx` invariant (PgUserRepo.insert) so tests
+  // can exercise the first-admin race without a real Postgres connection (#172).
   async insert(u: UserDoc) {
+    if (u.role === "admin" && this.users.some((existing) => existing.role === "admin")) {
+      throw new AdminAlreadyExistsError();
+    }
     this.users.push(u);
   }
 }
@@ -170,6 +175,26 @@ describe("setup routes", () => {
       payload: { email: "evil@acme.io", password: "supersecret" },
     });
     expect(again.statusCode).toBe(403);
+  });
+
+  it("concurrent first-admin requests: exactly one wins, the loser gets 403 with no session cookie (#172)", async () => {
+    const [first, second] = await Promise.all([
+      app.inject({
+        method: "POST",
+        url: "/api/v1/setup/admin",
+        payload: { email: "winner@acme.io", password: "supersecret" },
+      }),
+      app.inject({
+        method: "POST",
+        url: "/api/v1/setup/admin",
+        payload: { email: "attacker@acme.io", password: "supersecret" },
+      }),
+    ]);
+    const statuses = [first.statusCode, second.statusCode].sort();
+    expect(statuses).toEqual([201, 403]);
+    const loser = first.statusCode === 403 ? first : second;
+    expect(loser.cookies.some((c) => c.name === "tf_sid")).toBe(false);
+    expect(loser.json()).toEqual({ error: "setup already complete" });
   });
 
   it("business step persists name + description to soul.yaml", async () => {

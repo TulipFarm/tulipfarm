@@ -614,6 +614,15 @@ async function renameIndexIfExists(q: Queryable, from: string, to: string): Prom
  * renamed explicitly. The OKF synthetic source_id `okf:<spaceId>:<path>` is unchanged (the UUID
  * value is identical — only the variable name moves), so no data backfill is needed.
  */
+// First-admin claiming (setup/routes.ts POST /api/v1/setup/admin) was check-then-insert:
+// a `count() === 0` guard followed by a separate `insert()`, racy under concurrent requests
+// (each observes zero users before either commits). This partial unique index makes "at
+// most one admin row" a database invariant instead of a process-local check, so a losing
+// concurrent insert fails with a unique violation the route can catch and reject.
+const ADMIN_SINGLETON_STATEMENTS: string[] = [
+  "CREATE UNIQUE INDEX IF NOT EXISTS users_single_admin_idx ON users (role) WHERE role = 'admin'",
+];
+
 const TERMINOLOGY_RENAME_STATEMENTS = async (q: Queryable): Promise<void> => {
   // Retire the legacy collections grouping. Join table first (FK), then the parent.
   await q.query("DROP TABLE IF EXISTS knowledge_documents_collections");
@@ -884,6 +893,16 @@ export const PG_MIGRATIONS: PgMigration[] = [
       "ingress: integration_conversations (external thread↔conversation map), integration_events (webhook-kind records), ingress_deliveries (retry dedup)",
     up: async (q) => {
       for (const sql of INGRESS_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 25,
+    description:
+      "auth: partial unique index enforcing at most one admin user (closes the first-admin check-then-insert race)",
+    up: async (q) => {
+      for (const sql of ADMIN_SINGLETON_STATEMENTS) {
         await q.query(sql);
       }
     },
