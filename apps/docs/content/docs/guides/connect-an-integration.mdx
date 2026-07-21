@@ -5,20 +5,19 @@ description: Install an MCP integration from the marketplace and connect it so a
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-This guide walks through installing the Slack integration from the TulipFarm marketplace
-and connecting it with a bot token. The same steps apply to any integration.
+This guide installs Slack from the TulipFarm marketplace and connects it so agents can use
+its tools. The same steps apply to other integrations, although their credential fields differ.
 
 ## Prerequisites
 
 - TulipFarm is running and you are signed in
-- You have an integration's required credentials ready (for Slack, a bot token that starts
-  with `xoxb-`)
+- You can create or configure the integration in its provider
 
 ## Install from the marketplace
 
-1. Open the web UI and go to **Integrations** in the sidebar.
-2. Click the **Marketplace** tab.
-3. Locate the integration you want. Click **Install**.
+1. Open **Integrations** in the sidebar, then select **Marketplace**.
+2. Select **slack** in the official marketplace list.
+3. Click **Install 1 integration**.
 
 TulipFarm clones the official `tulipfarm/integrations` repository, reads the integration's
 `manifest.yml`, and writes it into your soul repo under
@@ -30,34 +29,35 @@ URL (`owner/repo` shorthand or a full HTTPS URL), and TulipFarm will scan it for
 integrations.
 </Callout>
 
-After install, the integration appears on the **Installed** tab with status **Disconnected**.
+After installation, follow **connect them now** or open the **Installed** tab. Slack appears as
+**disconnected**.
 
 ## Connect the integration
 
-1. Click the integration name to open its detail page.
-2. Fill in the required credential fields. For Slack this is **Slack Bot Token**.
-3. Click **Connect**.
+1. Open **slack** from the **Installed** tab.
+2. Open **Setup guide** for the provider-side setup. Each field also has a **How to get this**
+   section.
+3. Fill in the shared fields, then choose **Connect with OAuth** or **Paste token directly**.
+4. Click the connect button for your chosen method.
 
-TulipFarm writes your credentials into `soul/integrations/slack/connection.yaml`, starts
-the MCP server subprocess, and lists its tools. The status badge changes to **Connected**
-and a tool count appears (Slack exposes eight tools).
+TulipFarm starts the integration's MCP server. The status changes to **Connected**.
 
-<Callout type="warn">
-Credentials are stored in the soul repo. If you push your soul to a remote, make sure the
-remote is private or the soul directory is excluded from tracking.
+<Callout type="info">
+TulipFarm encrypts fields that the integration marks as secret, including OAuth access tokens
+and client secrets, in the Secrets store. The soul keeps an opaque `secret://` reference instead
+of the plaintext value. Non-secret connection settings remain in the soul.
 </Callout>
 
 ## Verify the connection
 
-Ask the agent a question that would require the integration. For Slack, try:
+The detail page should show **Connected**. Then ask the assistant to use the integration:
 
-> What channels are available in Slack?
+```prompt
+List the channels available in Slack.
+```
 
-The agent calls `integration_slack_slack_list_channels` and returns the list. If the agent
-says it cannot find a Slack tool, see [Troubleshooting](#troubleshooting) below.
-
-You can also check the detail page: it shows the current status and the list of tools
-the MCP server registered.
+The assistant should return channels from your workspace. If it cannot use a Slack tool, see
+[Troubleshooting](#troubleshooting).
 
 ## Disconnect
 
@@ -65,21 +65,18 @@ Open the integration's detail page and click **Disconnect**. TulipFarm stops the
 server and removes its tools from the tool registry. The soul entry is preserved — you
 can reconnect without reinstalling.
 
-## Uninstall
+## Remove the integration
 
-To remove an integration entirely, click **Uninstall** (or **Delete**) on the detail page.
-This disconnects the server if it is running, removes `soul/integrations/{name}/`, and
-removes the entry from `integrations-lock.json`.
+Click **Remove integration** on the detail page and confirm. TulipFarm disconnects the server,
+removes the integration from the soul, and deletes its stored integration secrets.
 
 ## Troubleshooting
 
-**Status shows "Error"** — the MCP server exited unexpectedly. Check that the required
-credentials are correct. Click **Disconnect** then **Connect** to restart the server.
+**Status shows "Error"** — the MCP server failed to start or exited unexpectedly. Open the
+integration, check its credentials, then connect again. The error appears beside the status.
 
-**Agent says it cannot use the integration's tools** — the integration may have
-disconnected after a server restart. Check the **Integrations** page. If status is
-**Disconnected**, click **Connect** to re-establish. The server reconnects automatically on
-the next boot once you connect it once.
+**The assistant cannot use the integration's tools** — check the **Installed** tab. If the
+integration is **disconnected**, open it and connect again.
 
 **Marketplace is empty or cannot load** — TulipFarm clones from GitHub to browse the
 marketplace. Check that the host running TulipFarm has outbound internet access.
