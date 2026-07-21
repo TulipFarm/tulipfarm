@@ -44,6 +44,55 @@ const EMPTY_LLM_CONFIG = {
 
 const TIER_KEYS = ["quick", "standard", "complex"] as const;
 
+const LIVE_MODELS_TIMEOUT_MS = 5000;
+
+/**
+ * For `openai-compatible` providers pointed at a self-hosted LiteLLM proxy, the static LiteLLM
+ * catalog lists every model that ever existed rather than what the operator actually deployed.
+ * Best-effort: any missing base_url, network error, non-200, or unparseable body returns null so
+ * the caller falls back to the catalog (the field stays usable as free-text entry either way).
+ */
+async function fetchLiveModelOptions(
+  secrets: SecretsService,
+  log: { warn: (obj: unknown, msg?: string) => void }
+): Promise<string[] | null> {
+  let baseUrl: string;
+  try {
+    baseUrl = await secrets.get("openai-compatible-base-url");
+  } catch {
+    return null;
+  }
+  if (!baseUrl) return null;
+
+  let apiKey: string | undefined;
+  try {
+    apiKey = await secrets.get("openai-compatible-api-key");
+  } catch {
+    apiKey = undefined;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LIVE_MODELS_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { data?: unknown };
+    if (!Array.isArray(body.data)) return null;
+    const ids = body.data
+      .map((m) => (m as { id?: unknown }).id)
+      .filter((id): id is string => typeof id === "string");
+    return ids;
+  } catch (err) {
+    log.warn({ err }, "live model fetch from openai-compatible proxy failed");
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 /**
  * Auto-resolve + pin a LiteLLM spec onto every model that doesn't already have one, so that simply
  * adding a model and saving is enough for cost tracking (no per-model "Fetch spec" click). Best-effort:
@@ -227,7 +276,7 @@ export function registerLlmConfigRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Suggested model ids for a provider (from the LiteLLM catalog), to populate the Settings model picker. Admin only. `source: catalog` lists known ids; `source: unavailable` (+ `reason`) means the catalog couldn't be reached and the UI falls back to free-text entry.",
+          "Suggested model ids for a provider, to populate the Settings model picker. Admin only. For `openai-compatible` with a configured base_url, `source: live` lists the proxy's actually-deployed models (via its `GET /models`); otherwise `source: catalog` lists known LiteLLM ids; `source: unavailable` (+ `reason`) means neither could be reached and the UI falls back to free-text entry.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
@@ -241,7 +290,7 @@ export function registerLlmConfigRoutes(
             required: ["models", "source"],
             properties: {
               models: { type: "array", items: { type: "string" } },
-              source: { type: "string", enum: ["catalog", "unavailable"] },
+              source: { type: "string", enum: ["catalog", "live", "unavailable"] },
               reason: { type: "string" },
             },
           },
@@ -254,6 +303,11 @@ export function registerLlmConfigRoutes(
       const actor = req.user as UserDoc;
       if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
       const { provider } = req.query as { provider: string };
+
+      if (provider === "openai-compatible") {
+        const live = await fetchLiveModelOptions(secrets, req.log);
+        if (live) return reply.send({ models: live, source: "live" });
+      }
 
       const catalog = await getCatalog();
       if (!catalog) {
