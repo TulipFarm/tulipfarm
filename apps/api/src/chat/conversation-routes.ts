@@ -9,13 +9,27 @@ import { getPlatformAgent, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import type { ToolRegistry } from "../tools/registry";
-import type { ConversationRepo } from "./conversations";
+import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
 import { MessageSchema } from "./schemas";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 import { availableToolsFor, canGroundKnowledge } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/**
+ * Owner-scoped conversation lookup: a foreign conversation is treated identically to a
+ * missing one (404), so a caller can't distinguish "not found" from "not yours".
+ */
+async function findOwnedConversation(
+  repo: ConversationRepo,
+  id: string,
+  userId: string
+): Promise<ConversationDoc | null> {
+  const convo = await repo.findById(id);
+  if (!convo || convo.userId !== userId) return null;
+  return convo;
+}
 
 /** Read/update routes over conversation metadata + messages (no streaming). */
 export interface ConversationRoutesDeps {
@@ -142,9 +156,8 @@ export function registerConversationRoutes(
       const { id } = req.params as { id: string };
       const body = req.body as { title?: string; starred?: boolean };
 
-      // Owner-only mutation (unlike the tenant-open reads): a non-owner — or a missing id — is a 404.
-      const convo = await repo.findById(id);
-      if (!convo || convo.userId !== user._id) {
+      const convo = await findOwnedConversation(repo, id, user._id);
+      if (!convo) {
         return reply.code(404).send({ error: "conversation not found" });
       }
 
@@ -175,7 +188,7 @@ export function registerConversationRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "Fetch a conversation's metadata (tenant-open: any authenticated user).",
+        description: "Fetch a conversation's metadata. Owner-only.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -204,8 +217,9 @@ export function registerConversationRoutes(
       },
     },
     async (req, reply) => {
+      const user = req.user as UserDoc;
       const { id } = req.params as { id: string };
-      const convo = await repo.findById(id);
+      const convo = await findOwnedConversation(repo, id, user._id);
       if (!convo) {
         return reply.code(404).send({ error: "conversation not found" });
       }
@@ -227,9 +241,7 @@ export function registerConversationRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description:
-          "List a conversation's messages, oldest→newest, cursor-paginated " +
-          "(tenant-open: any authenticated user).",
+        description: "List a conversation's messages, oldest→newest, cursor-paginated. Owner-only.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -260,8 +272,9 @@ export function registerConversationRoutes(
       },
     },
     async (req, reply) => {
+      const user = req.user as UserDoc;
       const { id } = req.params as { id: string };
-      const convo = await repo.findById(id);
+      const convo = await findOwnedConversation(repo, id, user._id);
       if (!convo) {
         return reply.code(404).send({ error: "conversation not found" });
       }
@@ -289,8 +302,8 @@ export function registerConversationRoutes(
         preHandler: requireAuth,
         schema: {
           description:
-            "Dev-only: a conversation's reconstructed system prompt + full raw message rows " +
-            "(not registered in production).",
+            "Dev-only: a conversation's reconstructed system prompt + full raw message rows. " +
+            "Owner-only (not registered in production).",
           tags: ["chat"],
           security: [{ sessionCookie: [] }, { bearerToken: [] }],
           params: {
@@ -314,8 +327,9 @@ export function registerConversationRoutes(
         },
       },
       async (req, reply) => {
+        const user = req.user as UserDoc;
         const { id } = req.params as { id: string };
-        const convo = await repo.findById(id);
+        const convo = await findOwnedConversation(repo, id, user._id);
         if (!convo) {
           return reply.code(404).send({ error: "conversation not found" });
         }
