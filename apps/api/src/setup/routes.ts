@@ -8,7 +8,7 @@ import { generateCsrfToken, setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
-import { createUser, toPublicUser, type UserRepo } from "../auth/users";
+import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import { isHeadlessBoot } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
@@ -169,7 +169,19 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           .code(400)
           .send({ error: "email and a password of at least 8 characters are required" });
       }
-      const user = await createUser(userRepo, email, password, "admin");
+      // requireSetupOpen's count() check is a fast-path only — it cannot prevent two
+      // concurrent requests both observing zero users. The database's single-admin
+      // invariant (users_single_admin_idx) is what actually closes the race: the loser's
+      // insert throws AdminAlreadyExistsError here and gets no session (#172).
+      let user: Awaited<ReturnType<typeof createUser>>;
+      try {
+        user = await createUser(userRepo, email, password, "admin");
+      } catch (err) {
+        if (err instanceof AdminAlreadyExistsError) {
+          return reply.code(403).send({ error: "setup already complete" });
+        }
+        throw err;
+      }
       const sid = await sessionStore.create(user._id);
       setSessionCookies(reply, sid, ttlSeconds);
       return reply.code(201).send({ user: toPublicUser(user) });

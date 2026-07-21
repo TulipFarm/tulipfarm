@@ -35,6 +35,18 @@ export interface UserRepo {
 }
 
 /**
+ * Thrown by `insert()` when a second admin row would violate the single-admin database
+ * invariant (`users_single_admin_idx`, migration v25) — the concurrency-safe replacement
+ * for the old check-then-insert `count() === 0` race in setup/routes.ts (#172).
+ */
+export class AdminAlreadyExistsError extends Error {
+  constructor() {
+    super("an admin user already exists");
+    this.name = "AdminAlreadyExistsError";
+  }
+}
+
+/**
  * The narrow lookup surface integration ingress needs to resolve an inbound sender to a
  * TulipFarm user (email match → admin fallback). Kept separate from UserRepo so test fakes
  * that don't care about ingress don't have to implement findFirstAdmin. PgUserRepo satisfies it.
@@ -44,6 +56,17 @@ export interface IngressUserLookup {
   findById(id: string): Promise<UserDoc | null>;
   /** Oldest admin user — the fallback identity for integration ingress turns. */
   findFirstAdmin(): Promise<UserDoc | null>;
+}
+
+function isUniqueViolation(error: unknown, constraint: string): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "23505" &&
+    "constraint" in error &&
+    error.constraint === constraint
+  );
 }
 
 function rowToUser(row: Record<string, unknown>): UserDoc {
@@ -77,10 +100,17 @@ export class PgUserRepo implements UserRepo {
   }
 
   async insert(user: UserDoc): Promise<void> {
-    await this.q.query(
-      "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
-      [user._id, user.email, user.passwordHash, user.role, user.createdAt]
-    );
+    try {
+      await this.q.query(
+        "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
+        [user._id, user.email, user.passwordHash, user.role, user.createdAt]
+      );
+    } catch (err) {
+      if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
+        throw new AdminAlreadyExistsError();
+      }
+      throw err;
+    }
   }
 
   async findFirstAdmin(): Promise<UserDoc | null> {

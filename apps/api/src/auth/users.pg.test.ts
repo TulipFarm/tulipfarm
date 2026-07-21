@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { PgUserRepo, type UserDoc } from "./users";
+import { AdminAlreadyExistsError, PgUserRepo, type UserDoc } from "./users";
 
 function makeUser(overrides: Partial<UserDoc> = {}): UserDoc {
   return {
@@ -60,5 +60,16 @@ describe("PgUserRepo", () => {
   it("rejects a duplicate email (unique constraint)", async () => {
     await repo.insert(makeUser({ email: "dup@example.com" }));
     await expect(repo.insert(makeUser({ email: "dup@example.com" }))).rejects.toThrow();
+  });
+
+  it("rejects a second admin insert with AdminAlreadyExistsError (users_single_admin_idx, #172)", async () => {
+    await repo.insert(makeUser({ role: "admin" }));
+    await expect(repo.insert(makeUser({ role: "admin" }))).rejects.toThrow(AdminAlreadyExistsError);
+  });
+
+  it("still allows member inserts after an admin exists", async () => {
+    await repo.insert(makeUser({ role: "admin" }));
+    await expect(repo.insert(makeUser({ role: "member" }))).resolves.toBeUndefined();
+    expect(await repo.count()).toBe(2);
   });
 });
