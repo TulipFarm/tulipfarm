@@ -9,7 +9,7 @@ import {
 import { useEffect, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
-import { ErrorState } from "~/components/states";
+import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Modal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
@@ -475,6 +475,9 @@ export default function IntegrationDetailPage() {
 
 export function ErrorBoundary() {
   const error = useRouteError();
+  if (error instanceof ApiError && error.status === 404) {
+    return <NotFoundState section="integrations" />;
+  }
   const status = error instanceof ApiError ? error.status : undefined;
   const message = error instanceof Error ? error.message : undefined;
   return <ErrorState section="integrations" status={status} message={message} />;
