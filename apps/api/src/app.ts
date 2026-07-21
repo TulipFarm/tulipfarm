@@ -322,7 +322,8 @@ export async function buildApp(opts: AppOptions = {}) {
           mcpClientSvc,
           requireAuth,
           opts.llmService,
-          opts.secretsService
+          opts.secretsService,
+          opts.rateLimiter
         );
         if (opts.llmService) {
           registerSkillRoutes(

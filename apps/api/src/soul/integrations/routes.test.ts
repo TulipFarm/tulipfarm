@@ -17,6 +17,7 @@ import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { McpClientService } from "../../integrations/mcp-client-service";
 import type { PaginatedResult } from "../../pagination";
+import type { RateLimiter, RateLimitResult } from "../../rate-limit";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -157,5 +158,84 @@ describe("POST /api/v1/integrations/:name/connect", () => {
     expect(res.statusCode).toBe(200);
     const connection = mcpConnect.mock.calls[0][2];
     expect(connection.env).toEqual({ TOKEN: "existing-secret", NAME: "bar" });
+  });
+});
+
+describe("rate limiting on integrations write routes", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let sid: string;
+
+  class DenyingRateLimiter implements RateLimiter {
+    async check(): Promise<RateLimitResult> {
+      return { allowed: false, limit: 30, remaining: 0, resetAt: Date.now() + 60_000 };
+    }
+  }
+
+  const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
+  const headers = { [CSRF_HEADER]: TEST_CSRF };
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const tokenRepo = new FakeTokenRepo();
+    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    sid = await store.create(user._id);
+
+    const soulPath = await mkdtemp(join(tmpdir(), "soul-integrations-"));
+    const gitSync = {
+      path: soulPath,
+      withSync: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 }),
+    } as unknown as GitSyncService;
+
+    const soulLoader = {
+      integrations: new Map([
+        ["demo-integration", makeIntegration({ TOKEN: "existing-secret", NAME: "foo" })],
+      ]),
+      reload: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SoulLoader;
+
+    const mcpClient = {
+      connect: vi.fn().mockResolvedValue(undefined),
+      disconnect: vi.fn().mockResolvedValue(undefined),
+      getStatus: vi.fn().mockReturnValue("connected"),
+      getToolNames: vi.fn().mockReturnValue([]),
+    } as unknown as McpClientService;
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      gitSync,
+      soulLoader,
+      mcpClient,
+      rateLimiter: new DenyingRateLimiter(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("rejects connect with 429 once the rate limiter denies the request", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/demo-integration/connect",
+      cookies: auth(),
+      headers,
+      payload: {},
+    });
+    expect(res.statusCode).toBe(429);
+  });
+
+  it("rejects scan with 429 once the rate limiter denies the request", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/integrations/scan",
+      cookies: auth(),
+      headers,
+      payload: { source: "tulipfarm/integrations" },
+    });
+    expect(res.statusCode).toBe(429);
   });
 });

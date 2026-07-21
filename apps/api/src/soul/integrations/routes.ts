@@ -16,6 +16,8 @@ import {
   sealConnectionEnv,
 } from "../../integrations/connection-env";
 import type { McpClientService } from "../../integrations/mcp-client-service";
+import type { RateLimiter } from "../../rate-limit";
+import { makeRateLimitHook } from "../../rate-limit";
 import { buildIngressAudit, type IngressAuditReport } from "./ingress-audit";
 import { readIntegrationsLock, sourceType, writeIntegrationsLock } from "./lock";
 
@@ -113,6 +115,9 @@ async function cloneToTemp(source: string): Promise<{ dir: string; ref: string }
   const { base, ref } = splitSourceRef(source);
   const dir = await mkdtemp(join(tmpdir(), "integration-scan-"));
   // --branch accepts branch or tag names (not commit SHAs) and still works with --depth 1.
+  // `base` and `ref` are gated by isAllowedSource/REF_RE before this is ever called, and execFile
+  // passes argv directly to the git binary (no shell), so neither can inject additional flags or
+  // shell metacharacters — not a command-line-injection path.
   await execFileP(
     "git",
     ["clone", "--depth", "1", ...(ref ? ["--branch", ref] : []), normalizeGitUrl(base), dir],
@@ -294,7 +299,8 @@ export function registerIntegrationRoutes(
   llmService?: LlmService,
   /** When present, secret-flagged env values are sealed into the secrets store instead of
    * being written to connection.yaml in the soul git repo. */
-  secretsService?: ConnectionSecretStore
+  secretsService?: ConnectionSecretStore,
+  rateLimiter?: RateLimiter
 ): void {
   const sealEnv = async (
     name: string,
@@ -302,6 +308,14 @@ export function registerIntegrationRoutes(
     env: Record<string, string>
   ): Promise<Record<string, string>> =>
     secretsService ? await sealConnectionEnv(name, manifest, env, secretsService) : env;
+
+  // Marketplace/scan/install/connect/oauth/delete all do fs and/or git work — rate-limit them
+  // to bound abuse of the clone path and repeated soul writes (same policy as resource-types).
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(rateLimiter, (req) => `rl:integrations:${req.ip}`, 30, 60_000)
+    : undefined;
+  const limitedAuth: PreHandler[] = rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth];
+  const limitedOnly: PreHandler[] = rateLimitHook ? [rateLimitHook] : [];
   // List all installed integrations with runtime status
   app.get(
     "/api/v1/integrations",
@@ -354,7 +368,7 @@ export function registerIntegrationRoutes(
   app.get(
     "/api/v1/integrations/marketplace",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Browse the official integrations marketplace (tulipfarm/integrations). Returns a scanId usable with the install endpoint.",
@@ -504,7 +518,7 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/scan",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Clone a git repo (source accepts an optional #branch suffix) and discover installable MCP integration manifests.",
@@ -591,7 +605,7 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/install",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "Install the named integrations from a scan into the soul repo.",
         tags: ["integrations"],
@@ -740,7 +754,7 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/:name/connect",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Connect an installed integration: write connection config and start the MCP server.",
@@ -809,7 +823,7 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/:name/disconnect",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "Disconnect an integration: stop the MCP server and mark as disabled.",
         tags: ["integrations"],
@@ -850,7 +864,7 @@ export function registerIntegrationRoutes(
   app.post(
     "/api/v1/integrations/:name/oauth/start",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Begin OAuth authorization flow. Returns an authUrl to open in a new tab. The user's client_id and other env values must be supplied so the redirect can be pre-filled on callback.",
@@ -929,6 +943,7 @@ export function registerIntegrationRoutes(
   app.get(
     "/api/v1/integrations/:name/oauth/callback",
     {
+      preHandler: limitedOnly,
       schema: {
         description:
           "OAuth callback handler. Exchanges the authorization code for an access token, writes connection.yaml, and starts the MCP server. Redirects to the integration detail page.",
@@ -1054,7 +1069,7 @@ export function registerIntegrationRoutes(
   app.delete(
     "/api/v1/integrations/:name",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "Remove an integration from the soul repo (disconnects first if connected).",
         tags: ["integrations"],
