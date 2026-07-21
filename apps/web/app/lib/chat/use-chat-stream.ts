@@ -18,7 +18,14 @@ import {
 } from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
 import { postChat, sendApprovalDecision, stopChatStream } from "~/lib/chat/sse-client";
-import type { Autonomy, ChatEvent, ChatMessage, ChatState, ModelTier } from "~/lib/chat/types";
+import type {
+  Autonomy,
+  ChatEvent,
+  ChatMessage,
+  ChatState,
+  ChatStatus,
+  ModelTier,
+} from "~/lib/chat/types";
 import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
 
 export type SendOptions = {
@@ -142,6 +149,12 @@ export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOp
     return { text: hasPayload ? `${event} ${JSON.stringify(p.payload)}` : event };
   }
   return null;
+}
+
+// A turn is in flight — used to reject duplicate A2UI postbacks (e.g. a re-clicked, already-
+// answered wizard step) rather than firing another identical user turn.
+export function isChatBusy(status: ChatStatus): boolean {
+  return status === "submitted" || status === "streaming";
 }
 
 function reducer(state: ChatState, action: ChatAction): ChatState {
@@ -308,8 +321,12 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   }, []);
 
   // Bridge postback from an A2UI tf-* control: turn the `agent` payload into a follow-up user turn.
+  // A2UI surfaces have no composer-level disabled state of their own, so a re-clicked/stale prompt
+  // can fire this while the previous turn is still in flight — reject it rather than sending a
+  // duplicate turn.
   const sendA2uiAgent = useCallback(
     (payload: unknown) => {
+      if (isChatBusy(stateRef.current.status)) return;
       const mapped = a2uiAgentToSend(payload);
       if (mapped) void send(mapped.text, mapped.opts);
     },
