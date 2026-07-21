@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { analyzeHook } from "../hooks/hook-analyzer";
 import { HookExecutor } from "../hooks/hook-executor";
 import { type IngressDecision, parseDecision } from "./service";
@@ -25,9 +25,10 @@ let executor: HookExecutor;
 beforeAll(async () => {
   source = await readFile(join(__dirname, "__fixtures__", "slack-ingress.hook.txt"), "utf8");
   executor = new HookExecutor(FAKE_DATABASE_URL);
-  return async () => {
-    await executor.close();
-  };
+});
+
+afterAll(async () => {
+  await executor.close();
 });
 
 function envelope(
