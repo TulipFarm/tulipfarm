@@ -23,15 +23,16 @@ async function seedChunk(
   db: PGlite,
   pageId: string,
   content: string,
-  embedding: string | null
+  embedding: string | null,
+  chunkIndex = 0
 ): Promise<void> {
   await db.query(
     `INSERT INTO knowledge_chunks (id, page_id, chunk_index, content, embedding, tsv, model, dim, created_at)
-     VALUES ($1, $2, 0, $3, ${embedding === null ? "NULL" : "$4::vector"}, to_tsvector('english', $3),
+     VALUES ($1, $2, $3, $4, ${embedding === null ? "NULL" : "$5::vector"}, to_tsvector('english', $4),
              'm', 3, now())`,
     embedding === null
-      ? [randomUUID(), pageId, content]
-      : [randomUUID(), pageId, content, embedding]
+      ? [randomUUID(), pageId, chunkIndex, content]
+      : [randomUUID(), pageId, chunkIndex, content, embedding]
   );
 }
 
@@ -47,9 +48,9 @@ describe("002_knowledge migration on PGlite", () => {
     await db.close();
   });
 
-  it("bumps schema_version to the latest (25)", async () => {
+  it("bumps schema_version to the latest (26)", async () => {
     const { rows } = await db.query("SELECT version FROM schema_version WHERE id = true");
-    expect(Number((rows[0] as { version: number }).version)).toBe(25);
+    expect(Number((rows[0] as { version: number }).version)).toBe(26);
   });
 
   it("adds knowledge_chunks.content_hash (019)", async () => {
@@ -59,6 +60,15 @@ describe("002_knowledge migration on PGlite", () => {
     expect((col.rows as { column_name: string }[]).map((r) => r.column_name)).toEqual([
       "content_hash",
     ]);
+  });
+
+  it("enforces one chunk per page and chunk index (026)", async () => {
+    const { rows } = await db.query(
+      "SELECT indexdef FROM pg_indexes WHERE indexname = 'knowledge_chunks_page_chunk_idx'"
+    );
+    expect((rows[0] as { indexdef: string }).indexdef).toContain(
+      "UNIQUE INDEX knowledge_chunks_page_chunk_idx"
+    );
   });
 
   it("backfills content_hash with md5(content) for pre-existing chunks (019)", async () => {
@@ -116,7 +126,7 @@ describe("002_knowledge migration on PGlite", () => {
   it("stores a nullable vector + tsvector and ranks by cosine exact-scan", async () => {
     const pageId = await seedPage(db);
     await seedChunk(db, pageId, "alpha", "[1,0,0]");
-    await seedChunk(db, pageId, "beta", "[0.2,0.9,0]");
+    await seedChunk(db, pageId, "beta", "[0.2,0.9,0]", 1);
 
     const { rows } = await db.query(
       `SELECT content, (embedding <=> $1::vector) AS dist

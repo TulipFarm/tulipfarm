@@ -32,7 +32,7 @@ export async function indexPage(
 ): Promise<IndexResult> {
   const textChunks = chunkText(page.plainText);
   if (textChunks.length === 0) {
-    await chunksRepo.deleteByPage(page._id);
+    await chunksRepo.replaceForPage(page._id, []);
     return { chunkCount: 0, embedded: false };
   }
 
@@ -86,8 +86,7 @@ export async function indexPage(
     model: vectors[i] !== null ? activeModel : null,
     dim: vectors[i] !== null ? dims[i] : null,
   }));
-  await chunksRepo.deleteByPage(page._id);
-  await chunksRepo.insertMany(page._id, inputs);
+  await chunksRepo.replaceForPage(page._id, inputs);
   return { chunkCount: inputs.length, embedded: vectors.some((v) => v !== null) };
 }
 

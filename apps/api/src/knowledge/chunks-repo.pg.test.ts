@@ -1,11 +1,13 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Queryable } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { PgKnowledgeChunkRepo } from "./chunks-repo";
+import { indexPage } from "./index-service";
 import { PgKnowledgePageRepo } from "./repo";
-import type { ChunkInput, KnowledgePage } from "./types";
+import type { ChunkInput, EmbeddingPort, KnowledgePage } from "./types";
 
 function page(over: Partial<KnowledgePage> = {}): KnowledgePage {
   const now = new Date();
@@ -40,6 +42,46 @@ function chunk(over: Partial<ChunkInput> = {}): ChunkInput {
   };
 }
 
+function unavailableEmbeddings(): EmbeddingPort {
+  return {
+    isAvailable: () => false,
+    embedMany: async () => ({ embeddings: [], dimension: 0 }),
+    getActive: () => null,
+    getDimension: () => null,
+    consumePendingReindex: () => false,
+  };
+}
+
+class FailSecondChunkInsert implements Queryable {
+  private insertCount = 0;
+
+  constructor(private readonly db: PGlite) {}
+
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }> {
+    return this.queryWith(this.db, text, params);
+  }
+
+  transaction<T>(callback: (tx: Queryable) => Promise<T>): Promise<T> {
+    return this.db.transaction((tx) =>
+      callback({
+        query: (text, params) => this.queryWith(tx, text, params),
+      })
+    );
+  }
+
+  private queryWith(
+    q: Queryable,
+    text: string,
+    params?: unknown[]
+  ): Promise<{ rows: Record<string, unknown>[] }> {
+    if (text.includes("INSERT INTO knowledge_chunks")) {
+      this.insertCount += 1;
+      if (this.insertCount === 2) throw new Error("injected chunk insert failure");
+    }
+    return q.query(text, params);
+  }
+}
+
 describe("PgKnowledgeChunkRepo", () => {
   let db: PGlite;
   let chunks: PgKnowledgeChunkRepo;
@@ -68,6 +110,23 @@ describe("PgKnowledgeChunkRepo", () => {
     await chunks.deleteByPage(p._id);
     const after = await db.query("SELECT count(*)::int AS n FROM knowledge_chunks");
     expect((after.rows[0] as { n: number }).n).toBe(0);
+  });
+
+  it("keeps the previous complete index when replacement insertion fails", async () => {
+    const p = page({ content: "x".repeat(1_000), plainText: "x".repeat(1_000) });
+    await pages.insert(p);
+    await chunks.insertMany(p._id, [chunk({ content: "old index" })]);
+
+    const failingChunks = new PgKnowledgeChunkRepo(new FailSecondChunkInsert(db));
+    await expect(indexPage(p, failingChunks, unavailableEmbeddings())).rejects.toThrow(
+      "injected chunk insert failure"
+    );
+
+    const { rows } = await db.query(
+      "SELECT content FROM knowledge_chunks WHERE page_id = $1 ORDER BY chunk_index",
+      [p._id]
+    );
+    expect(rows.map((row) => (row as { content: string }).content)).toEqual(["old index"]);
   });
 
   it("ranks vector search by cosine similarity and filters by dim + active page", async () => {
