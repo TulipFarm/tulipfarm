@@ -131,11 +131,14 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
-function makeFakeGitSync(overrides: Partial<{ commit: unknown; push: unknown }> = {}) {
+function makeFakeGitSync(
+  overrides: Partial<{ commit: unknown; push: unknown; emit: unknown }> = {}
+) {
   return {
     path: SOUL_ROOT,
     commit: vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 2 }),
     push: vi.fn().mockResolvedValue(true),
+    emit: vi.fn(),
     ...overrides,
   } as unknown as GitSyncService;
 }
@@ -251,6 +254,26 @@ describe("soul routes", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({ pushed: false });
+    });
+  });
+
+  // ── POST /api/v1/soul/reload ──────────────────────────────────────────────
+
+  describe("POST /api/v1/soul/reload", () => {
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "POST", url: "/api/v1/soul/reload" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("emits soul.synced and returns 204", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/soul/reload",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+      });
+      expect(res.statusCode).toBe(204);
+      expect(gitSync.emit).toHaveBeenCalledWith("soul.synced");
     });
   });
 

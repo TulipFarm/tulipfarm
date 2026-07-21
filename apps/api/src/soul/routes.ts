@@ -175,6 +175,29 @@ export function registerSoulRoutes(
     }
   );
 
+  app.post(
+    "/api/v1/soul/reload",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Re-emit soul.synced so registries (routines, guardrails, resources, LLM config) " +
+          "reload hand-edited soul files. Dev-friendly path for remote-less souls, where the " +
+          "periodic sync (which normally emits soul.synced) never runs.",
+        tags: ["soul"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          204: { type: "null" },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      gitSync.emit("soul.synced");
+      return reply.code(204).send();
+    }
+  );
+
   if (!secretsService) return;
 
   app.get(
