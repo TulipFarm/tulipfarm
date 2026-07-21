@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Queryable } from "../db";
+import { type Queryable, withTransaction } from "../db";
 import type {
   ChunkInput,
   ExistingChunk,
@@ -66,6 +66,8 @@ function rowToHit(row: Record<string, unknown>, score: number): SearchHit {
 export interface KnowledgeChunkRepo {
   deleteByPage(pageId: string): Promise<void>;
   insertMany(pageId: string, chunks: ChunkInput[]): Promise<void>;
+  /** Atomically replace one page's complete chunk generation. */
+  replaceForPage(pageId: string, chunks: ChunkInput[]): Promise<void>;
   /** Existing chunks (ordered by chunk_index) projected for the re-index content-hash diff. */
   listByPageForDiff(pageId: string): Promise<ExistingChunk[]>;
   /** Cosine exact-scan over chunks whose stored dim matches the active model. */
@@ -95,8 +97,21 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
   }
 
   async insertMany(pageId: string, chunks: ChunkInput[]): Promise<void> {
+    await this.insertManyWith(this.q, pageId, chunks);
+  }
+
+  async replaceForPage(pageId: string, chunks: ChunkInput[]): Promise<void> {
+    await withTransaction(this.q, async (tx) => {
+      // Lock the parent so concurrent reindexes for this page cannot interleave generations.
+      await tx.query("SELECT id FROM knowledge_pages WHERE id = $1 FOR UPDATE", [pageId]);
+      await tx.query("DELETE FROM knowledge_chunks WHERE page_id = $1", [pageId]);
+      await this.insertManyWith(tx, pageId, chunks);
+    });
+  }
+
+  private async insertManyWith(q: Queryable, pageId: string, chunks: ChunkInput[]): Promise<void> {
     for (const chunk of chunks) {
-      await this.q.query(
+      await q.query(
         `INSERT INTO knowledge_chunks
            (id, page_id, chunk_index, content, content_hash, embedding, tsv, model, dim, created_at)
          VALUES ($1, $2, $3, $4, $5, $6::vector, to_tsvector('english', $4), $7, $8, now())`,

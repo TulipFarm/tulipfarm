@@ -907,4 +907,20 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 26,
+    description: "knowledge: enforce one chunk per page generation index",
+    up: async (q) => {
+      await q.query(
+        `DELETE FROM knowledge_chunks older
+         USING knowledge_chunks newer
+         WHERE older.page_id = newer.page_id
+           AND older.chunk_index = newer.chunk_index
+           AND (older.created_at, older.id) < (newer.created_at, newer.id)`
+      );
+      await q.query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS knowledge_chunks_page_chunk_idx ON knowledge_chunks (page_id, chunk_index)"
+      );
+    },
+  },
 ];
