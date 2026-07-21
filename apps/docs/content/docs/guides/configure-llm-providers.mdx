@@ -25,15 +25,28 @@ store.
 Open **Settings → LLM**. You see the three tiers — `quick`, `standard`, and `complex` —
 each an ordered list of provider rows.
 
-For each tier, choose a configured provider and type the model id to use, for example
-`claude-sonnet-4-6`. A provider only becomes selectable once its credentials are saved;
-unconfigured providers are disabled with a "configure first" note.
+For each tier, choose a configured provider, then click into the **model** field. A
+provider only becomes selectable once its credentials are saved; unconfigured providers
+are disabled with a "configure first" note.
+
+The model field is a combobox: focusing it loads a dropdown of suggested model ids for
+that provider, but you can still type any custom id it doesn't list. Suggestions come
+from the LiteLLM catalog, except for **OpenAI-compatible**, which — when its **Base
+URL** is configured — queries the proxy's own `GET /models` endpoint so you pick from
+what it actually has deployed. **Azure Foundry** has no suggestions (deployment names
+can't be discovered); type the deployment name directly, for example `claude-sonnet-4-6`.
 
 <Callout type="info">
 The order of rows in a tier is its fallback chain — the top provider is tried first, and
 the runtime falls through to the next on failure. Add a second provider to a tier with
 **+ Add provider** to give it a backup.
 </Callout>
+
+When you move focus off a filled-in model field, the app resolves its LiteLLM spec and
+shows it as a row of badges — cost per million tokens, context window, and supported
+capabilities (tools, vision, cache, reasoning). If nothing matches, the row shows "No
+LiteLLM match — cost stays unpriced" instead; a **Refresh** button re-fetches a resolved
+spec.
 
 Each tier needs at least one provider with a model. Choose **Save**; the LLM service
 reloads with the new configuration, written to `soul/llm.config.yaml`.
