@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { ChatMessage } from "~/lib/chat/types";
-import { a2uiAgentToSend, seedState } from "~/lib/chat/use-chat-stream";
+import { a2uiAgentToSend, isChatBusy, seedState } from "~/lib/chat/use-chat-stream";
 
 describe("a2uiAgentToSend", () => {
   test("maps a choice payload to a user turn using the label", () => {
@@ -48,6 +48,18 @@ describe("a2uiAgentToSend", () => {
     expect(a2uiAgentToSend({ kind: "other", label: "x" })).toBeNull();
     expect(a2uiAgentToSend({ kind: "a2ui-action" })).toBeNull();
     expect(a2uiAgentToSend("nope")).toBeNull();
+  });
+});
+
+describe("isChatBusy", () => {
+  test("is busy while a turn is submitted or streaming", () => {
+    expect(isChatBusy("submitted")).toBe(true);
+    expect(isChatBusy("streaming")).toBe(true);
+  });
+
+  test("is not busy when idle or errored", () => {
+    expect(isChatBusy("idle")).toBe(false);
+    expect(isChatBusy("error")).toBe(false);
   });
 });
 
