@@ -352,13 +352,58 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Non-blocking coverage for the non-api workspaces, aggregated into a single
+  # report. One root vitest run scoped to packages/ (their tests carry no config
+  # and aren't cwd-sensitive, so the root defaults + root-installed coverage-v8
+  # apply cleanly). Parallel to the api coverage job; never gates merges.
+  coverage-packages:
+    name: Coverage (packages)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Coverage (packages)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm exec vitest run \
+            --dir packages \
+            --coverage \
+            --coverage.provider=v8 \
+            --coverage.include='packages/**/src/**' \
+            --coverage.reporter=text-summary \
+            --coverage.reporter=json-summary 2>&1 | tee coverage-packages.log
+      - name: Rename summary (avoid artifact collision with apps/api)
+        if: always()
+        run: |
+          cp coverage/coverage-summary.json coverage-packages-summary.json 2>/dev/null || true
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Coverage (packages) — informational"
+            echo '```'
+            tail -n 15 coverage-packages.log 2>/dev/null || echo "(no coverage captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-packages-summary
+          path: coverage-packages-summary.json
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Single required status check. Aggregates the four core jobs, posts a sticky
   # PR comment, mirrors it to the run summary, and fails if any core check did
   # not succeed. Require ONLY this check ("CI Success") in branch protection.
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, build, docs-build, test, test-packages, coverage]
+    needs: [changes, lint, typecheck, build, docs-build, test, test-packages, coverage, coverage-packages]
     # always() so it still runs when a core job fails.
     if: ${{ always() }}
     permissions:
@@ -381,6 +426,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
+          COVERAGE_PACKAGES_RESULT: ${{ needs['coverage-packages'].result }}
         with:
           script: |
             const fs = require("fs");
@@ -410,7 +456,9 @@ jobs:
             body += "| Check | Result |\n| --- | --- |\n";
             for (const [label, , res] of coreChecks) body += `| ${label} | ${icon(res)} |\n`;
             const covOk = process.env.COVERAGE_RESULT === "success";
-            body += `| Coverage (apps/api) | ${covOk ? "ℹ️ see below" : "— (non-blocking)"} |\n\n`;
+            const covPkgOk = process.env.COVERAGE_PACKAGES_RESULT === "success";
+            body += `| Coverage (apps/api) | ${covOk ? "ℹ️ see below" : "— (non-blocking)"} |\n`;
+            body += `| Coverage (packages) | ${covPkgOk ? "ℹ️ see below" : "— (non-blocking)"} |\n\n`;
 
             const readTail = (file, n = 50) => {
               try {
@@ -443,17 +491,21 @@ jobs:
               }
             }
 
-            try {
-              const cov = JSON.parse(fs.readFileSync("logs/coverage-summary.json", "utf8"));
-              const t = cov.total || {};
-              const pct = (m) => (t[m] && t[m].pct != null ? `${t[m].pct}%` : "n/a");
-              body += "<details><summary>Coverage (apps/api) — informational, not a merge gate</summary>\n\n";
-              body += "| Metric | % |\n| --- | --- |\n";
-              body += `| Lines | ${pct("lines")} |\n| Statements | ${pct("statements")} |\n| Functions | ${pct("functions")} |\n| Branches | ${pct("branches")} |\n\n`;
-              body += "</details>\n\n";
-            } catch {
-              /* coverage absent — non-blocking */
-            }
+            const renderCoverage = (label, file) => {
+              try {
+                const cov = JSON.parse(fs.readFileSync(path.join("logs", file), "utf8"));
+                const t = cov.total || {};
+                const pct = (m) => (t[m] && t[m].pct != null ? `${t[m].pct}%` : "n/a");
+                body += `<details><summary>${label} — informational, not a merge gate</summary>\n\n`;
+                body += "| Metric | % |\n| --- | --- |\n";
+                body += `| Lines | ${pct("lines")} |\n| Statements | ${pct("statements")} |\n| Functions | ${pct("functions")} |\n| Branches | ${pct("branches")} |\n\n`;
+                body += "</details>\n\n";
+              } catch {
+                /* coverage absent — non-blocking */
+              }
+            };
+            renderCoverage("Coverage (apps/api)", "coverage-summary.json");
+            renderCoverage("Coverage (packages)", "coverage-packages-summary.json");
 
             body += "_Full logs are attached as run artifacts (`log-*`)._\n";
 

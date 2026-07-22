@@ -29,6 +29,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
+    "@vitest/coverage-v8": "^4.1.9",
     "@commitlint/cli": "^21.1.0",
     "@commitlint/config-conventional": "^21.1.0",
     "@release-it/conventional-changelog": "^11.0.1",
