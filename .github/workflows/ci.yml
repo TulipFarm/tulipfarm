@@ -218,34 +218,45 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-  test:
-    name: Test
+  test-api:
+    name: Test API (${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Test
+      - name: Test API shard ${{ matrix.shard }}/5 with coverage
         run: |
           set -o pipefail
-          pnpm test 2>&1 | tee test.log
+          pnpm --filter @tulipfarm/api exec vitest run \
+            --shard=${{ matrix.shard }}/5 \
+            --coverage \
+            --coverage.reporter=json \
+            --reporter=default \
+            --reporter=blob \
+            --outputFile="${{ github.workspace }}/coverage-blobs/api-${{ matrix.shard }}.json" \
+            2>&1 | tee test-api-${{ matrix.shard }}.log
       - name: Job summary
         if: always()
         env:
           STATUS: ${{ job.status }}
         run: |
           {
-            echo "## Test"
+            echo "## Test API (${{ matrix.shard }}/5)"
             if [ "$STATUS" = "success" ]; then
-              echo "✅ **Tests passed**"
+              echo "✅ **API shard passed with coverage**"
             else
-              echo "❌ **Tests failed** — last 100 lines:"
+              echo "❌ **API shard failed** — last 100 lines:"
               echo ""
               echo '<details><summary>Log tail</summary>'
               echo ""
               echo '```'
-              tail -n 100 test.log 2>/dev/null || echo "(no log captured)"
+              tail -n 100 test-api-${{ matrix.shard }}.log 2>/dev/null || echo "(no log captured)"
               echo '```'
               echo ""
               echo '</details>'
@@ -255,56 +266,209 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: log-test
-          path: test.log
+          name: log-test-api-${{ matrix.shard }}
+          path: test-api-${{ matrix.shard }}.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload coverage blob
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-blob-api-${{ matrix.shard }}
+          path: coverage-blobs/api-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
 
-  # Non-blocking coverage for the bulk of the suite (apps/api). Runs in parallel;
-  # never gates merges. A separate job keeps the authoritative `test` job lean.
-  coverage:
-    name: Coverage (apps/api)
+  test-packages:
+    name: Test packages
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Coverage (apps/api)
-        continue-on-error: true
-        # Invoke vitest directly (not via `run test --`, whose arg-forwarding
-        # drops these flags). cwd is apps/api, so output lands in apps/api/coverage.
+      - name: Test packages with coverage
         run: |
           set -o pipefail
-          pnpm --filter @tulipfarm/api exec vitest run \
+          pnpm exec turbo test --filter='./packages/*' -- \
+            --coverage \
+            --coverage.reporter=json \
+            --reporter=default \
+            --reporter=blob \
+            2>&1 | tee test-packages.log
+      - name: Collect package coverage blobs
+        run: |
+          mkdir -p coverage-blobs
+          while IFS= read -r report; do
+            package="${report#packages/}"
+            package="${package%%/*}"
+            cp "$report" "coverage-blobs/package-${package}.json"
+          done < <(find packages -path '*/.vitest-reports/blob.json' -type f)
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Test packages"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Package tests passed with coverage**"
+            else
+              echo "❌ **Package tests failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 test-packages.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-test-packages
+          path: test-packages.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload coverage blobs
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-blob-packages
+          path: coverage-blobs/*.json
+          if-no-files-found: error
+          retention-days: 1
+
+  # Preserve the existing web and worker suites while keeping the requested
+  # API shards and package tests independently visible in CI.
+  test-apps:
+    name: Test other apps
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Test non-API apps with coverage
+        run: |
+          set -o pipefail
+          pnpm exec turbo test \
+            --filter=@tulipfarm/web \
+            --filter=@tulipfarm/worker \
+            --filter=@tulipfarm/integration-worker \
+            -- \
+            --coverage \
+            --coverage.reporter=json \
+            --reporter=default \
+            --reporter=blob \
+            2>&1 | tee test-apps.log
+      - name: Collect app coverage blobs
+        run: |
+          mkdir -p coverage-blobs
+          while IFS= read -r report; do
+            app="${report#apps/}"
+            app="${app%%/*}"
+            cp "$report" "coverage-blobs/app-${app}.json"
+          done < <(find apps -path '*/.vitest-reports/blob.json' -type f)
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Test other apps"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Other app tests passed with coverage**"
+            else
+              echo "❌ **Other app tests failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 test-apps.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-test-apps
+          path: test-apps.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload coverage blobs
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-blob-apps
+          path: coverage-blobs/*.json
+          if-no-files-found: error
+          retention-days: 1
+
+  coverage:
+    name: Coverage report
+    runs-on: ubuntu-latest
+    needs: [changes, test-api, test-packages, test-apps]
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Download coverage blobs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-blob-*
+          path: coverage-blobs
+          merge-multiple: true
+      - name: Merge and report coverage
+        run: |
+          set -o pipefail
+          pnpm exec vitest \
+            --merge-reports=coverage-blobs \
+            --passWithNoTests \
             --coverage \
             --coverage.reporter=text-summary \
-            --coverage.reporter=json-summary 2>&1 | tee coverage.log
+            --coverage.reporter=json-summary \
+            2>&1 | tee coverage.log
       - name: Job summary
         if: always()
         run: |
           {
-            echo "## Coverage (apps/api) — informational"
+            echo "## Combined coverage"
             echo '```'
             tail -n 15 coverage.log 2>/dev/null || echo "(no coverage captured)"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload coverage summary
+      - name: Upload log
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: coverage-summary
-          path: apps/api/coverage/coverage-summary.json
+          name: log-coverage
+          path: coverage.log
           if-no-files-found: ignore
           retention-days: 7
+      - name: Upload coverage summary
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-summary
+          path: coverage/coverage-summary.json
+          if-no-files-found: error
+          retention-days: 7
 
-  # Single required status check. Aggregates the four core jobs, posts a sticky
+  # Single required status check. Aggregates the core jobs, posts a sticky
   # PR comment, mirrors it to the run summary, and fails if any core check did
   # not succeed. Require ONLY this check ("CI Success") in branch protection.
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, build, docs-build, test, coverage]
+    needs:
+      [changes, lint, typecheck, build, docs-build, test-api, test-packages, test-apps, coverage]
     # always() so it still runs when a core job fails.
     if: ${{ always() }}
     permissions:
@@ -315,8 +479,15 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
+          pattern: log-*
           path: logs
           merge-multiple: true
+      - name: Download coverage summary
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: coverage-summary
+          path: logs
       - name: Report and gate
         uses: actions/github-script@v9
         env:
@@ -324,7 +495,9 @@ jobs:
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_BUILD_RESULT: ${{ needs['docs-build'].result }}
-          TEST_RESULT: ${{ needs.test.result }}
+          TEST_API_RESULT: ${{ needs['test-api'].result }}
+          TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
+          TEST_APPS_RESULT: ${{ needs['test-apps'].result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
         with:
           script: |
@@ -333,15 +506,17 @@ jobs:
             const marker = "<!-- tulipfarm-ci-report -->";
 
             // Fourth tuple field `allowSkip`: when true, a `skipped` result
-            // counts as passing (the Test job is gated off for docs/markdown-only
-            // PRs via the `changes` job). Lint/typecheck/build/docs-build stay
-            // strictly required.
+            // counts as passing (test and coverage jobs are gated off for
+            // docs/markdown-only PRs via the `changes` job).
             const coreChecks = [
               ["Lint", "lint", process.env.LINT_RESULT, false],
               ["Typecheck", "typecheck", process.env.TYPECHECK_RESULT, false],
               ["Build", "build", process.env.BUILD_RESULT, false],
               ["Docs build", "docs-build", process.env.DOCS_BUILD_RESULT, false],
-              ["Test", "test", process.env.TEST_RESULT, true],
+              ["Test API (5 shards)", "test-api", process.env.TEST_API_RESULT, true],
+              ["Test packages", "test-packages", process.env.TEST_PACKAGES_RESULT, true],
+              ["Test other apps", "test-apps", process.env.TEST_APPS_RESULT, true],
+              ["Coverage report", "coverage", process.env.COVERAGE_RESULT, true],
             ];
             const icon = (r) =>
               r === "success" ? "✅ pass"
@@ -353,8 +528,7 @@ jobs:
             let body = `${marker}\n### CI results\n\n`;
             body += "| Check | Result |\n| --- | --- |\n";
             for (const [label, , res] of coreChecks) body += `| ${label} | ${icon(res)} |\n`;
-            const covOk = process.env.COVERAGE_RESULT === "success";
-            body += `| Coverage (apps/api) | ${covOk ? "ℹ️ see below" : "— (non-blocking)"} |\n\n`;
+            body += "\n";
 
             const readTail = (file, n = 50) => {
               try {
@@ -364,9 +538,22 @@ jobs:
                 return null;
               }
             };
+            const readCheckTail = (key) => {
+              const exact = readTail(`${key}.log`);
+              if (exact) return exact;
+              try {
+                return fs.readdirSync("logs")
+                  .filter((file) => file.startsWith(`${key}-`) && file.endsWith(".log"))
+                  .sort()
+                  .map((file) => `# ${file}\n${readTail(file) || "(no log captured)"}`)
+                  .join("\n\n");
+              } catch {
+                return null;
+              }
+            };
             for (const [label, key, res] of coreChecks) {
               if (res === "failure") {
-                const tail = readTail(`${key}.log`);
+                const tail = readCheckTail(key);
                 if (tail) {
                   body += `<details><summary>❌ ${label} — last 50 lines</summary>\n\n\`\`\`\n${tail}\n\`\`\`\n\n</details>\n\n`;
                 }
@@ -377,12 +564,12 @@ jobs:
               const cov = JSON.parse(fs.readFileSync("logs/coverage-summary.json", "utf8"));
               const t = cov.total || {};
               const pct = (m) => (t[m] && t[m].pct != null ? `${t[m].pct}%` : "n/a");
-              body += "<details><summary>Coverage (apps/api) — informational, not a merge gate</summary>\n\n";
+              body += "<details><summary>Combined coverage</summary>\n\n";
               body += "| Metric | % |\n| --- | --- |\n";
               body += `| Lines | ${pct("lines")} |\n| Statements | ${pct("statements")} |\n| Functions | ${pct("functions")} |\n| Branches | ${pct("branches")} |\n\n`;
               body += "</details>\n\n";
             } catch {
-              /* coverage absent — non-blocking */
+              /* Coverage is absent when the coverage job was skipped or failed. */
             }
 
             body += "_Full logs are attached as run artifacts (`log-*`)._\n";
@@ -391,7 +578,7 @@ jobs:
 
             // Commenting is best-effort: a fork PR gets a read-only token, so
             // never let a comment failure flip the gate. Pass/fail is decided
-            // solely by the four core jobs below.
+            // solely by the core jobs below.
             if (context.eventName === "pull_request") {
               try {
                 const { owner, repo } = context.repo;
