@@ -109,7 +109,11 @@ legacy edge is removed when its accountable owner passes replacement and cutover
 
 ## Enforcement
 
-AW-004 will turn this allowlist into a CI/static-import check. Until then, review treats any omitted
-edge as a blocking architecture violation. Runtime contract tests must separately prove default
-deny, duplicate safety, crash/retry/restart behavior, authority non-amplification, and redaction;
-passing an import check never substitutes for those tests.
+This allowlist is enforced as a static-import check in `scripts/architecture-check.ts`
+(`pnpm architecture:check`), which the CI `Architecture` job runs on every PR. The check scans the
+`@tulipfarm/*` import graph and fails on any forbidden edge or import cycle with an actionable
+message. The `legacyExceptions` map in `scripts/lib/architecture-rules.ts` documents the remaining
+v1 edges tolerated during cutover; new legacy edges must not be added there. Review still treats any
+omitted, undocumented edge as a blocking architecture violation. Runtime contract tests must
+separately prove default deny, duplicate safety, crash/retry/restart behavior, authority
+non-amplification, and redaction; passing an import check never substitutes for those tests.

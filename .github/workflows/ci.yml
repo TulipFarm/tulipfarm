@@ -168,6 +168,93 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Static architecture guardrail (AW-004): enforce the package/app dependency
+  # allowlist and block forbidden imports and import cycles. Encodes
+  # docs/architecture/dependency-rules.md. Fast and deterministic — always runs.
+  architecture:
+    name: Architecture
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Enforce dependency and import rules
+        run: |
+          set -o pipefail
+          pnpm architecture:test 2>&1 | tee architecture.log
+          pnpm architecture:check 2>&1 | tee -a architecture.log
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Architecture"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Dependency and import rules passed**"
+            else
+              echo "❌ **Architecture check failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 architecture.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-architecture
+          path: architecture.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Schema contract fixtures (AW-004 / SPEC §25 layer 1): run the schema package's
+  # fixture and property tests as a focused, always-on signal for the single
+  # contract authority. Independent of the sharded package test job.
+  schema-fixtures:
+    name: Schema fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Validate schema fixtures
+        run: |
+          set -o pipefail
+          pnpm --filter @tulipfarm/schema test 2>&1 | tee schema-fixtures.log
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Schema fixtures"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Schema fixtures passed**"
+            else
+              echo "❌ **Schema fixtures failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 schema-fixtures.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-schema-fixtures
+          path: schema-fixtures.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   docs-build:
     name: Docs build
     runs-on: ubuntu-latest
@@ -468,7 +555,19 @@ jobs:
     name: CI Success
     runs-on: ubuntu-latest
     needs:
-      [changes, lint, typecheck, build, docs-build, test-api, test-packages, test-apps, coverage]
+      [
+        changes,
+        lint,
+        typecheck,
+        build,
+        architecture,
+        schema-fixtures,
+        docs-build,
+        test-api,
+        test-packages,
+        test-apps,
+        coverage,
+      ]
     # always() so it still runs when a core job fails.
     if: ${{ always() }}
     permissions:
@@ -494,6 +593,8 @@ jobs:
           LINT_RESULT: ${{ needs.lint.result }}
           TYPECHECK_RESULT: ${{ needs.typecheck.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          ARCHITECTURE_RESULT: ${{ needs.architecture.result }}
+          SCHEMA_FIXTURES_RESULT: ${{ needs['schema-fixtures'].result }}
           DOCS_BUILD_RESULT: ${{ needs['docs-build'].result }}
           TEST_API_RESULT: ${{ needs['test-api'].result }}
           TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
@@ -512,6 +613,8 @@ jobs:
               ["Lint", "lint", process.env.LINT_RESULT, false],
               ["Typecheck", "typecheck", process.env.TYPECHECK_RESULT, false],
               ["Build", "build", process.env.BUILD_RESULT, false],
+              ["Architecture", "architecture", process.env.ARCHITECTURE_RESULT, false],
+              ["Schema fixtures", "schema-fixtures", process.env.SCHEMA_FIXTURES_RESULT, false],
               ["Docs build", "docs-build", process.env.DOCS_BUILD_RESULT, false],
               ["Test API (5 shards)", "test-api", process.env.TEST_API_RESULT, true],
               ["Test packages", "test-packages", process.env.TEST_PACKAGES_RESULT, true],

@@ -17,6 +17,8 @@
     "dev:docs": "turbo dev --filter=@tulipfarm/docs",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "reset:dev": "bash scripts/reset-dev.sh",
+    "architecture:check": "node scripts/architecture-check.ts",
+    "architecture:test": "vitest run scripts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
