@@ -203,6 +203,24 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  apps/integration-worker:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
   apps/web:
     dependencies:
       '@dagrejs/dagre':
@@ -354,6 +372,60 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.17.6)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  apps/worker:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
+      tsx:
+        specifier: ^4.22.4
+        version: 4.22.4
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/a2ui:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/agent-runtime:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/audit:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/authz:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/constants:
     devDependencies:
       '@tulipfarm/tsconfig':
@@ -424,6 +496,24 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/integrations:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/knowledge:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/llm:
     dependencies:
       '@ai-sdk/anthropic':
@@ -464,6 +554,24 @@ importers:
         specifier: ^4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
+  packages/memory:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/observability:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/routine-engine:
     dependencies:
       '@tulipfarm/schema':
@@ -482,6 +590,24 @@ importers:
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/run-kernel:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/sandbox:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/schema:
     dependencies:
@@ -547,6 +673,24 @@ importers:
       vitest:
         specifier: ^4.1.9
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
+  packages/storage:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
+  packages/tool-broker:
+    devDependencies:
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
 
   packages/tsconfig: {}
 
@@ -11756,7 +11900,7 @@ snapshots:
 
   eval@0.1.8:
     dependencies:
-      '@types/node': 24.13.2
+      '@types/node': 26.1.1
       require-like: 0.1.2
 
   event-target-shim@5.0.1: {}

@@ -4,6 +4,7 @@ build/
 coverage/
 .turbo/
 *.local
+.DS_Store
 .env*
 !.env.local.example
 /soul/

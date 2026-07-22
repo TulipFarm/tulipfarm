@@ -21,10 +21,24 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | [`apps/api`](apps/api/AGENTS.md) | Fastify API server. PostgreSQL (pgvector + pg-boss), migration-on-boot, soul git store. |
 | [`apps/web`](apps/web/AGENTS.md) | Remix + React web UI. |
 | [`apps/docs`](apps/docs/AGENTS.md) | Fumadocs public documentation site (static export). Prompt-first docs conventions. |
+| [`apps/worker`](apps/worker/AGENTS.md) | Durable Run dispatch, Agent/Tool States, timers, reconciliation, projections. Scaffold (AW-002). |
+| [`apps/integration-worker`](apps/integration-worker/AGENTS.md) | Integration ingress, sync, delivery, retries, reconciliation. Scaffold (AW-002). |
 | [`packages/llm`](packages/llm/AGENTS.md) | LLM provider abstraction + tiered fallback chains (`@tulipfarm/llm`). |
 | [`packages/soul`](packages/soul/AGENTS.md) | Soul artifact loader + git sync (`@tulipfarm/soul`). |
 | [`packages/secrets`](packages/secrets/AGENTS.md) | Encrypted secret storage + key rotation (`@tulipfarm/secrets`). |
 | [`packages/schema`](packages/schema/AGENTS.md) | Config schemas (LLM, guardrails, agent, resource) + validators + resource transforms (`@tulipfarm/schema`). |
+| [`packages/authz`](packages/authz/AGENTS.md) | Principals, roles, grants, authority intersection, policy evidence (`@tulipfarm/authz`). Scaffold (AW-002). |
+| [`packages/audit`](packages/audit/AGENTS.md) | Audit events, hash chaining, sealing/export/retention, lineage (`@tulipfarm/audit`). Scaffold (AW-002). |
+| [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State state machines, waits, retries, child Runs (`@tulipfarm/run-kernel`). Scaffold (AW-002). |
+| [`packages/tool-broker`](packages/tool-broker/AGENTS.md) | Tool catalog, intent/effect orchestration, approvals, reconciliation (`@tulipfarm/tool-broker`). Scaffold (AW-002). |
+| [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation (`@tulipfarm/agent-runtime`). Scaffold (AW-002). |
+| [`packages/knowledge`](packages/knowledge/AGENTS.md) | ACL-preserving source ingestion, retrieval, provenance (`@tulipfarm/knowledge`). Scaffold (AW-002). |
+| [`packages/memory`](packages/memory/AGENTS.md) | Scoped, versioned memory assertions and supersession (`@tulipfarm/memory`). Scaffold (AW-002). |
+| [`packages/a2ui`](packages/a2ui/AGENTS.md) | Safe presentation schemas, Artifacts, signed actions (`@tulipfarm/a2ui`). Scaffold (AW-002). |
+| [`packages/integrations`](packages/integrations/AGENTS.md) | Integration adapter contracts, event normalization, identity mapping (`@tulipfarm/integrations`). Scaffold (AW-002). |
+| [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution request contract and backend ports (`@tulipfarm/sandbox`). Scaffold (AW-002). |
+| [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports (`@tulipfarm/storage`). Scaffold (AW-002). |
+| [`packages/observability`](packages/observability/AGENTS.md) | OTel conventions, metrics, health/readiness, redaction (`@tulipfarm/observability`). Scaffold (AW-002). |
 | [`packages/ui`](packages/ui/AGENTS.md) | Shared React components (`@tulipfarm/ui`). |
 | [`packages/types`](packages/types/AGENTS.md) | Shared TypeScript types (`@tulipfarm/types`). |
 | [`packages/utils`](packages/utils/AGENTS.md) | Shared utilities (`@tulipfarm/utils`). |
