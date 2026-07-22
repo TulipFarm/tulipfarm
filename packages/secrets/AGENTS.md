@@ -16,6 +16,9 @@
 - **`backfillSecretsToDek`** — migrate legacy (pre-envelope) secrets onto the DEK.
 - **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads the env KEK(s).
 - **`assertValidSecretKey`** + `InvalidSecretKeyError` — key-name guard.
+- **KMS port** (`src/ports/kms.ts`) — provider-neutral `KmsPort` (`wrap`/`unwrap`/`activeKey`)
+  with opaque `MasterKeyRef` / `WrappedKey`; the master key never crosses the boundary and no
+  provider SDK type leaks. Adapters: local managed keys, cloud KMS, or Vault-compatible services.
 - Types: `SecretDoc`, `SecretEnvelopeFields`, `SecretMeta`, `SecretType`, `WrappedDekRow`, `KekLabel`.
 
 ## Model — envelope encryption (SEC-V1 key recovery)
