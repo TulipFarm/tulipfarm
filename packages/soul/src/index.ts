@@ -1,3 +1,18 @@
+export type {
+  SoulChangeset,
+  SoulChangesetErrorCode,
+  SoulChangesetSource,
+  SoulChangesetValidationIssue,
+  SoulChangesetValidationIssueCode,
+  SoulFileChange,
+  ValidatedSoulChangeset,
+  ValidatedSoulFileChange,
+} from "./changeset";
+export {
+  SOUL_CHANGESET_SOURCES,
+  SoulChangesetValidationError,
+  validateSoulChangeset,
+} from "./changeset";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
 export { SoulLoader } from "./soul-loader";
