@@ -22,6 +22,13 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
 - **LLM error classes** — `LlmConfigValidationError`, `LlmCredentialError`,
   `LlmNotConfiguredError`, `UnknownModelError`, `EmbeddingUnavailableError` (thrown by
   `@tulipfarm/llm` runtime).
+- **`SchemaRegistry`** — strict `apiVersion`/`kind` dispatch with explicit unknown-property
+  behavior, fail-closed YAML parsing, deterministic validation issues, and immutable validated
+  documents.
+- **`canonicalize` + `canonicalHash`** — deterministic canonical JSON and lowercase SHA-256 hex
+  over parsed data; rejects values that JSON would silently erase or change.
+- **Schema contract errors** — stable error codes for invalid/unknown/duplicate schemas, validation,
+  YAML parsing, and canonicalization without protected payload values.
 
 ## Boundaries
 
