@@ -96,6 +96,27 @@ const toolSpecSchema = {
       },
     },
   },
+  allOf: [
+    {
+      if: {
+        additionalProperties: true,
+        required: ["mutating"],
+        properties: { mutating: { const: true } },
+      },
+      // biome-ignore lint/suspicious/noThenProperty: `then` is a JSON Schema keyword.
+      then: {
+        additionalProperties: true,
+        properties: {
+          idempotency: {
+            type: "object",
+            additionalProperties: true,
+            required: ["strategy"],
+            properties: { strategy: { enum: ["provider", "reconcile"] } },
+          },
+        },
+      },
+    },
+  ],
 } as const;
 
 export const ToolContractDefinitionSchema = definitionSchema(KIND, toolSpecSchema);

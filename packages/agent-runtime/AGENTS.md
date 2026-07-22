@@ -1,8 +1,9 @@
 # Agent Runtime — Agent Conventions
 
 `@tulipfarm/agent-runtime` — Context assembly, iterative model/tool loop, model profiles,
-compaction, budgets, and delegation orchestration. **Scaffold today:** `src/index.ts` is
-`export {}`. tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for
+compaction, budgets, and delegation orchestration. **Today:** `src/ports/model.ts` defines the
+provider-neutral model invocation boundary. tsconfig extends `@tulipfarm/tsconfig/base.json`.
+See root `AGENTS.md` for
 commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`,

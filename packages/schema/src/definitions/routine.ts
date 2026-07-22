@@ -1,4 +1,11 @@
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
+import {
+  DEFINITION_API_VERSION,
+  type DefinitionMetadata,
+  definitionMetadataSchema,
+  definitionRegistration,
+  refListSchema,
+} from "./common";
 
 /**
  * Routine definition meta-schema (SPEC §7.1, §9.1). A Routine is a versioned automation
@@ -13,7 +20,7 @@ import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
  * - a retry policy requires a bounded `maxAttempts`.
  */
 
-const apiVersion = "tulipfarm.ai/v1";
+const apiVersion = DEFINITION_API_VERSION;
 const kind = "Routine";
 
 export const ROUTINE_STATE_TYPES = [
@@ -111,6 +118,35 @@ const sharedStateProps = {
   concurrencyKey: nonEmptyString,
   deadlineMs: positiveInteger,
   wallClockMs: positiveInteger,
+  identity: {
+    type: "object",
+    additionalProperties: false,
+    required: ["principalKind", "principalId"],
+    properties: { principalKind: nonEmptyString, principalId: nonEmptyString },
+  },
+  permissionCeiling: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      grants: refListSchema,
+      maxRiskClass: { type: "string", enum: ["low", "medium", "high"] },
+    },
+  },
+  retention: {
+    type: "object",
+    additionalProperties: false,
+    properties: { resultDays: positiveInteger, evidenceDays: positiveInteger },
+  },
+  observability: {
+    type: "object",
+    additionalProperties: false,
+    required: ["level"],
+    properties: {
+      level: { type: "string", enum: ["minimal", "standard", "detailed"] },
+      captureInputs: { type: "boolean" },
+      captureOutputs: { type: "boolean" },
+    },
+  },
 } as const;
 
 const sharedStateRequired = ["type", "name"] as const;
@@ -244,21 +280,14 @@ export const RoutineDefinitionSchema = {
   properties: {
     apiVersion: { const: apiVersion },
     kind: { const: kind },
-    metadata: {
-      type: "object",
-      additionalProperties: false,
-      required: ["name"],
-      properties: {
-        name: { type: "string", minLength: 1, pattern: "^[a-z][a-z0-9-]*$" },
-        id: nonEmptyString,
-        version: nonEmptyString,
-      },
-    },
+    metadata: definitionMetadataSchema,
     spec: {
       type: "object",
       additionalProperties: false,
-      required: ["start", "states"],
+      required: ["owner", "start", "states"],
       properties: {
+        owner: nonEmptyString,
+        maintainers: refListSchema,
         input: jsonSchemaObject,
         output: jsonSchemaObject,
         start: stateName,
@@ -295,8 +324,10 @@ export interface RoutineState {
 export interface RoutineDefinition {
   apiVersion: typeof apiVersion;
   kind: typeof kind;
-  metadata: { name: string; id?: string; version?: string };
+  metadata: DefinitionMetadata;
   spec: {
+    owner: string;
+    maintainers?: string[];
     input?: Record<string, unknown>;
     output?: Record<string, unknown>;
     start: string;
@@ -310,11 +341,8 @@ export interface ValidatedRoutineDocument extends ValidatedSchemaDocument {
   document: Readonly<RoutineDefinition>;
 }
 
-export const RoutineSchemaRegistration = {
-  apiVersion,
-  kind,
-  schema: RoutineDefinitionSchema,
-} as const;
+export const ROUTINE_DEFINITION = definitionRegistration(kind, RoutineDefinitionSchema);
+export const RoutineSchemaRegistration = ROUTINE_DEFINITION;
 
 let registry: SchemaRegistry | undefined;
 

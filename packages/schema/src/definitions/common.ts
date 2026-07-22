@@ -119,6 +119,16 @@ export const refListSchema = {
   items: { type: "string", minLength: 1, maxLength: 256 },
 } as const;
 
+/** Reference to governed Markdown content stored beside its owning Soul definition. */
+export const instructionsReferenceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["path"],
+  properties: {
+    path: { type: "string", minLength: 1, maxLength: 512, pattern: "^[^/].*\\.md$" },
+  },
+} as const;
+
 /**
  * Wrap a `spec` schema in the strict discriminated root every authored definition shares.
  * The root pins `apiVersion`/`kind` and forbids unknown top-level keys.

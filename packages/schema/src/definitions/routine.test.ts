@@ -4,13 +4,21 @@ import { ROUTINE_STATE_TYPES, type RoutineDefinition, validateRoutineDefinition 
 
 const apiVersion = "tulipfarm.ai/v1";
 const kind = "Routine";
+const metadata = {
+  id: "77777777-7777-4777-8777-777777777777",
+  slug: "issue-triage",
+  schemaVersion: 1,
+  authoredVersion: 1,
+  lifecycle: "draft",
+};
 
 function routine(states: Array<Record<string, unknown>>): Record<string, unknown> {
   return {
     apiVersion,
     kind,
-    metadata: { name: "issue-triage" },
+    metadata,
     spec: {
+      owner: "team-platform",
       input: { type: "object", additionalProperties: false },
       output: { type: "object", additionalProperties: false },
       start: states[0]?.name,
@@ -171,6 +179,27 @@ describe("Routine schema", () => {
     const doc = routine([agentState]);
     delete (doc.spec as Record<string, unknown>).start;
     expect(() => validateRoutineDefinition(doc)).toThrow(SchemaValidationError);
+  });
+
+  it("requires canonical definition metadata and Routine ownership", () => {
+    const missingOwner = routine([agentState]);
+    delete (missingOwner.spec as Record<string, unknown>).owner;
+    expect(() => validateRoutineDefinition(missingOwner)).toThrow(SchemaValidationError);
+
+    const legacyMetadata = routine([agentState]);
+    legacyMetadata.metadata = { name: "issue-triage" };
+    expect(() => validateRoutineDefinition(legacyMetadata)).toThrow(SchemaValidationError);
+  });
+
+  it("accepts explicit State authority and evidence controls", () => {
+    const controlled = {
+      ...agentState,
+      identity: { principalKind: "agent", principalId: "triager" },
+      permissionCeiling: { grants: ["ticket.read"], maxRiskClass: "low" },
+      retention: { resultDays: 30, evidenceDays: 365 },
+      observability: { level: "standard", captureInputs: false, captureOutputs: true },
+    };
+    expect(() => validateRoutineDefinition(routine([controlled]))).not.toThrow();
   });
 
   it("fails closed for the wrong kind discriminator", () => {

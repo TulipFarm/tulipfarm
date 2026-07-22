@@ -4,4 +4,4 @@ export type {
   ModelMessage,
   ModelOutput,
   ModelPort,
-} from "./ports";
+} from "./model";

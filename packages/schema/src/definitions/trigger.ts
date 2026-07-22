@@ -1,4 +1,10 @@
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
+import {
+  DEFINITION_API_VERSION,
+  type DefinitionMetadata,
+  definitionMetadataSchema,
+  definitionRegistration,
+} from "./common";
 
 /**
  * Trigger definition meta-schema (SPEC §7.1, §9.2). A Trigger maps a normalized event to a
@@ -15,7 +21,7 @@ import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
  * - Catch-up schedules are bounded: `catch_up_bounded` requires a `catchUpCap`.
  */
 
-const apiVersion = "tulipfarm.ai/v1";
+const apiVersion = DEFINITION_API_VERSION;
 const kind = "Trigger";
 
 export const TRIGGER_TYPES = [
@@ -199,16 +205,7 @@ export const TriggerDefinitionSchema = {
   properties: {
     apiVersion: { const: apiVersion },
     kind: { const: kind },
-    metadata: {
-      type: "object",
-      additionalProperties: false,
-      required: ["name"],
-      properties: {
-        name: { type: "string", minLength: 1, pattern: "^[a-z][a-z0-9-]*$" },
-        id: nonEmptyString,
-        version: nonEmptyString,
-      },
-    },
+    metadata: definitionMetadataSchema,
     spec: { oneOf: specVariants },
   },
 } as const;
@@ -222,7 +219,7 @@ export interface TriggerRef {
 export interface TriggerDefinition {
   apiVersion: typeof apiVersion;
   kind: typeof kind;
-  metadata: { name: string; id?: string; version?: string };
+  metadata: DefinitionMetadata;
   spec: {
     type: TriggerType;
     routineRef: TriggerRef;
@@ -238,11 +235,8 @@ export interface ValidatedTriggerDocument extends ValidatedSchemaDocument {
   document: Readonly<TriggerDefinition>;
 }
 
-export const TriggerSchemaRegistration = {
-  apiVersion,
-  kind,
-  schema: TriggerDefinitionSchema,
-} as const;
+export const TRIGGER_DEFINITION = definitionRegistration(kind, TriggerDefinitionSchema);
+export const TriggerSchemaRegistration = TRIGGER_DEFINITION;
 
 let registry: SchemaRegistry | undefined;
 

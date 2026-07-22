@@ -4,6 +4,7 @@ import {
   type DefinitionTrustTier,
   definitionRegistration,
   definitionSchema,
+  instructionsReferenceSchema,
   refListSchema,
 } from "./common";
 
@@ -36,8 +37,9 @@ export const SKILL_FORBIDDEN_GRANT_KEYS = [
 const skillSpecSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["trustTier"],
+  required: ["instructions", "trustTier"],
   properties: {
+    instructions: instructionsReferenceSchema,
     references: refListSchema,
     templates: refListSchema,
     examples: refListSchema,
@@ -58,6 +60,7 @@ export const SkillDefinitionSchema = definitionSchema(KIND, skillSpecSchema);
 export const SKILL_DEFINITION = definitionRegistration(KIND, SkillDefinitionSchema);
 
 export interface SkillSpec {
+  instructions: { path: string };
   references?: string[];
   templates?: string[];
   examples?: string[];

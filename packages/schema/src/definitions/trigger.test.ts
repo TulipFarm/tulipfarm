@@ -4,12 +4,19 @@ import { TRIGGER_TYPES, type TriggerDefinition, validateTriggerDefinition } from
 
 const apiVersion = "tulipfarm.ai/v1";
 const kind = "Trigger";
+const metadata = {
+  id: "88888888-8888-4888-8888-888888888888",
+  slug: "nightly-triage",
+  schemaVersion: 1,
+  authoredVersion: 1,
+  lifecycle: "draft",
+};
 
 function base(type: string, extra: Record<string, unknown>): Record<string, unknown> {
   return {
     apiVersion,
     kind,
-    metadata: { name: "nightly-triage" },
+    metadata,
     spec: {
       type,
       routineRef: { name: "issue-triage", version: "1.0.0" },
@@ -96,5 +103,11 @@ describe("Trigger schema", () => {
     const wrong = cron();
     wrong.kind = "Routine";
     expect(() => validateTriggerDefinition(wrong)).toThrow();
+  });
+
+  it("rejects the retired metadata envelope", () => {
+    const legacy = cron();
+    legacy.metadata = { name: "nightly-triage" };
+    expect(() => validateTriggerDefinition(legacy)).toThrow(SchemaValidationError);
   });
 });
