@@ -218,25 +218,36 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  # apps/api holds the bulk of the suite (each file boots a PGlite + migrations),
+  # so it's sharded across parallel jobs via vitest `--shard`. Bump TOTAL_SHARDS
+  # (and the matrix list) together as the suite grows. The non-api workspaces run
+  # separately in `test-packages`. Both feed the `ci-success` gate.
   test:
-    name: Test
+    name: Test (apps/api shard ${{ matrix.shard }})
     runs-on: ubuntu-latest
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+    env:
+      TOTAL_SHARDS: 5
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - name: Test
         run: |
           set -o pipefail
-          pnpm test 2>&1 | tee test.log
+          pnpm --filter @tulipfarm/api exec vitest run \
+            --shard="${{ matrix.shard }}/${TOTAL_SHARDS}" 2>&1 | tee "test-${{ matrix.shard }}.log"
       - name: Job summary
         if: always()
         env:
           STATUS: ${{ job.status }}
         run: |
           {
-            echo "## Test"
+            echo "## Test (apps/api shard ${{ matrix.shard }}/${TOTAL_SHARDS})"
             if [ "$STATUS" = "success" ]; then
               echo "✅ **Tests passed**"
             else
@@ -245,7 +256,7 @@ jobs:
               echo '<details><summary>Log tail</summary>'
               echo ""
               echo '```'
-              tail -n 100 test.log 2>/dev/null || echo "(no log captured)"
+              tail -n 100 "test-${{ matrix.shard }}.log" 2>/dev/null || echo "(no log captured)"
               echo '```'
               echo ""
               echo '</details>'
@@ -255,8 +266,51 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: log-test
-          path: test.log
+          name: log-test-${{ matrix.shard }}
+          path: test-${{ matrix.shard }}.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Non-api workspaces (small, fast). Runs in parallel with the api shards.
+  test-packages:
+    name: Test (packages)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: ${{ needs.changes.outputs.code == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Test
+        run: |
+          set -o pipefail
+          pnpm exec turbo test --filter='!@tulipfarm/api' 2>&1 | tee test-packages.log
+      - name: Job summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Test (packages)"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Tests passed**"
+            else
+              echo "❌ **Tests failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 test-packages.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-test-packages
+          path: test-packages.log
           if-no-files-found: ignore
           retention-days: 7
 
@@ -304,7 +358,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [changes, lint, typecheck, build, docs-build, test, coverage]
+    needs: [changes, lint, typecheck, build, docs-build, test, test-packages, coverage]
     # always() so it still runs when a core job fails.
     if: ${{ always() }}
     permissions:
@@ -325,6 +379,7 @@ jobs:
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_BUILD_RESULT: ${{ needs['docs-build'].result }}
           TEST_RESULT: ${{ needs.test.result }}
+          TEST_PACKAGES_RESULT: ${{ needs['test-packages'].result }}
           COVERAGE_RESULT: ${{ needs.coverage.result }}
         with:
           script: |
@@ -341,7 +396,8 @@ jobs:
               ["Typecheck", "typecheck", process.env.TYPECHECK_RESULT, false],
               ["Build", "build", process.env.BUILD_RESULT, false],
               ["Docs build", "docs-build", process.env.DOCS_BUILD_RESULT, false],
-              ["Test", "test", process.env.TEST_RESULT, true],
+              ["Test (apps/api)", "test", process.env.TEST_RESULT, true],
+              ["Test (packages)", "test-packages", process.env.TEST_PACKAGES_RESULT, true],
             ];
             const icon = (r) =>
               r === "success" ? "✅ pass"
@@ -364,11 +420,25 @@ jobs:
                 return null;
               }
             };
+            // apps/api Test is sharded, so its logs are test-1.log..test-N.log
+            // rather than a single test.log. Every other check has one <key>.log.
+            const logFilesFor = (key) => {
+              if (key !== "test") return [`${key}.log`];
+              try {
+                return fs.readdirSync("logs")
+                  .filter((f) => /^test-\d+\.log$/.test(f))
+                  .sort();
+              } catch {
+                return [];
+              }
+            };
             for (const [label, key, res] of coreChecks) {
               if (res === "failure") {
-                const tail = readTail(`${key}.log`);
-                if (tail) {
-                  body += `<details><summary>❌ ${label} — last 50 lines</summary>\n\n\`\`\`\n${tail}\n\`\`\`\n\n</details>\n\n`;
+                for (const file of logFilesFor(key)) {
+                  const tail = readTail(file);
+                  if (tail) {
+                    body += `<details><summary>❌ ${label} (${file}) — last 50 lines</summary>\n\n\`\`\`\n${tail}\n\`\`\`\n\n</details>\n\n`;
+                  }
                 }
               }
             }
