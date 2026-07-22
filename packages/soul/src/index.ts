@@ -13,6 +13,27 @@ export {
   SoulChangesetValidationError,
   validateSoulChangeset,
 } from "./changeset";
+export type {
+  CommitActor,
+  CommitApproval,
+  CommitSchemaRef,
+  CommitSignature,
+  CommitSigner,
+  SignedCommitMetadata,
+} from "./commit-signing";
+export {
+  buildCommitMessage,
+  buildCommitSigningPayload,
+  CommitSigningError,
+  createHmacCommitSigner,
+  verifyCommitSignature,
+} from "./commit-signing";
+export type {
+  SoulCommitRequest,
+  SoulCommitResult,
+  SoulGitStoreErrorCode,
+} from "./git-store";
+export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
