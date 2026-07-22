@@ -19,8 +19,8 @@ Detailed contracts:
 | ADR-001 | One deployment represents one business; every persisted object carries `business_id` | Keeps current product scope while making isolation explicit and future-safe | `packages/storage` |
 | ADR-002 | TulipFarm remains a TypeScript pnpm monorepo with modular applications and packages | Preserves current tooling while separating API, durable work, Integrations, and UI | Architecture rules |
 | ADR-003 | PostgreSQL is the correctness core | Transactions, constraints, leases, inbox/outbox, and recovery must work without optional infrastructure | `packages/storage` |
-| ADR-004 | Every Chat turn and automation is one durable Run with durable StepRuns | One state, recovery, policy, and audit model replaces special chat/schedule/webhook engines | `packages/run-kernel` |
-| ADR-005 | Step outputs are immutable typed Artifacts referenced by later inputs | Enables replayable lineage, validation, and safe concurrency; forbids mutable global context | `packages/run-kernel` |
+| ADR-004 | Every Chat turn and automation is one durable Run with durable States | One state, recovery, policy, and audit model replaces special chat/schedule/webhook engines | `packages/run-kernel` |
+| ADR-005 | State outputs are immutable typed Artifacts referenced by later inputs | Enables replayable lineage, validation, and safe concurrency; forbids mutable global context | `packages/run-kernel` |
 | ADR-006 | Delivery is at least once with stable effect identities and reconciliation | External exactly-once claims are dishonest; ambiguous dispatch is explicit and never blindly retried | `packages/tool-broker` |
 | ADR-007 | Every authored write uses one Soul changeset and publication gateway | UI, API, Agent, import, migration, MCP, and discovery paths cannot bypass validation/policy/audit | `packages/soul` |
 | ADR-008 | Runs pin immutable published bundles by content digest | Runtime does not need live Git and survives deploys; current security revocations still re-evaluate | `packages/soul` |

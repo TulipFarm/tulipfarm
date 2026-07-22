@@ -23,6 +23,7 @@ const full = {
   spec: {
     owner: "user_01",
     maintainers: ["user_02"],
+    instructions: { path: "instructions.md" },
     personality: "Helpful and precise.",
     roles: ["agent-operator"],
     permissionCeiling: { grants: ["read-tickets"], maxRiskClass: "medium" },
@@ -45,6 +46,7 @@ const minimal = {
   metadata,
   spec: {
     owner: "user_01",
+    instructions: { path: "instructions.md" },
     modelProfile: "sol-high",
     autonomy: "answer_only",
     trustTier: "first_party",

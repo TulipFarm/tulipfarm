@@ -8,6 +8,7 @@
       "!**/build",
       "!**/.next",
       "!**/out",
+      "!**/coverage",
       "!**/.source",
       "!**/next-env.d.ts",
       "!**/.turbo",

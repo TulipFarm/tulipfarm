@@ -27,7 +27,7 @@ const minimal = {
   apiVersion: DEFINITION_API_VERSION,
   kind: "Skill",
   metadata,
-  spec: { trustTier: "third_party" },
+  spec: { instructions: { path: "SKILL.md" }, trustTier: "third_party" },
 };
 
 const full = {
@@ -35,6 +35,7 @@ const full = {
   kind: "Skill",
   metadata,
   spec: {
+    instructions: { path: "SKILL.md" },
     references: ["docs/triage.md"],
     templates: ["reply.hbs"],
     examples: ["example-1.md"],
@@ -56,7 +57,7 @@ describe("Skill definition schema", () => {
     expect(() => registry().validate(full)).not.toThrow();
   });
 
-  it("validates a minimal Skill with only a trust tier", () => {
+  it("validates a minimal Skill with instructions and a trust tier", () => {
     expect(() => registry().validate(minimal)).not.toThrow();
   });
 
@@ -79,7 +80,7 @@ describe("Skill definition schema", () => {
   });
 
   it("rejects an unknown trust tier", () => {
-    const doc = { ...minimal, spec: { trustTier: "internal" } };
+    const doc = { ...minimal, spec: { ...minimal.spec, trustTier: "internal" } };
     expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
   });
 

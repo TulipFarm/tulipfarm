@@ -61,7 +61,7 @@ contract; they do not reimplement its decisions.
 | Identity and authorization | `packages/authz` | Principals, roles, grants, authority intersection, policy evidence |
 | Audit and lineage | `packages/audit` | Audit events, hash chains, sealing, retention, cryptographic erasure evidence, export, lineage queries |
 | Credentials and secret resolution | `packages/secrets` | Envelope crypto, Secret Broker, leases, rotation, revocation |
-| Durable orchestration | `packages/run-kernel` | Run and StepRun states, attempts, waits, leases, retries, child Runs |
+| Durable orchestration | `packages/run-kernel` | Run and State state machines, attempts, waits, leases, retries, child Runs |
 | Tool effects and approvals | `packages/tool-broker` | Catalog and intent/effect orchestration that consumes authorization decisions, credential leases, audit appends, exact approvals, and reconciliation |
 | Agent and model behavior | `packages/agent-runtime` | Context assembly, model profiles, bounded Tool loop, budgets, delegation |
 | Knowledge authorization | `packages/knowledge` | Source ACL ingestion, retrieval, provenance, invalidation, deletion |
@@ -98,8 +98,8 @@ add stricter checks but cannot bypass or broaden the owner's decision.
 | I-04 | Skills instruct but never grant Tools | `packages/authz` | Tool exposure and every Tool intent require independent grants; Skill metadata is not authority |
 | I-05 | Every authored write uses one Soul changeset gateway | `packages/soul` | No public Git/file write API; every proposal records validation, policy, approval, and audit IDs |
 | I-06 | Runtime uses an immutable published digest without live Git | `packages/soul` | Bundle activation is content-addressed; Runs pin a digest; publication failure keeps prior active |
-| I-07 | Every Chat turn and automation is a durable Run | `packages/run-kernel` | Public commands persist Run/StepRun plus outbox before dispatch; no in-process-only execution path |
-| I-08 | Step outputs are immutable typed values | `packages/run-kernel` | AJV-valid Artifact references are append-only; later inputs name prior outputs explicitly |
+| I-07 | Every Chat turn and automation is a durable Run | `packages/run-kernel` | Public commands persist Run/State plus outbox before dispatch; no in-process-only execution path |
+| I-08 | State outputs are immutable typed values | `packages/run-kernel` | AJV-valid Artifact references are append-only; later inputs name prior outputs explicitly |
 | I-09 | Every side effect is idempotent and durably recorded | `packages/tool-broker` | Stable effect identity is persisted before dispatch; ambiguous results reconcile instead of retry |
 | I-10 | Secrets remain opaque until authorized Tool dispatch | `packages/secrets` | Secret Broker leases current credentials after authorization; plaintext never enters Soul/prompts |
 | I-11 | Knowledge authorization precedes ranking and return | `packages/knowledge` | ACL filter/live check runs before candidates; stale, revoked, or unverifiable access denies |
@@ -128,7 +128,7 @@ Every owning boundary must cover these cases in contract or state-machine tests 
 
 - Boundary errors use a versioned envelope: stable code, safe message, correlation ID,
   retryability, and optional field issues. Stack traces and provider payloads stay internal.
-- Structured logs carry request, event, Run, StepRun, effect, Integration, and audit correlation
+- Structured logs carry request, event, Run, State, effect, Integration, and audit correlation
   IDs. They never contain secret plaintext, protected Artifact contents, prompts, or raw webhook
   bodies.
 - Audit evidence records actor/effective principal, action, resource, allow/deny reason, relevant
@@ -151,7 +151,7 @@ the current API or trust boundary is preserved.
 | `packages/soul/src/soul-loader.ts` | Replace boundary | Fail-open loading cannot be publication authority; runtime consumes an active immutable digest |
 | `packages/routine-engine` | Adapt concepts; replace engine | Keep useful outcomes/snapshots; move to durable `packages/run-kernel` with immutable outputs |
 | `apps/api/src/routines/driver.ts` | Adapt patterns | Preserve CAS, persist-first, journal, wake, timeout, and approval ideas in `packages/run-kernel` |
-| `apps/api/src/routines/repo.ts` | Replace | Mutable context/status model becomes Runs, StepRuns, attempts, waits, and effects |
+| `apps/api/src/routines/repo.ts` | Replace | Mutable context/status model becomes Runs, States, attempts, waits, and effects |
 | `apps/api/src/chat/turn.ts` | Adapt ergonomics; replace execution | Keep streaming, Skills, models, and compaction behavior inside durable Agent steps |
 | `apps/api/src/tools/registry.ts` | Adapt validation; replace authority | Keep AJV/timeouts; all Tool discovery and calls move through `packages/tool-broker` |
 | `apps/api/src/chat/approvals.ts` | Replace | Process-local pending decisions become durable exact-intent approvals |

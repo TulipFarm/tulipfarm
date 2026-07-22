@@ -6,6 +6,7 @@ import {
   type DefinitionTrustTier,
   definitionRegistration,
   definitionSchema,
+  instructionsReferenceSchema,
   MEMORY_SCOPES,
   type MemoryScope,
   refListSchema,
@@ -40,10 +41,11 @@ const agentLimitsSchema = {
 const agentSpecSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["owner", "modelProfile", "autonomy", "trustTier"],
+  required: ["owner", "instructions", "modelProfile", "autonomy", "trustTier"],
   properties: {
     owner: { type: "string", minLength: 1, maxLength: 256 },
     maintainers: refListSchema,
+    instructions: instructionsReferenceSchema,
     personality: { type: "string", maxLength: 8192 },
     // Assigned Agent roles and the permission ceiling that bounds effective authority.
     roles: refListSchema,
@@ -88,6 +90,7 @@ export const AGENT_DEFINITION = definitionRegistration(KIND, AgentDefinitionSche
 export interface AgentSpec {
   owner: string;
   maintainers?: string[];
+  instructions: { path: string };
   personality?: string;
   roles?: string[];
   permissionCeiling?: {

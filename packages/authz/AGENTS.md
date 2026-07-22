@@ -1,8 +1,9 @@
 # Authz — Agent Conventions
 
 `@tulipfarm/authz` — principals, custom roles, AccessGrants, field/destination/data/audience
-guardrails, and authority-intersection decision evidence. **Scaffold today:** `src/index.ts` is
-`export {}`. tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for
+guardrails, and authority-intersection decision evidence. **Today:** `src/ports/identity.ts`
+defines the provider-neutral external identity resolution boundary. tsconfig extends
+`@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for
 commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/observability`. See

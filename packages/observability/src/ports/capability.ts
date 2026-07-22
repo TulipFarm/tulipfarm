@@ -17,9 +17,8 @@
  * This catalog enumerates capability *ids* only. The port interfaces live with
  * their owning packages: transactions/blob/vector/cache/queue in
  * `@tulipfarm/storage`, KMS in `@tulipfarm/secrets`, sandbox in
- * `@tulipfarm/sandbox`, telemetry here. The `identity` and `model` ports are
- * owned by their downstream domain packages; only their capability classification
- * is fixed here.
+ * `@tulipfarm/sandbox`, identity in `@tulipfarm/authz`, model in
+ * `@tulipfarm/agent-runtime`, and telemetry here.
  */
 
 export const CAPABILITY_IDS = [

@@ -4,12 +4,30 @@ import { SchemaRegistry } from "../registry";
 import { DEFINITION_API_VERSION, DEFINITION_KINDS, DEFINITION_REGISTRATIONS } from "./index";
 
 describe("Authored definition registry integration", () => {
-  it("registers all four canonical kinds in one registry without collision", () => {
+  it("registers every canonical authored kind in one registry without collision", () => {
     expect(() => new SchemaRegistry(DEFINITION_REGISTRATIONS)).not.toThrow();
   });
 
-  it("exposes exactly the Agent, Skill, ToolContract, and ModelProfile kinds", () => {
-    expect([...DEFINITION_KINDS]).toEqual(["Agent", "Skill", "ToolContract", "ModelProfile"]);
+  it("exposes every authored definition kind through the public registry", () => {
+    expect([...DEFINITION_KINDS]).toEqual([
+      "Agent",
+      "Skill",
+      "ToolContract",
+      "ModelProfile",
+      "Routine",
+      "Trigger",
+      "Role",
+      "Guardrail",
+      "Settings",
+      "IntegrationAdapter",
+      "App",
+      "Integration",
+      "AccessGrant",
+      "KnowledgeSource",
+      "MemorySettings",
+      "Form",
+      "A2UITemplate",
+    ]);
     expect(DEFINITION_REGISTRATIONS.map((r) => r.kind)).toEqual([...DEFINITION_KINDS]);
   });
 

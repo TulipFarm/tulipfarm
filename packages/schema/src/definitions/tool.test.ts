@@ -83,6 +83,11 @@ describe("ToolContract definition schema", () => {
     expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
   });
 
+  it("rejects a mutating Tool without an idempotency or reconciliation strategy", () => {
+    const doc = { ...minimal, spec: { ...minimal.spec, idempotency: { strategy: "none" } } };
+    expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
+  });
+
   it("rejects a partial retry policy", () => {
     const doc = { ...minimal, spec: { ...minimal.spec, retry: { maxAttempts: 1 } } };
     expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
