@@ -5,8 +5,8 @@ import { vector } from "@electric-sql/pglite-pgvector";
 
 /**
  * In-process Postgres (WASM) for real-SQL migration/repo tests, loaded with the
- * `vector` + `citext` extensions that `001_init` requires, plus `pg_trgm` for the
- * trigram typo-tolerance recall pass (migration 017). The returned instance
+ * `vector` + `citext` extensions that the greenfield baseline requires, plus `pg_trgm` for the
+ * trigram typo-tolerance recall pass (greenfield baseline). The returned instance
  * satisfies `Queryable`, so it drops straight into `runPgMigrations` and the repos.
  */
 export function makePglite(): Promise<PGlite> {

@@ -683,6 +683,18 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
 
+  packages/testkit:
+    devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
+      '@tulipfarm/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+
   packages/tool-broker:
     devDependencies:
       '@tulipfarm/tsconfig':
