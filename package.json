@@ -7,6 +7,9 @@
     "url": "https://github.com/TulipFarm/tulipfarm.git"
   },
   "packageManager": "pnpm@11.5.3",
+  "engines": {
+    "node": "26.5.0"
+  },
   "scripts": {
     "build": "turbo build",
     "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web",
