@@ -15,6 +15,9 @@ export {
 } from "./changeset";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
+export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
+export { SoulSemanticValidationError } from "./refs";
+export { validateSoulSemantics } from "./semantic";
 export { SoulLoader } from "./soul-loader";
 export { runSoulMigrations } from "./soul-migrations";
 export type {
