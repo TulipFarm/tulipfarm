@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { definitions } from "../index";
 import { SchemaRegistry } from "../registry";
 import { DEFINITION_API_VERSION, DEFINITION_KINDS, DEFINITION_REGISTRATIONS } from "./index";
 
@@ -40,5 +41,16 @@ describe("Authored definition registry integration", () => {
     const first = new SchemaRegistry(DEFINITION_REGISTRATIONS).validate(doc);
     const second = new SchemaRegistry(DEFINITION_REGISTRATIONS).validate(doc);
     expect(first.hash).toBe(second.hash);
+  });
+});
+
+describe("definitions namespace", () => {
+  it("exposes the routine, trigger, and event validators without colliding with legacy exports", () => {
+    expect(typeof definitions.routine.validateRoutineDefinition).toBe("function");
+    expect(typeof definitions.trigger.validateTriggerDefinition).toBe("function");
+    expect(typeof definitions.event.validateEventEnvelope).toBe("function");
+    expect(definitions.routine.ROUTINE_STATE_TYPES).toContain("agent");
+    expect(definitions.trigger.TRIGGER_TYPES).toContain("webhook");
+    expect(definitions.event.EVENT_VERIFICATION_STATUSES).toContain("verified");
   });
 });

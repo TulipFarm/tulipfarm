@@ -5,6 +5,7 @@ export type { ValidationBoundary } from "./boundaries";
 export { BOUNDARIES } from "./boundaries";
 export { CANONICAL_HASH_ALGORITHM, canonicalHash, canonicalize } from "./canonicalize";
 export * from "./definitions";
+export * as definitions from "./definitions";
 export { TulipFarmValidationError } from "./error";
 export type { SchemaContractErrorCode, SchemaValidationIssue } from "./errors";
 export {
