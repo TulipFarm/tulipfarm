@@ -189,3 +189,17 @@ curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens?limit=2&cursor=
 - Never `git commit` unless explicitly asked.
 - Work on the current branch.
 - PR titles must follow Conventional Commits (CI-enforced): `type(scope): subject` — type ∈ `feat|fix|chore|docs|refactor|perf|test|build|ci|style|revert` (e.g. `feat(approvals): add live badge`).
+
+### Commit message convention
+
+- Follow Conventional Commits: `type(scope): subject` — same type set as PR titles.
+- Subject: imperative mood, no trailing period, under ~72 chars.
+- Body (optional): explain *why*, not what — the diff already shows what changed.
+- One logical change per commit; don't bundle unrelated fixes.
+
+### PR description guidelines
+
+- Title: Conventional Commits format, matches the commit convention above.
+- Summary: 1-3 bullets on what changed and why — link the driving issue/ticket if one exists.
+- Test plan: bulleted checklist of how the change was verified (commands run, manual steps, screenshots for UI).
+- Keep it scoped to the diff — no unrelated context dumps.
