@@ -37,7 +37,7 @@ which threads the service into `registerChatRoutes`. The chat turn (`chat/turn.t
 `buildMemoryToolSet(ctx)` as `streamText` `tools` and persists tool-call/tool-result steps via
 `onStepFinish`. Tools are scoped to the authenticated user (`user._id`).
 
-Schema migration: `migrations/index.ts` v6 creates the unique `{userId,key}` index plus
+The greenfield baseline in `pg-migrations/index.ts` creates the unique `{userId,key}` index plus
 `{userId,lastWrittenAt}` for per-user LRU listing.
 
 ## Out of scope (here)

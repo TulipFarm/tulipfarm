@@ -41,11 +41,11 @@ The caller never names scope/owner — it is derived from identity, so isolation
 
 ## Wiring
 
-Migration v9 (`pg-migrations/index.ts`) creates the table. `index.ts` constructs
+The greenfield baseline (`pg-migrations/index.ts`) creates the table. `index.ts` constructs
 `new KvService(new PgKvRepo(pool))` and threads it into `buildToolRegistry` (agent tools) and
 `buildApp` (HTTP routes). `tools/setup.ts` registers `KV_TOOLS` with `ctx.agentId` as the owner.
 
 ## Tests
 
-`repo.pg.test.ts` (PGlite), `service.test.ts` + `tools.test.ts` (in-memory fakes), `routes.test.ts`
-(Fastify inject + PGlite). KV-specific migration assertions live in `../pg-migrate.test.ts`.
+`repo.pg.test.ts` (PGlite), `service.test.ts` + `tools.test.ts` (in-memory fakes), and
+`routes.test.ts` (Fastify inject + PGlite).

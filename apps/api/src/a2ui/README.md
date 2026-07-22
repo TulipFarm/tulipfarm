@@ -35,7 +35,8 @@ iframe runtime swaps them by `data-a2ui-id` in place (no rebuild). Legacy view t
 ## Status
 
 Phases 1 (declarative contract + render pipeline), 2 (HITL suspend/resume via `ask_user` +
-`chat/pending-interactions.ts` + migration v8), 3 (frontend tools — `platform/frontend-tools.ts`), and
+`chat/pending-interactions.ts` + greenfield baseline), 3 (frontend tools —
+`platform/frontend-tools.ts`), and
 the **live-ops layer** (`update_surface` + `surface-store.ts` + the leaf-diff in `chat/a2ui-surface.ts`)
 are built and tested. Containers (Card/Row/Column/Grid) carry no bound props, so a binding change always
 lands on a leaf — swapping that leaf updates its ancestors' DOM too, which is why only leaves are diffed.

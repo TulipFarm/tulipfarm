@@ -36,7 +36,7 @@ export interface UserRepo {
 
 /**
  * Thrown by `insert()` when a second admin row would violate the single-admin database
- * invariant (`users_single_admin_idx`, migration v25) — the concurrency-safe replacement
+ * invariant (`users_single_admin_idx`, greenfield baseline) — the concurrency-safe replacement
  * for the old check-then-insert `count() === 0` race in setup/routes.ts (#172).
  */
 export class AdminAlreadyExistsError extends Error {
