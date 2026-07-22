@@ -21,6 +21,7 @@ export {
 } from "./key-manager";
 export type { EncryptionKeys } from "./keys";
 export { loadEncryptionKeys } from "./keys";
+export type { KmsPort, MasterKeyRef, WrappedKey } from "./ports";
 export type { LlmProviderId, LlmProviderInfo, ProviderField, ProviderFieldRole } from "./registry";
 export {
   isProviderConfigured,
