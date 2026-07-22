@@ -3,7 +3,19 @@ export { AUTONOMY_VALUES, validateAgentFrontmatter } from "./agent";
 export { ajv } from "./ajv";
 export type { ValidationBoundary } from "./boundaries";
 export { BOUNDARIES } from "./boundaries";
+export { CANONICAL_HASH_ALGORITHM, canonicalHash, canonicalize } from "./canonicalize";
 export { TulipFarmValidationError } from "./error";
+export type { SchemaContractErrorCode, SchemaValidationIssue } from "./errors";
+export {
+  CanonicalizationError,
+  DuplicateSchemaError,
+  InvalidDiscriminatorError,
+  InvalidSchemaError,
+  SchemaContractError,
+  SchemaValidationError,
+  UnknownSchemaError,
+  YamlParseError,
+} from "./errors";
 export type {
   ContentFilterConfig,
   GuardrailsConfig,
@@ -28,6 +40,12 @@ export {
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
+export type {
+  SchemaRegistration,
+  ValidatedSchemaDocument,
+  VersionedSchemaDocument,
+} from "./registry";
+export { parseYamlDocument, SchemaRegistry } from "./registry";
 export type {
   RoutineAction,
   RoutineDefinition,
