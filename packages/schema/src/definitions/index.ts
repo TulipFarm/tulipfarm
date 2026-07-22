@@ -42,3 +42,7 @@ export const DEFINITION_REGISTRATIONS: readonly SchemaRegistration[] = [
 /** Canonical `kind` discriminators owned by AW-008. */
 export const DEFINITION_KINDS = ["Agent", "Skill", "ToolContract", "ModelProfile"] as const;
 export type DefinitionKind = (typeof DEFINITION_KINDS)[number];
+
+export * as event from "./event";
+export * as routine from "./routine";
+export * as trigger from "./trigger";
