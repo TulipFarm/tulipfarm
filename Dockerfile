@@ -7,7 +7,7 @@
 # pnpm deploy) ships — the dev toolchain (vite/remix/turbo/typescript/biome/
 # vitest/esbuild) is left in the build stage.
 
-FROM node:24-slim AS builder
+FROM node:26.5.0-slim AS builder
 WORKDIR /app
 ENV CI=true
 # Build toolchain for native deps (isolated-vm, @node-rs/argon2). git: the root
@@ -33,17 +33,17 @@ RUN VITE_API_URL="" pnpm --filter @tulipfarm/web build
 # (pg-boss) are externalized too — they live in the prod node_modules closure.
 RUN TF_VERSION=$(node -p "require('./package.json').version") \
   && pnpm --filter @tulipfarm/api exec esbuild src/index.ts \
-  --bundle --platform=node --target=node24 --format=cjs --outfile=dist/server.cjs \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/server.cjs \
   --define:__TULIPFARM_VERSION__="\"$TF_VERSION\"" \
   --external:isolated-vm --external:@node-rs/argon2 --external:pg --external:pg-boss \
   --external:@scalar/fastify-api-reference \
   && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
-  --bundle --platform=node --target=node24 --format=cjs --outfile=dist/hook-worker.cjs \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/hook-worker.cjs \
   --external:isolated-vm --external:pg
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
-FROM node:24-slim AS runtime
+FROM node:26.5.0-slim AS runtime
 # git: soul backup/sync shells out to it. ca-certificates: git clones soul
 # remotes over https; --no-install-recommends skips it, so name it explicitly.
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
@@ -61,7 +61,7 @@ COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 RUN mkdir -p /opt/tulipfarm/soul
 # Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
-# node:24-slim ships a `node` user; give it the app + soul dirs it writes to.
+# node:26.5.0-slim ships a `node` user; give it the app + soul dirs it writes to.
 RUN chown -R node:node /app /opt/tulipfarm
 USER node
 EXPOSE 8080

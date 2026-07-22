@@ -11,7 +11,7 @@ Guidance for AI coding agents working in this repo. Read before editing.
 
 TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 
-- **Node**: see `.node-version` · **Package manager**: `pnpm@11.5.3` (never use npm/yarn)
+- **Node**: `26.5.0` (see `.node-version`) · **Package manager**: `pnpm@11.5.3` (never use npm/yarn)
 - **Workspaces**: `apps/*`, `packages/*`
 
 ## Layout
