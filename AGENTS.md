@@ -56,13 +56,20 @@ Single workspace: `pnpm --filter @tulipfarm/api <script>`.
 
 ## Before marking work done
 
-Run all three — CI runs the same and blocks merge:
+For changes that affect code or build inputs, run all three — CI runs the same and blocks merge:
 
 ```bash
 pnpm lint && pnpm typecheck && pnpm test
 ```
 
 Tests use **Vitest** (`*.test.ts` colocated with source). `pnpm test` passes with no tests (`--passWithNoTests`).
+
+### Documentation-only changes
+
+When the diff contains only documentation, do not run `pnpm lint`, `pnpm typecheck`, `pnpm test`,
+or `pnpm build`. Run only targeted documentation checks needed for the changed files, such as link,
+formatting, example, or task-specific contract checks. Explicit task instructions override this
+exception.
 
 ## Lint / format — Biome (read this to avoid churn)
 

@@ -48,9 +48,10 @@ export class HookExecutor {
 
     // Wrap raw worker errors as HookError so callers can handle them uniformly.
     // Also record the error so future send() calls reject immediately instead of hanging.
-    this.worker.on("error", (err) => {
-      this.workerError = err;
-      const hookErr = new HookError(`hook worker error: ${err.message}`);
+    this.worker.on("error", (err: unknown) => {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.workerError = error;
+      const hookErr = new HookError(`hook worker error: ${error.message}`);
       for (const [id, p] of this.pending) {
         p.reject(hookErr);
         this.pending.delete(id);

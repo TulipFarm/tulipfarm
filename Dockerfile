@@ -14,7 +14,8 @@ ENV CI=true
 # `prepare` lifecycle script runs `lefthook install`, which shells out to git.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git \
   && rm -rf /var/lib/apt/lists/*
-RUN corepack enable
+# node:*-slim no longer bundles corepack by default; install it explicitly.
+RUN npm install -g corepack@latest && corepack enable
 COPY . .
 # The root `prepare` lifecycle script runs `lefthook install`, which shells out to
 # git and needs a repo — but `.git` is dockerignored. A throwaway repo (builder stage
