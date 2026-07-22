@@ -14,7 +14,7 @@ ENV CI=true
 # `prepare` lifecycle script runs `lefthook install`, which shells out to git.
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ git \
   && rm -rf /var/lib/apt/lists/*
-# Node 24-slim no longer bundles corepack by default; install it explicitly.
+# node:*-slim no longer bundles corepack by default; install it explicitly.
 RUN npm install -g corepack@latest && corepack enable
 COPY . .
 # The root `prepare` lifecycle script runs `lefthook install`, which shells out to
