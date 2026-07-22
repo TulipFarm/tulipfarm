@@ -147,7 +147,7 @@ describe("validateSoulChangeset", () => {
     );
   });
 
-  it.each([
+  it.each<readonly [string, Partial<SoulChangeset>, string]>([
     ["empty set", { files: [] }, "EMPTY_CHANGESET"],
     [
       "duplicate path",
