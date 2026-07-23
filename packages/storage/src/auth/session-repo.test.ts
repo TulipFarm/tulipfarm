@@ -14,8 +14,9 @@ function record(overrides: Partial<SessionRecord> = {}): SessionRecord {
 describe("InMemorySessionRepo", () => {
   it("round-trips a created session by sid", async () => {
     const repo = new InMemorySessionRepo();
-    await repo.create(record());
-    await expect(repo.get("sid-1")).resolves.toEqual(record());
+    const stored = record();
+    await repo.create(stored);
+    await expect(repo.get("sid-1")).resolves.toEqual(stored);
   });
 
   it("returns undefined once the session has expired", async () => {
