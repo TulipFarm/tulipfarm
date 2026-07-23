@@ -47,6 +47,17 @@ export {
 export type { BundleCompileRequest } from "./compiler";
 export { compileExecutionBundle } from "./compiler";
 export type {
+  ConversionResult,
+  ConversionWarning,
+  ConversionWarningCode,
+  LegacyDefinitionBatch,
+} from "./converters/legacy-definitions";
+export {
+  convertLegacyAgent,
+  convertLegacyDefinitions,
+  convertLegacySkill,
+} from "./converters/legacy-definitions";
+export type {
   SoulCommitRequest,
   SoulCommitResult,
   SoulGitStoreErrorCode,
