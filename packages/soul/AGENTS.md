@@ -18,6 +18,11 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
   immutable execution bundles: exact-version resolution, canonical digest, signature, and the
   Git-free `RuntimeBundle` workers execute against. `InMemoryBundleStore` implements the
   content-addressed `BundleStore` port.
+- **`SoulPublicationCoordinator`** — projects a signed bundle through the outbox and activates one
+  digest only after every stage (`committed → projected → stored → active`) committed. `publish()`
+  records + enqueues, `drain()` is the durable job (resumes at the recorded stage after a crash),
+  `activeDigest()`/`activeBundle()` are the runtime read side, `rebuildProjection()` recompiles the
+  authored projection from Git. Persistence is `@tulipfarm/storage`'s `SoulPublicationStore`.
 - **`runSoulMigrations()`** + type `SoulMigration`.
 - Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
 

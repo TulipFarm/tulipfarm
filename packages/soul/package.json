@@ -11,6 +11,7 @@
   "dependencies": {
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
     "simple-git": "^3.36.0",
     "yaml": "^2.9.0"
   },

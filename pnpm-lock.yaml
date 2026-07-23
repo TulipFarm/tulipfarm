@@ -657,6 +657,9 @@ importers:
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
       simple-git:
         specifier: ^3.36.0
         version: 3.36.0
