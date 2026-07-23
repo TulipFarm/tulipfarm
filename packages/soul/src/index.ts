@@ -54,6 +54,17 @@ export type {
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
+export type {
+  SoulPublicationErrorCode,
+  SoulPublicationOutcome,
+  SoulPublishRequest,
+  SoulTreeReader,
+} from "./publication";
+export {
+  SOUL_PUBLICATION_TOPIC,
+  SoulPublicationCoordinator,
+  SoulPublicationError,
+} from "./publication";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
 export { validateSoulSemantics } from "./semantic";
