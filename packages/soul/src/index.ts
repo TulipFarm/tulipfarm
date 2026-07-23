@@ -1,4 +1,20 @@
 export type {
+  BundleDefinition,
+  BundleErrorCode,
+  BundleSignature,
+  BundleStore,
+  ExecutionBundle,
+  ResolvedReference,
+  RuntimeBundle,
+  SignedExecutionBundle,
+} from "./bundle";
+export {
+  BundleError,
+  computeBundleDigest,
+  EXECUTION_BUNDLE_VERSION,
+  InMemoryBundleStore,
+} from "./bundle";
+export type {
   SoulChangeset,
   SoulChangesetErrorCode,
   SoulChangesetSource,
@@ -28,6 +44,8 @@ export {
   createHmacCommitSigner,
   verifyCommitSignature,
 } from "./commit-signing";
+export type { BundleCompileRequest } from "./compiler";
+export { compileExecutionBundle } from "./compiler";
 export type {
   SoulCommitRequest,
   SoulCommitResult,
@@ -39,6 +57,13 @@ export type { SoulMigration } from "./migrations/index";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
 export { validateSoulSemantics } from "./semantic";
+export type { BundleSigner } from "./signatures";
+export {
+  buildBundleSigningPayload,
+  createHmacBundleSigner,
+  signExecutionBundle,
+  verifyExecutionBundle,
+} from "./signatures";
 export { SoulLoader } from "./soul-loader";
 export { runSoulMigrations } from "./soul-migrations";
 export type {

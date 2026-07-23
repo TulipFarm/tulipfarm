@@ -14,6 +14,10 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
   `guardrailsConfig`, `manifest` (the full parsed `soul.yaml`).
 - **`GitSyncService`** — `bootSync`, `pull`, `commit`, `push`, `withSync(message)` (commit +
   best-effort push around a write — used by the API's soul-backed tools), periodic sync.
+- **`compileExecutionBundle()`** / **`signExecutionBundle()`** / **`verifyExecutionBundle()`** —
+  immutable execution bundles: exact-version resolution, canonical digest, signature, and the
+  Git-free `RuntimeBundle` workers execute against. `InMemoryBundleStore` implements the
+  content-addressed `BundleStore` port.
 - **`runSoulMigrations()`** + type `SoulMigration`.
 - Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
 
