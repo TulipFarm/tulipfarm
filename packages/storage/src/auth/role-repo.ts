@@ -38,11 +38,15 @@ export interface RoleAssignmentRecord {
 }
 
 export interface RoleRepo {
-  getRole(id: string): Promise<RoleRecord | undefined>;
+  getRole(businessId: string, id: string): Promise<RoleRecord | undefined>;
   putRole(record: RoleRecord): Promise<void>;
   assign(record: RoleAssignmentRecord): Promise<void>;
   /** Only unexpired assignments, even if expired rows have not been reaped yet. */
-  listAssignments(principalId: string): Promise<RoleAssignmentRecord[]>;
+  listAssignments(
+    businessId: string,
+    principalId: string,
+    now: Date
+  ): Promise<RoleAssignmentRecord[]>;
 }
 
 /**
@@ -53,22 +57,32 @@ export class InMemoryRoleRepo implements RoleRepo {
   private readonly roles = new Map<string, RoleRecord>();
   private readonly assignments: RoleAssignmentRecord[] = [];
 
-  async getRole(id: string): Promise<RoleRecord | undefined> {
-    return this.roles.get(id);
+  private roleKey(businessId: string, id: string): string {
+    return JSON.stringify([businessId, id]);
+  }
+
+  async getRole(businessId: string, id: string): Promise<RoleRecord | undefined> {
+    return this.roles.get(this.roleKey(businessId, id));
   }
 
   async putRole(record: RoleRecord): Promise<void> {
-    this.roles.set(record.id, Object.freeze({ ...record }));
+    this.roles.set(this.roleKey(record.businessId, record.id), Object.freeze({ ...record }));
   }
 
   async assign(record: RoleAssignmentRecord): Promise<void> {
     this.assignments.push(Object.freeze({ ...record }));
   }
 
-  async listAssignments(principalId: string): Promise<RoleAssignmentRecord[]> {
-    const now = new Date();
+  async listAssignments(
+    businessId: string,
+    principalId: string,
+    now: Date
+  ): Promise<RoleAssignmentRecord[]> {
     return this.assignments.filter(
-      (a) => a.principalId === principalId && (!a.expiresAt || a.expiresAt > now)
+      (assignment) =>
+        assignment.businessId === businessId &&
+        assignment.principalId === principalId &&
+        (!assignment.expiresAt || assignment.expiresAt > now)
     );
   }
 }

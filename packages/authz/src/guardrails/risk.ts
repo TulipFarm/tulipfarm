@@ -1,13 +1,15 @@
 /**
  * Risk dimension orderings for Guardrail ceilings (SPEC §13). Taint tracks whether untrusted
- * input influenced the action; autonomy tracks how much human oversight the Run has. Both are
- * totally ordered so a ceiling check is deterministic: an actual level is within a ceiling only
- * when its rank does not exceed the ceiling's rank.
+ * input influenced the action; autonomy uses the canonical Agent autonomy ceilings from the
+ * authored schema. Both are totally ordered so a ceiling check is deterministic: an actual level
+ * is within a ceiling only when its rank does not exceed the ceiling's rank.
  */
+
+import type { AgentAutonomyCeiling } from "@tulipfarm/schema";
 
 export type TaintLevel = "trusted" | "untrusted";
 
-export type AutonomyLevel = "interactive" | "approved" | "autonomous";
+export type AutonomyLevel = AgentAutonomyCeiling;
 
 const TAINT_RANK: Readonly<Record<TaintLevel, number>> = {
   trusted: 0,
@@ -15,9 +17,10 @@ const TAINT_RANK: Readonly<Record<TaintLevel, number>> = {
 };
 
 const AUTONOMY_RANK: Readonly<Record<AutonomyLevel, number>> = {
-  interactive: 0,
-  approved: 1,
-  autonomous: 2,
+  answer_only: 0,
+  propose_actions: 1,
+  execute_low_risk: 2,
+  execute_policy_authorized: 3,
 };
 
 /** True when `actual` taint is at or below the `ceiling`. */

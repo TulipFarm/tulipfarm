@@ -17,20 +17,35 @@ describe("InMemoryGuestRepo", () => {
   it("round-trips a guest record and returns undefined for an unknown id", async () => {
     const repo = new InMemoryGuestRepo();
     await repo.put(guest());
-    await expect(repo.get("guest-1")).resolves.toEqual(guest());
-    await expect(repo.get("missing")).resolves.toBeUndefined();
+    await expect(repo.get("business-1", "guest-1")).resolves.toEqual(guest());
+    await expect(repo.get("business-1", "missing")).resolves.toBeUndefined();
   });
 
   it("revokes an existing guest without touching its other fields", async () => {
     const repo = new InMemoryGuestRepo();
     await repo.put(guest());
-    await repo.revoke("guest-1");
-    await expect(repo.get("guest-1")).resolves.toMatchObject({ status: "revoked" });
+    await repo.revoke("business-1", "guest-1");
+    await expect(repo.get("business-1", "guest-1")).resolves.toMatchObject({
+      status: "revoked",
+    });
   });
 
   it("revoking an unknown guest is a no-op", async () => {
     const repo = new InMemoryGuestRepo();
-    await expect(repo.revoke("missing")).resolves.toBeUndefined();
-    await expect(repo.get("missing")).resolves.toBeUndefined();
+    await expect(repo.revoke("business-1", "missing")).resolves.toBeUndefined();
+    await expect(repo.get("business-1", "missing")).resolves.toBeUndefined();
+  });
+
+  it("isolates the same guest principal id across businesses", async () => {
+    const repo = new InMemoryGuestRepo();
+    await repo.put(guest({ businessId: "business-1", sponsorPrincipalId: "sponsor-1" }));
+    await repo.put(guest({ businessId: "business-2", sponsorPrincipalId: "sponsor-2" }));
+
+    await expect(repo.get("business-1", "guest-1")).resolves.toMatchObject({
+      sponsorPrincipalId: "sponsor-1",
+    });
+    await expect(repo.get("business-2", "guest-1")).resolves.toMatchObject({
+      sponsorPrincipalId: "sponsor-2",
+    });
   });
 });

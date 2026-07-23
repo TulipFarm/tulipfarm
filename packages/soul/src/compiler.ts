@@ -142,6 +142,17 @@ function resolveEdge(
   if (ref.id !== undefined) {
     const byId = index.get(ref.id);
     if (byId?.kind !== edge.kind) throw unresolved(def, `${edge.field}/id`);
+    if (
+      ref.version !== "*" &&
+      ref.version !== "latest" &&
+      String(byId.authoredVersion) !== ref.version
+    ) {
+      throw new BundleError(
+        "VERSION_UNSATISFIED",
+        `Execution bundle: ${def.subject} requests a version the published tree does not contain`,
+        { subject: def.subject, field: `${edge.field}/version` }
+      );
+    }
     return toResolved(edge.field, byId);
   }
 

@@ -16,7 +16,11 @@ export interface JitGrantRequest {
   readonly justification: string;
 }
 
-export type JitDenialReason = "missing_expiry" | "business_mismatch" | "self_approval";
+export type JitDenialReason =
+  | "missing_expiry"
+  | "business_mismatch"
+  | "self_approval"
+  | "approver_inactive";
 
 export class JitDeniedError extends Error {
   constructor(
@@ -35,7 +39,7 @@ export class JitDeniedError extends Error {
  */
 export function assertJitGrantIssuable(
   request: JitGrantRequest,
-  approver: Pick<Principal, "id" | "businessId">,
+  approver: Pick<Principal, "id" | "businessId" | "status" | "expiresAt">,
   now: Date = new Date()
 ): void {
   if (!request.grant.expiresAt || request.grant.expiresAt <= now) {
@@ -46,6 +50,12 @@ export function assertJitGrantIssuable(
       "business_mismatch",
       "approver does not belong to the requesting principal's business"
     );
+  }
+  if (
+    approver.status !== "active" ||
+    (approver.expiresAt !== undefined && approver.expiresAt <= now)
+  ) {
+    throw new JitDeniedError("approver_inactive", "approver is not an active principal");
   }
   if (approver.id === request.principalId) {
     throw new JitDeniedError("self_approval", "a principal cannot approve its own JIT grant");

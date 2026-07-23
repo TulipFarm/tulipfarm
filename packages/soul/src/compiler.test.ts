@@ -117,6 +117,28 @@ describe("compileExecutionBundle", () => {
     expect(error.field).toBe("/spec/routineRef/version");
   });
 
+  it("rejects an ID-based reference whose version constraint does not match", () => {
+    const routineId = "11111111-1111-1111-1111-111111111111";
+    const error = failure(() =>
+      compileExecutionBundle(
+        request([
+          def(
+            "Routine",
+            "child",
+            { start: "s", states: [] },
+            { id: routineId, authoredVersion: 2 }
+          ),
+          def("Trigger", "t", {
+            routineRef: { id: routineId, name: "child", version: "1" },
+          }),
+        ])
+      )
+    );
+
+    expect(error.code).toBe("VERSION_UNSATISFIED");
+    expect(error.field).toBe("/spec/routineRef/version");
+  });
+
   it("rejects inline credential material instead of an opaque reference", () => {
     const error = failure(() =>
       compileExecutionBundle(

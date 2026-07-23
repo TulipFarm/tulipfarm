@@ -17,9 +17,9 @@ export interface GuestRecord {
 }
 
 export interface GuestRepo {
-  get(principalId: string): Promise<GuestRecord | undefined>;
+  get(businessId: string, principalId: string): Promise<GuestRecord | undefined>;
   put(record: GuestRecord): Promise<void>;
-  revoke(principalId: string): Promise<void>;
+  revoke(businessId: string, principalId: string): Promise<void>;
 }
 
 /**
@@ -29,17 +29,22 @@ export interface GuestRepo {
 export class InMemoryGuestRepo implements GuestRepo {
   private readonly records = new Map<string, GuestRecord>();
 
-  async get(principalId: string): Promise<GuestRecord | undefined> {
-    return this.records.get(principalId);
+  private key(businessId: string, principalId: string): string {
+    return JSON.stringify([businessId, principalId]);
+  }
+
+  async get(businessId: string, principalId: string): Promise<GuestRecord | undefined> {
+    return this.records.get(this.key(businessId, principalId));
   }
 
   async put(record: GuestRecord): Promise<void> {
-    this.records.set(record.principalId, Object.freeze({ ...record }));
+    this.records.set(this.key(record.businessId, record.principalId), Object.freeze({ ...record }));
   }
 
-  async revoke(principalId: string): Promise<void> {
-    const existing = this.records.get(principalId);
+  async revoke(businessId: string, principalId: string): Promise<void> {
+    const key = this.key(businessId, principalId);
+    const existing = this.records.get(key);
     if (!existing) return;
-    this.records.set(principalId, Object.freeze({ ...existing, status: "revoked" }));
+    this.records.set(key, Object.freeze({ ...existing, status: "revoked" }));
   }
 }

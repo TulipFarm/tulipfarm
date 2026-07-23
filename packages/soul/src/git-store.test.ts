@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+import { canonicalHash, canonicalize } from "@tulipfarm/schema";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { stringify } from "yaml";
 
 vi.mock("simple-git", () => ({ default: vi.fn() }));
 vi.mock("node:fs", () => ({
@@ -70,10 +73,29 @@ function makeSigner(overrides: Partial<CommitSigner> = {}): CommitSigner {
   return { keyId: "key-1", sign: vi.fn(() => "sigvalue"), ...overrides };
 }
 
+const AGENT_DOCUMENT = {
+  apiVersion: "tulipfarm.ai/v1",
+  kind: "Agent",
+  metadata: {
+    id: "11111111-1111-1111-1111-111111111111",
+    slug: "ada",
+    schemaVersion: 1,
+    authoredVersion: 1,
+    lifecycle: "draft",
+  },
+  spec: {
+    owner: "prin_1",
+    instructions: { path: "instructions.md" },
+    modelProfile: "sol-high",
+    autonomy: "answer_only",
+    trustTier: "first_party",
+  },
+};
+
 const UPSERT: SoulFileChange = {
   operation: "upsert",
   path: "agents/ada/agent.yaml",
-  content: "apiVersion: v1\nkind: Agent\n",
+  content: stringify(AGENT_DOCUMENT),
 };
 const DELETE: SoulFileChange = { operation: "delete", path: "routines/old.yaml" };
 
@@ -85,8 +107,18 @@ function makeValidated(overrides: Partial<ValidatedSoulChangeset> = {}): Validat
     source: "agent",
     expectedBaseCommit: BASE,
     files: [
-      { operation: "upsert", path: UPSERT.path, hash: "h1", apiVersion: "v1", kind: "Agent" },
-      { operation: "delete", path: DELETE.path, hash: "h2" },
+      {
+        operation: "upsert",
+        path: UPSERT.path,
+        hash: canonicalHash(AGENT_DOCUMENT),
+        apiVersion: "tulipfarm.ai/v1",
+        kind: "Agent",
+      },
+      {
+        operation: "delete",
+        path: DELETE.path,
+        hash: createHash("sha256").update(`delete\0${DELETE.path}`).digest("hex"),
+      },
     ],
     evidence: { outcome: "validated", fileCount: 2 },
     ...overrides,
@@ -168,8 +200,13 @@ describe("SoulGitStore.commitChangeset", () => {
     expect(mock.rawCalls.some((c) => c[0] === "read-tree")).toBe(false);
     const commitTree = mock.rawCalls.find((c) => c[0] === "commit-tree");
     expect(commitTree).not.toContain("-p");
-    // ref update has no old-value guard when the branch is unborn
-    expect(mock.rawCalls).toContainEqual(["update-ref", "refs/heads/main", "commit3333"]);
+    // all-zero old value makes creation compare-and-swap: the ref must still not exist
+    expect(mock.rawCalls).toContainEqual([
+      "update-ref",
+      "refs/heads/main",
+      "commit3333",
+      "0000000000000000000000000000000000000000",
+    ]);
   });
 
   it("rejects a stale base before touching the ref", async () => {
@@ -189,6 +226,51 @@ describe("SoulGitStore.commitChangeset", () => {
     await expect(
       store.commitChangeset({ changeset: makeValidated(), files: [UPSERT], actor: ACTOR })
     ).rejects.toMatchObject({ code: "CONTENT_MISMATCH" });
+    expect(mock.git.revparse).not.toHaveBeenCalled();
+  });
+
+  it("rejects content changed after validation even when operation and path still match", async () => {
+    const changed = {
+      ...UPSERT,
+      content: UPSERT.content.replace("answer_only", "propose_actions"),
+    };
+    const store = new SoulGitStore(SOUL, makeSigner(), logger);
+
+    await expect(
+      store.commitChangeset({
+        changeset: makeValidated(),
+        files: [changed, DELETE],
+        actor: ACTOR,
+      })
+    ).rejects.toMatchObject({ code: "CONTENT_MISMATCH" });
+
+    expect(mock.git.revparse).not.toHaveBeenCalled();
+  });
+
+  it("writes definitions in deterministic canonical form", async () => {
+    const store = new SoulGitStore(SOUL, makeSigner(), logger);
+    await store.commitChangeset({
+      changeset: makeValidated(),
+      files: [UPSERT, DELETE],
+      actor: ACTOR,
+    });
+
+    expect(mockWriteFileSync).toHaveBeenCalledWith(
+      "/tmp/soul-changeset-xyz/blob",
+      `${canonicalize(AGENT_DOCUMENT)}\n`
+    );
+  });
+
+  it("rejects an actor that differs from the validated principal", async () => {
+    const store = new SoulGitStore(SOUL, makeSigner(), logger);
+    await expect(
+      store.commitChangeset({
+        changeset: makeValidated(),
+        files: [UPSERT, DELETE],
+        actor: { ...ACTOR, principalId: "other-principal" },
+      })
+    ).rejects.toMatchObject({ code: "ACTOR_MISMATCH" });
+
     expect(mock.git.revparse).not.toHaveBeenCalled();
   });
 

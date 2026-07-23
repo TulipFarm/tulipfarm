@@ -13,10 +13,10 @@ export interface RecertificationDueRecord {
 }
 
 export interface RecertificationRepo {
-  get(grantId: string): Promise<RecertificationDueRecord | undefined>;
+  get(businessId: string, grantId: string): Promise<RecertificationDueRecord | undefined>;
   put(record: RecertificationDueRecord): Promise<void>;
-  /** All records due at or before `at`, regardless of business. */
-  listDue(at: Date): Promise<RecertificationDueRecord[]>;
+  /** Records for one business due at or before `at`. */
+  listDue(businessId: string, at: Date): Promise<RecertificationDueRecord[]>;
 }
 
 /**
@@ -26,15 +26,21 @@ export interface RecertificationRepo {
 export class InMemoryRecertificationRepo implements RecertificationRepo {
   private readonly records = new Map<string, RecertificationDueRecord>();
 
-  async get(grantId: string): Promise<RecertificationDueRecord | undefined> {
-    return this.records.get(grantId);
+  private key(businessId: string, grantId: string): string {
+    return JSON.stringify([businessId, grantId]);
+  }
+
+  async get(businessId: string, grantId: string): Promise<RecertificationDueRecord | undefined> {
+    return this.records.get(this.key(businessId, grantId));
   }
 
   async put(record: RecertificationDueRecord): Promise<void> {
-    this.records.set(record.grantId, Object.freeze({ ...record }));
+    this.records.set(this.key(record.businessId, record.grantId), Object.freeze({ ...record }));
   }
 
-  async listDue(at: Date): Promise<RecertificationDueRecord[]> {
-    return [...this.records.values()].filter((r) => r.dueAt <= at);
+  async listDue(businessId: string, at: Date): Promise<RecertificationDueRecord[]> {
+    return [...this.records.values()].filter(
+      (record) => record.businessId === businessId && record.dueAt <= at
+    );
   }
 }

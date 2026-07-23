@@ -14,8 +14,8 @@ export interface SessionRecord {
 export interface SessionRepo {
   create(record: SessionRecord): Promise<void>;
   /** Returns undefined once past `expiresAt`, even if the row has not been reaped yet. */
-  get(sid: string): Promise<SessionRecord | undefined>;
-  destroy(sid: string): Promise<void>;
+  get(businessId: string, sid: string, now: Date): Promise<SessionRecord | undefined>;
+  destroy(businessId: string, sid: string): Promise<void>;
 }
 
 /**
@@ -25,17 +25,21 @@ export interface SessionRepo {
 export class InMemorySessionRepo implements SessionRepo {
   private readonly records = new Map<string, SessionRecord>();
 
-  async create(record: SessionRecord): Promise<void> {
-    this.records.set(record.sid, Object.freeze({ ...record }));
+  private key(businessId: string, sid: string): string {
+    return JSON.stringify([businessId, sid]);
   }
 
-  async get(sid: string): Promise<SessionRecord | undefined> {
-    const record = this.records.get(sid);
-    if (!record || record.expiresAt <= new Date()) return undefined;
+  async create(record: SessionRecord): Promise<void> {
+    this.records.set(this.key(record.businessId, record.sid), Object.freeze({ ...record }));
+  }
+
+  async get(businessId: string, sid: string, now: Date): Promise<SessionRecord | undefined> {
+    const record = this.records.get(this.key(businessId, sid));
+    if (!record || record.expiresAt <= now) return undefined;
     return record;
   }
 
-  async destroy(sid: string): Promise<void> {
-    this.records.delete(sid);
+  async destroy(businessId: string, sid: string): Promise<void> {
+    this.records.delete(this.key(businessId, sid));
   }
 }

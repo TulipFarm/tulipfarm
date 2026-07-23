@@ -8,6 +8,11 @@ const FUTURE_GRANT = {
   effect: "allow",
   expiresAt: new Date(NOW.getTime() + 60_000),
 } as const;
+const APPROVER = {
+  id: "approver-1",
+  businessId: "business-1",
+  status: "active",
+} as const;
 
 function request(overrides: Partial<JitGrantRequest> = {}): JitGrantRequest {
   return {
@@ -21,15 +26,13 @@ function request(overrides: Partial<JitGrantRequest> = {}): JitGrantRequest {
 
 describe("assertJitGrantIssuable", () => {
   it("allows an expiring grant approved by a different in-business approver", () => {
-    expect(() =>
-      assertJitGrantIssuable(request(), { id: "approver-1", businessId: "business-1" }, NOW)
-    ).not.toThrow();
+    expect(() => assertJitGrantIssuable(request(), APPROVER, NOW)).not.toThrow();
   });
 
   it("denies a grant without a future expiry", () => {
     const standing = request({ grant: { ...FUTURE_GRANT, expiresAt: undefined } });
     try {
-      assertJitGrantIssuable(standing, { id: "approver-1", businessId: "business-1" }, NOW);
+      assertJitGrantIssuable(standing, APPROVER, NOW);
       throw new Error("expected denial");
     } catch (error) {
       expect(error).toBeInstanceOf(JitDeniedError);
@@ -39,14 +42,12 @@ describe("assertJitGrantIssuable", () => {
 
   it("denies a grant whose expiry has already passed", () => {
     const past = request({ grant: { ...FUTURE_GRANT, expiresAt: new Date(NOW.getTime() - 1) } });
-    expect(() =>
-      assertJitGrantIssuable(past, { id: "approver-1", businessId: "business-1" }, NOW)
-    ).toThrow(JitDeniedError);
+    expect(() => assertJitGrantIssuable(past, APPROVER, NOW)).toThrow(JitDeniedError);
   });
 
   it("denies an approver from a different business", () => {
     try {
-      assertJitGrantIssuable(request(), { id: "approver-1", businessId: "business-2" }, NOW);
+      assertJitGrantIssuable(request(), { ...APPROVER, businessId: "business-2" }, NOW);
       throw new Error("expected denial");
     } catch (error) {
       expect(error).toBeInstanceOf(JitDeniedError);
@@ -56,11 +57,24 @@ describe("assertJitGrantIssuable", () => {
 
   it("denies self-approval", () => {
     try {
-      assertJitGrantIssuable(request(), { id: "principal-1", businessId: "business-1" }, NOW);
+      assertJitGrantIssuable(request(), { ...APPROVER, id: "principal-1" }, NOW);
       throw new Error("expected denial");
     } catch (error) {
       expect(error).toBeInstanceOf(JitDeniedError);
       expect((error as JitDeniedError).reason).toBe("self_approval");
     }
+  });
+
+  it("denies a disabled or expired approver", () => {
+    expect(() =>
+      assertJitGrantIssuable(request(), { ...APPROVER, status: "disabled" }, NOW)
+    ).toThrow(expect.objectContaining({ reason: "approver_inactive" }));
+    expect(() =>
+      assertJitGrantIssuable(
+        request(),
+        { ...APPROVER, expiresAt: new Date(NOW.getTime() - 1) },
+        NOW
+      )
+    ).toThrow(expect.objectContaining({ reason: "approver_inactive" }));
   });
 });

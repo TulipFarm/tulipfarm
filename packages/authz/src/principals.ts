@@ -63,6 +63,7 @@ export function assertSessionMatchesPrincipal(
   principal: Principal,
   now: Date = new Date()
 ): void {
+  assertPrincipalAuthenticatable(principal, now);
   if (session.expiresAt <= now) {
     throw new PrincipalDeniedError("expired", `session ${session.sid} has expired`);
   }

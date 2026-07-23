@@ -15,13 +15,16 @@ import {
   CommitSigningError,
   type SignedCommitMetadata,
 } from "./commit-signing";
+import { parseSoulFile } from "./parse";
 import type { Logger } from "./types";
 
 const GIT_TIMEOUT_MS = 30_000;
 const SOUL_BRANCH_REF = "refs/heads/main";
 const BLOB_MODE = "100644";
+const ZERO_OID = "0".repeat(40);
 
 export type SoulGitStoreErrorCode =
+  | "ACTOR_MISMATCH"
   | "BASE_MISMATCH"
   | "CONTENT_MISMATCH"
   | "SIGNING_FAILED"
@@ -97,10 +100,10 @@ export class SoulGitStore {
     }
   }
 
-  private assertContentMatches(
+  private validatedFiles(
     validated: ValidatedSoulChangeset,
     files: readonly SoulFileChange[]
-  ): void {
+  ): SoulFileChange[] {
     if (files.length !== validated.files.length) {
       throw new SoulGitStoreError(
         "CONTENT_MISMATCH",
@@ -115,6 +118,19 @@ export class SoulGitStore {
           `Soul git store: content at index ${index} does not match the validated changeset`
         );
       }
+      const parsed = parseSoulFile(file);
+      if (!parsed.parsed || parsed.parsed.hash !== validatedFile.hash) {
+        throw new SoulGitStoreError(
+          "CONTENT_MISMATCH",
+          `Soul git store: content at index ${index} changed after validation`
+        );
+      }
+    });
+    return files.map((file) => {
+      if (file.operation === "delete") return file;
+      const parsed = parseSoulFile(file).parsed;
+      if (parsed?.definition === undefined) return file;
+      return { ...file, content: `${parsed.definition.canonical}\n` };
     });
   }
 
@@ -178,7 +194,13 @@ export class SoulGitStore {
    */
   async commitChangeset(request: SoulCommitRequest): Promise<SoulCommitResult> {
     const { changeset, files, actor, approval } = request;
-    this.assertContentMatches(changeset, files);
+    if (actor.principalId !== changeset.principalId) {
+      throw new SoulGitStoreError(
+        "ACTOR_MISMATCH",
+        "Soul git store: commit actor does not match the validated changeset principal"
+      );
+    }
+    const canonicalFiles = this.validatedFiles(changeset, files);
 
     const expected = changeset.expectedBaseCommit === "" ? null : changeset.expectedBaseCommit;
     const parentSha = await this.resolveHead();
@@ -194,7 +216,7 @@ export class SoulGitStore {
     try {
       let treeSha: string;
       try {
-        treeSha = await this.writeTree(workDir, indexFile, parentSha, files);
+        treeSha = await this.writeTree(workDir, indexFile, parentSha, canonicalFiles);
       } catch (error) {
         throw new SoulGitStoreError(
           "WRITE_FAILED",
@@ -226,7 +248,7 @@ export class SoulGitStore {
       const commitSha = (await this.git(indexFile, identityEnv()).raw(commitArgs)).trim();
 
       const refArgs = ["update-ref", SOUL_BRANCH_REF, commitSha];
-      if (parentSha !== null) refArgs.push(parentSha);
+      refArgs.push(parentSha ?? ZERO_OID);
       try {
         await this.git().raw(refArgs);
       } catch (error) {

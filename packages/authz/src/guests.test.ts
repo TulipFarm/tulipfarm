@@ -19,7 +19,7 @@ function guest(overrides: Partial<Guest> = {}): Guest {
 
 function sponsor(
   overrides: Partial<Principal> = {}
-): Pick<Principal, "id" | "businessId" | "status"> {
+): Pick<Principal, "id" | "businessId" | "status" | "expiresAt"> {
   return { id: "sponsor-1", businessId: "business-1", status: "active", ...overrides };
 }
 
@@ -63,6 +63,13 @@ describe("assertGuestActive", () => {
       expect(error).toBeInstanceOf(GuestDeniedError);
       expect((error as GuestDeniedError).reason).toBe("sponsor_inactive");
     }
+  });
+
+  it("denies when an active-status sponsor is past its expiry", () => {
+    const expiredSponsor = sponsor({ expiresAt: new Date(NOW.getTime() - 1) });
+    expect(() => assertGuestActive(guest(), expiredSponsor, NOW)).toThrow(
+      expect.objectContaining({ reason: "sponsor_inactive" })
+    );
   });
 });
 
