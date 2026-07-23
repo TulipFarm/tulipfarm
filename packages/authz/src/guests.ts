@@ -34,7 +34,7 @@ export class GuestDeniedError extends Error {
 /** Throws unless `guest` is active, unexpired, and its sponsor is authenticatable at `now`. */
 export function assertGuestActive(
   guest: Guest,
-  sponsor: Pick<Principal, "id" | "businessId" | "status">,
+  sponsor: Pick<Principal, "id" | "businessId" | "status" | "expiresAt">,
   now: Date = new Date()
 ): void {
   if (guest.status === "revoked") {
@@ -49,7 +49,10 @@ export function assertGuestActive(
       `sponsor does not match guest ${guest.principalId}'s recorded sponsor`
     );
   }
-  if (sponsor.status !== "active") {
+  if (
+    sponsor.status !== "active" ||
+    (sponsor.expiresAt !== undefined && sponsor.expiresAt <= now)
+  ) {
     throw new GuestDeniedError(
       "sponsor_inactive",
       `sponsor for guest ${guest.principalId} is not active`
@@ -60,7 +63,7 @@ export function assertGuestActive(
 /** A guest's own explicit grants only — never the sponsor's. Empty when denied or expired. */
 export function guestGrants(
   guest: Guest,
-  sponsor: Pick<Principal, "id" | "businessId" | "status">,
+  sponsor: Pick<Principal, "id" | "businessId" | "status" | "expiresAt">,
   now: Date = new Date()
 ): readonly AccessGrant[] {
   try {

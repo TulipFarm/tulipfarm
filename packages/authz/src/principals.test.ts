@@ -85,4 +85,16 @@ describe("assertSessionMatchesPrincipal", () => {
       PrincipalDeniedError
     );
   });
+
+  it("denies a valid session when its bound principal is disabled or expired", () => {
+    expect(() =>
+      assertSessionMatchesPrincipal(session(), principal({ status: "disabled" }))
+    ).toThrow(PrincipalDeniedError);
+    expect(() =>
+      assertSessionMatchesPrincipal(
+        session(),
+        principal({ expiresAt: new Date(Date.now() - 1_000) })
+      )
+    ).toThrow(PrincipalDeniedError);
+  });
 });

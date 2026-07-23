@@ -26,7 +26,7 @@ describe("InMemoryJitGrantRepo", () => {
     const repo = new InMemoryJitGrantRepo();
     await repo.put(issuance());
     await repo.put(issuance({ id: "jit-2", principalId: "principal-2" }));
-    const active = await repo.listActive("principal-1", NOW);
+    const active = await repo.listActive("business-1", "principal-1", NOW);
     expect(active.map((r) => r.id)).toEqual(["jit-1"]);
   });
 
@@ -35,6 +35,13 @@ describe("InMemoryJitGrantRepo", () => {
     await repo.put(
       issuance({ grant: { ...issuance().grant, expiresAt: new Date(NOW.getTime() - 1_000) } })
     );
-    expect(await repo.listActive("principal-1", NOW)).toEqual([]);
+    expect(await repo.listActive("business-1", "principal-1", NOW)).toEqual([]);
+  });
+
+  it("does not return another business's grant for the same principal id", async () => {
+    const repo = new InMemoryJitGrantRepo();
+    await repo.put(issuance({ businessId: "business-2" }));
+
+    expect(await repo.listActive("business-1", "principal-1", NOW)).toEqual([]);
   });
 });

@@ -23,7 +23,7 @@ export interface PrincipalRecord {
 }
 
 export interface PrincipalRepo {
-  get(id: string): Promise<PrincipalRecord | undefined>;
+  get(businessId: string, id: string): Promise<PrincipalRecord | undefined>;
   put(record: PrincipalRecord): Promise<void>;
 }
 
@@ -34,11 +34,15 @@ export interface PrincipalRepo {
 export class InMemoryPrincipalRepo implements PrincipalRepo {
   private readonly records = new Map<string, PrincipalRecord>();
 
-  async get(id: string): Promise<PrincipalRecord | undefined> {
-    return this.records.get(id);
+  private key(businessId: string, id: string): string {
+    return JSON.stringify([businessId, id]);
+  }
+
+  async get(businessId: string, id: string): Promise<PrincipalRecord | undefined> {
+    return this.records.get(this.key(businessId, id));
   }
 
   async put(record: PrincipalRecord): Promise<void> {
-    this.records.set(record.id, Object.freeze({ ...record }));
+    this.records.set(this.key(record.businessId, record.id), Object.freeze({ ...record }));
   }
 }

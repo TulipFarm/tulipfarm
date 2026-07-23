@@ -181,6 +181,32 @@ describe("validateSoulSemantics", () => {
     expect(codes(() => validateSoulSemantics(docs))).toEqual(["VERSION_UNSATISFIED"]);
   });
 
+  it("enforces the version constraint when a reference uses a stable id", () => {
+    const routineId = "11111111-1111-1111-1111-111111111111";
+    const docs = [
+      def(
+        "Routine",
+        "flow",
+        {
+          owner: "u",
+          start: "S",
+          states: [{ type: "x", name: "S", end: true }],
+        },
+        { id: routineId, authoredVersion: 2 }
+      ),
+      def("Trigger", "t", {
+        type: "manual",
+        routineRef: { id: routineId, name: "flow", version: "1" },
+        eventType: "e",
+        eventVersion: 1,
+        backgroundIdentity: { principalKind: "service", principalId: "s" },
+        deduplication: { key: "k" },
+      }),
+    ];
+
+    expect(codes(() => validateSoulSemantics(docs))).toEqual(["VERSION_UNSATISFIED"]);
+  });
+
   it("rejects a broken Routine State graph", () => {
     const docs = [
       def("Routine", "flow", {

@@ -18,7 +18,7 @@ export interface JitGrantIssuanceRecord {
 export interface JitGrantRepo {
   put(record: JitGrantIssuanceRecord): Promise<void>;
   /** Only unexpired grants, even if expired rows have not been reaped yet. */
-  listActive(principalId: string, now: Date): Promise<JitGrantIssuanceRecord[]>;
+  listActive(businessId: string, principalId: string, now: Date): Promise<JitGrantIssuanceRecord[]>;
 }
 
 /**
@@ -32,9 +32,16 @@ export class InMemoryJitGrantRepo implements JitGrantRepo {
     this.records.push(Object.freeze({ ...record }));
   }
 
-  async listActive(principalId: string, now: Date): Promise<JitGrantIssuanceRecord[]> {
+  async listActive(
+    businessId: string,
+    principalId: string,
+    now: Date
+  ): Promise<JitGrantIssuanceRecord[]> {
     return this.records.filter(
-      (r) => r.principalId === principalId && (!r.grant.expiresAt || r.grant.expiresAt > now)
+      (r) =>
+        r.businessId === businessId &&
+        r.principalId === principalId &&
+        (!r.grant.expiresAt || r.grant.expiresAt > now)
     );
   }
 }

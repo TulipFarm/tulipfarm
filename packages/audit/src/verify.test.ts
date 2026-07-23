@@ -86,4 +86,29 @@ describe("verifyChain", () => {
       result.issues.some((issue) => issue.type === "reordered" && issue.chainIndex === 2)
     ).toBe(true);
   });
+
+  it("detects events returned out of chain order", async () => {
+    const chain = await buildChain(3);
+    const result = verifyChain([chain[1], chain[0], chain[2]]);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.type === "reordered")).toBe(true);
+  });
+
+  it("uses a durable anchor to detect tail or whole-chain deletion", async () => {
+    const chain = await buildChain(3);
+    const expectation = { eventCount: chain.length, tailHash: chain.at(-1)?.hash };
+
+    expect(verifyChain(chain.slice(0, 2), expectation).valid).toBe(false);
+    expect(verifyChain([], expectation).valid).toBe(false);
+  });
+
+  it("detects a protected payload smuggled into a stored event", async () => {
+    const chain = await buildChain(1);
+    const injected = { ...chain[0], payload: "private body" };
+    const result = verifyChain([injected]);
+
+    expect(result.valid).toBe(false);
+    expect(result.issues.some((issue) => issue.type === "protected_payload")).toBe(true);
+  });
 });

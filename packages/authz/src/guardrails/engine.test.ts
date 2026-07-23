@@ -4,7 +4,7 @@ import { evaluateGuardrail, type GuardrailContext, type GuardrailRule } from "./
 const READ: GuardrailContext = {
   action: "record.read",
   resourceType: "invoice",
-  autonomy: "interactive",
+  autonomy: "answer_only",
   taint: "trusted",
 };
 
@@ -147,16 +147,27 @@ describe("evaluateGuardrail — volume, taint, autonomy ceilings", () => {
   });
 
   it("denies autonomy above the ceiling and missing autonomy alike", () => {
-    const supervised: GuardrailRule = { ...allowRead, id: "auto", maxAutonomy: "approved" };
-    expect(evaluateGuardrail([supervised], { ...READ, autonomy: "autonomous" })).toEqual({
+    const lowRisk: GuardrailRule = {
+      ...allowRead,
+      id: "auto",
+      maxAutonomy: "execute_low_risk",
+    };
+    expect(
+      evaluateGuardrail([lowRisk], {
+        ...READ,
+        autonomy: "execute_policy_authorized",
+      })
+    ).toEqual({
       effect: "deny",
       reason: "autonomy_exceeded",
       ruleId: "auto",
       dimension: "autonomy",
     });
-    expect(evaluateGuardrail([supervised], { ...READ, autonomy: "approved" }).effect).toBe("allow");
+    expect(evaluateGuardrail([lowRisk], { ...READ, autonomy: "execute_low_risk" }).effect).toBe(
+      "allow"
+    );
     const { autonomy: _autonomy, ...noAutonomy } = READ;
-    expect(evaluateGuardrail([supervised], noAutonomy)).toEqual({
+    expect(evaluateGuardrail([lowRisk], noAutonomy)).toEqual({
       effect: "deny",
       reason: "missing_context",
       ruleId: "auto",
@@ -181,23 +192,30 @@ describe("evaluateGuardrail — approval and precedence", () => {
   });
 
   it("escalates to approval when autonomy exceeds the allow ceiling", () => {
-    const interactiveAllow: GuardrailRule = { ...allowRead, id: "ia", maxAutonomy: "interactive" };
+    const answerOnly: GuardrailRule = {
+      ...allowRead,
+      id: "answer",
+      maxAutonomy: "answer_only",
+    };
     const approval: GuardrailRule = {
       id: "approve",
       effect: "require_approval",
       action: "record.read",
       resourceType: "invoice",
     };
-    const autonomous = { ...READ, autonomy: "autonomous" as const };
-    expect(evaluateGuardrail([interactiveAllow, approval], autonomous)).toEqual({
+    const policyAuthorized = {
+      ...READ,
+      autonomy: "execute_policy_authorized" as const,
+    };
+    expect(evaluateGuardrail([answerOnly, approval], policyAuthorized)).toEqual({
       effect: "require_approval",
       reason: "approval_required",
       ruleId: "approve",
     });
-    expect(evaluateGuardrail([interactiveAllow], autonomous)).toEqual({
+    expect(evaluateGuardrail([answerOnly], policyAuthorized)).toEqual({
       effect: "deny",
       reason: "autonomy_exceeded",
-      ruleId: "ia",
+      ruleId: "answer",
       dimension: "autonomy",
     });
   });

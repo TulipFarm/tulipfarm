@@ -428,10 +428,17 @@ importers:
         version: 6.0.3
 
   packages/authz:
+    dependencies:
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

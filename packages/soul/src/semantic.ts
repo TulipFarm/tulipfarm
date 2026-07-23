@@ -2,6 +2,8 @@ import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import { analyzeCapabilities } from "./capability-analysis";
 import {
   type AuthoredDefinition,
+  asDefinitionRef,
+  collectReferenceEdges,
   DefinitionIndex,
   resolveReferences,
   type SoulSemanticIssue,
@@ -163,6 +165,29 @@ function checkCycles(index: DefinitionIndex): SoulSemanticIssue[] {
   ];
 }
 
+function checkStableIdVersions(index: DefinitionIndex): SoulSemanticIssue[] {
+  const issues: SoulSemanticIssue[] = [];
+  for (const def of index.all) {
+    for (const edge of collectReferenceEdges(def)) {
+      if (edge.form !== "versioned") continue;
+      const ref = asDefinitionRef(edge.value);
+      if (ref?.id === undefined || ref.version === "*" || ref.version === "latest") {
+        continue;
+      }
+      const target = index.get(ref.id);
+      if (target?.kind === edge.kind && String(target.authoredVersion) !== ref.version) {
+        issues.push({
+          code: "VERSION_UNSATISFIED",
+          subject: def.subject,
+          ref: ref.version,
+          field: `${edge.field}/version`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 // ── Public entrypoint ───────────────────────────────────────────────────────────
 
 /**
@@ -175,6 +200,7 @@ export function validateSoulSemantics(documents: readonly VersionedSchemaDocumen
   const issues = sortIssues([
     ...identityIssues,
     ...resolveReferences(index),
+    ...checkStableIdVersions(index),
     ...checkRoutineGraphs(index),
     ...checkCycles(index),
     ...analyzeCapabilities(index),
