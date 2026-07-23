@@ -45,14 +45,33 @@ export function deriveDefinitionId(kind: string, name: string): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
 
-/** Kebab-case-normalize a legacy name into a slug satisfying the schema's slug pattern. */
+/** True for the 36 characters a slug may contain: `a`-`z`, `0`-`9`. */
+function isSlugChar(char: string): boolean {
+  return (char >= "a" && char <= "z") || (char >= "0" && char <= "9");
+}
+
+/**
+ * Kebab-case-normalize a legacy name into a slug satisfying the schema's slug pattern. Built as a
+ * single-pass character scan (no regex) so it stays linear-time regardless of input shape — the
+ * legacy `name` is uncontrolled data, and CodeQL flags regex-based collapsing/trimming here as a
+ * polynomial-ReDoS shape even when each step is individually anchored.
+ */
 export function slugify(name: string): string {
-  const base = name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "");
-  return /^[a-z]/.test(base) ? base : `x-${base || "unnamed"}`;
+  const lower = name.toLowerCase();
+  let base = "";
+  let pendingHyphen = false;
+  for (const char of lower) {
+    if (isSlugChar(char)) {
+      if (pendingHyphen && base.length > 0) base += "-";
+      pendingHyphen = false;
+      base += char;
+    } else {
+      pendingHyphen = true;
+    }
+  }
+  return base.length > 0 && base.charAt(0) >= "a" && base.charAt(0) <= "z"
+    ? base
+    : `x-${base || "unnamed"}`;
 }
 
 /**
