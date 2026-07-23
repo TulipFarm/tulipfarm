@@ -8,6 +8,17 @@ export { decideEffectivePermission, evaluateGrants } from "./effective";
 export type { AccessGrant, AccessRequest, GrantEffect } from "./grants";
 export { grantMatches } from "./grants";
 export type {
+  GuardrailDecision,
+  GuardrailDecisionReason,
+  GuardrailEffect,
+} from "./guardrails/decision";
+export type { DlpCrossing, DlpRule } from "./guardrails/dlp";
+export { checkDlpBoundary } from "./guardrails/dlp";
+export type { GuardrailContext, GuardrailRule } from "./guardrails/engine";
+export { evaluateGuardrail } from "./guardrails/engine";
+export type { AutonomyLevel, TaintLevel } from "./guardrails/risk";
+export { autonomyWithin, taintWithin } from "./guardrails/risk";
+export type {
   IdentityPort,
   IdentityResolution,
   IdentityResolutionRequest,
