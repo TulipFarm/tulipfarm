@@ -9,10 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tulipfarm/storage": "workspace:*"
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
+    "ajv": "^8.20.0"
   },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
     "typescript": "^6.0.3"
   }
 }
