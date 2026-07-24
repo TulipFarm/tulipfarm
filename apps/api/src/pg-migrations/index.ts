@@ -1,4 +1,8 @@
-import { EVENT_STORAGE_STATEMENTS, RUN_STORAGE_STATEMENTS } from "@tulipfarm/storage";
+import {
+  ARTIFACT_STORAGE_STATEMENTS,
+  EVENT_STORAGE_STATEMENTS,
+  RUN_STORAGE_STATEMENTS,
+} from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 
 export interface PgMigration {
@@ -448,6 +452,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "durable Runs, States, attempts, and lineage",
     up: async (q) => {
       for (const sql of RUN_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 5,
+    description: "immutable typed outputs and Artifacts",
+    up: async (q) => {
+      for (const sql of ARTIFACT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },
