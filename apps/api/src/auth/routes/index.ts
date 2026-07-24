@@ -54,7 +54,14 @@ export function registerAuthRoutes(
   registerTokenRoutes(app, repo, tokenRepo, requireAuth, preHandler);
   registerIdentityRoutes(
     app,
-    { ...options.identity, sessionStore: store, userRepo: repo, ttlSeconds },
+    {
+      ...options.identity,
+      sessionStore: store,
+      userRepo: repo,
+      ttlSeconds,
+      ...(preHandler && { rateLimitHook: preHandler }),
+      ...(loginPreHandler && { credentialRateLimitHook: loginPreHandler }),
+    },
     requireAuth
   );
 }

@@ -52,6 +52,15 @@ export interface IdentityRouteDeps {
   oidc?: OidcConfig;
   mfa?: MfaVerifierRegistry;
   ttlSeconds?: number;
+  /** Shared per-IP budget applied to every identity route. */
+  rateLimitHook?: PreHandler;
+  /** Tighter budget for routes that verify a secret (OIDC callback, step-up proof). */
+  credentialRateLimitHook?: PreHandler;
+}
+
+/** Route preHandlers in order, dropping the hooks that were not configured. */
+function chain(...hooks: Array<PreHandler | undefined>): PreHandler[] {
+  return hooks.filter((hook): hook is PreHandler => hook !== undefined);
 }
 
 const AUTH_METHODS: AuthMethod[] = ["password", "oidc", "totp", "passkey"];
@@ -96,6 +105,7 @@ function registerOidcRoutes(
   app.get(
     "/api/v1/auth/oidc/start",
     {
+      preHandler: chain(deps.rateLimitHook),
       schema: {
         description: "Begin OIDC sign-in. Redirects to the configured identity provider.",
         tags: ["auth"],
@@ -126,6 +136,7 @@ function registerOidcRoutes(
   app.get(
     "/api/v1/auth/oidc/callback",
     {
+      preHandler: chain(deps.credentialRateLimitHook ?? deps.rateLimitHook),
       schema: {
         description: "Complete OIDC sign-in and issue a session for the mapped user.",
         tags: ["auth"],
@@ -214,7 +225,7 @@ function registerStepUpRoute(
   app.post(
     "/api/v1/auth/step-up",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.credentialRateLimitHook ?? deps.rateLimitHook, requireAuth),
       schema: {
         description: "Prove a second factor and elevate the current session.",
         tags: ["auth"],
@@ -300,7 +311,7 @@ function registerApiClientRoutes(
   app.get(
     "/api/v1/identity/api-clients",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "List API clients (service identities).",
         tags: ["identity"],
@@ -326,7 +337,7 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Create an API client. The secret is returned exactly once.",
         tags: ["identity"],
@@ -381,7 +392,7 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients/:id/rotate",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Rotate an API client secret. The previous secret stops working at once.",
         tags: ["identity"],
@@ -411,7 +422,7 @@ function registerApiClientRoutes(
   app.post(
     "/api/v1/identity/api-clients/:id/disable",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Disable an API client. Its credential is refused on the next request.",
         tags: ["identity"],
@@ -462,7 +473,7 @@ function registerExternalLinkRoutes(
   app.post(
     "/api/v1/identity/external-links",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Mint a one-use link token binding an external subject to the current user.",
         tags: ["identity"],
@@ -507,7 +518,7 @@ function registerExternalLinkRoutes(
   app.post(
     "/api/v1/identity/external-links/redeem",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Redeem a link token for one verified external subject (single use).",
         tags: ["identity"],
@@ -578,7 +589,7 @@ function registerExternalLinkRoutes(
   app.get(
     "/api/v1/identity/external-links",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "List the external identities linked to the current user.",
         tags: ["identity"],
@@ -614,7 +625,7 @@ function registerExternalLinkRoutes(
   app.delete(
     "/api/v1/identity/external-links/:provider/:externalSubject",
     {
-      preHandler: requireAuth,
+      preHandler: chain(deps.rateLimitHook, requireAuth),
       schema: {
         description: "Remove one of the current user's external identity links.",
         tags: ["identity"],
