@@ -9,6 +9,7 @@ import {
   type SessionStore,
 } from "../auth/session-store";
 import { toPublicUser, type UserRepo } from "../auth/users";
+import { MemoryRateLimiter, makeRateLimitHook } from "../rate-limit";
 import {
   type ApiClientRepo,
   createApiClient,
@@ -63,6 +64,14 @@ function chain(...hooks: Array<PreHandler | undefined>): PreHandler[] {
   return hooks.filter((hook): hook is PreHandler => hook !== undefined);
 }
 
+// Per-IP budgets for the identity surface. The deployment normally injects a shared
+// (Postgres-backed) limiter; when it does not, these in-process budgets still apply, so no
+// identity route is ever unlimited.
+const IDENTITY_LIMIT = 100;
+const IDENTITY_WINDOW_MS = 60_000;
+const CREDENTIAL_LIMIT = 10;
+const CREDENTIAL_WINDOW_MS = 900_000;
+
 const AUTH_METHODS: AuthMethod[] = ["password", "oidc", "totp", "passkey"];
 
 function cookieOptions(maxAge: number) {
@@ -90,11 +99,31 @@ export function registerIdentityRoutes(
   requireAuth: PreHandler
 ): void {
   const ttlSeconds = deps.ttlSeconds ?? DEFAULT_SESSION_TTL_SECONDS;
+  const fallbackLimiter = new MemoryRateLimiter();
+  const limited: IdentityRouteDeps = {
+    ...deps,
+    rateLimitHook:
+      deps.rateLimitHook ??
+      makeRateLimitHook(
+        fallbackLimiter,
+        (req) => `rl:identity:${req.ip}`,
+        IDENTITY_LIMIT,
+        IDENTITY_WINDOW_MS
+      ),
+    credentialRateLimitHook:
+      deps.credentialRateLimitHook ??
+      makeRateLimitHook(
+        fallbackLimiter,
+        (req) => `rl:identity-credential:${req.ip}`,
+        CREDENTIAL_LIMIT,
+        CREDENTIAL_WINDOW_MS
+      ),
+  };
 
-  registerOidcRoutes(app, deps, ttlSeconds);
-  registerStepUpRoute(app, deps, requireAuth, ttlSeconds);
-  registerApiClientRoutes(app, deps, requireAuth);
-  registerExternalLinkRoutes(app, deps, requireAuth);
+  registerOidcRoutes(app, limited, ttlSeconds);
+  registerStepUpRoute(app, limited, requireAuth, ttlSeconds);
+  registerApiClientRoutes(app, limited, requireAuth);
+  registerExternalLinkRoutes(app, limited, requireAuth);
 }
 
 function registerOidcRoutes(
@@ -136,7 +165,7 @@ function registerOidcRoutes(
   app.get(
     "/api/v1/auth/oidc/callback",
     {
-      preHandler: chain(deps.credentialRateLimitHook ?? deps.rateLimitHook),
+      preHandler: chain(deps.credentialRateLimitHook),
       schema: {
         description: "Complete OIDC sign-in and issue a session for the mapped user.",
         tags: ["auth"],
@@ -225,7 +254,7 @@ function registerStepUpRoute(
   app.post(
     "/api/v1/auth/step-up",
     {
-      preHandler: chain(deps.credentialRateLimitHook ?? deps.rateLimitHook, requireAuth),
+      preHandler: chain(deps.credentialRateLimitHook, requireAuth),
       schema: {
         description: "Prove a second factor and elevate the current session.",
         tags: ["auth"],
