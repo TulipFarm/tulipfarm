@@ -16,6 +16,18 @@
 - **`backfillSecretsToDek`** — migrate legacy (pre-envelope) secrets onto the DEK.
 - **`loadEncryptionKeys`** (+ type `EncryptionKeys`) — reads the env KEK(s).
 - **`assertValidSecretKey`** + `InvalidSecretKeyError` — key-name guard.
+- **`SecretBroker`** (`src/broker.ts`) — scoped, short-lived, in-memory Credential leases. Requires a
+  `SecretAuthorizer` (default-deny: a refusal *or* an authorizer failure denies), clamps TTL/uses to
+  what was authorized, resolves the value fresh on every use (so rotation/revocation apply to the
+  next invocation), and emits `SecretBrokerEvent` lease metadata — reference and scope, never value.
+  `revokeSecret` / `revokeLease` / `revokeAll` invalidate outstanding leases.
+- **`SecretLease`** (`src/lease.ts`) — non-serializable handle. Plaintext exists only as the argument
+  to `lease.use(cb)`; `toJSON` throws `SecretNotSerializableError`, string/inspect coercion yields
+  `[SecretLease redacted]`, a callback error is re-thrown redacted, and a callback that returns the
+  plaintext raises `SecretLeakError`. Denials are `SecretLeaseDeniedError` + reason code.
+- **`SecretProvider`** (`src/providers.ts`) — where the broker reads the *current* value from;
+  `inMemorySecretProvider` (dev/test only) and `secretsServiceProvider` (see its cache caveat).
+- **Redaction** (`src/redaction.ts`) — `redactSecrets`, `containsSecret`, `redactError`, `REDACTED`.
 - **KMS port** (`src/ports/kms.ts`) — provider-neutral `KmsPort` (`wrap`/`unwrap`/`activeKey`)
   with opaque `MasterKeyRef` / `WrappedKey`; the master key never crosses the boundary and no
   provider SDK type leaks. Adapters: local managed keys, cloud KMS, or Vault-compatible services.
