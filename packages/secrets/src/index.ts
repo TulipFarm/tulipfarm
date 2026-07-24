@@ -1,5 +1,14 @@
 export type { BackfillResult } from "./backfill";
 export { backfillSecretsToDek } from "./backfill";
+export type {
+  SecretAuthorization,
+  SecretAuthorizer,
+  SecretBrokerDeps,
+  SecretBrokerEvent,
+  SecretBrokerEventType,
+  SecretLeaseRequest,
+} from "./broker";
+export { SecretBroker } from "./broker";
 export type { SecretEnvelope } from "./crypto";
 export { DecryptError, decryptSecret, encryptSecret } from "./crypto";
 export type { DekRepo, InsertWrapInput, KekLabel, WrappedDekRow } from "./dek-repo";
@@ -21,7 +30,21 @@ export {
 } from "./key-manager";
 export type { EncryptionKeys } from "./keys";
 export { loadEncryptionKeys } from "./keys";
+export type {
+  ScopedSecretCallback,
+  SecretLeaseDenialReason,
+  SecretScope,
+} from "./lease";
+export {
+  SecretLeakError,
+  SecretLease,
+  SecretLeaseDeniedError,
+  SecretNotSerializableError,
+} from "./lease";
 export type { KmsPort, MasterKeyRef, WrappedKey } from "./ports";
+export type { InMemorySecretProvider, ResolvedSecret, SecretProvider } from "./providers";
+export { inMemorySecretProvider, secretsServiceProvider } from "./providers";
+export { containsSecret, REDACTED, redactError, redactSecrets } from "./redaction";
 export type { LlmProviderId, LlmProviderInfo, ProviderField, ProviderFieldRole } from "./registry";
 export {
   isProviderConfigured,
