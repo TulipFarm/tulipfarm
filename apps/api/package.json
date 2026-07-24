@@ -26,6 +26,7 @@
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
     "fastify": "^5.8.5",
