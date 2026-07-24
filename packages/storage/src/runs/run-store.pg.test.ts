@@ -164,11 +164,15 @@ describe("RunStore (PostgreSQL)", () => {
         expectedVersion: 0,
         expectedStatus: "queued",
         status: "claimed",
+        leaseOwner: "worker-1",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
       }),
       store.transitionRun("business-1", run().id, {
         expectedVersion: 0,
         expectedStatus: "queued",
         status: "claimed",
+        leaseOwner: "worker-2",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
       }),
     ]);
 
@@ -177,6 +181,172 @@ describe("RunStore (PostgreSQL)", () => {
       status: "claimed",
       version: 1,
     });
+  });
+
+  it("claims a queued Run with an owned lease and rejects a stale double-claim", async () => {
+    await store.start(run());
+
+    const results = await Promise.all([
+      store.transitionRun("business-1", run().id, {
+        expectedVersion: 0,
+        expectedStatus: "queued",
+        status: "claimed",
+        leaseOwner: "worker-1",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+      }),
+      store.transitionRun("business-1", run().id, {
+        expectedVersion: 0,
+        expectedStatus: "queued",
+        status: "claimed",
+        leaseOwner: "worker-2",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+      }),
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      status: "claimed",
+      version: 1,
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+  });
+
+  it("clears the lease when a Run transitions off claimed/running", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "queued",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      status: "queued",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+  });
+
+  it("extends the lease on heartbeat only for the owning worker", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    expect(
+      await store.heartbeat("business-1", run().id, "worker-2", {
+        expectedVersion: 1,
+        leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+      })
+    ).toBe(false);
+
+    expect(
+      await store.heartbeat("business-1", run().id, "worker-1", {
+        expectedVersion: 1,
+        leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+      })
+    ).toBe(true);
+
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      version: 2,
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:02:00.000Z",
+    });
+  });
+
+  it("reclaims a Run whose lease expired so a new worker can take it over", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    const reclaimed = await store.reclaimExpiredRuns("business-1", "2026-07-24T10:01:00.001Z", 10);
+
+    expect(reclaimed).toEqual([
+      expect.objectContaining({ id: run().id, status: "queued", leaseOwner: null }),
+    ]);
+    expect(await store.find("business-1", run().id)).toMatchObject({
+      status: "queued",
+      version: 2,
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+  });
+
+  it("does not reclaim a Run whose lease has not expired", async () => {
+    await store.start(run());
+    await store.transitionRun("business-1", run().id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    expect(await store.reclaimExpiredRuns("business-1", "2026-07-24T10:00:59.000Z", 10)).toEqual(
+      []
+    );
+  });
+
+  it("claims a batch of queued Runs with an owned, timed lease", async () => {
+    await store.start(run());
+    await store.start(run({ id: "00000000-0000-4000-8000-000000000002" }));
+
+    const claimed = await store.claimNextQueued("business-1", "worker-1", {
+      now: "2026-07-24T10:00:00.000Z",
+      leaseDurationMs: 60_000,
+      limit: 10,
+    });
+
+    expect(claimed).toEqual([
+      expect.objectContaining({
+        id: run().id,
+        status: "claimed",
+        leaseOwner: "worker-1",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+      }),
+      expect.objectContaining({
+        id: "00000000-0000-4000-8000-000000000002",
+        status: "claimed",
+        leaseOwner: "worker-1",
+        leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+      }),
+    ]);
+  });
+
+  it("does not claim an already-claimed Run for a second worker", async () => {
+    await store.start(run());
+    await store.claimNextQueued("business-1", "worker-1", {
+      now: "2026-07-24T10:00:00.000Z",
+      leaseDurationMs: 60_000,
+      limit: 10,
+    });
+
+    expect(
+      await store.claimNextQueued("business-1", "worker-2", {
+        now: "2026-07-24T10:00:01.000Z",
+        leaseDurationMs: 60_000,
+        limit: 10,
+      })
+    ).toEqual([]);
   });
 
   it("persists State status with the same optimistic concurrency boundary", async () => {

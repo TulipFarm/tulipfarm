@@ -82,6 +82,8 @@ export interface PersistedRun {
   readonly finishedAt: string | null;
   readonly resultArtifactId: string | null;
   readonly errorEvidenceRef: string | null;
+  readonly leaseOwner: string | null;
+  readonly leaseExpiresAt: string | null;
 }
 
 export interface PersistedState {
@@ -107,6 +109,20 @@ export interface RunTransitionInput {
   readonly finishedAt?: string;
   readonly resultArtifactId?: string;
   readonly errorEvidenceRef?: string;
+  /** Worker lease: required non-null for `claimed`/`running`, required null otherwise. */
+  readonly leaseOwner: string | null;
+  readonly leaseExpiresAt: string | null;
+}
+
+export interface HeartbeatInput {
+  readonly expectedVersion: number;
+  readonly leaseExpiresAt: string;
+}
+
+export interface ClaimNextQueuedInput {
+  readonly now: string;
+  readonly leaseDurationMs: number;
+  readonly limit: number;
 }
 
 export interface StateTransitionInput {
@@ -206,7 +222,13 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     finished_at           timestamptz,
     result_artifact_id    text,
     error_evidence_ref    text,
-    UNIQUE (business_id, id)
+    lease_owner           text,
+    lease_expires_at      timestamptz,
+    UNIQUE (business_id, id),
+    CHECK (
+      (status IN ('claimed', 'running') AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL)
+      OR (status NOT IN ('claimed', 'running') AND lease_owner IS NULL AND lease_expires_at IS NULL)
+    )
   )`,
   `CREATE TABLE IF NOT EXISTS run_states (
     business_id           text NOT NULL,
@@ -314,6 +336,8 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     FOR EACH ROW EXECUTE FUNCTION reject_state_identity_change()`,
   `CREATE INDEX IF NOT EXISTS runs_status_idx
     ON runs (business_id, status, created_at)`,
+  `CREATE INDEX IF NOT EXISTS runs_lease_reclaim_idx
+    ON runs (business_id, status, lease_expires_at)`,
   `CREATE INDEX IF NOT EXISTS run_states_status_idx
     ON run_states (business_id, run_id, status)`,
   `CREATE INDEX IF NOT EXISTS state_attempts_order_idx
@@ -335,6 +359,8 @@ interface RunRow {
   finished_at: string | Date | null;
   result_artifact_id: string | null;
   error_evidence_ref: string | null;
+  lease_owner: string | null;
+  lease_expires_at: string | Date | null;
 }
 
 interface StateRow {
@@ -386,6 +412,8 @@ function persistedRun(row: RunRow): PersistedRun {
     finishedAt: optionalTimestamp(row.finished_at),
     resultArtifactId: row.result_artifact_id,
     errorEvidenceRef: row.error_evidence_ref,
+    leaseOwner: row.lease_owner,
+    leaseExpiresAt: optionalTimestamp(row.lease_expires_at),
   };
 }
 
@@ -407,7 +435,7 @@ function persistedState(row: StateRow): PersistedState {
 }
 
 const RUN_COLUMNS = `id, business_id, bundle, identity, bounds, status, version, created_at,
-  started_at, finished_at, result_artifact_id, error_evidence_ref`;
+  started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
 const STATE_COLUMNS = `business_id, run_id, state_key, definition_ref, resolved_input, status,
   version, created_at, started_at, finished_at, result_artifact_id, error_evidence_ref`;
 
@@ -499,7 +527,9 @@ export class RunStore {
                 started_at = COALESCE($6::timestamptz, started_at),
                 finished_at = COALESCE($7::timestamptz, finished_at),
                 result_artifact_id = COALESCE($8, result_artifact_id),
-                error_evidence_ref = COALESCE($9, error_evidence_ref)
+                error_evidence_ref = COALESCE($9, error_evidence_ref),
+                lease_owner = $10,
+                lease_expires_at = $11::timestamptz
           WHERE business_id = $1
             AND id = $2
             AND version = $3
@@ -515,9 +545,107 @@ export class RunStore {
           transition.finishedAt ?? null,
           transition.resultArtifactId ?? null,
           transition.errorEvidenceRef ?? null,
+          transition.leaseOwner,
+          transition.leaseExpiresAt,
         ]
       );
       return result.rows.length === 1;
+    });
+  }
+
+  /** Extends an owned lease without changing status; fails if the lease moved to another worker. */
+  async heartbeat(
+    businessId: string,
+    runId: string,
+    owner: string,
+    heartbeat: HeartbeatInput
+  ): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ id: string }>(
+        `UPDATE runs
+            SET version = version + 1,
+                lease_expires_at = $5::timestamptz
+          WHERE business_id = $1
+            AND id = $2
+            AND version = $3
+            AND lease_owner = $4
+            AND status IN ('claimed', 'running')
+          RETURNING id`,
+        [businessId, runId, heartbeat.expectedVersion, owner, heartbeat.leaseExpiresAt]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
+  /** Requeues Runs whose worker lease expired so another worker can claim them. */
+  async reclaimExpiredRuns(
+    businessId: string,
+    now: string,
+    limit: number
+  ): Promise<readonly PersistedRun[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<RunRow>(
+        `WITH candidates AS (
+           SELECT id
+             FROM runs
+            WHERE business_id = $1
+              AND status IN ('claimed', 'running')
+              AND lease_expires_at <= $2::timestamptz
+            ORDER BY lease_expires_at
+            FOR UPDATE SKIP LOCKED
+            LIMIT $3
+         )
+         UPDATE runs
+            SET status = 'queued',
+                version = version + 1,
+                lease_owner = NULL,
+                lease_expires_at = NULL
+           FROM candidates
+          WHERE runs.id = candidates.id
+         RETURNING runs.id, runs.business_id, runs.bundle, runs.identity, runs.bounds,
+                   runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
+                   runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
+                   runs.lease_expires_at`,
+        [businessId, now, Math.max(0, limit)]
+      );
+      return result.rows.map(persistedRun);
+    });
+  }
+
+  /** Claims a batch of queued Runs with an owned, timed lease so a worker can start them. */
+  async claimNextQueued(
+    businessId: string,
+    owner: string,
+    input: ClaimNextQueuedInput
+  ): Promise<readonly PersistedRun[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const leaseExpiresAt = new Date(
+        new Date(input.now).getTime() + input.leaseDurationMs
+      ).toISOString();
+      const result = await transaction.query<RunRow>(
+        `WITH candidates AS (
+           SELECT id
+             FROM runs
+            WHERE business_id = $1
+              AND status = 'queued'
+            ORDER BY created_at
+            FOR UPDATE SKIP LOCKED
+            LIMIT $4
+         )
+         UPDATE runs
+            SET status = 'claimed',
+                version = version + 1,
+                lease_owner = $2,
+                lease_expires_at = $3::timestamptz
+           FROM candidates
+          WHERE runs.id = candidates.id
+         RETURNING runs.id, runs.business_id, runs.bundle, runs.identity, runs.bounds,
+                   runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
+                   runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
+                   runs.lease_expires_at`,
+        [businessId, owner, leaseExpiresAt, Math.max(0, input.limit)]
+      );
+      return result.rows.map(persistedRun);
     });
   }
 

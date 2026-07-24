@@ -3,6 +3,8 @@ export type {
   AppendAttemptResult,
   AttemptEvent,
   AttemptEvidence,
+  ClaimNextQueuedInput,
+  HeartbeatInput,
   PersistedRun,
   PersistedRunStatus,
   PersistedState,
