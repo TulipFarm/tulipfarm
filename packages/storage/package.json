@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.3",
     "@tulipfarm/tsconfig": "workspace:*",
     "typescript": "^6.0.3"
   }

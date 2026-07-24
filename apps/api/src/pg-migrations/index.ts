@@ -1,3 +1,4 @@
+import { EVENT_STORAGE_STATEMENTS } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 
 export interface PgMigration {
@@ -429,6 +430,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "hardened authentication and identity",
     up: async (q) => {
       for (const sql of IDENTITY_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 3,
+    description: "transactional event inbox and outbox",
+    up: async (q) => {
+      for (const sql of EVENT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },
