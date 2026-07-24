@@ -68,6 +68,9 @@ importers:
       '@sinclair/typebox':
         specifier: ^0.34.49
         version: 0.34.49
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../../packages/authz
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm

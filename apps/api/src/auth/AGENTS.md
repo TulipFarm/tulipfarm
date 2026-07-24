@@ -13,15 +13,23 @@ OpenAPI schema rule in the root `AGENTS.md`.
 | `csrf.ts` | CSRF token issue / verify for cookie-session requests. |
 | `api-tokens.ts` | API token mint + `hashToken` + repo lookup by hash. |
 | `users.ts` | `UserRepo` / `UserDoc`. |
-| `middleware.ts` | `makeRequireAuth(store, repo, tokenRepo)` → `requireAuth` PreHandler. |
+| `middleware.ts` | `makeRequireAuth({ store, userRepo, tokenRepo, apiClientRepo })` → `requireAuth` PreHandler. |
 | `schemas.ts` | Shared JSON Schemas for auth routes — import, don't inline. |
 | `routes/` | `registerAuthRoutes` (index) → `registerSessionRoutes`, `registerTokenRoutes`. |
 
 ## How `requireAuth` resolves a request
 
-1. Session cookie `tf_sid` → `session-store` → `UserRepo.findById` → set `req.user`.
-2. Else `Authorization: Bearer <token>` → `findByHash(hashToken(raw))` → `req.user`.
-3. Else `401 { error: "unauthorized" }`.
+1. Session cookie `tf_sid` → `session-store` → `UserRepo.findById`.
+2. Else `Authorization: Bearer tfc_<clientId>.<secret>` → API client (service identity).
+3. Else `Authorization: Bearer <token>` → `findByHash(hashToken(raw))`.
+4. Else `401 { error: "unauthorized" }`.
+
+Every success sets both `req.user` (legacy) and `req.principal` (`RequestPrincipal`, see
+`../identity/principal.ts`). Every denial logs `{ event: "auth.denied", reason, credential }` and
+returns the same opaque `401` — disabled, expired, and unknown are indistinguishable to callers.
+
+Sessions carry the auth methods used and a session-bound CSRF token; `rotateSession` replaces the
+id on login and on step-up (session fixation). See `../identity/AGENTS.md`.
 
 ## Conventions
 

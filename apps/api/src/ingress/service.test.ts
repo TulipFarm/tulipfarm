@@ -37,7 +37,14 @@ const log = {
 } as unknown as FastifyBaseLogger;
 
 function makeUser(email: string, role: "admin" | "member" = "admin"): UserDoc {
-  return { _id: randomUUID(), email, passwordHash: "x", role, createdAt: new Date() };
+  return {
+    _id: randomUUID(),
+    email,
+    passwordHash: "x",
+    role,
+    status: "active",
+    createdAt: new Date(),
+  };
 }
 
 const HANDLER = { source: "({ classify(ctx) { return { kind: 'ignore' }; } })", hash: "h1" };

@@ -4,11 +4,19 @@ import { hashPassword } from "./passwords";
 
 export type Role = "admin" | "member";
 
+/**
+ * Lifecycle state of a local identity. A disabled user fails authentication at every credential
+ * path — cookie session, API token, and identity link — so deactivation takes effect on the next
+ * request instead of waiting for a session to lapse (SPEC §12).
+ */
+export type UserStatus = "active" | "disabled";
+
 export interface UserDoc {
   _id: string;
   email: string;
   passwordHash: string;
   role: Role;
+  status: UserStatus;
   createdAt: Date;
 }
 
@@ -17,10 +25,11 @@ export interface PublicUser {
   id: string;
   email: string;
   role: Role;
+  status: UserStatus;
 }
 
 export function toPublicUser(user: UserDoc): PublicUser {
-  return { id: user._id, email: user.email, role: user.role };
+  return { id: user._id, email: user.email, role: user.role, status: user.status };
 }
 
 export function normalizeEmail(email: string): string {
@@ -75,6 +84,7 @@ function rowToUser(row: Record<string, unknown>): UserDoc {
     email: row.email as string,
     passwordHash: row.password_hash as string,
     role: row.role as Role,
+    status: row.status as UserStatus,
     createdAt: row.created_at as Date,
   };
 }
@@ -102,8 +112,8 @@ export class PgUserRepo implements UserRepo {
   async insert(user: UserDoc): Promise<void> {
     try {
       await this.q.query(
-        "INSERT INTO users (id, email, password_hash, role, created_at) VALUES ($1, $2, $3, $4, $5)",
-        [user._id, user.email, user.passwordHash, user.role, user.createdAt]
+        "INSERT INTO users (id, email, password_hash, role, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
+        [user._id, user.email, user.passwordHash, user.role, user.status, user.createdAt]
       );
     } catch (err) {
       if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
@@ -115,9 +125,13 @@ export class PgUserRepo implements UserRepo {
 
   async findFirstAdmin(): Promise<UserDoc | null> {
     const { rows } = await this.q.query(
-      "SELECT * FROM users WHERE role = 'admin' ORDER BY created_at, id LIMIT 1"
+      "SELECT * FROM users WHERE role = 'admin' AND status = 'active' ORDER BY created_at, id LIMIT 1"
     );
     return rows.length > 0 ? rowToUser(rows[0]) : null;
+  }
+
+  async setStatus(id: string, status: UserStatus): Promise<void> {
+    await this.q.query("UPDATE users SET status = $2 WHERE id = $1", [id, status]);
   }
 }
 
@@ -132,6 +146,7 @@ export async function createUser(
     email: normalizeEmail(email),
     passwordHash: await hashPassword(password),
     role,
+    status: "active",
     createdAt: new Date(),
   };
   await repo.insert(user);

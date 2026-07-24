@@ -362,12 +362,73 @@ const BASELINE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS ingress_deliveries_received_idx ON ingress_deliveries (received_at)",
 ];
 
+/**
+ * Hardened authentication and identity (AW-025): user lifecycle status, typed session
+ * authentication evidence, API clients as first-class service identities, one-use OIDC
+ * authorization requests, and verified external identity mappings with one-use link tokens.
+ */
+const IDENTITY_STATEMENTS: string[] = [
+  "ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'",
+  "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now()",
+  "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS auth_methods text[] NOT NULL DEFAULT '{}'",
+  "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS mfa_verified_at timestamptz",
+  "ALTER TABLE sessions ADD COLUMN IF NOT EXISTS csrf_token text",
+  `CREATE TABLE IF NOT EXISTS api_clients (
+    id            uuid PRIMARY KEY,
+    client_id     text NOT NULL UNIQUE,
+    name          text NOT NULL,
+    secret_hash   text NOT NULL,
+    owner_user_id uuid NOT NULL REFERENCES users(id),
+    status        text NOT NULL DEFAULT 'active',
+    expires_at    timestamptz,
+    created_at    timestamptz NOT NULL,
+    rotated_at    timestamptz
+  )`,
+  "CREATE INDEX IF NOT EXISTS api_clients_owner_idx ON api_clients (owner_user_id)",
+  `CREATE TABLE IF NOT EXISTS oidc_auth_requests (
+    state         text PRIMARY KEY,
+    nonce         text NOT NULL,
+    code_verifier text NOT NULL,
+    redirect_to   text,
+    created_at    timestamptz NOT NULL,
+    expires_at    timestamptz NOT NULL,
+    consumed_at   timestamptz
+  )`,
+  "CREATE INDEX IF NOT EXISTS oidc_auth_requests_expires_idx ON oidc_auth_requests (expires_at)",
+  `CREATE TABLE IF NOT EXISTS external_identity_mappings (
+    provider        text NOT NULL,
+    external_subject text NOT NULL,
+    user_id         uuid NOT NULL REFERENCES users(id),
+    verified_at     timestamptz NOT NULL,
+    expires_at      timestamptz,
+    PRIMARY KEY (provider, external_subject)
+  )`,
+  "CREATE INDEX IF NOT EXISTS external_identity_mappings_user_idx ON external_identity_mappings (user_id)",
+  `CREATE TABLE IF NOT EXISTS external_link_tokens (
+    token_hash  text PRIMARY KEY,
+    provider    text NOT NULL,
+    user_id     uuid NOT NULL REFERENCES users(id),
+    created_at  timestamptz NOT NULL,
+    expires_at  timestamptz NOT NULL,
+    consumed_at timestamptz
+  )`,
+];
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
     description: "greenfield baseline",
     up: async (q) => {
       for (const sql of BASELINE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 2,
+    description: "hardened authentication and identity",
+    up: async (q) => {
+      for (const sql of IDENTITY_STATEMENTS) {
         await q.query(sql);
       }
     },

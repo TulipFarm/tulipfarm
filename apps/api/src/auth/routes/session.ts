@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { generateCsrfToken, setCsrfCookie } from "../csrf";
+import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
-import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../session-store";
+import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
 import { toPublicUser, type UserRepo } from "../users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
@@ -34,12 +34,17 @@ export function registerSessionRoutes(
   repo: UserRepo,
   requireAuth: PreHandler,
   ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
-  rateLimitHook?: PreHandler
+  rateLimitHook?: PreHandler,
+  loginRateLimitHook?: PreHandler
 ): void {
+  const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
+    (hook): hook is PreHandler => hook !== undefined
+  );
+
   app.post(
     "/api/v1/auth/login",
     {
-      preHandler: rateLimitHook ?? [],
+      preHandler: loginPreHandlers,
       schema: {
         description: "Authenticate with email and password. Sets session cookie.",
         tags: ["auth"],
@@ -78,10 +83,20 @@ export function registerSessionRoutes(
       if (!(await verifyPassword(user.passwordHash, password))) {
         return reply.code(401).send({ error: "invalid credentials" });
       }
+      // A disabled identity is denied with the same message as a bad password: whether an
+      // account exists and whether it is disabled are both unobservable to the caller.
+      if (user.status === "disabled") {
+        return reply.code(401).send({ error: "invalid credentials" });
+      }
 
-      const sid = await store.create(user._id);
-      reply.setCookie(SESSION_COOKIE, sid, cookieOptions(ttlSeconds));
-      setCsrfCookie(reply, generateCsrfToken(), ttlSeconds);
+      // Rotate: any session id the browser already carried is destroyed and replaced, so a
+      // pre-planted session id is never upgraded into an authenticated one (session fixation).
+      const session = await rotateSession(store, req.cookies[SESSION_COOKIE], {
+        userId: user._id,
+        authMethods: ["password"],
+      });
+      reply.setCookie(SESSION_COOKIE, session.sid, cookieOptions(ttlSeconds));
+      setCsrfCookie(reply, session.csrfToken, ttlSeconds);
       return reply.code(200).send({ user: toPublicUser(user) });
     }
   );
@@ -102,6 +117,7 @@ export function registerSessionRoutes(
         await store.destroy(sid);
       }
       reply.clearCookie(SESSION_COOKIE, { path: "/" });
+      reply.clearCookie(CSRF_COOKIE, { path: "/" });
       return reply.code(204).send();
     }
   );
