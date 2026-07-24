@@ -1,4 +1,4 @@
-import { EVENT_STORAGE_STATEMENTS } from "@tulipfarm/storage";
+import { EVENT_STORAGE_STATEMENTS, RUN_STORAGE_STATEMENTS } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 
 export interface PgMigration {
@@ -439,6 +439,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "transactional event inbox and outbox",
     up: async (q) => {
       for (const sql of EVENT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 4,
+    description: "durable Runs, States, attempts, and lineage",
+    up: async (q) => {
+      for (const sql of RUN_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },
