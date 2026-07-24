@@ -1,4 +1,24 @@
 export type {
+  ApprovalBinding,
+  ApprovalBindingInput,
+  ApprovalIntent,
+} from "./approval/binding";
+export { bindingsMatch, computeApprovalBinding } from "./approval/binding";
+export type {
+  ApprovalApprover,
+  ApprovalDecisionRecord,
+  ApprovalDenialReason,
+  ApprovalOutcome,
+  ApprovalRecord,
+  ApprovalRiskLevel,
+} from "./approval/decision";
+export {
+  ApprovalDeniedError,
+  assertApprovalUsable,
+  assertApproverEligible,
+  requiredApproverCount,
+} from "./approval/decision";
+export type {
   AuthorityLayer,
   AuthzDecision,
   AuthzDecisionReason,
