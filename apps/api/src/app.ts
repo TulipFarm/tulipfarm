@@ -17,7 +17,7 @@ import type { ActivityService } from "./activity/service";
 import type { ApprovalsRepo } from "./approvals/repo";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
-import { csrfHook } from "./auth/csrf";
+import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
@@ -33,6 +33,7 @@ import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
+import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
 import { resolveConnectionEnv } from "./integrations/connection-env";
 import { McpClientService } from "./integrations/mcp-client-service";
@@ -70,6 +71,7 @@ export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
   tokenRepo?: TokenRepo;
+  identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   rateLimiter?: RateLimiter;
   secretsService?: SecretsService;
   gitSync?: GitSyncService;
@@ -194,7 +196,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
   });
 
-  app.addHook("preHandler", csrfHook);
+  // CSRF is session-bound when a session store is available (a double-submit pair alone is not
+  // sufficient); the stateless hook remains for deployments assembled without session auth.
+  app.addHook("preHandler", opts.sessionStore ? makeCsrfHook(opts.sessionStore) : csrfHook);
 
   app.get(
     "/health",
@@ -231,8 +235,14 @@ export async function buildApp(opts: AppOptions = {}) {
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
+      ...(opts.identity && { identity: opts.identity }),
     });
-    const requireAuth = makeRequireAuth(opts.sessionStore, opts.userRepo, opts.tokenRepo);
+    const requireAuth = makeRequireAuth({
+      store: opts.sessionStore,
+      userRepo: opts.userRepo,
+      tokenRepo: opts.tokenRepo,
+      ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
+    });
     // MCP client service: created once, shared between integration routes (connect/disconnect) and
     // the tool registry (dynamic tool registration). Accepts an optional override for testing.
     const secretsSvc = opts.secretsService;

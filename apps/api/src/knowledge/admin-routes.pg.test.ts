@@ -44,6 +44,7 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
         email: "u@example.com",
         passwordHash: "x",
         role: req.headers["x-role"] === "admin" ? "admin" : "member",
+        status: "active" as const,
         createdAt: new Date(),
       };
     });

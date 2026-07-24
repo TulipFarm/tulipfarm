@@ -4,7 +4,7 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import { generateText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { generateCsrfToken, setCsrfCookie } from "../auth/csrf";
+import { setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
@@ -31,7 +31,12 @@ export interface SetupDeps {
   ttlSeconds?: number;
 }
 
-function setSessionCookies(reply: FastifyReply, sid: string, ttlSeconds: number): void {
+function setSessionCookies(
+  reply: FastifyReply,
+  sid: string,
+  csrfToken: string,
+  ttlSeconds: number
+): void {
   reply.setCookie(SESSION_COOKIE, sid, {
     httpOnly: true,
     sameSite: "strict",
@@ -39,7 +44,7 @@ function setSessionCookies(reply: FastifyReply, sid: string, ttlSeconds: number)
     path: "/",
     maxAge: ttlSeconds,
   });
-  setCsrfCookie(reply, generateCsrfToken(), ttlSeconds);
+  setCsrfCookie(reply, csrfToken, ttlSeconds);
 }
 
 // Always-registered: returns needsSetup regardless of boot mode.
@@ -182,8 +187,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         }
         throw err;
       }
-      const sid = await sessionStore.create(user._id);
-      setSessionCookies(reply, sid, ttlSeconds);
+      const session = await sessionStore.issue({ userId: user._id, authMethods: ["password"] });
+      setSessionCookies(reply, session.sid, session.csrfToken, ttlSeconds);
       return reply.code(201).send({ user: toPublicUser(user) });
     }
   );

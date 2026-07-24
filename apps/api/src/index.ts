@@ -32,6 +32,8 @@ import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
+import { PgApiClientRepo } from "./identity/api-clients";
+import { PgExternalIdentityRepo } from "./identity/external-links";
 import { IngressIdentityResolver } from "./ingress/identity";
 import { makeIngressEnqueuer, registerIngressJobs } from "./ingress/jobs";
 import {
@@ -145,6 +147,8 @@ async function boot() {
     const sessionStore = new PgSessionStore(pool, ttlSeconds);
     const userRepo = new PgUserRepo(pool);
     const tokenRepo = new PgTokenRepo(pool);
+    const apiClientRepo = new PgApiClientRepo(pool);
+    const externalIdentityRepo = new PgExternalIdentityRepo(pool);
     const rateLimiter = new PgRateLimiter(pool);
 
     const hookExecutor =
@@ -297,6 +301,8 @@ async function boot() {
       sessionStore,
       userRepo,
       tokenRepo,
+      // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.
+      identity: { apiClientRepo, externalIdentityRepo },
       rateLimiter,
       secretsService,
       gitSync,

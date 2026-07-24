@@ -9,6 +9,7 @@ const alice: UserDoc = {
   email: "alice@example.com",
   passwordHash: "",
   role: "member",
+  status: "active" as const,
   createdAt: new Date(),
 };
 const admin: UserDoc = {
@@ -16,6 +17,7 @@ const admin: UserDoc = {
   email: "admin@example.com",
   passwordHash: "",
   role: "admin",
+  status: "active" as const,
   createdAt: new Date(),
 };
 

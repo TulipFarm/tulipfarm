@@ -9,7 +9,19 @@ import { SESSION_COOKIE } from "./routes";
 import { MemorySessionStore } from "./session-store";
 import { createUser, type UserDoc, type UserRepo } from "./users";
 
-const TEST_CSRF = "a".repeat(64);
+// A session binds its own CSRF token (see makeCsrfHook); tests look it up by session id.
+const csrfBySid = new Map<string, string>();
+const WRONG_CSRF = "a".repeat(64);
+
+async function issueSession(store: MemorySessionStore, userId: string): Promise<string> {
+  const session = await store.issue({ userId, authMethods: ["password"] });
+  csrfBySid.set(session.sid, session.csrfToken);
+  return session.sid;
+}
+
+function csrfOf(sid: string): string {
+  return csrfBySid.get(sid) ?? WRONG_CSRF;
+}
 
 class FakeUserRepo implements UserRepo {
   constructor(private readonly users: UserDoc[] = []) {}
@@ -192,6 +204,7 @@ describe("auth routes", () => {
 
   describe("GET /tokens pagination", () => {
     let sessionCookie: string;
+    let csrf: string;
 
     beforeEach(async () => {
       const login = await app.inject({
@@ -200,15 +213,12 @@ describe("auth routes", () => {
         payload: { email: "user@example.com", password: "correct-horse" },
       });
       sessionCookie = cookieValue(login) as string;
+      // The CSRF token is bound to the session this login issued — a token from any other
+      // session is rejected (see makeCsrfHook).
+      csrf = login.cookies.find((c) => c.name === CSRF_COOKIE)?.value as string;
     });
 
     async function createToken(name: string): Promise<void> {
-      const csrfLogin = await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/login",
-        payload: { email: "user@example.com", password: "correct-horse" },
-      });
-      const csrf = csrfLogin.cookies.find((c) => c.name === CSRF_COOKIE)?.value as string;
       await app.inject({
         method: "POST",
         url: "/api/v1/auth/tokens",
@@ -324,8 +334,8 @@ describe("API token routes", () => {
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
     adminId = admin._id;
     memberId = member._id;
-    adminSid = await store.create(adminId);
-    memberSid = await store.create(memberId);
+    adminSid = await issueSession(store, adminId);
+    memberSid = await issueSession(store, memberId);
 
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo });
   });
@@ -338,8 +348,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "ci-token" },
     });
     expect(res.statusCode).toBe(201);
@@ -354,8 +364,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: {},
     });
     expect(res.statusCode).toBe(400);
@@ -374,8 +384,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "for-member", userId: memberId },
     });
     expect(res.statusCode).toBe(201);
@@ -386,8 +396,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
       payload: { name: "x", userId: adminId },
     });
     expect(res.statusCode).toBe(403);
@@ -397,8 +407,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "x", userId: "no-such-user" },
     });
     expect(res.statusCode).toBe(404);
@@ -408,15 +418,15 @@ describe("API token routes", () => {
     await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "admin-token" },
     });
     await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
       payload: { name: "member-token" },
     });
 
@@ -433,15 +443,15 @@ describe("API token routes", () => {
     await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "admin-token" },
     });
     await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
       payload: { name: "member-token" },
     });
 
@@ -460,8 +470,8 @@ describe("API token routes", () => {
     const create = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
       payload: { name: "to-revoke" },
     });
     const { id } = create.json();
@@ -469,8 +479,8 @@ describe("API token routes", () => {
     const del = await app.inject({
       method: "DELETE",
       url: `/api/v1/auth/tokens/${id}`,
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
     });
     expect(del.statusCode).toBe(204);
     expect(await tokenRepo.findById(id)).toBeNull();
@@ -480,8 +490,8 @@ describe("API token routes", () => {
     const create = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "admin-token" },
     });
     const { id } = create.json();
@@ -489,8 +499,8 @@ describe("API token routes", () => {
     const del = await app.inject({
       method: "DELETE",
       url: `/api/v1/auth/tokens/${id}`,
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
     });
     expect(del.statusCode).toBe(403);
   });
@@ -499,8 +509,8 @@ describe("API token routes", () => {
     const create = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
       payload: { name: "member-token" },
     });
     const { id } = create.json();
@@ -508,8 +518,8 @@ describe("API token routes", () => {
     const del = await app.inject({
       method: "DELETE",
       url: `/api/v1/auth/tokens/${id}`,
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
     });
     expect(del.statusCode).toBe(204);
   });
@@ -518,8 +528,8 @@ describe("API token routes", () => {
     const res = await app.inject({
       method: "DELETE",
       url: "/api/v1/auth/tokens/no-such-id",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
     });
     expect(res.statusCode).toBe(404);
   });
@@ -538,7 +548,7 @@ describe("Bearer token auth", () => {
     tokenRepo = new MemoryTokenRepo();
 
     const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
-    adminSid = await store.create(admin._id);
+    adminSid = await issueSession(store, admin._id);
 
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo });
   });
@@ -551,8 +561,8 @@ describe("Bearer token auth", () => {
     const create = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "mcp" },
     });
     const rawToken = create.json().token as string;
@@ -579,8 +589,8 @@ describe("Bearer token auth", () => {
     const create = await app.inject({
       method: "POST",
       url: "/api/v1/auth/tokens",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
       payload: { name: "temp" },
     });
     const { token: rawToken, id } = create.json();
@@ -588,8 +598,8 @@ describe("Bearer token auth", () => {
     await app.inject({
       method: "DELETE",
       url: `/api/v1/auth/tokens/${id}`,
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
     });
 
     const res = await app.inject({
@@ -619,7 +629,7 @@ describe("CSRF protection", () => {
     store = new MemorySessionStore();
     const repo = new FakeUserRepo();
     await createUser(repo, "admin@example.com", "pass", "admin");
-    adminSid = await store.create((await repo.findByEmail("admin@example.com"))?._id ?? "");
+    adminSid = await issueSession(store, (await repo.findByEmail("admin@example.com"))?._id ?? "");
     app = await buildApp({ sessionStore: store, userRepo: repo, tokenRepo: new MemoryTokenRepo() });
   });
 
@@ -653,8 +663,8 @@ describe("CSRF protection", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/logout",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
-      headers: { [CSRF_HEADER]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
     });
     expect(res.statusCode).toBe(204);
   });
@@ -672,7 +682,7 @@ describe("CSRF protection", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/auth/logout",
-      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: WRONG_CSRF },
       headers: { [CSRF_HEADER]: "wrong-token" },
     });
     expect(res.statusCode).toBe(403);
@@ -764,7 +774,9 @@ describe("rate limiting", () => {
       payload: { email: "user@example.com", password: "pass" },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.headers["x-ratelimit-limit"]).toBe("100");
+    // Login carries its own, stricter limiter on top of the shared auth limiter, so the
+    // headers on this route reflect the login budget.
+    expect(res.headers["x-ratelimit-limit"]).toBe("10");
     expect(Number(res.headers["x-ratelimit-remaining"])).toBeGreaterThanOrEqual(0);
     expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
   });

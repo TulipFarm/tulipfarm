@@ -123,6 +123,7 @@ const user: UserDoc = {
   email: "slack@example.com",
   passwordHash: "x",
   role: "member",
+  status: "active" as const,
   createdAt: new Date(),
 };
 
