@@ -1,5 +1,5 @@
 import { PGlite } from "@electric-sql/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable, TransactionPort } from "../ports";
 import {
   EVENT_STORAGE_STATEMENTS,
@@ -49,11 +49,15 @@ describe("EventStore (PostgreSQL)", () => {
   let store: EventStore;
   let nextId: () => string;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     database = await PGlite.create();
     for (const statement of EVENT_STORAGE_STATEMENTS) {
       await database.query(statement);
     }
+  }, 60_000);
+
+  beforeEach(async () => {
+    await database.query("TRUNCATE TABLE events_inbox CASCADE");
     let id = 0;
     nextId = () => {
       id += 1;
@@ -62,7 +66,7 @@ describe("EventStore (PostgreSQL)", () => {
     store = new EventStore(transactionPort(database), nextId);
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await database.close();
   });
 
