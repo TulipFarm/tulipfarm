@@ -55,6 +55,7 @@ import { registerResourceRoutes } from "./resources/routes";
 import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
+import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
@@ -89,6 +90,7 @@ export interface AppOptions {
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
+  runReplay?: RunReplayDeps;
   streamResumeRepo?: StreamResumeRepo;
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
@@ -442,6 +444,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.runEvents) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
+    }
+    if (opts.runReplay) {
+      registerRunReplayRoutes(app, opts.runReplay, requireAuth);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
