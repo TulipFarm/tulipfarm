@@ -2,7 +2,9 @@
 
 `@tulipfarm/worker` — durable Run dispatch, Agent/Tool States, timers, reconciliation, and
 projections. Composition-only: this app wires published packages together and must not
-reimplement package-owned logic. **Scaffold today:** `src/index.ts` is `export {}`. tsconfig
+reimplement package-owned logic. Today: Run/event dispatchers, `src/agent-state.ts` (Agent State
+execution around the bounded Agent loop), and `src/conversation-turn.ts` (durable Turn
+completion). tsconfig
 extends `@tulipfarm/tsconfig/node.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`,
