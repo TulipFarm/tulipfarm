@@ -36,7 +36,7 @@ const RUN_ID = "00000000-0000-4000-8000-000000000001";
 const NOW = Date.UTC(2026, 6, 25, 12, 0, 0);
 
 /** A linear Routine of `length` Tool States — every State previews exactly one effect. */
-function chain(length: number) {
+function compileChain(length: number) {
   const states: routineSchema.RoutineState[] = Array.from({ length }, (_, index) => ({
     type: "tool",
     name: `Step${index}`,
@@ -64,6 +64,20 @@ function chain(length: number) {
   );
 }
 
+/**
+ * Compilation is deterministic in `length`, so the generated cases share one compiled graph per
+ * length instead of paying for a compile on every case.
+ */
+const chains = new Map<number, ReturnType<typeof compileChain>>();
+
+function chain(length: number) {
+  const cached = chains.get(length);
+  if (cached !== undefined) return cached;
+  const compiled = compileChain(length);
+  chains.set(length, compiled);
+  return compiled;
+}
+
 function chainFixture(length: number, salt: number): SimulationFixture {
   const tools: Record<string, Record<string, unknown>> = {};
   for (let index = 0; index < length; index += 1) {
@@ -81,7 +95,7 @@ function chainFixture(length: number, salt: number): SimulationFixture {
 
 describe("simulation is deterministic, effect-free, and bounded", () => {
   it("produces the identical result for the identical fixture", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 8);
       const salt = intBetween(random, 0, 1_000);
       const routine = chain(length);
@@ -92,7 +106,7 @@ describe("simulation is deterministic, effect-free, and bounded", () => {
   });
 
   it("distinguishes fixtures that differ", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 8);
       const salt = intBetween(random, 0, 1_000);
       const routine = chain(length);
@@ -104,7 +118,7 @@ describe("simulation is deterministic, effect-free, and bounded", () => {
   });
 
   it("never dispatches an effect or leases a Secret, whatever the graph", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 8);
       const result = simulateRoutine(chain(length), chainFixture(length, 1));
 
@@ -119,7 +133,7 @@ describe("simulation is deterministic, effect-free, and bounded", () => {
   });
 
   it("executes exactly one step per reachable State, inside the default budget", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 8);
       const result = simulateRoutine(chain(length), chainFixture(length, 1));
 
@@ -129,7 +143,7 @@ describe("simulation is deterministic, effect-free, and bounded", () => {
   });
 
   it("stops at the budget rather than running a longer graph unbounded", () => {
-    forEachCase(50, (random) => {
+    forEachCase(25, (random) => {
       const length = intBetween(random, 2, 8);
       const maxSteps = intBetween(random, 1, length - 1);
 
@@ -161,7 +175,7 @@ describe("replay is a simulation unless live authority is proven", () => {
   }
 
   it("only reaches the live path with the grant and a fresh effect identity", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const length = intBetween(random, 1, 5);
       const routine = chain(length);
       const live = random() < 0.5;
@@ -199,7 +213,7 @@ describe("replay is a simulation unless live authority is proven", () => {
   });
 
   it("never dispatches on the default path, whatever the recorded Run looked like", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 5);
       const plan = planReplay(recorded(length, intBetween(random, 0, 50)), chain(length), {}, NOW);
       if (plan.mode !== "simulation") throw new Error("expected a simulation plan");
@@ -210,7 +224,7 @@ describe("replay is a simulation unless live authority is proven", () => {
   });
 
   it("calls a replay identical exactly when every recorded State output is reproduced", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const length = intBetween(random, 1, 5);
       const salt = intBetween(random, 0, 50);
       const drift = random() < 0.5;

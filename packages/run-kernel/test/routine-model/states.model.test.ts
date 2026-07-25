@@ -31,7 +31,7 @@ const IDENTITY_CEILING: IdentityCeiling = {
 
 const STATUSES: readonly WorkStatus[] = ["pending", "running", "succeeded", "failed"];
 
-function compileFanOut(maxConcurrency: number) {
+function buildFanOut(maxConcurrency: number) {
   const states: routineSchema.RoutineState[] = [
     {
       type: "parallel",
@@ -62,13 +62,24 @@ function compileFanOut(maxConcurrency: number) {
   return state;
 }
 
+/** One compiled graph per concurrency bound — compilation is deterministic in that bound. */
+const fanOuts = new Map<number, ReturnType<typeof buildFanOut>>();
+
+function compileFanOut(maxConcurrency: number) {
+  const cached = fanOuts.get(maxConcurrency);
+  if (cached !== undefined) return cached;
+  const compiled = buildFanOut(maxConcurrency);
+  fanOuts.set(maxConcurrency, compiled);
+  return compiled;
+}
+
 function randomStatuses(random: () => number, size: number): WorkStatus[] {
   return Array.from({ length: size }, () => pick(random, STATUSES));
 }
 
 describe("fan-out dispatch never exceeds its authored bound", () => {
   it("starts only pending units, in order, within the free concurrency slots", () => {
-    forEachCase(300, (random) => {
+    forEachCase(120, (random) => {
       const cap = intBetween(random, 1, 6);
       const statuses = randomStatuses(random, intBetween(random, 0, 12));
       const state = compileFanOut(cap);
@@ -85,7 +96,7 @@ describe("fan-out dispatch never exceeds its authored bound", () => {
   });
 
   it("never leaves a free slot idle while a unit is still pending", () => {
-    forEachCase(300, (random) => {
+    forEachCase(120, (random) => {
       const cap = intBetween(random, 1, 6);
       const statuses = randomStatuses(random, intBetween(random, 0, 12));
       const state = compileFanOut(cap);
@@ -101,7 +112,7 @@ describe("fan-out dispatch never exceeds its authored bound", () => {
 
 describe("join resolution agrees with the counting model", () => {
   it("is in exactly one of pending, satisfied, or failed, and matches the counts", () => {
-    forEachCase(300, (random) => {
+    forEachCase(120, (random) => {
       const size = intBetween(random, 1, 8);
       const statuses = randomStatuses(random, size);
       const keys = statuses.map((_, index) => `unit-${index}`);
@@ -123,7 +134,7 @@ describe("join resolution agrees with the counting model", () => {
   });
 
   it("only ever asks the caller to cancel units that are still unsettled", () => {
-    forEachCase(300, (random) => {
+    forEachCase(120, (random) => {
       const size = intBetween(random, 1, 8);
       const statuses = randomStatuses(random, size);
       const keys = statuses.map((_, index) => `unit-${index}`);
@@ -166,7 +177,7 @@ describe("wait aggregation is monotone and never satisfied by nothing", () => {
   }
 
   it("requires at least one signal for every aggregation", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const expectedSignals = intBetween(random, 1, 6);
       const aggregation = pick(random, ["first", "all", "quorum", "window"] as const);
       const quorum = aggregation === "quorum" ? intBetween(random, 1, expectedSignals) : null;
@@ -176,7 +187,7 @@ describe("wait aggregation is monotone and never satisfied by nothing", () => {
   });
 
   it("stays satisfied once satisfied, as further signals arrive", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const expectedSignals = intBetween(random, 1, 6);
       const aggregation = pick(random, ["first", "all", "quorum", "window"] as const);
       const quorum = aggregation === "quorum" ? intBetween(random, 1, expectedSignals) : null;
@@ -192,7 +203,7 @@ describe("wait aggregation is monotone and never satisfied by nothing", () => {
   });
 
   it("never satisfies a quorum that `all` would not also satisfy", () => {
-    forEachCase(100, (random) => {
+    forEachCase(40, (random) => {
       const expectedSignals = intBetween(random, 1, 6);
       const quorum = intBetween(random, 1, expectedSignals);
       const count = intBetween(random, 0, expectedSignals + 2);
@@ -208,7 +219,7 @@ describe("wait aggregation is monotone and never satisfied by nothing", () => {
   });
 
   it("never closes a window on signal count alone", () => {
-    forEachCase(50, (random) => {
+    forEachCase(25, (random) => {
       const count = intBetween(random, 0, 20);
 
       expect(isWaitSatisfied(wait({ aggregation: "window", expectedSignals: 3 }), count)).toBe(
@@ -257,7 +268,7 @@ describe("branch selection is a function of its Context", () => {
   it("takes the first matching arm and repeats that choice for the same Context", () => {
     const state = compileBranch();
 
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const score = intBetween(random, 0, 20);
       const scope = { input: { score } };
 

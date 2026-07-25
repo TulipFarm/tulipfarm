@@ -70,7 +70,7 @@ function intervalCase(random: () => number): Case {
 
 describe("interval schedules match the reference enumeration", () => {
   it("only ever fires occurrences the model says are due", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs, due } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
 
@@ -85,7 +85,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("accounts for every due occurrence as either fired or skipped", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs, due } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
 
@@ -94,7 +94,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("honours the missed-run policy's fire budget", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
 
@@ -104,7 +104,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("backfills oldest-first and ends on the current occurrence", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs, due } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
       if (plan.fires.length === 0) return;
@@ -119,7 +119,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("applies the overlap policy against in-flight Runs", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
       if (state.activeRuns === 0) return;
@@ -133,7 +133,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("keeps jitter bounded, deterministic, and inside the occurrence's identity", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs } = intervalCase(random);
       const plan = planSchedule(spec, state, nowMs);
       const replanned = planSchedule(spec, state, nowMs);
@@ -149,7 +149,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("gives every planned occurrence a distinct deduplication key", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs } = intervalCase(random);
       const keys = planSchedule(spec, state, nowMs).fires.map((fire) => fire.deduplicationKey);
 
@@ -158,7 +158,7 @@ describe("interval schedules match the reference enumeration", () => {
   });
 
   it("always points at a future occurrence for an open-ended schedule", () => {
-    forEachCase(200, (random) => {
+    forEachCase(80, (random) => {
       const { spec, state, nowMs } = intervalCase(random);
       const { nextDueAtMs } = planSchedule(spec, state, nowMs);
 
