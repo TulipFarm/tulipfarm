@@ -4,6 +4,7 @@ import {
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
+  RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
@@ -492,6 +493,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "child Run links",
     up: async (q) => {
       for (const sql of CHILD_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 9,
+    description: "persisted Run event stream",
+    up: async (q) => {
+      for (const sql of RUN_EVENT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

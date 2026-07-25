@@ -19,6 +19,7 @@ src/
   memory/         # per-user working memory
   secrets/        # secret storage
   soul/           # soul git ops (commit, push) + agents/, skills/, resource-types/ CRUD
+  runs/           # persisted Run event SSE stream (GET /api/v1/runs/:id/events, cursor recovery)
   pg-migrations/  # Postgres schema migrations (applied on boot)
 ```
 
