@@ -23,6 +23,7 @@
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/routine-engine": "workspace:*",
+    "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/soul": "workspace:*",
