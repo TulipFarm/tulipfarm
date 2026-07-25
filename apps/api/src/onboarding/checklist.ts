@@ -9,7 +9,7 @@ import { evaluateRules } from "./rules";
  * contextual "recommended next" items come from the deterministic rule set in ./rules.
  *
  * Typed against a minimal soul slice (resources/skills/agents maps) so it is trivially testable with
- * a stub — mirrors suggestions.ts. The platform agents (GeneralAssistant / InformationArchitect)
+ * a stub — mirrors suggestions.ts. The built-in platform assistant
  * live in listAgents(), NOT in soulLoader.agents, so `agents.size > 0` correctly counts only
  * user-created soul agents.
  */

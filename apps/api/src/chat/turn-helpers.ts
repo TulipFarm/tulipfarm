@@ -2,7 +2,7 @@ import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
 import type { KnowledgeService } from "../knowledge/service";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
-import { EXCLUSIVE_SOUL_WRITE_TOOLS, type PlatformAgent } from "../soul/agents/registry";
+import type { PlatformAgent } from "../soul/agents/registry";
 import type { ToolRegistry } from "../tools/registry";
 import {
   fromAssistantParts,
@@ -244,29 +244,22 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
 }
 
 // Per-agent tool scoping (shared by the chat turn's toolset build, its <available-tools> prompt
-// block, and the debug-context route): the Information Architect is filtered to its forge
-// allowlist; every other agent (the GeneralAssistant front desk + user soul agents) gets all
-// registered tools EXCEPT the IA-exclusive soul writes — so only the IA can author/edit soul
-// artifacts. `undefined` (no/empty registry) means no scoping — every registered tool is exposed.
+// block, and the debug-context route): a platform allowlist is applied when supplied; otherwise
+// every registered tool is exposed. The built-in assistant intentionally receives the full set.
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined
 ): ReadonlySet<string> | undefined {
   if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
   if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
-  return new Set(
-    toolRegistry
-      .getAll()
-      .map((t) => t.name)
-      .filter((n) => !EXCLUSIVE_SOUL_WRITE_TOOLS.has(n))
-  );
+  return undefined;
 }
 
 /**
  * Whether to instruct knowledge grounding + citation (and surface pinned pages) for an agent this
  * turn: a knowledge service must be wired AND `cite_sources` must be in the agent's scoped toolset
- * (so e.g. the Information Architect, which has no knowledge tools, is excluded). Centralizes the gate
- * the chat turn and the debug-context route otherwise duplicated.
+ * (so a future restricted platform agent can be excluded). Centralizes the gate the chat turn and
+ * the debug-context route otherwise duplicated.
  */
 export function canGroundKnowledge(
   knowledge: KnowledgeService | undefined,

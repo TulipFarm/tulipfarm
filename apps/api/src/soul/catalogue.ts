@@ -14,7 +14,7 @@ export interface SoulCatalogueEntry {
 /**
  * The repo catalogue for `<soul-context>`: every soul artifact type the loader exposes, each
  * projected to its L1 surface. Gives an agent ambient awareness of what already exists without a
- * tool round-trip (e.g. the Information Architect can reference an existing agent or resource
+ * tool round-trip (e.g. the built-in assistant can reference an existing agent or resource
  * type by name). Sorted by name within each section for a byte-stable prompt prefix (AC-V1-001).
  */
 export interface SoulCatalogue {
@@ -42,8 +42,8 @@ function byName(a: SoulCatalogueEntry, b: SoulCatalogueEntry): number {
 
 /**
  * Project every soul artifact to the `<soul-context>` L1 catalogue. Agents come from `listAgents`
- * (the two platform agents first, then soul agents) so the catalogue surfaces the GeneralAssistant
- * / InformationArchitect an agent may hand off to. Skills are the FULL set (eager + lazy) minus
+ * (the built-in platform assistant first, then Soul agents) so the catalogue surfaces agents an
+ * agent may hand off to. Skills are the full set (eager + lazy) minus
  * pending-audit; descriptions are read from each type's own metadata (frontmatter / schema /
  * config), falling back through `title` and then "". An absent loader yields all
  * empty sections, so the block is omitted entirely.

@@ -40,7 +40,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | One user→assistant exchange | **Turn** | `Turn` | — | — | child of Conversation |
 | Atomic message unit | **Message** | `Message` | — | — | roles: system\|user\|**assistant**\|tool |
 | Auth/login session (cookie) | **Session** | `Session` | `/api/v1/auth/...` | — | AUTH ONLY — never the chat thread |
-| Configured AI persona/worker | **Agent** | `Agent` | `/agents`, `/api/v1/agents` | "Agents" | default instance named `GeneralAssistant` (proper noun, kept) |
+| Configured AI persona/worker | **Agent** | `Agent` | `/agents`, `/api/v1/agents` | "Agents" | normal chat is the default harness; Agents are user-created |
 | The resource feature | **Resources** | — | `/resources` | "Resources" | umbrella |
 | A user-defined schema (Ticket, Customer) | **Resource type** | `ResourceType` | `/resources/:type` | "Resource type" | has a JSON **schema** |
 | The JSON Schema artifact of a type | **Schema** | `schema` | `/resources/:type/schema` | "Schema" | |

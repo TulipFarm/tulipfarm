@@ -80,7 +80,6 @@ import { reconcileRoutineSchedules, registerRoutineCronWorker } from "./routines
 import { RoutineTriggerService, subscribeRoutineEventTriggers } from "./routines/trigger-service";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
-import { PLATFORM_AGENTS } from "./soul/agents/platform-agents";
 import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
 import { registerSoulSync } from "./soul-sync";
 import { buildToolRegistry } from "./tools/setup";
@@ -246,7 +245,6 @@ async function boot() {
         soulPath: process.env.SOUL_PATH,
         gitSync,
         builtinSkills: BUILTIN_SKILLS,
-        platformAgentNames: new Set(PLATFORM_AGENTS.map((a) => a.name)),
         triggerRoutine: (slug, inputs) =>
           routineTriggerService.trigger(slug, { type: "agent", payload: inputs ?? {} }),
         onRoutinesChanged: async () => {

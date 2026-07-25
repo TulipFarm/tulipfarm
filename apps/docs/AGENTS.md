@@ -6,8 +6,7 @@ for monorepo commands, Biome rules, and git policy; see `README.md` for deployme
 
 > **Terminology is binding** — [`metadata/terminologies.md`](../../metadata/terminologies.md).
 > In these docs that means: **chat** (never "conversation"), **space** / **page** (never
-> bundle/concept/document/collection), and the platform agents by their display names —
-> **General Assistant** and **Information Architect** (not the PascalCase code names).
+> bundle/concept/document/collection), and user-created Agents by their display names.
 
 ## The one rule that governs everything here
 
@@ -27,11 +26,8 @@ every build task that way:
 
 ### How building actually works (verify against `apps/api/src/soul/agents/platform-agents.ts`)
 
-- **General Assistant** — the default chat agent / front desk. Answers, reads, and creates
-  **records + knowledge** directly.
-- It **transfers** any "build/change my system" request (resource type, agent, skill,
-  onboarding) to the **Information Architect**, which loads a **forge**
-  (`resource-forge` / `agent-forge` / `skill-forge` / `onboarding`), interviews the user,
+ - Normal chat answers, reads, and creates **records + knowledge** directly, and loads a **forge**
+  (`resource-forge` / `agent-forge` / `skill-forge` / `onboarding`) to build the system.
   and writes the artifact. The handoff is visible to the user.
 - Soul writes commit immediately and reconcile **live — no restart** (`create_resource_type`
   calls `soulLoader.reload()` + `reconcile()`).

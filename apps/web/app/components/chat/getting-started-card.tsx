@@ -4,8 +4,8 @@ import type { OnboardingChecklist } from "~/lib/onboarding";
 /*
  * "Getting started" checklist card on the chat welcome (ONB-V1). Steps are the core build blocks
  * with status auto-derived server-side; `todo` steps and the "recommended next" items seed a guided
- * prompt down the same GeneralAssistant -> InformationArchitect flow the suggestion chips use (via
- * `onPick`). Routine/integration render as non-actionable "coming soon". Flat/hairline aesthetic,
+ * prompt through the built-in assistant flow the suggestion chips use (via `onPick`).
+ * Routine/integration render as non-actionable "coming soon". Flat/hairline aesthetic,
  * no shadows; ruby is reserved for hover affordances only.
  */
 

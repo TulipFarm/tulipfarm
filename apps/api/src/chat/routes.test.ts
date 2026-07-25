@@ -819,9 +819,8 @@ describe("chat routes", () => {
       expect(system).toContain("<skills>\\n## code-review\\nReview carefully.");
       // The L1 index holds ONLY the lazy skill — the eager one does not leak into it (it surfaces
       // as a full body in <skills>, and by name in the <soul-context> catalogue, but never here).
-      expect(system).toContain(
-        "<available-skills>\\n- data-export: Export data.\\n</available-skills>"
-      );
+      expect(system).toContain("- data-export: Export data.");
+      expect(system).toContain("- resource-forge:");
     });
 
     // Business context — soul.yaml's businessName/businessDescription surface in the system prompt
@@ -1006,7 +1005,7 @@ describe("chat routes", () => {
       expect(res.headers["content-type"]).toContain("text/event-stream");
       expect(res.headers["x-stream-id"]).toBeDefined();
       // The turn's active agent is surfaced up front so the client header reflects it immediately.
-      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(res.headers["x-agent-id"]).toBeUndefined();
       expect(res.body).toMatch(/id: 1\nevent: text\ndata: /);
       expect(res.body).toContain("event: finish");
     });
@@ -1255,9 +1254,8 @@ describe("chat routes", () => {
     });
   });
 
-  // ── Same-turn agent handoff: the front desk calls transfer_to_agent, the loop switches the active
-  //    agent (persisting it) and the target continues in the SAME SSE stream; complete_task hands
-  //    control back to the GeneralAssistant. ──
+  // ── Same-turn agent handoff: a user-created agent can call transfer_to_agent and the loop switches
+  //    to a valid target in the same SSE stream. Normal chat never has a named platform agent. ──
   describe("POST /api/v1/chat (agent handoff / delegation)", () => {
     function registerControlTools(): ToolRegistry {
       const reg = new ToolRegistry();
@@ -1296,7 +1294,7 @@ describe("chat routes", () => {
       return reg;
     }
 
-    it("transfers GeneralAssistant → InformationArchitect in one turn and persists the active agent", async () => {
+    it("ignores a transfer to an agent that does not exist", async () => {
       await app.close();
       select.mockImplementation(() =>
         makeToolThenTextModel(
@@ -1304,10 +1302,10 @@ describe("chat routes", () => {
             {
               toolCallId: "c1",
               toolName: "transfer_to_agent",
-              args: { agentId: "InformationArchitect" },
+              args: { agentId: "missing-agent" },
             },
           ],
-          "Information Architect here — building it now."
+          "The default assistant stays active."
         )
       );
       app = await buildApp({
@@ -1329,21 +1327,14 @@ describe("chat routes", () => {
       await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
 
       const types = streamRepo.rows.map((r) => r.eventType);
-      // The front desk's transfer tool-result AND the architect's follow-up text are on one stream,
-      // closed by exactly one finish.
+      // An unknown target cannot take over the conversation; the stream still closes once.
       expect(types.filter((t) => t === "finish")).toHaveLength(1);
       const toolResult = streamRepo.rows.find((r) => r.eventType === "tool-result");
       expect((toolResult?.data as { toolName: string }).toolName).toBe("transfer_to_agent");
-      const text = streamRepo.rows
-        .filter((r) => r.eventType === "text")
-        .map((r) => (r.data as { delta: string }).delta)
-        .join("");
-      expect(text).toContain("Information Architect here");
-      // The active agent is persisted as the architect (it did not complete_task this turn).
-      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+      expect(repo.docs.get(convoId)?.agentId).toBeUndefined();
     });
 
-    it("complete_task hands control back to the GeneralAssistant", async () => {
+    it("does not persist an unknown agent on a new conversation", async () => {
       await app.close();
       select.mockImplementation(() =>
         makeToolThenTextModel(
@@ -1364,14 +1355,13 @@ describe("chat routes", () => {
         toolRegistry: registerControlTools(),
       });
 
-      const res = await post({ message: userMsg("that's all"), agentId: "InformationArchitect" });
+      const res = await post({ message: userMsg("that's all"), agentId: "missing-agent" });
       expect(res.statusCode).toBe(200);
       const convoId = res.headers["x-conversation-id"] as string;
       await waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
 
-      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
-      // After complete_task the front desk streams a brief closing confirmation (the model's 2nd
-      // call), so the turn never ends on a silent tool result.
+      expect(repo.docs.get(convoId)?.agentId).toBeUndefined();
+      // Completion is a normal tool result; no second platform-agent turn is created.
       const closing = streamRepo.rows
         .filter((r) => r.eventType === "text")
         .map((r) => (r.data as { delta: string }).delta)
@@ -1384,8 +1374,7 @@ describe("chat routes", () => {
   // ── Sticky @mention hand-off: a mid-conversation `@agent` mention re-targets the active agent.
   //    Unlike the LLM-driven transfer_to_agent above, this is a deterministic, user-initiated switch
   //    keyed off body.agentId — the tagged agent takes over this turn and persists as the
-  //    conversation's agent until a different one is tagged. InformationArchitect/GeneralAssistant are
-  //    platform agents (always resolvable via getAgent), so no toolRegistry/soul setup is needed. ──
+  //    conversation's agent until a different one is tagged. Normal chat has no persisted agent id. ──
   describe("POST /api/v1/chat (sticky @mention hand-off)", () => {
     async function seedConvo(agentId?: string): Promise<string> {
       const id = randomUUID();
@@ -1403,56 +1392,35 @@ describe("chat routes", () => {
     const handoffs = () => streamRepo.rows.filter((r) => r.eventType === "agent-handoff");
     const finish = () => waitFor(() => streamRepo.rows.some((r) => r.eventType === "finish"), 2000);
 
-    it("routes the turn to the @mentioned agent, persists it, and emits an inline handoff marker", async () => {
-      const convoId = await seedConvo("GeneralAssistant");
+    it("ignores a mention of an agent that does not exist", async () => {
+      const convoId = await seedConvo();
       const res = await post({
         conversationId: convoId,
-        message: userMsg("@Information Architect build it"),
-        agentId: "InformationArchitect",
+        message: userMsg("@Missing Agent build it"),
+        agentId: "missing-agent",
       });
       expect(res.statusCode).toBe(200);
       await finish();
 
-      // The header reflects the switched agent immediately (X-Agent-Id), the switch persists, and a
-      // single agent-handoff event drives the client's inline marker + current-agent indicator.
-      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
-      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+      expect(res.headers["x-agent-id"]).toBeUndefined();
+      expect(repo.docs.get(convoId)?.agentId).toBeUndefined();
       const hs = handoffs();
-      expect(hs).toHaveLength(1);
-      expect(hs[0]?.data).toMatchObject({ from: "GeneralAssistant", to: "InformationArchitect" });
+      expect(hs).toHaveLength(0);
     });
 
-    it("a turn with no @mention stays on the conversation's persisted agent (sticky)", async () => {
-      const convoId = await seedConvo("InformationArchitect");
+    it("a conversation with a removed agent resolves to normal chat", async () => {
+      const convoId = await seedConvo("removed-agent");
       const res = await post({ conversationId: convoId, message: userMsg("and the next bit") });
       expect(res.statusCode).toBe(200);
       await finish();
 
-      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
-      expect(repo.docs.get(convoId)?.agentId).toBe("InformationArchitect");
+      expect(res.headers["x-agent-id"]).toBeUndefined();
+      expect(repo.docs.get(convoId)?.agentId).toBe("removed-agent");
       expect(handoffs()).toHaveLength(0);
     });
 
-    it("re-tagging a different agent switches again", async () => {
-      const convoId = await seedConvo("InformationArchitect");
-      const res = await post({
-        conversationId: convoId,
-        message: userMsg("@General Assistant thanks"),
-        agentId: "GeneralAssistant",
-      });
-      expect(res.statusCode).toBe(200);
-      await finish();
-
-      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
-      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
-      expect(handoffs()[0]?.data).toMatchObject({
-        from: "InformationArchitect",
-        to: "GeneralAssistant",
-      });
-    });
-
     it("ignores an unknown @mention (no switch, no marker, no persist)", async () => {
-      const convoId = await seedConvo("GeneralAssistant");
+      const convoId = await seedConvo();
       const setAgentSpy = vi.spyOn(repo, "setAgent");
       const res = await post({
         conversationId: convoId,
@@ -1462,61 +1430,26 @@ describe("chat routes", () => {
       expect(res.statusCode).toBe(200);
       await finish();
 
-      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
-      expect(repo.docs.get(convoId)?.agentId).toBe("GeneralAssistant");
+      expect(res.headers["x-agent-id"]).toBeUndefined();
+      expect(repo.docs.get(convoId)?.agentId).toBeUndefined();
       expect(handoffs()).toHaveLength(0);
       expect(setAgentSpy).not.toHaveBeenCalled();
     });
 
-    it("mentioning the already-active agent is a no-op (no marker, no persist)", async () => {
-      const convoId = await seedConvo("GeneralAssistant");
-      const setAgentSpy = vi.spyOn(repo, "setAgent");
-      const res = await post({
-        conversationId: convoId,
-        message: userMsg("@General Assistant still you"),
-        agentId: "GeneralAssistant",
-      });
-      expect(res.statusCode).toBe(200);
-      await finish();
-
-      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
-      expect(handoffs()).toHaveLength(0);
-      expect(setAgentSpy).not.toHaveBeenCalled();
-    });
-
-    it("a legacy conversation (no persisted agent) mentioning the default agent is a no-op", async () => {
-      // convo.agentId === undefined (a row predating agent persistence): the effective agent is the
-      // GeneralAssistant, so tagging it must NOT spuriously switch/persist/emit a marker.
+    it("normal chat ignores an unknown mention without persisting an agent", async () => {
       const convoId = await seedConvo();
       const setAgentSpy = vi.spyOn(repo, "setAgent");
       const res = await post({
         conversationId: convoId,
-        message: userMsg("@General Assistant hi"),
-        agentId: "GeneralAssistant",
+        message: userMsg("@Missing Agent hi"),
+        agentId: "missing-agent",
       });
       expect(res.statusCode).toBe(200);
       await finish();
 
-      expect(res.headers["x-agent-id"]).toBe("GeneralAssistant");
+      expect(res.headers["x-agent-id"]).toBeUndefined();
       expect(handoffs()).toHaveLength(0);
       expect(setAgentSpy).not.toHaveBeenCalled();
-    });
-
-    it("a setAgent persistence failure is non-fatal — the turn still runs as the switched agent", async () => {
-      const convoId = await seedConvo("GeneralAssistant");
-      vi.spyOn(repo, "setAgent").mockRejectedValueOnce(new Error("db down"));
-      const res = await post({
-        conversationId: convoId,
-        message: userMsg("@Information Architect build it"),
-        agentId: "InformationArchitect",
-      });
-      expect(res.statusCode).toBe(200);
-      await finish();
-
-      // The in-memory switch survives a failed persist: the turn is served by the target agent and a
-      // finish closes the stream (no 500). Persistence simply didn't stick this time.
-      expect(res.headers["x-agent-id"]).toBe("InformationArchitect");
-      expect(streamRepo.rows.filter((r) => r.eventType === "finish")).toHaveLength(1);
     });
   });
 

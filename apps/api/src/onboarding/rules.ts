@@ -4,7 +4,7 @@ import type { ChecklistSignals, Recommendation } from "./checklist";
  * Deterministic "recommended next" rules (ONBOARDING ONB-V1). Each rule is a predicate over the
  * current soul state plus a builder for its label + seeded chat prompt. Recommendations surface in
  * the checklist card once core steps progress; tapping one seeds a prompt down the existing
- * GeneralAssistant -> InformationArchitect build flow (identical to the suggestion chips). Pure and
+ * built-in assistant build flow (identical to the suggestion chips). Pure and
  * cheap — no LLM — so it can run on every checklist request. Adding a rule = one array entry.
  */
 

@@ -22,20 +22,20 @@ and a customer it belongs to. Auto-number each ticket as TICK-1, TICK-2, and lin
 customer to our existing customer type.
 ```
 
-The assistant hands the request to the **Information Architect**, which loads its
+The assistant loads its
 `resource-forge` and confirms the details it needs — the fields, which one is the
 human-friendly identifier, and which fields link to other types. Answer its questions,
 and it builds the type.
 
 <Callout type="info">
-The Information Architect builds one type at a time, in dependency order. If your `ticket`
+The assistant builds one type at a time, in dependency order. If your `ticket`
 links to a `customer`, create the `customer` type first (or ask for both, and it will
 sequence them) — a link can only point at a type that exists.
 </Callout>
 
 ## What it builds for you
 
-From that description the Information Architect writes the schema, wires up the
+From that description the assistant writes the schema, wires up the
 extensions, and commits it — no schema for you to write:
 
 - the `subject` and `status` fields, with `status` constrained to `open` or `closed`

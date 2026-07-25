@@ -439,7 +439,7 @@ const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
 export const transferToAgentTool: PlatformTool = {
   name: "transfer_to_agent",
   description:
-    "Hand the conversation off to another agent (e.g. the InformationArchitect for any create/edit of a resource type, skill, or agent). The conversation's active agent switches and future turns are handled by the target until it completes. Validates that the target is a known platform or soul agent.",
+    "Hand the conversation off to another configured agent. The conversation's active agent switches and future turns are handled by the target. Validates that the target is a known platform or Soul agent.",
   mutating: false,
   inputSchema: TRANSFER_TO_AGENT_SCHEMA,
   handler: async (args, ctx) => {

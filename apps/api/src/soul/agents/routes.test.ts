@@ -121,25 +121,11 @@ describe("agents routes", () => {
       expect(res.statusCode).toBe(401);
     });
 
-    it("lists the platform agents first, then soul agents (frontmatter only, no body)", async () => {
+    it("lists only Soul agents (frontmatter only, no body)", async () => {
       const res = await app.inject(authed("/api/v1/agents"));
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         agents: [
-          {
-            name: "GeneralAssistant",
-            label: "General Assistant",
-            description:
-              "Front desk for TulipFarm — answers questions, reads resources and knowledge, and routes creation work to the Information Architect.",
-            model: "standard",
-          },
-          {
-            name: "InformationArchitect",
-            label: "Information Architect",
-            description:
-              "Creation specialist — builds and edits resource types, skills, and agents and runs onboarding, using the inbuilt forge skills.",
-            model: "complex",
-          },
           {
             name: "sprint-planner",
             label: "Sprint Planner",
@@ -154,12 +140,9 @@ describe("agents routes", () => {
   });
 
   describe("GET /api/v1/agents/:name", () => {
-    it("serves the built-in GeneralAssistant detail by name", async () => {
+    it("does not expose the normal chat harness as an agent", async () => {
       const res = await app.inject(authed("/api/v1/agents/GeneralAssistant"));
-      expect(res.statusCode).toBe(200);
-      const body = res.json();
-      expect(body.name).toBe("GeneralAssistant");
-      expect(body.body.length).toBeGreaterThan(0);
+      expect(res.statusCode).toBe(404);
     });
 
     it("returns the full agent including its markdown body", async () => {

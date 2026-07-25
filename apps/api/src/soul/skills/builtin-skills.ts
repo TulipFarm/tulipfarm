@@ -1,7 +1,7 @@
 /**
  * Inbuilt forge skills (SKL-V1-005) — bundled with the app, NOT seeded into the soul repo and NOT
- * operator-editable. These are the lazily-loaded sidebar skills owned by the Information Architect
- * platform agent: it surfaces their `name` + `description` in `<available-skills>` and pulls the
+ * operator-editable. These are lazily-loaded sidebar skills available to normal chat: it surfaces
+ * their `name` + `description` in `<available-skills>` and pulls the
  * full `body` on demand via `load_skill`. Ported from the canary forge skills, adapted to this
  * repo's tools (`create_resource_type`, `skill_create`/`skill_activate`, `agent_create`, …) and to
  * UUID record ids (RES-V1-001 — `_id` is a UUID, not a Mongo ObjectId).
@@ -16,10 +16,31 @@ export interface BuiltinSkill {
   body: string;
 }
 
+/**
+ * Hermes-style execution discipline, adapted for Soul creation. This appears inside every forge
+ * body (not only the normal-chat harness) so loading a workflow preserves the same inspect → act
+ * → verify contract through multi-step creation and onboarding flows.
+ */
+const FORGE_EXECUTION_CONTRACT = `## Execution Contract
+
+- Inspect relevant existing Soul artifacts before writing, then use the creation or update tool that
+  actually performs the requested change. Do not stop at a plan, draft, or preview.
+- Treat a write as incomplete until it has a real tool result. Verify it with the relevant read,
+  list, schema, status, or smoke-test tool when one is available.
+- If validation or a tool call fails, use the returned error to correct the artifact and retry when
+  the path is clear. If the request is genuinely blocked, report the specific blocker; never claim
+  an artifact was created, activated, or tested when it was not.
+- Keep dependent work ordered: inspect before changing, create prerequisites before dependants, and
+  verify after changing. Batch independent inspection calls when the tool surface allows it.
+- Respect the user's explicit approval choice and the active autonomy/approval controls. Ask one
+  focused question only when the missing decision materially changes the artifact.`;
+
 const RESOURCE_FORGE = `# Resource Forge Workflow
 
-Guides building ONE resource-type schema at a time. The Information Architect's master flow decides
-when the whole session is done and calls \`complete_task\` — this skill never calls it.
+Guides building ONE resource-type schema at a time. The chat harness owns the whole session; this
+skill reports its outcome directly.
+
+${FORGE_EXECUTION_CONTRACT}
 
 ## Create Flow
 
@@ -117,14 +138,15 @@ call \`complete_task\` — the master flow owns session completion.
 
 ## Error handling
 Recoverable issues (bad field type, validation failure, user changes mind): fix and retry. A logical
-dead end (validation fails repeatedly, impossible schema): stop and report the specific error so the
-Information Architect can decide how to proceed.`;
+dead end (validation fails repeatedly, impossible schema): stop and report the specific error.`;
 
 const SKILL_FORGE = `# Skill Forge Workflow
 
 Guides creating or editing a **skill** — a stateless, atomic unit carrying instructions for a
 single well-defined task (SKILL.md = \`name\` + \`description\` + markdown body). Skills are loaded by
 agents on demand via \`load_skill\`. They have no identity and no memory.
+
+${FORGE_EXECUTION_CONTRACT}
 
 ## Decide first: skill or agent?
 If the request needs to remember state across turns, own a persona, or coordinate other skills, it
@@ -178,6 +200,8 @@ frontmatter that define how it operates. Agents are AGENT.md: frontmatter (label
 description, model, autonomy, placeholder, suggestions) + a markdown body that becomes the system
 prompt.
 
+${FORGE_EXECUTION_CONTRACT}
+
 ## Create Flow — interview, don't guess
 Conduct a short step-by-step interview before proposing the agent, even if the initial prompt gives
 the role. Walk the decision tree one question at a time, giving your recommended answer for each. If
@@ -223,6 +247,8 @@ business. Use this when the user wants to "set up my business" / "run onboarding
 domain". For a single incremental request ("create an invoices resource"), skip this and use the
 matching forge directly.
 
+${FORGE_EXECUTION_CONTRACT}
+
 ## Flow (sequential)
 
 ### 1. Discovery
@@ -249,16 +275,17 @@ simplified version rather than skipping it.
 Summarise everything created (with which agents use which skills / reference which resources). Handle
 revise-per-artifact by rebuilding that single artifact with the matching forge. When the user is
 satisfied, record completion in working memory (\`update_memory\`:
-\`onboarding_completed\` = \`true\`, \`onboarding_domain\` = \`"<domain>"\`) and call \`complete_task\`
-with a \`success\` summary listing what was created, so the General Assistant resumes and can suggest
-next steps.`;
+\`onboarding_completed\` = \`true\`, \`onboarding_domain\` = \`"<domain>"\`) and report a
+\`success\` summary listing what was created and relevant next steps.`;
 
 const ROUTINE_FORGE = `# Routine Forge Workflow
 
 Guides authoring or editing ONE **routine** — a scheduled/triggered automation that runs a
 deterministic sequence of steps (CNCF Serverless Workflow 0.8 subset + \`x-\` extensions). A routine
-lives at \`soul/routines/<slug>/routine.yaml\` (+ optional \`hooks.ts\`). The Information Architect's
-master flow decides when the session is done and calls \`complete_task\` — this skill never does.
+lives at \`soul/routines/<slug>/routine.yaml\` (+ optional \`hooks.ts\`). The chat harness owns the
+whole session; this skill reports its outcome directly.
+
+${FORGE_EXECUTION_CONTRACT}
 
 ## Decide first: routine, agent, or skill?
 - **Routine** — a repeatable, mostly-deterministic pipeline on a trigger ("every morning at 9, tag
@@ -376,11 +403,11 @@ diff in plain language, then call \`routine_forge\` again with the SAME \`name\`
 ## Error handling
 Recoverable (bad ref, schema violation, user changes mind): fix and retry. A hard dead end
 (repeated validation failure, a construct that is genuinely deferred in V1): stop and report the
-specific error so the Information Architect can decide how to proceed.`;
+specific error.`;
 
 /**
- * The inbuilt forge skills, keyed by name. Surfaced (frontmatter only) to the Information Architect
- * and loaded on demand via `load_skill`.
+ * The inbuilt forge skills, keyed by name, surfaced to normal chat and loaded on demand via
+ * `load_skill`.
  */
 export const BUILTIN_SKILLS: Map<string, BuiltinSkill> = new Map(
   [
@@ -417,5 +444,5 @@ export const BUILTIN_SKILLS: Map<string, BuiltinSkill> = new Map(
   ].map((s) => [s.name, s])
 );
 
-/** Names of the inbuilt forge skills the Information Architect surfaces and can load. */
+/** Names of the inbuilt forge skills normal chat can load. */
 export const FORGE_SKILL_NAMES: readonly string[] = Array.from(BUILTIN_SKILLS.keys());
