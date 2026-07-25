@@ -1,6 +1,6 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
-import { BundleError, type BundleErrorCode } from "./bundle";
+import { BundleError, type BundleErrorCode, computeBundleDigest } from "./bundle";
 import { compileExecutionBundle } from "./compiler";
 
 const API = "tulipfarm.ai/v1";
@@ -93,6 +93,20 @@ describe("compileExecutionBundle", () => {
     ]);
     expect(bundle.commitSha).toBe("c0ffee");
     expect(bundle.bundleVersion).toBe(1);
+  });
+
+  it("detaches and deeply freezes authored documents", () => {
+    const document = model("fast");
+    const bundle = compileExecutionBundle(request([document]));
+    const compiled = bundle.definitions[0];
+    if (!compiled) throw new Error("expected compiled definition");
+    const originalDigest = computeBundleDigest(bundle);
+
+    (document.spec as Record<string, unknown>).model = "mutated";
+
+    expect((compiled.document.spec as Record<string, unknown>).model).toBe("m");
+    expect(computeBundleDigest(bundle)).toBe(originalDigest);
+    expect(Object.isFrozen(compiled.document.spec)).toBe(true);
   });
 
   it("rejects a reference that does not resolve in the compiled tree", () => {

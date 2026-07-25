@@ -191,6 +191,15 @@ describe("ArtifactService", () => {
       });
     });
 
+    it("denies a foreign Artifact passed directly to the open boundary", async () => {
+      const foreign = await store.find("business-1", "artifact-1");
+      if (!foreign) throw new Error("expected published Artifact");
+
+      await expect(
+        service.open(foreign, readRequest({ businessId: "business-2" }))
+      ).rejects.toMatchObject({ code: "artifact_not_found" });
+    });
+
     it("denies a read past the retention expiry", async () => {
       await service.publish(
         publishInput({

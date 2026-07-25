@@ -31,6 +31,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
 
 class FakeRunStore implements RunLeaseStore {
   releaseCalls: unknown[] = [];
+  releaseResult = true;
   claimBatchResult: readonly PersistedRun[] = [];
   reclaimResult: readonly PersistedRun[] = [];
 
@@ -45,7 +46,10 @@ class FakeRunStore implements RunLeaseStore {
       leaseExpiresAt: string | null;
     }
   ): Promise<boolean> {
-    if (transition.leaseOwner === null) this.releaseCalls.push(transition);
+    if (transition.leaseOwner === null) {
+      this.releaseCalls.push(transition);
+      return this.releaseResult;
+    }
     return true;
   }
 
@@ -130,5 +134,25 @@ describe("RunDispatcher", () => {
     const result = await dispatcher.dispatchBatch();
 
     expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, failed: 0 });
+  });
+
+  it("does not report success when the terminal compare-and-swap loses the lease", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    store.releaseResult = false;
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => "succeeded",
+    });
+
+    await expect(dispatcher.dispatchBatch()).resolves.toEqual({
+      reclaimed: 0,
+      claimed: 1,
+      dispatched: 0,
+      failed: 1,
+    });
   });
 });

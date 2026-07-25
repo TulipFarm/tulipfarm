@@ -109,6 +109,9 @@ describe("ArtifactStore (PostgreSQL)", () => {
     await expect(store.put(artifact({ contentHash: "hash-2" }))).rejects.toBeInstanceOf(
       ArtifactPersistenceError
     );
+    await expect(
+      store.put(artifact({ acl: { readers: ["agent:agent-2"] } }))
+    ).rejects.toMatchObject({ code: "artifact_conflict" });
   });
 
   it("refuses to mutate or delete a stored Artifact", async () => {

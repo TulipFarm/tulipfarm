@@ -180,6 +180,23 @@ describe("assertApprovalUsable", () => {
     ).toBe("insufficient_approvals");
   });
 
+  it("does not count persisted self-approval or unqualified decisions", () => {
+    expect(
+      denialReason(() =>
+        assertApprovalUsable(
+          record({
+            decisions: [
+              approved("user-proposer"),
+              { ...approved("user-viewer"), approverRoles: ["viewer"] },
+            ],
+          }),
+          BINDING,
+          NOW
+        )
+      )
+    ).toBe("insufficient_approvals");
+  });
+
   it("accepts a single approver below high risk", () => {
     expect(() =>
       assertApprovalUsable(

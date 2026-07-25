@@ -157,9 +157,15 @@ export function assertApprovalUsable(
   if (record.decisions.some((entry) => entry.outcome === "denied")) {
     throw new ApprovalDeniedError("denied", `Approval ${record.approvalId} was denied`);
   }
+  const prohibited = prohibitedApprovers(record);
   const approvers = new Set(
     record.decisions
-      .filter((entry) => entry.outcome === "approved")
+      .filter(
+        (entry) =>
+          entry.outcome === "approved" &&
+          !prohibited.includes(entry.approverPrincipalId) &&
+          entry.approverRoles.some((role) => record.allowedApproverRoles.includes(role))
+      )
       .map((entry) => entry.approverPrincipalId)
   );
   if (approvers.size < requiredApproverCount(record.risk)) {

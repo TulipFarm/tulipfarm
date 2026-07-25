@@ -24,6 +24,12 @@ describe("containsSecret", () => {
   it("treats a non-string scalar as clean", () => {
     expect(containsSecret(42, ["42"])).toBe(false);
   });
+
+  it("detects secrets in maps, sets, and binary data", () => {
+    expect(containsSecret(new Map([["key", "tok-abc"]]), ["tok-abc"])).toBe(true);
+    expect(containsSecret(new Set(["tok-abc"]), ["tok-abc"])).toBe(true);
+    expect(containsSecret(new TextEncoder().encode("tok-abc"), ["tok-abc"])).toBe(true);
+  });
 });
 
 describe("redactError", () => {

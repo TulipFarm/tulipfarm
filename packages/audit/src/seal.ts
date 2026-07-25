@@ -75,6 +75,9 @@ export async function sealSegment(
     if (i > 0 && event.chainIndex !== events[i - 1].chainIndex + 1) {
       throw new SealError("NON_CONTIGUOUS", "segment chainIndex must be contiguous and ascending");
     }
+    if (i > 0 && event.previousHash !== events[i - 1].hash) {
+      throw new SealError("CHAIN_BROKEN", `event ${event.id} does not link to its predecessor`);
+    }
     if (recomputeEventHash(event) !== event.hash) {
       throw new SealError("CHAIN_BROKEN", `event ${event.id} hash does not match its content`);
     }
@@ -82,12 +85,15 @@ export async function sealSegment(
 
   const bytes = serializeSegment(events);
   const blobRef = await blob.put(bytes, "application/json");
+  const eventCount = events.length;
   const segmentHash = canonicalHash({
     businessId,
     startIndex: events[0].chainIndex,
     endIndex: events.at(-1)?.chainIndex ?? -1,
+    eventCount,
     previousSegmentHash,
     blobHash: blobRef.hash,
+    sealedAt: sealedAt.toISOString(),
   });
   const signature = await signer.sign(new TextEncoder().encode(segmentHash));
 
@@ -95,7 +101,7 @@ export async function sealSegment(
     businessId,
     startIndex: events[0].chainIndex,
     endIndex: events.at(-1)?.chainIndex ?? -1,
-    eventCount: events.length,
+    eventCount,
     segmentHash,
     previousSegmentHash,
     signature,
@@ -113,9 +119,12 @@ export async function verifySegmentSeal(
     businessId: segment.businessId,
     startIndex: segment.startIndex,
     endIndex: segment.endIndex,
+    eventCount: segment.eventCount,
     previousSegmentHash: segment.previousSegmentHash,
     blobHash: segment.blobRef.hash,
+    sealedAt: segment.sealedAt.toISOString(),
   });
+  if (segment.eventCount !== segment.endIndex - segment.startIndex + 1) return false;
   if (segmentHash !== segment.segmentHash) return false;
   return signer.verify(new TextEncoder().encode(segmentHash), segment.signature);
 }

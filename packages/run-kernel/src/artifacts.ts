@@ -177,6 +177,9 @@ export class ArtifactService {
   }
 
   private authorize(artifact: PersistedArtifact, request: ArtifactReadRequest): void {
+    if (artifact.businessId !== request.businessId || artifact.id !== request.artifactId) {
+      throw new ArtifactAccessError("artifact_not_found", request.artifactId);
+    }
     const { expiresAt } = artifact.retention;
     if (expiresAt !== null && new Date(expiresAt).getTime() <= request.now.getTime()) {
       throw new ArtifactAccessError("artifact_expired", artifact.id);

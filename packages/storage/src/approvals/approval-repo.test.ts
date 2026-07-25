@@ -117,17 +117,64 @@ describe("InMemoryApprovalRepo persistence", () => {
     expect(() => {
       (stored.decisions as unknown[]).push(decision("user-intruder"));
     }).toThrow();
+    stored.expiresAt.setTime(CREATED_AT.getTime());
     expect((await repo.get("biz-1", "ap-1"))?.decisions).toHaveLength(2);
+    expect((await repo.get("biz-1", "ap-1"))?.expiresAt).toEqual(EXPIRES_AT);
+  });
+
+  it("rejects self, unqualified, and expired approver decisions", async () => {
+    const repo = new InMemoryApprovalRepo();
+    await repo.create(grant());
+
+    expect(
+      await storeErrorCode(() => repo.appendDecision("biz-1", "ap-1", decision("user-proposer")))
+    ).toBe("self_approval");
+    expect(
+      await storeErrorCode(() =>
+        repo.appendDecision("biz-1", "ap-1", {
+          ...decision("user-viewer"),
+          approverRoles: ["viewer"],
+        })
+      )
+    ).toBe("approver_not_qualified");
+    expect(
+      await storeErrorCode(() =>
+        repo.appendDecision("biz-1", "ap-1", {
+          ...decision("user-late"),
+          decidedAt: EXPIRES_AT,
+        })
+      )
+    ).toBe("expired");
   });
 });
 
 describe("InMemoryApprovalRepo one-use consumption", () => {
   it("consumes once and denies replay", async () => {
     const repo = await seededRepo();
-    const consumed = await repo.consume("biz-1", "ap-1", BINDING, EXPIRES_AT);
-    expect(consumed.consumedAt).toEqual(EXPIRES_AT);
-    expect(await storeErrorCode(() => repo.consume("biz-1", "ap-1", BINDING, EXPIRES_AT))).toBe(
+    const consumed = await repo.consume("biz-1", "ap-1", BINDING, CREATED_AT);
+    expect(consumed.consumedAt).toEqual(CREATED_AT);
+    expect(await storeErrorCode(() => repo.consume("biz-1", "ap-1", BINDING, CREATED_AT))).toBe(
       "already_used"
+    );
+  });
+
+  it("denies under-approved, denied, and expired consumption", async () => {
+    const underApproved = new InMemoryApprovalRepo();
+    await underApproved.create(grant());
+    await underApproved.appendDecision("biz-1", "ap-1", decision("user-approver-1"));
+    expect(
+      await storeErrorCode(() => underApproved.consume("biz-1", "ap-1", BINDING, CREATED_AT))
+    ).toBe("insufficient_approvals");
+
+    const denied = await seededRepo();
+    await denied.appendDecision("biz-1", "ap-1", decision("user-approver-3", "denied"));
+    expect(await storeErrorCode(() => denied.consume("biz-1", "ap-1", BINDING, CREATED_AT))).toBe(
+      "denied"
+    );
+
+    const expired = await seededRepo();
+    expect(await storeErrorCode(() => expired.consume("biz-1", "ap-1", BINDING, EXPIRES_AT))).toBe(
+      "expired"
     );
   });
 

@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   type ApiClientDoc,
-  type ApiClientRepo,
-  type ApiClientStatus,
   authenticateApiClient,
   createApiClient,
   formatApiClientCredential,

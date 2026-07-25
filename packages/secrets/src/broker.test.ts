@@ -150,6 +150,25 @@ describe("SecretLease.use", () => {
       lease.use(async (secret) => secret, { ...SCOPE, targetId: "acme/other" })
     ).rejects.toMatchObject({ reason: "scope_mismatch" });
   });
+
+  it("cannot be retargeted by mutating the caller-owned scope after issue", async () => {
+    const provider = inMemorySecretProvider({
+      [SCOPE.secretRef]: PLAINTEXT,
+      "other.token": "other-plaintext",
+    });
+    const broker = new SecretBroker({
+      provider,
+      authorizer: { authorize: async () => ({ allowed: true }) },
+    });
+    const mutableScope = { ...SCOPE, secretRef: String(SCOPE.secretRef) };
+    const lease = await broker.lease({ scope: mutableScope });
+
+    mutableScope.secretRef = "other.token";
+
+    await expect(lease.use(async (secret) => secret === PLAINTEXT)).resolves.toBe(true);
+    expect(lease.scope.secretRef).toBe(SCOPE.secretRef);
+    expect(Object.isFrozen(lease.scope)).toBe(true);
+  });
 });
 
 describe("secret containment", () => {
@@ -187,6 +206,18 @@ describe("secret containment", () => {
     expect((error as Error).message).not.toContain(PLAINTEXT);
   });
 
+  it.each([
+    ["Map", (secret: string) => new Map([["credential", secret]])],
+    ["Set", (secret: string) => new Set([secret])],
+    ["binary data", (secret: string) => new TextEncoder().encode(secret)],
+  ])("fails closed when the callback returns plaintext inside %s", async (_name, value) => {
+    const lease = await fixture.broker.lease({ scope: SCOPE });
+
+    await expect(lease.use(async (secret) => value(secret))).rejects.toBeInstanceOf(
+      SecretLeakError
+    );
+  });
+
   it("never puts plaintext in lease evidence", async () => {
     const lease = await fixture.broker.lease({ scope: SCOPE });
     await lease.use(async () => "ok");
@@ -194,5 +225,17 @@ describe("secret containment", () => {
     expect(issued?.scope.secretRef).toBe(SCOPE.secretRef);
     expect(issued?.scope).not.toHaveProperty("value");
     expect(inspect(fixture.events, { depth: 8 })).not.toContain(PLAINTEXT);
+  });
+
+  it("emits immutable scope evidence that cannot retarget a lease", async () => {
+    const lease = await fixture.broker.lease({ scope: SCOPE });
+    const issued = fixture.events[0];
+    if (!issued) throw new Error("expected issue evidence");
+
+    expect(Object.isFrozen(issued.scope)).toBe(true);
+    expect(() => {
+      Object.assign(issued.scope, { secretRef: "other.token" });
+    }).toThrow();
+    await expect(lease.use(async (secret) => secret === PLAINTEXT)).resolves.toBe(true);
   });
 });

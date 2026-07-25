@@ -90,6 +90,21 @@ export interface SignedExecutionBundle {
   readonly signature: BundleSignature;
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
+}
+
+/** Takes a detached, deeply immutable snapshot at an append-only boundary. */
+export function immutableSnapshot<T>(value: T): T {
+  return deepFreeze(structuredClone(value));
+}
+
 /** Content address of a bundle: the canonical hash of its complete parsed data. */
 export function computeBundleDigest(bundle: ExecutionBundle): string {
   return canonicalHash(bundle);
@@ -111,14 +126,15 @@ export interface RuntimeBundle {
  * is the only public way to open a bundle, so execution can never skip verification.
  */
 export function createRuntimeBundle(bundle: ExecutionBundle, digest: string): RuntimeBundle {
-  const byId = new Map(bundle.definitions.map((d) => [d.id, d]));
-  const byKindSlug = new Map(bundle.definitions.map((d) => [`${d.kind} ${d.slug}`, d]));
+  const snapshot = immutableSnapshot(bundle);
+  const byId = new Map(snapshot.definitions.map((d) => [d.id, d]));
+  const byKindSlug = new Map(snapshot.definitions.map((d) => [`${d.kind} ${d.slug}`, d]));
   return Object.freeze({
     digest,
-    businessId: bundle.businessId,
-    changesetId: bundle.changesetId,
-    commitSha: bundle.commitSha,
-    definitions: bundle.definitions,
+    businessId: snapshot.businessId,
+    changesetId: snapshot.changesetId,
+    commitSha: snapshot.commitSha,
+    definitions: snapshot.definitions,
     get: (kind: string, slug: string) => byKindSlug.get(`${kind} ${slug}`),
     getById: (id: string) => byId.get(id),
   });
@@ -158,7 +174,7 @@ export class InMemoryBundleStore implements BundleStore {
       }
       return;
     }
-    this.records.set(digest, record);
+    this.records.set(digest, immutableSnapshot(record));
   }
 
   async get(digest: string): Promise<SignedExecutionBundle | undefined> {

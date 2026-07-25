@@ -1,6 +1,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import type { BlobPort, BlobRef } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
+import { recomputeEventHash } from "./chain";
 import type { AuditEvent } from "./event";
 import { SealError, type SealSigner, sealSegment, verifySegmentSeal } from "./seal";
 import { InMemoryAuditEventRepo } from "./storage";
@@ -92,6 +93,19 @@ describe("sealSegment", () => {
     ).rejects.toThrow(SealError);
   });
 
+  it("rejects self-consistent events that do not link to their predecessor", async () => {
+    const events = await appendEvents(2);
+    const disconnected = { ...events[1], previousHash: null };
+    const selfConsistent = {
+      ...disconnected,
+      hash: recomputeEventHash(disconnected),
+    } as AuditEvent;
+
+    await expect(
+      sealSegment([events[0], selfConsistent], null, hmacSigner(), inMemoryBlob(), new Date())
+    ).rejects.toMatchObject({ code: "CHAIN_BROKEN" });
+  });
+
   it("detects a signature that does not match a different key", async () => {
     const events = await appendEvents(2);
     const sealed = await sealSegment(events, null, hmacSigner(), inMemoryBlob(), new Date());
@@ -105,6 +119,19 @@ describe("sealSegment", () => {
       },
     };
     expect(await verifySegmentSeal(sealed, otherSigner)).toBe(false);
+  });
+
+  it("detects tampered segment range metadata", async () => {
+    const events = await appendEvents(2);
+    const sealed = await sealSegment(events, null, hmacSigner(), inMemoryBlob(), new Date());
+
+    expect(await verifySegmentSeal({ ...sealed, eventCount: 1 }, hmacSigner())).toBe(false);
+    expect(
+      await verifySegmentSeal(
+        { ...sealed, sealedAt: new Date(sealed.sealedAt.getTime() + 1) },
+        hmacSigner()
+      )
+    ).toBe(false);
   });
 
   it("verifies signature without ever reading blob content", async () => {

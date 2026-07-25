@@ -4,8 +4,6 @@ import {
   claimsProveMfa,
   completeOidcAuthorization,
   deriveCodeChallenge,
-  type OidcAuthRequestDoc,
-  type OidcAuthRequestRepo,
   OidcDeniedError,
   type OidcExchangeParams,
   type OidcProvider,

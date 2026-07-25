@@ -91,6 +91,11 @@ interface LeaseRecord {
 
 const DEFAULT_TTL_MS = 60_000;
 
+/** Takes an immutable authority snapshot before authorization or lease issue. */
+function snapshotScope(scope: SecretScope): SecretScope {
+  return Object.freeze({ ...scope });
+}
+
 /** Scope equality is exact: any differing field is a different authority, not a narrower one. */
 function sameScope(a: SecretScope, b: SecretScope): boolean {
   return (
@@ -127,20 +132,16 @@ export class SecretBroker {
    */
   async lease(request: SecretLeaseRequest): Promise<SecretLease> {
     const leaseId = `lease-${++this.counter}`;
+    const scope = snapshotScope(request.scope);
     let decision: SecretAuthorization;
     try {
-      decision = await this.authorizer.authorize(request.scope);
+      decision = await this.authorizer.authorize(scope);
     } catch {
       decision = { allowed: false, reason: "not_authorized" };
     }
 
     if (!decision.allowed) {
-      this.deny(
-        leaseId,
-        request.scope,
-        decision.reason ?? "not_authorized",
-        "lease is not authorized"
-      );
+      this.deny(leaseId, scope, decision.reason ?? "not_authorized", "lease is not authorized");
     }
 
     const ttlMs = Math.min(
@@ -149,16 +150,16 @@ export class SecretBroker {
     );
     const maxUses = Math.min(request.maxUses ?? 1, decision.maxUses ?? Number.MAX_SAFE_INTEGER);
     const expiresAt = this.now() + ttlMs;
-    this.leases.set(leaseId, { scope: request.scope, expiresAt, maxUses, uses: 0, revoked: false });
+    this.leases.set(leaseId, { scope, expiresAt, maxUses, uses: 0, revoked: false });
     this.emit({
       type: "secret.lease.issued",
       leaseId,
-      scope: request.scope,
+      scope,
       at: this.now(),
       expiresAt,
     });
 
-    return new SecretLease(leaseId, request.scope, expiresAt, (id, presented, callback) =>
+    return new SecretLease(leaseId, scope, expiresAt, (id, presented, callback) =>
       this.redeem(id, presented, callback)
     );
   }
@@ -258,6 +259,6 @@ export class SecretBroker {
   }
 
   private emit(event: SecretBrokerEvent): void {
-    this.onEvent?.(event);
+    this.onEvent?.(Object.freeze({ ...event, scope: snapshotScope(event.scope) }));
   }
 }

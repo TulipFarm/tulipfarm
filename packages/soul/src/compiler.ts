@@ -4,6 +4,7 @@ import {
   BundleError,
   EXECUTION_BUNDLE_VERSION,
   type ExecutionBundle,
+  immutableSnapshot,
   type ResolvedReference,
 } from "./bundle";
 import {
@@ -183,13 +184,14 @@ function compileDefinition(
     const resolved = resolveEdge(index, def, edge);
     if (resolved) references.push(resolved);
   }
+  const immutableDocument = immutableSnapshot(document);
   return Object.freeze({
     kind: def.kind,
     id: def.id,
     slug: def.slug,
     authoredVersion: def.authoredVersion,
-    hash: canonicalHash(document),
-    document,
+    hash: canonicalHash(immutableDocument),
+    document: immutableDocument,
     references: Object.freeze(references),
   });
 }
