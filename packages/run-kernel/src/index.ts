@@ -10,5 +10,7 @@ export * from "./model";
 export * from "./outputs";
 export * from "./reconcile-state";
 export * from "./resume";
+export * from "./routine";
 export * from "./timers";
+export * from "./triggers";
 export * from "./waits";

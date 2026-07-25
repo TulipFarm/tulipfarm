@@ -33,6 +33,7 @@ import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
+import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
 import { resolveConnectionEnv } from "./integrations/connection-env";
@@ -67,6 +68,7 @@ import { registerSkillRoutes } from "./soul/skills/routes";
 import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
 import type { ToolRegistry } from "./tools/registry";
 import { buildToolRegistry } from "./tools/setup";
+import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes";
 
 export interface AppOptions {
   sessionStore?: SessionStore;
@@ -91,6 +93,8 @@ export interface AppOptions {
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
   kvService?: KvService;
+  /** Caller-initiated invocation of manual / internal-API Triggers. */
+  triggerInvoke?: TriggerInvokeDeps;
   knowledgeService?: KnowledgeService;
   retrievalService?: PageRetrievalService;
   toolRegistry?: ToolRegistry;
@@ -108,6 +112,8 @@ export interface AppOptions {
   approvalsRepo?: ApprovalsRepo;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
   ingress?: IngressRoutesDeps;
+  /** Trigger ingress: the canonical signed /hooks/:provider/:trigger webhook receiver. */
+  hookIngress?: HookIngressDeps;
   /** System routes overrides (update-check fetch injection for tests). */
   systemRoutes?: SystemRoutesDeps;
 }
@@ -234,6 +240,12 @@ export async function buildApp(opts: AppOptions = {}) {
     await registerIngressRoutes(app, opts.ingress);
   }
 
+  // Same posture as integration ingress: the Trigger hook route carries its own signature
+  // verification and must work without any session dependency.
+  if (opts.hookIngress) {
+    await registerHookIngressRoutes(app, opts.hookIngress);
+  }
+
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
@@ -289,6 +301,10 @@ export async function buildApp(opts: AppOptions = {}) {
             : undefined,
       });
     }
+    if (opts.triggerInvoke) {
+      registerTriggerRoutes(app, opts.triggerInvoke, requireAuth);
+    }
+
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth);
     }
