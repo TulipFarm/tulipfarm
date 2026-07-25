@@ -7,7 +7,10 @@ contracts (no `pg`/SDK types leak across the boundary), and `src/soul/` defines 
 publication record/projection/outbox port (`SoulPublicationStore`, plus an in-memory
 implementation with real rollback) that `@tulipfarm/soul` drives. `src/artifacts/` owns the
 append-only `artifacts`, `state_output_bindings`, and `artifact_lineage` tables (`ArtifactStore`,
-plus `MemoryArtifactStore`) that `@tulipfarm/run-kernel` drives. tsconfig extends
+plus `MemoryArtifactStore`) that `@tulipfarm/run-kernel` drives. `src/runs/` owns the `runs`,
+`run_states`, `run_attempts`, `run_lineage`, `run_waits`, and `run_wait_signals` tables
+(`RunStore`, `WaitStore`, plus `MemoryWaitStore`), including resume-token digests and
+lock-guarded wait resolution. tsconfig extends
 `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/observability`. See

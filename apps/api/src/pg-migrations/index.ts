@@ -2,6 +2,7 @@ import {
   ARTIFACT_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
+  WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import type { Queryable } from "../db";
 
@@ -461,6 +462,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "immutable typed outputs and Artifacts",
     up: async (q) => {
       for (const sql of ARTIFACT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 6,
+    description: "durable waits, timers, and resume tokens",
+    up: async (q) => {
+      for (const sql of WAIT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

@@ -4,8 +4,10 @@
 retries, cancellation, child Runs, and concurrency. **Today:** `src/model` (state machines),
 `src/lease` (worker leases), `src/outputs` (AJV-validated typed State outputs + canonical hashes),
 `src/artifacts` (immutable Artifact publish/read with ACL, classification, retention, redaction,
-and tamper checks), and `src/lineage` (named State-output mappings resolved into downstream
-Context). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+and tamper checks), `src/lineage` (named State-output mappings resolved into downstream
+Context), and `src/waits`, `src/timers`, `src/resume` (durable timer/event/Approval/human-task/
+form/child-Run waits with `first`/`all`/`quorum`/window aggregation, deadline sweeps, and
+unguessable one-use resume tokens). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/audit`, `@tulipfarm/storage`,
 `@tulipfarm/observability`. See

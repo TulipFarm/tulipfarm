@@ -349,6 +349,39 @@ describe("RunStore (PostgreSQL)", () => {
     ).toEqual([]);
   });
 
+  it("requeues a waiting Run exactly once and refuses any other status", async () => {
+    const persisted = await store.start(run());
+    await store.transitionRun("business-1", persisted.id, {
+      expectedVersion: 0,
+      expectedStatus: "queued",
+      status: "claimed",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    await store.transitionRun("business-1", persisted.id, {
+      expectedVersion: 1,
+      expectedStatus: "claimed",
+      status: "running",
+      leaseOwner: "worker-1",
+      leaseExpiresAt: "2026-07-24T10:01:00.000Z",
+    });
+    await store.transitionRun("business-1", persisted.id, {
+      expectedVersion: 2,
+      expectedStatus: "running",
+      status: "waiting",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+
+    expect(await store.requeueWaitingRun("business-1", persisted.id)).toBe(true);
+    expect(await store.requeueWaitingRun("business-1", persisted.id)).toBe(false);
+    expect(await store.find("business-1", persisted.id)).toMatchObject({
+      status: "queued",
+      version: 4,
+      leaseOwner: null,
+    });
+  });
+
   it("persists State status with the same optimistic concurrency boundary", async () => {
     await store.start(run());
 

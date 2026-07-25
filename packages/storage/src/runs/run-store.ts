@@ -649,6 +649,26 @@ export class RunStore {
     });
   }
 
+  /**
+   * Requeues a waiting Run whose durable wait resolved. Idempotent by construction: only a Run
+   * still in `waiting` moves, so a duplicate resume never requeues the same Run twice.
+   */
+  async requeueWaitingRun(businessId: string, runId: string): Promise<boolean> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ id: string }>(
+        `UPDATE runs
+            SET status = 'queued',
+                version = version + 1
+          WHERE business_id = $1
+            AND id = $2
+            AND status = 'waiting'
+          RETURNING id`,
+        [businessId, runId]
+      );
+      return result.rows.length === 1;
+    });
+  }
+
   async transitionState(
     businessId: string,
     runId: string,
