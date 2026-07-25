@@ -158,10 +158,14 @@ export async function prepareChatTurn(
   } else {
     const now = new Date();
     const requestedAgentId = body.agentId;
+    // Unknown agentId → normal chat (the composer only offers real agents); don't persist a
+    // dangling reference.
+    const validAgentId =
+      requestedAgentId && getAgent(soulLoader, requestedAgentId) ? requestedAgentId : undefined;
     convo = {
       _id: randomUUID(),
       userId: user._id,
-      agentId: requestedAgentId,
+      agentId: validAgentId,
       model: undefined,
       createdAt: now,
       updatedAt: now,
@@ -171,7 +175,7 @@ export async function prepareChatTurn(
     events?.emit(DOMAIN_EVENTS.CONVERSATION_CREATED, {
       conversationId: convo._id,
       actorId: user._id,
-      agentId: requestedAgentId,
+      agentId: validAgentId,
     });
     // Best-effort, off the turn's critical path: derive a title from the first message via the
     // quick tier and persist it asynchronously. The stream below is never blocked on this, and a
@@ -791,8 +795,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   writeSseHeaders(reply.raw, {
     "X-Stream-Id": handle.streamId,
     "X-Message-Id": handle.replyMessageId,
-    // Only a user-selected Soul Agent is exposed to the client. Normal chat has no agent identity.
-    ...(prepared.convo.agentId ? { "X-Agent-Id": handle.agentName } : {}),
+    // Only a user-selected Soul Agent is exposed to the client. Normal chat has no agent identity —
+    // and a removed agent resolves back to normal chat, so key off the resolved agent, not the
+    // (possibly stale) persisted convo.agentId.
+    ...(prepared.agent.name !== DEFAULT_ASSISTANT_NAME ? { "X-Agent-Id": handle.agentName } : {}),
     ...corsPassthrough(reply),
   });
   reply.hijack();

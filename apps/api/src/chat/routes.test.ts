@@ -572,6 +572,24 @@ describe("chat routes", () => {
     });
 
     it("persists agentId on a newly created conversation", async () => {
+      await app.close();
+      const soulLoader = {
+        agents: new Map([["agent-x", { name: "agent-x", frontmatter: {}, body: "" }]]),
+        skills: new Map(),
+      } as unknown as SoulLoader;
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        llmService,
+        conversationRepo: repo,
+        messageRepo,
+        streamResumeRepo: streamRepo,
+        streamHub,
+        workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+        soulLoader,
+      });
+
       const res = await post({ message: userMsg("hi"), agentId: "agent-x" });
       expect(res.statusCode).toBe(200);
       const id = res.headers["x-conversation-id"] as string;
