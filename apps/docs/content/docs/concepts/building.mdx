@@ -12,7 +12,7 @@ those chats, not something you normally write by hand.
 
 ## The assistant is your front desk
 
-The default agent in every chat is the **General Assistant**. It answers questions, reads
+Normal chat answers questions, reads
 your resources and knowledge, and handles everyday data work directly — creating records,
 writing knowledge pages, searching. If your intent is clear, it acts; it does not ask for
 confirmation it does not need.
@@ -21,12 +21,10 @@ What the assistant does **not** do is build your system itself. The moment you a
 something that changes what your instance *is* — a new resource type, an agent, a skill,
 or first-time setup — it hands the chat to a specialist.
 
-## Building hands off to the Information Architect
+## Building in the same chat
 
-When you ask to build or change your system, the assistant transfers the chat to
-the **Information Architect** — the agent that owns system-building. You see the handoff
-in the chat. The Information Architect then interviews you for exactly what it needs,
-builds the artifact, and hands control back.
+When you ask to build or change your system, the same chat loads the appropriate forge, asks for
+the details it needs, and builds the artifact.
 
 A request like any of these triggers the handoff on the first turn:
 
@@ -36,12 +34,12 @@ A request like any of these triggers the handoff on the first turn:
 - "Set up my business" (first-time onboarding)
 
 You do not phrase these in any special way and you do not write schema. You say what you
-want in plain language; the Information Architect asks the few questions it needs and
+want in plain language; the assistant asks the few questions it needs and
 does the rest.
 
 ## Forges guide the build
 
-The Information Architect does not improvise. For each kind of artifact it loads a
+The assistant does not improvise. For each kind of artifact it loads a
 built-in **forge** — a structured interview that walks from intent to a finished
 artifact:
 
@@ -57,7 +55,7 @@ building works.
 
 ## The result lives in the soul
 
-When the Information Architect finishes, the artifact is written to your
+When the assistant finishes, the artifact is written to your
 [soul repository](/docs/concepts/soul) and committed — a resource type becomes
 `resources/{name}/schema.yml`, an agent becomes `agents/{name}/AGENT.md`. There is no
 approval step for soul writes, and the change takes effect immediately — a new resource

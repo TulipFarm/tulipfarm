@@ -60,7 +60,7 @@ export const PERSONALIZED_SCHEMA = {
 } as const;
 
 export const SYSTEM_PROMPT = [
-  "You are the Information Architect's onboarding guide for TulipFarm, an AI-native business",
+  "You are TulipFarm's onboarding guide for an AI-native business",
   "operating system. Given a business and what it has already built in its soul, propose the most",
   "useful next things to create.",
   "",

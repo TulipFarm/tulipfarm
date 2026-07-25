@@ -20,9 +20,9 @@ import {
   type ObservableStep,
 } from "../observability/capture";
 import {
-  GENERAL_ASSISTANT_NAME,
+  DEFAULT_ASSISTANT_NAME,
   getAgent,
-  getPlatformAgent,
+  getDefaultAssistant,
   resolveAgent,
 } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
@@ -101,14 +101,14 @@ export interface PreparedTurn {
   isNew: boolean;
   userSwitch?: { from: string; to: string; reason: string };
   agent: ReturnType<typeof resolveAgent>;
-  platformAgent: ReturnType<typeof getPlatformAgent>;
+  platformAgent: ReturnType<typeof getDefaultAssistant>;
   resolved: ResolvedModel;
   resolvedModelId: string;
   messages: ModelMessage[];
   pending: Awaited<ReturnType<PendingInteractionRepo["findOpenByConversation"]>>;
   buildSystemFor: (
     a: ReturnType<typeof resolveAgent>,
-    pa: ReturnType<typeof getPlatformAgent>
+    pa: ReturnType<typeof getDefaultAssistant>
   ) => string;
 }
 
@@ -157,10 +157,15 @@ export async function prepareChatTurn(
     isNew = false;
   } else {
     const now = new Date();
+    const requestedAgentId = body.agentId;
+    // Unknown agentId → normal chat (the composer only offers real agents); don't persist a
+    // dangling reference.
+    const validAgentId =
+      requestedAgentId && getAgent(soulLoader, requestedAgentId) ? requestedAgentId : undefined;
     convo = {
       _id: randomUUID(),
       userId: user._id,
-      agentId: body.agentId,
+      agentId: validAgentId,
       model: undefined,
       createdAt: now,
       updatedAt: now,
@@ -170,7 +175,7 @@ export async function prepareChatTurn(
     events?.emit(DOMAIN_EVENTS.CONVERSATION_CREATED, {
       conversationId: convo._id,
       actorId: user._id,
-      agentId: body.agentId,
+      agentId: validAgentId,
     });
     // Best-effort, off the turn's critical path: derive a title from the first message via the
     // quick tier and persist it asynchronously. The stream below is never blocked on this, and a
@@ -190,11 +195,10 @@ export async function prepareChatTurn(
   //     body.agentId above, so no switch/marker there.) Surfaced to the client as the same
   //     `agent-handoff` event a transfer emits (see agentTurnStream).
   let userSwitch: { from: string; to: string; reason: string } | undefined;
-  // Compare against the EFFECTIVE current agent: a legacy row with no persisted agentId resolves
-  // to the GeneralAssistant, so tagging it must read as a no-op (not a spurious GA→GA switch).
-  const currentAgentId = convo.agentId ?? GENERAL_ASSISTANT_NAME;
+  // A conversation with no selected Agent is normal chat, not an implicit named Agent.
+  const currentAgentId = convo.agentId ?? DEFAULT_ASSISTANT_NAME;
   if (!isNew && body.agentId && body.agentId !== currentAgentId) {
-    const target = getAgent(soulLoader, body.agentId); // platform OR soul agent; undefined if unknown
+    const target = getAgent(soulLoader, body.agentId);
     if (target) {
       userSwitch = {
         from: currentAgentId,
@@ -252,11 +256,11 @@ export async function prepareChatTurn(
   const history = await messageRepo.listByConversation(convo._id, 1000);
   const messages: ModelMessage[] = [];
   const agent = resolveAgent(soulLoader, convo.agentId);
-  const platformAgent = getPlatformAgent(agent.name);
+  const platformAgent = getDefaultAssistant(agent.name);
   // Memory + governance + soul skills are conversation-scoped, so fetch once and reuse for both
-  // the front desk and any handoff target. `buildSystemFor` assembles a per-agent system prompt:
-  // the agent's body + its inbuilt forge skills (frontmatter only; bodies pulled on demand via
-  // load_skill). Only the Information Architect carries forge skills today.
+  // the built-in assistant and any handoff target. `buildSystemFor` assembles a per-agent system
+  // prompt: the agent's body + its inbuilt forge skills (frontmatter only; bodies pulled on demand
+  // via `load_skill`).
   const memoryList = workingMemory ? await workingMemory.list(user._id) : [];
   const governancePages = knowledge ? await knowledge.governancePages() : [];
   const soulAvailableSkills = listAvailableSkills(soulLoader);
@@ -502,7 +506,7 @@ export async function startChatTurn(
 
   // Same-turn agent loop (delegation): the active agent runs first; if it calls
   // `transfer_to_agent` the conversation's active agent switches (persisted) and the target
-  // continues IN THE SAME SSE stream; `complete_task` hands control back to the GeneralAssistant.
+  // continues in the same SSE stream.
   // Each agent gets its own streamText tool loop; we suppress the per-agent `finish` part and
   // emit exactly one synthetic finish after the chain ends.
   const MAX_HANDOFF_DEPTH = 4;
@@ -510,9 +514,6 @@ export async function startChatTurn(
     let activeAgent = agent;
     let activePlatform = platformAgent;
     let turnMessages = messages;
-    // Set once we've queued the GeneralAssistant's closing confirmation after a `complete_task`,
-    // so the next iteration runs that wrap-up turn and then ends.
-    let closingTurn = false;
 
     // Observability accumulators (best-effort, off the critical path). Each finished step emits an
     // LLM_STEP_FINISHED; totals roll up across steps + handoffs into one TURN_FINISHED at the end.
@@ -584,7 +585,7 @@ export async function startChatTurn(
           tools: turnTools,
           // The stop endpoint aborts this signal to halt generation mid-turn (see streamControllers).
           abortSignal: abortController.signal,
-          // Stop the agent's own loop at the step budget, or as soon as it hands off / completes —
+          // Stop the agent's own loop at the step budget, or as soon as it hands off —
           // so control returns to this loop without the agent rambling after the control tool.
           stopWhen: ({ steps }) => {
             if (steps.length >= MAX_TOOL_STEPS) return true;
@@ -592,7 +593,6 @@ export async function startChatTurn(
             return (last?.toolCalls ?? []).some(
               (c) =>
                 c.toolName === "transfer_to_agent" ||
-                c.toolName === "complete_task" ||
                 c.toolName === "ask_user" || // HITL: end the turn cleanly with the form rendered
                 c.toolName === "cite_sources" // terminal: cite_sources is the answer's last act —
               // stopping here prevents the model running another step that restates the whole answer
@@ -652,10 +652,7 @@ export async function startChatTurn(
           },
         });
 
-        let control:
-          | { type: "transfer"; target: string; reason?: string }
-          | { type: "complete"; summary?: string }
-          | undefined;
+        let control: { type: "transfer"; target: string; reason?: string } | undefined;
         // Set when this agent calls `ask_user`: the turn ends with the form rendered and a pending
         // interaction is persisted so the next request resumes with the user's answer.
         let pendingAsk:
@@ -678,24 +675,15 @@ export async function startChatTurn(
               };
             }
           }
-          if (
-            p.type === "tool-result" &&
-            (p.toolName === "transfer_to_agent" || p.toolName === "complete_task")
-          ) {
+          if (p.type === "tool-result" && p.toolName === "transfer_to_agent") {
             const full = fullResultCache.get(p.toolCallId as string);
             if (full?.success) {
               const data = full.data as Record<string, unknown>;
-              control =
-                p.toolName === "transfer_to_agent"
-                  ? {
-                      type: "transfer",
-                      target: String(data.agentId),
-                      reason: data.message ? String(data.message) : undefined,
-                    }
-                  : {
-                      type: "complete",
-                      summary: data.summary ? String(data.summary) : undefined,
-                    };
+              control = {
+                type: "transfer",
+                target: String(data.agentId),
+                reason: data.message ? String(data.message) : undefined,
+              };
             }
           }
           yield part;
@@ -724,12 +712,13 @@ export async function startChatTurn(
           emitTurnFinished("paused");
           break;
         }
-        if (closingTurn) break; // the GeneralAssistant's closing confirmation just streamed
-        if (control?.type === "transfer" && depth < MAX_HANDOFF_DEPTH - 1) {
+        const transferTarget =
+          control?.type === "transfer" ? getAgent(soulLoader, control.target) : undefined;
+        if (control?.type === "transfer" && transferTarget && depth < MAX_HANDOFF_DEPTH - 1) {
           const fromAgent = activeAgent.name;
-          await repo.setAgent(convo._id, control.target);
-          activeAgent = resolveAgent(soulLoader, control.target);
-          activePlatform = getPlatformAgent(activeAgent.name);
+          await repo.setAgent(convo._id, transferTarget.name);
+          activeAgent = transferTarget;
+          activePlatform = getDefaultAssistant(activeAgent.name);
           // Surface the live switch so the client's current-agent indicator follows the handoff.
           yield {
             type: "agent-handoff",
@@ -746,35 +735,6 @@ export async function startChatTurn(
             { role: "user", content: handoffUser },
           ];
           continue;
-        }
-        if (control?.type === "complete" && depth < MAX_HANDOFF_DEPTH - 1) {
-          // Control returns to the front desk, which streams a brief confirmation of what the
-          // specialist just did — otherwise the turn ends on a silent (collapsed) tool result.
-          const fromAgent = activeAgent.name;
-          await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
-          activeAgent = resolveAgent(soulLoader, GENERAL_ASSISTANT_NAME);
-          activePlatform = getPlatformAgent(activeAgent.name);
-          // Hand the indicator back to the front desk for the closing confirmation turn.
-          yield { type: "agent-handoff", from: fromAgent, to: activeAgent.name };
-          const summary = control.summary ?? "completed the requested work";
-          turnMessages = [
-            { role: "system", content: buildSystemFor(activeAgent, activePlatform) },
-            { role: "user", content: userContent },
-            {
-              role: "assistant",
-              content: `(Internal note — the Information Architect handled that and reported: ${summary})`,
-            },
-            {
-              role: "user",
-              content:
-                "In one short, friendly sentence, confirm what was just created or done, and suggest one relevant next step. Do not call any tools.",
-            },
-          ];
-          closingTurn = true;
-          continue;
-        }
-        if (control?.type === "complete") {
-          await repo.setAgent(convo._id, GENERAL_ASSISTANT_NAME);
         }
         break;
       }
@@ -835,9 +795,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
   writeSseHeaders(reply.raw, {
     "X-Stream-Id": handle.streamId,
     "X-Message-Id": handle.replyMessageId,
-    // The agent handling this turn (from the @mention / conversation) so the client's header
-    // indicator reflects it immediately; mid-turn handoffs then update it via agent-handoff events.
-    "X-Agent-Id": handle.agentName,
+    // Only a user-selected Soul Agent is exposed to the client. Normal chat has no agent identity —
+    // and a removed agent resolves back to normal chat, so key off the resolved agent, not the
+    // (possibly stale) persisted convo.agentId.
+    ...(prepared.agent.name !== DEFAULT_ASSISTANT_NAME ? { "X-Agent-Id": handle.agentName } : {}),
     ...corsPassthrough(reply),
   });
   reply.hijack();

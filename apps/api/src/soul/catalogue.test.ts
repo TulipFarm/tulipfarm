@@ -7,7 +7,6 @@ import type {
   SoulSkill,
 } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
-import { GENERAL_ASSISTANT_NAME, INFORMATION_ARCHITECT_NAME } from "./agents/registry";
 import { buildSoulCatalogue } from "./catalogue";
 
 const skill = (name: string, frontmatter: Record<string, unknown> = {}): SoulSkill => ({
@@ -78,12 +77,7 @@ describe("buildSoulCatalogue", () => {
       })
     );
     // Platform agents are always present, sorted in among soul agents by name.
-    expect(cat.agents.map((a) => a.name)).toEqual([
-      GENERAL_ASSISTANT_NAME,
-      INFORMATION_ARCHITECT_NAME,
-      "alpha",
-      "zeta",
-    ]);
+    expect(cat.agents.map((a) => a.name)).toEqual(["alpha", "zeta"]);
     expect(cat.skills.map((s) => s.name)).toEqual(["export", "review"]);
     expect(cat.resourceTypes.map((r) => r.name)).toEqual(["invoice", "ticket"]);
     expect(cat.routines.map((r) => r.name)).toEqual(["hourly", "nightly"]);
@@ -124,10 +118,7 @@ describe("buildSoulCatalogue", () => {
 
   it("still lists the platform agents when the loader is absent, with every other section empty", () => {
     const cat = buildSoulCatalogue(undefined);
-    expect(cat.agents.map((a) => a.name)).toEqual([
-      GENERAL_ASSISTANT_NAME,
-      INFORMATION_ARCHITECT_NAME,
-    ]);
+    expect(cat.agents).toEqual([]);
     expect(cat.skills).toEqual([]);
     expect(cat.resourceTypes).toEqual([]);
     expect(cat.routines).toEqual([]);

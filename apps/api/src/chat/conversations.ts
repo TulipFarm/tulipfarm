@@ -20,7 +20,7 @@ export interface ConversationRepo {
   create(doc: ConversationDoc): Promise<void>;
   findById(id: string): Promise<ConversationDoc | null>;
   touch(id: string): Promise<void>;
-  /** Persist the conversation's active agent (the GeneralAssistant ↔ InformationArchitect handoff). */
+  /** Persist the conversation's active agent after an explicit agent handoff. */
   setAgent(id: string, agentId: string): Promise<void>;
   /**
    * Persist the title. Does not bump `updated_at`, so it works both for the async title generator

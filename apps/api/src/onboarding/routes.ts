@@ -9,7 +9,7 @@ import { getPersonalizedOnboarding } from "./personalize";
 import { deriveSuggestions } from "./suggestions";
 
 /*
- * Read-only HTTP surface for the onboarding / Information Architect layer (ONBOARDING ONB-V1).
+ * Read-only HTTP surface for the normal-chat onboarding layer (ONBOARDING ONB-V1).
  *
  * - `/suggestions` — the adaptive empty-state chips, derived from the soul resource set (a candidate
  *   is omitted once the resource it would create already exists). No persistence.

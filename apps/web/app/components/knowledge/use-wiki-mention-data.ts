@@ -18,7 +18,7 @@ import { listAllPages, listSpacePages } from "~/lib/knowledge-api";
  */
 
 // Platform/forge agents are internal infrastructure — never surface them in the author's @-menu.
-const INTERNAL_AGENTS = new Set(["GeneralAssistant", "InformationArchitect"]);
+const INTERNAL_AGENTS = new Set<string>();
 
 export function useWikiMentionExtensions(spaceId: string): AnyExtension[] {
   const pages = useRef<MentionItem[]>([]);

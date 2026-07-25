@@ -1,7 +1,7 @@
 import type { SoulAgent } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { assembleSystemPrompt } from "../context/assemble";
-import { INFORMATION_ARCHITECT } from "../soul/agents/platform-agents";
+import { DEFAULT_ASSISTANT } from "../soul/agents/platform-agents";
 import type { SoulCatalogue } from "../soul/catalogue";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 
@@ -57,7 +57,7 @@ describe("assembleAgentSystemPrompt", () => {
   it("merges the platform agent's forge skills into the available-skills index", () => {
     const withForge = assembleAgentSystemPrompt({
       agent,
-      platformAgent: INFORMATION_ARCHITECT,
+      platformAgent: DEFAULT_ASSISTANT,
       ...empty,
     });
     const withoutForge = assembleAgentSystemPrompt({ agent, platformAgent: undefined, ...empty });
@@ -68,10 +68,10 @@ describe("assembleAgentSystemPrompt", () => {
   it("threads the soul catalogue and tool index into their blocks; forge stays out of soul-context", () => {
     const out = assembleAgentSystemPrompt({
       agent,
-      platformAgent: INFORMATION_ARCHITECT,
+      platformAgent: DEFAULT_ASSISTANT,
       ...empty,
       soulCatalogue: {
-        agents: [{ name: "GeneralAssistant", description: "Front desk" }],
+        agents: [{ name: "support-agent", description: "Customer support" }],
         skills: [{ name: "catalogue-skill", description: "Repo skill" }],
         resourceTypes: [{ name: "invoice", description: "Billable items" }],
         routines: [],

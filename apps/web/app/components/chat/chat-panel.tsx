@@ -123,7 +123,7 @@ export function ChatPanel({
   });
   const busy = status === "submitted" || status === "streaming";
   // Prefer the live agent from a handoff; fall back to the restored conversation's persisted agent.
-  const agent = currentAgent || agentId || "GeneralAssistant";
+  const agent = currentAgent || agentId || "TulipFarm";
   // Resolve the active agent's domain/autonomy so its header glyph matches the agents list. Undefined
   // until the list loads (and for the two platform agents) → glyph uses its name-hashed fallback.
   // Mentionable entities: powers the active-agent header glyph AND highlights @/#// tags (with hover

@@ -53,7 +53,7 @@ test("default view is the live chat empty state with adaptive suggestions (AC-V1
   // Signature welcome (blinking wordmark + ready status + active agent).
   expect(screen.getByRole("heading", { name: /tulipfarm/i })).toBeInTheDocument();
   expect(screen.getByText("ready")).toBeInTheDocument();
-  expect(screen.getByText("GeneralAssistant")).toBeInTheDocument();
+  expect(screen.getByText("TulipFarm")).toBeInTheDocument();
 
   // Adaptive soul-derived suggestion chip (replaces the former hardcoded set).
   expect(screen.getByRole("button", { name: "Set up ticket management?" })).toBeInTheDocument();

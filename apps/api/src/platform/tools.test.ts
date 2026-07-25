@@ -469,17 +469,17 @@ describe("transferToAgentTool", () => {
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
-  it("accepts a code-defined platform agent (InformationArchitect) as a transfer target", async () => {
+  it("accepts the built-in platform assistant as a transfer target", async () => {
     const ctx: PlatformToolContext = {
-      platformAgentNames: new Set(["InformationArchitect"]),
+      platformAgentNames: new Set(["GeneralAssistant"]),
     };
     const res = await transferToAgentTool.handler(
-      { agentId: "InformationArchitect", message: "build an invoices resource" },
+      { agentId: "GeneralAssistant", message: "resume the default assistant" },
       ctx
     );
     expect(res).toMatchObject({
       success: true,
-      data: { agentId: "InformationArchitect", status: "transferred" },
+      data: { agentId: "GeneralAssistant", status: "transferred" },
     });
   });
 });

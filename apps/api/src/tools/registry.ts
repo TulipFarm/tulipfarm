@@ -72,9 +72,8 @@ export class ToolRegistry {
     runToolCallGuard?: RunToolCallGuard,
     allowedToolNames?: ReadonlySet<string>
   ): ToolSet {
-    // Per-agent tool scoping: when `allowedToolNames` is given, expose only those tools (the
-    // Information Architect's allowlist, or every-tool-minus-the-IA-exclusive-set for the front
-    // desk). Undefined → all registered tools (unchanged default).
+    // Per-agent tool scoping: an explicit allowed set limits the exposed tools. Undefined exposes
+    // every registered tool, which is the built-in assistant's default.
     const exposed = allowedToolNames
       ? this.getAll().filter((t) => allowedToolNames.has(t.name))
       : this.getAll();

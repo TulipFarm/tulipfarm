@@ -5,7 +5,7 @@ import type { UserDoc } from "../auth/users";
 import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
-import { getPlatformAgent, resolveAgent } from "../soul/agents/registry";
+import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import type { ToolRegistry } from "../tools/registry";
@@ -337,7 +337,7 @@ export function registerConversationRoutes(
         // resources (there is no in-flight turn) — mirrors the chat route's front-desk assembly. Memory
         // is the conversation owner's, so the prompt matches what the LLM actually saw for this chat.
         const agent = resolveAgent(soulLoader, convo.agentId);
-        const platformAgent = getPlatformAgent(agent.name);
+        const platformAgent = getDefaultAssistant(agent.name);
         const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
         const governancePages = knowledge ? await knowledge.governancePages() : [];
         const tools = availableToolsFor(toolRegistry, platformAgent);

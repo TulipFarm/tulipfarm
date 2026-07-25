@@ -42,11 +42,13 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
   const agentId = convo.agentId ?? undefined;
   let defaultModel: ModelTier = "standard";
-  try {
-    const agent = await getAgent(agentId ?? "GeneralAssistant");
-    if (agent.model === "complex") defaultModel = "complex";
-  } catch {
-    // Unknown agent / transient API error — keep the standard default rather than break the page.
+  if (agentId) {
+    try {
+      const agent = await getAgent(agentId);
+      if (agent.model === "complex") defaultModel = "complex";
+    } catch {
+      // Unknown Agent / transient API error — keep the standard default rather than break chat.
+    }
   }
 
   return {

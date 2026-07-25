@@ -4,11 +4,10 @@ import { ErrorSchema } from "../../auth/schemas";
 import { getAgent, listAgents } from "./registry";
 
 /*
- * Read-only HTTP surface for agents (AGENTS / UI-V1-003). The registry is the built-in `GeneralAssistant`
- * platform agent plus the soul agents (AGENT.md files loaded into the SoulLoader at startup). The list
- * view carries frontmatter only and puts GeneralAssistant first; the detail view adds the markdown `body`
- * (the agent's system prompt). Creation/editing of soul agents happens via the agent_* tools / forges,
- * not here.
+ * Read-only HTTP surface for user-created Agents (AGENT.md files loaded into the SoulLoader at
+ * startup). The list view carries frontmatter only; the detail view adds the markdown `body`.
+ * Normal chat is not an Agent resource. Creation/editing of Soul agents happens through the
+ * agent_* tools / forges, not here.
  */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
