@@ -53,6 +53,7 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
+import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
@@ -85,6 +86,7 @@ export interface AppOptions {
   conversationRepo?: ConversationRepo;
   messageRepo?: MessageRepo;
   feedbackRepo?: FeedbackRepo;
+  runEvents?: RunEventRouteDeps;
   streamResumeRepo?: StreamResumeRepo;
   streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
@@ -421,6 +423,9 @@ export async function buildApp(opts: AppOptions = {}) {
             }
           : undefined
       );
+    }
+    if (opts.runEvents) {
+      registerRunEventRoutes(app, opts.runEvents, requireAuth);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);

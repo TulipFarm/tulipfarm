@@ -13,7 +13,8 @@ with a declared exhaustion disposition, and `serialize`/`queue`/`coalesce`/`reje
 target-concurrency admission over a deterministic target key), and `src/children`, `src/cancel`,
 `src/reconcile-state` (never-broadening child authority with explicit detach, cancellation that
 cancels future work and parks in-flight effects, and evidence-driven reconciliation where an
-ambiguous effect never becomes `cancelled`). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+ambiguous effect never becomes `cancelled`), and `src/resilience` (crash/duplicate/recovery proofs
+over a `SimulatedRunStore` that injects failure before and after each durable write). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/audit`, `@tulipfarm/storage`,
 `@tulipfarm/observability`. See

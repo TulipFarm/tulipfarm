@@ -23,6 +23,17 @@ export type {
   PersistedConcurrencySlotStatus,
 } from "./concurrency-store";
 export { CONCURRENCY_STORAGE_STATEMENTS, ConcurrencyStore } from "./concurrency-store";
+export type {
+  AppendRunEventInput,
+  ListRunEventsOptions,
+  PersistedRunEvent,
+  RunEventAudience,
+} from "./events";
+export {
+  DEFAULT_RUN_EVENT_PAGE_SIZE,
+  RUN_EVENT_STORAGE_STATEMENTS,
+  RunEventStore,
+} from "./events";
 export { MemoryWaitStore } from "./memory-wait-store";
 export type {
   AppendAttemptInput,

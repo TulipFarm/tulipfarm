@@ -12,7 +12,8 @@ plus `MemoryArtifactStore`) that `@tulipfarm/run-kernel` drives. `src/runs/` own
 (`RunStore`, `WaitStore`, plus `MemoryWaitStore`), including resume-token digests and
 lock-guarded wait resolution, plus the write-once `run_budgets` ledger (`BudgetStore`) and the
 lock-guarded `run_concurrency_keys`/`run_concurrency_slots` tables (`ConcurrencyStore`), plus the
-authority-immutable, detach-final `run_child_links` table (`ChildLinkStore`). tsconfig extends
+authority-immutable, detach-final `run_child_links` table (`ChildLinkStore`), plus the append-only,
+audience-scoped `run_events` stream with a gapless per-Run sequence (`RunEventStore`). tsconfig extends
 `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/observability`. See
