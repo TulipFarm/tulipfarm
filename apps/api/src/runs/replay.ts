@@ -7,6 +7,7 @@ import type {
 import { planReplay, ReplayError } from "@tulipfarm/run-kernel";
 import type { FastifyInstance, FastifyRequest, preHandlerHookHandler } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface RunReplayDeps {
   /** The recorded Run, or `null` when the caller may not see it. */
@@ -23,6 +24,10 @@ export interface RunReplayDeps {
 
 const NOT_FOUND = { error: "run not found" };
 
+/** A replay re-executes a whole Run, so it is far costlier than the request that asks for it. */
+const REPLAY_LIMIT = 30;
+const REPLAY_WINDOW_MS = 60_000;
+
 /**
  * `POST /api/v1/runs/:id/replay` (SPEC §18).
  *
@@ -35,12 +40,24 @@ const NOT_FOUND = { error: "run not found" };
 export function registerRunReplayRoutes(
   app: FastifyInstance,
   deps: RunReplayDeps,
-  requireAuth: preHandlerHookHandler
+  requireAuth: preHandlerHookHandler,
+  rateLimiter?: RateLimiter
 ): void {
+  // Limit per caller when a limiter is wired, keyed on the authenticated user so one caller
+  // cannot spend another's budget, falling back to the address for the unauthenticated case.
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(
+        rateLimiter,
+        (req) => `rl:run-replay:${req.user?._id ?? req.ip}`,
+        REPLAY_LIMIT,
+        REPLAY_WINDOW_MS
+      )
+    : undefined;
+
   app.post(
     "/api/v1/runs/:id/replay",
     {
-      preHandler: requireAuth,
+      preHandler: rateLimitHook ? [requireAuth, rateLimitHook] : requireAuth,
       schema: {
         description:
           "Replay a finished Run. Defaults to a new simulation Run whose effects are previewed " +
@@ -94,6 +111,7 @@ export function registerRunReplayRoutes(
           403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
+          429: ErrorSchema,
         },
       },
     },

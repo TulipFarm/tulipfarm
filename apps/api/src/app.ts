@@ -449,7 +449,7 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
     }
     if (opts.runReplay) {
-      registerRunReplayRoutes(app, opts.runReplay, requireAuth);
+      registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);

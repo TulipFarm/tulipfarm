@@ -262,4 +262,42 @@ describe("POST /api/v1/runs/:id/replay", () => {
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({ error: "run not found" });
   });
+
+  it("refuses to start a replay once the caller is over the rate limit", async () => {
+    await app.close();
+
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    sid = await store.create(user._id);
+    const keys: string[] = [];
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      rateLimiter: {
+        async check(key, limit) {
+          keys.push(key);
+          return { allowed: false, limit, remaining: 0, resetAt: Date.now() + 60_000 };
+        },
+      },
+      runReplay: {
+        loadRecordedRun,
+        loadRoutine: async () => routine,
+        authorizeLiveReplay,
+        startReplayRun,
+        now: () => NOW,
+      },
+    });
+
+    const response = await replay();
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toEqual({ error: "rate_limit_exceeded" });
+    // The bucket is the authenticated caller, so one caller cannot exhaust another's budget.
+    expect(keys).toEqual([`rl:run-replay:${user._id}`]);
+    expect(loadRecordedRun).not.toHaveBeenCalled();
+    expect(startReplayRun).not.toHaveBeenCalled();
+  });
 });
