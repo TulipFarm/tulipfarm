@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { APICallError } from "ai";
 import type { A2uiSurfaceStore } from "../a2ui/surface-store";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import { clientActionEvent } from "../platform/frontend-tools";
@@ -12,6 +13,31 @@ import type { StreamResumeRepo } from "./stream-resume";
 interface MappedEvent {
   eventType: string;
   data: unknown;
+}
+
+/**
+ * Some providers (e.g. Ollama Cloud) return an APICallError with an empty `message` and the real
+ * reason only in `responseBody` (as JSON `{ error: "..." }` or plain text) — surface that instead
+ * of falling through to a generic "stream error" the user can't act on.
+ */
+function describeStreamError(error: unknown): string {
+  if (APICallError.isInstance(error)) {
+    if (error.message) return error.message;
+    const body = error.responseBody;
+    if (body) {
+      try {
+        const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+        const fromBody = parsed.error ?? parsed.message;
+        if (typeof fromBody === "string" && fromBody) return fromBody;
+      } catch {
+        // not JSON — fall through to the raw body below
+      }
+      return body;
+    }
+    return `${error.statusCode ?? "?"} request failed`;
+  }
+  if (error instanceof Error && error.message) return error.message;
+  return "stream error";
 }
 
 /**
@@ -50,7 +76,7 @@ export function mapStreamPart(
     case "error":
       return {
         eventType: "error",
-        data: { message: p.error instanceof Error ? p.error.message : "stream error" },
+        data: { message: describeStreamError(p.error) },
       };
     default:
       return null;
@@ -235,7 +261,7 @@ export async function runChatStream(
       } else {
         deps.log.error({ err, streamId }, "chat stream producer failed");
         await deps.emitter.emit("error", {
-          message: err instanceof Error ? err.message : "stream error",
+          message: describeStreamError(err),
         });
       }
     }

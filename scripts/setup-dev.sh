@@ -181,6 +181,28 @@ else
       else
         echo "✅ Postgres database 'tulipfarm' already exists"
       fi
+
+      # An existing .env.local may carry a password-auth DATABASE_URL (e.g. left over from a
+      # prior Docker-mode setup, or hand-edited) instead of the template's peer-auth default.
+      # Native Postgres has no such role by default — ensure it exists so the app can connect.
+      if [ -f ".env.local" ]; then
+        EXISTING_DB_URL="$(grep -E '^DATABASE_URL=' .env.local | head -1 | cut -d= -f2-)"
+        if [[ "$EXISTING_DB_URL" =~ ^postgres(ql)?://([^:@/]+):([^@/]+)@ ]]; then
+          DB_ROLE="${BASH_REMATCH[2]}"
+          DB_ROLE_PASSWORD="${BASH_REMATCH[3]}"
+          if psql -Atqc "SELECT 1 FROM pg_roles WHERE rolname='$DB_ROLE'" postgres 2>/dev/null | grep -q 1; then
+            echo "✅ Postgres role '$DB_ROLE' already exists"
+          else
+            psql -c "CREATE ROLE \"$DB_ROLE\" WITH LOGIN PASSWORD '$DB_ROLE_PASSWORD';" postgres \
+              && echo "✅ Created Postgres role '$DB_ROLE'"
+          fi
+          # Docker mode's tulipfarm role is superuser (POSTGRES_USER on the official postgres
+          # image), which owns the DB, the public schema, and can CREATE EXTENSION (vector,
+          # citext, pg_trgm — none are "trusted" extensions installable by a plain role).
+          # Match that here instead of granting each privilege piecemeal.
+          psql -c "ALTER ROLE \"$DB_ROLE\" WITH SUPERUSER;" postgres &> /dev/null
+        fi
+      fi
     else
       echo "⚠ createdb not on PATH — create the 'tulipfarm' database manually"
     fi
