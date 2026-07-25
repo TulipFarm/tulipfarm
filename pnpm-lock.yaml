@@ -89,6 +89,9 @@ importers:
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
+      '@tulipfarm/tool-broker':
+        specifier: workspace:*
+        version: link:../../packages/tool-broker
       ai:
         specifier: ^7.0.2
         version: 7.0.2(zod@4.4.3)
@@ -748,10 +751,29 @@ importers:
         version: 6.0.3
 
   packages/tool-broker:
+    dependencies:
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../authz
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/secrets':
+        specifier: workspace:*
+        version: link:../secrets
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

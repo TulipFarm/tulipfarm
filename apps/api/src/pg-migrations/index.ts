@@ -8,6 +8,7 @@ import {
   RUN_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
+import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import type { Queryable } from "../db";
 
 export interface PgMigration {
@@ -502,6 +503,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "persisted Run event stream",
     up: async (q) => {
       for (const sql of RUN_EVENT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 10,
+    description: "durable Tool intents and effect ledger",
+    up: async (q) => {
+      for (const sql of EFFECT_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },
