@@ -99,6 +99,7 @@ export type ArtifactPersistenceErrorCode =
   | "artifact_conflict"
   /** Exactly one of inline content or a blob reference is required; PostgreSQL CHECKs the same. */
   | "artifact_content_shape"
+  | "artifact_reference_invalid"
   | "output_binding_conflict";
 
 export class ArtifactPersistenceError extends Error {
@@ -227,6 +228,41 @@ function timestamp(value: string | Date): string {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalJson).join(",")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "undefined";
+}
+
+/** Exact replay check for every immutable field, not only the payload digest. */
+export function artifactMatchesInput(
+  artifact: PersistedArtifact,
+  input: PutArtifactInput
+): boolean {
+  return (
+    artifact.id === input.id &&
+    artifact.businessId === input.businessId &&
+    artifact.schemaRef === input.schemaRef &&
+    artifact.contentKind === (input.blob === null ? "inline" : "blob") &&
+    canonicalJson(artifact.content) === canonicalJson(input.content) &&
+    canonicalJson(artifact.blob) === canonicalJson(input.blob) &&
+    artifact.contentHash === input.contentHash &&
+    canonicalJson(artifact.classification) === canonicalJson(input.classification) &&
+    canonicalJson(artifact.acl) === canonicalJson(input.acl) &&
+    canonicalJson(artifact.retention) === canonicalJson(input.retention) &&
+    canonicalJson(artifact.redaction) === canonicalJson(input.redaction) &&
+    canonicalJson(artifact.producer) === canonicalJson(input.producer) &&
+    new Date(artifact.createdAt).getTime() === new Date(input.createdAt).getTime()
+  );
+}
+
 function persistedArtifact(row: ArtifactRow): PersistedArtifact {
   return {
     id: row.id,
@@ -275,8 +311,8 @@ export class ArtifactStore {
   constructor(private readonly transactions: TransactionPort) {}
 
   /**
-   * Inserts an Artifact once. A replay of the same identity and hash is a `duplicate`; the same
-   * identity with a different hash is an `artifact_conflict` rather than a silent overwrite.
+   * Inserts an Artifact once. Only an exact replay of every immutable field is a `duplicate`;
+   * reusing the identity with changed content or metadata is an `artifact_conflict`.
    */
   async put(input: PutArtifactInput): Promise<PutArtifactResult> {
     return this.transactions.withTransaction(async (transaction) => {
@@ -309,11 +345,12 @@ export class ArtifactStore {
       );
       if (inserted.rows.length === 1) return { outcome: "created" };
 
-      const existing = await transaction.query<{ content_hash: string }>(
-        "SELECT content_hash FROM artifacts WHERE business_id = $1 AND id = $2",
+      const existing = await transaction.query<ArtifactRow>(
+        `SELECT ${ARTIFACT_COLUMNS} FROM artifacts WHERE business_id = $1 AND id = $2`,
         [input.businessId, input.id]
       );
-      if (existing.rows[0]?.content_hash !== input.contentHash) {
+      const row = existing.rows[0];
+      if (!row || !artifactMatchesInput(persistedArtifact(row), input)) {
         throw new ArtifactPersistenceError("artifact_conflict");
       }
       return { outcome: "duplicate" };

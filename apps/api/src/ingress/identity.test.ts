@@ -50,7 +50,7 @@ function makeLog() {
 
 describe("IngressIdentityResolver", () => {
   it("resolves via the identity binding: tool call → email_path → user match", async () => {
-    const execute = vi.fn(async (args: unknown) => ({
+    const execute = vi.fn(async (_args: unknown) => ({
       success: true as const,
       data: {
         content: [

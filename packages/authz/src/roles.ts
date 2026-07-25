@@ -97,8 +97,9 @@ export function assertRoleAssignable(
 
 /**
  * Flattens the grants of `roleIds` and their composed parents. Fails closed: an unknown role
- * throws {@link RoleResolutionError}, a cycle throws {@link RoleCycleError}, and an expired
- * role contributes nothing (its parents included). Each role is visited once.
+ * throws {@link RoleResolutionError}, a cycle throws {@link RoleCycleError}, a cross-business
+ * composition throws {@link RoleAssignmentError}, and an expired role contributes nothing (its
+ * parents included). Each role is visited once.
  */
 export function collectRoleGrants(
   roleIds: readonly string[],
@@ -107,6 +108,7 @@ export function collectRoleGrants(
 ): AccessGrant[] {
   const grants: AccessGrant[] = [];
   const done = new Set<string>();
+  let businessId: string | undefined;
   const visit = (id: string, path: readonly string[]): void => {
     if (path.includes(id)) {
       throw new RoleCycleError([...path.slice(path.indexOf(id)), id]);
@@ -115,6 +117,13 @@ export function collectRoleGrants(
     done.add(id);
     const role = rolesById.get(id);
     if (!role) throw new RoleResolutionError(id);
+    businessId ??= role.businessId;
+    if (role.businessId !== businessId) {
+      throw new RoleAssignmentError(
+        "business_mismatch",
+        `role ${role.id} cannot compose with a role from another business`
+      );
+    }
     if (role.expiresAt && role.expiresAt <= now) return;
     grants.push(...role.grants);
     for (const parentId of role.parentRoleIds) visit(parentId, [...path, id]);

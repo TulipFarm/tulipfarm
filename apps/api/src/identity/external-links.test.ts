@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   ExternalIdentityDeniedError,
-  type ExternalIdentityMappingDoc,
-  type ExternalIdentityRepo,
-  type ExternalLinkTokenDoc,
   hashLinkToken,
   LinkRedemptionDeniedError,
   mintLinkToken,

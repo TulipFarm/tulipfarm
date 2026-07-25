@@ -125,6 +125,15 @@ describe("collectRoleGrants", () => {
     expect(() => collectRoleGrants(["a"], roles, NOW)).toThrow(RoleCycleError);
   });
 
+  it("fails closed when composed roles cross a business boundary", () => {
+    const roles = byId([
+      role({ id: "child", parentRoleIds: ["foreign"] }),
+      role({ id: "foreign", businessId: "business-2" }),
+    ]);
+
+    expect(() => collectRoleGrants(["child"], roles, NOW)).toThrow(RoleAssignmentError);
+  });
+
   it("contributes nothing from an expired role, including its parents", () => {
     const roles = byId([
       role({ id: "dead", parentRoleIds: ["parent"], grants: [readGrant], expiresAt: NOW }),

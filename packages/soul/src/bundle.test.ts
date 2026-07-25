@@ -65,6 +65,23 @@ describe("InMemoryBundleStore", () => {
     await expect(store.get(record.digest)).resolves.toEqual(record);
   });
 
+  it("stores a detached, deeply immutable snapshot", async () => {
+    const store = new InMemoryBundleStore();
+    const record = structuredClone(signed(bundleOf({ nested: { value: 1 } })));
+    await store.put(record);
+    const stored = await store.get(record.digest);
+    if (!stored) throw new Error("expected stored bundle");
+    const document = record.bundle.definitions[0]?.document;
+    if (!document) throw new Error("expected source document");
+
+    (document.spec as Record<string, unknown>).nested = { value: 2 };
+
+    expect((stored.bundle.definitions[0]?.document.spec as Record<string, unknown>).nested).toEqual(
+      { value: 1 }
+    );
+    expect(Object.isFrozen(stored.bundle.definitions[0]?.document.spec)).toBe(true);
+  });
+
   it("returns undefined for an unknown digest", async () => {
     await expect(new InMemoryBundleStore().get("deadbeef")).resolves.toBeUndefined();
   });

@@ -59,13 +59,17 @@ export class RunDispatcher {
 
       try {
         const outcome = await this.options.handler(started.run);
-        await this.options.leases.release({
+        const released = await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
           expectedVersion: started.run.version,
           expectedStatus: "running",
           status: outcome,
         });
+        if (!released) {
+          failed += 1;
+          continue;
+        }
         if (outcome === "succeeded") dispatched += 1;
         else failed += 1;
       } catch {

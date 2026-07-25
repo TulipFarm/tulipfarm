@@ -41,6 +41,18 @@ describe("signExecutionBundle / verifyExecutionBundle", () => {
     expect(runtime.get("Agent", "triage")?.authoredVersion).toBe(2);
     expect(runtime.getById("id-triage")?.slug).toBe("triage");
     expect(runtime.get("Agent", "unknown")).toBeUndefined();
+    expect(Object.isFrozen(runtime.get("Agent", "triage")?.document.spec)).toBe(true);
+  });
+
+  it("detaches the verified runtime view from an untrusted stored record", () => {
+    const record = structuredClone(signExecutionBundle(bundle(), signer));
+    const runtime = verifyExecutionBundle(record, signer);
+
+    (record.bundle.definitions[0].document.spec as Record<string, unknown>).instructions = "exfil";
+
+    expect(
+      (runtime.get("Agent", "triage")?.document.spec as Record<string, unknown>).instructions
+    ).toBe("be helpful");
   });
 
   it("is deterministic: the same tree signs to the same digest and signature", () => {
@@ -51,7 +63,7 @@ describe("signExecutionBundle / verifyExecutionBundle", () => {
   });
 
   it("detects a tampered definition", () => {
-    const record = signExecutionBundle(bundle(), signer);
+    const record = structuredClone(signExecutionBundle(bundle(), signer));
     (record.bundle.definitions[0].document.spec as Record<string, unknown>).instructions = "exfil";
     expect(() => verifyExecutionBundle(record, signer)).toThrow(
       expect.objectContaining({ code: "DIGEST_MISMATCH" })

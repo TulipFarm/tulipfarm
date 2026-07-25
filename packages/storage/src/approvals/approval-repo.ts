@@ -55,7 +55,12 @@ export type ApprovalStoreErrorCode =
   | "duplicate_approver"
   | "already_used"
   | "revoked"
-  | "binding_mismatch";
+  | "binding_mismatch"
+  | "expired"
+  | "self_approval"
+  | "approver_not_qualified"
+  | "denied"
+  | "insufficient_approvals";
 
 export class ApprovalStoreError extends Error {
   constructor(
@@ -78,9 +83,9 @@ export interface ApprovalRepo {
     decision: ApprovalDecisionEntry
   ): Promise<ApprovalGrantRecord>;
   /**
-   * Spends the one-use decision, but only for the exact `binding` it was granted for. Consumption
-   * is atomic: of any number of concurrent attempts exactly one succeeds and the rest see
-   * `already_used`.
+   * Spends a valid one-use decision only for its exact `binding`. Expiry, denial, qualified
+   * approver count, binding, and the consumed marker must be checked in the same atomic storage
+   * operation: of any number of concurrent attempts exactly one succeeds.
    */
   consume(
     businessId: string,
@@ -96,11 +101,19 @@ function freeze(record: ApprovalGrantRecord): ApprovalGrantRecord {
     ...record,
     binding: Object.freeze({ ...record.binding }),
     allowedApproverRoles: Object.freeze([...record.allowedApproverRoles]),
+    expiresAt: new Date(record.expiresAt.getTime()),
+    createdAt: new Date(record.createdAt.getTime()),
     decisions: Object.freeze(
       record.decisions.map((entry) =>
-        Object.freeze({ ...entry, approverRoles: Object.freeze([...entry.approverRoles]) })
+        Object.freeze({
+          ...entry,
+          approverRoles: Object.freeze([...entry.approverRoles]),
+          decidedAt: new Date(entry.decidedAt.getTime()),
+        })
       )
     ),
+    consumedAt: record.consumedAt === undefined ? undefined : new Date(record.consumedAt.getTime()),
+    revokedAt: record.revokedAt === undefined ? undefined : new Date(record.revokedAt.getTime()),
   });
 }
 
@@ -116,7 +129,8 @@ function bindingsEqual(a: ApprovalBindingRecord, b: ApprovalBindingRecord): bool
  * Process-local reference implementation for tests and single-process composition. A durable
  * PostgreSQL adapter implements the same {@link ApprovalRepo} contract, where `create` maps to a
  * primary key, `appendDecision` to a unique `(approval_id, approver_principal_id)` constraint, and
- * `consume` to a conditional `UPDATE … WHERE consumed_at IS NULL` returning the affected row.
+ * `consume` to a transaction that locks and validates the Approval before a conditional
+ * `UPDATE … WHERE consumed_at IS NULL` returning the affected row.
  */
 export class InMemoryApprovalRepo implements ApprovalRepo {
   private readonly records = new Map<string, ApprovalGrantRecord>();
@@ -141,7 +155,7 @@ export class InMemoryApprovalRepo implements ApprovalRepo {
     return record;
   }
 
-  private assertOpen(record: ApprovalGrantRecord): void {
+  private assertOpen(record: ApprovalGrantRecord, at?: Date): void {
     if (record.revokedAt !== undefined) {
       throw new ApprovalStoreError("revoked", `Approval ${record.approvalId} was revoked`);
     }
@@ -151,12 +165,27 @@ export class InMemoryApprovalRepo implements ApprovalRepo {
         `Approval ${record.approvalId} was already used`
       );
     }
+    if (at !== undefined && record.expiresAt <= at) {
+      throw new ApprovalStoreError("expired", `Approval ${record.approvalId} has expired`);
+    }
+  }
+
+  private qualified(record: ApprovalGrantRecord, decision: ApprovalDecisionEntry): boolean {
+    const prohibited = [
+      record.proposerPrincipalId,
+      record.performerPrincipalId,
+      record.agentPrincipalId,
+    ].filter((id): id is string => id !== undefined);
+    return (
+      !prohibited.includes(decision.approverPrincipalId) &&
+      decision.approverRoles.some((role) => record.allowedApproverRoles.includes(role))
+    );
   }
 
   private write(record: ApprovalGrantRecord): ApprovalGrantRecord {
     const stored = freeze(record);
     this.records.set(this.key(stored.businessId, stored.approvalId), stored);
-    return stored;
+    return freeze(stored);
   }
 
   async create(grant: NewApprovalGrant): Promise<ApprovalGrantRecord> {
@@ -170,13 +199,15 @@ export class InMemoryApprovalRepo implements ApprovalRepo {
   }
 
   async get(businessId: string, approvalId: string): Promise<ApprovalGrantRecord | undefined> {
-    return this.records.get(this.key(businessId, approvalId));
+    const record = this.records.get(this.key(businessId, approvalId));
+    return record === undefined ? undefined : freeze(record);
   }
 
   async list(businessId: string): Promise<ApprovalGrantRecord[]> {
     return [...this.records.values()]
       .filter((record) => record.businessId === businessId)
-      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .map(freeze);
   }
 
   async appendDecision(
@@ -185,7 +216,23 @@ export class InMemoryApprovalRepo implements ApprovalRepo {
     decision: ApprovalDecisionEntry
   ): Promise<ApprovalGrantRecord> {
     const record = this.require(businessId, approvalId);
-    this.assertOpen(record);
+    this.assertOpen(record, decision.decidedAt);
+    if (
+      decision.approverPrincipalId === record.proposerPrincipalId ||
+      decision.approverPrincipalId === record.performerPrincipalId ||
+      decision.approverPrincipalId === record.agentPrincipalId
+    ) {
+      throw new ApprovalStoreError(
+        "self_approval",
+        `the proposing, performing, or executing principal cannot decide Approval ${approvalId}`
+      );
+    }
+    if (!this.qualified(record, decision)) {
+      throw new ApprovalStoreError(
+        "approver_not_qualified",
+        `approver holds no role allowed to decide Approval ${approvalId}`
+      );
+    }
     if (
       record.decisions.some((entry) => entry.approverPrincipalId === decision.approverPrincipalId)
     ) {
@@ -206,11 +253,26 @@ export class InMemoryApprovalRepo implements ApprovalRepo {
     // Check and mark in one synchronous step: no await may separate them, or two concurrent
     // callers could both observe an unconsumed Approval and both spend it.
     const record = this.require(businessId, approvalId);
-    this.assertOpen(record);
+    this.assertOpen(record, at);
     if (!bindingsEqual(record.binding, binding)) {
       throw new ApprovalStoreError(
         "binding_mismatch",
         `Approval ${approvalId} was not granted for this binding`
+      );
+    }
+    if (record.decisions.some((decision) => decision.outcome === "denied")) {
+      throw new ApprovalStoreError("denied", `Approval ${approvalId} was denied`);
+    }
+    const qualifiedApprovers = new Set(
+      record.decisions
+        .filter((decision) => decision.outcome === "approved" && this.qualified(record, decision))
+        .map((decision) => decision.approverPrincipalId)
+    );
+    const required = record.risk === "high" ? 2 : 1;
+    if (qualifiedApprovers.size < required) {
+      throw new ApprovalStoreError(
+        "insufficient_approvals",
+        `Approval ${approvalId} lacks the required number of qualified approvers`
       );
     }
     return this.write({ ...record, consumedAt: at });

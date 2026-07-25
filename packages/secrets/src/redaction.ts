@@ -49,6 +49,19 @@ export function containsSecret(value: unknown, secrets: Iterable<string>): boole
     if (Array.isArray(node)) {
       return node.some(visit);
     }
+    if (node instanceof Map) {
+      return [...node].some(([key, entry]) => visit(key) || visit(entry));
+    }
+    if (node instanceof Set) {
+      return [...node].some(visit);
+    }
+    if (ArrayBuffer.isView(node)) {
+      const bytes = new Uint8Array(node.buffer, node.byteOffset, node.byteLength);
+      return visit(new TextDecoder().decode(bytes));
+    }
+    if (node instanceof ArrayBuffer) {
+      return visit(new TextDecoder().decode(node));
+    }
     if (node instanceof Error) {
       return visit(node.message) || visit(node.stack ?? "");
     }
