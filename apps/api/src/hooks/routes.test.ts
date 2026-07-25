@@ -129,4 +129,25 @@ describe("POST /api/v1/hooks/:provider/:trigger", () => {
     expect(response.json()).toEqual({ error: "hook not found" });
     expect(accept).not.toHaveBeenCalled();
   });
+
+  it("sheds a flood before it reaches signature verification", async () => {
+    const keys: string[] = [];
+    await build({
+      rateLimiter: {
+        async check(key, limit) {
+          keys.push(key);
+          return { allowed: false, limit, remaining: 0, resetAt: Date.now() + 60_000 };
+        },
+      },
+    });
+
+    const response = await post(JSON.stringify({ action: "opened" }));
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toEqual({ error: "rate_limit_exceeded" });
+    // Per sender and per Trigger: one noisy sender cannot deny another provider's deliveries.
+    expect(keys).toEqual(["rl:hook:127.0.0.1:github:issues-opened"]);
+    expect(resolveTrigger).not.toHaveBeenCalled();
+    expect(accept).not.toHaveBeenCalled();
+  });
 });

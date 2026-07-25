@@ -7,6 +7,7 @@ import {
 import { event as eventSchema } from "@tulipfarm/schema";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface TriggerInvokeDeps {
   /** Resolve the Trigger by slug, or `null` when the caller may not know it exists. */
@@ -27,6 +28,9 @@ const NOT_FOUND = { error: "trigger not found" };
 /** Only these Trigger types accept a caller-initiated invocation. */
 const INVOKABLE = new Set(["manual", "internal_api"]);
 
+const INVOKE_LIMIT = 60;
+const INVOKE_WINDOW_MS = 60_000;
+
 /**
  * Caller-initiated Trigger invocation for `manual` and `internal_api` Triggers.
  *
@@ -38,12 +42,25 @@ const INVOKABLE = new Set(["manual", "internal_api"]);
 export function registerTriggerRoutes(
   app: FastifyInstance,
   deps: TriggerInvokeDeps,
-  requireAuth: preHandlerHookHandler
+  requireAuth: preHandlerHookHandler,
+  rateLimiter?: RateLimiter
 ): void {
+  // An invocation starts a Run, so it is far more expensive than the request that asks for it.
+  // Limit per caller when a limiter is wired; the identity is the authenticated user, falling
+  // back to the address so an unauthenticated burst cannot share one bucket with everyone else.
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(
+        rateLimiter,
+        (req) => `rl:trigger-invoke:${req.user?._id ?? req.ip}`,
+        INVOKE_LIMIT,
+        INVOKE_WINDOW_MS
+      )
+    : undefined;
+
   app.post(
     "/api/v1/triggers/:slug/invoke",
     {
-      preHandler: requireAuth,
+      preHandler: rateLimitHook ? [requireAuth, rateLimitHook] : requireAuth,
       schema: {
         description:
           "Invoke a manual or internal-API Trigger. The request is normalized into a canonical " +
@@ -76,6 +93,7 @@ export function registerTriggerRoutes(
           401: ErrorSchema,
           404: ErrorSchema,
           422: ErrorSchema,
+          429: ErrorSchema,
         },
       },
     },

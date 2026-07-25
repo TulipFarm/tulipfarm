@@ -245,7 +245,10 @@ export async function buildApp(opts: AppOptions = {}) {
   // Same posture as integration ingress: the Trigger hook route carries its own signature
   // verification and must work without any session dependency.
   if (opts.hookIngress) {
-    await registerHookIngressRoutes(app, opts.hookIngress);
+    await registerHookIngressRoutes(app, {
+      ...opts.hookIngress,
+      rateLimiter: opts.hookIngress.rateLimiter ?? opts.rateLimiter,
+    });
   }
 
   if (opts.sessionStore && opts.userRepo && opts.tokenRepo) {
@@ -304,7 +307,7 @@ export async function buildApp(opts: AppOptions = {}) {
       });
     }
     if (opts.triggerInvoke) {
-      registerTriggerRoutes(app, opts.triggerInvoke, requireAuth);
+      registerTriggerRoutes(app, opts.triggerInvoke, requireAuth, opts.rateLimiter);
     }
 
     if (opts.kvService) {

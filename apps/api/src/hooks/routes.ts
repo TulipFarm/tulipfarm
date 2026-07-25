@@ -1,6 +1,7 @@
 import { ingestWebhook, type WebhookIngressDeps, type WebhookTrigger } from "@tulipfarm/run-kernel";
 import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface HookIngressDeps {
   /** Resolve the published webhook Trigger bound to this provider + slug, or `null`. */
@@ -8,10 +9,20 @@ export interface HookIngressDeps {
   ingress: WebhookIngressDeps;
   /** Receipt clock, injectable so ingress stays deterministic under test. */
   now?: () => string;
+  rateLimiter?: RateLimiter;
 }
 
 /** Constant 404 body: never reveal whether a Trigger exists, is published, or is signed. */
 const NOT_FOUND = { error: "hook not found" };
+
+/**
+ * The receiver is public, so the limit is per sender and per Trigger rather than global, and it
+ * is set well above a normal provider's delivery rate — a legitimate burst or redelivery storm
+ * must not be dropped, while an unauthenticated flood still cannot run signature verification
+ * without bound.
+ */
+const HOOK_LIMIT = 600;
+const HOOK_WINDOW_MS = 60_000;
 
 /**
  * Canonical signed-webhook receiver. No session auth and no CSRF — the route authenticates the
@@ -28,9 +39,22 @@ export async function registerHookIngressRoutes(
       done(null, body)
     );
 
+    const rateLimitHook = deps.rateLimiter
+      ? makeRateLimitHook(
+          deps.rateLimiter,
+          (req) => {
+            const { provider, trigger } = req.params as { provider: string; trigger: string };
+            return `rl:hook:${req.ip}:${provider}:${trigger}`;
+          },
+          HOOK_LIMIT,
+          HOOK_WINDOW_MS
+        )
+      : undefined;
+
     scope.post(
       "/api/v1/hooks/:provider/:trigger",
       {
+        ...(rateLimitHook ? { preHandler: rateLimitHook } : {}),
         schema: {
           description:
             "Signed webhook receiver for a published Trigger. The delivery is signature-" +
@@ -57,6 +81,7 @@ export async function registerHookIngressRoutes(
             401: ErrorSchema,
             404: ErrorSchema,
             413: ErrorSchema,
+            429: ErrorSchema,
           },
         },
       },

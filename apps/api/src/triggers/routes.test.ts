@@ -187,4 +187,41 @@ describe("POST /api/v1/triggers/:slug/invoke", () => {
     expect(response.json()).toEqual({ error: "mapping_unresolved" });
     expect(startRun).not.toHaveBeenCalled();
   });
+
+  it("refuses to start a Run once the caller is over the rate limit", async () => {
+    await app.close();
+
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "member@example.com", "pass", "member");
+    sid = await store.create(user._id);
+    const keys: string[] = [];
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      rateLimiter: {
+        async check(key, limit) {
+          keys.push(key);
+          return { allowed: false, limit, remaining: 0, resetAt: Date.now() + 60_000 };
+        },
+      },
+      triggerInvoke: {
+        resolveTrigger,
+        sink: { accept },
+        startRun,
+        nextEventId: () => "event-1",
+        now: () => "2026-07-25T10:00:00.000Z",
+      },
+    });
+
+    const response = await invoke({ data: { window: "7d" }, idempotencyKey: "manual-1" });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toEqual({ error: "rate_limit_exceeded" });
+    // The bucket is the authenticated caller, so one caller cannot exhaust another's budget.
+    expect(keys).toEqual([`rl:trigger-invoke:${user._id}`]);
+    expect(startRun).not.toHaveBeenCalled();
+  });
 });
