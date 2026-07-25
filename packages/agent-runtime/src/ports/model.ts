@@ -34,6 +34,8 @@ export interface ModelInvocationResult {
   readonly usage: {
     readonly inputTokens: number;
     readonly outputTokens: number;
+    /** Provider-reported cost when the adapter can price the call; absent when unknown. */
+    readonly costUsd?: number;
   };
   readonly providerRequestId?: string;
 }
