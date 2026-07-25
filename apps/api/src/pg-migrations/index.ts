@@ -1,5 +1,8 @@
 import {
   ARTIFACT_STORAGE_STATEMENTS,
+  BUDGET_STORAGE_STATEMENTS,
+  CHILD_STORAGE_STATEMENTS,
+  CONCURRENCY_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
@@ -471,6 +474,24 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "durable waits, timers, and resume tokens",
     up: async (q) => {
       for (const sql of WAIT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 7,
+    description: "budgets, limits, and target concurrency",
+    up: async (q) => {
+      for (const sql of [...BUDGET_STORAGE_STATEMENTS, ...CONCURRENCY_STORAGE_STATEMENTS]) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 8,
+    description: "child Run links",
+    up: async (q) => {
+      for (const sql of CHILD_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

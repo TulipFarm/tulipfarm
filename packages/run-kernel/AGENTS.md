@@ -7,7 +7,13 @@ retries, cancellation, child Runs, and concurrency. **Today:** `src/model` (stat
 and tamper checks), `src/lineage` (named State-output mappings resolved into downstream
 Context), and `src/waits`, `src/timers`, `src/resume` (durable timer/event/Approval/human-task/
 form/child-Run waits with `first`/`all`/`quorum`/window aggregation, deadline sweeps, and
-unguessable one-use resume tokens). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+unguessable one-use resume tokens), and `src/limits`, `src/budgets`, `src/concurrency`
+(narrowest-wins limit resolution, non-amplifying Agent requests, durable per-Run budget ledgers
+with a declared exhaustion disposition, and `serialize`/`queue`/`coalesce`/`reject`/`supersede`
+target-concurrency admission over a deterministic target key), and `src/children`, `src/cancel`,
+`src/reconcile-state` (never-broadening child authority with explicit detach, cancellation that
+cancels future work and parks in-flight effects, and evidence-driven reconciliation where an
+ambiguous effect never becomes `cancelled`). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/audit`, `@tulipfarm/storage`,
 `@tulipfarm/observability`. See

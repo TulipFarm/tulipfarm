@@ -514,6 +514,23 @@ export class RunStore {
     });
   }
 
+  async findState(
+    businessId: string,
+    runId: string,
+    stateKey: string
+  ): Promise<PersistedState | null> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<StateRow>(
+        `SELECT ${STATE_COLUMNS}
+           FROM run_states
+          WHERE business_id = $1 AND run_id = $2 AND state_key = $3`,
+        [businessId, runId, stateKey]
+      );
+      const row = result.rows[0];
+      return row ? persistedState(row) : null;
+    });
+  }
+
   async transitionRun(
     businessId: string,
     runId: string,

@@ -109,6 +109,15 @@ describe("RunStore (PostgreSQL)", () => {
     expect(columns.rows.map((row) => row.column_name)).not.toContain("context");
   });
 
+  it("finds a single State by key and reports an unknown key as missing", async () => {
+    await store.start(run());
+
+    expect(await store.findState("business-1", run().id, "apply")).toEqual(
+      expect.objectContaining({ key: "apply", status: "pending", version: 0 })
+    );
+    expect(await store.findState("business-1", run().id, "ghost")).toBeNull();
+  });
+
   it("rolls back the Run when a State violates a database constraint", async () => {
     await expect(
       store.start(
