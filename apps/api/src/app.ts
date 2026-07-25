@@ -425,7 +425,7 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     if (opts.runEvents) {
-      registerRunEventRoutes(app, opts.runEvents, requireAuth);
+      registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);

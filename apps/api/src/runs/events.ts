@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { formatSseEvent, writeSseHeaders } from "../chat/sse";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 /** Who a persisted Run event may be shown to (mirrors `@tulipfarm/storage`'s `RunEventAudience`). */
 export type RunEventAudience = "participant" | "operator";
@@ -169,16 +170,30 @@ function sinkFor(reply: FastifyReply): SseSink {
   };
 }
 
+/** Each stream holds a connection open, so cap how fast one client may (re)open them. */
+const STREAM_LIMIT = 30;
+const STREAM_WINDOW_MS = 60_000;
+
 /** `GET /api/v1/runs/:id/events` — persisted Run event stream with cursor recovery (SPEC §18). */
 export function registerRunEventRoutes(
   app: FastifyInstance,
   deps: RunEventRouteDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  rateLimiter?: RateLimiter
 ): void {
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(
+        rateLimiter,
+        (req) => `rl:run-events:${req.ip}`,
+        STREAM_LIMIT,
+        STREAM_WINDOW_MS
+      )
+    : undefined;
+
   app.get(
     "/api/v1/runs/:id/events",
     {
-      preHandler: requireAuth,
+      preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth],
       schema: {
         description:
           "SSE stream of a Run's persisted events. Delivery resumes strictly after the cursor — " +
@@ -206,6 +221,7 @@ export function registerRunEventRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          429: ErrorSchema,
         },
       },
     },

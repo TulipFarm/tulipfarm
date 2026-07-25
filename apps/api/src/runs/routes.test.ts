@@ -156,6 +156,41 @@ describe("GET /api/v1/runs/:id/events", () => {
     expect(res.statusCode).toBe(403);
   });
 
+  it("rate-limits how fast one client may open streams", async () => {
+    const seen: Array<{ key: string; limit: number; windowMs: number }> = [];
+    const limited = await buildApp({
+      sessionStore: new MemorySessionStore(),
+      userRepo: new FakeUserRepo(),
+      tokenRepo: new FakeTokenRepo(),
+      rateLimiter: {
+        async check(key, limit, windowMs) {
+          seen.push({ key, limit, windowMs });
+          return { allowed: false, limit, remaining: 0, resetAt: Date.now() + windowMs };
+        },
+      },
+      runEvents: {
+        events: {
+          async list() {
+            return [];
+          },
+        },
+        runs: {
+          async find() {
+            return { status: "succeeded" };
+          },
+        },
+        authorize: async () => grant,
+      },
+    });
+
+    const res = await limited.inject({ method: "GET", url: `/api/v1/runs/${RUN_ID}/events` });
+
+    expect(res.statusCode).toBe(429);
+    expect(res.json()).toEqual({ error: "rate_limit_exceeded" });
+    expect(seen).toEqual([{ key: "rl:run-events:127.0.0.1", limit: 30, windowMs: 60_000 }]);
+    await limited.close();
+  });
+
   it("reports an unknown Run before opening a stream", async () => {
     runStatus = null;
 
