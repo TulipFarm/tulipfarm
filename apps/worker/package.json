@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/storage": "workspace:*"
   },

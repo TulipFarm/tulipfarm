@@ -383,6 +383,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@tulipfarm/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel

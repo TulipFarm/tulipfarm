@@ -1,4 +1,13 @@
 export type {
+  ActivationAllowed,
+  ActivationBlocked,
+  AgentActivationVerdict,
+  AgentPublicationErrorCode,
+  AgentPublicationRequest,
+  PublishedAgentVersion,
+} from "./agent-publication";
+export { AgentPublicationError, publishAgentVersion } from "./agent-publication";
+export type {
   BundleDefinition,
   BundleErrorCode,
   BundleSignature,
