@@ -416,10 +416,29 @@ importers:
         version: 6.0.3
 
   packages/agent-runtime:
+    dependencies:
+      '@tulipfarm/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../authz
+      '@tulipfarm/run-kernel':
+        specifier: workspace:*
+        version: link:../run-kernel
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/tool-broker':
+        specifier: workspace:*
+        version: link:../tool-broker
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
