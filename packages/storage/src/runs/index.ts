@@ -1,3 +1,4 @@
+export { MemoryWaitStore } from "./memory-wait-store";
 export type {
   AppendAttemptInput,
   AppendAttemptResult,
@@ -26,3 +27,18 @@ export {
   RunPersistenceError,
   RunStore,
 } from "./run-store";
+export type {
+  CreateWaitInput,
+  DueWaitDecision,
+  PersistedWait,
+  PersistedWaitKind,
+  PersistedWaitSignal,
+  PersistedWaitStatus,
+  ResolvedDueWait,
+  WaitAggregation,
+  WaitDeliveryOutcome,
+  WaitDeliveryResult,
+  WaitSignalInput,
+  WaitSignalPolicy,
+} from "./wait-store";
+export { WAIT_STORAGE_STATEMENTS, WaitStore } from "./wait-store";
