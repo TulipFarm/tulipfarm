@@ -17,6 +17,8 @@
   "devDependencies": {
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",

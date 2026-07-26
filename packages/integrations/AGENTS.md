@@ -17,6 +17,16 @@ delivery, source ACL adapters, sync checkpoints, and identity mapping. tsconfig 
 - `src/jira/` — site/project scope + identity resolution (`scope.ts`), published ToolContracts
   (`contracts.ts`), and the `JiraAdapter` (`adapter.ts`). Jira has no provider idempotency key, so
   creates carry a `tulipfarm-effect-<hash>` label and every mutation reads state before writing.
+- `src/knowledge/` — the provider-neutral Knowledge emission contract (`KnowledgeSourceEmission`,
+  `KnowledgeChunkEmission`, `KnowledgeEmissionSink`, `KnowledgeIdentityMapPort`). This package may
+  not import `@tulipfarm/knowledge`, so these shapes mirror the store's records; `apps/worker` owns
+  the conformance test that keeps them from drifting.
+- `src/google-drive/` — Drive change-feed sync into Knowledge: per-file permissions become the ACL,
+  unreadable permissions emit `unverifiable`, sensitive classifications use live authorization, and
+  checkpoints advance only after a change is fully committed.
+- `src/slack/knowledge/` — Slack channels as sources and messages as chunks. Non-public channels are
+  restricted + live-authorized; archived channels are revoked and their content removed; deleted
+  messages remove their chunk; one failing channel never stalls the others.
 
 Concrete transports live in `apps/integration-worker` (e.g. `src/github/http.ts`), never here.
 
