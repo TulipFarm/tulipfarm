@@ -406,6 +406,12 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
+      '@tulipfarm/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
+      '@tulipfarm/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../../packages/schema
@@ -596,10 +602,26 @@ importers:
         version: 6.0.3
 
   packages/knowledge:
+    dependencies:
+      '@tulipfarm/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@tulipfarm/authz':
+        specifier: workspace:*
+        version: link:../authz
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../storage
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -645,10 +667,20 @@ importers:
         version: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1)(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/memory:
+    dependencies:
+      '@tulipfarm/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../schema
     devDependencies:
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@types/node':
+        specifier: ^26.1.1
+        version: 26.1.1
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
