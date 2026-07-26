@@ -2,6 +2,9 @@
   "name": "@tulipfarm/integration-worker",
   "version": "0.0.0",
   "private": true,
+  "dependencies": {
+    "@tulipfarm/integrations": "workspace:*"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",

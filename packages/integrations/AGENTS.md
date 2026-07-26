@@ -1,9 +1,24 @@
 # Integrations — Agent Conventions
 
 `@tulipfarm/integrations` — internal integration adapter contracts, event normalization,
-delivery, source ACL adapters, sync checkpoints, and identity mapping. **Scaffold today:**
-`src/index.ts` is `export {}`. tsconfig extends `@tulipfarm/tsconfig/base.json`. See root
-`AGENTS.md` for commands/lint.
+delivery, source ACL adapters, sync checkpoints, and identity mapping. tsconfig extends
+`@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+
+## Layout
+
+- `src/http.ts` — provider-neutral `IntegrationHttpPort` plus `classifyHttpFailure` (the one place
+  an HTTP status becomes a `before_dispatch`/`after_dispatch` durability decision) and bounded
+  `collectPages` (throws `PaginationBoundError` rather than silently truncating a paged read).
+- `src/grants.ts` — AccessGrant evaluation for external targets: default-deny intersection of
+  Integration, principal, action, and concrete external target.
+- `src/github/` — installation scope + identity resolution (`scope.ts`), published ToolContracts
+  (`contracts.ts`), signed-webhook normalization (`events.ts`), and the `GitHubAdapter`
+  (`adapter.ts`) implementing the broker's dispatch and reconciliation ports.
+- `src/jira/` — site/project scope + identity resolution (`scope.ts`), published ToolContracts
+  (`contracts.ts`), and the `JiraAdapter` (`adapter.ts`). Jira has no provider idempotency key, so
+  creates carry a `tulipfarm-effect-<hash>` label and every mutation reads state before writing.
+
+Concrete transports live in `apps/integration-worker` (e.g. `src/github/http.ts`), never here.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`,
 `@tulipfarm/tool-broker`, `@tulipfarm/storage`, `@tulipfarm/observability`. See
