@@ -1,5 +1,19 @@
-import { expect, test } from "vitest";
-import { parseSseFrames } from "~/lib/chat/sse-client";
+import { afterEach, expect, test, vi } from "vitest";
+import { parseSseFrames, postChat } from "~/lib/chat/sse-client";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function streamResponse(frames: string, headers: Record<string, string> = {}) {
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(frames));
+      controller.close();
+    },
+  });
+  return new Response(body, { status: 200, headers });
+}
 
 test("parses a single frame with the spec spacing (space after the colon)", () => {
   const { frames, rest } = parseSseFrames('id: 1\nevent: text\ndata: {"delta":"hi"}\n\n');
@@ -69,4 +83,38 @@ test("ignores empty/whitespace-only frames and a frame whose data is invalid JSO
 test("defaults seq to 0 when no id line is present but event+data are", () => {
   const { frames } = parseSseFrames('event: text\ndata: {"delta":"x"}\n\n');
   expect(frames).toEqual([{ seq: 0, type: "text", data: { delta: "x" } }]);
+});
+
+test("recovers a dropped stream from the persisted cursor without duplicating events", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(
+      streamResponse('id: 1\nevent: text\ndata: {"delta":"hello"}\n\n', {
+        "X-Stream-Id": "stream-1",
+      })
+    )
+    .mockResolvedValueOnce(
+      streamResponse(
+        'id: 1\nevent: text\ndata: {"delta":"hello"}\n\n' +
+          'id: 2\nevent: finish\ndata: {"reason":"stop"}\n\n'
+      )
+    );
+  vi.stubGlobal("fetch", fetchMock);
+  const events: string[] = [];
+  const states: string[] = [];
+
+  await postChat(
+    { message: { role: "user", content: "hello" } },
+    {
+      onEvent: (event) => events.push(event.type),
+      onConnectionState: (state) => states.push(state),
+    }
+  );
+
+  expect(events).toEqual(["text", "finish"]);
+  expect(states).toEqual(["reconnecting", "online"]);
+  expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/v1/chat/streams/stream-1");
+  expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
+    headers: expect.objectContaining({ "Last-Event-ID": "1" }),
+  });
 });

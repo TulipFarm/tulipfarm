@@ -5,12 +5,14 @@ import {
   useNavigate,
   useRouteError,
 } from "@remix-run/react";
+import { useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
+import { AgentGovernanceCard } from "~/components/agents/governance-card";
 import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
-import { getAgent } from "~/lib/agents";
+import { getAgent, proposeAgentCandidate } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
 
 export const meta: MetaFunction = () => [{ title: "Agents · tulipfarm" }];
@@ -35,6 +37,8 @@ function MetaRow({ label, value }: { label: string; value?: string }) {
 export default function AgentDetail() {
   const { agent } = useLoaderData<typeof clientLoader>();
   const navigate = useNavigate();
+  const [publishing, setPublishing] = useState(false);
+  const [publishResult, setPublishResult] = useState<string>();
   const display = agent.label ?? agent.name;
   const hasMeta = Boolean(agent.label || agent.domain || agent.model || agent.autonomy);
 
@@ -68,6 +72,28 @@ export default function AgentDetail() {
           <MetaRow label="model" value={agent.model} />
           <MetaRow label="autonomy" value={agent.autonomy} />
         </dl>
+      ) : null}
+
+      {agent.governance ? (
+        <AgentGovernanceCard
+          governance={agent.governance}
+          busy={publishing}
+          result={publishResult}
+          onPublish={async () => {
+            const governance = agent.governance;
+            if (!governance) return;
+            setPublishing(true);
+            setPublishResult(undefined);
+            try {
+              const result = await proposeAgentCandidate(agent.name, governance);
+              setPublishResult(`${result.status} · ${result.changesetId}`);
+            } catch (error) {
+              setPublishResult(error instanceof Error ? error.message : "Publication failed");
+            } finally {
+              setPublishing(false);
+            }
+          }}
+        />
       ) : null}
 
       <div className="border-t border-border pt-4">

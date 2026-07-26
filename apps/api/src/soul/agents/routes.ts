@@ -25,6 +25,13 @@ function asStringArray(v: unknown): string[] | undefined {
   return arr.length > 0 ? arr : undefined;
 }
 
+function asNumberRecord(v: unknown): Record<string, number> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
+  return Object.fromEntries(
+    Object.entries(v).filter((entry): entry is [string, number] => typeof entry[1] === "number")
+  );
+}
+
 function asAutonomy(v: unknown): Autonomy | undefined {
   return typeof v === "string" && (AUTONOMY_VALUES as readonly string[]).includes(v)
     ? (v as Autonomy)
@@ -45,11 +52,48 @@ function toSummary(agent: SoulAgent) {
 
 function toDetail(agent: SoulAgent) {
   const f = agent.frontmatter;
+  const version = asString(f.version);
+  const candidateVersion = asString(f.candidateVersion);
+  const evaluationStatus = asString(f.evaluationStatus);
+  const publicationStatus = asString(f.publicationStatus);
+  const governance =
+    version && candidateVersion
+      ? {
+          version,
+          roles: asStringArray(f.roles) ?? [],
+          skills: asStringArray(f.skills) ?? [],
+          tools: asStringArray(f.tools) ?? [],
+          modelProfile: asString(f.modelProfile) ?? asString(f.model) ?? "default",
+          limits: asNumberRecord(f.limits),
+          evaluation: {
+            status:
+              evaluationStatus &&
+              ["pending", "passed", "failed", "stale"].includes(evaluationStatus)
+                ? evaluationStatus
+                : "pending",
+            suite: asString(f.evaluationSuite) ?? "not configured",
+            passedAt: asString(f.evaluationPassedAt),
+          },
+          publication: {
+            candidateVersion,
+            status:
+              publicationStatus &&
+              ["draft", "validated", "awaiting_approval", "published", "blocked"].includes(
+                publicationStatus
+              )
+                ? publicationStatus
+                : "draft",
+            canPublish: f.canPublish === true,
+            reason: asString(f.publicationReason),
+          },
+        }
+      : undefined;
   return {
     ...toSummary(agent),
     placeholder: asStringArray(f.placeholder),
     suggestions: asStringArray(f.suggestions),
     body: agent.body,
+    governance,
   };
 }
 
@@ -118,6 +162,7 @@ export function registerAgentRoutes(
               placeholder: { type: "array", items: { type: "string" } },
               suggestions: { type: "array", items: { type: "string" } },
               body: { type: "string" },
+              governance: { type: "object", additionalProperties: true },
             },
           },
           401: ErrorSchema,

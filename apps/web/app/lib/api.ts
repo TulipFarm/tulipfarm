@@ -71,6 +71,24 @@ export async function apiWrite<T>(
   return (await res.json()) as T;
 }
 
+/** A retry-safe server command. The server remains authoritative and deduplicates by this key. */
+export async function apiCommand<T>(
+  path: string,
+  body: unknown,
+  idempotencyKey: string
+): Promise<T> {
+  const headers = mutationHeaders();
+  headers["Idempotency-Key"] = idempotencyKey;
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as T;
+}
+
 // Like apiWrite (cookie-first auth, CSRF echo, optional If-Match) but for endpoints that return
 // 204 No Content — sends a JSON body and parses nothing, so it returns void.
 export async function apiSend(
@@ -147,8 +165,19 @@ export async function readError(res: Response): Promise<ApiError> {
   let message = res.statusText || `request failed (${res.status})`;
   let path: string | undefined;
   try {
-    const body = (await res.json()) as { error?: unknown; path?: unknown };
+    const body = (await res.json()) as {
+      error?: unknown;
+      path?: unknown;
+    };
     if (typeof body.error === "string") message = body.error;
+    if (
+      typeof body.error === "object" &&
+      body.error !== null &&
+      "message" in body.error &&
+      typeof body.error.message === "string"
+    ) {
+      message = body.error.message;
+    }
     if (typeof body.path === "string" && body.path.length > 0) path = body.path;
   } catch {
     // non-JSON body — keep the status-text fallback
