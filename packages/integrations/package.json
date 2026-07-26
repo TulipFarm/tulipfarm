@@ -8,8 +8,14 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/tool-broker": "workspace:*"
+  },
   "devDependencies": {
     "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
     "typescript": "^6.0.3"
   }
 }

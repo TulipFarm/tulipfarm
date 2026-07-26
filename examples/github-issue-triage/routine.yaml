@@ -1,0 +1,227 @@
+apiVersion: tulipfarm.ai/v1
+kind: Routine
+metadata:
+  id: 22222222-2222-4222-8222-222222222222
+  slug: github-issue-triage
+  displayName: GitHub issue triage
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: published
+spec:
+  owner: platform-team
+  start: ReadIssue
+  requiredToolAbilities:
+    - github.issue.read
+    - github.issue.search
+    - github.issue.comment
+    - github.issue.label
+    - github.issue.assign
+    - github.issue.close
+    - jira.issue.create
+    - jira.user.availability
+  states:
+    # Read the issue the Trigger delivered. Everything downstream reasons over this output
+    # rather than over the webhook payload, so the flow acts on provider state it re-read.
+    - type: tool
+      name: ReadIssue
+      toolRef:
+        name: github.issue.read
+        version: 1.0.0
+      action: github.issue.read
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+      transition: FindDuplicates
+
+    - type: tool
+      name: FindDuplicates
+      toolRef:
+        name: github.issue.search
+        version: 1.0.0
+      action: github.issue.search
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        query: "${states.ReadIssue.title}"
+        state: all
+        limit: 10
+      transition: ClassifyIssue
+
+    # The Agent proposes; it performs nothing. Its output is schema-bound so a malformed or
+    # over-reaching proposal fails here instead of at the provider boundary.
+    - type: agent
+      name: ClassifyIssue
+      agentRef:
+        name: github-issue-triage
+        version: "1"
+      input:
+        issue: "${states.ReadIssue}"
+        candidates: "${states.FindDuplicates.items}"
+      output:
+        type: object
+        additionalProperties: false
+        required:
+          - duplicate
+          - labels
+          - summary
+          - reply
+          - candidateAccountIds
+          - assignees
+        properties:
+          duplicate:
+            type: boolean
+          duplicateOfIssue:
+            type: integer
+            minimum: 1
+          labels:
+            type: array
+            minItems: 1
+            maxItems: 20
+            items:
+              type: string
+              minLength: 1
+          summary:
+            type: string
+            minLength: 1
+            maxLength: 255
+          reply:
+            type: string
+            minLength: 1
+          candidateAccountIds:
+            type: array
+            maxItems: 25
+            items:
+              type: string
+              minLength: 1
+          assignees:
+            type: array
+            maxItems: 10
+            items:
+              type: string
+              minLength: 1
+      transition: RouteOutcome
+
+    - type: branch
+      name: RouteOutcome
+      conditions:
+        - condition: states.ClassifyIssue.duplicate
+          transition: ReplyDuplicate
+      default:
+        transition: ApplyLabels
+
+    # Duplicate path: explain first, then close — and only behind an Approval, because closing
+    # someone else's issue is the most consequential thing this Routine can do.
+    - type: tool
+      name: ReplyDuplicate
+      toolRef:
+        name: github.issue.comment
+        version: 1.0.0
+      action: github.issue.comment
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+        body: "${states.ClassifyIssue.reply}"
+      transition: ApproveClose
+
+    - type: approval
+      name: ApproveClose
+      approverRoles:
+        - issue-triage-approver
+      transition: CloseIssue
+
+    - type: tool
+      name: CloseIssue
+      toolRef:
+        name: github.issue.close
+        version: 1.0.0
+      action: github.issue.close
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+        stateReason: not_planned
+      end: true
+
+    # New-issue path.
+    - type: tool
+      name: ApplyLabels
+      toolRef:
+        name: github.issue.label
+        version: 1.0.0
+      action: github.issue.label
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+        labels: "${states.ClassifyIssue.labels}"
+      transition: CheckAvailability
+
+    # Read-only evidence for the approver: how loaded the proposed assignees already are.
+    - type: tool
+      name: CheckAvailability
+      toolRef:
+        name: jira.user.availability
+        version: 1.0.0
+      action: jira.user.availability
+      destination: jira
+      credentialRef: secret://integrations/jira/issue-triage
+      input:
+        projectKey: ENG
+        accountIds: "${states.ClassifyIssue.candidateAccountIds}"
+      transition: CreateTicket
+
+    - type: tool
+      name: CreateTicket
+      toolRef:
+        name: jira.issue.create
+        version: 1.0.0
+      action: jira.issue.create
+      destination: jira
+      credentialRef: secret://integrations/jira/issue-triage
+      input:
+        projectKey: ENG
+        summary: "${states.ClassifyIssue.summary}"
+        description: "${states.ReadIssue.htmlUrl}"
+        issueType: Task
+      transition: ApproveAssignment
+
+    - type: approval
+      name: ApproveAssignment
+      approverRoles:
+        - issue-triage-approver
+      transition: AssignIssue
+
+    - type: tool
+      name: AssignIssue
+      toolRef:
+        name: github.issue.assign
+        version: 1.0.0
+      action: github.issue.assign
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+        assignees: "${states.ClassifyIssue.assignees}"
+      transition: ReplyTriaged
+
+    - type: tool
+      name: ReplyTriaged
+      toolRef:
+        name: github.issue.comment
+        version: 1.0.0
+      action: github.issue.comment
+      destination: github
+      credentialRef: secret://integrations/github/issue-triage
+      input:
+        repository: "${trigger.repositoryRef}"
+        issueNumber: "${trigger.issueNumber}"
+        body: "${states.ClassifyIssue.reply}"
+      end: true

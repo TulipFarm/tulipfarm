@@ -12,9 +12,14 @@
     "dev": "tsx watch src/index.ts",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
+    "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/secrets": "workspace:*",
+    "@tulipfarm/tool-broker": "workspace:*",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "tsx": "^4.22.4",

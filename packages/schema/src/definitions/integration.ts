@@ -10,6 +10,9 @@ const apiVersion = DEFINITION_API_VERSION;
 const idPattern =
   "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-HJKMNP-TV-Z]{26})$";
 const slugPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
+// External target types are provider-qualified (`github.repository`), so they carry dotted
+// segments a bare slug cannot express. Each segment is still a slug — no wildcards, no casing.
+const qualifiedSlugPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$";
 const actionPattern = "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$";
 const secretReferencePattern =
   "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$";
@@ -120,7 +123,7 @@ const PrincipalReferenceSchema = Type.Object(
 
 const ExternalTargetSchema = Type.Object(
   {
-    type: Type.String({ pattern: slugPattern }),
+    type: Type.String({ pattern: qualifiedSlugPattern }),
     ids: Type.Array(Type.String({ minLength: 1 }), { minItems: 1, uniqueItems: true }),
   },
   { additionalProperties: false }

@@ -348,6 +348,44 @@ describe("AW-010 authored definition schemas", () => {
     }
   });
 
+  it("accepts provider-qualified external target types on an AccessGrant", () => {
+    const grant = {
+      apiVersion,
+      kind: "AccessGrant",
+      metadata: metadata("triage-repository"),
+      spec: {
+        integrationId: definitionId,
+        principals: [{ kind: "role", id: definitionId }],
+        actions: ["github.issue.read", "github.issue.label"],
+        externalTargets: [
+          { type: "github.repository", ids: ["tulip/farm"] },
+          { type: "jira.project", ids: ["ENG"] },
+          { type: "channel", ids: ["C012345"] },
+        ],
+        delegable: false,
+      },
+    };
+
+    expect(() => validationRegistry.validate(grant)).not.toThrow();
+  });
+
+  it("still rejects an external target type that is not a qualified slug", () => {
+    const grant = {
+      apiVersion,
+      kind: "AccessGrant",
+      metadata: metadata("malformed-target"),
+      spec: {
+        integrationId: definitionId,
+        principals: [{ kind: "role", id: definitionId }],
+        actions: ["github.issue.read"],
+        externalTargets: [{ type: "GitHub Repository", ids: ["tulip/farm"] }],
+        delegable: false,
+      },
+    };
+
+    expectInvalidAt(grant, "/spec/externalTargets/0/type", "pattern");
+  });
+
   it("rejects wildcard authority and unknown grant properties", () => {
     const base = {
       apiVersion,
