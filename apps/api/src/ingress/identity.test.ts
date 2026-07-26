@@ -69,7 +69,7 @@ describe("IngressIdentityResolver", () => {
     expect(execute).toHaveBeenCalledWith({ user_id: "EXT1" }, expect.anything());
   });
 
-  it("falls back to the admin when the email matches no user", async () => {
+  it("denies when the verified external email matches no user", async () => {
     const execute = async () => ({
       success: true as const,
       data: { structuredContent: { profile: { email: "stranger@example.com" } } },
@@ -81,10 +81,10 @@ describe("IngressIdentityResolver", () => {
       identity: IDENTITY,
       registry: makeRegistry(execute),
     });
-    expect(user).toEqual(admin);
+    expect(user).toBeNull();
   });
 
-  it("falls back to the admin when the binding tool fails", async () => {
+  it("denies when the identity binding tool fails", async () => {
     const execute = async () => ({
       success: false as const,
       error: { code: "internal_error" as const, message: "boom" },
@@ -97,14 +97,14 @@ describe("IngressIdentityResolver", () => {
       identity: IDENTITY,
       registry: makeRegistry(execute),
     });
-    expect(user).toEqual(admin);
+    expect(user).toBeNull();
     expect((log as { warn: ReturnType<typeof vi.fn> }).warn).toHaveBeenCalled();
   });
 
-  it("goes straight to the admin when no identity binding is declared", async () => {
+  it("denies when no identity binding is declared", async () => {
     const resolver = new IngressIdentityResolver(makeUsers(), makeLog());
     const user = await resolver.resolve({ slug: "chatapp", sender: "EXT4" });
-    expect(user).toEqual(admin);
+    expect(user).toBeNull();
   });
 
   it("caches resolutions per slug+sender (one tool call for repeat senders)", async () => {
@@ -124,12 +124,11 @@ describe("IngressIdentityResolver", () => {
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("returns null only when no admin exists", async () => {
-    const resolver = new IngressIdentityResolver(
-      makeUsers({ findFirstAdmin: async () => null }),
-      makeLog()
-    );
+  it("does not consult an admin fallback when no mapping can be established", async () => {
+    const findFirstAdmin = vi.fn(async () => admin);
+    const resolver = new IngressIdentityResolver(makeUsers({ findFirstAdmin }), makeLog());
     const user = await resolver.resolve({ slug: "chatapp", sender: "EXT9" });
     expect(user).toBeNull();
+    expect(findFirstAdmin).not.toHaveBeenCalled();
   });
 });

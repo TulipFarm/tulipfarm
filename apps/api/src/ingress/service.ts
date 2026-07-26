@@ -1,7 +1,6 @@
 import type { EventEmitter } from "node:events";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyBaseLogger } from "fastify";
-import type { IngressUserLookup } from "../auth/users";
 import { runHeadlessChatTurn } from "../chat/headless-chat-turn";
 import type { ChatTurnContext } from "../chat/turn";
 import { DOMAIN_EVENTS, type IntegrationEventPayload } from "../domain-events";
@@ -42,8 +41,7 @@ export interface IngressServiceDeps {
   soulLoader: SoulLoader;
   conversations: IntegrationConversationsRepo;
   integrationEvents: IntegrationEventsRepo;
-  users: IngressUserLookup;
-  identity: IngressIdentityResolver;
+  identity: Pick<IngressIdentityResolver, "resolve">;
   chatCtx: ChatTurnContext;
   /** Sandbox for the integration's classify() — ingress is disabled without it. */
   hookExecutor: HookExecutor;
@@ -139,15 +137,14 @@ export async function handleIngressJob(
     deps.log.debug({ slug }, "thread-following chat without an existing mapping; ignored");
     return;
   }
-  await handleChat(slug, threadKey, decision, deps, integration.sourceIntegration);
+  await handleChat(slug, threadKey, decision, deps);
 }
 
 async function handleChat(
   slug: string,
   threadKey: string,
   decision: Extract<IngressDecision, { kind: "chat" }>,
-  deps: IngressServiceDeps,
-  sourceIntegration: string
+  deps: IngressServiceDeps
 ): Promise<void> {
   const integration = deps.soulLoader.integrations.get(slug);
   const chat = integration?.manifest.ingress?.chat;
@@ -161,20 +158,13 @@ async function handleChat(
     registry: deps.toolRegistry,
   });
   if (!sender) {
-    deps.log.error({ slug }, "no TulipFarm user resolvable (no admin exists); dropping");
+    deps.log.warn({ slug }, "external sender is not mapped to a TulipFarm principal; denying");
     return;
   }
   const mapping = await deps.conversations.find(slug, threadKey);
-  // The turn must run as the conversation OWNER (prepareChatTurn enforces ownership). When a
-  // different external user chimes into a mapped thread, attribute them in the message text.
-  let runAs = sender;
-  let text = decision.text;
   if (mapping && mapping.userId !== sender._id) {
-    const owner = await deps.users.findById(mapping.userId);
-    if (owner) {
-      runAs = owner;
-      text = `[From ${sourceIntegration} user ${decision.sender}] ${text}`;
-    }
+    deps.log.warn({ slug }, "external sender does not own the mapped Conversation; denying");
+    return;
   }
 
   const replyVars = decision.reply.vars ?? {};
@@ -187,10 +177,10 @@ async function handleChat(
   // From here on: log-don't-throw (the user message is persisted inside the turn).
   try {
     const result = await runHeadlessChatTurn(deps.chatCtx, {
-      user: runAs,
+      user: sender,
       body: {
         conversationId: mapping?.conversationId,
-        message: { role: "user", content: text },
+        message: { role: "user", content: decision.text },
         autonomy: "full",
       },
       log: deps.log,
@@ -201,7 +191,7 @@ async function handleChat(
         integrationSlug: slug,
         externalKey: threadKey,
         conversationId: result.conversationId,
-        userId: runAs._id,
+        userId: sender._id,
       });
     }
 

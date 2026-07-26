@@ -7,10 +7,9 @@ import { executeToolBinding, extractFromToolResult } from "./bindings";
 /**
  * Resolves an inbound sender to the TulipFarm user the turn runs as, using the manifest's
  * declarative identity binding: execute the bound tool (var: {sender}) through the
- * integration's own MCP tools, extract `email_path` from the result, match by email, and fall
- * back to the first admin (approved product decision — V1 instances are effectively
- * single-admin). No binding declared → straight to the admin fallback. Resolutions are cached
- * per boot, keyed by integration slug + sender id.
+ * integration's own MCP tools, extract `email_path` from the result, and match by email.
+ * Unmapped, failed, or undeclared bindings deny; an external actor is never substituted with an
+ * administrator. Resolutions are cached per boot, keyed by integration slug + sender id.
  */
 export class IngressIdentityResolver {
   private readonly cache = new Map<string, UserDoc | null>();
@@ -20,7 +19,7 @@ export class IngressIdentityResolver {
     private readonly log: FastifyBaseLogger
   ) {}
 
-  /** Resolve the sender, falling back to the first admin. Null only when no admin exists. */
+  /** Resolve the sender exactly. Null means the external actor is not mapped and must be denied. */
   async resolve(opts: {
     slug: string;
     sender: string;
@@ -28,11 +27,11 @@ export class IngressIdentityResolver {
     registry?: ToolRegistry;
   }): Promise<UserDoc | null> {
     const { slug, sender, identity, registry } = opts;
-    if (!identity || !registry) return this.users.findFirstAdmin();
+    if (!identity || !registry) return null;
 
     const cacheKey = `${slug}:${sender}`;
     const cached = this.cache.get(cacheKey);
-    if (cached !== undefined) return cached ?? this.users.findFirstAdmin();
+    if (cached !== undefined) return cached;
 
     let matched: UserDoc | null = null;
     try {
@@ -45,13 +44,16 @@ export class IngressIdentityResolver {
       } else {
         this.log.warn(
           { slug, sender, error: result.error },
-          "ingress identity binding failed; using admin fallback"
+          "ingress identity binding failed; denying external actor"
         );
       }
     } catch (err) {
-      this.log.warn({ err, slug, sender }, "ingress identity binding threw; using admin fallback");
+      this.log.warn(
+        { err, slug, sender },
+        "ingress identity binding threw; denying external actor"
+      );
     }
     this.cache.set(cacheKey, matched);
-    return matched ?? this.users.findFirstAdmin();
+    return matched;
   }
 }
