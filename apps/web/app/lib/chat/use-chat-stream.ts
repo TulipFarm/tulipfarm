@@ -8,7 +8,7 @@
  */
 
 import { type NavigateFunction, useNavigate } from "@remix-run/react";
-import { useCallback, useReducer, useRef } from "react";
+import { useCallback, useReducer, useRef, useState } from "react";
 import { invokeClientAction, prefillForm } from "~/lib/chat/action-registry";
 import {
   appendUserMessage,
@@ -192,6 +192,7 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
 
 export function useChatStream(opts?: UseChatStreamOptions) {
   const [state, dispatch] = useReducer(reducer, opts, seedState);
+  const [connectionState, setConnectionState] = useState<"online" | "reconnecting">("online");
   // Latest conversation id + state + last send options, read inside callbacks without re-subscribing.
   const conversationIdRef = useRef<string | undefined>(opts?.initialConversationId);
   const stateRef = useRef(state);
@@ -246,6 +247,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
             if (event.type === "finish")
               onConversationChangeRef.current?.(conversationIdRef.current);
           },
+          onConnectionState: setConnectionState,
         }
       );
     } catch (err) {
@@ -340,6 +342,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     currentAgent: state.currentAgent,
     conversationId: state.conversationId,
     error: state.error,
+    connectionState,
     send,
     stop,
     approve,

@@ -44,7 +44,7 @@ test("renders the V1 sidebar sections (no standalone Chat item)", () => {
     "Resources",
     "Agents",
     "Routines",
-    "Approvals",
+    "Inbox",
     "Knowledge",
     "Integrations",
     "Settings",
@@ -65,13 +65,13 @@ test("does not render an Apps section (AC-V1-003)", () => {
   expect(screen.queryByText("Apps")).not.toBeInTheDocument();
 });
 
-test("renders no Approvals badge when there are no pending approvals", () => {
+test("renders no Inbox badge when there are no pending approvals", () => {
   render(<Stub initialEntries={["/"]} />);
-  const approvalsLink = screen.getByRole("link", { name: /approvals/i });
+  const approvalsLink = screen.getByRole("link", { name: /inbox/i });
   expect(within(approvalsLink).queryByText(/^\d+$/)).toBeNull();
 });
 
-test("renders the live Approvals badge count from context", () => {
+test("renders the live Inbox badge count from context", () => {
   useApprovals.mockReturnValue({
     approvals: [],
     count: 2,
@@ -80,7 +80,7 @@ test("renders the live Approvals badge count from context", () => {
     refresh: vi.fn(),
   });
   render(<Stub initialEntries={["/"]} />);
-  const approvalsLink = screen.getByRole("link", { name: /approvals/i });
+  const approvalsLink = screen.getByRole("link", { name: /inbox/i });
   expect(within(approvalsLink).getByText("2")).toBeInTheDocument();
 });
 

@@ -2,11 +2,12 @@ import {
   BookOpen,
   Bot,
   Boxes,
-  CheckCheck,
+  Inbox,
   type LucideIcon,
   Plug,
   Puzzle,
   Settings,
+  ShieldAlert,
   Workflow,
 } from "lucide-react";
 import type { BadgeKey } from "~/lib/badges";
@@ -32,14 +33,15 @@ export const navItems: NavItem[] = [
   { to: "/skills", label: "Skills", icon: Puzzle, group: "Workspace" },
   { to: "/routines", label: "Routines", icon: Workflow, group: "Workspace" },
   {
-    to: "/approvals",
-    label: "Approvals",
-    icon: CheckCheck,
+    to: "/inbox",
+    label: "Inbox",
+    icon: Inbox,
     group: "Workspace",
     badgeKey: "approvals",
   },
   { to: "/knowledge", label: "Knowledge", icon: BookOpen, group: "Workspace" },
   { to: "/integrations", label: "Integrations", icon: Plug, group: "System" },
+  { to: "/operations", label: "Operations", icon: ShieldAlert, group: "System" },
   { to: "/settings", label: "Settings", icon: Settings, group: "System" },
 ];
 
