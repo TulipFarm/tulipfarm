@@ -37,7 +37,7 @@ const classify: routineSchema.RoutineState = {
   type: "agent",
   name: "Classify",
   agentRef: { name: "triage", version: "1.0.0" },
-  input: { issue: "${ input.issueId }" },
+  input: { issue: `\${ input.issueId }` },
   transition: "Label",
 };
 
@@ -47,14 +47,17 @@ const label: routineSchema.RoutineState = {
   toolRef: { name: "github", version: "2.0.0" },
   action: "issues.addLabels",
   credentialRef: "github-app",
-  input: { issue: "${ input.issueId }", label: "${ states.Classify.output.label }" },
+  input: {
+    issue: `\${ input.issueId }`,
+    label: `\${ states.Classify.output.label }`,
+  },
   end: true,
 };
 
 /** The same Tool State, but with no reference to an upstream State's output. */
 const standaloneLabel: routineSchema.RoutineState = {
   ...label,
-  input: { issue: "${ input.issueId }", label: "bug" },
+  input: { issue: `\${ input.issueId }`, label: "bug" },
 };
 
 const routine = compile([classify, label], "Classify");

@@ -8,7 +8,6 @@ import {
   installIntegrations,
   type MarketplaceCatalog,
   marketplaceIntegrations,
-  type ScannedIntegration,
   type ScanResult,
   scanIntegrations,
 } from "~/lib/integrations";

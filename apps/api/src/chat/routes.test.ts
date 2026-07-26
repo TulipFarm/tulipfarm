@@ -13,6 +13,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import { ToolRegistry } from "../broker/tool-adapter";
 import { GuardrailsService } from "../guardrails";
+import { DEPLOYMENT_BUSINESS_ID } from "../identity/principal";
 import { MAX_HISTORY_TOKENS } from "../memory/limits";
 import { WorkingMemoryService } from "../memory/service";
 import {
@@ -21,6 +22,11 @@ import {
   type WorkingMemoryRepo,
 } from "../memory/working-memory";
 import { encodeCursor, type PaginatedResult } from "../pagination";
+import {
+  DurableInvocationGateway,
+  type DurableInvocationRecord,
+  type DurableInvocationStore,
+} from "../runtime/invocation-gateway";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";
@@ -331,6 +337,20 @@ class FakeTokenRepo implements TokenRepo {
   }
 }
 
+class FakeInvocationStore implements DurableInvocationStore {
+  readonly records: DurableInvocationRecord[] = [];
+  private readonly byKey = new Map<string, DurableInvocationRecord>();
+
+  async persist(record: DurableInvocationRecord) {
+    const key = `${record.businessId}:${record.source}:${record.idempotencyKey}`;
+    const existing = this.byKey.get(key);
+    if (existing) return { outcome: "duplicate" as const, runId: existing.runId };
+    this.records.push(record);
+    this.byKey.set(key, record);
+    return { outcome: "started" as const, runId: record.runId };
+  }
+}
+
 async function waitFor(predicate: () => boolean, ms = 500): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -409,6 +429,7 @@ describe("chat routes", () => {
   let otherSid: string;
   let select: ReturnType<typeof vi.fn>;
   let llmService: LlmService;
+  let invocationStore: FakeInvocationStore;
 
   beforeEach(async () => {
     capturedPrompts.length = 0;
@@ -438,6 +459,7 @@ describe("chat routes", () => {
       return { model, modelId, tier: undefined, chain: [{ provider: "test", modelId }] };
     });
     llmService = { select, resolve } as unknown as LlmService;
+    invocationStore = new FakeInvocationStore();
 
     app = await buildApp({
       sessionStore: store,
@@ -449,6 +471,7 @@ describe("chat routes", () => {
       streamResumeRepo: streamRepo,
       streamHub,
       workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
+      invocations: new DurableInvocationGateway({ store: invocationStore }),
     });
   });
 
@@ -458,9 +481,9 @@ describe("chat routes", () => {
 
   function post(
     payload: InjectOptions["payload"],
-    opts: { auth?: boolean; csrf?: boolean } = {}
+    opts: { auth?: boolean; csrf?: boolean; idempotencyKey?: string } = {}
   ): Promise<LightMyRequestResponse> {
-    const { auth = true, csrf = true } = opts;
+    const { auth = true, csrf = true, idempotencyKey } = opts;
     const cookies: Record<string, string> = {};
     const headers: Record<string, string> = {};
     if (auth) cookies[SESSION_COOKIE] = sid;
@@ -468,6 +491,7 @@ describe("chat routes", () => {
       cookies[CSRF_COOKIE] = TEST_CSRF;
       headers[CSRF_HEADER] = TEST_CSRF;
     }
+    if (idempotencyKey) headers["idempotency-key"] = idempotencyKey;
     return app.inject({ method: "POST", url: "/api/v1/chat", cookies, headers, payload });
   }
 
@@ -513,6 +537,26 @@ describe("chat routes", () => {
       );
       expect(res.headers["x-conversation-id"]).toBeDefined();
       expect(res.body).toContain("Hello");
+      expect(invocationStore.records).toEqual([
+        expect.objectContaining({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          initiator: { kind: "user", id: userId },
+          effectiveSubject: { kind: "user", id: userId },
+        }),
+      ]);
+    });
+
+    it("does not execute a duplicate idempotent invocation twice", async () => {
+      const payload = { message: userMsg("hi") };
+      const first = await post(payload, { idempotencyKey: "chat-request-1" });
+      const duplicate = await post(payload, { idempotencyKey: "chat-request-1" });
+
+      expect(first.statusCode).toBe(200);
+      expect(duplicate.statusCode).toBe(409);
+      expect(duplicate.json()).toEqual({ error: "duplicate chat invocation" });
+      expect(duplicate.headers["x-run-id"]).toBe(first.headers["x-run-id"]);
+      expect(invocationStore.records).toHaveLength(1);
+      expect(select).toHaveBeenCalledTimes(1);
     });
 
     // AC3 — unknown model id → 400, no assistant message persisted
