@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { PHASE_14_RESOLVED_MAJORS, PHASE_14_REVIEW } from "../ops/cutover/review";
+import {
+  PHASE_14_RELEASE_READY,
+  PHASE_14_RESOLVED_MAJORS,
+  PHASE_14_REVIEW,
+} from "../ops/cutover/review";
 
 const REQUIRED_CATEGORIES = [
   "Security",
@@ -16,19 +20,26 @@ describe("Phase 14 whole-rewrite review", () => {
     expect(PHASE_14_REVIEW.map((section) => section.category)).toEqual(REQUIRED_CATEGORIES);
   });
 
-  it("leaves no major finding and gives every minor a disposition", () => {
+  it("gives every finding a disposition and reason when deferred", () => {
     const findings = PHASE_14_REVIEW.flatMap((section) => section.findings);
-    expect(findings.filter((finding) => finding.severity === "MAJOR")).toEqual([]);
     expect(
-      findings
-        .filter((finding) => finding.severity === "MINOR")
-        .every((finding) => finding.disposition === "fixed" || finding.disposition === "deferred")
+      findings.every(
+        (finding) => finding.disposition === "fixed" || finding.disposition === "deferred"
+      )
     ).toBe(true);
     expect(
       findings
         .filter((finding) => finding.disposition === "deferred")
         .every((finding) => Boolean(finding.reason))
     ).toBe(true);
+  });
+
+  it("does not declare the release ready while a major remains deferred", () => {
+    const deferredMajors = PHASE_14_REVIEW.flatMap((section) => section.findings).filter(
+      (finding) => finding.severity === "MAJOR" && finding.disposition === "deferred"
+    );
+    expect(deferredMajors.length).toBeGreaterThan(0);
+    expect(PHASE_14_RELEASE_READY).toBe(false);
   });
 
   it("records every discovered major as fixed with evidence", () => {

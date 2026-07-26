@@ -57,7 +57,7 @@ const label: routineSchema.RoutineState = {
   name: "Label",
   toolRef: { name: "github", version: "2.0.0" },
   action: "issues.addLabels",
-  input: { issue: "${ input.issueId }", label: "bug" },
+  input: { issue: `\${ input.issueId }`, label: "bug" },
   end: true,
 };
 

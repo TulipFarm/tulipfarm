@@ -199,7 +199,7 @@ function LlmStep({ onNext }: { onNext: () => void }) {
   const [providers, setProviders] = useState<LlmProviderInfo[]>([]);
   const [providerId, setProviderId] = useState("anthropic");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
-  const [model, setModel] = useState(DEFAULT_MODEL["anthropic"] ?? "");
+  const [model, setModel] = useState(DEFAULT_MODEL.anthropic ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -241,7 +241,7 @@ function LlmStep({ onNext }: { onNext: () => void }) {
     setError(null);
     try {
       const filled = selected.fields.filter((f) => (fieldValues[f.key] ?? "").trim().length > 0);
-      await Promise.all(filled.map((f) => putSecret(f.key, fieldValues[f.key]!.trim())));
+      await Promise.all(filled.map((f) => putSecret(f.key, (fieldValues[f.key] ?? "").trim())));
       const entry = { provider: providerId, model: model.trim() };
       await putLlmConfig({
         tiers: {

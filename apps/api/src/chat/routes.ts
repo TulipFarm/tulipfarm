@@ -93,12 +93,22 @@ export function registerChatRoutes(
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: ChatBodySchema,
-        response: { 400: ErrorSchema, 401: ErrorSchema, 404: ErrorSchema, 503: ErrorSchema },
+        response: {
+          400: ErrorSchema,
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          503: ErrorSchema,
+        },
       },
     },
     async (req, reply) => {
       if (invocations) {
         const body = req.body as { agentId?: string };
+        const principal = req.principal;
+        if (!principal) {
+          return reply.code(401).send({ error: "unauthorized" });
+        }
         const idempotencyHeader = req.headers["idempotency-key"];
         const idempotencyKey =
           typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
@@ -106,14 +116,20 @@ export function registerChatRoutes(
             : req.id;
         const result = await invocations.start({
           source: "chat",
-          businessId: "default",
-          initiator: { kind: "user", id: req.user?._id ?? "unknown" },
-          effectiveSubject: { kind: "user", id: req.user?._id ?? "unknown" },
+          businessId: principal.businessId,
+          initiator: { kind: principal.kind, id: principal.id },
+          effectiveSubject: { kind: principal.kind, id: principal.id },
           definitionRef: `published:agent:${body.agentId ?? "assistant"}`,
           payloadRef: `artifact:request:${req.id}`,
           idempotencyKey,
         });
+        // The chat response is hijacked for SSE below, so write this to the raw response as well as
+        // Fastify's header collection. Otherwise the durable Run identifier is lost at the wire.
         reply.header("X-Run-Id", result.runId);
+        reply.raw.setHeader("X-Run-Id", result.runId);
+        if (result.outcome === "duplicate") {
+          return reply.code(409).send({ error: "duplicate chat invocation" });
+        }
       }
       return runChatTurn(req, reply, turnCtx);
     }

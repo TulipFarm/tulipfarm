@@ -24,7 +24,7 @@ const states: routineSchema.RoutineState[] = [
     type: "agent",
     name: "Classify",
     agentRef: { name: "triage", version: "1.0.0" },
-    input: { issue: "${ input.issueId }" },
+    input: { issue: `\${ input.issueId }` },
     transition: "Label",
   },
   {
@@ -33,7 +33,7 @@ const states: routineSchema.RoutineState[] = [
     toolRef: { name: "github", version: "2.0.0" },
     action: "issues.addLabels",
     credentialRef: "github-app",
-    input: { label: "${ states.Classify.output.label }" },
+    input: { label: `\${ states.Classify.output.label }` },
     end: true,
   },
 ];

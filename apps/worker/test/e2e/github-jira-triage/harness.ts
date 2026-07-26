@@ -19,12 +19,7 @@ import {
   jiraEffectLabel,
   normalizeGitHubIssueEvent,
 } from "@tulipfarm/integrations";
-import {
-  type CompiledRoutine,
-  type CompiledState,
-  compileRoutine,
-  type IdentityCeiling,
-} from "@tulipfarm/run-kernel";
+import { type CompiledState, compileRoutine, type IdentityCeiling } from "@tulipfarm/run-kernel";
 import {
   type AccessGrantDefinition,
   ajv,
@@ -214,10 +209,6 @@ function record(value: unknown): Record<string, unknown> {
     throw new Error("expected an object");
   }
   return value as Record<string, unknown>;
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.map((entry) => String(entry)) : [];
 }
 
 /**

@@ -92,7 +92,7 @@ describe("crash at the claim boundary", () => {
 
 describe("crash while holding a lease", () => {
   it("recovers an accepted Run once its lease expires", async () => {
-    const { store, leases } = leaseFixture();
+    const { leases } = leaseFixture();
     await leases.claim({
       businessId: BUSINESS_ID,
       runId: RUN_ID,

@@ -12,7 +12,6 @@ import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import {
-  connectIntegration,
   disconnectIntegration,
   type IntegrationSummary,
   listIntegrations,

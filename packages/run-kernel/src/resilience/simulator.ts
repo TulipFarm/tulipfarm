@@ -224,7 +224,7 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
   async requeueWaitingRun(_businessId: string, runId: string): Promise<boolean> {
     this.guard("requeueWaitingRun", "before");
     const run = this.runs.get(runId);
-    if (!run || run.status !== "waiting") return false;
+    if (run?.status !== "waiting") return false;
     this.runs.set(runId, { ...run, status: "queued", version: run.version + 1 });
     this.requeues += 1;
     this.guard("requeueWaitingRun", "after");
