@@ -19,6 +19,7 @@
     "reset:dev": "bash scripts/reset-dev.sh",
     "architecture:check": "node scripts/architecture-check.ts",
     "architecture:test": "vitest run scripts",
+    "verify:phase14": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/run-phase14-verification.ts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",

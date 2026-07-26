@@ -40,6 +40,14 @@ export const PHASE_14_RESOLVED_MAJORS: readonly ReviewFinding[] = [
     disposition: "fixed",
     evidence: "packages/secrets/src/encrypted-store.ts; packages/secrets/src/service.test.ts",
   },
+  {
+    severity: "MAJOR",
+    summary: "Phase 14 verification evidence was self-declared rather than run-derived.",
+    disposition: "fixed",
+    evidence:
+      "ops/verification/phase14.ts; ops/verification/runner.ts; " +
+      "scripts/run-phase14-verification.ts; scripts/phase14-verification.test.ts",
+  },
 ] as const;
 
 export const PHASE_14_REVIEW: readonly ReviewSection[] = [
@@ -135,20 +143,11 @@ export const PHASE_14_REVIEW: readonly ReviewSection[] = [
   },
   {
     category: "Testing",
-    findings: [
-      {
-        severity: "MAJOR",
-        summary: "Phase 14 verification evidence is self-declared rather than run-derived.",
-        disposition: "deferred",
-        evidence: "ops/verification/phase14.ts; scripts/phase14-verification.test.ts",
-        reason:
-          "The gate currently tests hard-coded passed values instead of signed or generated " +
-          "outputs from the required checks.",
-      },
-    ],
+    findings: [],
     evidence: [
       "pnpm test",
       "scripts/phase14-review.test.ts",
+      "scripts/phase14-verification.test.ts",
       "absolute-simplify unavailable on PATH",
     ],
   },

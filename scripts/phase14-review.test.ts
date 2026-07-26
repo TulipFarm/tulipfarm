@@ -43,7 +43,7 @@ describe("Phase 14 whole-rewrite review", () => {
   });
 
   it("records every discovered major as fixed with evidence", () => {
-    expect(PHASE_14_RESOLVED_MAJORS).toHaveLength(3);
+    expect(PHASE_14_RESOLVED_MAJORS).toHaveLength(4);
     expect(
       PHASE_14_RESOLVED_MAJORS.every(
         (finding) =>

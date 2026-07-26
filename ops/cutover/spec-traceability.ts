@@ -237,7 +237,8 @@ export const PHASE_14_TRACEABILITY: {
         "scripts/resilience-contract.test.ts",
       ],
       blocker:
-        "Verification status is declared in constants and is not derived from recorded runs.",
+        "The run-derived gate exists, but final evidence cannot pass until the remaining runtime, " +
+        "load, and cutover blockers are resolved.",
     },
     {
       id: "26",
