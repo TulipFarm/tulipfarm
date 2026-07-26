@@ -1,0 +1,37 @@
+apiVersion: tulipfarm.ai/v1
+kind: Agent
+metadata:
+  id: 11111111-1111-4111-8111-111111111111
+  slug: github-issue-triage
+  displayName: GitHub issue triage
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: published
+spec:
+  owner: platform-team
+  instructions:
+    path: AGENT.md
+  personality: >-
+    Careful maintainer. Prefers asking over guessing, and never closes an issue it is not certain
+    is a duplicate.
+  # The Agent proposes only. Every external write in this example goes through the Tool Broker as
+  # a Routine tool State, so the ceiling here is deliberately the lowest that still lets the
+  # Routine run.
+  autonomy: propose_actions
+  permissionCeiling:
+    maxRiskClass: medium
+  modelProfile: reasoning-default
+  # Reference is not authority: the Routine, the AccessGrants, and the Guardrails decide what
+  # actually dispatches.
+  allowedTools:
+    - github.issue.read
+    - github.issue.search
+    - jira.user.availability
+  limits:
+    toolCalls: 12
+    delegationDepth: 0
+  memoryScopes:
+    - agent_private
+    - business
+  trustTier: business_authored
+  evaluationSuite: github-issue-triage
