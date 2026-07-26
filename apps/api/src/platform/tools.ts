@@ -268,7 +268,7 @@ const validateAskUser = ajv.compile(ASK_USER_SCHEMA);
 export const askUserTool: PlatformTool = {
   name: "ask_user",
   description:
-    "Pause the run and ask the user for input via an interactive A2UI form, then resume with their answer as THIS tool's result. `spec` is the surface to render — include a Form whose `action.event` posts the answer; usually a Card wrapping a Heading (the question) and the Form. The turn ends with the form on screen; the user's submission resumes the SAME run with their answer. Use for genuine human-in-the-loop decisions, not rhetorical questions. " +
+    "Pause the run and ask the user for input via an interactive A2UI form, then resume with their answer as THIS tool's result. `spec` is the surface to render — include a Form whose action contains an opaque server-signed descriptor; usually a Card wrapping a Heading (the question) and the Form. The turn ends with the form on screen; the user's submission resumes the SAME run with their answer. Use for genuine human-in-the-loop decisions, not rhetorical questions. " +
     A2UI_COMPONENTS_REF,
   mutating: false,
   inputSchema: ASK_USER_SCHEMA,

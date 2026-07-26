@@ -85,12 +85,13 @@ describe("compileSurface", () => {
       root: {
         component: "Button",
         label: "Approve",
-        action: { event: "approve", payload: { id: 7 } },
+        action: { descriptor: "payload.signature" },
       },
     };
     const { html } = compileSurface(spec);
     expect(html).toContain("&quot;kind&quot;:&quot;a2ui-action&quot;");
-    expect(html).toContain("&quot;event&quot;:&quot;approve&quot;");
+    expect(html).toContain("&quot;descriptor&quot;:&quot;payload.signature&quot;");
+    expect(html).not.toContain("&quot;event&quot;");
   });
 
   it("HTML-escapes agent values so a label cannot break out of the tag/attribute", () => {
@@ -152,7 +153,7 @@ describe("compileSurface", () => {
     const spec: A2uiSpec = {
       root: {
         component: "Form",
-        action: { event: "profile_done" },
+        action: { descriptor: "payload.signature" },
         submitLabel: "Save",
         fields: [
           { name: "city", label: "City", input: "text", value: "Pune", required: true },
@@ -178,26 +179,22 @@ describe("compileSurface", () => {
     expect(html).toContain(">Save</tf-button>");
   });
 
-  it("skips unknown components without throwing", () => {
+  it("rejects unknown components", () => {
     const spec = {
       root: [{ component: "Nope" }, { component: "Text", text: "ok" }],
     } as unknown as A2uiSpec;
-    const { html } = compileSurface(spec);
-    expect(html).toContain("ok");
-    expect(html).not.toContain("Nope");
+    expect(() => compileSurface(spec)).toThrow(/A2UI schema/);
   });
 
-  it("never throws on a loose/malformed spec (missing field props, missing values)", () => {
-    // The agent authors specs loosely; a Form field missing `name`/`input`, or a node missing its
-    // value, must degrade to empty — not crash the compiler (regression: esc(undefined).replace).
+  it("rejects a loose or malformed spec", () => {
     const spec = {
       root: {
         component: "Form",
-        action: { event: "x" },
+        action: { descriptor: "payload.signature" },
         fields: [{}, { input: "select" }, { name: "city" }],
       },
     } as unknown as A2uiSpec;
-    expect(() => compileSurface(spec)).not.toThrow();
+    expect(() => compileSurface(spec)).toThrow(/A2UI schema/);
     const malformed = {
       root: [
         { component: "Text" },
@@ -206,6 +203,6 @@ describe("compileSurface", () => {
         { component: "BarChart" },
       ],
     } as unknown as A2uiSpec;
-    expect(() => compileSurface(malformed)).not.toThrow();
+    expect(() => compileSurface(malformed)).toThrow(/A2UI schema/);
   });
 });

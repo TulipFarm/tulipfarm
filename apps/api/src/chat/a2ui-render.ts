@@ -1,3 +1,4 @@
+import { A2UISchemaError } from "@tulipfarm/a2ui";
 import { compileSurface } from "../a2ui/compiler";
 import { esc, sendAttr } from "../a2ui/escape";
 import type { A2uiSpec } from "../a2ui/spec";
@@ -94,7 +95,12 @@ export function renderSurfaceEvent(result: ToolCallResult): A2uiEventData | null
     typeof data.dataModel === "object" && data.dataModel !== null
       ? (data.dataModel as Record<string, unknown>)
       : {};
-  const { html, nodeIds } = compileSurface(data.spec as A2uiSpec, dataModel);
-  if (html.length === 0) return null;
-  return { op: "createSurface", surfaceId: data.surfaceId, html, nodeIds };
+  try {
+    const { html, nodeIds } = compileSurface(data.spec as A2uiSpec, dataModel);
+    if (html.length === 0) return null;
+    return { op: "createSurface", surfaceId: data.surfaceId, html, nodeIds: [...nodeIds] };
+  } catch (error) {
+    if (error instanceof A2UISchemaError) return null;
+    throw error;
+  }
 }

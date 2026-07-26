@@ -32,6 +32,7 @@ import { StreamHub } from "./chat/stream-hub";
 import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
 import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
+import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import type { GuardrailsService } from "./guardrails";
 import type { HookExecutor } from "./hooks/hook-executor";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
@@ -53,6 +54,8 @@ import { registerOnboardingRoutes } from "./onboarding/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
+import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
+import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
 import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
@@ -98,6 +101,8 @@ export interface AppOptions {
   kvService?: KvService;
   /** Caller-initiated invocation of manual / internal-API Triggers. */
   triggerInvoke?: TriggerInvokeDeps;
+  /** Standalone and resumable governed form submissions. */
+  forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
   retrievalService?: PageRetrievalService;
   toolRegistry?: ToolRegistry;
@@ -111,6 +116,8 @@ export interface AppOptions {
   observabilityConfig?: ObservabilityConfig;
   /** Routine engine surface (v0.11): registry + runs repo + trigger service + enqueuers. */
   routines?: RoutineRoutesDeps;
+  /** Canonical proposal-only Routine authoring and simulation boundary. */
+  routineAuthoring?: CanonicalRoutineAuthoringService;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
@@ -317,6 +324,12 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.triggerInvoke) {
       registerTriggerRoutes(app, opts.triggerInvoke, requireAuth, opts.rateLimiter);
+    }
+    if (opts.forms) {
+      registerFormRoutes(app, opts.forms, requireAuth);
+    }
+    if (opts.routineAuthoring) {
+      registerRoutineAuthoringRoutes(app, opts.routineAuthoring, requireAuth);
     }
 
     if (opts.kvService) {

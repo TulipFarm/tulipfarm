@@ -135,7 +135,12 @@ export default function RoutineDetail() {
   return (
     <ResourcePanel crumbs={[{ label: "routines", to: "/routines" }, { label: routine.slug }]}>
       <div className="flex flex-col gap-1">
-        <h1 className="font-medium text-foreground">{definition.name ?? routine.slug}</h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="font-medium text-foreground">{definition.name ?? routine.slug}</h1>
+          <Button asChild size="sm" variant="outline">
+            <Link to={`/routines/${encodeURIComponent(routine.slug)}/edit`}>author</Link>
+          </Button>
+        </div>
         {definition.description ? (
           <p className="text-muted-foreground text-sm">{definition.description}</p>
         ) : null}

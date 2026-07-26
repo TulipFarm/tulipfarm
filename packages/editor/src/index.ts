@@ -26,5 +26,13 @@ export {
 } from "./mentions/host-data";
 export { buildMentionExtensions } from "./mentions/mention-menu";
 export { PageEditor, type PageEditorProps } from "./page-editor";
+export {
+  createRoutineAuthoringSession,
+  RoutineAuthoringError,
+  type RoutineAuthoringIssue,
+  type RoutineAuthoringSession,
+  type RoutineChangesetProposal,
+  type RoutineSimulationSummary,
+} from "./routine/authoring";
 export { filterSlashItems, SLASH_ITEMS, type SlashItem } from "./slash/slash-items";
 export { SlashCommands } from "./slash/slash-menu";
