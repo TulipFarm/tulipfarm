@@ -1,9 +1,11 @@
 import {
   ARTIFACT_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
+  CHANNEL_DELIVERY_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
+  INTEGRATION_STORAGE_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
@@ -512,6 +514,18 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "durable Tool intents and effect ledger",
     up: async (q) => {
       for (const sql of EFFECT_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 11,
+    description: "Integration Apps, installations, AccessGrants, and channel routing",
+    up: async (q) => {
+      for (const sql of [
+        ...INTEGRATION_STORAGE_STATEMENTS,
+        ...CHANNEL_DELIVERY_STORAGE_STATEMENTS,
+      ]) {
         await q.query(sql);
       }
     },

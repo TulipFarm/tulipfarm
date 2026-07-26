@@ -398,7 +398,6 @@ async function boot() {
         soulLoader,
         conversations: new IntegrationConversationsRepo(pool),
         integrationEvents: new IntegrationEventsRepo(pool),
-        users: userRepo,
         identity: new IngressIdentityResolver(userRepo, app.log),
         chatCtx: app.chatTurnContext,
         hookExecutor,

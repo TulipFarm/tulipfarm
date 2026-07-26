@@ -3,14 +3,13 @@ import { EventEmitter } from "node:events";
 import type { SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyBaseLogger } from "fastify";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { IngressUserLookup, UserDoc } from "../auth/users";
+import type { UserDoc } from "../auth/users";
 import { runHeadlessChatTurn } from "../chat/headless-chat-turn";
 import type { ChatTurnContext } from "../chat/turn";
 import { DOMAIN_EVENTS } from "../domain-events";
 import { HookError, type HookExecutor } from "../hooks/hook-executor";
 import type { ToolRegistry } from "../tools/registry";
 import type { ToolDef } from "../tools/types";
-import { IngressIdentityResolver } from "./identity";
 import type { IntegrationConversation } from "./repo";
 import {
   handleIngressJob,
@@ -129,12 +128,6 @@ describe("handleIngressJob", () => {
     sendTool = vi.fn(async () => ({ success: true as const, data: {} }));
     bus = new EventEmitter();
 
-    const users: IngressUserLookup = {
-      findByEmail: async () => null,
-      findById: async (id) => (id === admin._id ? admin : null),
-      findFirstAdmin: async () => admin,
-    };
-
     deps = {
       soulLoader: {
         integrations: new Map([["chatapp", makeIntegration()]]),
@@ -153,8 +146,9 @@ describe("handleIngressJob", () => {
           return record;
         },
       } as unknown as IngressServiceDeps["integrationEvents"],
-      users,
-      identity: new IngressIdentityResolver(users, log),
+      identity: {
+        resolve: async () => admin,
+      },
       chatCtx: {} as ChatTurnContext,
       hookExecutor: makeHookExecutor(() => ({ kind: "ignore" })),
       toolRegistry: makeRegistry(sendTool as unknown as ToolDef["execute"]),
@@ -235,12 +229,11 @@ describe("handleIngressJob", () => {
     );
   });
 
-  it("reuses an existing conversation mapping and attributes other senders to the owner", async () => {
+  it("denies an external sender whose mapped thread belongs to another user", async () => {
     const owner = makeUser("owner@example.com", "member");
-    deps.users = {
-      findByEmail: async () => null,
-      findById: async (id) => (id === owner._id ? owner : null),
-      findFirstAdmin: async () => admin,
+    const sender = makeUser("sender@example.com", "member");
+    deps.identity = {
+      resolve: async () => sender,
     };
     mappings.set("chatapp:T1/C1/100.1", {
       integrationSlug: "chatapp",
@@ -251,12 +244,12 @@ describe("handleIngressJob", () => {
     withDecision(CHAT_DECISION);
     await handleIngressJob({ slug: "chatapp", body: BODY }, deps);
 
-    const turnArgs = mockTurn.mock.calls[0][1];
-    expect(turnArgs.user).toEqual(owner);
-    expect(turnArgs.body).toMatchObject({
-      conversationId: "convo-9",
-      message: { content: "[From chatapp user EXT-U1] summarize" },
-    });
+    expect(mockTurn).not.toHaveBeenCalled();
+    expect(sendTool).not.toHaveBeenCalled();
+    expect(log.warn).toHaveBeenCalledWith(
+      { slug: "chatapp" },
+      "external sender does not own the mapped Conversation; denying"
+    );
   });
 
   it("honors requireExistingThread: no mapping → ignored, mapping → chat", async () => {
