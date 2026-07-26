@@ -199,3 +199,29 @@ test("collapsing the sidebar hides labels and persists the choice", async () => 
   expect(screen.queryByText("Resources")).not.toBeInTheDocument();
   expect(localStorage.getItem("sidebar-collapsed")).toBe("true");
 });
+
+test("mobile drawer closes on Escape and restores focus to its opener", async () => {
+  window.matchMedia = vi.fn().mockReturnValue({
+    matches: false,
+    media: "(min-width: 768px)",
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  });
+  const user = userEvent.setup();
+  render(<Stub initialEntries={["/"]} />);
+  const opener = screen.getByRole("button", { name: "Open navigation" });
+
+  await user.click(opener);
+  expect(screen.getByRole("complementary")).toHaveAttribute("aria-hidden", "false");
+  await user.keyboard("{Escape}");
+
+  expect(screen.getByRole("complementary", { hidden: true })).toHaveAttribute(
+    "aria-hidden",
+    "true"
+  );
+  expect(opener).toHaveFocus();
+});

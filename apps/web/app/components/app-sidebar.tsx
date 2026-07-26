@@ -217,7 +217,12 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
   // Desktop-first so the nav is never hidden from AT before the media query resolves.
   const [isDesktop, setIsDesktop] = useState(true);
   const navRef = useRef<HTMLElement>(null);
+  const openerRef = useRef<HTMLButtonElement>(null);
   const close = () => setOpen(false);
+  const closeAndRestore = () => {
+    setOpen(false);
+    queueMicrotask(() => openerRef.current?.focus());
+  };
 
   // Collapse only applies on desktop; the mobile drawer always shows full labels. `forceCollapsed`
   // (set under /knowledge, which has its own tree rail) rails the nav without touching the persisted
@@ -241,6 +246,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpen(false);
+        queueMicrotask(() => openerRef.current?.focus());
       }
     };
     document.addEventListener("keydown", onKey);
@@ -261,6 +267,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
       {/* Mobile top bar with hamburger (hidden ≥ md). */}
       <header className="bg-sidebar text-sidebar-foreground border-sidebar-border flex h-12 items-center gap-2 border-b px-2 md:hidden">
         <button
+          ref={openerRef}
           type="button"
           aria-label="Open navigation"
           aria-expanded={open}
@@ -279,7 +286,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
         <button
           type="button"
           aria-label="Close navigation"
-          onClick={close}
+          onClick={closeAndRestore}
           className="fixed inset-0 z-40 bg-foreground/20 md:hidden"
         />
       ) : null}
@@ -322,7 +329,7 @@ export function AppSidebar({ forceCollapsed = false }: { forceCollapsed?: boolea
           <button
             type="button"
             aria-label="Close navigation"
-            onClick={close}
+            onClick={closeAndRestore}
             className="hover:bg-sidebar-accent/50 rounded-sm p-1.5 md:hidden"
           >
             <X className="size-5" />

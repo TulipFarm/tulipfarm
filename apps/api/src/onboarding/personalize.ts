@@ -75,6 +75,7 @@ export const SYSTEM_PROMPT = [
   '- `label`: short chip text, question style (e.g. "Set up ticket management?").',
   '- `prompt`: the chat message that seeds the build flow (e.g. "Help me set up ticket management.").',
   "",
+  "Return raw JSON only. Do not wrap the response in Markdown or a code fence.",
   "Never propose something that already exists in the soul. Be specific to the business domain.",
 ].join("\n");
 
@@ -104,6 +105,11 @@ export function buildStateKey(businessDescription: string, state: SoulState): st
   return `suggestions:${hash}`;
 }
 
+async function repairFencedJson({ text }: { text: string }): Promise<string | null> {
+  const match = /^\s*```(?:json)?\s*\n([\s\S]*?)\n```\s*$/i.exec(text);
+  return match?.[1]?.trim() ?? null;
+}
+
 /** Run the LLM call and return a validated {@link Personalized}. Throws on malformed output. */
 export async function generatePersonalized(
   model: LlmModel,
@@ -112,6 +118,7 @@ export async function generatePersonalized(
   const { object } = await generateObject({
     model,
     schema: jsonSchema<Personalized>(PERSONALIZED_SCHEMA),
+    experimental_repairText: repairFencedJson,
     system: SYSTEM_PROMPT,
     prompt: [
       `Business name: ${ctx.businessName ?? "(unnamed)"}`,

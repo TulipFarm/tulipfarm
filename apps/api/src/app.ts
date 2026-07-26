@@ -14,6 +14,7 @@ import Fastify from "fastify";
 import type { A2uiSurfaceStore } from "./a2ui/surface-store";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
+import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
 import type { ApprovalsRepo } from "./approvals/repo";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { TokenRepo } from "./auth/api-tokens";
@@ -118,6 +119,8 @@ export interface AppOptions {
   hookIngress?: HookIngressDeps;
   /** System routes overrides (update-check fetch injection for tests). */
   systemRoutes?: SystemRoutesDeps;
+  /** Authorized Phase 9 browser read models and server-side command authorities. */
+  operationalApi?: OperationalApiDeps;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -171,7 +174,13 @@ export async function buildApp(opts: AppOptions = {}) {
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
     methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-csrf-token", "If-Match"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "x-csrf-token",
+      "If-Match",
+      "Idempotency-Key",
+    ],
     // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
     // X-Message-Id is the just-streamed reply's persisted id, so the client can attach feedback to it.
     exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id"],
@@ -450,6 +459,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
+    }
+    if (opts.operationalApi) {
+      registerOperationalRoutes(app, opts.operationalApi, requireAuth);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);

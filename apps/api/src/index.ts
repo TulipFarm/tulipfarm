@@ -14,6 +14,7 @@ import { PgA2uiSurfaceStore } from "./a2ui/surface-store";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
+import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
 import { ApprovalsRepo } from "./approvals/repo";
 import { PgTokenRepo } from "./auth/api-tokens";
@@ -327,6 +328,13 @@ async function boot() {
       activityService,
       observabilityService,
       observabilityConfig: obsConfig,
+      operationalApi: createRuntimeOperationalApi({
+        activity: activityService,
+        approvals: approvalsRepo,
+        approvalRegistry,
+        enqueueWake: (job) => routineEnqueuers.enqueueWake(job),
+        guardrailsConfig: () => soulLoader.guardrailsConfig,
+      }),
       routines: {
         registry: routineRegistry,
         runs: routineRuns,

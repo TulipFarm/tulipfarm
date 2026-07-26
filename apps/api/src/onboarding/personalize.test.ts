@@ -124,6 +124,30 @@ describe("getPersonalizedOnboarding", () => {
     expect(generateObject).toHaveBeenCalledOnce(); // served from cache
   });
 
+  it("repairs a complete fenced JSON response from providers without structured outputs", async () => {
+    generateObject.mockResolvedValue({ object: VALID });
+
+    const result = await getPersonalizedOnboarding(
+      soul({ businessDescription: "an online store" }),
+      {
+        llmService,
+        kvService: new KvService(new FakeKvRepo()),
+      }
+    );
+
+    expect(result).toEqual(VALID);
+    const options = generateObject.mock.calls[0][0] as {
+      experimental_repairText?: (input: { text: string; error: Error }) => Promise<string | null>;
+    };
+    expect(options.experimental_repairText).toBeTypeOf("function");
+    await expect(
+      options.experimental_repairText?.({
+        text: `\`\`\`json\n${JSON.stringify(VALID)}\n\`\`\``,
+        error: new Error("JSON parse failed"),
+      })
+    ).resolves.toBe(JSON.stringify(VALID));
+  });
+
   it("returns null when the LLM output is malformed / the call fails (static fallback)", async () => {
     generateObject.mockResolvedValue({ object: { suggestions: "nope" } });
     const kvService = new KvService(new FakeKvRepo());
