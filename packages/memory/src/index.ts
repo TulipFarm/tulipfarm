@@ -1,1 +1,46 @@
-export {};
+export {
+  DEFAULT_CONFIRMATION_TTL_MS,
+  InMemoryPendingMemoryStore,
+  type PendingMemory,
+  type PendingMemoryStore,
+  type ResolvePendingRequest,
+  type ResolvePendingResult,
+  resolvePendingMemory,
+} from "./confirm";
+export {
+  commitAssertion,
+  type ForgetRequest,
+  type ForgetResult,
+  forgetMemory,
+  InMemoryMemoryStore,
+  type MemoryAssertion,
+  type MemoryAuditSink,
+  type MemoryConfirmationState,
+  type MemoryDeps,
+  type MemoryEvidenceAuthorizationPort,
+  type MemoryEvidenceRef,
+  type MemoryOrigin,
+  type MemoryProvenance,
+  type MemorySettingsView,
+  type MemoryStatus,
+  type MemoryStore,
+  memorySettingsView,
+  type RememberDenialReason,
+  type RememberRequest,
+  type RememberResult,
+  rememberMemory,
+} from "./memory";
+export {
+  type MemoryExclusion,
+  type MemoryExclusionReason,
+  type RecallRequest,
+  type RecallResult,
+  recallMemory,
+} from "./retrieve";
+export {
+  authorizeMemoryScope,
+  type MemoryScopeDecision,
+  type MemoryScopeDenialReason,
+  type MemoryScopeRequest,
+  type MemoryScopeTarget,
+} from "./scope";
