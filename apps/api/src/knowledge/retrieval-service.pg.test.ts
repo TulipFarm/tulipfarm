@@ -3,8 +3,8 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
+import { extractHighlights, PageRetrievalService, toPrefixTsQuery } from "./page-search-adapter";
 import { DEFAULT_RANKING } from "./retrieval-config";
-import { extractHighlights, PageRetrievalService, toPrefixTsQuery } from "./retrieval-service";
 
 async function seedSpace(db: PGlite, name = `b-${randomUUID()}`): Promise<string> {
   const id = randomUUID();

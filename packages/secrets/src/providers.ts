@@ -9,8 +9,8 @@
  * invocation", so caching belongs behind an explicit invalidation the adapter controls.
  */
 
-import type { SecretsService } from "./service";
-import { SecretUnavailableError } from "./service";
+import type { SecretsService } from "./encrypted-store";
+import { SecretUnavailableError } from "./encrypted-store";
 
 export interface ResolvedSecret {
   readonly value: string;

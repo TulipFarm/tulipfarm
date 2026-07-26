@@ -1,3 +1,4 @@
+import type { MutationGuard } from "@tulipfarm/observability";
 import { ajv, canonicalHash } from "@tulipfarm/schema";
 import type { ToolCatalog } from "../catalog";
 import type { CredentialDispatcher } from "../credential-dispatch";
@@ -36,7 +37,8 @@ export type ToolDispatchErrorCode =
   | "adapter_not_found"
   | "dispatch_failed"
   | "ambiguous"
-  | "invalid_output";
+  | "invalid_output"
+  | "kill_switch_denied";
 
 export class ToolDispatchError extends Error {
   constructor(
@@ -53,6 +55,7 @@ export interface EffectDispatcherDeps {
   readonly catalog: ToolCatalog;
   readonly adapters: ReadonlyMap<string, ToolAdapter>;
   readonly credentialDispatcher?: CredentialDispatcher;
+  readonly mutationGuard?: MutationGuard;
   readonly wait?: (delayMs: number) => Promise<void>;
   readonly now?: () => string;
 }
@@ -99,6 +102,24 @@ export class EffectDispatcher {
     const adapter = this.deps.adapters.get(contract.adapter.ref);
     if (adapter === undefined) throw new ToolDispatchError("adapter_not_found", effectId);
     const validateOutput = ajv.compile(contract.outputSchema);
+
+    if (this.deps.mutationGuard !== undefined) {
+      try {
+        await this.deps.mutationGuard.assertAllowed({
+          businessId,
+          mutation: contract.mutating,
+          runId: effect.runId,
+          stateId: effect.stateId,
+          effectId,
+          toolId: effect.intent.toolId,
+          provider: contract.adapter.ref,
+          destination: effect.intent.destination,
+          dataClasses: contract.dataClasses,
+        });
+      } catch {
+        throw new ToolDispatchError("kill_switch_denied", effectId);
+      }
+    }
 
     let attemptNumber = 0;
     while (true) {

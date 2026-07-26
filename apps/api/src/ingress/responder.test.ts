@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ToolRegistry } from "../tools/registry";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ToolDef } from "../tools/types";
 import { postReply } from "./responder";
 

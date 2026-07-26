@@ -11,7 +11,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { ApprovalsRepo } from "./repo";
+import { ApprovalsRepo } from "./runtime-repo";
 
 const TEST_CSRF = "a".repeat(64);
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
+import { MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { ok } from "../tools/types";
 import { a2uiEventsForToolResult } from "./a2ui-surface";
 

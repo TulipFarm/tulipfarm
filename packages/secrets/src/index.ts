@@ -13,6 +13,7 @@ export type { SecretEnvelope } from "./crypto";
 export { DecryptError, decryptSecret, encryptSecret } from "./crypto";
 export type { DekRepo, InsertWrapInput, KekLabel, WrappedDekRow } from "./dek-repo";
 export { PgDekRepo } from "./dek-repo";
+export { SecretsService, SecretUnavailableError } from "./encrypted-store";
 export { assertValidSecretKey, InvalidSecretKeyError } from "./key-guard";
 export type { ActiveDek } from "./key-manager";
 export {
@@ -62,4 +63,3 @@ export type {
   SecretType,
 } from "./repo";
 export { PgSecretRepo } from "./repo";
-export { SecretsService, SecretUnavailableError } from "./service";

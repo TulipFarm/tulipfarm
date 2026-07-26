@@ -1,0 +1,52 @@
+---
+title: Control evidence
+description: Implemented security and privacy controls, operator responsibilities, and evidence.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+This page is an engineering control map, not legal advice, an audit opinion, or a claim that a
+TulipFarm deployment is certified or compliant with any framework.
+</Callout>
+
+## How to read the map
+
+- **Product feature** means shipped code with executable evidence.
+- **Configuration** means a control that only operates when the deployment configures it.
+- **Operator duty** means work the organization must perform and retain evidence for.
+- **Independent certification** means assessment by a qualified third party. Product features do
+  not provide this.
+
+## Control-family map
+
+| Control family | Product feature | Configuration and operator duty |
+| --- | --- | --- |
+| SOC 2 security, availability, confidentiality | Default-deny authorization, durable effects, audit chains, recovery contracts | Assign owners, review access, configure retention, test recovery, and collect evidence |
+| ISO 27001 access, operations, cryptography, incident management | Scoped grants, Secret leases, redaction, incident grouping, backup verification | Maintain an ISMS, risk treatment, key custody, incident exercises, and supplier review |
+| GDPR security, access, export, erasure | Access decisions, audit export verification, retention and crypto-erasure primitives | Establish lawful basis, notices, processor terms, schedules, and data-subject procedures |
+| India's DPDP Act safeguards and grievance operations | Scoped access, protected evidence, retention and erase primitives | Determine applicability, notices/consent, grievance process, and breach duties with counsel |
+| NIST AI RMF Govern, Map, Measure, Manage | Guardrails, model/effect evidence, eval and incident boundaries | Set risk appetite, approve model profiles, review outcomes, and own residual risk |
+| OWASP ASVS access, validation, logging, SSRF | Session binding, strict schemas, protected dispatch, public-destination checks, audit integrity | Configure identity, TLS, egress destinations, alerting, and security review |
+| OWASP LLM guidance | Prompt-injection Guardrails, Tool allowlists, DLP, sandboxing, source ACLs | Curate Guardrails, approve Tools and Integrations, monitor model behavior, and test adversarial inputs |
+
+## Executable evidence
+
+Evidence: `packages/authz/src/effective.test.ts`
+
+Evidence: `packages/secrets/src/broker.test.ts`
+
+Evidence: `packages/audit/src/verify.test.ts`
+
+Evidence: `packages/tool-broker/src/effects/dispatch.test.ts`
+
+Evidence: `packages/integrations/src/generic/http.test.ts`
+
+Evidence: `packages/knowledge/src/retrieve.test.ts`
+
+Evidence: `packages/sandbox/src/backend.test.ts`
+
+Evidence: `test/security/threat-model.test.ts`
+
+The evidence demonstrates product behavior in the tested revision. It does not demonstrate that a
+particular deployment is configured correctly or that operators performed their duties.

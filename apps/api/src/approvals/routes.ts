@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { ApprovalRegistry } from "../chat/approvals";
-import type { ApprovalsRepo } from "./repo";
+import type { DurableApprovalGate } from "./chat-gate";
+import type { ApprovalsRepo } from "./runtime-repo";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -18,13 +18,11 @@ export interface RoutineApprovalDeps {
 
 /**
  * Standalone approval routes (AGT-V1-002). Serves BOTH approval kinds behind one
- * discriminated list/decide surface: `tool_call` (in-memory registry, ephemeral,
- * resumes a suspended chat stream) and `routine_state` (DB rows, durable, resumes a
- * suspended routine run via a routine-wake job).
+ * discriminated list/decide surface. Both kinds are PostgreSQL-authoritative.
  */
 export function registerApprovalRoutes(
   app: FastifyInstance,
-  approvalRegistry: ApprovalRegistry,
+  approvalRegistry: DurableApprovalGate,
   requireAuth: PreHandler,
   routineDeps?: RoutineApprovalDeps
 ): void {
@@ -34,9 +32,7 @@ export function registerApprovalRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "List all pending approvals, both kinds: tool_call (ephemeral, in-memory — empties on " +
-          "restart) and routine_state (durable rows for routine human_approval states). " +
-          "Discriminate on `kind`.",
+          "List all durable pending approvals. Discriminate tool_call and routine_state by kind.",
         tags: ["approvals"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -75,9 +71,10 @@ export function registerApprovalRoutes(
       },
     },
     async (_req, reply) => {
-      const toolCalls = approvalRegistry
-        .listPending()
-        .map((item) => ({ kind: "tool_call" as const, ...item }));
+      const toolCalls = (await approvalRegistry.listPending()).map((item) => ({
+        kind: "tool_call" as const,
+        ...item,
+      }));
 
       let routineItems: Array<Record<string, unknown>> = [];
       if (routineDeps) {
@@ -144,8 +141,7 @@ export function registerApprovalRoutes(
       const { decision } = req.body as { decision: "approve" | "deny" };
       const settled = decision === "approve" ? "approved" : "denied";
 
-      // Tool-call approvals first (in-memory authoritative), then DB routine_state rows.
-      const resolved = approvalRegistry.decide(approvalId, settled);
+      const resolved = await approvalRegistry.decide(approvalId, settled);
       if (resolved) return reply.send({ status: decision });
 
       if (routineDeps) {

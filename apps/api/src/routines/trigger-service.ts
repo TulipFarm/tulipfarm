@@ -5,7 +5,7 @@ import { DOMAIN_EVENTS } from "../domain-events";
 import { definitionHash } from "./definition-hash";
 import type { RoutineEnqueuers } from "./jobs";
 import type { LoadedRoutine, RoutineRegistry } from "./registry";
-import type { RoutineRunsRepo } from "./repo";
+import type { RoutineRunsRepo } from "./run-store-adapter";
 
 export type TriggerType = "event" | "manual" | "cron" | "webhook" | "agent";
 

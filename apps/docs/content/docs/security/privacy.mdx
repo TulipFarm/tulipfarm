@@ -1,0 +1,42 @@
+---
+title: Privacy operations
+description: Product privacy controls and the deployment decisions that remain with operators.
+---
+
+TulipFarm separates private content from operational evidence. Audit events contain safe metadata
+and protected Artifact references rather than prompts, Secret plaintext, or Tool payloads.
+Knowledge retrieval checks source ACLs before candidate ranking, and cached results are
+reauthorized before reuse.
+
+## Retention and legal hold
+
+The product provides category-based retention decisions and legal holds. An operator defines the
+retention schedule, confirms the correct categories, restricts administration, and records each
+change. A legal hold prevents eligible deletion but does not grant read access.
+
+Evidence: `packages/audit/src/retention.test.ts`
+
+Evidence: `packages/audit/src/legal-hold.test.ts`
+
+## Export and erase
+
+Audit export bundles preserve chain and seal verification without reading protected blob content.
+Crypto-erasure destroys a segment key while retaining a tombstone and integrity evidence. The
+operator must verify requester authority, applicable legal duties, scope, downstream copies, and
+legal holds before an export or erase action.
+
+Evidence: `packages/audit/src/export.test.ts`
+
+Evidence: `packages/audit/src/erase.test.ts`
+
+## Access review
+
+Access review is an operator process. Review active principals, roles, AccessGrants, Credentials,
+external identity mappings, and administrative access on the organization's chosen schedule.
+TulipFarm rejects self-review and cross-business recertification.
+
+Evidence: `packages/authz/src/recertification.test.ts`
+
+These features are technical building blocks. Operators remain responsible for notices, lawful
+basis or consent, data-subject handling, processor agreements, breach duties, and jurisdictional
+analysis.

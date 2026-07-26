@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Queryable } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { RoutineRunsRepo } from "./repo";
+import { RoutineRunsRepo } from "./run-store-adapter";
 
 const DEF = {
   id: "r",

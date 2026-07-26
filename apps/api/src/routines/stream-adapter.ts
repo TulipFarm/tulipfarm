@@ -1,6 +1,6 @@
 import type { StreamEvent, StreamHub } from "../chat/stream-hub";
 import type { StreamResumeRepo } from "../chat/stream-resume";
-import type { RoutineRunsRepo, RunJournalEvent } from "./repo";
+import type { RoutineRunsRepo, RunJournalEvent } from "./run-store-adapter";
 
 /** streamId for a run's SSE stream. Namespaced so it can never collide with chat ids. */
 export function runStreamId(runId: string): string {

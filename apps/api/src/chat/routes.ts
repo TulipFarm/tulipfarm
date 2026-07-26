@@ -2,13 +2,15 @@ import type { EventEmitter } from "node:events";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { type A2uiSurfaceStore, MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
+import { type A2uiSurfaceStore, MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
+import { DurableApprovalGate } from "../approvals/chat-gate";
 import { ErrorSchema } from "../auth/schemas";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
-import type { ToolRegistry } from "../tools/registry";
-import { ApprovalRegistry } from "./approvals";
+import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
+import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import { registerConversationRoutes } from "./conversation-routes";
 import type { ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
@@ -17,7 +19,6 @@ import { attachToStream } from "./producer";
 import { writeSseHeaders } from "./sse";
 import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
-import { type ChatTurnContext, runChatTurn } from "./turn";
 import { ChatBodySchema, corsPassthrough, parseLastEventId } from "./turn-helpers";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -42,16 +43,17 @@ export function registerChatRoutes(
   soulLoader?: SoulLoader,
   events?: EventEmitter,
   toolRegistry?: ToolRegistry,
-  approvals?: ApprovalRegistry,
+  approvals?: DurableApprovalGate,
   guardrails?: GuardrailsService,
   pendingInteractionRepo?: PendingInteractionRepo,
-  a2uiSurfaceStore?: A2uiSurfaceStore
+  a2uiSurfaceStore?: A2uiSurfaceStore,
+  invocations?: DurableInvocationGateway
 ): void {
-  // One in-process approval registry shared by the chat turn (which suspends gated tools) and the
-  // decide route (which resolves them). Single-instance V1 — see chat/approvals.ts.
-  const approvalRegistry = approvals ?? new ApprovalRegistry();
-  // HITL suspend/resume store (A2UI ask_user). Defaults to in-memory like the approval registry; the
-  // Postgres-backed repo is injected by buildApp so pauses survive restarts.
+  // One approval gate shared by the chat turn and decision route. Production injects its
+  // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
+  const approvalRegistry = approvals ?? new DurableApprovalGate();
+  // HITL suspend/resume store (A2UI ask_user). Tests may use the in-memory default; buildApp injects
+  // the PostgreSQL-backed repository so production pauses survive restarts.
   const pendingInteractions = pendingInteractionRepo ?? new MemoryPendingInteractionRepo();
   // A2UI live-surface store: render_surface persists each surface; update_surface diffs + swaps it.
   const surfaceStore = a2uiSurfaceStore ?? new MemoryA2uiSurfaceStore();
@@ -94,7 +96,27 @@ export function registerChatRoutes(
         response: { 400: ErrorSchema, 401: ErrorSchema, 404: ErrorSchema, 503: ErrorSchema },
       },
     },
-    async (req, reply) => runChatTurn(req, reply, turnCtx)
+    async (req, reply) => {
+      if (invocations) {
+        const body = req.body as { agentId?: string };
+        const idempotencyHeader = req.headers["idempotency-key"];
+        const idempotencyKey =
+          typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
+            ? idempotencyHeader
+            : req.id;
+        const result = await invocations.start({
+          source: "chat",
+          businessId: "default",
+          initiator: { kind: "user", id: req.user?._id ?? "unknown" },
+          effectiveSubject: { kind: "user", id: req.user?._id ?? "unknown" },
+          definitionRef: `published:agent:${body.agentId ?? "assistant"}`,
+          payloadRef: `artifact:request:${req.id}`,
+          idempotencyKey,
+        });
+        reply.header("X-Run-Id", result.runId);
+      }
+      return runChatTurn(req, reply, turnCtx);
+    }
   );
 
   app.post(

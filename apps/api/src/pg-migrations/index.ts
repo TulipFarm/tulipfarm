@@ -12,6 +12,7 @@ import {
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import type { Queryable } from "../db";
+import { CUTOVER_STORAGE_STATEMENTS } from "../runtime/invocation-store";
 
 export interface PgMigration {
   version: number;
@@ -526,6 +527,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
         ...INTEGRATION_STORAGE_STATEMENTS,
         ...CHANNEL_DELIVERY_STORAGE_STATEMENTS,
       ]) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 12,
+    description: "unified durable invocation cutover",
+    up: async (q) => {
+      for (const sql of CUTOVER_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

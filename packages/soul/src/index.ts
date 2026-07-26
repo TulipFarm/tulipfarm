@@ -85,6 +85,7 @@ export {
   SoulPublicationCoordinator,
   SoulPublicationError,
 } from "./publication";
+export { SoulLoader } from "./published-loader";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
 export { validateSoulSemantics } from "./semantic";
@@ -95,7 +96,6 @@ export {
   signExecutionBundle,
   verifyExecutionBundle,
 } from "./signatures";
-export { SoulLoader } from "./soul-loader";
 export { runSoulMigrations } from "./soul-migrations";
 export type {
   BodyMatch,

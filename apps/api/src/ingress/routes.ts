@@ -6,7 +6,7 @@ import type { IngressDeliveriesRepo } from "./repo";
 import { verifyHmacSignature } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
 
-/** One accepted delivery, queued for the integration-ingress pg-boss worker. */
+/** One verified delivery handed to the persist-first invocation gateway. */
 export interface IngressJobPayload {
   slug: string;
   body: Record<string, unknown>;
@@ -17,7 +17,7 @@ export interface IngressJobPayload {
 export interface IngressRoutesDeps {
   soulLoader: SoulLoader;
   deliveries: IngressDeliveriesRepo;
-  enqueue: (job: IngressJobPayload) => Promise<void>;
+  invoke: (job: IngressJobPayload) => Promise<void>;
   /** Resolves a `secret://` env value to plaintext; plaintext values need no resolver. */
   resolveSecret?: (value: string) => Promise<string | undefined>;
 }
@@ -31,8 +31,8 @@ const NOT_FOUND = { error: "integration ingress not found" };
  * are all driven by the integration manifest's declarative `ingress.webhook` block. Registered
  * in its own Fastify plugin scope so the JSON content-type parser can capture the raw body
  * (`parseAs: "buffer"`) for HMAC verification without affecting any other route. Does only
- * cheap synchronous work (verify → handshake → dedup → enqueue) and acks inside the provider's
- * ack window; all real processing happens on the pg-boss worker.
+ * cheap synchronous work (verify → handshake → dedup → persist) and acks inside the provider's
+ * acknowledgement window; all real processing is claimed from the durable Run store.
  */
 export async function registerIngressRoutes(
   app: FastifyInstance,
@@ -50,9 +50,8 @@ export async function registerIngressRoutes(
           description:
             "Inbound webhook receiver for an installed integration. Signature-verified, " +
             "challenge-answered, and deduped per the integration manifest's declarative " +
-            "ingress config; accepted deliveries are queued for async processing " +
-            "(chat injection or integration.event) through the integration's sandboxed " +
-            "classifier.",
+            "ingress config; accepted deliveries create a durable Integration Run before the " +
+            "request is acknowledged.",
           tags: ["ingress"],
           params: {
             type: "object",
@@ -144,7 +143,7 @@ export async function registerIngressRoutes(
           }
         }
 
-        await deps.enqueue({ slug: name, body, headers });
+        await deps.invoke({ slug: name, body, headers });
         return reply.code(200).send({});
       }
     );

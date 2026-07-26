@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Queryable } from "../db";
-import { hashPassword } from "./passwords";
+import type { Queryable } from "../../db";
+import { hashPassword } from "../passwords";
 
 export type Role = "admin" | "member";
 

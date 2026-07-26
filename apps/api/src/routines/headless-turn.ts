@@ -1,6 +1,6 @@
 import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ToolSet } from "ai";
-import type { ToolRegistry } from "../tools/registry";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { RequestContext } from "../tools/types";
 
 /** Max model steps for a routine-spawned agent turn (tool loop bound). */

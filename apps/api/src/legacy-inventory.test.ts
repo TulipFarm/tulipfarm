@@ -6,11 +6,9 @@ import { describe, expect, it } from "vitest";
  * Machine verification of the legacy-bypass inventory (AW-006).
  *
  * The inventory at `docs/architecture/legacy-inventory.md` is the cutover contract that AW-096
- * consumes to prove no listed bypass remains. This test is the mechanical gate that keeps the
- * inventory accurate and well-formed: every listed legacy path must still exist today (so the
- * inventory is not stale), and every row must name a replacement task, a cutover test, and a
- * removal owner. AW-096 later inverts the existence check — the same rows must resolve to paths
- * that are gone.
+ * consumes to prove no listed bypass remains. AW-096 has completed the cutover, so every listed
+ * path must now be absent while each row remains as historical evidence with its replacement,
+ * cutover test, and removal owner.
  */
 
 /** Walk up from this file to the pnpm workspace root (worktree-safe). */
@@ -107,13 +105,13 @@ describe("legacy bypass inventory (AW-006)", () => {
     expect(new Set(ids).size, "LB ids must be unique").toBe(ids.length);
   });
 
-  it("cites a legacy path that still exists today (inventory is not stale)", () => {
+  it("proves every inventoried legacy path has been removed", () => {
     for (const r of rows) {
       const paths = backticked(r.legacyPath);
       expect(paths.length, `row ${r.id} must cite a backticked legacy path`).toBeGreaterThan(0);
       for (const p of paths) {
-        expect(existsSync(resolve(ROOT, p)), `row ${r.id}: legacy path "${p}" must exist`).toBe(
-          true
+        expect(existsSync(resolve(ROOT, p)), `row ${r.id}: legacy path "${p}" must be gone`).toBe(
+          false
         );
       }
     }

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SoulLoader } from "./soul-loader";
+import { SoulLoader } from "./published-loader";
 
 const TMP = join(import.meta.dirname, "__soul_test_tmp__");
 
@@ -70,13 +70,10 @@ describe("SoulLoader", () => {
       expect(loader.agents.get("plain")?.body).toBe("Just body text.");
     });
 
-    it("skips agent with missing AGENT.md, logs warn", async () => {
+    it("fails closed when a published agent is missing AGENT.md", async () => {
       await mkdirs(join(TMP, "agents", "broken"));
-      const logger = makeLogger();
-      const loader = new SoulLoader(TMP, logger);
-      await loader.load();
-      expect(loader.agents.size).toBe(0);
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("broken"));
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow('agent "broken"');
     });
   });
 
@@ -130,6 +127,13 @@ describe("SoulLoader", () => {
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
       expect(loader.resources.get("ticket")?.hookSource).toBeUndefined();
+    });
+
+    it("fails closed when hooks.ts exists but cannot be read as a file", async () => {
+      await write(join(TMP, "resources", "ticket", "schema.yml"), "type: object\n");
+      await mkdirs(join(TMP, "resources", "ticket", "hooks.ts"));
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow('resource "ticket"');
     });
 
     it("hooksEnabled defaults to true when x-hooks-enabled absent", async () => {
@@ -192,15 +196,11 @@ describe("SoulLoader", () => {
       expect(logger.warn).not.toHaveBeenCalledWith(expect.stringContaining("hook integrity"));
     });
 
-    it("skips resource with invalid YAML, logs warn, others still load", async () => {
+    it("fails closed when a published resource contains invalid YAML", async () => {
       await write(join(TMP, "resources", "bad", "schema.yml"), "{ broken yaml: [}");
       await write(join(TMP, "resources", "good", "schema.yml"), "type: object\n");
-      const logger = makeLogger();
-      const loader = new SoulLoader(TMP, logger);
-      await loader.load();
-      expect(loader.resources.has("bad")).toBe(false);
-      expect(loader.resources.has("good")).toBe(true);
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("bad"));
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow('resource "bad"');
     });
   });
 
@@ -283,16 +283,13 @@ describe("SoulLoader", () => {
       expect(loaded?.ingressHandler?.hash).toBe(createHash("sha256").update(handler).digest("hex"));
     });
 
-    it("warns and loads without ingressHandler when the declared handler file is missing", async () => {
+    it("fails closed when a declared ingress handler is missing", async () => {
       await write(
         join(TMP, "integrations", "broken", "manifest.yml"),
         "name: broken\negress:\n  type: mcp\n  entry:\n    transport: stdio\n    command: echo\ningress:\n  handler: ingress.ts\n  webhook:\n    security:\n      type: hmac_sha256\n      header: X-Sig\n      secret_env: SECRET\n"
       );
-      const logger = makeLogger();
-      const loader = new SoulLoader(TMP, logger);
-      await loader.load();
-      expect(loader.integrations.get("broken")?.ingressHandler).toBeUndefined();
-      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("ingress disabled"));
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow("declares ingress.handler");
     });
 
     it("confines the handler path to the integration dir (basename only)", async () => {
@@ -302,9 +299,8 @@ describe("SoulLoader", () => {
         "name: sneaky\negress:\n  type: mcp\n  entry:\n    transport: stdio\n    command: echo\ningress:\n  handler: ../../outside.ts\n  webhook:\n    security:\n      type: hmac_sha256\n      header: X-Sig\n      secret_env: SECRET\n"
       );
       const loader = new SoulLoader(TMP, makeLogger());
-      await loader.load();
       // basename() reduces ../../outside.ts to outside.ts inside the integration dir → missing.
-      expect(loader.integrations.get("sneaky")?.ingressHandler).toBeUndefined();
+      await expect(loader.load()).rejects.toThrow('ingress.handler "outside.ts"');
     });
   });
 

@@ -18,9 +18,9 @@ function request() {
 }
 
 function runtime() {
-  const decide = vi.fn(() => true);
+  const decide = vi.fn(async () => true);
   const enqueueWake = vi.fn(async () => undefined);
-  const listPending = vi.fn(() => [
+  const listPending = vi.fn(async () => [
     {
       approvalId: "approval-tool",
       toolCallId: "call-1",

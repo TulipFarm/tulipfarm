@@ -15,8 +15,8 @@ import { makePglite } from "../test/pglite";
 import { definitionHash } from "./definition-hash";
 import type { RoutineRunJob, RoutineWakeJob } from "./jobs";
 import { RoutineRegistry } from "./registry";
-import { RoutineRunsRepo } from "./repo";
 import { WEBHOOK_SECRET_HEADER } from "./routes";
+import { RoutineRunsRepo } from "./run-store-adapter";
 import { RoutineTriggerService } from "./trigger-service";
 
 const TEST_CSRF = "a".repeat(64);

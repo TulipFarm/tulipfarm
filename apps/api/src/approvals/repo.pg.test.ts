@@ -3,7 +3,7 @@ import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { ApprovalsRepo } from "./repo";
+import { ApprovalsRepo } from "./runtime-repo";
 
 describe("ApprovalsRepo (PGlite)", () => {
   let db: PGlite;
@@ -65,6 +65,20 @@ describe("ApprovalsRepo (PGlite)", () => {
     await repo.settle(id, "denied");
     const row = await repo.findById(id);
     expect(row?.status).toBe("denied");
+  });
+
+  it("settlePending is atomic and rejects replay", async () => {
+    const id = randomUUID();
+    await repo.insert({
+      id,
+      kind: "tool_call",
+      payload: {},
+      expiresAt: new Date(Date.now() + 300_000),
+    });
+
+    expect(await repo.settlePending(id, "approved")).toBe(true);
+    expect(await repo.settlePending(id, "denied")).toBe(false);
+    expect((await repo.findById(id))?.status).toBe("approved");
   });
 
   it("findById returns null for unknown id", async () => {

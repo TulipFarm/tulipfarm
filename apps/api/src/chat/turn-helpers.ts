@@ -1,9 +1,9 @@
 import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { KnowledgeService } from "../knowledge/service";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import type { PlatformAgent } from "../soul/agents/registry";
-import type { ToolRegistry } from "../tools/registry";
 import {
   fromAssistantParts,
   fromAssistantText,
@@ -244,15 +244,16 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
 }
 
 // Per-agent tool scoping (shared by the chat turn's toolset build, its <available-tools> prompt
-// block, and the debug-context route): a platform allowlist is applied when supplied; otherwise
-// every registered tool is exposed. The built-in assistant intentionally receives the full set.
+// block, and the debug-context route): a platform allowlist is applied when supplied. The built-in
+// assistant receives an explicit snapshot of the registered set; it never relies on an undefined
+// allowlist, which the production adapter treats as deny-all.
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined
 ): ReadonlySet<string> | undefined {
   if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
   if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
-  return undefined;
+  return new Set(toolRegistry.getAll().map((toolDefinition) => toolDefinition.name));
 }
 
 /**

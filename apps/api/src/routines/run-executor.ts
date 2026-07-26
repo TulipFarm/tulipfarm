@@ -18,7 +18,7 @@ import type {
   RunStatus,
   RunTransitionGuard,
   RunTransitionPatch,
-} from "./repo";
+} from "./run-store-adapter";
 import { makeRunJournalEmitter, publishRunEvents, runStreamId } from "./stream-adapter";
 
 type DriverLogger = {

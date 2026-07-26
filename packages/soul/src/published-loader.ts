@@ -27,8 +27,11 @@ async function subdirs(dir: string): Promise<string[]> {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries.filter((e) => e.isDirectory()).map((e) => e.name);
-  } catch {
-    return [];
+  } catch (err) {
+    const isNotFound =
+      err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
+    if (isNotFound) return [];
+    throw err;
   }
 }
 
@@ -36,9 +39,17 @@ async function fileExists(path: string): Promise<boolean> {
   try {
     await readFile(path);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const isNotFound =
+      err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
+    if (isNotFound) return false;
+    throw err;
   }
+}
+
+function artifactLoadError(kind: string, name: string, err: unknown): Error {
+  const detail = err instanceof Error ? err.message : String(err);
+  return new Error(`Soul: failed to load published ${kind} "${name}": ${detail}`);
 }
 
 export class SoulLoader {
@@ -119,9 +130,7 @@ export class SoulLoader {
         const { frontmatter, body } = parseFrontmatter(content);
         map.set(name, { name, frontmatter, body });
       } catch (err) {
-        this.logger.warn(
-          `Soul: skipping agent "${name}" — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("agent", name, err);
       }
     }
     return map;
@@ -137,9 +146,7 @@ export class SoulLoader {
         const { frontmatter, body } = parseFrontmatter(content);
         map.set(name, { name, frontmatter, body });
       } catch (err) {
-        this.logger.warn(
-          `Soul: skipping skill "${name}" — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("skill", name, err);
       }
     }
     return map;
@@ -163,9 +170,7 @@ export class SoulLoader {
         const hooksEnabled = schema["x-hooks-enabled"] !== false;
         map.set(name, { name, schema, hasHooks, hookSource, hookHash, hooksEnabled });
       } catch (err) {
-        this.logger.warn(
-          `Soul: skipping resource "${name}" — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("resource", name, err);
       }
     }
     return map;
@@ -187,9 +192,7 @@ export class SoulLoader {
           : undefined;
         map.set(name, { name, config, hasHooks, hookSource, hookHash });
       } catch (err) {
-        this.logger.warn(
-          `Soul: skipping routine "${name}" — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("routine", name, err);
       }
     }
     return map;
@@ -208,14 +211,10 @@ export class SoulLoader {
 
         // Validate egress block minimally
         if (!manifestRaw.egress?.type) {
-          this.logger.warn(`Soul: skipping integration "${slug}" — manifest.egress.type missing`);
-          continue;
+          throw new Error("manifest.egress.type missing");
         }
         if (manifestRaw.egress.type === "mcp" && !manifestRaw.egress.entry?.transport) {
-          this.logger.warn(
-            `Soul: skipping integration "${slug}" — manifest.egress.entry.transport missing`
-          );
-          continue;
+          throw new Error("manifest.egress.entry.transport missing");
         }
 
         let connection: IntegrationConnection | undefined;
@@ -246,9 +245,11 @@ export class SoulLoader {
               source,
               hash: createHash("sha256").update(source).digest("hex"),
             };
-          } catch {
-            this.logger.warn(
-              `Soul: integration "${slug}" declares ingress.handler "${handlerFile}" but the file is missing — ingress disabled`
+          } catch (err) {
+            throw new Error(
+              `declares ingress.handler "${handlerFile}" but it could not be loaded: ${
+                err instanceof Error ? err.message : String(err)
+              }`
             );
           }
         }
@@ -264,9 +265,7 @@ export class SoulLoader {
           ingressHandler,
         });
       } catch (err) {
-        this.logger.warn(
-          `Soul: skipping integration "${slug}" — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("integration", slug, err);
       }
     }
     return map;
@@ -280,9 +279,7 @@ export class SoulLoader {
       const isNotFound =
         err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
       if (!isNotFound) {
-        this.logger.warn(
-          `Soul: skipping ${label} — ${err instanceof Error ? err.message : String(err)}`
-        );
+        throw artifactLoadError("configuration", label, err);
       }
       return null;
     }

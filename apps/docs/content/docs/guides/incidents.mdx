@@ -1,0 +1,33 @@
+---
+title: Respond to an incident
+description: Contain mutations, preserve evidence, recover, and close an incident.
+---
+
+## Triage
+
+1. Assign an incident owner, severity, start time, affected business, and safe reason code.
+2. Correlate request, event, Run, State, effect, Integration, sandbox, model, and audit identifiers.
+   Do not copy prompts, credentials, cookies, Tool arguments, or results into the incident record.
+3. Determine whether accepted durable work is safe to continue.
+
+## Contain
+
+Use the deployment's durable kill-switch store to stop the narrowest affected mutation scope:
+Agent, Routine, Tool, provider, Integration, destination, model, data class, or all mutations.
+The effect dispatcher checks the switch before creating an attempt or calling an adapter. If
+switch state cannot be read, mutation dispatch fails closed.
+
+Evidence: `packages/tool-broker/src/effects/dispatch.test.ts`
+
+Do not bypass the Tool Broker, substitute another Credential, or fall back to unsandboxed
+execution. Preserve ambiguous effects for reconciliation.
+
+## Recover and close
+
+1. Verify the fault is removed and required capability checks pass.
+2. Reconcile ambiguous effects before retrying.
+3. Restore dispatch gradually and watch for recurrence.
+4. Verify the audit chain, record the recovery action, and perform a denied-access smoke check.
+5. Close with timeline, impact, evidence references, corrective actions, and an owner.
+
+Evidence: `packages/run-kernel/src/reconcile-state.test.ts`

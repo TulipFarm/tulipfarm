@@ -11,19 +11,20 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
-import type { A2uiSurfaceStore } from "./a2ui/surface-store";
+import type { A2uiSurfaceStore } from "./a2ui/artifact-surface";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
-import type { ApprovalsRepo } from "./approvals/repo";
+import { DurableApprovalGate } from "./approvals/chat-gate";
 import { registerApprovalRoutes } from "./approvals/routes";
+import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
-import { ApprovalRegistry } from "./chat/approvals";
+import type { ToolRegistry } from "./broker/tool-adapter";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
 import type { PendingInteractionRepo } from "./chat/pending-interactions";
@@ -38,9 +39,6 @@ import type { HookExecutor } from "./hooks/hook-executor";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
-import { resolveConnectionEnv } from "./integrations/connection-env";
-import { McpClientService } from "./integrations/mcp-client-service";
-import type { PageRetrievalService } from "./knowledge/retrieval-service";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -60,18 +58,17 @@ import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
+import type { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
-import { registerIntegrationRoutes } from "./soul/integrations/routes";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
 import { registerSkillRoutes } from "./soul/skills/routes";
 import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
-import type { ToolRegistry } from "./tools/registry";
 import { buildToolRegistry } from "./tools/setup";
 import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes";
 
@@ -104,10 +101,8 @@ export interface AppOptions {
   /** Standalone and resumable governed form submissions. */
   forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
-  retrievalService?: PageRetrievalService;
   toolRegistry?: ToolRegistry;
-  mcpClient?: McpClientService;
-  approvalRegistry?: ApprovalRegistry;
+  approvalRegistry?: DurableApprovalGate;
   guardrailsService?: GuardrailsService;
   pendingInteractionRepo?: PendingInteractionRepo;
   a2uiSurfaceStore?: A2uiSurfaceStore;
@@ -128,6 +123,8 @@ export interface AppOptions {
   systemRoutes?: SystemRoutesDeps;
   /** Authorized Phase 9 browser read models and server-side command authorities. */
   operationalApi?: OperationalApiDeps;
+  /** Persist-first authority shared by Chat and every Trigger ingress. */
+  invocations?: DurableInvocationGateway;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -190,7 +187,7 @@ export async function buildApp(opts: AppOptions = {}) {
     ],
     // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
     // X-Message-Id is the just-streamed reply's persisted id, so the client can attach feedback to it.
-    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id"],
+    exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id", "X-Run-Id"],
   });
 
   await app.register(helmet, {
@@ -278,15 +275,6 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
-    // MCP client service: created once, shared between integration routes (connect/disconnect) and
-    // the tool registry (dynamic tool registration). Accepts an optional override for testing.
-    const secretsSvc = opts.secretsService;
-    const mcpClientSvc =
-      opts.mcpClient ??
-      new McpClientService(
-        app.log,
-        secretsSvc ? (env) => resolveConnectionEnv(env, secretsSvc) : undefined
-      );
     // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
     const soulPath = process.env.SOUL_PATH;
@@ -370,16 +358,6 @@ export async function buildApp(opts: AppOptions = {}) {
             ? () => knowledgeService.hasAnyKnowledgePage()
             : undefined,
         });
-        registerIntegrationRoutes(
-          app,
-          opts.soulLoader,
-          opts.gitSync,
-          mcpClientSvc,
-          requireAuth,
-          opts.llmService,
-          opts.secretsService,
-          opts.rateLimiter
-        );
         if (opts.llmService) {
           registerSkillRoutes(
             app,
@@ -420,20 +398,8 @@ export async function buildApp(opts: AppOptions = {}) {
           workingMemory: opts.workingMemoryService,
           kv: opts.kvService,
           knowledge: opts.knowledgeService,
-          mcpClient: mcpClientSvc,
-          soulLoader: opts.soulLoader,
         });
-      // When an external registry is provided (e.g. from index.ts which builds the full registry
-      // separately), the inner buildToolRegistry above is skipped, so mcpClientSvc never gets its
-      // registry wired. Do it here so integration tools registered on connect/disconnect land in
-      // the same registry the chat turn uses.
-      if (opts.toolRegistry) {
-        mcpClientSvc.setRegistry(opts.toolRegistry);
-        if (opts.soulLoader?.integrations) {
-          void mcpClientSvc.startAll(opts.soulLoader.integrations);
-        }
-      }
-      const approvalRegistry = opts.approvalRegistry ?? new ApprovalRegistry();
+      const approvalRegistry = opts.approvalRegistry ?? new DurableApprovalGate();
       registerChatRoutes(
         app,
         opts.llmService,
@@ -450,7 +416,8 @@ export async function buildApp(opts: AppOptions = {}) {
         approvalRegistry,
         opts.guardrailsService,
         opts.pendingInteractionRepo,
-        opts.a2uiSurfaceStore
+        opts.a2uiSurfaceStore,
+        opts.invocations
       );
       registerApprovalRoutes(
         app,
@@ -490,7 +457,7 @@ export async function buildApp(opts: AppOptions = {}) {
         app,
         opts.knowledgeService,
         requireAuth,
-        opts.retrievalService,
+        undefined,
         opts.activityService
       );
     }

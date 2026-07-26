@@ -6,10 +6,10 @@ import { StreamHub } from "../chat/stream-hub";
 import { DOMAIN_EVENTS } from "../domain-events";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { RoutineRunDriver, type RoutineSandbox } from "./driver";
 import type { RoutineRunJob, RoutineWakeJob } from "./jobs";
 import { RoutineRegistry } from "./registry";
-import { RoutineRunsRepo } from "./repo";
+import { RoutineRunDriver, type RoutineSandbox } from "./run-executor";
+import { RoutineRunsRepo } from "./run-store-adapter";
 import { RoutineTriggerService, subscribeRoutineEventTriggers } from "./trigger-service";
 
 /**

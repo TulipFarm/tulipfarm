@@ -1,7 +1,7 @@
 import type { ResolvedFunction, RunSnapshot } from "@tulipfarm/routine-engine";
-import type { ToolRegistry } from "../tools/registry";
-import type { ActionExecutor } from "./driver";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import { type HeadlessTurnDeps, ROUTINE_ACTOR, runHeadlessTurn } from "./headless-turn";
+import type { ActionExecutor } from "./run-executor";
 
 /**
  * Bridges the engine's `operation` actions onto the platform (D7): `tool:` targets run

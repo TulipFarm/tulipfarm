@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
+import { MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
 import {
   attachToStream,
   mapStreamPart,

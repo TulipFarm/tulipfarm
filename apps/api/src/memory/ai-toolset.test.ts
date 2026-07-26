@@ -33,7 +33,18 @@ function exec(set: ToolSet, name: string, args: unknown): Promise<ToolCallResult
 function setup(): { set: ToolSet; repo: FakeWorkingMemoryRepo } {
   const repo = new FakeWorkingMemoryRepo();
   const registry = buildToolRegistry({ workingMemory: new WorkingMemoryService(repo) });
-  return { set: registry.buildToolSet({ userId: "u1" }), repo };
+  const allowedToolNames = new Set(registry.getAll().map((tool) => tool.name));
+  return {
+    set: registry.buildToolSet(
+      { userId: "u1" },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      allowedToolNames
+    ),
+    repo,
+  };
 }
 
 describe("memory tools via ToolRegistry", () => {

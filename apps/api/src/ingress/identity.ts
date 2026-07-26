@@ -1,7 +1,7 @@
 import type { ChatIngressConfig } from "@tulipfarm/soul";
 import type { FastifyBaseLogger } from "fastify";
 import type { IngressUserLookup, UserDoc } from "../auth/users";
-import type { ToolRegistry } from "../tools/registry";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import { executeToolBinding, extractFromToolResult } from "./bindings";
 
 /**
