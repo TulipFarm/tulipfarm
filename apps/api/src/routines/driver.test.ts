@@ -5,9 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StreamHub } from "../chat/stream-hub";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { type ActionExecutor, RoutineRunDriver, type RoutineSandbox } from "./driver";
 import type { RoutineRegistry } from "./registry";
-import { RoutineRunsRepo } from "./repo";
+import { type ActionExecutor, RoutineRunDriver, type RoutineSandbox } from "./run-executor";
+import { RoutineRunsRepo } from "./run-store-adapter";
 import { RunJournalStreamRepo, runStreamId } from "./stream-adapter";
 
 function makeSandbox(hookResults: Record<string, unknown> = {}): RoutineSandbox {

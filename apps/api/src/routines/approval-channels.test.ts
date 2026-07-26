@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApprovalsRepo } from "../approvals/repo";
+import { ApprovalsRepo } from "../approvals/runtime-repo";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import type { ToolRegistry } from "../tools/registry";
 import type { ToolDef } from "../tools/types";
 import { makeApprovalRequester } from "./approval-channels";
-import type { RoutineRunRow } from "./repo";
+import type { RoutineRunRow } from "./run-store-adapter";
 
 function makeRun(): RoutineRunRow {
   return {

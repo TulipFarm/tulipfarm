@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/storage": "workspace:*"

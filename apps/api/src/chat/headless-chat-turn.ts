@@ -4,7 +4,7 @@ import {
   prepareChatTurn,
   startChatTurn,
   type TurnInput,
-} from "./turn";
+} from "../runtime/chat-run";
 
 export type HeadlessTurnStatus = "ok" | "guardrail_block" | "error" | "prepare_error";
 

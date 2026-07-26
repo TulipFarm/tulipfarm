@@ -6,8 +6,33 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
-import type { A2uiSurfaceStore } from "../a2ui/surface-store";
+import type { A2uiSurfaceStore } from "../a2ui/artifact-surface";
+import { type DurableApprovalGate, makeApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
+import type { RunToolCallGuard, ToolRegistry } from "../broker/tool-adapter";
+import { compactHistory, estimateTokens } from "../chat/compaction";
+import type { ConversationDoc, ConversationRepo } from "../chat/conversations";
+import { fromUserText, type MessageRepo, toModelMessage } from "../chat/messages";
+import type { PendingInteractionRepo } from "../chat/pending-interactions";
+import { attachToStream, type OutputScan, runChatStream } from "../chat/producer";
+import { writeSseHeaders } from "../chat/sse";
+import { makeStreamEmitter } from "../chat/stream-emitter";
+import type { StreamHub } from "../chat/stream-hub";
+import type { StreamResumeRepo } from "../chat/stream-resume";
+import { assembleAgentSystemPrompt } from "../chat/system-prompt";
+import { buildAndStoreTitle } from "../chat/title";
+import {
+  allowedToolNamesFor,
+  availableToolsFor,
+  buildTurnLog,
+  type ChatBody,
+  canGroundKnowledge,
+  corsPassthrough,
+  type PersistableStep,
+  patchToolResult,
+  persistStep,
+  SUMMARY_PROMPT,
+} from "../chat/turn-helpers";
 import { DOMAIN_EVENTS } from "../domain-events";
 import type { GuardContext, GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
@@ -28,32 +53,7 @@ import {
 import { buildSoulCatalogue } from "../soul/catalogue";
 import { type EagerSkill, listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
-import type { RunToolCallGuard, ToolRegistry } from "../tools/registry";
 import type { ToolCallResult } from "../tools/types";
-import { type ApprovalRegistry, makeApprovalGate } from "./approvals";
-import { compactHistory, estimateTokens } from "./compaction";
-import type { ConversationDoc, ConversationRepo } from "./conversations";
-import { fromUserText, type MessageRepo, toModelMessage } from "./messages";
-import type { PendingInteractionRepo } from "./pending-interactions";
-import { attachToStream, type OutputScan, runChatStream } from "./producer";
-import { writeSseHeaders } from "./sse";
-import { makeStreamEmitter } from "./stream-emitter";
-import type { StreamHub } from "./stream-hub";
-import type { StreamResumeRepo } from "./stream-resume";
-import { assembleAgentSystemPrompt } from "./system-prompt";
-import { buildAndStoreTitle } from "./title";
-import {
-  allowedToolNamesFor,
-  availableToolsFor,
-  buildTurnLog,
-  type ChatBody,
-  canGroundKnowledge,
-  corsPassthrough,
-  type PersistableStep,
-  patchToolResult,
-  persistStep,
-  SUMMARY_PROMPT,
-} from "./turn-helpers";
 
 /**
  * Per-instance dependencies for one chat turn: the injected services plus the in-process state that
@@ -72,7 +72,7 @@ export interface ChatTurnContext {
   events?: EventEmitter;
   toolRegistry?: ToolRegistry;
   guardrails?: GuardrailsService;
-  approvalRegistry: ApprovalRegistry;
+  approvalRegistry: DurableApprovalGate;
   pendingInteractions: PendingInteractionRepo;
   surfaceStore: A2uiSurfaceStore;
   streamControllers: Map<string, AbortController>;

@@ -2,18 +2,18 @@ import { randomUUID } from "node:crypto";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { LlmService } from "@tulipfarm/llm";
 import { describe, expect, it, vi } from "vitest";
-import { MemoryA2uiSurfaceStore } from "../a2ui/surface-store";
+import { MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
+import { DurableApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
 import { GuardrailsService } from "../guardrails";
 import type { PaginatedResult } from "../pagination";
-import { ApprovalRegistry } from "./approvals";
+import type { ChatTurnContext } from "../runtime/chat-run";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { runHeadlessChatTurn } from "./headless-chat-turn";
 import type { MessageDoc, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
-import type { ChatTurnContext } from "./turn";
 
 const V3_USAGE = {
   inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
@@ -110,7 +110,7 @@ function makeCtx(model: LanguageModelV3, guardrails?: GuardrailsService) {
     streamRepo,
     hub: new StreamHub(),
     guardrails,
-    approvalRegistry: new ApprovalRegistry(),
+    approvalRegistry: new DurableApprovalGate(),
     pendingInteractions: new MemoryPendingInteractionRepo(),
     surfaceStore: new MemoryA2uiSurfaceStore(),
     streamControllers: new Map(),

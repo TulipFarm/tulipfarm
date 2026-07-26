@@ -7,9 +7,9 @@ import { indexPage, reindexAll } from "./index-service";
 import type { KnowledgeLinksRepo } from "./links-repo";
 import { parseOkf, resolveLink, rewriteCrossPageSpaceName } from "./okf/parse";
 import { type IndexEntry, renderIndex } from "./okf/synthesize";
+import type { PageRetrievalService } from "./page-search-adapter";
 import type { KnowledgePageRepo, KnowledgeRevisionRepo, PageListOpts } from "./repo";
 import { resolveRerank } from "./rerank";
-import type { PageRetrievalService } from "./retrieval-service";
 import { search } from "./search-service";
 import type { KnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
 import type { KnowledgeSpaceRepo, SpacePatch } from "./spaces-repo";
@@ -131,7 +131,7 @@ export interface KnowledgeServiceDeps {
   revisions: KnowledgeRevisionRepo;
   embeddings: EmbeddingPort;
   /** Page-level lexical retrieval — the lexical arm of `hybridSearchPages`. */
-  retrieval: PageRetrievalService;
+  retrieval?: PageRetrievalService;
   /** When set, page writes enqueue async (re)indexing instead of indexing inline. */
   enqueueIndex?: (pageId: string) => Promise<void>;
   /** Operational stats for the async index queue (pg-boss). Absent → index-status omits queue info. */
@@ -344,7 +344,9 @@ export class KnowledgeService {
     }
 
     // ── lexical arm: whole-page FTS ──
-    const lexHits = await this.deps.retrieval.searchPages({ query, filters, limit: N });
+    const lexHits = this.deps.retrieval
+      ? await this.deps.retrieval.searchPages({ query, filters, limit: N })
+      : [];
     const pagesL = lexHits.map((h) => h.pageId);
     const lexicalSnippet = new Map(lexHits.map((h) => [h.pageId, h.snippet]));
 

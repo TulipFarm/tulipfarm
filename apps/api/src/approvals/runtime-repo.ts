@@ -26,9 +26,8 @@ function rowToApproval(row: Record<string, unknown>): ApprovalRow {
 }
 
 /**
- * DB-backed store for approval rows (AGT-V1-002). Serves as an audit trail for
- * tool-call approvals and will store routine human_approval states (v0.11).
- * Tool-call approvals remain in-memory-authoritative; this repo is write-through only.
+ * Authoritative DB-backed store for Tool Approval and Routine human-approval rows
+ * (AGT-V1-002). Atomic pending-state settlement prevents replayed decisions.
  */
 export class ApprovalsRepo {
   constructor(private readonly db: Queryable) {}
@@ -51,6 +50,17 @@ export class ApprovalsRepo {
       id,
       status,
     ]);
+  }
+
+  async settlePending(id: string, status: Exclude<ApprovalStatus, "pending">): Promise<boolean> {
+    const { rows } = await this.db.query(
+      `UPDATE approvals
+       SET status = $2, resolved_at = now()
+       WHERE id = $1 AND status = 'pending'
+       RETURNING id`,
+      [id, status]
+    );
+    return rows.length === 1;
   }
 
   async findById(id: string): Promise<ApprovalRow | null> {

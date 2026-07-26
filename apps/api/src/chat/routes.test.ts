@@ -11,6 +11,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
+import { ToolRegistry } from "../broker/tool-adapter";
 import { GuardrailsService } from "../guardrails";
 import { MAX_HISTORY_TOKENS } from "../memory/limits";
 import { WorkingMemoryService } from "../memory/service";
@@ -20,7 +21,6 @@ import {
   type WorkingMemoryRepo,
 } from "../memory/working-memory";
 import { encodeCursor, type PaginatedResult } from "../pagination";
-import { ToolRegistry } from "../tools/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";

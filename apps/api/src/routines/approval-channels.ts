@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { ApprovalsRepo } from "../approvals/repo";
-import type { ToolRegistry } from "../tools/registry";
-import type { ApprovalRequester } from "./driver";
+import type { ApprovalsRepo } from "../approvals/runtime-repo";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import { ROUTINE_ACTOR } from "./headless-turn";
+import type { ApprovalRequester } from "./run-executor";
 
 /** Routine approvals wait for humans — give them days, not the tool-call 5 minutes. */
 export const ROUTINE_APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;

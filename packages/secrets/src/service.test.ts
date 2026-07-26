@@ -1,10 +1,9 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { encryptSecret } from "./crypto";
+import { SecretsService, SecretUnavailableError } from "./encrypted-store";
 import type { ActiveDek } from "./key-manager";
-import type { EncryptionKeys } from "./keys";
 import type { SecretDoc, SecretEnvelopeFields, SecretRepo } from "./repo";
-import { SecretsService, SecretUnavailableError } from "./service";
 
 class FakeRepo implements SecretRepo {
   readonly docs = new Map<string, SecretDoc>();
@@ -206,31 +205,11 @@ describe("SecretsService", () => {
 });
 
 describe("SecretsService — legacy rows (pre-backfill)", () => {
-  it("decrypts a legacy (dek_id NULL) row under the configured env KEK", async () => {
-    const repo = new FakeRepo();
-    const envKey = randomBytes(32);
-    const legacyKeys: EncryptionKeys = { current: envKey };
-    seedLegacy(repo, "legacy.key", "old-secret", envKey);
-
-    const svc = new SecretsService(repo, makeDek(), { legacyKeys });
-    expect(await svc.get("legacy.key")).toBe("old-secret");
-  });
-
-  it("decrypts a legacy row under the previous env KEK after env-key rotation", async () => {
-    const repo = new FakeRepo();
-    const oldEnvKey = randomBytes(32);
-    const legacyKeys: EncryptionKeys = { current: randomBytes(32), previous: oldEnvKey };
-    seedLegacy(repo, "legacy.key", "old-secret", oldEnvKey);
-
-    const svc = new SecretsService(repo, makeDek(), { legacyKeys });
-    expect(await svc.get("legacy.key")).toBe("old-secret");
-  });
-
-  it("throws when a legacy row exists but no legacy key is configured", async () => {
+  it("fails closed when a pre-cutover row remains after the required backfill", async () => {
     const repo = new FakeRepo();
     seedLegacy(repo, "legacy.key", "old-secret", randomBytes(32));
 
-    const svc = new SecretsService(repo, makeDek()); // no legacyKeys
+    const svc = new SecretsService(repo, makeDek());
     await expect(svc.get("legacy.key")).rejects.toBeInstanceOf(SecretUnavailableError);
   });
 
@@ -240,7 +219,7 @@ describe("SecretsService — legacy rows (pre-backfill)", () => {
     seedLegacy(repo, "legacy.key", "old-secret", envKey);
 
     const dek = makeDek();
-    const svc = new SecretsService(repo, dek, { legacyKeys: { current: envKey } });
+    const svc = new SecretsService(repo, dek);
     await svc.set("legacy.key", "new-secret"); // re-encrypts under the DEK + tags dekId
 
     expect(repo.docs.get("legacy.key")?.dekId).toBe(dek.dekId);

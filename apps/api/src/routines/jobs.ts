@@ -1,7 +1,7 @@
 import type { PgBoss } from "pg-boss";
-import type { ApprovalsRepo } from "../approvals/repo";
-import type { RoutineRunDriver } from "./driver";
-import type { RoutineRunsRepo } from "./repo";
+import type { ApprovalsRepo } from "../approvals/runtime-repo";
+import type { RoutineRunDriver } from "./run-executor";
+import type { RoutineRunsRepo } from "./run-store-adapter";
 
 export const ROUTINE_RUN_QUEUE = "routine-run";
 export const ROUTINE_WAKE_QUEUE = "routine-wake";

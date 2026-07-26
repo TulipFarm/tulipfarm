@@ -8,7 +8,7 @@ import { corsPassthrough, parseLastEventId } from "../chat/turn-helpers";
 import { definitionHash } from "./definition-hash";
 import type { RoutineEnqueuers } from "./jobs";
 import type { RoutineRegistry } from "./registry";
-import type { RoutineRunsRepo } from "./repo";
+import type { RoutineRunsRepo } from "./run-store-adapter";
 import { RunJournalStreamRepo, runStreamId } from "./stream-adapter";
 import { RoutineTriggerError, type RoutineTriggerService } from "./trigger-service";
 

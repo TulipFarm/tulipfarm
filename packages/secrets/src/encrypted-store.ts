@@ -1,7 +1,6 @@
 import { decryptSecret, encryptSecret, type SecretEnvelope } from "./crypto";
 import { assertValidSecretKey } from "./key-guard";
 import type { ActiveDek } from "./key-manager";
-import type { EncryptionKeys } from "./keys";
 import type { SecretMeta, SecretRepo, SecretType } from "./repo";
 
 export class SecretUnavailableError extends Error {}
@@ -11,10 +10,6 @@ export interface SecretsServiceDeps {
   log?: { warn: (obj: object, msg: string) => void };
   ttlMs?: number;
   staleMs?: number;
-  // Legacy env KEK(s) for decrypting rows written before envelope encryption (dek_id IS NULL).
-  // Once `keys backfill` migrates every row to the DEK, this path is dead. If omitted, a legacy
-  // row surfaces as SecretUnavailableError rather than being silently undecryptable.
-  legacyKeys?: EncryptionKeys;
 }
 
 interface CacheEntry {
@@ -28,7 +23,6 @@ export class SecretsService {
   private readonly log?: { warn: (obj: object, msg: string) => void };
   private readonly ttlMs: number;
   private readonly staleMs: number;
-  private readonly legacyKeys?: EncryptionKeys;
 
   constructor(
     private readonly repo: SecretRepo,
@@ -39,7 +33,6 @@ export class SecretsService {
     this.log = deps.log;
     this.ttlMs = deps.ttlMs ?? 300_000;
     this.staleMs = deps.staleMs ?? 900_000;
-    this.legacyKeys = deps.legacyKeys;
   }
 
   async list(): Promise<SecretMeta[]> {
@@ -89,17 +82,12 @@ export class SecretsService {
     return value;
   }
 
-  // DEK-tagged rows decrypt under the active DEK. Legacy rows (dek_id IS NULL, pre-backfill)
-  // decrypt under the env KEK(s) — the only place the secret-layer dual-key fallthrough still
-  // applies during the migration window. V1 has exactly one active DEK, so a non-null dekId always
-  // refers to it (DEK rotation, which would need a dekId→key lookup, is deferred — see board).
   private decrypt(dekId: string | null, envelope: SecretEnvelope): string {
-    if (dekId) {
-      return decryptSecret(envelope, { current: this.dek.key });
+    if (!dekId) {
+      throw new SecretUnavailableError(
+        "pre-cutover secret row remains after the required backfill"
+      );
     }
-    if (!this.legacyKeys) {
-      throw new SecretUnavailableError("legacy secret present but no legacy key is configured");
-    }
-    return decryptSecret(envelope, this.legacyKeys);
+    return decryptSecret(envelope, { current: this.dek.key });
   }
 }

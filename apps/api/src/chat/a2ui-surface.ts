@@ -1,6 +1,6 @@
+import type { A2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { compileSurface } from "../a2ui/compiler";
 import type { A2uiDataModel, A2uiSpec } from "../a2ui/spec";
-import type { A2uiSurfaceStore } from "../a2ui/surface-store";
 import type { ToolCallResult } from "../tools/types";
 import { type A2uiEventData, renderA2uiHtml, renderSurfaceEvent } from "./a2ui-render";
 

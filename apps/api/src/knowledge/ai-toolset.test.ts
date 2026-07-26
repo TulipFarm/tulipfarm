@@ -10,7 +10,15 @@ const frontendNames = new Set(FRONTEND_TOOLS.map((t) => t.name));
 describe("knowledge tools via ToolRegistry", () => {
   it("exposes the knowledge + OKF tools as an AI SDK tool set", () => {
     const registry = buildToolRegistry({ knowledge: {} as KnowledgeService });
-    const set = registry.buildToolSet({ userId: "u" });
+    const allowedToolNames = new Set(registry.getAll().map((tool) => tool.name));
+    const set = registry.buildToolSet(
+      { userId: "u" },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      allowedToolNames
+    );
     expect(
       Object.keys(set)
         .filter((k) => !frontendNames.has(k))

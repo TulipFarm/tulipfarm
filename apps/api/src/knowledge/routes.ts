@@ -3,7 +3,7 @@ import type { ActivityService } from "../activity/service";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import { parsePaginationQuery } from "../pagination";
-import type { PageHit, PageRetrievalService } from "./retrieval-service";
+import type { PageHit, PageRetrievalService } from "./page-search-adapter";
 import { type KnowledgeService, SpaceNameTakenError } from "./service";
 import type {
   IndexingStatus,

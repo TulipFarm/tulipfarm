@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { APPROVAL_TIMEOUT_MS, ApprovalRegistry } from "./approvals";
+import { APPROVAL_TIMEOUT_MS, DurableApprovalGate } from "../approvals/chat-gate";
 import type { StreamEmitter } from "./stream-emitter";
 
 interface Emitted {
@@ -20,9 +20,9 @@ function fakeEmitter(): { events: Emitted[]; emitter: StreamEmitter } {
 const reqId = (events: Emitted[]): string =>
   events.find((e) => e.type === "approval-request")?.data.approvalId as string;
 
-describe("ApprovalRegistry", () => {
+describe("DurableApprovalGate", () => {
   it("emits approval-request (with id/expiry) and resolves approved on decide", async () => {
-    const reg = new ApprovalRegistry();
+    const reg = new DurableApprovalGate();
     const { events, emitter } = fakeEmitter();
     const p = reg.request(emitter, { toolCallId: "c1", toolName: "write_x", args: { a: 1 } });
 
@@ -31,7 +31,7 @@ describe("ApprovalRegistry", () => {
     expect(typeof req?.data.approvalId).toBe("string");
     expect(typeof req?.data.expiresAt).toBe("string");
 
-    expect(reg.decide(reqId(events), "approved")).toBe(true);
+    expect(await reg.decide(reqId(events), "approved")).toBe(true);
     await expect(p).resolves.toEqual({ outcome: "approved" });
     expect(
       events.some((e) => e.type === "approval-resolved" && e.data.outcome === "approved")
@@ -39,11 +39,11 @@ describe("ApprovalRegistry", () => {
   });
 
   it("resolves denied (with reason) on decide('denied')", async () => {
-    const reg = new ApprovalRegistry();
+    const reg = new DurableApprovalGate();
     const { events, emitter } = fakeEmitter();
     const p = reg.request(emitter, { toolCallId: "c1", toolName: "write_x", args: {} });
 
-    expect(reg.decide(reqId(events), "denied")).toBe(true);
+    expect(await reg.decide(reqId(events), "denied")).toBe(true);
     await expect(p).resolves.toEqual({ outcome: "denied", reason: expect.any(String) });
     expect(events.some((e) => e.type === "approval-resolved" && e.data.outcome === "denied")).toBe(
       true
@@ -51,21 +51,21 @@ describe("ApprovalRegistry", () => {
   });
 
   it("decide returns false for an unknown or already-resolved id", async () => {
-    const reg = new ApprovalRegistry();
+    const reg = new DurableApprovalGate();
     const { events, emitter } = fakeEmitter();
-    expect(reg.decide("nope", "approved")).toBe(false);
+    expect(await reg.decide("nope", "approved")).toBe(false);
 
     const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
     const id = reqId(events);
-    expect(reg.decide(id, "approved")).toBe(true);
-    expect(reg.decide(id, "approved")).toBe(false); // already resolved
+    expect(await reg.decide(id, "approved")).toBe(true);
+    expect(await reg.decide(id, "approved")).toBe(false); // already resolved
     await p;
   });
 
   it("auto-denies (timeout) after APPROVAL_TIMEOUT_MS, then decide is a no-op", async () => {
     vi.useFakeTimers();
     try {
-      const reg = new ApprovalRegistry();
+      const reg = new DurableApprovalGate();
       const { events, emitter } = fakeEmitter();
       const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
 
@@ -75,24 +75,24 @@ describe("ApprovalRegistry", () => {
       expect(
         events.some((e) => e.type === "approval-resolved" && e.data.outcome === "timeout")
       ).toBe(true);
-      expect(reg.decide(reqId(events), "approved")).toBe(false);
+      expect(await reg.decide(reqId(events), "approved")).toBe(false);
     } finally {
       vi.useRealTimers();
     }
   });
 });
 
-describe("ApprovalRegistry.listPending", () => {
-  it("is empty with nothing in flight", () => {
-    expect(new ApprovalRegistry().listPending()).toEqual([]);
+describe("DurableApprovalGate.listPending", () => {
+  it("is empty with nothing in flight", async () => {
+    expect(await new DurableApprovalGate().listPending()).toEqual([]);
   });
 
-  it("projects an in-flight request into a listable row", () => {
-    const reg = new ApprovalRegistry();
+  it("projects an in-flight request into a listable row", async () => {
+    const reg = new DurableApprovalGate();
     const { events, emitter } = fakeEmitter();
     void reg.request(emitter, { toolCallId: "c1", toolName: "write_x", args: { a: 1 } });
 
-    const rows = reg.listPending();
+    const rows = await reg.listPending();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ toolCallId: "c1", toolName: "write_x", args: { a: 1 } });
     expect(rows[0]?.approvalId).toBe(reqId(events));
@@ -101,37 +101,37 @@ describe("ApprovalRegistry.listPending", () => {
   });
 
   it("drops an entry once it is decided", async () => {
-    const reg = new ApprovalRegistry();
+    const reg = new DurableApprovalGate();
     const { events, emitter } = fakeEmitter();
     const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
-    expect(reg.listPending()).toHaveLength(1);
+    expect(await reg.listPending()).toHaveLength(1);
 
-    reg.decide(reqId(events), "approved");
-    expect(reg.listPending()).toEqual([]);
+    await reg.decide(reqId(events), "approved");
+    expect(await reg.listPending()).toEqual([]);
     await p;
   });
 
   it("drops an entry once it times out", async () => {
     vi.useFakeTimers();
     try {
-      const reg = new ApprovalRegistry();
+      const reg = new DurableApprovalGate();
       const { emitter } = fakeEmitter();
       const p = reg.request(emitter, { toolCallId: "c1", toolName: "t", args: {} });
-      expect(reg.listPending()).toHaveLength(1);
+      expect(await reg.listPending()).toHaveLength(1);
 
       await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
-      expect(reg.listPending()).toEqual([]);
+      expect(await reg.listPending()).toEqual([]);
       await p;
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("lists multiple entries oldest-first", () => {
+  it("lists multiple entries oldest-first", async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(0);
-      const reg = new ApprovalRegistry();
+      const reg = new DurableApprovalGate();
       const { events, emitter } = fakeEmitter();
       void reg.request(emitter, { toolCallId: "c1", toolName: "first", args: {} });
       vi.advanceTimersByTime(1000);
@@ -140,7 +140,7 @@ describe("ApprovalRegistry.listPending", () => {
       const ids = events
         .filter((e) => e.type === "approval-request")
         .map((e) => e.data.approvalId as string);
-      const rows = reg.listPending();
+      const rows = await reg.listPending();
       expect(rows.map((r) => r.approvalId)).toEqual(ids);
       expect(rows.map((r) => r.toolName)).toEqual(["first", "second"]);
       expect((rows[0]?.createdAt ?? "") <= (rows[1]?.createdAt ?? "")).toBe(true);

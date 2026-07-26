@@ -1,5 +1,5 @@
 import type { ToolBinding } from "@tulipfarm/soul";
-import type { ToolRegistry } from "../tools/registry";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ToolCallResult } from "../tools/types";
 import { dotPath, renderVarTemplate } from "./template";
 

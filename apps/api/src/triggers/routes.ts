@@ -105,7 +105,7 @@ export function registerTriggerRoutes(
       };
 
       const trigger = await deps.resolveTrigger(slug);
-      if (!trigger || trigger.lifecycle !== "published" || !INVOKABLE.has(trigger.type)) {
+      if (trigger?.lifecycle !== "published" || !INVOKABLE.has(trigger.type)) {
         return reply.code(404).send(NOT_FOUND);
       }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
+import { type RunToolCallGuard, TOOL_TIMEOUT_MS, ToolRegistry } from "../broker/tool-adapter";
 import { BatchCoordinator } from "./batch-executor";
-import { type RunToolCallGuard, TOOL_TIMEOUT_MS, ToolRegistry } from "./registry";
 import type {
   ApprovalDecision,
   ApprovalGate,
@@ -95,6 +95,17 @@ describe("ToolRegistry", () => {
       reg.register(makeTool({ name: "alpha" }));
       reg.register(makeTool({ name: "beta" }));
       expect(Object.keys(reg.buildToolSet(ctx))).toEqual(["alpha", "beta"]);
+    });
+
+    it("defaults to deny when the production adapter requires an explicit allowlist", () => {
+      const reg = new ToolRegistry({ defaultDeny: true });
+      reg.register(makeTool({ name: "alpha" }));
+      expect(reg.buildToolSet(ctx)).toEqual({});
+      expect(
+        Object.keys(
+          reg.buildToolSet(ctx, undefined, undefined, undefined, undefined, new Set(["alpha"]))
+        )
+      ).toEqual(["alpha"]);
     });
   });
 

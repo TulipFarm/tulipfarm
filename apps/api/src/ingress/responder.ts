@@ -1,5 +1,5 @@
 import type { ChatIngressConfig } from "@tulipfarm/soul";
-import type { ToolRegistry } from "../tools/registry";
+import type { ToolRegistry } from "../broker/tool-adapter";
 import { executeToolBinding } from "./bindings";
 
 type ResponderLogger = {

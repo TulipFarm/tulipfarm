@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import {
@@ -10,21 +11,19 @@ import {
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
-import { PgA2uiSurfaceStore } from "./a2ui/surface-store";
+import { PgA2uiSurfaceStore } from "./a2ui/artifact-surface";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
-import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
-import { ApprovalsRepo } from "./approvals/repo";
+import { DurableApprovalGate } from "./approvals/chat-gate";
+import { ApprovalsRepo } from "./approvals/runtime-repo";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
-import { ApprovalRegistry } from "./chat/approvals";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgPendingInteractionRepo } from "./chat/pending-interactions";
-import { registerStreamGc } from "./chat/stream-gc";
 import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
 import { connectPg } from "./db";
@@ -35,13 +34,7 @@ import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { PgExternalIdentityRepo } from "./identity/external-links";
-import { IngressIdentityResolver } from "./ingress/identity";
-import { makeIngressEnqueuer, registerIngressJobs } from "./ingress/jobs";
-import {
-  IngressDeliveriesRepo,
-  IntegrationConversationsRepo,
-  IntegrationEventsRepo,
-} from "./ingress/repo";
+import { IngressDeliveriesRepo } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
@@ -51,7 +44,6 @@ import { subscribeKnowledgeIndexing } from "./knowledge/events";
 import { enqueueIndex, makeIndexQueueStats, registerKnowledgeIndexing } from "./knowledge/indexing";
 import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
 import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./knowledge/repo";
-import { PageRetrievalService } from "./knowledge/retrieval-service";
 import { KnowledgeService } from "./knowledge/service";
 import { PgKnowledgeSpaceOverrideRepo } from "./knowledge/space-overrides-repo";
 import { PgKnowledgeSpaceRepo } from "./knowledge/spaces-repo";
@@ -71,14 +63,8 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
-import { makeActionExecutor } from "./routines/action-executor";
-import { makeApprovalRequester } from "./routines/approval-channels";
-import { RoutineRunDriver } from "./routines/driver";
-import { makeRoutineEnqueuers, registerRoutineJobs } from "./routines/jobs";
-import { RoutineRegistry, registerRoutineRegistryReload } from "./routines/registry";
-import { RoutineRunsRepo } from "./routines/repo";
-import { reconcileRoutineSchedules, registerRoutineCronWorker } from "./routines/schedules";
-import { RoutineTriggerService, subscribeRoutineEventTriggers } from "./routines/trigger-service";
+import { DurableInvocationGateway } from "./runtime/invocation-gateway";
+import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
@@ -103,11 +89,9 @@ async function boot() {
     // Fail-fast boot canary: unwrap the active DEK under the env KEK (auto-provisioning one on
     // first boot to preserve zero-setup) and verify its canary. A wrong/missing key or corrupt
     // wrap throws KeyManagerError → the catch below logs and exits 1, rather than failing later at
-    // first secret access. `encryptionKeys` doubles as the legacy KEK for any pre-backfill rows.
+    // first secret access. Pre-cutover rows must already have been backfilled to the active DEK.
     const activeDek = await loadOrProvisionActiveDek(dekRepo, encryptionKeys);
-    const secretsService = new SecretsService(secretRepo, activeDek, {
-      legacyKeys: encryptionKeys,
-    });
+    const secretsService = new SecretsService(secretRepo, activeDek);
 
     const soulPath = process.env.SOUL_PATH as string;
     // SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL only seed the very first boot. Once Settings → Soul
@@ -150,6 +134,9 @@ async function boot() {
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
     const rateLimiter = new PgRateLimiter(pool);
+    const invocations = new DurableInvocationGateway({
+      store: new PgDurableInvocationStore(pool),
+    });
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -180,9 +167,6 @@ async function boot() {
     const boss = new PgBoss({ connectionString: process.env.DATABASE_URL as string });
     await boss.start();
 
-    // Page-level human search spine (shares the pool; chunk-mode search stays in knowledgeService).
-    const retrievalService = new PageRetrievalService(pool);
-
     const knowledgeService = new KnowledgeService({
       pages: new PgKnowledgePageRepo(pool),
       chunks: new PgKnowledgeChunkRepo(pool),
@@ -191,37 +175,13 @@ async function boot() {
       links: new PgKnowledgeLinksRepo(pool),
       overrides: new PgKnowledgeSpaceOverrideRepo(pool),
       embeddings: embeddingService,
-      retrieval: retrievalService,
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
     });
 
-    // Routine engine (v0.11): validated registry over soul routines + runs repo + the
-    // trigger funnel. Built before the tool registry so trigger_routine can enqueue,
-    // and before buildApp so the routes get the surface. Uses a console-backed logger
-    // until Fastify's exists; hot paths re-log through app.log via the reload hooks.
-    const bootLog = {
-      error: (obj: unknown, msg?: string) => console.error(msg ?? "", obj),
-      warn: (obj: unknown, msg?: string) => console.warn(msg ?? "", obj),
-    };
-    const routineRegistry = new RoutineRegistry(soulLoader, bootLog);
-    routineRegistry.refresh();
-    const routineRuns = new RoutineRunsRepo(pool);
     const approvalsRepo = new ApprovalsRepo(pool);
-    const approvalRegistry = new ApprovalRegistry(approvalsRepo);
-    const routineEnqueuers = makeRoutineEnqueuers(boss);
+    const approvalRegistry = new DurableApprovalGate(approvalsRepo);
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
-    const routineEvalFilter = hookExecutor
-      ? (code: string, scope: Record<string, unknown>) =>
-          hookExecutor.runExpression(code, scope, "routine:event-filter")
-      : undefined;
-    const routineTriggerService = new RoutineTriggerService({
-      registry: routineRegistry,
-      runs: routineRuns,
-      enqueuers: routineEnqueuers,
-      evalFilter: routineEvalFilter,
-      log: bootLog,
-    });
 
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
@@ -246,54 +206,25 @@ async function boot() {
         soulPath: process.env.SOUL_PATH,
         gitSync,
         builtinSkills: BUILTIN_SKILLS,
-        triggerRoutine: (slug, inputs) =>
-          routineTriggerService.trigger(slug, { type: "agent", payload: inputs ?? {} }),
+        triggerRoutine: async (slug, inputs) => {
+          const digest = createHash("sha256")
+            .update(JSON.stringify(inputs ?? {}))
+            .digest("hex");
+          const result = await invocations.start({
+            source: "manual",
+            businessId: "default",
+            initiator: { kind: "agent", id: "assistant" },
+            effectiveSubject: { kind: "agent", id: "assistant" },
+            definitionRef: `published:routine:${slug}`,
+            payloadRef: `artifact:sha256:${digest}`,
+            idempotencyKey: `${slug}:${digest}`,
+          });
+          return { runId: result.runId };
+        },
         onRoutinesChanged: async () => {
           await soulLoader.reload();
-          routineRegistry.refresh();
-          await reconcileRoutineSchedules(boss, routineRegistry, bootLog);
         },
       },
-    });
-
-    // Driver + action executor close over the tool registry (tool: and agent: actions).
-    const routineDriver = new RoutineRunDriver({
-      runs: routineRuns,
-      registry: routineRegistry,
-      hub: streamHub,
-      sandbox: hookExecutor ?? {
-        runExpression: async () => {
-          throw new Error("routine expressions unavailable: HOOKS_DISABLED=true");
-        },
-        runRoutineHook: async () => {
-          throw new Error("routine hooks unavailable: HOOKS_DISABLED=true");
-        },
-      },
-      actionExecutor: makeActionExecutor({
-        llmService,
-        registry: toolRegistry,
-        soulLoader,
-        log: bootLog,
-      }),
-      requestApproval: makeApprovalRequester({
-        approvals: approvalsRepo,
-        toolRegistry,
-        publicUrl: process.env.PUBLIC_URL,
-        log: bootLog,
-      }),
-      enqueueWake: (args) => routineEnqueuers.enqueueWake(args),
-      recordRun: ({ slug, runId, status, error }) => {
-        void activityService.record({
-          category: "routine",
-          action: `routine.${status}`,
-          targetType: "routine",
-          targetId: slug,
-          status: status === "succeeded" ? "ok" : "error",
-          summary: status === "succeeded" ? `Routine ${slug} ran` : `Routine ${slug} failed`,
-          metadata: { runId, ...(error ? { error } : {}) },
-        });
-      },
-      log: bootLog,
     });
 
     const app = await buildApp({
@@ -323,32 +254,28 @@ async function boot() {
       workingMemoryService,
       kvService,
       knowledgeService,
-      retrievalService,
       toolRegistry,
       activityService,
       observabilityService,
       observabilityConfig: obsConfig,
-      operationalApi: createRuntimeOperationalApi({
-        activity: activityService,
-        approvals: approvalsRepo,
-        approvalRegistry,
-        enqueueWake: (job) => routineEnqueuers.enqueueWake(job),
-        guardrailsConfig: () => soulLoader.guardrailsConfig,
-      }),
-      routines: {
-        registry: routineRegistry,
-        runs: routineRuns,
-        triggerService: routineTriggerService,
-        enqueuers: routineEnqueuers,
-        getSecret: (key) => secretsService.get(key),
-        hub: streamHub,
-      },
+      invocations,
       approvalsRepo,
       approvalRegistry,
       ingress: {
         soulLoader,
         deliveries: ingressDeliveries,
-        enqueue: makeIngressEnqueuer(boss),
+        invoke: async (job) => {
+          const digest = createHash("sha256").update(JSON.stringify(job)).digest("hex");
+          await invocations.start({
+            source: "integration",
+            businessId: "default",
+            initiator: { kind: "integration", id: job.slug },
+            effectiveSubject: { kind: "integration", id: job.slug },
+            definitionRef: `published:integration:${job.slug}`,
+            payloadRef: `artifact:sha256:${digest}`,
+            idempotencyKey: digest,
+          });
+        },
         resolveSecret: (value) => resolveSecretRef(value, secretsService),
       },
     });
@@ -380,46 +307,6 @@ async function boot() {
       activity: activityService,
       soulLoader,
     });
-    // Routine engine queues + cron worker + event triggers (v0.11). Schedules are
-    // reconciled at boot and again after every soul.synced registry refresh (D4).
-    await registerRoutineJobs(boss, {
-      driver: routineDriver,
-      runs: routineRuns,
-      approvals: approvalsRepo,
-      log: app.log,
-    });
-    await registerRoutineCronWorker(boss, routineTriggerService, app.log);
-    // Integration ingress worker (v0.12): consumes verified webhook deliveries queued by the
-    // /hooks/integrations/:name route, classifies them through the integration's sandboxed
-    // ingress.ts — chat injection via the shared turn context, or integration.event domain
-    // events for routine triggers. Needs the hook sandbox: without it, ingress stays off.
-    if (app.chatTurnContext && hookExecutor) {
-      await registerIngressJobs(boss, {
-        soulLoader,
-        conversations: new IntegrationConversationsRepo(pool),
-        integrationEvents: new IntegrationEventsRepo(pool),
-        identity: new IngressIdentityResolver(userRepo, app.log),
-        chatCtx: app.chatTurnContext,
-        hookExecutor,
-        toolRegistry,
-        events: domainEventEmitter,
-        log: app.log,
-      });
-    } else if (app.chatTurnContext) {
-      app.log.warn("integration ingress disabled: hook sandbox unavailable");
-    }
-    await reconcileRoutineSchedules(boss, routineRegistry, app.log);
-    registerRoutineRegistryReload(gitSync, soulLoader, routineRegistry, app.log, () =>
-      reconcileRoutineSchedules(boss, routineRegistry, app.log)
-    );
-    subscribeRoutineEventTriggers(
-      domainEventEmitter,
-      routineTriggerService,
-      routineRegistry,
-      routineEvalFilter,
-      app.log
-    );
-    await registerStreamGc(boss, streamResumeRepo, activityService);
     await registerObsPrune(boss, new PgObsRepo(pool), activityService, {
       obs: observabilityService,
       retentionMs: obsConfig.retentionDays * 24 * 60 * 60 * 1000,

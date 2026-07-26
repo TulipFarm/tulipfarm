@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
-import type { ApprovalsRepo } from "../approvals/repo";
-import type { ApprovalRegistry } from "../chat/approvals";
+import type { DurableApprovalGate } from "../approvals/chat-gate";
+import type { ApprovalsRepo } from "../approvals/runtime-repo";
 import type {
   ApprovalDecisionInput,
   InboxItemReadModel,
@@ -14,7 +14,7 @@ import type {
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
   approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
-  approvalRegistry: Pick<ApprovalRegistry, "decide" | "listPending">;
+  approvalRegistry: Pick<DurableApprovalGate, "decide" | "listPending">;
   enqueueWake(job: {
     runId: string;
     reason: "approval";
@@ -56,7 +56,7 @@ function safeActivity(item: Awaited<ReturnType<ActivityService["list"]>>["items"
 }
 
 function toolApproval(
-  item: ReturnType<ApprovalRegistry["listPending"]>[number]
+  item: Awaited<ReturnType<DurableApprovalGate["listPending"]>>[number]
 ): InboxItemReadModel {
   const args =
     typeof item.args === "object" && item.args !== null
@@ -181,7 +181,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
 
     async getInbox() {
       const [toolCalls, routineRows] = await Promise.all([
-        Promise.resolve(deps.approvalRegistry.listPending()),
+        deps.approvalRegistry.listPending(),
         deps.approvals.listPending("routine_state"),
       ]);
       return {
@@ -193,7 +193,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       const cached = decisions.get(input.idempotencyKey);
       if (cached) return cached;
 
-      const resolved = deps.approvalRegistry.decide(input.approvalId, input.decision);
+      const resolved = await deps.approvalRegistry.decide(input.approvalId, input.decision);
       if (!resolved) {
         const row = await deps.approvals.findById(input.approvalId);
         const payload =

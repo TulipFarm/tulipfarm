@@ -72,7 +72,7 @@ describe("POST /api/v1/hooks/integrations/:name", () => {
             return true;
           },
         } as never,
-        enqueue: enqueue as (job: IngressJobPayload) => Promise<void>,
+        invoke: enqueue as (job: IngressJobPayload) => Promise<void>,
         resolveSecret,
       },
     });

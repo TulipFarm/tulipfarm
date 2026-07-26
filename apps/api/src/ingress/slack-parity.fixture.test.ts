@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { analyzeHook } from "../hooks/hook-analyzer";
 import { HookExecutor } from "../hooks/hook-executor";
-import { type IngressDecision, parseDecision } from "./service";
+import { type IngressDecision, parseDecision } from "./classification";
 
 /*
  * Parity guard for the REFERENCE integration: runs a vendored copy of the integrations repo's

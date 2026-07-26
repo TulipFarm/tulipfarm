@@ -1,6 +1,6 @@
 import type { RoutineDefinition } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
-import { executeState } from "./interpreter";
+import { executeState } from "./execution";
 import type { EnginePorts, HookInvocation, ResolvedFunction } from "./ports";
 import type { RunEvent, RunSnapshot } from "./types";
 

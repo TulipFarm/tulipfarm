@@ -1,14 +1,14 @@
 import { ajv } from "@tulipfarm/schema";
 import { jsonSchema, type ToolSet, tool } from "ai";
-import type { BatchCoordinator } from "./batch-executor";
-import { truncateResult } from "./truncate";
+import type { BatchCoordinator } from "../tools/batch-executor";
+import { truncateResult } from "../tools/truncate";
 import {
   type ApprovalGate,
   err,
   type RequestContext,
   type ToolCallResult,
   type ToolDef,
-} from "./types";
+} from "../tools/types";
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
@@ -42,13 +42,14 @@ function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
 }
 
 /**
- * Central in-process tool registry (TOOL-V1). All registered tools are exposed to the LLM
- * (ALLOW_ALL / AC-V1-004). Call buildToolSet() per request to get a Vercel AI SDK ToolSet with
- * 30-second per-call timeouts enforced.
+ * Compatibility adapter from published Tool definitions to the AI SDK. Exposure is always
+ * default-deny: the caller must provide the exact Tool allowlist produced by authorization.
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
   private readonly validators = new Map<string, ReturnType<typeof ajv.compile>>();
+
+  constructor(private readonly options: { defaultDeny?: boolean } = {}) {}
 
   register(tool: ToolDef): void {
     this.tools.set(tool.name, tool);
@@ -72,11 +73,11 @@ export class ToolRegistry {
     runToolCallGuard?: RunToolCallGuard,
     allowedToolNames?: ReadonlySet<string>
   ): ToolSet {
-    // Per-agent tool scoping: an explicit allowed set limits the exposed tools. Undefined exposes
-    // every registered tool, which is the built-in assistant's default.
     const exposed = allowedToolNames
-      ? this.getAll().filter((t) => allowedToolNames.has(t.name))
-      : this.getAll();
+      ? this.getAll().filter((toolDefinition) => allowedToolNames.has(toolDefinition.name))
+      : this.options.defaultDeny
+        ? []
+        : this.getAll();
     return Object.fromEntries(
       exposed.map((t) => [
         t.name,

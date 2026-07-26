@@ -141,6 +141,37 @@ describe("EffectDispatcher", () => {
     expect(await store.get(BUSINESS_ID, EFFECT_ID)).toMatchObject({ state: "failed" });
   });
 
+  it("enforces a kill switch before creating an attempt or calling the adapter", async () => {
+    const adapter: ToolAdapter = { dispatch: vi.fn(async () => ({ providerId: "must-not-run" })) };
+    const assertAllowed = vi.fn(async () => {
+      throw new Error("kill_switch_denied");
+    });
+    const guarded = new EffectDispatcher({
+      store,
+      catalog: ToolCatalog.load([definition]),
+      adapters: new Map([["github", adapter]]),
+      mutationGuard: { assertAllowed },
+      now: () => "2026-07-25T00:00:01.000Z",
+    });
+
+    await expect(guarded.dispatch(BUSINESS_ID, EFFECT_ID)).rejects.toThrow(
+      new ToolDispatchError("kill_switch_denied", EFFECT_ID)
+    );
+    expect(assertAllowed).toHaveBeenCalledWith({
+      businessId: BUSINESS_ID,
+      mutation: true,
+      runId: reservation().runId,
+      stateId: reservation().stateId,
+      effectId: EFFECT_ID,
+      toolId: definition.spec.toolId,
+      provider: definition.spec.adapter.ref,
+      destination: reservation().intent.destination,
+      dataClasses: definition.spec.dataClasses,
+    });
+    expect(adapter.dispatch).not.toHaveBeenCalled();
+    expect(await store.listAttempts(BUSINESS_ID, EFFECT_ID)).toEqual([]);
+  });
+
   function dispatcher(adapter: ToolAdapter, wait?: (delayMs: number) => Promise<void>) {
     return new EffectDispatcher({
       store,

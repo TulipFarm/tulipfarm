@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { APICallError } from "ai";
-import type { A2uiSurfaceStore } from "../a2ui/surface-store";
+import type { A2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import { clientActionEvent } from "../platform/frontend-tools";
 import type { ToolCallResult } from "../tools/types";
