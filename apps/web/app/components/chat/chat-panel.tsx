@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import { AgentGlyph } from "~/components/agent-glyph";
+import { ConnectionStatus } from "~/components/shell/states";
 import type { Autonomy } from "~/lib/agents";
 import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
@@ -116,6 +117,7 @@ export function ChatPanel({
     regenerate,
     sendFeedback,
     sendA2uiAgent,
+    connectionState,
   } = useChatStream({
     initialConversationId,
     initialMessages,
@@ -207,6 +209,11 @@ export function ChatPanel({
             </>
           ) : null}
         </p>
+      ) : null}
+      {connectionState === "reconnecting" ? (
+        <div className="mx-auto w-full max-w-3xl px-6 pb-2">
+          <ConnectionStatus state="reconnecting" />
+        </div>
       ) : null}
       <Composer
         busy={busy}

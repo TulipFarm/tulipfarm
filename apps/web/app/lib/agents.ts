@@ -1,4 +1,4 @@
-import { apiGet } from "./api";
+import { apiCommand, apiGet } from "./api";
 
 /*
  * Read-only client for the agents API (AGENTS / UI-V1-003). Agents are AGENT.md files in the soul
@@ -21,6 +21,27 @@ export type AgentDetail = AgentSummary & {
   placeholder?: string[];
   suggestions?: string[];
   body: string;
+  governance?: AgentGovernance;
+};
+
+export type AgentGovernance = {
+  version: string;
+  roles: string[];
+  skills: string[];
+  tools: string[];
+  modelProfile: string;
+  limits: Record<string, number>;
+  evaluation: {
+    status: "pending" | "passed" | "failed" | "stale";
+    suite: string;
+    passedAt?: string;
+  };
+  publication: {
+    candidateVersion: string;
+    status: "draft" | "validated" | "awaiting_approval" | "published" | "blocked";
+    canPublish: boolean;
+    reason?: string;
+  };
 };
 
 export async function listAgents(): Promise<AgentSummary[]> {
@@ -30,4 +51,20 @@ export async function listAgents(): Promise<AgentSummary[]> {
 
 export async function getAgent(name: string): Promise<AgentDetail> {
   return apiGet<AgentDetail>(`/api/v1/agents/${encodeURIComponent(name)}`);
+}
+
+export async function proposeAgentCandidate(
+  name: string,
+  governance: AgentGovernance
+): Promise<{ changesetId: string; candidateVersion: string; status: string }> {
+  const candidate = governance.publication.candidateVersion;
+  return apiCommand(
+    `/api/v1/agents/${encodeURIComponent(name)}/changesets`,
+    {
+      baseVersion: governance.version,
+      candidateVersion: candidate,
+      patch: {},
+    },
+    `agent-${name}-${candidate}`
+  );
 }

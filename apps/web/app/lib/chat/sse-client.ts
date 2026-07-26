@@ -115,6 +115,7 @@ export type PostChatHandlers = {
   signal?: AbortSignal;
   onEvent: (event: ChatEvent) => void;
   onMeta?: (meta: ChatStreamMeta) => void;
+  onConnectionState?: (state: "online" | "reconnecting") => void;
 };
 
 // Best-effort `{ error }` extraction so a failed POST throws the same ApiError shape as the rest of
@@ -134,7 +135,7 @@ async function readChatError(res: Response): Promise<ApiError> {
 // `X-Conversation-Id`/`X-Stream-Id` headers via `onMeta`, then streams typed events to `onEvent`,
 // stopping at the first terminal event (finish/error) or when the reader is exhausted.
 export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers): Promise<void> {
-  const { signal, onEvent, onMeta } = handlers;
+  const { signal, onMeta } = handlers;
   const res = await fetch(`${API_BASE}/api/v1/chat`, {
     method: "POST",
     credentials: "include",
@@ -145,17 +146,52 @@ export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers
 
   if (!res.ok) throw await readChatError(res);
 
+  const streamId = res.headers.get("X-Stream-Id") ?? undefined;
   onMeta?.({
     conversationId: res.headers.get("X-Conversation-Id") ?? undefined,
-    streamId: res.headers.get("X-Stream-Id") ?? undefined,
+    streamId,
     messageId: res.headers.get("X-Message-Id") ?? undefined,
     agentId: res.headers.get("X-Agent-Id") ?? undefined,
   });
 
-  if (!res.body) return;
-  const reader = res.body.getReader();
+  let outcome = await consumeSse(res, handlers, 0);
+  if (outcome.terminal || !streamId) return;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    handlers.onConnectionState?.("reconnecting");
+    const headers = mutationHeaders();
+    delete headers["Content-Type"];
+    headers.Accept = "text/event-stream";
+    headers["Last-Event-ID"] = String(outcome.lastSequence);
+    const resumed = await fetch(
+      `${API_BASE}/api/v1/chat/streams/${encodeURIComponent(streamId)}?lastEventId=${outcome.lastSequence}`,
+      {
+        method: "GET",
+        credentials: "include",
+        headers,
+        signal,
+      }
+    );
+    if (!resumed.ok) throw await readChatError(resumed);
+    outcome = await consumeSse(resumed, handlers, outcome.lastSequence);
+    if (outcome.terminal) {
+      handlers.onConnectionState?.("online");
+      return;
+    }
+  }
+  throw new ApiError(503, "The stream could not be recovered from its persisted cursor.");
+}
+
+async function consumeSse(
+  response: Response,
+  handlers: PostChatHandlers,
+  afterSequence: number
+): Promise<{ terminal: boolean; lastSequence: number }> {
+  if (!response.body) return { terminal: false, lastSequence: afterSequence };
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let lastSequence = afterSequence;
 
   while (true) {
     const { value, done } = await reader.read();
@@ -166,15 +202,18 @@ export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers
     buffer = rest;
 
     for (const frame of frames) {
+      if (frame.seq <= lastSequence) continue;
+      lastSequence = frame.seq;
       const event = toChatEvent(frame);
       if (!event) continue;
-      onEvent(event);
+      handlers.onEvent(event);
       if (TERMINAL_EVENT_TYPES.has(event.type)) {
         await reader.cancel();
-        return;
+        return { terminal: true, lastSequence };
       }
     }
   }
+  return { terminal: false, lastSequence };
 }
 
 // Stop an in-flight chat stream server-side: aborts the LLM so generation halts. Reuses the shared
