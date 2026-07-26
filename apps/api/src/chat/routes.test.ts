@@ -1478,7 +1478,7 @@ describe("chat routes", () => {
     const FORM_SPEC = {
       root: {
         component: "Form",
-        action: { event: "answer" },
+        action: { descriptor: "payload.signature" },
         fields: [{ name: "city", input: "text" }],
       },
     };
