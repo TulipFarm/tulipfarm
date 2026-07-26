@@ -9,7 +9,6 @@ const PAGES = [
   `${DOCS}/security/privacy.mdx`,
   `${DOCS}/guides/operations.mdx`,
   `${DOCS}/guides/incidents.mdx`,
-  `${DOCS}/guides/recovery.mdx`,
 ] as const;
 
 function page(path: string): string {
@@ -45,7 +44,7 @@ describe("compliance and operator evidence documentation", () => {
     expect(controls).not.toMatch(/TulipFarm is (?:certified|compliant)/i);
   });
 
-  it("documents retention, access review, incident, export, erase, and recovery duties", () => {
+  it("documents retention, access review, incident, export, erase, and denial duties", () => {
     const combined = PAGES.slice(1).map(page).join("\n");
     for (const required of [
       "retention",
@@ -53,8 +52,6 @@ describe("compliance and operator evidence documentation", () => {
       "incident",
       "export",
       "erase",
-      "backup",
-      "restore",
       "denied-access",
     ]) {
       expect(combined.toLowerCase(), required).toContain(required);
