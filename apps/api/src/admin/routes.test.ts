@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { describe, expect, it, vi } from "vitest";
+import type { RateLimiter } from "../rate-limit";
 import {
   type OperationalApiDeps,
   type OperationalPermission,
@@ -88,9 +89,9 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
   };
 }
 
-async function harness(overrides: Partial<OperationalApiDeps> = {}) {
+async function harness(overrides: Partial<OperationalApiDeps> = {}, rateLimiter?: RateLimiter) {
   const app = Fastify();
-  registerOperationalRoutes(app, deps(overrides), async () => undefined);
+  registerOperationalRoutes(app, deps(overrides), async () => undefined, rateLimiter);
   await app.ready();
   return app;
 }
@@ -118,6 +119,30 @@ describe("operational API", () => {
       },
     });
     expect(JSON.stringify(response.json())).not.toContain("business-1");
+    await app.close();
+  });
+
+  it("rate-limits operational reads before authorization", async () => {
+    const authorize = vi.fn(async () => ({
+      businessId: "business-1",
+      principalId: "user-1",
+      permissions: ["operations:read"] as OperationalPermission[],
+    }));
+    const rateLimiter: RateLimiter = {
+      check: vi.fn(async () => ({
+        allowed: false,
+        limit: 120,
+        remaining: 0,
+        resetAt: Date.now() + 60_000,
+      })),
+    };
+    const app = await harness({ authorize }, rateLimiter);
+
+    const response = await app.inject({ method: "GET", url: "/api/v1/admin/operations" });
+
+    expect(response.statusCode).toBe(429);
+    expect(response.json()).toEqual({ error: "rate_limit_exceeded" });
+    expect(authorize).not.toHaveBeenCalled();
     await app.close();
   });
 

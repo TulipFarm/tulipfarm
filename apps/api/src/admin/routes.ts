@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -304,12 +305,18 @@ const runSchema = {
 export function registerOperationalRoutes(
   app: FastifyInstance,
   deps: OperationalApiDeps,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  rateLimiter?: RateLimiter
 ): void {
+  const rateLimitHook = rateLimiter
+    ? makeRateLimitHook(rateLimiter, (request) => `rl:operations:${request.ip}`, 120, 60_000)
+    : undefined;
+  const limitedAuth: PreHandler[] = rateLimitHook ? [rateLimitHook, requireAuth] : [requireAuth];
+
   app.get(
     "/api/v1/runs",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "List authorized Run read models for the operational browser UI.",
         tags: ["runs"],
@@ -346,7 +353,7 @@ export function registerOperationalRoutes(
   app.get(
     "/api/v1/runs/:id",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Get an authorized Run inspector read model with States, effects, waits, costs, " +
@@ -379,7 +386,7 @@ export function registerOperationalRoutes(
     app.post(
       `/api/v1/runs/:id/${action}`,
       {
-        preHandler: requireAuth,
+        preHandler: limitedAuth,
         schema: {
           description:
             `Request a server-authorized ${action} command for one Run. ` +
@@ -447,7 +454,7 @@ export function registerOperationalRoutes(
   app.get(
     "/api/v1/admin/operations",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Authorized, redacted operations read model: health, incidents, quarantine, kill " +
@@ -470,7 +477,7 @@ export function registerOperationalRoutes(
   app.get(
     "/api/v1/guardrails",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "Get the authorized Guardrail administration read model.",
         tags: ["guardrails"],
@@ -498,7 +505,7 @@ export function registerOperationalRoutes(
   app.post(
     "/api/v1/guardrails/changesets",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Propose a Guardrail change through the Soul changeset validation, Approval, and " +
@@ -574,7 +581,7 @@ export function registerOperationalRoutes(
   app.post(
     "/api/v1/agents/:id/changesets",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Propose an exact Agent candidate through the Soul validation, evaluation, Approval, " +
@@ -642,7 +649,7 @@ export function registerOperationalRoutes(
   app.get(
     "/api/v1/inbox",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Unified authorized inbox for Approvals, human tasks, form waits, and access requests. " +
@@ -674,7 +681,7 @@ export function registerOperationalRoutes(
   app.post(
     "/api/v1/approvals/:id/decisions",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Record one server-authorized decision for the exact persisted Approval binding. " +
@@ -743,7 +750,7 @@ export function registerOperationalRoutes(
   app.get(
     "/api/v1/roles",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description: "Get authorized custom Role summaries and scoped grants.",
         tags: ["roles"],
@@ -771,7 +778,7 @@ export function registerOperationalRoutes(
   app.post(
     "/api/v1/roles/changesets",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Propose a custom Role through the Soul changeset authority. The route cannot assign " +
@@ -837,7 +844,7 @@ export function registerOperationalRoutes(
   app.post(
     "/api/v1/admin/operations/:action",
     {
-      preHandler: requireAuth,
+      preHandler: limitedAuth,
       schema: {
         description:
           "Request an audited operational command. The operations authority reauthorizes the " +

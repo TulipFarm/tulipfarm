@@ -461,7 +461,7 @@ export async function buildApp(opts: AppOptions = {}) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }
     if (opts.operationalApi) {
-      registerOperationalRoutes(app, opts.operationalApi, requireAuth);
+      registerOperationalRoutes(app, opts.operationalApi, requireAuth, opts.rateLimiter);
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
