@@ -1,0 +1,30 @@
+apiVersion: tulipfarm.ai/v1
+kind: AccessGrant
+metadata:
+  id: 77777777-7777-4777-8777-777777777777
+  slug: github-issue-triage-grant
+  displayName: GitHub issue triage — tulip/farm
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: active
+spec:
+  integrationId: 44444444-4444-4444-8444-444444444444
+  principals:
+    - kind: agent
+      id: 66666666-6666-4666-8666-666666666666
+  # Closed list. There is no wildcard action: an operation absent here is denied even when the
+  # underlying credential could perform it.
+  actions:
+    - github.issue.read
+    - github.issue.search
+    - github.issue.comment
+    - github.issue.label
+    - github.issue.assign
+    - github.issue.close
+  # One repository, not the installation. This is the narrowing only the Integration layer can
+  # apply — it never widens the Tool Broker's decision.
+  externalTargets:
+    - type: github.repository
+      ids:
+        - tulip/farm
+  delegable: false
