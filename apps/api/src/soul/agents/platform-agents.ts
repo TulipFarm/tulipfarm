@@ -1,5 +1,13 @@
 import type { SoulAgent } from "@tulipfarm/soul";
-import { FORGE_SKILL_NAMES } from "../skills/builtin-skills";
+
+/** Bundled forge Skills surfaced by the default chat harness. */
+export const FORGE_SKILL_NAMES = [
+  "resource-forge",
+  "skill-forge",
+  "agent-forge",
+  "routine-forge",
+  "onboarding",
+] as const;
 
 /**
  * The default chat harness. It is code-defined — not AGENT.md on disk, not loaded from the Soul
@@ -9,7 +17,7 @@ import { FORGE_SKILL_NAMES } from "../skills/builtin-skills";
 export interface PlatformAgent extends SoulAgent {
   /** Tool names this agent may call. Undefined means every registered tool. */
   toolAllowlist?: readonly string[];
-  /** Inbuilt forge skill names surfaced to this agent and loadable via `load_skill`. */
+  /** Bundled forge Skill names surfaced to this Agent and loadable via `load_skill`. */
   forgeSkills?: readonly string[];
 }
 

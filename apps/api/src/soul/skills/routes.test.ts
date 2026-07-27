@@ -15,6 +15,7 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+import type { BundledSkill } from "./bundled";
 
 // Keep the report schema real (used in the route's response schema); mock only the LLM call.
 const buildAudit = vi.fn();
@@ -112,6 +113,8 @@ describe("skills routes", () => {
   let withSync: ReturnType<typeof vi.fn>;
   let reload: ReturnType<typeof vi.fn>;
   let soulLoader: SoulLoader;
+  let bundledSkills: Map<string, BundledSkill>;
+  let disabledBundledSkills: Set<string>;
   const temps: string[] = [];
 
   beforeEach(async () => {
@@ -134,6 +137,19 @@ describe("skills routes", () => {
       agents: new Map(),
       reload,
     } as unknown as SoulLoader;
+    bundledSkills = new Map([
+      [
+        "resource-forge",
+        {
+          ...skill("resource-forge", "Bundled Resource forge."),
+          category: "forge",
+          categoryDescription: "Forge Skills.",
+          directory: "/app/skills/forge/resource-forge",
+          references: [],
+        },
+      ],
+    ]);
+    disabledBundledSkills = new Set();
 
     const gitSync = {
       path: soulPath,
@@ -160,6 +176,8 @@ describe("skills routes", () => {
       gitSync,
       soulLoader,
       llmService,
+      bundledSkills,
+      disabledBundledSkills,
     });
     buildAudit.mockReset();
   });
@@ -223,6 +241,22 @@ describe("skills routes", () => {
       );
     });
 
+    it("lists bundled Skills with builtin provenance", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills).toContainEqual({
+        name: "resource-forge",
+        description: "Bundled Resource forge.",
+        provenance: "builtin",
+        pendingAudit: false,
+      });
+    });
+
     it("does not crash when skills-lock.json is an empty object", async () => {
       // A freshly-initialized soul has `{}` — no `skills` key (regression: would 500 on lock.skills).
       await writeFile(join(soulPath, "skills-lock.json"), "{}", "utf8");
@@ -233,9 +267,12 @@ describe("skills routes", () => {
         headers,
       });
       expect(res.statusCode).toBe(200);
-      expect(res.json().skills.every((s: { provenance: string }) => s.provenance === "user")).toBe(
-        true
-      );
+      expect(
+        res
+          .json()
+          .skills.filter((entry: { name: string }) => entry.name !== "resource-forge")
+          .every((entry: { provenance: string }) => entry.provenance === "user")
+      ).toBe(true);
     });
   });
 
@@ -249,6 +286,21 @@ describe("skills routes", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().body).toContain("Authored by hand");
+    });
+
+    it("returns a bundled Skill with builtin provenance", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/resource-forge",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        name: "resource-forge",
+        provenance: "builtin",
+        body: "# resource-forge\nBundled Resource forge.",
+      });
     });
 
     it("returns 404 for an unknown skill", async () => {
@@ -720,6 +772,28 @@ describe("skills routes", () => {
       expect(res.statusCode).toBe(204);
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
       expect(lock.skills["installed-skill"]).toBeDefined();
+    });
+
+    it("hides a bundled Skill with a persistent tombstone", async () => {
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/skills/resource-forge",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(204);
+      expect(disabledBundledSkills).toEqual(new Set(["resource-forge"]));
+      expect(
+        JSON.parse(await readFile(join(soulPath, "skills", ".bundled-disabled.json"), "utf8"))
+      ).toEqual(["resource-forge"]);
+
+      const get = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/resource-forge",
+        cookies: auth(),
+        headers,
+      });
+      expect(get.statusCode).toBe(404);
     });
 
     it("returns 404 for an unknown skill and commits nothing", async () => {

@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LlmService } from "@tulipfarm/llm";
 import {
@@ -12,11 +12,15 @@ import {
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
+import { type BundledSkill, persistDisabledBundledSkills } from "./bundled.js";
+import { mergedSkills, resolveSkill } from "./registry.js";
 
 export interface SkillToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
   llmService?: LlmService;
+  bundledSkills: ReadonlyMap<string, BundledSkill>;
+  disabledBundledSkills: Set<string>;
 }
 
 export interface SkillTool {
@@ -102,7 +106,9 @@ const skillCreate: SkillTool = {
     if (!validation.valid) return err("validation_error", validation.error);
 
     const skillDir = join(ctx.gitSync.path, "skills", name);
-    if (existsSync(skillDir)) return err("validation_error", "skill already exists");
+    if (existsSync(skillDir) || ctx.bundledSkills.has(name)) {
+      return err("validation_error", "skill already exists");
+    }
 
     // Fail fast before writing: SkillAudit requires a working LLM (AC-V1-002).
     if (!ctx.llmService) {
@@ -198,7 +204,9 @@ const skillUpdate: SkillTool = {
     if (body === undefined && frontmatter === undefined)
       return err("validation_error", "at least one of body or frontmatter must be provided");
 
-    const existing = ctx.soulLoader.skills.get(name);
+    const soulSkill = ctx.soulLoader.skills.get(name);
+    const bundledSkill = ctx.bundledSkills.get(name);
+    const existing = soulSkill ?? bundledSkill;
     if (!existing) return err("not_found", `skill not found: ${name}`);
 
     const existingPublic = publicFrontmatter(existing.frontmatter);
@@ -211,7 +219,18 @@ const skillUpdate: SkillTool = {
 
     const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
     try {
+      if (!soulSkill && bundledSkill) {
+        await mkdir(join(ctx.gitSync.path, "skills"), { recursive: true });
+        await cp(bundledSkill.directory, join(ctx.gitSync.path, "skills", name), {
+          recursive: true,
+          errorOnExist: true,
+          force: false,
+        });
+      }
       await writeFile(skillFile, content, "utf8");
+      if (ctx.disabledBundledSkills.delete(name)) {
+        await persistDisabledBundledSkills(ctx.gitSync.path, ctx.disabledBundledSkills);
+      }
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -247,15 +266,22 @@ const validateGet = ajv.compile(GET_SCHEMA);
 
 const skillGet: SkillTool = {
   name: "skill_get",
-  description: "Get a skill's frontmatter and markdown body from the soul.",
+  description:
+    "Get a Skill's frontmatter, markdown body, and provenance from the merged Soul-over-bundled view.",
   mutating: false,
   inputSchema: GET_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet));
     const { name } = args as { name: string };
-    const skill = ctx.soulLoader.skills.get(name);
+    const soulSkill = ctx.soulLoader.skills.get(name);
+    const skill = resolveSkill(name, ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills);
     if (!skill) return err("not_found", `skill not found: ${name}`);
-    return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
+    return ok({
+      name: skill.name,
+      frontmatter: skill.frontmatter,
+      body: skill.body,
+      provenance: soulSkill ? "soul" : "builtin",
+    });
   },
 };
 
@@ -271,14 +297,17 @@ const validateList = ajv.compile(LIST_SCHEMA);
 
 const skillList: SkillTool = {
   name: "skill_list",
-  description: "List all skills defined in the soul repo.",
+  description: "List Skills from the merged Soul-over-bundled view with provenance.",
   mutating: false,
   inputSchema: LIST_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList));
-    const skills = Array.from(ctx.soulLoader.skills.values()).map(({ name, frontmatter }) => ({
+    const skills = Array.from(
+      mergedSkills(ctx.soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills).values()
+    ).map(({ name, frontmatter }) => ({
       name,
       frontmatter,
+      provenance: ctx.soulLoader.skills.has(name) ? "soul" : "builtin",
     }));
     return ok({ skills });
   },
@@ -300,18 +329,26 @@ const validateDelete = ajv.compile(DELETE_SCHEMA);
 const skillDelete: SkillTool = {
   name: "skill_delete",
   description:
-    "Delete a skill from the soul repo. Removes its directory, commits and pushes via withSync.",
+    "Delete a Skill from the merged view. Soul Skills are removed; bundled Skills are hidden with a persistent tombstone. Commits and pushes via withSync.",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
     const { name } = args as { name: string };
 
-    if (!ctx.soulLoader.skills.has(name)) return err("not_found", `skill not found: ${name}`);
+    const soulSkill = ctx.soulLoader.skills.get(name);
+    const bundledSkill = ctx.bundledSkills.get(name);
+    if (!soulSkill && (!bundledSkill || ctx.disabledBundledSkills.has(name))) {
+      return err("not_found", `skill not found: ${name}`);
+    }
 
     const skillDir = join(ctx.gitSync.path, "skills", name);
     try {
-      await rm(skillDir, { recursive: true, force: true });
+      if (soulSkill) await rm(skillDir, { recursive: true, force: true });
+      if (bundledSkill) {
+        ctx.disabledBundledSkills.add(name);
+        await persistDisabledBundledSkills(ctx.gitSync.path, ctx.disabledBundledSkills);
+      }
     } catch (e) {
       return err("internal_error", reason(e));
     }

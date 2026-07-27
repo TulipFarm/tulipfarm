@@ -60,6 +60,7 @@ COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
 # can't run code out of the server.cjs bundle).
 COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
+COPY --from=builder /app/skills ./skills
 RUN mkdir -p /opt/tulipfarm/soul
 # Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
 # node:26.5.0-slim ships a `node` user; give it the app + soul dirs it writes to.

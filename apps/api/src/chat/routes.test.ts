@@ -27,6 +27,7 @@ import {
   type DurableInvocationRecord,
   type DurableInvocationStore,
 } from "../runtime/invocation-gateway";
+import type { BundledSkill } from "../soul/skills/bundled";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageDoc, MessagePart, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";
@@ -35,6 +36,15 @@ import { MemoryStreamResumeRepo } from "./stream-resume";
 import { buildTurnLog, parseLastEventId } from "./turn-helpers";
 
 const TEST_CSRF = "a".repeat(64);
+const resourceForge: BundledSkill = {
+  name: "resource-forge",
+  frontmatter: { name: "resource-forge", description: "Forge Resource types." },
+  body: "Forge instructions.",
+  category: "forge",
+  categoryDescription: "Author Soul artifacts.",
+  directory: "/app/skills/forge/resource-forge",
+  references: [],
+};
 
 // Captures the `prompt` (converted CoreMessages) that streamText hands the model
 // on each call, so history-rebuild assertions can inspect the outgoing messages.
@@ -869,6 +879,7 @@ describe("chat routes", () => {
         streamHub,
         workingMemoryService: new WorkingMemoryService(workingMemoryRepo),
         soulLoader,
+        bundledSkills: new Map([[resourceForge.name, resourceForge]]),
       });
 
       const res = await post({ message: userMsg("hi") });

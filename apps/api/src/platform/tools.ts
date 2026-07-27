@@ -1,9 +1,17 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
-import type { GitSyncService, SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
+import type {
+  GitSyncService,
+  SoulAgent,
+  SoulLoader,
+  SoulRoutine,
+  SoulSkill,
+} from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
 import { A2UI_COMPONENTS_REF, A2UI_SPEC_SCHEMA } from "../a2ui/spec";
+import type { BundledSkill } from "../soul/skills/bundled";
+import { resolveSkill } from "../soul/skills/registry";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -19,12 +27,10 @@ export interface PlatformToolContext {
   triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
   /** Post-write hook after routine_forge: registry revalidate + cron schedule reconcile. */
   onRoutinesChanged?: () => Promise<void>;
-  /**
-   * Inbuilt forge skills (resource-forge / skill-forge / agent-forge / onboarding) bundled with the
-   * app, not present in the soul. `load_skill` falls back to these by name so the Information
-   * Architect can pull a forge body on demand.
-   */
-  builtinSkills?: ReadonlyMap<string, { name: string; description: string; body: string }>;
+  /** Read-only bundled Skill overlay, resolved after Soul Skills by name. */
+  bundledSkills?: ReadonlyMap<string, BundledSkill>;
+  /** Bundled Skill names hidden persistently by an operator delete. */
+  disabledBundledSkills?: ReadonlySet<string>;
   /** Reserved names of the code-defined platform agents, valid `transfer_to_agent` targets. */
   platformAgentNames?: ReadonlySet<string>;
 }
@@ -61,23 +67,20 @@ const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
 export const loadSkillTool: PlatformTool = {
   name: "load_skill",
   description:
-    "Load a skill's frontmatter and body by name so the agent can apply its instructions. Resolves soul skills and the inbuilt forge skills (resource-forge, skill-forge, agent-forge, onboarding). Graceful not_found when the skill is absent.",
+    "Load a Skill's frontmatter and body by name so the agent can apply its instructions. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
   mutating: false,
   inputSchema: LOAD_SKILL_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateLoadSkill(args))
       return err("validation_error", firstError(validateLoadSkill.errors));
     const { name } = args as { name: string };
-    const skill = ctx.soulLoader?.skills.get(name);
+    const skill = resolveSkill(
+      name,
+      ctx.soulLoader as SoulLoader | undefined,
+      ctx.bundledSkills,
+      ctx.disabledBundledSkills
+    );
     if (skill) return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
-    // Fall back to the bundled forge skills (not in the soul).
-    const builtin = ctx.builtinSkills?.get(name);
-    if (builtin)
-      return ok({
-        name: builtin.name,
-        frontmatter: { description: builtin.description },
-        body: builtin.body,
-      });
     return err("not_found", `Skill "${name}" not found.`);
   },
 };
@@ -92,8 +95,9 @@ const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
     skill: {
       type: "string",
       minLength: 1,
-      pattern: "^[a-z][a-z0-9-]*$",
-      description: "Skill name (kebab-case, as registered in the soul).",
+      maxLength: 64,
+      pattern: "^[a-z0-9][a-z0-9._-]*$",
+      description: "Skill name as registered in the Soul or bundled overlay.",
     },
     reference: {
       type: "string",
@@ -115,11 +119,19 @@ export const loadSkillReferenceTool: PlatformTool = {
     if (!validateLoadSkillRef(args))
       return err("validation_error", firstError(validateLoadSkillRef.errors));
     const { skill, reference } = args as { skill: string; reference: string };
-    if (!ctx.soulPath)
-      return err("not_found", `Skill "${skill}" references directory not available.`);
-    // Contain the read to the skill's references/ dir — `reference` is LLM-controlled, so a
-    // `../`-escape (e.g. driven by a malicious skill) must not read outside the soul (SKL-V1-002).
-    const base = resolve(ctx.soulPath, "skills", skill, "references");
+    const soulSkill = ctx.soulLoader?.skills.get(skill);
+    const bundledSkill = ctx.disabledBundledSkills?.has(skill)
+      ? undefined
+      : ctx.bundledSkills?.get(skill);
+    const base =
+      !soulSkill && bundledSkill
+        ? resolve(bundledSkill.directory, "references")
+        : ctx.soulPath
+          ? resolve(ctx.soulPath, "skills", skill, "references")
+          : undefined;
+    if (!base) return err("not_found", `Skill "${skill}" references directory not available.`);
+    // Contain the read to the selected Skill's references directory — `reference` is
+    // LLM-controlled, so a `../` escape must not read outside either Soul or bundled storage.
     const refPath = resolve(base, reference);
     const rel = relative(base, refPath);
     if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
@@ -806,8 +818,13 @@ export const callSkillTool: PlatformTool = {
     if (!ctx.routineContext)
       return err("internal_error", "call_skill is only callable from a routine context.");
     const { name, args: skillArgs } = args as { name: string; args?: Record<string, unknown> };
-    const skill = ctx.soulLoader?.skills.get(name);
-    if (!skill) return err("not_found", `Skill "${name}" not found in soul.`);
+    const skill = resolveSkill(
+      name,
+      ctx.soulLoader as SoulLoader | undefined,
+      ctx.bundledSkills,
+      ctx.disabledBundledSkills
+    );
+    if (!skill) return err("not_found", `Skill "${name}" not found.`);
     return ok({
       name: skill.name,
       frontmatter: skill.frontmatter,

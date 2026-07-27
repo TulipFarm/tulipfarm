@@ -67,8 +67,7 @@ import { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
-import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
-import { loadBundledSkills } from "./soul/skills/bundled";
+import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { buildToolRegistry } from "./tools/setup";
 
@@ -120,7 +119,8 @@ async function boot() {
 
     const soulLoader = new SoulLoader(soulPath, console);
     await soulLoader.load();
-    await loadBundledSkills(console);
+    const bundledSkills = await loadBundledSkills(console);
+    const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     // materialise them for every loaded soul type before serving.
@@ -202,12 +202,19 @@ async function boot() {
       },
       resourceTypes: { gitSync, soulLoader, reconcile: reconcileResources },
       agentTools: { gitSync, soulLoader },
-      skillTools: { gitSync, soulLoader, llmService },
+      skillTools: {
+        gitSync,
+        soulLoader,
+        llmService,
+        bundledSkills,
+        disabledBundledSkills,
+      },
       platform: {
         soulLoader,
         soulPath: process.env.SOUL_PATH,
         gitSync,
-        builtinSkills: BUILTIN_SKILLS,
+        bundledSkills,
+        disabledBundledSkills,
         triggerRoutine: async (slug, inputs) => {
           const digest = createHash("sha256")
             .update(JSON.stringify(inputs ?? {}))
@@ -239,6 +246,8 @@ async function boot() {
       secretsService,
       gitSync,
       soulLoader,
+      bundledSkills,
+      disabledBundledSkills,
       hookExecutor,
       resourceRepoFactory,
       counterStore,

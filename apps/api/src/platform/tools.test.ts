@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
+import type { BundledSkill } from "../soul/skills/bundled";
 import {
   askUserTool,
   beginSoulBatchTool,
@@ -30,6 +31,16 @@ import {
 
 function makeSkill(name: string): SoulSkill {
   return { name, frontmatter: { version: "1.0" }, body: `# ${name}\nDoes things.` };
+}
+
+function makeBundledSkill(name: string, directory = `/bundled/core/${name}`): BundledSkill {
+  return {
+    ...makeSkill(name),
+    category: "core",
+    categoryDescription: "Core Skills.",
+    directory,
+    references: [],
+  };
 }
 
 function makeAgent(name: string, displayName?: string): SoulAgent {
@@ -110,16 +121,18 @@ describe("loadSkillTool", () => {
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
-  it("falls back to a bundled forge skill when not in the soul", async () => {
+  it("falls back to a bundled Skill when not in the Soul", async () => {
     const ctx: PlatformToolContext = {
-      builtinSkills: new Map([
-        ["resource-forge", { name: "resource-forge", description: "Forge a type", body: "# RF" }],
-      ]),
+      bundledSkills: new Map([["resource-forge", makeBundledSkill("resource-forge")]]),
     };
     const res = await loadSkillTool.handler({ name: "resource-forge" }, ctx);
     expect(res).toEqual({
       success: true,
-      data: { name: "resource-forge", frontmatter: { description: "Forge a type" }, body: "# RF" },
+      data: {
+        name: "resource-forge",
+        frontmatter: { version: "1.0" },
+        body: "# resource-forge\nDoes things.",
+      },
     });
   });
 
@@ -217,6 +230,37 @@ describe("loadSkillReferenceTool", () => {
         makeCtx({}, {}, dir)
       );
       expect(deep).toMatchObject({ success: true, data: { content: "deep guide" } });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads a bundled reference and rejects traversal against the bundled base", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "bundled-skill-ref-"));
+    const skillDirectory = join(dir, "core", "research");
+    await mkdir(join(skillDirectory, "references"), { recursive: true });
+    await writeFile(join(skillDirectory, "references", "guide.md"), "bundled guide", "utf8");
+    const ctx: PlatformToolContext = {
+      bundledSkills: new Map([["research", makeBundledSkill("research", skillDirectory)]]),
+    };
+    try {
+      const loaded = await loadSkillReferenceTool.handler(
+        { skill: "research", reference: "guide.md" },
+        ctx
+      );
+      expect(loaded).toEqual({
+        success: true,
+        data: { skill: "research", reference: "guide.md", content: "bundled guide" },
+      });
+
+      const escaped = await loadSkillReferenceTool.handler(
+        { skill: "research", reference: "../../outside.md" },
+        ctx
+      );
+      expect(escaped).toMatchObject({
+        success: false,
+        error: { code: "validation_error" },
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -753,6 +797,19 @@ describe("callSkillTool", () => {
     const ctx: PlatformToolContext = { ...makeCtx(), routineContext: routineCtx };
     const res = await callSkillTool.handler({ name: "ghost" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
+  });
+
+  it("loads a bundled Skill in routine context", async () => {
+    const bundled = makeBundledSkill("summarize");
+    const ctx: PlatformToolContext = {
+      routineContext: routineCtx,
+      bundledSkills: new Map([[bundled.name, bundled]]),
+    };
+    const res = await callSkillTool.handler({ name: "summarize" }, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: "summarize", body: bundled.body },
+    });
   });
 
   it("returns validation_error for missing name", async () => {

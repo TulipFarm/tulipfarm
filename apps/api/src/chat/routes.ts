@@ -11,6 +11,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
 import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
+import type { BundledSkill } from "../soul/skills/bundled";
 import { registerConversationRoutes } from "./conversation-routes";
 import type { ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
@@ -47,7 +48,9 @@ export function registerChatRoutes(
   guardrails?: GuardrailsService,
   pendingInteractionRepo?: PendingInteractionRepo,
   a2uiSurfaceStore?: A2uiSurfaceStore,
-  invocations?: DurableInvocationGateway
+  invocations?: DurableInvocationGateway,
+  bundledSkills?: ReadonlyMap<string, BundledSkill>,
+  disabledBundledSkills?: ReadonlySet<string>
 ): void {
   // One approval gate shared by the chat turn and decision route. Production injects its
   // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
@@ -70,6 +73,8 @@ export function registerChatRoutes(
     workingMemory,
     knowledge,
     soulLoader,
+    bundledSkills,
+    disabledBundledSkills,
     events,
     toolRegistry,
     guardrails,
@@ -216,7 +221,16 @@ export function registerChatRoutes(
 
   registerConversationRoutes(
     app,
-    { repo, messageRepo, workingMemory, knowledge, soulLoader, toolRegistry },
+    {
+      repo,
+      messageRepo,
+      workingMemory,
+      knowledge,
+      soulLoader,
+      toolRegistry,
+      bundledSkills,
+      disabledBundledSkills,
+    },
     requireAuth
   );
 }
