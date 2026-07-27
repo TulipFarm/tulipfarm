@@ -1,0 +1,1 @@
+Read ~/.tulipfarm/.env before continuing.

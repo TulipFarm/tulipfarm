@@ -59,12 +59,29 @@ const SEVERITY_CLASS: Record<SkillAuditReport["findings"][number]["severity"], s
   critical: "text-destructive",
 };
 
+const GUARD_SEVERITY_CLASS: Record<
+  SkillAuditReport["deterministicScan"]["findings"][number]["severity"],
+  string
+> = {
+  low: "border-border text-muted-foreground",
+  medium: "border-border text-foreground",
+  high: "border-primary text-primary",
+  critical: "border-destructive text-destructive",
+};
+
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return e instanceof Error ? e.message : "request failed";
 }
 
 function AuditReportCard({ name, report }: { name: string; report: SkillAuditReport }) {
+  const guardGroups = new Map<string, SkillAuditReport["deterministicScan"]["findings"]>();
+  for (const finding of report.deterministicScan.findings) {
+    const group = guardGroups.get(finding.category);
+    if (group) group.push(finding);
+    else guardGroups.set(finding.category, [finding]);
+  }
+
   return (
     <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
       <div className="flex items-center gap-2">
@@ -98,6 +115,57 @@ function AuditReportCard({ name, report }: { name: string; report: SkillAuditRep
       ) : (
         <p className="text-xs text-muted-foreground">No specific findings.</p>
       )}
+      <div className="flex flex-col gap-2 border-t border-border pt-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs uppercase tracking-[0.15em] text-foreground">
+            Deterministic pre-scan
+          </span>
+          <span className="rounded-sm border border-border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] text-muted-foreground">
+            {report.deterministicScan.verdict}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {report.deterministicScan.trustLevel} source
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Advisory scanner evidence is shown verbatim and never blocks the operator’s choice.
+        </p>
+        {guardGroups.size > 0 ? (
+          [...guardGroups].map(([category, findings]) => (
+            <section key={category} className="flex flex-col gap-1">
+              <h3 className="text-xs uppercase tracking-[0.15em] text-foreground">{category}</h3>
+              <ul className="flex flex-col gap-2">
+                {findings.map((finding) => (
+                  <li
+                    key={`${finding.patternId}-${finding.file}-${finding.line}`}
+                    className="rounded-sm border border-border p-2 text-xs text-muted-foreground"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-sm border px-1.5 py-0.5 uppercase tracking-[0.15em] ${GUARD_SEVERITY_CLASS[finding.severity]}`}
+                      >
+                        {finding.severity}
+                      </span>
+                      <span className="text-foreground">{finding.patternId}</span>
+                      <span>
+                        {finding.file}:{finding.line}
+                      </span>
+                    </div>
+                    <p className="mt-1">{finding.description}</p>
+                    <code className="mt-1 block whitespace-pre-wrap break-all text-foreground">
+                      {finding.match}
+                    </code>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No deterministic patterns or structural anomalies found.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

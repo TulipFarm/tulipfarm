@@ -44,11 +44,32 @@ export type SkillAuditFinding = {
   detail: string;
 };
 
+export type SkillGuardFinding = {
+  patternId: string;
+  severity: "critical" | "high" | "medium" | "low";
+  category:
+    | "exfiltration"
+    | "injection"
+    | "destructive"
+    | "obfuscation"
+    | "network"
+    | "persistence";
+  file: string;
+  line: number;
+  match: string;
+  description: string;
+};
+
 export type SkillAuditReport = {
   riskRating: "low" | "medium" | "high";
   summary: string;
   toolsReach: string[];
   findings: SkillAuditFinding[];
+  deterministicScan: {
+    verdict: "safe" | "caution" | "dangerous";
+    trustLevel: "builtin" | "trusted" | "community";
+    findings: SkillGuardFinding[];
+  };
 };
 
 export async function listSkills(): Promise<SkillSummary[]> {
