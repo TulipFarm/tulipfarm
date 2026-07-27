@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { assembleSystemPrompt } from "../context/assemble";
 import { DEFAULT_ASSISTANT } from "../soul/agents/platform-agents";
 import type { SoulCatalogue } from "../soul/catalogue";
+import type { BundledSkill } from "../soul/skills/bundled";
 import { assembleAgentSystemPrompt } from "./system-prompt";
 
 const agent: SoulAgent = {
@@ -28,6 +29,17 @@ const empty = {
   soulCatalogue: emptyCatalogue,
   availableTools: [],
 };
+
+const skillForge: BundledSkill = {
+  name: "skill-forge",
+  frontmatter: { name: "skill-forge", description: "Forge a Skill." },
+  body: "Forge instructions.",
+  category: "forge",
+  categoryDescription: "Author Soul artifacts.",
+  directory: "/app/skills/forge/skill-forge",
+  references: [],
+};
+const bundledSkills = new Map([[skillForge.name, skillForge]]);
 
 /** Inner text of one XML block, or "" when absent — lets a test scope assertions to a single block. */
 function blockBody(prompt: string, tag: string): string {
@@ -58,6 +70,7 @@ describe("assembleAgentSystemPrompt", () => {
     const withForge = assembleAgentSystemPrompt({
       agent,
       platformAgent: DEFAULT_ASSISTANT,
+      bundledSkills,
       ...empty,
     });
     const withoutForge = assembleAgentSystemPrompt({ agent, platformAgent: undefined, ...empty });
@@ -69,6 +82,7 @@ describe("assembleAgentSystemPrompt", () => {
     const out = assembleAgentSystemPrompt({
       agent,
       platformAgent: DEFAULT_ASSISTANT,
+      bundledSkills,
       ...empty,
       soulCatalogue: {
         agents: [{ name: "support-agent", description: "Customer support" }],

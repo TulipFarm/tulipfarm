@@ -16,6 +16,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
 import { ErrorSchema } from "../../auth/schemas";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
+import { type BundledSkill, persistDisabledBundledSkills } from "./bundled";
+import { mergedSkills, resolveSkill } from "./registry";
 
 /*
  * Skills HTTP surface (SKILLS / SKL-V1-001..003). Read endpoints over the SoulLoader, plus the
@@ -185,7 +187,8 @@ async function readLock(soulPath: string): Promise<{
 
 function toSkillSummary(
   skill: SoulSkill,
-  lock: Awaited<ReturnType<typeof readLock>>
+  lock: Awaited<ReturnType<typeof readLock>>,
+  bundledOnly = false
 ): {
   name: string;
   description?: string;
@@ -197,7 +200,7 @@ function toSkillSummary(
   return {
     name: skill.name,
     description: asString(skill.frontmatter.description),
-    provenance: locked ? "marketplace" : "user",
+    provenance: bundledOnly ? "builtin" : locked ? "marketplace" : "user",
     source: locked?.sourceUrl,
     pendingAudit: skill.frontmatter._pendingAudit === true,
   };
@@ -210,9 +213,11 @@ function toSkillSummary(
 function installStatus(
   skill: DiscoveredSkill,
   lock: Awaited<ReturnType<typeof readLock>>,
-  soulLoader: SoulLoader
+  soulLoader: SoulLoader,
+  bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(),
+  disabledBundledSkills: ReadonlySet<string> = new Set()
 ): { installed: boolean; updateAvailable: boolean } {
-  const installed = soulLoader.skills.has(skill.name);
+  const installed = mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).has(skill.name);
   const lockedHash = lock.skills[skill.name]?.hash;
   const updateAvailable =
     installed &&
@@ -290,14 +295,16 @@ export function registerSkillRoutes(
   llmService: LlmService,
   requireAuth: PreHandler,
   // Optional: record skill installs in the activity feed.
-  activity?: ActivityService
+  activity?: ActivityService,
+  bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(),
+  disabledBundledSkills: Set<string> = new Set()
 ): void {
   app.get(
     "/api/v1/skills",
     {
       preHandler: requireAuth,
       schema: {
-        description: "List skills installed in the soul repo, with provenance.",
+        description: "List Soul and bundled Skills with provenance.",
         tags: ["skills"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -321,7 +328,9 @@ export function registerSkillRoutes(
     },
     async () => {
       const lock = await readLock(gitSync.path);
-      const skills = Array.from(soulLoader.skills.values()).map((s) => toSkillSummary(s, lock));
+      const skills = Array.from(
+        mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).values()
+      ).map((skill) => toSkillSummary(skill, lock, !soulLoader.skills.has(skill.name)));
       return { skills };
     }
   );
@@ -400,7 +409,7 @@ export function registerSkillRoutes(
               skillId: asString(meta?.skillId),
               description: s.description ?? asString(meta?.description),
               installs: typeof meta?.installs === "number" ? meta.installs : undefined,
-              ...installStatus(s, lock, soulLoader),
+              ...installStatus(s, lock, soulLoader, bundledSkills, disabledBundledSkills),
             };
           }),
         };
@@ -438,10 +447,13 @@ export function registerSkillRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      const skill = soulLoader.skills.get(name);
+      const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
       const lock = await readLock(gitSync.path);
-      return { ...toSkillSummary(skill, lock), body: skill.body };
+      return {
+        ...toSkillSummary(skill, lock, !soulLoader.skills.has(name)),
+        body: skill.body,
+      };
     }
   );
 
@@ -460,10 +472,19 @@ export function registerSkillRoutes(
     async (req, reply) => {
       const { name } = req.params as { name: string };
       // NAME_RE also guards the rm path below against traversal, same as install.
-      if (!NAME_RE.test(name) || !soulLoader.skills.get(name)) {
+      if (
+        !NAME_RE.test(name) ||
+        !resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills)
+      ) {
         return reply.code(404).send({ error: `skill not found: ${name}` });
       }
-      await rm(join(gitSync.path, "skills", name), { recursive: true, force: true });
+      if (soulLoader.skills.has(name)) {
+        await rm(join(gitSync.path, "skills", name), { recursive: true, force: true });
+      }
+      if (bundledSkills.has(name)) {
+        disabledBundledSkills.add(name);
+        await persistDisabledBundledSkills(gitSync.path, disabledBundledSkills);
+      }
       const lock = await readLock(gitSync.path);
       delete lock.skills[name];
       await writeFile(
@@ -549,7 +570,7 @@ export function registerSkillRoutes(
           skills: discovered.map((s) => ({
             name: s.name,
             description: s.description,
-            ...installStatus(s, lock, soulLoader),
+            ...installStatus(s, lock, soulLoader, bundledSkills, disabledBundledSkills),
           })),
         };
       } catch (e) {

@@ -67,6 +67,7 @@ import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
+import type { BundledSkill } from "./soul/skills/bundled";
 import { registerSkillRoutes } from "./soul/skills/routes";
 import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
 import { buildToolRegistry } from "./tools/setup";
@@ -81,6 +82,8 @@ export interface AppOptions {
   secretsService?: SecretsService;
   gitSync?: GitSyncService;
   soulLoader?: SoulLoader;
+  bundledSkills?: ReadonlyMap<string, BundledSkill>;
+  disabledBundledSkills?: Set<string>;
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -365,7 +368,9 @@ export async function buildApp(opts: AppOptions = {}) {
             opts.gitSync,
             opts.llmService,
             requireAuth,
-            opts.activityService
+            opts.activityService,
+            opts.bundledSkills,
+            opts.disabledBundledSkills
           );
           if (opts.secretsService) {
             registerLlmConfigRoutes(
@@ -417,7 +422,9 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.guardrailsService,
         opts.pendingInteractionRepo,
         opts.a2uiSurfaceStore,
-        opts.invocations
+        opts.invocations,
+        opts.bundledSkills,
+        opts.disabledBundledSkills
       );
       registerApprovalRoutes(
         app,

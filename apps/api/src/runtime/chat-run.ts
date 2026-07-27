@@ -51,7 +51,13 @@ import {
   resolveAgent,
 } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
-import { type EagerSkill, listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
+import type { BundledSkill } from "../soul/skills/bundled";
+import {
+  type EagerSkill,
+  listAvailableSkills,
+  listEagerSkills,
+  resolveSkill,
+} from "../soul/skills/registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolCallResult } from "../tools/types";
 
@@ -69,6 +75,8 @@ export interface ChatTurnContext {
   workingMemory?: WorkingMemoryService;
   knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
+  bundledSkills?: ReadonlyMap<string, BundledSkill>;
+  disabledBundledSkills?: ReadonlySet<string>;
   events?: EventEmitter;
   toolRegistry?: ToolRegistry;
   guardrails?: GuardrailsService;
@@ -263,8 +271,12 @@ export async function prepareChatTurn(
   // via `load_skill`).
   const memoryList = workingMemory ? await workingMemory.list(user._id) : [];
   const governancePages = knowledge ? await knowledge.governancePages() : [];
-  const soulAvailableSkills = listAvailableSkills(soulLoader);
-  const soulEagerSkills = listEagerSkills(soulLoader);
+  const soulAvailableSkills = listAvailableSkills(
+    soulLoader,
+    ctx.bundledSkills,
+    ctx.disabledBundledSkills
+  );
+  const soulEagerSkills = listEagerSkills(soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills);
   // Repo catalogue for <soul-context> — conversation-scoped (same for the front desk and any
   // handoff target), so build it once and reuse across `buildSystemFor` calls.
   const soulCatalogue = buildSoulCatalogue(soulLoader);
@@ -273,7 +285,7 @@ export async function prepareChatTurn(
   // are merged with the soul's own eager skills, deduped by name so an already-eager skill isn't
   // injected twice. Resource schemas render to YAML, matching the resource-types API surface.
   const turnEagerSkills: EagerSkill[] = (body.skills ?? [])
-    .map((name) => soulLoader?.skills.get(name))
+    .map((name) => resolveSkill(name, soulLoader, ctx.bundledSkills, ctx.disabledBundledSkills))
     .filter((s): s is NonNullable<typeof s> => s != null && s.frontmatter._pendingAudit !== true)
     .map((s) => ({ name: s.name, body: s.body }));
   // Keep the soul's sorted eager-skill prefix intact (AC-V1-001 cache stability) and append only
@@ -320,6 +332,8 @@ export async function prepareChatTurn(
       memory: memoryList,
       governancePages,
       availableSkills: soulAvailableSkills,
+      bundledSkills: ctx.bundledSkills,
+      disabledBundledSkills: ctx.disabledBundledSkills,
       eagerSkills: mergedEagerSkills,
       taggedResources: turnTaggedResources,
       soulCatalogue,

@@ -316,6 +316,42 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
     expect(out).toContain("<available-skills>\n- bare\n</available-skills>");
   });
 
+  it("groups bundled Skills under deterministic category headers", () => {
+    const context = baseCtx({
+      availableSkills: [
+        {
+          name: "resource-forge",
+          description: "Forge Resource types.",
+          category: "forge",
+          categoryDescription: "Author Soul artifacts.",
+        },
+        {
+          name: "business-records",
+          description: "Work with Records.",
+          category: "core",
+          categoryDescription: "Core workflows.",
+        },
+        { name: "user-skill", description: "A Soul Skill." },
+      ],
+    });
+
+    const first = assembleSystemPrompt(context);
+    const second = assembleSystemPrompt(context);
+
+    expect(first).toBe(second);
+    expect(first).toContain(
+      [
+        "<available-skills>",
+        "- user-skill: A Soul Skill.",
+        "core: Core workflows.",
+        "  - business-records: Work with Records.",
+        "forge: Author Soul artifacts.",
+        "  - resource-forge: Forge Resource types.",
+        "</available-skills>",
+      ].join("\n")
+    );
+  });
+
   it("omits the block when there are no skills (unset or empty)", () => {
     expect(assembleSystemPrompt(baseCtx())).not.toContain("<available-skills>");
     expect(assembleSystemPrompt(baseCtx({ availableSkills: [] }))).not.toContain(

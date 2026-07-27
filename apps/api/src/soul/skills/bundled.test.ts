@@ -1,9 +1,14 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Logger } from "@tulipfarm/soul";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { bundledSkillsDir, loadBundledSkills } from "./bundled";
+import {
+  bundledSkillsDir,
+  loadBundledSkills,
+  loadDisabledBundledSkills,
+  persistDisabledBundledSkills,
+} from "./bundled";
 
 const temporaryDirectories: string[] = [];
 const originalOverride = process.env.BUNDLED_SKILLS_DIR;
@@ -16,11 +21,19 @@ async function makeTree(): Promise<string> {
   const invalid = join(root, "core", "invalid-skill");
   await mkdir(valid, { recursive: true });
   await mkdir(invalid, { recursive: true });
+  await mkdir(join(valid, "references", "nested"), { recursive: true });
+  await writeFile(
+    join(root, "core", "DESCRIPTION.md"),
+    "---\ndescription: Essential bundled workflows.\n---\n",
+    "utf8"
+  );
   await writeFile(
     join(valid, "SKILL.md"),
     "---\nname: valid-skill\ndescription: A valid bundled Skill.\n---\nFollow the steps.",
     "utf8"
   );
+  await writeFile(join(valid, "references", "guide.md"), "Guide.", "utf8");
+  await writeFile(join(valid, "references", "nested", "deep.md"), "Deep.", "utf8");
   await writeFile(
     join(invalid, "SKILL.md"),
     "---\nname: invalid-skill\n---\nMissing a description.",
@@ -72,10 +85,42 @@ describe("loadBundledSkills", () => {
         description: "A valid bundled Skill.",
       },
       body: "Follow the steps.",
+      category: "core",
+      categoryDescription: "Essential bundled workflows.",
+      directory: join(root, "core", "valid-skill"),
+      references: ["guide.md", "nested/deep.md"],
     });
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Bundled Skill "invalid-skill" skipped')
     );
+  });
+
+  it("loads the repository tree and expands the shared forge execution contract", async () => {
+    const logger = makeLogger();
+    const skills = await loadBundledSkills(logger);
+
+    expect([...skills.keys()].sort()).toEqual([
+      "agent-forge",
+      "business-records",
+      "knowledge-research",
+      "onboarding",
+      "resource-forge",
+      "routine-forge",
+      "skill-forge",
+      "structured-results",
+    ]);
+    for (const name of [
+      "agent-forge",
+      "onboarding",
+      "resource-forge",
+      "routine-forge",
+      "skill-forge",
+    ]) {
+      const skill = skills.get(name);
+      expect(skill?.body).toContain("## Execution Contract");
+      expect(skill?.body).not.toContain("{{FORGE_EXECUTION_CONTRACT}}");
+      expect(skill?.body).toContain("Do not stop at a plan, draft, or preview.");
+    }
   });
 
   it("returns an empty map when the bundled tree does not exist", async () => {
@@ -83,5 +128,21 @@ describe("loadBundledSkills", () => {
     const skills = await loadBundledSkills(logger, "/path/that/does/not/exist");
     expect(skills.size).toBe(0);
     expect(logger.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("disabled bundled Skills", () => {
+  it("persists sorted names and loads them back", async () => {
+    const root = await mkdtemp(join(tmpdir(), "bundled-disabled-"));
+    temporaryDirectories.push(root);
+
+    await persistDisabledBundledSkills(root, new Set(["zebra", "alpha"]));
+
+    expect(await loadDisabledBundledSkills(root, makeLogger())).toEqual(
+      new Set(["alpha", "zebra"])
+    );
+    expect(await readFile(join(root, "skills", ".bundled-disabled.json"), "utf8")).toBe(
+      '[\n  "alpha",\n  "zebra"\n]\n'
+    );
   });
 });

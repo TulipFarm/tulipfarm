@@ -8,6 +8,7 @@ import type { WorkingMemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
+import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
@@ -39,6 +40,8 @@ export interface ConversationRoutesDeps {
   knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
   toolRegistry?: ToolRegistry;
+  bundledSkills?: ReadonlyMap<string, BundledSkill>;
+  disabledBundledSkills?: ReadonlySet<string>;
 }
 
 export function registerConversationRoutes(
@@ -46,7 +49,16 @@ export function registerConversationRoutes(
   deps: ConversationRoutesDeps,
   requireAuth: PreHandler
 ): void {
-  const { repo, messageRepo, workingMemory, knowledge, soulLoader, toolRegistry } = deps;
+  const {
+    repo,
+    messageRepo,
+    workingMemory,
+    knowledge,
+    soulLoader,
+    toolRegistry,
+    bundledSkills,
+    disabledBundledSkills,
+  } = deps;
 
   app.get(
     "/api/v1/chats",
@@ -346,8 +358,10 @@ export function registerConversationRoutes(
           platformAgent,
           memory,
           governancePages,
-          availableSkills: listAvailableSkills(soulLoader),
-          eagerSkills: listEagerSkills(soulLoader),
+          availableSkills: listAvailableSkills(soulLoader, bundledSkills, disabledBundledSkills),
+          bundledSkills,
+          disabledBundledSkills,
+          eagerSkills: listEagerSkills(soulLoader, bundledSkills, disabledBundledSkills),
           taggedResources: [],
           soulCatalogue: buildSoulCatalogue(soulLoader),
           availableTools: tools,

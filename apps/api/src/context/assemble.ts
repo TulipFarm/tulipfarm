@@ -44,8 +44,9 @@ export interface AssembleContext {
    */
   eagerSkills?: EagerSkill[];
   /**
-   * Lazy skill L1 index for `<available-skills>` — non-eager soul skills projected to name +
-   * description. The agent pulls a skill's body (L2) on demand via `load_skill`. Unset → block omitted.
+   * Lazy Skill L1 index for `<available-skills>` — non-eager Skills projected to name,
+   * description, and optional bundled category metadata. The agent pulls a Skill's body (L2) on
+   * demand via `load_skill`. Unset → block omitted.
    */
   availableSkills?: AvailableSkill[];
   /**
@@ -179,27 +180,55 @@ function renderEagerSkills(ctx: AssembleContext): string {
 }
 
 /**
- * `<available-skills>` budget — total chars across all `name`+`description` pairs. Over this the whole
- * block is dropped (never half-rendered) so the cacheable prefix can't drift mid-block, matching
- * `renderMemory`. Defensive: V1 skill counts sit well under it.
+ * `<available-skills>` budget — total chars across every name, description, category, and category
+ * description. Over this the whole block is dropped (never half-rendered) so the cacheable prefix
+ * cannot drift mid-block, matching `renderMemory`.
  */
 const MAX_AVAILABLE_SKILLS_CHARS = 8000;
 
 /**
- * `<available-skills>` block (SKILLS.md, CONTEXT-ENGINE §1). The lazy skill L1 index: one
- * `- name: description` line per soul skill (just `- name` when the skill declares no description),
- * in the registry's sorted order. The agent loads a skill's body (L2) on demand via `load_skill`.
- * Omitted entirely when no skills are available; dropped whole when over budget.
+ * `<available-skills>` block (SKILLS.md, CONTEXT-ENGINE §1). Bundled Skills are grouped beneath
+ * category headers; uncategorized Soul Skills retain the flat `- name: description` form. Input
+ * order within each group remains the registry's stable name sort.
  */
 function renderAvailableSkills(ctx: AssembleContext): string {
   const skills = ctx.availableSkills ?? [];
   if (skills.length === 0) return "";
-  const total = skills.reduce((n, s) => n + s.name.length + s.description.length, 0);
+  const total = skills.reduce(
+    (n, skill) =>
+      n +
+      skill.name.length +
+      skill.description.length +
+      (skill.category?.length ?? 0) +
+      (skill.categoryDescription?.length ?? 0),
+    0
+  );
   if (total > MAX_AVAILABLE_SKILLS_CHARS) return "";
-  const body = skills
-    .map((s) => (s.description ? `- ${s.name}: ${s.description}` : `- ${s.name}`))
-    .join("\n");
-  return block("available-skills", body);
+
+  const lines = skills
+    .filter((skill) => !skill.category)
+    .map((skill) =>
+      skill.description ? `- ${skill.name}: ${skill.description}` : `- ${skill.name}`
+    );
+  const categories = new Map<string, AvailableSkill[]>();
+  for (const skill of skills) {
+    if (!skill.category) continue;
+    const categorySkills = categories.get(skill.category) ?? [];
+    categorySkills.push(skill);
+    categories.set(skill.category, categorySkills);
+  }
+  for (const category of [...categories.keys()].sort((left, right) => left.localeCompare(right))) {
+    const categorySkills = categories.get(category) ?? [];
+    const description =
+      categorySkills.find((skill) => skill.categoryDescription)?.categoryDescription ?? "";
+    lines.push(description ? `${category}: ${description}` : `${category}:`);
+    for (const skill of categorySkills) {
+      lines.push(
+        skill.description ? `  - ${skill.name}: ${skill.description}` : `  - ${skill.name}`
+      );
+    }
+  }
+  return block("available-skills", lines.join("\n"));
 }
 
 /**

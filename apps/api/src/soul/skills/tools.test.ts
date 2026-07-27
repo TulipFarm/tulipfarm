@@ -6,6 +6,7 @@ import { SKILL_TOOLS, type SkillTool, type SkillToolContext } from "./tools";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
+  cp: vi.fn().mockResolvedValue(undefined),
   mkdir: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   rm: vi.fn().mockResolvedValue(undefined),
@@ -19,7 +20,8 @@ vi.mock("./audit", async (orig) => {
 });
 
 import { existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import type { BundledSkill } from "./bundled";
 
 const FAKE_REPORT = {
   riskRating: "low" as const,
@@ -58,12 +60,32 @@ function makeLlmService(configured = true): LlmService {
 
 function makeCtx(
   skills: SoulSkill[] = [],
-  llmService?: LlmService
+  llmService?: LlmService,
+  bundledSkills: BundledSkill[] = [],
+  disabledBundledSkills = new Set<string>()
 ): SkillToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
 } {
-  return { gitSync: makeGitSync(), soulLoader: makeSoulLoader(skills), llmService };
+  return {
+    gitSync: makeGitSync(),
+    soulLoader: makeSoulLoader(skills),
+    llmService,
+    bundledSkills: new Map(bundledSkills.map((skill) => [skill.name, skill])),
+    disabledBundledSkills,
+  };
+}
+
+function bundledSkill(name: string): BundledSkill {
+  return {
+    name,
+    frontmatter: frontmatter(name, { category: "forge" }),
+    body: "Bundled body.",
+    category: "forge",
+    categoryDescription: "Forge Skills.",
+    directory: `/app/skills/forge/${name}`,
+    references: ["guide.md"],
+  };
 }
 
 const createTool = SKILL_TOOLS.find((t) => t.name === "skill_create") as SkillTool;
@@ -434,6 +456,31 @@ describe("skill_update", () => {
     const res = await updateTool.handler({ name: "code-review" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
+
+  it("materializes a bundled-only Skill before updating it", async () => {
+    const bundled = bundledSkill("resource-forge");
+    const disabled = new Set(["resource-forge"]);
+    const ctx = makeCtx([], undefined, [bundled], disabled);
+
+    const res = await updateTool.handler({ name: "resource-forge", body: "Customized body." }, ctx);
+
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: "resource-forge", body: "Customized body." },
+    });
+    expect(cp).toHaveBeenCalledWith(bundled.directory, "/fake/soul/skills/resource-forge", {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    expect(writeFile).toHaveBeenCalledWith(
+      "/fake/soul/skills/resource-forge/SKILL.md",
+      expect.stringContaining("Customized body."),
+      "utf8"
+    );
+    expect(disabled.has("resource-forge")).toBe(false);
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill resource-forge");
+  });
 });
 
 // ── skill_get ─────────────────────────────────────────────────────────────────
@@ -444,7 +491,22 @@ describe("skill_get", () => {
     const res = await getTool.handler({ name: "planner" }, ctx);
     expect(res).toEqual({
       success: true,
-      data: { name: "planner", frontmatter: { tags: ["planning"] }, body: "Plan." },
+      data: {
+        name: "planner",
+        frontmatter: { tags: ["planning"] },
+        body: "Plan.",
+        provenance: "soul",
+      },
+    });
+  });
+
+  it("reads a bundled Skill with builtin provenance", async () => {
+    const bundled = bundledSkill("resource-forge");
+    const ctx = makeCtx([], undefined, [bundled]);
+    const res = await getTool.handler({ name: bundled.name }, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: bundled.name, body: bundled.body, provenance: "builtin" },
     });
   });
 
@@ -479,8 +541,12 @@ describe("skill_list", () => {
     expect(res.success).toBe(true);
     const { skills } = (res as { success: true; data: { skills: unknown[] } }).data;
     expect(skills).toHaveLength(2);
-    expect(skills).toContainEqual({ name: "code-review", frontmatter: { tags: ["review"] } });
-    expect(skills).toContainEqual({ name: "planner", frontmatter: {} });
+    expect(skills).toContainEqual({
+      name: "code-review",
+      frontmatter: { tags: ["review"] },
+      provenance: "soul",
+    });
+    expect(skills).toContainEqual({ name: "planner", frontmatter: {}, provenance: "soul" });
   });
 });
 
@@ -515,6 +581,26 @@ describe("skill_delete", () => {
     const ctx = makeCtx();
     const res = await deleteTool.handler({}, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+  });
+
+  it("persists a tombstone when deleting a bundled-only Skill", async () => {
+    const bundled = bundledSkill("resource-forge");
+    const disabled = new Set<string>();
+    const ctx = makeCtx([], undefined, [bundled], disabled);
+
+    const res = await deleteTool.handler({ name: bundled.name }, ctx);
+
+    expect(res).toEqual({
+      success: true,
+      data: { name: "resource-forge", deleted: true },
+    });
+    expect(rm).not.toHaveBeenCalled();
+    expect(disabled).toEqual(new Set(["resource-forge"]));
+    expect(writeFile).toHaveBeenCalledWith(
+      "/fake/soul/skills/.bundled-disabled.json",
+      '[\n  "resource-forge"\n]\n',
+      "utf8"
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
+import type { BundledSkill } from "./bundled";
 import {
   type AvailableSkill,
   type EagerSkill,
@@ -13,6 +14,18 @@ function skill(name: string, frontmatter: Record<string, unknown> = {}, body = "
 
 function makeSoulLoader(skills: SoulSkill[] = []): SoulLoader {
   return { skills: new Map(skills.map((s) => [s.name, s])) } as unknown as SoulLoader;
+}
+
+function bundled(name: string, frontmatter: Record<string, unknown> = {}, body = ""): BundledSkill {
+  return {
+    name,
+    frontmatter,
+    body,
+    category: "core",
+    categoryDescription: "Core bundled Skills.",
+    directory: `/bundled/core/${name}`,
+    references: [],
+  };
 }
 
 describe("listAvailableSkills", () => {
@@ -69,6 +82,65 @@ describe("listAvailableSkills", () => {
   it("returns [] when there are no skills", () => {
     expect(listAvailableSkills(makeSoulLoader([]))).toEqual([]);
   });
+
+  it("merges bundled Skills and lets a Soul Skill override a name collision", () => {
+    const bundledSkills = new Map([
+      ["alpha", bundled("alpha", { name: "alpha", description: "Bundled." }, "bundled body")],
+      ["beta", bundled("beta", { name: "beta", description: "Bundled beta." })],
+    ]);
+    const out = listAvailableSkills(
+      makeSoulLoader([
+        skill(
+          "alpha",
+          { name: "alpha", description: "Soul override.", category: "custom" },
+          "soul body"
+        ),
+      ]),
+      bundledSkills
+    );
+
+    expect(out).toEqual<AvailableSkill[]>([
+      {
+        name: "alpha",
+        description: "Soul override.",
+        category: "custom",
+        categoryDescription: "",
+      },
+      {
+        name: "beta",
+        description: "Bundled beta.",
+        category: "core",
+        categoryDescription: "Core bundled Skills.",
+      },
+    ]);
+  });
+
+  it("filters disabled bundled names without hiding a Soul override", () => {
+    const bundledSkills = new Map([
+      ["alpha", bundled("alpha", { description: "Bundled alpha." })],
+      ["beta", bundled("beta", { description: "Bundled beta." })],
+    ]);
+    const disabled = new Set(["alpha", "beta"]);
+
+    expect(
+      listAvailableSkills(
+        makeSoulLoader([skill("alpha", { description: "Soul alpha." })]),
+        bundledSkills,
+        disabled
+      )
+    ).toEqual<AvailableSkill[]>([{ name: "alpha", description: "Soul alpha." }]);
+  });
+
+  it("keeps global name sorting stable across Soul and bundled inputs", () => {
+    const out = listAvailableSkills(
+      makeSoulLoader([skill("zebra"), skill("bravo")]),
+      new Map([
+        ["mango", bundled("mango")],
+        ["alpha", bundled("alpha")],
+      ])
+    );
+    expect(out.map((entry) => entry.name)).toEqual(["alpha", "bravo", "mango", "zebra"]);
+  });
 });
 
 describe("listEagerSkills", () => {
@@ -113,5 +185,18 @@ describe("listEagerSkills", () => {
 
   it("returns [] when there are no skills", () => {
     expect(listEagerSkills(makeSoulLoader([]))).toEqual([]);
+  });
+
+  it("applies Soul precedence before eager filtering", () => {
+    const bundledSkills = new Map([
+      ["alpha", bundled("alpha", { eager: true }, "bundled eager")],
+      ["beta", bundled("beta", { eager: true }, "bundled beta")],
+    ]);
+    const out = listEagerSkills(
+      makeSoulLoader([skill("alpha", { eager: false }, "soul lazy")]),
+      bundledSkills
+    );
+
+    expect(out).toEqual<EagerSkill[]>([{ name: "beta", body: "bundled beta" }]);
   });
 });

@@ -29,11 +29,12 @@ the `\n` join), matching `buildGovernanceBlock`'s precedent — so the prefix st
 across turns when soul/memory don't change. No `<harness-typed-state>` block is ever emitted
 (deferred MEM-V1-005).
 
-Both skill blocks are fed by the **SkillRegistry** (`../soul/skills/registry.ts`): `listEagerSkills`
-projects skills with `eager: true` to their full `{ name, body }` for `<skills>`, and `listAvailableSkills`
-projects the rest to their sorted L1 `{ name, description }` for `<available-skills>` — the two sets are
-disjoint. A lazy skill's body (L2) and reference files (L3) load on demand via the `load_skill` /
-`load_skill_reference` platform tools; per-agent eager-skill election stays deferred post-V1.
+Both Skill blocks are fed by the **SkillRegistry** (`../soul/skills/registry.ts`), which merges the
+read-only bundled tree with Soul overrides by name before projecting eager Skills to
+`{ name, body }` and lazy Skills to their sorted L1 index. Bundled categories group the lazy index.
+The sets are disjoint. A lazy Skill's body (L2) and reference files (L3) load on demand via the
+`load_skill` / `load_skill_reference` platform Tools; per-Agent eager-Skill election stays deferred
+post-V1.
 
 `<soul-context>` and `<available-tools>` give the agent **ambient awareness** without a tool
 round-trip. `buildSoulCatalogue` (`../soul/catalogue.ts`) projects every soul artifact — agents

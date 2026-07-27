@@ -2,7 +2,7 @@ import type { SoulAgent } from "@tulipfarm/soul";
 import { type AssembleContext, assembleSystemPrompt } from "../context/assemble";
 import type { PlatformAgent } from "../soul/agents/platform-agents";
 import type { SoulCatalogue } from "../soul/catalogue";
-import { BUILTIN_SKILLS } from "../soul/skills/builtin-skills";
+import type { BundledSkill } from "../soul/skills/bundled";
 import type { AvailableSkill } from "../soul/skills/registry";
 
 /**
@@ -19,6 +19,8 @@ export function assembleAgentSystemPrompt(args: {
   memory: AssembleContext["memory"];
   governancePages: AssembleContext["governancePages"];
   availableSkills: AvailableSkill[];
+  bundledSkills?: ReadonlyMap<string, BundledSkill>;
+  disabledBundledSkills?: ReadonlySet<string>;
   eagerSkills: AssembleContext["eagerSkills"];
   taggedResources: AssembleContext["taggedResources"];
   soulCatalogue: SoulCatalogue;
@@ -33,6 +35,8 @@ export function assembleAgentSystemPrompt(args: {
     memory,
     governancePages,
     availableSkills,
+    bundledSkills,
+    disabledBundledSkills,
     eagerSkills,
     taggedResources,
     soulCatalogue,
@@ -40,11 +44,24 @@ export function assembleAgentSystemPrompt(args: {
     pinnedKnowledge,
     knowledgeGrounding,
   } = args;
-  // Platform forge skills surface in <available-skills> alongside the soul's own (loadable via load_skill).
+  // Resolve platform forge Skills against the boot-cached bundled map. Registry output normally
+  // already contains them; the name-keyed merge below prevents duplicates while preserving access
+  // for callers that intentionally pass a narrower available-Skill list.
   const forgeAvailable = (platformAgent?.forgeSkills ?? [])
-    .map((n) => BUILTIN_SKILLS.get(n))
+    .filter((name) => !disabledBundledSkills?.has(name))
+    .map((name) => bundledSkills?.get(name))
     .filter((s): s is NonNullable<typeof s> => s !== undefined)
-    .map((s) => ({ name: s.name, description: s.description }));
+    .map((skill) => ({
+      name: skill.name,
+      description:
+        typeof skill.frontmatter.description === "string" ? skill.frontmatter.description : "",
+      category: skill.category,
+      categoryDescription: skill.categoryDescription,
+    }));
+  const mergedAvailable = new Map(availableSkills.map((skill) => [skill.name, skill]));
+  for (const skill of forgeAvailable) {
+    if (!mergedAvailable.has(skill.name)) mergedAvailable.set(skill.name, skill);
+  }
   return assembleSystemPrompt({
     agentId: agent.name,
     domain: typeof agent.frontmatter.domain === "string" ? agent.frontmatter.domain : null,
@@ -53,7 +70,7 @@ export function assembleAgentSystemPrompt(args: {
     personality: agent.body,
     memory,
     governancePages,
-    availableSkills: [...availableSkills, ...forgeAvailable],
+    availableSkills: [...mergedAvailable.values()],
     eagerSkills,
     taggedResources,
     soulCatalogue,
