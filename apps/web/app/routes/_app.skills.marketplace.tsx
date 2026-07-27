@@ -116,6 +116,14 @@ export default function SkillsMarketplace() {
 
   const selectedNames = [...selected];
   const allAudited = selectedNames.length > 0 && selectedNames.every((n) => reports[n]);
+  const catalogGroups = new Map<string, MarketplaceCatalog["skills"]>();
+  for (const skill of catalog?.skills ?? []) {
+    const category = skill.category ?? "other";
+    const group = catalogGroups.get(category);
+    if (group) group.push(skill);
+    else catalogGroups.set(category, [skill]);
+  }
+  const updateCount = catalog?.skills.filter((skill) => skill.updateAvailable).length ?? 0;
 
   // Load one or more catalog skills into the select → audit → confirm pipeline (the audit gate runs
   // unchanged). Used by the per-row Install/Update buttons and the "Review all" button.
@@ -221,48 +229,67 @@ export default function SkillsMarketplace() {
                 <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                   official marketplace · {catalog.source}
                 </p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy !== null}
-                  onClick={() => loadIntoPipeline(catalog.scanId, catalog.skills)}
-                >
-                  Review all ({catalog.skills.length})
-                </Button>
+                <div className="flex items-center gap-2">
+                  {updateCount > 0 ? (
+                    <span className="rounded-sm border border-primary px-2 py-1 text-xs uppercase tracking-[0.15em] text-primary">
+                      {updateCount} {updateCount === 1 ? "update" : "updates"} available
+                    </span>
+                  ) : null}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={busy !== null}
+                    onClick={() => loadIntoPipeline(catalog.scanId, catalog.skills)}
+                  >
+                    Review all ({catalog.skills.length})
+                  </Button>
+                </div>
               </div>
-              {/* List scrolls within the panel so the page itself does not grow with the catalog. */}
-              <ul className="flex max-h-96 flex-col divide-y divide-border overflow-y-auto rounded-sm border border-border">
-                {catalog.skills.map((s) => (
-                  <li key={s.name} className="flex items-center gap-3 px-3 py-2">
-                    <span className="font-medium text-foreground">{s.name}</span>
-                    {s.description ? (
-                      <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                        {s.description}
-                      </span>
-                    ) : (
-                      <span className="flex-1" />
-                    )}
-                    {s.installs !== undefined ? (
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {s.installs} installs
-                      </span>
-                    ) : null}
-                    {s.installed && !s.updateAvailable ? (
-                      <InstallBadge installed updateAvailable={false} />
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant={s.updateAvailable ? "default" : "outline"}
-                        className="shrink-0"
-                        disabled={busy !== null}
-                        onClick={() => loadIntoPipeline(catalog.scanId, [s])}
-                      >
-                        {s.updateAvailable ? "Update" : "Install"}
-                      </Button>
-                    )}
-                  </li>
+              {/* Groups scroll within the panel so the page itself does not grow with the catalog. */}
+              <div className="flex max-h-96 flex-col gap-3 overflow-y-auto rounded-sm border border-border p-3">
+                {[...catalogGroups].map(([category, skills]) => (
+                  <section key={category} aria-labelledby={`category-${category}`}>
+                    <h2
+                      id={`category-${category}`}
+                      className="mb-1 text-xs uppercase tracking-[0.2em] text-muted-foreground"
+                    >
+                      {category.replaceAll("-", " ")}
+                    </h2>
+                    <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+                      {skills.map((s) => (
+                        <li key={s.name} className="flex items-center gap-3 px-3 py-2">
+                          <span className="font-medium text-foreground">{s.name}</span>
+                          {s.description ? (
+                            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                              {s.description}
+                            </span>
+                          ) : (
+                            <span className="flex-1" />
+                          )}
+                          {s.installs !== undefined ? (
+                            <span className="shrink-0 text-xs text-muted-foreground">
+                              {s.installs} installs
+                            </span>
+                          ) : null}
+                          {s.installed && !s.updateAvailable ? (
+                            <InstallBadge installed updateAvailable={false} />
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant={s.updateAvailable ? "default" : "outline"}
+                              className="shrink-0"
+                              disabled={busy !== null}
+                              onClick={() => loadIntoPipeline(catalog.scanId, [s])}
+                            >
+                              {s.updateAvailable ? "Update" : "Install"}
+                            </Button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
               <p className="border-t border-border pt-4 text-xs uppercase tracking-[0.2em] text-muted-foreground">
                 or install from any git repo
               </p>

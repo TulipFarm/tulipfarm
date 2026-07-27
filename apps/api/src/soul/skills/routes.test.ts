@@ -82,10 +82,11 @@ const skill = (name: string, description: string): SoulSkill => ({
 // marketplace.json (the curated-catalog manifest read by GET /api/v1/skills/marketplace).
 async function makeRemoteRepo(
   manifest?: unknown,
-  skillContent = "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo."
+  skillContent = "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo.",
+  category?: string
 ): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "skill-remote-"));
-  const skillDir = join(dir, "skills", "demo-skill");
+  const skillDir = category ? join(dir, category, "demo-skill") : join(dir, "skills", "demo-skill");
   await mkdir(skillDir, { recursive: true });
   await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf8");
   if (manifest !== undefined) {
@@ -827,6 +828,7 @@ describe("skills routes", () => {
             skillId: "demo-skill",
             name: "demo-skill",
             description: "Manifest description.",
+            category: "productivity",
             installs: 42,
             source: "tulipfarm/skills",
           },
@@ -853,6 +855,7 @@ describe("skills routes", () => {
           name: "demo-skill",
           skillId: "demo-skill",
           description: "A demo skill.",
+          category: "productivity",
           installs: 42,
           installed: false,
           updateAvailable: false,
@@ -876,6 +879,29 @@ describe("skills routes", () => {
         {
           name: "demo-skill",
           description: "A demo skill.",
+          installed: false,
+          updateAvailable: false,
+        },
+      ]);
+    });
+
+    it("derives category from the authoritative catalog directory", async () => {
+      const remote = await makeRemoteRepo(undefined, undefined, "productivity");
+      temps.push(remote);
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/marketplace",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json().skills).toEqual([
+        {
+          name: "demo-skill",
+          description: "A demo skill.",
+          category: "productivity",
           installed: false,
           updateAvailable: false,
         },
@@ -963,6 +989,133 @@ describe("skills routes", () => {
       expect(installed.statusCode).toBe(200);
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
       expect(lock.skills["demo-skill"].sourceUrl).toBe(`file://${remote}`);
+    });
+  });
+
+  describe("GET /api/v1/skills/updates", () => {
+    afterEach(() => {
+      delete process.env.MARKETPLACE_SOURCE;
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/skills/updates" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("lists catalog drift and sends reinstall through audit and operator confirm", async () => {
+      const remote = await makeRemoteRepo({
+        version: 1,
+        skills: [
+          {
+            id: "tulipfarm/skills/productivity/demo-skill",
+            skillId: "demo-skill",
+            name: "demo-skill",
+            description: "A demo skill.",
+            category: "productivity",
+            installs: 42,
+            source: "tulipfarm/skills",
+          },
+        ],
+      });
+      temps.push(remote);
+      const source = `file://${remote}`;
+      process.env.MARKETPLACE_SOURCE = source;
+      soulLoader.skills.set("demo-skill", skill("demo-skill", "A demo skill."));
+      await writeFile(
+        join(soulPath, "skills-lock.json"),
+        JSON.stringify({
+          version: 1,
+          skills: {
+            "demo-skill": {
+              sourceUrl: source,
+              sourceType: "git",
+              hash: "0".repeat(64),
+            },
+          },
+        }),
+        "utf8"
+      );
+
+      const updates = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/updates",
+        cookies: auth(),
+        headers,
+      });
+      expect(updates.statusCode).toBe(200);
+      expect(updates.json().skills).toEqual([
+        {
+          name: "demo-skill",
+          skillId: "demo-skill",
+          description: "A demo skill.",
+          category: "productivity",
+          installs: 42,
+          installed: true,
+          updateAvailable: true,
+        },
+      ]);
+
+      const { scanId } = updates.json();
+      const blocked = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(blocked.statusCode).toBe(409);
+
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "Benign.",
+        toolsReach: [],
+        findings: [],
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+      const installed = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(installed.statusCode).toBe(200);
+    });
+
+    it("does not report a same-name Skill installed from another source", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      process.env.MARKETPLACE_SOURCE = `file://${remote}`;
+      soulLoader.skills.set("demo-skill", skill("demo-skill", "A demo skill."));
+      await writeFile(
+        join(soulPath, "skills-lock.json"),
+        JSON.stringify({
+          version: 1,
+          skills: {
+            "demo-skill": {
+              sourceUrl: "owner/other-catalog",
+              sourceType: "github",
+              hash: "0".repeat(64),
+            },
+          },
+        }),
+        "utf8"
+      );
+
+      const updates = await app.inject({
+        method: "GET",
+        url: "/api/v1/skills/updates",
+        cookies: auth(),
+        headers,
+      });
+      expect(updates.statusCode).toBe(200);
+      expect(updates.json().skills).toEqual([]);
     });
   });
 });

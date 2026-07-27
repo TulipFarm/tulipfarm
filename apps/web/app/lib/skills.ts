@@ -30,6 +30,7 @@ export type MarketplaceSkill = {
   name: string;
   skillId?: string;
   description?: string;
+  category?: string;
   installs?: number;
 } & SkillInstallStatus;
 
@@ -83,6 +84,10 @@ export async function installSkills(
 
 export async function marketplaceSkills(): Promise<MarketplaceCatalog> {
   return apiGet<MarketplaceCatalog>("/api/v1/skills/marketplace");
+}
+
+export async function skillUpdates(): Promise<MarketplaceCatalog> {
+  return apiGet<MarketplaceCatalog>("/api/v1/skills/updates");
 }
 
 export async function removeSkill(name: string): Promise<void> {

@@ -115,18 +115,21 @@ test("catalog rows badge installed and update-available skills", async () => {
       {
         name: "fresh-skill",
         description: "Not yet installed.",
+        category: "productivity",
         installed: false,
         updateAvailable: false,
       },
       {
         name: "current-skill",
         description: "Installed, current.",
+        category: "productivity",
         installed: true,
         updateAvailable: false,
       },
       {
         name: "stale-skill",
         description: "Installed, stale.",
+        category: "engineering",
         installed: true,
         updateAvailable: true,
       },
@@ -138,6 +141,9 @@ test("catalog rows badge installed and update-available skills", async () => {
   expect(screen.getByText(/installed ✓/i)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^Install$/ })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /^Update$/ })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "productivity" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "engineering" })).toBeInTheDocument();
+  expect(screen.getByText("1 update available")).toBeInTheDocument();
 });
 
 test("per-row Install loads only that skill into the audit pipeline", async () => {
