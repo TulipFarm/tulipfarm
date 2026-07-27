@@ -179,7 +179,7 @@ const skillCreate: SkillTool = {
 // ── skill_update ──────────────────────────────────────────────────────────────
 
 // NOTE: no top-level `anyOf` — OpenAI-family models reject tool parameter schemas with a top-level
-// anyOf/oneOf/allOf/enum/not. The "at least one of body/frontmatter" rule is enforced in the handler.
+// anyOf/oneOf/allOf/enum/not. The replacement-vs-patch constraints are enforced in the handler.
 const UPDATE_SCHEMA = {
   type: "object",
   required: ["name"],
@@ -190,7 +190,22 @@ const UPDATE_SCHEMA = {
     frontmatter: {
       ...PUBLIC_FRONTMATTER_SCHEMA,
       description:
-        "New complete frontmatter (replaces existing). name and description are required. Omit to keep current. At least one of body or frontmatter must be provided.",
+        "New complete frontmatter (replaces existing). name and description are required. Omit to keep current.",
+    },
+    old_string: {
+      type: "string",
+      description:
+        "Exact Skill body text to replace in surgical patch mode. Must be unique unless replace_all is true.",
+    },
+    new_string: {
+      type: "string",
+      description:
+        "Replacement text for surgical patch mode. Use an empty string to delete the matched text.",
+    },
+    replace_all: {
+      type: "boolean",
+      description:
+        "Replace every old_string occurrence instead of requiring a unique match. Defaults to false.",
     },
   },
 } as const;
@@ -200,18 +215,40 @@ const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const skillUpdate: SkillTool = {
   name: "skill_update",
   description:
-    "Update an existing skill's body and/or frontmatter. At least one must be provided. Commits and pushes via withSync.",
+    "Update an existing Skill. Prefer old_string/new_string for surgical body fixes; use body and/or frontmatter only for full replacements. Patch text must be unique unless replace_all is true. Updates preserve audit state and do not re-run SkillAudit. Commits and pushes via withSync.",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
-    const { name, body, frontmatter } = args as {
+    const { name, body, frontmatter, old_string, new_string, replace_all } = args as {
       name: string;
       body?: string;
       frontmatter?: Record<string, unknown>;
+      old_string?: string;
+      new_string?: string;
+      replace_all?: boolean;
     };
-    if (body === undefined && frontmatter === undefined)
-      return err("validation_error", "at least one of body or frontmatter must be provided");
+    const hasReplacement = body !== undefined || frontmatter !== undefined;
+    const hasPatch =
+      old_string !== undefined || new_string !== undefined || replace_all !== undefined;
+    if (!hasReplacement && !hasPatch) {
+      return err(
+        "validation_error",
+        "provide body/frontmatter for replacement or old_string/new_string for a patch"
+      );
+    }
+    if (hasReplacement && hasPatch) {
+      return err("validation_error", "cannot combine a full replacement with a surgical patch");
+    }
+    if (hasPatch && !old_string) {
+      return err("validation_error", "old_string is required for a surgical patch");
+    }
+    if (hasPatch && new_string === undefined) {
+      return err(
+        "validation_error",
+        "new_string is required for a surgical patch; use an empty string to delete"
+      );
+    }
 
     const soulSkill = ctx.soulLoader.skills.get(name);
     const bundledSkill = ctx.bundledSkills.get(name);
@@ -219,7 +256,22 @@ const skillUpdate: SkillTool = {
     if (!existing) return err("not_found", `skill not found: ${name}`);
 
     const existingPublic = publicFrontmatter(existing.frontmatter);
-    const newBody = body ?? existing.body;
+    let newBody = body ?? existing.body;
+    if (hasPatch && old_string && new_string !== undefined) {
+      const matchCount = existing.body.split(old_string).length - 1;
+      if (matchCount === 0) {
+        return err("validation_error", "old_string was not found in the Skill body");
+      }
+      if (!replace_all && matchCount > 1) {
+        return err(
+          "validation_error",
+          `old_string matched ${matchCount} times; include more context or set replace_all`
+        );
+      }
+      newBody = replace_all
+        ? existing.body.replaceAll(old_string, new_string)
+        : existing.body.replace(old_string, new_string);
+    }
     const newFm = frontmatter ?? existingPublic.frontmatter;
     const persistedFm = existingPublic.pendingAudit ? { ...newFm, _pendingAudit: true } : newFm;
     const content = serializeSkill(persistedFm, newBody);

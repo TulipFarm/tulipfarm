@@ -186,6 +186,13 @@ function renderEagerSkills(ctx: AssembleContext): string {
  */
 const MAX_AVAILABLE_SKILLS_CHARS = 8000;
 
+const AVAILABLE_SKILLS_GUIDANCE = [
+  "Before replying, scan this list and load any Skill that is even partially relevant with",
+  "load_skill. If a loaded Skill is wrong, outdated, or incomplete, patch it immediately with",
+  "skill_update using old_string and new_string; do not wait to be asked. After a hard multi-step",
+  "task, offer to save the reusable approach as a new Skill.",
+].join(" ");
+
 /**
  * `<available-skills>` block (SKILLS.md, CONTEXT-ENGINE §1). Bundled Skills are grouped beneath
  * category headers; uncategorized Soul Skills retain the flat `- name: description` form. Input
@@ -194,15 +201,17 @@ const MAX_AVAILABLE_SKILLS_CHARS = 8000;
 function renderAvailableSkills(ctx: AssembleContext): string {
   const skills = ctx.availableSkills ?? [];
   if (skills.length === 0) return "";
-  const total = skills.reduce(
-    (n, skill) =>
-      n +
-      skill.name.length +
-      skill.description.length +
-      (skill.category?.length ?? 0) +
-      (skill.categoryDescription?.length ?? 0),
-    0
-  );
+  const total =
+    AVAILABLE_SKILLS_GUIDANCE.length +
+    skills.reduce(
+      (n, skill) =>
+        n +
+        skill.name.length +
+        skill.description.length +
+        (skill.category?.length ?? 0) +
+        (skill.categoryDescription?.length ?? 0),
+      0
+    );
   if (total > MAX_AVAILABLE_SKILLS_CHARS) return "";
 
   const lines = skills
@@ -228,7 +237,7 @@ function renderAvailableSkills(ctx: AssembleContext): string {
       );
     }
   }
-  return block("available-skills", lines.join("\n"));
+  return block("available-skills", `${AVAILABLE_SKILLS_GUIDANCE}\n\n${lines.join("\n")}`);
 }
 
 /**

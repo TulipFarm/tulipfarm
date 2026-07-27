@@ -1,66 +1,136 @@
 ---
 name: skill-forge
-description: "Forge a Skill (SKILL.md): a stateless single-task unit, then audit and activate it."
+description: Create and improve safe, reusable Skills.
 category: forge
 ---
-# Skill Forge Workflow
+# Skill Forge Skill
 
-Guides creating or editing a **Skill** — a stateless, atomic unit carrying instructions for a
-single well-defined task (SKILL.md = `name` + `description` + markdown body). Skills are loaded by
-Agents on demand via `load_skill`. They have no identity and no Memory.
+Create or improve a Skill: a stateless set of instructions for one repeatable task. This workflow
+covers duplicate checks, authoring, surgical maintenance, SkillAudit, operator confirmation, and
+verification; it does not create Agents or Routines.
+
+## When to Use
+
+- The user wants to capture a repeatable procedure as a Skill.
+- A hard multi-step task produced an approach worth reusing.
+- A loaded Skill is wrong, outdated, incomplete, or missing a discovered pitfall.
+- An existing Skill needs a focused wording or command correction.
+
+Do not use this workflow for:
+
+- Persistent identity, persona, or coordination across Turns; use `agent-forge`.
+- Scheduled or event-driven automation; use `routine-forge`.
+- A one-off answer with no likely reuse.
+- General facts without a procedure; store those in the appropriate Knowledge or Memory surface.
+
+## Prerequisites
+
+- A single task with a checkable result.
+- Access to `skill_list`, `skill_get`, `skill_create`, `skill_update`, and `skill_activate`.
+- A configured LLM provider for new-Skill SkillAudit.
+- Explicit operator confirmation before activating a newly created Skill.
+
+## How to Run
+
+- For a new Skill, follow the create procedure and stop for operator confirmation after SkillAudit.
+- For a small correction, call `skill_update` with `old_string` and `new_string`.
+- For repeated exact text, add `replace_all: true`; otherwise the match must be unique.
+- For a major overhaul, supply a complete `body` and, only when needed, complete `frontmatter`.
+- A bundled Skill is read-only until `skill_update` materializes a Soul override automatically.
 
 {{FORGE_EXECUTION_CONTRACT}}
 
-## Decide first: Skill or Agent?
+## Quick Reference
 
-If the request needs to remember state across Turns, own a persona, or coordinate other Skills, it
-is an **Agent** — stop and use `agent-forge` instead. Proceed only for a single repeatable task
-("write release notes", "triage a ticket", "format a report").
+| Need | Tool call | Boundary |
+| --- | --- | --- |
+| Find existing Skills | `skill_list` | Inspect before creating |
+| Read one Skill | `skill_get` | Capture exact patch context |
+| Create | `skill_create` | Lands pending audit |
+| Patch one match | `skill_update` + `old_string`/`new_string` | Preferred maintenance path |
+| Patch every match | Add `replace_all: true` | Use only when every occurrence should change |
+| Delete matched text | Set `new_string: ""` | Final body must remain non-empty |
+| Rewrite | `skill_update` + complete `body` | Major changes only |
+| Activate | `skill_activate` | Only after operator reviews SkillAudit |
 
-## Create Flow
+- `name`: lowercase letters, numbers, dots, underscores, or hyphens; maximum 64 characters.
+- `name` must equal the Skill directory name; `description` is required.
+- `description`: one sentence, maximum 60 characters by house style, ending with a period.
+- Unknown benign fields are tolerated; authority-grant and underscore-prefixed fields are reserved.
 
-### Step 1 — Purpose & duplicates
+Body section order:
 
-Call `skill_list` to show existing Skills (avoid duplicates, anchor naming). Confirm the single
-task this Skill performs and which Agents will use it.
+1. `# <Title> Skill`
+2. Two or three sentences stating what the Skill does and does not do
+3. `## When to Use`
+4. `## Prerequisites`
+5. `## How to Run`
+6. `## Quick Reference`
+7. `## Procedure`
+8. `## Pitfalls`
+9. `## Verification`
 
-### Step 2 — Identity
+Aim for roughly 100 lines for a simple Skill. Move bulky or branch-specific material into
+`references/` and point to it from the body.
 
-- **name**: `^[a-z0-9][a-z0-9._-]*$` (maximum 64 characters), equal to the Skill's directory name.
-- **description**: one sentence written as a trigger condition for an LLM reader — specific Tool
-  names, 3–5 task types, synonyms, and action verbs. A vague description never fires; this is the #1
-  reason Skills do not activate.
+## Procedure
 
-### Step 3 — Instruction body
+1. **Classify the artifact.**
+   Confirm the request is a stateless, repeatable task. If it needs identity or scheduling, switch
+   to the matching forge before writing anything.
+2. **Survey the merged Skill view.**
+   Call `skill_list`, then read likely overlaps with `skill_get`. Completion criterion: the new
+   Skill has a distinct trigger, or the existing Skill selected for maintenance is identified.
+3. **Define the contract.**
+   Write input assumptions, ordered actions, expected output, failure handling, and a checkable
+   finish condition. Remove generic advice that would not change Agent behavior.
+4. **Draft compact frontmatter and body.**
+   Follow the Quick Reference constraints and mandatory section order. Keep the description
+   trigger-focused and put procedure details in the body or references.
+5. **Choose create, patch, or rewrite.**
+   Use create only for a distinct Skill. For maintenance, prefer a surgical patch containing
+   enough exact surrounding text to match once. Use a full rewrite only when the structure itself
+   must change.
+6. **Create and audit a new Skill.**
+   Call `skill_create` with `name`, `body`, and complete public `frontmatter`. It writes a
+   pending-audit Skill and returns deterministic scanner evidence plus the LLM SkillAudit report.
+   If it returns `audit_required`, report that an LLM provider must be configured and do not claim
+   the Skill is live.
+7. **Present the independent audit signals.**
+   Show the operator the deterministic verdict and findings, source trust, LLM risk rating, and
+   summary. State that both are advisory rather than guarantees.
+8. **Activate only after confirmation.**
+   Once the operator explicitly confirms, call `skill_activate`. Completion criterion:
+   `skill_activate` succeeds and the Skill no longer has pending-audit status.
+9. **Maintain loaded Skills immediately.**
+   When a loaded Skill proves wrong, outdated, or incomplete, call `skill_update` with the exact
+   `old_string` and corrected `new_string`. Existing confirmed Skills retain their audit state and
+   are not re-audited on update.
+10. **Verify the durable result.**
+    Read the Skill again with `skill_get`. Confirm the intended content, frontmatter, provenance,
+    and activation state from real Tool results.
 
-Write the markdown body as direct instructions to an Agent: a one-line purpose, numbered steps,
-input/output examples, and edge-case/failure handling. Keep it lean (push bulky material into
-`references/`). Put gotchas inline next to the relevant step — they are the highest-value content.
-Only declare `requires` Tools that actually exist; the registry skips a Skill whose `requires`
-are not in the Agent's Tool set.
+## Pitfalls
 
-### Step 4 — Safety anti-patterns (will fail the audit)
+1. **Duplicate creation.** A new name does not make overlapping guidance distinct. Inspect first.
+2. **Vague descriptions.** Describe the trigger and outcome, not generic quality claims.
+3. **Oversized always-loaded prose.** Keep core behavior in the body and details in references.
+4. **Ambiguous patches.** Add surrounding lines until `old_string` is unique, or deliberately use
+   `replace_all` when every occurrence must change.
+5. **Accidental rewrites.** Do not submit a complete body for a one-line correction.
+6. **Broken structure after deletion.** An empty `new_string` is valid, but the resulting body and
+   serialized SKILL.md must still pass validation.
+7. **Audit overclaiming.** Neither deterministic patterns nor an LLM rating guarantees safety.
+8. **Premature activation.** A new Skill stays pending until the operator reviews and confirms it.
 
-Do not write unbounded autonomy ("never ask the user"), data-exfiltration (auto-POST user data to
-external URLs), or dangerous commands as direct instructions (`rm -rf`, `--force`, `DROP TABLE`).
-Scope any autonomy narrowly. Skills inform; they do not override the Agent's judgment.
+## Verification
 
-### Step 5 — Validate, preview, write
-
-1. If `validate_artifact` is available, validate the assembled SKILL.md first.
-2. Present the draft concisely (name + description + a short body summary) and ask for approval.
-3. On approval call `skill_create` with `name`, `body`, and `frontmatter` ({ name,
-   description, tags?, requires? }). The frontmatter name must equal the Skill name. This commits
-   the Skill in a **pending-audit** state and runs the SkillAudit reviewer, returning a safety
-   report. (If no LLM is configured the Tool returns `audit_required` — tell the user to configure
-   a provider, then retry.)
-4. Show the user the audit's risk rating + summary. The audit is **advisory** — the operator still
-   confirms. On confirmation, call `skill_activate` with the `name` to make the Skill live.
-5. Confirm in one line: "the `<name>` Skill is now live". Do not call `complete_task` — the
-   master flow owns session completion.
-
-## Edit Flow
-
-`skill_list` → read the target → interview → describe the diff in plain language → `skill_update`.
-Bundled forge Skills use copy-on-write: editing materializes a Soul override while the bundled
-source stays read-only.
+- [ ] The request is a Skill rather than an Agent, Routine, Knowledge Page, or Memory fact.
+- [ ] Existing Skills were checked and unnecessary duplication was avoided.
+- [ ] The name matches the directory and satisfies the lowercase 64-character limit.
+- [ ] The description is at most 60 characters, one sentence, and ends with a period.
+- [ ] The body follows the mandatory section order and has a checkable completion criterion.
+- [ ] A surgical update used an exact unique match or an intentional `replace_all`.
+- [ ] A new Skill returned both deterministic and LLM SkillAudit evidence.
+- [ ] The operator explicitly confirmed before `skill_activate`.
+- [ ] The final Skill was read back and matches the requested durable behavior.
