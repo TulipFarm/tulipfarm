@@ -5,10 +5,14 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { LlmService } from "@tulipfarm/llm";
-import { LlmNotConfiguredError } from "@tulipfarm/schema";
-import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
+import { LlmNotConfiguredError, validateSkill } from "@tulipfarm/schema";
+import {
+  type GitSyncService,
+  parseFrontmatter,
+  type SoulLoader,
+  type SoulSkill,
+} from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { parse as parseYaml } from "yaml";
 import type { ActivityService } from "../../activity/service";
 import { ErrorSchema } from "../../auth/schemas";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
@@ -27,7 +31,7 @@ const execFileP = promisify(execFile);
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
+const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SCAN_TTL_MS = 10 * 60 * 1000;
 const CLONE_TIMEOUT_MS = 60_000;
 const MAX_SCANS = 25;
@@ -71,13 +75,6 @@ function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
-function parseFrontmatter(content: string): { frontmatter: Record<string, unknown>; body: string } {
-  const match = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
-  if (!match) return { frontmatter: {}, body: content.trim() };
-  const frontmatter = (parseYaml(match[1]) ?? {}) as Record<string, unknown>;
-  return { frontmatter, body: match[2].trim() };
-}
-
 // A source may carry an optional "#<ref>" suffix (branch or tag name — not a commit SHA) so
 // pre-merge branches can be scanned and tested: "owner/repo#my-branch". No "#" ⇒ default branch.
 function splitSourceRef(source: string): { base: string; ref?: string } {
@@ -112,7 +109,7 @@ function sourceType(source: string): "github" | "git" {
 
 /**
  * Walk a directory tree for SKILL.md files and parse each into a DiscoveredSkill. Skips .git and
- * node_modules. Skills whose resolved name is not a safe kebab-case identifier are dropped (the name
+ * node_modules. Skills whose directory name is not a safe Skill identifier are dropped (that name
  * becomes a soul directory on install, so it must not allow path traversal). Exported for testing.
  */
 export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
@@ -128,7 +125,7 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
       } else if (entry.name === "SKILL.md") {
         const content = await readFile(full, "utf8");
         const { frontmatter } = parseFrontmatter(content);
-        const name = asString(frontmatter.name) ?? basename(dirname(full));
+        const name = basename(dirname(full));
         if (!NAME_RE.test(name)) continue;
         out.push({
           name,
@@ -672,6 +669,21 @@ export function registerSkillRoutes(
         return reply
           .code(409)
           .send({ error: `audit required before install: ${unaudited.join(", ")}` });
+
+      for (const skill of chosen as DiscoveredSkill[]) {
+        const { frontmatter, body } = parseFrontmatter(skill.content);
+        const validation = validateSkill({
+          name: skill.name,
+          frontmatter,
+          body,
+          content: skill.content,
+        });
+        if (!validation.valid) {
+          return reply
+            .code(400)
+            .send({ error: `invalid Skill "${skill.name}": ${validation.error}` });
+        }
+      }
 
       const installed: string[] = [];
       for (const skill of chosen as DiscoveredSkill[]) {

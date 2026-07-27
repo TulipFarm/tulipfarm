@@ -2,13 +2,16 @@ import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { LlmService } from "@tulipfarm/llm";
-import { ajv, LlmNotConfiguredError } from "@tulipfarm/schema";
+import {
+  ajv,
+  LlmNotConfiguredError,
+  SkillFrontmatterSchema,
+  serializeSkill,
+  validateSkill,
+} from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { stringify } from "yaml";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
-
-const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 export interface SkillToolContext {
   gitSync: GitSyncService;
@@ -34,27 +37,45 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
-function serializeSkill(frontmatter: Record<string, unknown>, body: string): string {
-  if (Object.keys(frontmatter).length === 0) return body;
-  return `---\n${stringify(frontmatter)}---\n${body}`;
+const PUBLIC_FRONTMATTER_SCHEMA = {
+  ...SkillFrontmatterSchema,
+  properties: {
+    name: SkillFrontmatterSchema.properties.name,
+    description: SkillFrontmatterSchema.properties.description,
+    eager: SkillFrontmatterSchema.properties.eager,
+    category: SkillFrontmatterSchema.properties.category,
+    version: SkillFrontmatterSchema.properties.version,
+    author: SkillFrontmatterSchema.properties.author,
+    license: SkillFrontmatterSchema.properties.license,
+  },
+} as const;
+
+function publicFrontmatter(frontmatter: Record<string, unknown>): {
+  frontmatter: Record<string, unknown>;
+  pendingAudit: boolean;
+} {
+  const { _pendingAudit: pendingAudit, ...publicFields } = frontmatter;
+  return { frontmatter: publicFields, pendingAudit: pendingAudit === true };
 }
 
 // ── skill_create ──────────────────────────────────────────────────────────────
 
 const CREATE_SCHEMA = {
   type: "object",
-  required: ["name", "body"],
+  required: ["name", "body", "frontmatter"],
   additionalProperties: false,
   properties: {
     name: {
       type: "string",
       minLength: 1,
-      description: "Skill name (kebab-case, e.g. 'code-review'). Becomes the soul directory name.",
+      description:
+        "Skill name using lowercase letters, numbers, dots, underscores, or hyphens. Becomes the soul directory name.",
     },
     body: { type: "string", description: "Markdown skill body (instructions/content)." },
     frontmatter: {
-      type: "object",
-      description: "Optional YAML frontmatter fields (arbitrary key-value pairs).",
+      ...PUBLIC_FRONTMATTER_SCHEMA,
+      description:
+        "YAML frontmatter. name must match the Skill name and description is required. Unknown benign fields are allowed; underscore-prefixed and authority-grant fields are forbidden.",
     },
   },
 } as const;
@@ -69,17 +90,16 @@ const skillCreate: SkillTool = {
   inputSchema: CREATE_SCHEMA,
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
-    const {
-      name,
-      body,
-      frontmatter = {},
-    } = args as {
+    const { name, body, frontmatter } = args as {
       name: string;
       body: string;
-      frontmatter?: Record<string, unknown>;
+      frontmatter: Record<string, unknown>;
     };
 
-    if (!NAME_RE.test(name)) return err("validation_error", "invalid skill name");
+    const pendingFm = { ...frontmatter, _pendingAudit: true };
+    const content = serializeSkill(pendingFm, body);
+    const validation = validateSkill({ name, frontmatter, body, content });
+    if (!validation.valid) return err("validation_error", validation.error);
 
     const skillDir = join(ctx.gitSync.path, "skills", name);
     if (existsSync(skillDir)) return err("validation_error", "skill already exists");
@@ -105,10 +125,9 @@ const skillCreate: SkillTool = {
     }
 
     // Write with _pendingAudit marker so the skill is committed but inactive until operator confirms.
-    const pendingFm = { ...frontmatter, _pendingAudit: true };
     try {
       await mkdir(skillDir, { recursive: true });
-      await writeFile(join(skillDir, "SKILL.md"), serializeSkill(pendingFm, body), "utf8");
+      await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -130,8 +149,7 @@ const skillCreate: SkillTool = {
     try {
       auditReport = await buildAudit(model, {
         name,
-        description:
-          typeof frontmatter.description === "string" ? frontmatter.description : undefined,
+        description: validation.frontmatter.description,
         body,
       });
     } catch (e) {
@@ -155,9 +173,9 @@ const UPDATE_SCHEMA = {
     name: { type: "string", minLength: 1, description: "Skill name to update." },
     body: { type: "string", description: "New markdown body (replaces existing)." },
     frontmatter: {
-      type: "object",
+      ...PUBLIC_FRONTMATTER_SCHEMA,
       description:
-        "New frontmatter (replaces existing). Omit to keep current. At least one of body or frontmatter must be provided.",
+        "New complete frontmatter (replaces existing). name and description are required. Omit to keep current. At least one of body or frontmatter must be provided.",
     },
   },
 } as const;
@@ -183,12 +201,17 @@ const skillUpdate: SkillTool = {
     const existing = ctx.soulLoader.skills.get(name);
     if (!existing) return err("not_found", `skill not found: ${name}`);
 
+    const existingPublic = publicFrontmatter(existing.frontmatter);
     const newBody = body ?? existing.body;
-    const newFm = frontmatter ?? existing.frontmatter;
+    const newFm = frontmatter ?? existingPublic.frontmatter;
+    const persistedFm = existingPublic.pendingAudit ? { ...newFm, _pendingAudit: true } : newFm;
+    const content = serializeSkill(persistedFm, newBody);
+    const validation = validateSkill({ name, frontmatter: newFm, body: newBody, content });
+    if (!validation.valid) return err("validation_error", validation.error);
 
     const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
     try {
-      await writeFile(skillFile, serializeSkill(newFm, newBody), "utf8");
+      await writeFile(skillFile, content, "utf8");
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -205,7 +228,7 @@ const skillUpdate: SkillTool = {
       return err("internal_error", reason(e));
     }
 
-    return ok({ name, frontmatter: newFm, body: newBody });
+    return ok({ name, frontmatter: validation.frontmatter, body: newBody });
   },
 };
 
@@ -339,9 +362,18 @@ const skillActivate: SkillTool = {
     }
 
     const { _pendingAudit: _removed, ...activeFm } = skill.frontmatter;
+    const content = serializeSkill(activeFm, skill.body);
+    const validation = validateSkill({
+      name,
+      frontmatter: activeFm,
+      body: skill.body,
+      content,
+    });
+    if (!validation.valid) return err("validation_error", validation.error);
+
     const skillFile = join(ctx.gitSync.path, "skills", name, "SKILL.md");
     try {
-      await writeFile(skillFile, serializeSkill(activeFm, skill.body), "utf8");
+      await writeFile(skillFile, content, "utf8");
     } catch (e) {
       return err("internal_error", reason(e));
     }

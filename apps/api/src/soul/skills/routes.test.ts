@@ -79,15 +79,14 @@ const skill = (name: string, description: string): SoulSkill => ({
 // Build a throwaway local git repo containing one installable skill — `git clone <path>` reads it
 // offline, so the scan flow is exercised without any network. Optionally writes a root
 // marketplace.json (the curated-catalog manifest read by GET /api/v1/skills/marketplace).
-async function makeRemoteRepo(manifest?: unknown): Promise<string> {
+async function makeRemoteRepo(
+  manifest?: unknown,
+  skillContent = "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo."
+): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "skill-remote-"));
   const skillDir = join(dir, "skills", "demo-skill");
   await mkdir(skillDir, { recursive: true });
-  await writeFile(
-    join(skillDir, "SKILL.md"),
-    "---\nname: demo-skill\ndescription: A demo skill.\n---\nDo the demo.",
-    "utf8"
-  );
+  await writeFile(join(skillDir, "SKILL.md"), skillContent, "utf8");
   if (manifest !== undefined) {
     await writeFile(join(dir, "marketplace.json"), JSON.stringify(manifest), "utf8");
   }
@@ -540,6 +539,143 @@ describe("skills routes", () => {
       expect(installRes.statusCode).toBe(409);
       expect(withSync).not.toHaveBeenCalled();
       await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+    });
+
+    it("refuses a malformed audited Skill at install and writes nothing", async () => {
+      const remote = await makeRemoteRepo(
+        undefined,
+        "---\nname: demo-skill\n---\nMissing the required description."
+      );
+      temps.push(remote);
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      expect(installRes.json().error).toMatch(/invalid Skill.*description/);
+      expect(withSync).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+      await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+    });
+
+    it("validates every selected Skill before an atomic multi-Skill install", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const invalidDir = join(remote, "skills", "invalid-skill");
+      await mkdir(invalidDir, { recursive: true });
+      await writeFile(
+        join(invalidDir, "SKILL.md"),
+        "---\nname: invalid-skill\n---\nMissing the required description.",
+        "utf8"
+      );
+      const git = (args: string[]) => execFileP("git", args, { cwd: remote });
+      await git(["add", "-A"]);
+      await git(["commit", "-q", "-m", "add invalid skill"]);
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+      });
+      for (const name of ["demo-skill", "invalid-skill"]) {
+        await app.inject({
+          method: "POST",
+          url: "/api/v1/skills/audit",
+          cookies: auth(),
+          headers,
+          payload: { scanId, name },
+        });
+      }
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill", "invalid-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      expect(withSync).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+      await expect(access(join(soulPath, "skills", "demo-skill", "SKILL.md"))).rejects.toThrow();
+      await expect(access(join(soulPath, "skills", "invalid-skill", "SKILL.md"))).rejects.toThrow();
+    });
+
+    it("measures the exact raw marketplace file when enforcing the size limit", async () => {
+      const oversized =
+        "---\nname: demo-skill\ndescription: A demo skill.\n" +
+        `${"# padding\n".repeat(12_000)}---\nDo the demo.`;
+      const remote = await makeRemoteRepo(undefined, oversized);
+      temps.push(remote);
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+      buildAudit.mockResolvedValue({
+        riskRating: "low",
+        summary: "No issue found.",
+        toolsReach: [],
+        findings: [],
+      });
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+
+      expect(installRes.statusCode).toBe(400);
+      expect(installRes.json().error).toMatch(/100,000 characters/);
+      expect(withSync).not.toHaveBeenCalled();
     });
   });
 

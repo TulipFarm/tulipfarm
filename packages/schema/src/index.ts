@@ -66,6 +66,16 @@ export {
   RoutineDefinitionSchema,
   validateRoutineDefinition,
 } from "./routine";
+export type {
+  SkillFrontmatter,
+  SkillValidationInput,
+  SkillValidationResult,
+} from "./skill-frontmatter";
+export {
+  SkillFrontmatterSchema,
+  serializeSkill,
+  validateSkill,
+} from "./skill-frontmatter";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

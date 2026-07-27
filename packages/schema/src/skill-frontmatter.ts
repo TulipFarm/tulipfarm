@@ -1,0 +1,140 @@
+import { stringify } from "yaml";
+import { ajv } from "./ajv";
+import { SKILL_FORBIDDEN_GRANT_KEYS } from "./definitions/skill";
+
+const MAX_SKILL_CONTENT_CHARS = 100_000;
+
+export const SkillFrontmatterSchema = {
+  type: "object",
+  required: ["name", "description"],
+  additionalProperties: true,
+  properties: {
+    name: {
+      type: "string",
+      maxLength: 64,
+      pattern: "^[a-z0-9][a-z0-9._-]*$",
+    },
+    description: { type: "string", minLength: 1, maxLength: 1024 },
+    eager: { type: "boolean" },
+    category: {
+      type: "string",
+      maxLength: 64,
+      pattern: "^[a-z0-9][a-z0-9._-]*$",
+    },
+    version: { type: "string" },
+    author: { type: "string" },
+    license: { type: "string" },
+    _pendingAudit: { type: "boolean" },
+  },
+} as const;
+
+export interface SkillFrontmatter {
+  name: string;
+  description: string;
+  eager?: boolean;
+  category?: string;
+  version?: string;
+  author?: string;
+  license?: string;
+  _pendingAudit?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SkillValidationInput {
+  name: string;
+  frontmatter: unknown;
+  body: string;
+  /** Exact raw or would-be-written SKILL.md content used for the character limit. */
+  content: string;
+}
+
+export type SkillValidationResult =
+  | { valid: true; frontmatter: SkillFrontmatter }
+  | { valid: false; error: string };
+
+const checkFrontmatter = ajv.compile(SkillFrontmatterSchema);
+const forbiddenGrantKeys = new Set<string>(SKILL_FORBIDDEN_GRANT_KEYS);
+
+function firstSchemaError(): string {
+  const error = checkFrontmatter.errors?.[0];
+  if (!error) return "invalid Skill frontmatter";
+  return `${error.instancePath || "(root)"} ${error.message ?? "is invalid"}`.trim();
+}
+
+function reservedKeyError(
+  value: unknown,
+  path = "frontmatter",
+  seen = new Set<object>()
+): string | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  if (seen.has(value)) return undefined;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) {
+      const error = reservedKeyError(item, `${path}[${index}]`, seen);
+      if (error) return error;
+    }
+    return undefined;
+  }
+
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const keyPath = `${path}.${key}`;
+    if (key.startsWith("_")) {
+      return `${keyPath} is reserved for server use`;
+    }
+    if (forbiddenGrantKeys.has(key)) {
+      return `${keyPath} is forbidden because a Skill cannot grant authority`;
+    }
+    const error = reservedKeyError((value as Record<string, unknown>)[key], keyPath, seen);
+    if (error) return error;
+  }
+  return undefined;
+}
+
+/**
+ * Validate a SKILL.md candidate at a write boundary without throwing.
+ *
+ * `content` must be the exact raw or serialized value the caller will write. Keeping it explicit
+ * prevents raw marketplace files with large comments or whitespace from bypassing the size limit
+ * through parse-and-reserialize normalization.
+ */
+export function validateSkill(input: SkillValidationInput): SkillValidationResult {
+  if (!checkFrontmatter(input.frontmatter)) {
+    return { valid: false, error: firstSchemaError() };
+  }
+
+  const frontmatter = input.frontmatter as SkillFrontmatter;
+  if (frontmatter.name !== input.name) {
+    return {
+      valid: false,
+      error: `frontmatter.name must equal the Skill directory name "${input.name}"`,
+    };
+  }
+
+  const keyError = reservedKeyError(frontmatter);
+  if (keyError) return { valid: false, error: keyError };
+
+  if (input.body.trim().length === 0) {
+    return { valid: false, error: "SKILL.md body must not be empty" };
+  }
+
+  if (input.content.length > MAX_SKILL_CONTENT_CHARS) {
+    return {
+      valid: false,
+      error: `SKILL.md content exceeds ${MAX_SKILL_CONTENT_CHARS.toLocaleString("en-US")} characters`,
+    };
+  }
+
+  return { valid: true, frontmatter };
+}
+
+/**
+ * Serialize a validated Skill consistently for soul write boundaries.
+ *
+ * Internal server fields may be present in `frontmatter`; callers validate the public frontmatter
+ * separately and pass this exact result back to `validateSkill` for content-size enforcement.
+ */
+export function serializeSkill(frontmatter: Record<string, unknown>, body: string): string {
+  return `---\n${stringify(frontmatter)}---\n${body}`;
+}

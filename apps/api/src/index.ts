@@ -68,6 +68,7 @@ import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { BUILTIN_SKILLS } from "./soul/skills/builtin-skills";
+import { loadBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { buildToolRegistry } from "./tools/setup";
 
@@ -119,6 +120,7 @@ async function boot() {
 
     const soulLoader = new SoulLoader(soulPath, console);
     await soulLoader.load();
+    await loadBundledSkills(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     // materialise them for every loaded soul type before serving.
