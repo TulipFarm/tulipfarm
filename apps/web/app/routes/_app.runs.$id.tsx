@@ -20,6 +20,7 @@ export default function OperationalRunRoute() {
   const { run } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [busy, setBusy] = useState(false);
+  const [unavailable, setUnavailable] = useState<string>();
   const [connection, setConnection] = useState<"online" | "reconnecting">("online");
 
   useEffect(() => {
@@ -53,6 +54,11 @@ export default function OperationalRunRoute() {
     try {
       await commandRun(run, action, `Operator requested ${action} from the Run inspector`);
       revalidator.revalidate();
+    } catch (error) {
+      // 501 means this deployment has no authority for the command at all, not that this attempt
+      // failed. Lock the controls and repeat the server's reason instead of inviting a retry.
+      if (!(error instanceof ApiError) || error.status !== 501) throw error;
+      setUnavailable(error.message);
     } finally {
       setBusy(false);
     }
@@ -61,7 +67,7 @@ export default function OperationalRunRoute() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 py-6 sm:px-6">
       {connection === "reconnecting" ? <ConnectionStatus state="reconnecting" /> : null}
-      <RunInspector run={run} busy={busy} onCommand={submit} />
+      <RunInspector run={run} busy={busy} unavailable={unavailable} onCommand={submit} />
     </div>
   );
 }

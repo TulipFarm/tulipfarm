@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RateLimiter } from "../rate-limit";
 import {
   type OperationalApiDeps,
+  OperationalNotImplementedError,
   type OperationalPermission,
   registerOperationalRoutes,
 } from "./routes";
@@ -175,6 +176,52 @@ describe("operational API", () => {
       reason: "operator request",
       runId: "run-1",
     });
+    await app.close();
+  });
+
+  it("answers 501 for an authorized command this deployment cannot carry out", async () => {
+    const app = await harness({
+      commandRun: async () => {
+        throw new OperationalNotImplementedError("no durable worker is running.");
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs/run-1/cancel",
+      headers: { "idempotency-key": "cancel-run-1-v7" },
+      payload: { expectedVersion: 7, reason: "operator request" },
+    });
+
+    expect(response.statusCode).toBe(501);
+    expect(response.json().error).toMatchObject({
+      version: "1",
+      code: "not_implemented",
+      message: "no durable worker is running.",
+      retryable: false,
+    });
+    await app.close();
+  });
+
+  it("lets a preHandler rejection keep the API-wide error shape", async () => {
+    // The shared auth/CSRF preHandlers reject before the handler with `{ error: "reason" }`. If the
+    // response schema only allowed the versioned envelope, serialization would fail and an ordinary
+    // 403 would reach the operator as a 500.
+    const app = Fastify();
+    registerOperationalRoutes(app, deps(), async (_request, reply) => {
+      await reply.code(403).send({ error: "invalid csrf token" });
+    });
+    await app.ready();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/v1/runs/run-1/cancel",
+      headers: { "idempotency-key": "cancel-run-1-v7" },
+      payload: { expectedVersion: 7, reason: "operator request" },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toEqual({ error: "invalid csrf token" });
     await app.close();
   });
 

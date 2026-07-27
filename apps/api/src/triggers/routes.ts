@@ -7,6 +7,7 @@ import {
 import { event as eventSchema } from "@tulipfarm/schema";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { DEPLOYMENT_BUSINESS_ID } from "../identity/principal";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface TriggerInvokeDeps {
@@ -117,7 +118,7 @@ export function registerTriggerRoutes(
         version: trigger.eventVersion,
         occurredAt: now,
         receivedAt: now,
-        businessId: "default",
+        businessId: DEPLOYMENT_BUSINESS_ID,
         source: { provider: "tulipfarm" },
         principal: { kind: "user", internalId: req.user?._id ?? "unknown" },
         record: {},

@@ -42,6 +42,7 @@ export type {
   AttemptEvidence,
   ClaimNextQueuedInput,
   HeartbeatInput,
+  ListRunsInput,
   PersistedRun,
   PersistedRunStatus,
   PersistedState,
@@ -51,6 +52,7 @@ export type {
   RunIdentity,
   RunLineage,
   RunLineageRelation,
+  RunPage,
   RunPersistenceErrorCode,
   RunPrincipal,
   RunTransitionInput,
@@ -59,6 +61,8 @@ export type {
   StateTransitionInput,
 } from "./run-store";
 export {
+  MAX_RUN_PAGE_SIZE,
+  RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   RunPersistenceError,
   RunStore,

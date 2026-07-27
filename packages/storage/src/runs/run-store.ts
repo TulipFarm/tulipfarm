@@ -180,7 +180,21 @@ export interface RunLineage {
   readonly createdAt: string;
 }
 
-export type RunPersistenceErrorCode = "attempt_conflict";
+export interface ListRunsInput {
+  readonly businessId: string;
+  readonly limit: number;
+  /** Opaque cursor returned as `nextCursor` by a previous page. */
+  readonly cursor?: string;
+}
+
+export interface RunPage {
+  readonly items: readonly PersistedRun[];
+  readonly nextCursor: string | null;
+}
+
+export const MAX_RUN_PAGE_SIZE = 100;
+
+export type RunPersistenceErrorCode = "attempt_conflict" | "invalid_cursor";
 
 export class RunPersistenceError extends Error {
   readonly name = "RunPersistenceError";
@@ -199,6 +213,16 @@ const STATE_STATUS_SQL =
 const ATTEMPT_EVENT_SQL =
   "'claimed', 'started', 'waiting', 'succeeded', 'failed', 'cancelled', " +
   "'lease_expired', 'reconciliation_required'";
+
+/**
+ * Backs the operational Run browser's keyset page order. Exported separately from
+ * {@link RUN_STORAGE_STATEMENTS} so a deployment created before the browser existed picks it up
+ * through its own migration instead of silently sequential-scanning `runs`.
+ */
+export const RUN_BROWSE_STORAGE_STATEMENTS: readonly string[] = [
+  `CREATE INDEX IF NOT EXISTS runs_recent_idx
+    ON runs (business_id, created_at DESC, id DESC)`,
+];
 
 export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS runs (
@@ -344,6 +368,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     ON state_attempts (business_id, run_id, state_key, attempt, sequence)`,
   `CREATE INDEX IF NOT EXISTS run_lineage_target_idx
     ON run_lineage (business_id, target_run_id, created_at)`,
+  ...RUN_BROWSE_STORAGE_STATEMENTS,
 ];
 
 interface RunRow {
@@ -434,6 +459,31 @@ function persistedState(row: StateRow): PersistedState {
   };
 }
 
+interface RunCursor {
+  readonly createdAt: string;
+  readonly id: string;
+}
+
+/**
+ * Keyset cursors are this store's business: the page order lives here, so callers pass the cursor
+ * back untouched and a malformed one fails closed rather than silently reordering a page.
+ */
+function encodeRunCursor(run: PersistedRun): string {
+  return `${run.createdAt}|${run.id}`;
+}
+
+function decodeRunCursor(decoded: string | undefined): RunCursor | null {
+  if (decoded === undefined) return null;
+  const separator = decoded.lastIndexOf("|");
+  if (separator <= 0) throw new RunPersistenceError("invalid_cursor");
+  const createdAt = decoded.slice(0, separator);
+  const id = decoded.slice(separator + 1);
+  if (id.length === 0 || Number.isNaN(Date.parse(createdAt))) {
+    throw new RunPersistenceError("invalid_cursor");
+  }
+  return { createdAt, id };
+}
+
 const RUN_COLUMNS = `id, business_id, bundle, identity, bounds, status, version, created_at,
   started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
 const STATE_COLUMNS = `business_id, run_id, state_key, definition_ref, resolved_input, status,
@@ -498,6 +548,33 @@ export class RunStore {
       );
       const row = result.rows[0];
       return row ? persistedRun(row) : null;
+    });
+  }
+
+  /**
+   * One page of a business's Runs, newest first. Keyset paging on `(created_at, id)` — an offset
+   * would skip or repeat rows as new Runs land between pages, which an operator watching a live
+   * system would see as Runs vanishing.
+   */
+  async list(input: ListRunsInput): Promise<RunPage> {
+    const limit = Math.min(Math.max(Math.trunc(input.limit), 1), MAX_RUN_PAGE_SIZE);
+    const cursor = decodeRunCursor(input.cursor);
+    return this.transactions.withTransaction(async (transaction) => {
+      const params: unknown[] = [input.businessId, limit + 1];
+      if (cursor) params.push(cursor.createdAt, cursor.id);
+      const keyset = cursor ? "AND (created_at, id) < ($3::timestamptz, $4::uuid)" : "";
+      const result = await transaction.query<RunRow>(
+        `SELECT ${RUN_COLUMNS}
+           FROM runs
+          WHERE business_id = $1 ${keyset}
+          ORDER BY created_at DESC, id DESC
+          LIMIT $2`,
+        params
+      );
+      const items = result.rows.slice(0, limit).map(persistedRun);
+      const last = items.at(-1);
+      const hasMore = result.rows.length > limit;
+      return { items, nextCursor: hasMore && last ? encodeRunCursor(last) : null };
     });
   }
 
@@ -762,6 +839,23 @@ export class RunStore {
         throw new RunPersistenceError("attempt_conflict");
       }
       return { outcome: "duplicate" };
+    });
+  }
+
+  /** Highest attempt number recorded per State key, for Run inspector read models. */
+  async countStateAttempts(
+    businessId: string,
+    runId: string
+  ): Promise<ReadonlyMap<string, number>> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{ state_key: string; attempts: string | number }>(
+        `SELECT state_key, MAX(attempt) AS attempts
+           FROM state_attempts
+          WHERE business_id = $1 AND run_id = $2
+          GROUP BY state_key`,
+        [businessId, runId]
+      );
+      return new Map(result.rows.map((row) => [row.state_key, Number(row.attempts)]));
     });
   }
 

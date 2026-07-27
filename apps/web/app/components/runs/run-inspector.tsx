@@ -32,13 +32,19 @@ function EvidenceList({
 export function RunInspector({
   run,
   busy = false,
+  // Set once the server has answered 501 for a Run command. The controls stay visible but go
+  // inert, and the server's own explanation is shown — the operator learns the capability is
+  // absent from this deployment rather than that their click failed.
+  unavailable,
   onCommand,
 }: {
   run: OperationalRun;
   busy?: boolean;
+  unavailable?: string;
   onCommand: (action: RunCommandAction) => void;
 }) {
   const [preview, setPreview] = useState<RunCommandAction>();
+  const locked = busy || unavailable !== undefined;
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
@@ -57,22 +63,30 @@ export function RunInspector({
           <button
             key={action}
             type="button"
-            disabled={busy}
+            disabled={locked}
+            title={unavailable}
             onClick={() => onCommand(action)}
-            className="rounded-sm border border-border px-2 py-1 text-xs capitalize"
+            className="rounded-sm border border-border px-2 py-1 text-xs capitalize disabled:opacity-60"
           >
             {action}
           </button>
         ))}
         <button
           type="button"
-          disabled={busy}
+          disabled={locked}
+          title={unavailable}
           onClick={() => setPreview("cancel")}
-          className="rounded-sm border border-destructive px-2 py-1 text-xs text-destructive"
+          className="rounded-sm border border-destructive px-2 py-1 text-xs text-destructive disabled:opacity-60"
         >
           Cancel Run
         </button>
       </div>
+
+      {unavailable ? (
+        <p className="border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+          Run control is unavailable: {unavailable}
+        </p>
+      ) : null}
 
       {preview === "cancel" ? (
         <DestructivePreview
@@ -80,7 +94,7 @@ export function RunInspector({
           target={run.id}
           destination="TulipFarm Run authority"
           reversibility="New work stops; ambiguous effects still require reconciliation"
-          busy={busy}
+          busy={locked}
           onCancel={() => setPreview(undefined)}
           onConfirm={() => {
             setPreview(undefined);

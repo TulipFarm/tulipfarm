@@ -189,6 +189,19 @@ export interface OperationalApiDeps {
   ): Promise<{ commandId: string; status: "accepted" | "duplicate" }>;
 }
 
+/**
+ * Raised by an `OperationalApiDeps` implementation for a command this deployment cannot carry out
+ * yet, so the route answers `501 not_implemented` with the reason instead of a `500` that reads
+ * like a bug. Authorization is unaffected — the caller has the authority, the capability is absent.
+ */
+export class OperationalNotImplementedError extends Error {
+  readonly name = "OperationalNotImplementedError";
+
+  constructor(reason: string) {
+    super(reason);
+  }
+}
+
 const security: { [securityLabel: string]: readonly string[] }[] = [
   { sessionCookie: [] },
   { bearerToken: [] },
@@ -199,22 +212,33 @@ const idParams = {
   required: ["id"],
   properties: { id: { type: "string", minLength: 1 } },
 } as const;
+/*
+ * Two shapes reach the client under these status codes. The route's own failures use the versioned
+ * envelope below. The shared auth and CSRF preHandlers reject before the handler runs and send a
+ * plain `{ error: "reason" }`, which is the API-wide contract — the schema must accept it too, or
+ * the response serializer turns an ordinary 403 into a 500.
+ */
 const errorSchema = {
   type: "object",
   additionalProperties: false,
   required: ["error"],
   properties: {
     error: {
-      type: "object",
-      additionalProperties: false,
-      required: ["version", "code", "message", "correlationId", "retryable"],
-      properties: {
-        version: { type: "string", const: "1" },
-        code: { type: "string" },
-        message: { type: "string" },
-        correlationId: { type: "string" },
-        retryable: { type: "boolean" },
-      },
+      anyOf: [
+        { type: "string" },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["version", "code", "message", "correlationId", "retryable"],
+          properties: {
+            version: { type: "string", const: "1" },
+            code: { type: "string" },
+            message: { type: "string" },
+            correlationId: { type: "string" },
+            retryable: { type: "boolean" },
+          },
+        },
+      ],
     },
   },
 } as const;
@@ -222,7 +246,7 @@ const errorSchema = {
 function fail(
   reply: FastifyReply,
   request: FastifyRequest,
-  status: 400 | 403 | 404 | 409,
+  status: 400 | 403 | 404 | 409 | 501,
   code: string,
   message: string,
   retryable = false
@@ -250,6 +274,24 @@ async function requireGrant(
     return null;
   }
   return grant;
+}
+
+/**
+ * Runs a command against the deps, translating {@link OperationalNotImplementedError} into the
+ * `501` envelope. Returns `undefined` when it replied, so the caller returns without sending twice.
+ */
+async function attemptCommand<T>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  command: () => Promise<T>
+): Promise<T | undefined> {
+  try {
+    return await command();
+  } catch (error) {
+    if (!(error instanceof OperationalNotImplementedError)) throw error;
+    fail(reply, request, 501, "not_implemented", error.message);
+    return undefined;
+  }
 }
 
 function idempotencyKey(request: FastifyRequest): string | null {
@@ -421,6 +463,7 @@ export function registerOperationalRoutes(
             403: errorSchema,
             404: errorSchema,
             409: errorSchema,
+            501: errorSchema,
           },
         },
       },
@@ -439,13 +482,16 @@ export function registerOperationalRoutes(
         }
         const { id } = request.params as { id: string };
         const body = request.body as { expectedVersion: number; reason: string };
-        const result = await deps.commandRun(grant, {
-          action,
-          runId: id,
-          expectedVersion: body.expectedVersion,
-          reason: body.reason,
-          idempotencyKey: key,
-        });
+        const result = await attemptCommand(request, reply, () =>
+          deps.commandRun(grant, {
+            action,
+            runId: id,
+            expectedVersion: body.expectedVersion,
+            reason: body.reason,
+            idempotencyKey: key,
+          })
+        );
+        if (!result) return;
         return reply.code(202).send(result);
       }
     );
@@ -553,6 +599,7 @@ export function registerOperationalRoutes(
           400: errorSchema,
           403: errorSchema,
           409: errorSchema,
+          501: errorSchema,
         },
       },
     },
@@ -570,10 +617,10 @@ export function registerOperationalRoutes(
         );
       }
       const body = request.body as Omit<GuardrailChangesetInput, "idempotencyKey">;
-      const result = await deps.proposeGuardrailChangeset(grant, {
-        ...body,
-        idempotencyKey: key,
-      });
+      const result = await attemptCommand(request, reply, () =>
+        deps.proposeGuardrailChangeset(grant, { ...body, idempotencyKey: key })
+      );
+      if (!result) return;
       return reply.code(202).send(result);
     }
   );
@@ -619,6 +666,7 @@ export function registerOperationalRoutes(
           400: errorSchema,
           403: errorSchema,
           409: errorSchema,
+          501: errorSchema,
         },
       },
     },
@@ -637,11 +685,10 @@ export function registerOperationalRoutes(
       }
       const { id } = request.params as { id: string };
       const body = request.body as Omit<AgentChangesetInput, "agentId" | "idempotencyKey">;
-      const result = await deps.proposeAgentChangeset(grant, {
-        ...body,
-        agentId: id,
-        idempotencyKey: key,
-      });
+      const result = await attemptCommand(request, reply, () =>
+        deps.proposeAgentChangeset(grant, { ...body, agentId: id, idempotencyKey: key })
+      );
+      if (!result) return;
       return reply.code(202).send(result);
     }
   );
@@ -813,6 +860,7 @@ export function registerOperationalRoutes(
           400: errorSchema,
           403: errorSchema,
           409: errorSchema,
+          501: errorSchema,
         },
       },
     },
@@ -833,10 +881,10 @@ export function registerOperationalRoutes(
         baseRevision: string;
         role: Record<string, unknown>;
       };
-      const result = await deps.proposeRoleChangeset(grant, {
-        ...body,
-        idempotencyKey: key,
-      });
+      const result = await attemptCommand(request, reply, () =>
+        deps.proposeRoleChangeset(grant, { ...body, idempotencyKey: key })
+      );
+      if (!result) return;
       return reply.code(202).send(result);
     }
   );
@@ -889,6 +937,7 @@ export function registerOperationalRoutes(
           400: errorSchema,
           403: errorSchema,
           409: errorSchema,
+          501: errorSchema,
         },
       },
     },
@@ -913,11 +962,10 @@ export function registerOperationalRoutes(
           | "recovery.start";
       };
       const { input } = request.body as { input: Record<string, unknown> };
-      const result = await deps.commandOperation(grant, {
-        action,
-        parameters: input,
-        idempotencyKey: key,
-      });
+      const result = await attemptCommand(request, reply, () =>
+        deps.commandOperation(grant, { action, parameters: input, idempotencyKey: key })
+      );
+      if (!result) return;
       return reply.code(202).send(result);
     }
   );

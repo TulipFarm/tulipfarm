@@ -26,6 +26,18 @@ export type OperationalRun = {
   costs: { amountUsd: number; modelTokens: number };
 };
 
+export type OperationalRunPage = {
+  items: OperationalRun[];
+  nextCursor: string | null;
+};
+
+/** Keyset page of Runs, newest first. `cursor` is the previous page's `nextCursor`. */
+export function listOperationalRuns(cursor?: string, limit = 50): Promise<OperationalRunPage> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (cursor) query.set("cursor", cursor);
+  return apiGet<OperationalRunPage>(`/api/v1/runs?${query}`);
+}
+
 export async function getOperationalRun(id: string): Promise<OperationalRun> {
   return (await apiGet<{ run: OperationalRun }>(`/api/v1/runs/${encodeURIComponent(id)}`)).run;
 }

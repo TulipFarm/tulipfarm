@@ -481,6 +481,58 @@ describe("RunStore (PostgreSQL)", () => {
     await expect(database.query("DELETE FROM run_lineage")).rejects.toThrow();
   });
 
+  it("pages Runs newest first and never repeats a row across a keyset page boundary", async () => {
+    for (let index = 1; index <= 5; index += 1) {
+      await store.start(
+        run({
+          id: `00000000-0000-4000-8000-00000000000${index}`,
+          createdAt: `2026-07-24T10:0${index}:00.000Z`,
+        })
+      );
+    }
+
+    const first = await store.list({ businessId: "business-1", limit: 2 });
+    expect(first.items.map((item) => item.createdAt)).toEqual([
+      "2026-07-24T10:05:00.000Z",
+      "2026-07-24T10:04:00.000Z",
+    ]);
+    expect(first.nextCursor).not.toBeNull();
+
+    // A Run created between pages must not shift the second page's contents.
+    await store.start(
+      run({ id: "00000000-0000-4000-8000-000000000009", createdAt: "2026-07-24T10:09:00.000Z" })
+    );
+
+    const second = await store.list({
+      businessId: "business-1",
+      limit: 2,
+      cursor: first.nextCursor ?? undefined,
+    });
+    expect(second.items.map((item) => item.createdAt)).toEqual([
+      "2026-07-24T10:03:00.000Z",
+      "2026-07-24T10:02:00.000Z",
+    ]);
+
+    const third = await store.list({
+      businessId: "business-1",
+      limit: 2,
+      cursor: second.nextCursor ?? undefined,
+    });
+    expect(third.items.map((item) => item.createdAt)).toEqual(["2026-07-24T10:01:00.000Z"]);
+    expect(third.nextCursor).toBeNull();
+  });
+
+  it("scopes the Run page to one business and rejects a malformed cursor", async () => {
+    await store.start(run());
+    expect(await store.list({ businessId: "business-2", limit: 10 })).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+    await expect(
+      store.list({ businessId: "business-1", limit: 10, cursor: "nope" })
+    ).rejects.toThrow(RunPersistenceError);
+  });
+
   it("keeps immutable Run identity and State inputs unchanged at the database boundary", async () => {
     await store.start(run());
 
