@@ -28,6 +28,10 @@ const FAKE_REPORT = {
   findings: [],
 };
 
+function frontmatter(name: string, fields: Record<string, unknown> = {}): Record<string, unknown> {
+  return { name, description: `Instructions for ${name}.`, ...fields };
+}
+
 function makeGitSync(soulPath = "/fake/soul"): GitSyncService {
   return {
     path: soulPath,
@@ -81,7 +85,11 @@ describe("skill_create", () => {
   it("writes SKILL.md with _pendingAudit marker, commits, reloads, returns auditReport", async () => {
     const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler(
-      { name: "code-review", body: "Review code carefully." },
+      {
+        name: "code-review",
+        body: "Review code carefully.",
+        frontmatter: frontmatter("code-review"),
+      },
       ctx
     );
 
@@ -89,7 +97,7 @@ describe("skill_create", () => {
       success: true,
       data: {
         name: "code-review",
-        frontmatter: {},
+        frontmatter: frontmatter("code-review"),
         body: "Review code carefully.",
         auditReport: FAKE_REPORT,
       },
@@ -109,7 +117,11 @@ describe("skill_create", () => {
   it("includes user frontmatter in SKILL.md alongside _pendingAudit", async () => {
     const ctx = makeCtx([], makeLlmService());
     const res = await createTool.handler(
-      { name: "planner", body: "Plan tasks.", frontmatter: { tags: ["planning"] } },
+      {
+        name: "planner",
+        body: "Plan tasks.",
+        frontmatter: frontmatter("planner", { tags: ["planning"] }),
+      },
       ctx
     );
 
@@ -121,40 +133,55 @@ describe("skill_create", () => {
     expect(content).toContain("Plan tasks.");
     // Returned frontmatter excludes _pendingAudit (internal marker not surfaced to caller).
     const data = (res as { success: true; data: { frontmatter: unknown } }).data;
-    expect(data.frontmatter).toEqual({ tags: ["planning"] });
+    expect(data.frontmatter).toEqual(frontmatter("planner", { tags: ["planning"] }));
   });
 
   it("returns audit_required if llmService absent from context", async () => {
     const ctx = makeCtx();
-    const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
+    const res = await createTool.handler(
+      { name: "code-review", body: "body", frontmatter: frontmatter("code-review") },
+      ctx
+    );
     expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
     expect(mkdir).not.toHaveBeenCalled();
   });
 
   it("returns audit_required if LlmNotConfiguredError thrown by llmService.select", async () => {
     const ctx = makeCtx([], makeLlmService(false));
-    const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
+    const res = await createTool.handler(
+      { name: "code-review", body: "body", frontmatter: frontmatter("code-review") },
+      ctx
+    );
     expect(res).toMatchObject({ success: false, error: { code: "audit_required" } });
     expect(mkdir).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid name (uppercase)", async () => {
     const ctx = makeCtx([], makeLlmService());
-    const res = await createTool.handler({ name: "CodeReview", body: "body" }, ctx);
+    const res = await createTool.handler(
+      { name: "CodeReview", body: "body", frontmatter: frontmatter("CodeReview") },
+      ctx
+    );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
     expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
   });
 
-  it("returns validation_error for name starting with digit", async () => {
+  it("accepts a schema-valid name starting with a digit", async () => {
     const ctx = makeCtx([], makeLlmService());
-    const res = await createTool.handler({ name: "1skill", body: "body" }, ctx);
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    const res = await createTool.handler(
+      { name: "1skill", body: "body", frontmatter: frontmatter("1skill") },
+      ctx
+    );
+    expect(res).toMatchObject({ success: true, data: { name: "1skill" } });
   });
 
   it("returns validation_error if skill dir already exists", async () => {
     vi.mocked(existsSync).mockReturnValue(true);
     const ctx = makeCtx([], makeLlmService());
-    const res = await createTool.handler({ name: "code-review", body: "body" }, ctx);
+    const res = await createTool.handler(
+      { name: "code-review", body: "body", frontmatter: frontmatter("code-review") },
+      ctx
+    );
     expect(res).toMatchObject({
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("already exists") },
@@ -167,6 +194,52 @@ describe("skill_create", () => {
     const res = await createTool.handler({ name: "skill-x" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
+
+  it("requires caller-authored name and description frontmatter", async () => {
+    const ctx = makeCtx([], makeLlmService());
+    const res = await createTool.handler(
+      { name: "skill-x", body: "Body.", frontmatter: { name: "skill-x" } },
+      ctx
+    );
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects reserved frontmatter before selecting an audit model or writing", async () => {
+    const llmService = makeLlmService();
+    const ctx = makeCtx([], llmService);
+    const res = await createTool.handler(
+      {
+        name: "skill-x",
+        body: "Body.",
+        frontmatter: frontmatter("skill-x", { _pendingAudit: false }),
+      },
+      ctx
+    );
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("_pendingAudit") },
+    });
+    expect(llmService.select).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects a final serialized file over 100,000 characters", async () => {
+    const ctx = makeCtx([], makeLlmService());
+    const res = await createTool.handler(
+      {
+        name: "skill-x",
+        body: "x".repeat(100_000),
+        frontmatter: frontmatter("skill-x"),
+      },
+      ctx
+    );
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("100,000") },
+    });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
 });
 
 // ── skill_activate ────────────────────────────────────────────────────────────
@@ -178,7 +251,7 @@ describe("skill_activate", () => {
 
   const pendingSkill: SoulSkill = {
     name: "code-review",
-    frontmatter: { _pendingAudit: true, tags: ["review"] },
+    frontmatter: frontmatter("code-review", { _pendingAudit: true, tags: ["review"] }),
     body: "Review code.",
   };
 
@@ -195,7 +268,9 @@ describe("skill_activate", () => {
   });
 
   it("returns validation_error if skill is already active (no _pendingAudit)", async () => {
-    const ctx = makeCtx([{ name: "code-review", frontmatter: {}, body: "body" }]);
+    const ctx = makeCtx([
+      { name: "code-review", frontmatter: frontmatter("code-review"), body: "body" },
+    ]);
     const res = await activateTool.handler({ name: "code-review" }, ctx);
     expect(res).toMatchObject({
       success: false,
@@ -215,6 +290,19 @@ describe("skill_activate", () => {
     const res = await activateTool.handler({}, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
+
+  it("refuses to activate malformed legacy frontmatter", async () => {
+    const ctx = makeCtx([
+      {
+        name: "code-review",
+        frontmatter: { name: "code-review", _pendingAudit: true },
+        body: "Body.",
+      },
+    ]);
+    const res = await activateTool.handler({ name: "code-review" }, ctx);
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
 });
 
 // ── skill_update ──────────────────────────────────────────────────────────────
@@ -222,7 +310,7 @@ describe("skill_activate", () => {
 describe("skill_update", () => {
   const existingSkill: SoulSkill = {
     name: "code-review",
-    frontmatter: { tags: ["review"] },
+    frontmatter: frontmatter("code-review", { tags: ["review"] }),
     body: "Old body.",
   };
 
@@ -236,7 +324,11 @@ describe("skill_update", () => {
 
     expect(res).toMatchObject({
       success: true,
-      data: { name: "code-review", frontmatter: { tags: ["review"] }, body: "New body." },
+      data: {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { tags: ["review"] }),
+        body: "New body.",
+      },
     });
     expect(writeFile).toHaveBeenCalledWith(
       expect.stringContaining("SKILL.md"),
@@ -250,7 +342,10 @@ describe("skill_update", () => {
   it("updates frontmatter only, preserves existing body", async () => {
     const ctx = makeCtx([existingSkill]);
     const res = await updateTool.handler(
-      { name: "code-review", frontmatter: { tags: ["review", "security"] } },
+      {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { tags: ["review", "security"] }),
+      },
       ctx
     );
 
@@ -258,7 +353,7 @@ describe("skill_update", () => {
       success: true,
       data: {
         name: "code-review",
-        frontmatter: { tags: ["review", "security"] },
+        frontmatter: frontmatter("code-review", { tags: ["review", "security"] }),
         body: "Old body.",
       },
     });
@@ -267,14 +362,64 @@ describe("skill_update", () => {
   it("updates both body and frontmatter", async () => {
     const ctx = makeCtx([existingSkill]);
     const res = await updateTool.handler(
-      { name: "code-review", body: "New.", frontmatter: { version: "2" } },
+      {
+        name: "code-review",
+        body: "New.",
+        frontmatter: frontmatter("code-review", { version: "2" }),
+      },
       ctx
     );
 
     expect(res).toMatchObject({
       success: true,
-      data: { name: "code-review", frontmatter: { version: "2" }, body: "New." },
+      data: {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { version: "2" }),
+        body: "New.",
+      },
     });
+  });
+
+  it("preserves a server-set pending audit marker without returning it as public frontmatter", async () => {
+    const pending: SoulSkill = {
+      name: "code-review",
+      frontmatter: frontmatter("code-review", { _pendingAudit: true }),
+      body: "Old body.",
+    };
+    const ctx = makeCtx([pending]);
+
+    const res = await updateTool.handler(
+      {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { version: "2" }),
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: true,
+      data: {
+        frontmatter: frontmatter("code-review", { version: "2" }),
+      },
+    });
+    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    expect(content).toContain("_pendingAudit: true");
+  });
+
+  it("rejects caller attempts to set the pending audit marker", async () => {
+    const ctx = makeCtx([existingSkill]);
+    const res = await updateTool.handler(
+      {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { _pendingAudit: true }),
+      },
+      ctx
+    );
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("_pendingAudit") },
+    });
+    expect(writeFile).not.toHaveBeenCalled();
   });
 
   it("returns not_found for unknown skill", async () => {

@@ -160,7 +160,7 @@ Call \`skill_list\` to show existing skills (avoid duplicates, anchor naming). C
 task this skill performs and which agents will use it.
 
 ### Step 2 — Identity
-- **name**: kebab-case, \`^[a-z][a-z0-9-]*$\`, equal to the skill's directory name.
+- **name**: \`^[a-z0-9][a-z0-9._-]*$\` (maximum 64 characters), equal to the skill's directory name.
 - **description**: one sentence written as a trigger condition for an LLM reader — specific tool
   names, 3–5 task types, synonyms, and action verbs. A vague description never fires; this is the #1
   reason skills don't activate.
@@ -180,10 +180,11 @@ Scope any autonomy narrowly. Skills inform, they don't override the agent's judg
 ### Step 5 — Validate, preview, write
 1. If \`validate_artifact\` is available, validate the assembled SKILL.md first.
 2. Present the draft concisely (name + description + a short body summary) and ask for approval.
-3. On approval call \`skill_create\` with \`name\`, \`body\`, and \`frontmatter\` ({ description,
-   tags?, requires? }). This commits the skill in a **pending-audit** state and runs the SkillAudit
-   reviewer, returning a safety report. (If no LLM is configured the tool returns \`audit_required\`
-   — tell the user to configure a provider, then retry.)
+3. On approval call \`skill_create\` with \`name\`, \`body\`, and \`frontmatter\` ({ name,
+   description, tags?, requires? }). The frontmatter name must equal the Skill name. This commits
+   the Skill in a **pending-audit** state and runs the SkillAudit reviewer, returning a safety
+   report. (If no LLM is configured the tool returns \`audit_required\` — tell the user to configure
+   a provider, then retry.)
 4. Show the user the audit's risk rating + summary. The audit is **advisory** — the operator still
    confirms. On confirmation, call \`skill_activate\` with the \`name\` to make the skill live.
 5. Confirm in one line: "the \`<name>\` skill is now live". Do NOT call \`complete_task\` — the
