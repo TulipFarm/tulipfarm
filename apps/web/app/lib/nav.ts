@@ -1,4 +1,5 @@
 import {
+  Activity,
   BookOpen,
   Bot,
   Boxes,
@@ -32,6 +33,7 @@ export const navItems: NavItem[] = [
   { to: "/agents", label: "Agents", icon: Bot, group: "Workspace" },
   { to: "/skills", label: "Skills", icon: Puzzle, group: "Workspace" },
   { to: "/routines", label: "Routines", icon: Workflow, group: "Workspace" },
+  { to: "/runs", label: "Runs", icon: Activity, group: "Workspace" },
   {
     to: "/inbox",
     label: "Inbox",

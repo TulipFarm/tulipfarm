@@ -9,12 +9,17 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
+import { RunEventStore, RunStore } from "@tulipfarm/storage";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
 import { PgA2uiSurfaceStore } from "./a2ui/artifact-surface";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
+import { llmProbe, postgresProbe, queueProbe, soulProbe } from "./admin/health";
+import { OperationalNotImplementedError } from "./admin/routes";
+import { createRunReader } from "./admin/run-reader";
+import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
 import { DurableApprovalGate } from "./approvals/chat-gate";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
@@ -26,7 +31,7 @@ import { PgMessageRepo } from "./chat/messages";
 import { PgPendingInteractionRepo } from "./chat/pending-interactions";
 import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
-import { connectPg } from "./db";
+import { connectPg, transactionPort } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
@@ -34,6 +39,7 @@ import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { PgExternalIdentityRepo } from "./identity/external-links";
+import { DEPLOYMENT_BUSINESS_ID } from "./identity/principal";
 import { IngressDeliveriesRepo } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
@@ -139,6 +145,10 @@ async function boot() {
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(pool),
     });
+    // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
+    const runTransactions = transactionPort(pool);
+    const runStore = new RunStore(runTransactions);
+    const runEventStore = new RunEventStore(runTransactions);
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -221,7 +231,7 @@ async function boot() {
             .digest("hex");
           const result = await invocations.start({
             source: "manual",
-            businessId: "default",
+            businessId: DEPLOYMENT_BUSINESS_ID,
             initiator: { kind: "agent", id: "assistant" },
             effectiveSubject: { kind: "agent", id: "assistant" },
             definitionRef: `published:routine:${slug}`,
@@ -272,6 +282,46 @@ async function boot() {
       invocations,
       approvalsRepo,
       approvalRegistry,
+      runEvents: {
+        events: runEventStore,
+        runs: runStore,
+        // Every authenticated principal of this single-business deployment may read its own Runs.
+        // Operator-audience events stay admin-only.
+        authorize: async (req) => {
+          const principal = req.principal;
+          if (!principal) return null;
+          return {
+            businessId: principal.businessId,
+            audiences:
+              principal.kind === "user" && principal.role === "admin"
+                ? ["participant", "operator"]
+                : ["participant"],
+          };
+        },
+      },
+      operationalApi: createRuntimeOperationalApi({
+        activity: activityService,
+        approvals: approvalsRepo,
+        approvalRegistry,
+        runs: createRunReader(runStore),
+        healthProbes: [
+          postgresProbe(pool),
+          queueProbe(boss),
+          soulProbe(gitSync),
+          llmProbe(llmService),
+        ],
+        // Routine-state Approvals resume through the routine wake queue, which has no consumer
+        // in this deployment (the Routine engine is not composed). Deciding one would silently
+        // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
+        // this deployment actually produces — are resolved in-process and never reach here.
+        enqueueWake: async () => {
+          throw new OperationalNotImplementedError(
+            "Resuming a Routine-state Approval requires the Routine wake worker, which this " +
+              "deployment does not run."
+          );
+        },
+        guardrailsConfig: () => soulLoader.guardrailsConfig,
+      }),
       ingress: {
         soulLoader,
         deliveries: ingressDeliveries,
@@ -279,7 +329,7 @@ async function boot() {
           const digest = createHash("sha256").update(JSON.stringify(job)).digest("hex");
           await invocations.start({
             source: "integration",
-            businessId: "default",
+            businessId: DEPLOYMENT_BUSINESS_ID,
             initiator: { kind: "integration", id: job.slug },
             effectiveSubject: { kind: "integration", id: job.slug },
             definitionRef: `published:integration:${job.slug}`,

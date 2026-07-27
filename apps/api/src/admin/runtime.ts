@@ -3,6 +3,8 @@ import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
 import type { DurableApprovalGate } from "../approvals/chat-gate";
 import type { ApprovalsRepo } from "../approvals/runtime-repo";
+import { describeDeploymentRoles } from "../identity/roles";
+import { type HealthProbe, probeHealth } from "./health";
 import type {
   ApprovalDecisionInput,
   InboxItemReadModel,
@@ -10,11 +12,15 @@ import type {
   OperationalGrant,
   OperationalPermission,
 } from "./routes";
+import { OperationalNotImplementedError } from "./routes";
+import type { RunReader } from "./run-reader";
 
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
   approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
   approvalRegistry: Pick<DurableApprovalGate, "decide" | "listPending">;
+  runs: RunReader;
+  healthProbes: readonly HealthProbe[];
   enqueueWake(job: {
     runId: string;
     reason: "approval";
@@ -24,21 +30,40 @@ type RuntimeOperationalDeps = {
   guardrailsConfig(): unknown;
 };
 
+/**
+ * An administrator holds every operational authority this deployment defines, including the
+ * control permissions. Commands that the deployment cannot yet carry out fail as `501
+ * not_implemented`, never as `403` — telling an administrator they lack access to a capability
+ * that does not exist would send them looking for a permission to grant.
+ */
 const ADMIN_PERMISSIONS: readonly OperationalPermission[] = [
   "runs:read",
+  "runs:control",
   "operations:read",
+  "operations:control",
   "guardrails:read",
+  "guardrails:write",
+  "agents:write",
   "approvals:read",
   "approvals:decide",
   "roles:read",
+  "roles:write",
 ];
 
 function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function unavailable(): never {
-  throw new Error("operational control is not available from this runtime");
+/**
+ * Authoring and Run control are carried out by subsystems this deployment does not run yet: the
+ * durable worker executes Run commands, and the Soul changeset gateway is the only writer for
+ * Guardrail, Agent, and role proposals. Until those are composed, each command names the missing
+ * capability instead of pretending to accept the request.
+ */
+function notImplemented(capability: string, blockedBy: string): never {
+  throw new OperationalNotImplementedError(
+    `${capability} is not available in this deployment: ${blockedBy}.`
+  );
 }
 
 function safeActivity(item: Awaited<ReturnType<ActivityService["list"]>>["items"][number]) {
@@ -134,24 +159,32 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       };
     },
 
-    async listRuns() {
-      return { items: [], nextCursor: null };
+    async listRuns(grant: OperationalGrant, options: { cursor?: string; limit: number }) {
+      return deps.runs.list(grant.businessId, options);
     },
 
-    async getRun() {
-      return null;
+    async getRun(grant: OperationalGrant, runId: string) {
+      return deps.runs.get(grant.businessId, runId);
     },
 
     async commandRun() {
-      return unavailable();
+      return notImplemented(
+        "Run control",
+        "no durable worker is running to act on the command (the Run authority lives in the worker)"
+      );
     },
 
     async getOperations() {
-      const activity = await deps.activity.list({ limit: 50 });
+      const [activity, health] = await Promise.all([
+        deps.activity.list({ limit: 50 }),
+        probeHealth(deps.healthProbes),
+      ]);
       const audit = activity.items.map(safeActivity);
       return {
-        health: [{ component: "api", status: "ok" }],
+        health: health.map((component) => ({ ...component })),
         incidents: audit.filter((item) => item.status === "error"),
+        // Quarantine and recovery are recorded by subsystems this deployment does not run yet.
+        // Reported as empty because they are empty, not because the data is withheld.
         quarantine: [],
         killSwitches:
           process.env.HOOKS_DISABLED === "true"
@@ -172,11 +205,17 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
     },
 
     async proposeGuardrailChangeset() {
-      return unavailable();
+      return notImplemented(
+        "Guardrail authoring",
+        "Soul writes do not route through the changeset gateway yet"
+      );
     },
 
     async proposeAgentChangeset() {
-      return unavailable();
+      return notImplemented(
+        "Agent authoring",
+        "Soul writes do not route through the changeset gateway yet"
+      );
     },
 
     async getInbox() {
@@ -224,15 +263,22 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
     },
 
     async getRoles() {
-      return { revision: digest([]), items: [] };
+      const items = describeDeploymentRoles();
+      return { revision: digest(items), items };
     },
 
     async proposeRoleChangeset() {
-      return unavailable();
+      return notImplemented(
+        "Role authoring",
+        "roles are built into this deployment and have no changeset writer"
+      );
     },
 
     async commandOperation() {
-      return unavailable();
+      return notImplemented(
+        "Operational control",
+        "support bundles, kill switches, quarantine, and recovery have no durable command authority yet"
+      );
     },
   };
 }

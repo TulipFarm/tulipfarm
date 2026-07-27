@@ -1,3 +1,4 @@
+import type { Queryable as StorageQueryable, TransactionPort } from "@tulipfarm/storage";
 import { Pool } from "pg";
 
 let pool: Pool;
@@ -50,6 +51,17 @@ export async function withTransaction<T>(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Adapts this app's `Queryable` to the `@tulipfarm/storage` transaction port, so storage-owned
+ * repositories run on the same pool and the same transaction semantics as the app's own repos.
+ */
+export function transactionPort(database: Queryable): TransactionPort {
+  return {
+    withTransaction: (operation) =>
+      withTransaction(database, (tx) => operation(tx as unknown as StorageQueryable)),
+  };
 }
 
 export async function connectPg(): Promise<Pool> {
