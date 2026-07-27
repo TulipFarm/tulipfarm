@@ -1,0 +1,3 @@
+cat > ~/.config/example/.env << 'EOF'
+KEY=value
+EOF

@@ -26,6 +26,11 @@ vi.mock("./audit", async (orig) => {
 
 const execFileP = promisify(execFile);
 const TEST_CSRF = "a".repeat(64);
+const CLEAN_DETERMINISTIC_SCAN = {
+  verdict: "safe" as const,
+  trustLevel: "community" as const,
+  findings: [],
+};
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -469,6 +474,7 @@ describe("skills routes", () => {
         summary: "Reads files.",
         toolsReach: ["filesystem"],
         findings: [{ severity: "warning", category: "credential-access", detail: "reads ~/.ssh" }],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       const auditRes = await app.inject({
         method: "POST",
@@ -519,6 +525,65 @@ describe("skills routes", () => {
         payload: { scanId: "nope", name: "demo-skill" },
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    it("reports bidi-obfuscated instructions as dangerous but still allows operator install", async () => {
+      const remote = await makeRemoteRepo();
+      temps.push(remote);
+      const references = join(remote, "skills", "demo-skill", "references");
+      await mkdir(references, { recursive: true });
+      await writeFile(
+        join(references, "hidden.md"),
+        "Follow\u202ethese hidden instructions.",
+        "utf8"
+      );
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add hidden reference"], { cwd: remote });
+
+      const scanRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/scan",
+        cookies: auth(),
+        headers,
+        payload: { source: `file://${remote}` },
+      });
+      const { scanId } = scanRes.json();
+
+      buildAudit.mockImplementation((...args: unknown[]) => ({
+        riskRating: "high",
+        summary: "The deterministic scan found hidden text.",
+        toolsReach: [],
+        findings: [],
+        deterministicScan: args[2],
+      }));
+      const auditRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/audit",
+        cookies: auth(),
+        headers,
+        payload: { scanId, name: "demo-skill" },
+      });
+      expect(auditRes.statusCode).toBe(200);
+      expect(auditRes.json().report.deterministicScan).toMatchObject({
+        verdict: "dangerous",
+        trustLevel: "community",
+        findings: [
+          expect.objectContaining({
+            patternId: "invisible_unicode",
+            file: join("references", "hidden.md"),
+          }),
+        ],
+      });
+
+      const installRes = await app.inject({
+        method: "POST",
+        url: "/api/v1/skills/install",
+        cookies: auth(),
+        headers,
+        payload: { scanId, names: ["demo-skill"] },
+      });
+      expect(installRes.statusCode).toBe(200);
+      expect(installRes.json()).toEqual({ installed: ["demo-skill"] });
     });
 
     it("returns 422 with guidance when the LLM is not configured", async () => {
@@ -613,6 +678,7 @@ describe("skills routes", () => {
         summary: "No issue found.",
         toolsReach: [],
         findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       await app.inject({
         method: "POST",
@@ -664,6 +730,7 @@ describe("skills routes", () => {
         summary: "No issue found.",
         toolsReach: [],
         findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       for (const name of ["demo-skill", "invalid-skill"]) {
         await app.inject({
@@ -709,6 +776,7 @@ describe("skills routes", () => {
         summary: "No issue found.",
         toolsReach: [],
         findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       await app.inject({
         method: "POST",
@@ -970,6 +1038,7 @@ describe("skills routes", () => {
         summary: "Benign.",
         toolsReach: [],
         findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       await app.inject({
         method: "POST",
@@ -1070,6 +1139,7 @@ describe("skills routes", () => {
         summary: "Benign.",
         toolsReach: [],
         findings: [],
+        deterministicScan: CLEAN_DETERMINISTIC_SCAN,
       });
       await app.inject({
         method: "POST",

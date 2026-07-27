@@ -1,8 +1,17 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { LlmService } from "@tulipfarm/llm";
 import { LlmNotConfiguredError, validateSkill } from "@tulipfarm/schema";
@@ -17,6 +26,7 @@ import type { ActivityService } from "../../activity/service";
 import { ErrorSchema } from "../../auth/schemas";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 import { type BundledSkill, persistDisabledBundledSkills } from "./bundled";
+import { type SkillScanFile, scanSkill, skillTrustLevel } from "./guard";
 import { mergedSkills, resolveSkill } from "./registry";
 
 /*
@@ -46,6 +56,9 @@ export interface DiscoveredSkill {
   skillPath: string;
   // Raw SKILL.md content (frontmatter + body), written verbatim on install.
   content: string;
+  // Exact Skill directory contents retained after the temporary clone is removed so the
+  // deterministic pre-scan covers references and structural metadata, not just SKILL.md.
+  files: SkillScanFile[];
 }
 
 interface ScanEntry {
@@ -116,6 +129,47 @@ function categoryFromSkillPath(skillPath: string): string | undefined {
   return parts[0];
 }
 
+async function collectSkillFiles(skillDirectory: string): Promise<SkillScanFile[]> {
+  const files: SkillScanFile[] = [];
+  const root = await realpath(skillDirectory);
+
+  async function walk(directory: string, depth: number): Promise<void> {
+    if (depth > 6) return;
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name === ".git" || entry.name === "node_modules") continue;
+      const full = join(directory, entry.name);
+      const path = relative(skillDirectory, full);
+      if (entry.isDirectory()) {
+        await walk(full, depth + 1);
+      } else if (entry.isSymbolicLink()) {
+        const symlinkTarget = await readlink(full);
+        let symlinkEscapes = true;
+        try {
+          const resolved = await realpath(full);
+          const fromRoot = relative(root, resolved);
+          symlinkEscapes = fromRoot.startsWith("..") || isAbsolute(fromRoot);
+        } catch {
+          // Broken and circular symlinks are treated as escaping the Skill directory.
+        }
+        files.push({
+          path,
+          content: symlinkTarget,
+          size: Buffer.byteLength(symlinkTarget),
+          symlinkTarget,
+          symlinkEscapes,
+        });
+      } else if (entry.isFile()) {
+        const content = await readFile(full);
+        files.push({ path, content: content.toString("utf8"), size: content.byteLength });
+      }
+    }
+  }
+
+  await walk(skillDirectory, 0);
+  return files.sort((left, right) => left.path.localeCompare(right.path));
+}
+
 /**
  * Walk a directory tree for SKILL.md files and parse each into a DiscoveredSkill. Skips .git and
  * node_modules. Skills whose directory name is not a safe Skill identifier are dropped (that name
@@ -142,6 +196,7 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
           category: categoryFromSkillPath(relative(root, full)),
           skillPath: relative(root, full),
           content,
+          files: await collectSkillFiles(dirname(full)),
         });
       }
     }
@@ -700,13 +755,21 @@ export function registerSkillRoutes(
       if (!entry || !skill)
         return reply.code(404).send({ error: "scanned skill not found (scan may have expired)" });
       const { body } = parseFrontmatter(skill.content);
+      const deterministicScan = {
+        ...scanSkill(skill.files),
+        trustLevel: skillTrustLevel(entry.source),
+      };
       let report: Awaited<ReturnType<typeof buildAudit>>;
       try {
-        report = await buildAudit(llmService.select({ model: "standard" }), {
-          name: skill.name,
-          description: skill.description,
-          body,
-        });
+        report = await buildAudit(
+          llmService.select({ model: "standard" }),
+          {
+            name: skill.name,
+            description: skill.description,
+            body,
+          },
+          deterministicScan
+        );
       } catch (e) {
         // SkillAudit needs a working LLM. Surface an actionable message instead of a bare 500: a
         // missing provider is a config problem (422), any other failure is an upstream error (502).

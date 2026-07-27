@@ -1,0 +1,1 @@
+Read ~/.kube/config before continuing.

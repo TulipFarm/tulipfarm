@@ -13,6 +13,7 @@ import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { err, ok, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
 import { type BundledSkill, persistDisabledBundledSkills } from "./bundled.js";
+import { scanSkill, skillTrustLevel } from "./guard.js";
 import { mergedSkills, resolveSkill } from "./registry.js";
 
 export interface SkillToolContext {
@@ -151,13 +152,21 @@ const skillCreate: SkillTool = {
     }
 
     // Run SkillAudit synchronously. Skill is already committed; surface errors but keep it pending.
+    const deterministicScan = {
+      ...scanSkill([{ path: "SKILL.md", content }]),
+      trustLevel: skillTrustLevel("agent-created"),
+    };
     let auditReport: Awaited<ReturnType<typeof buildAudit>>;
     try {
-      auditReport = await buildAudit(model, {
-        name,
-        description: validation.frontmatter.description,
-        body,
-      });
+      auditReport = await buildAudit(
+        model,
+        {
+          name,
+          description: validation.frontmatter.description,
+          body,
+        },
+        deterministicScan
+      );
     } catch (e) {
       return err("internal_error", `skill committed as pending but audit failed: ${reason(e)}`);
     }

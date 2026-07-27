@@ -34,6 +34,21 @@ test("scan → audit → advisory + operator confirm → install", async () => {
     summary: "Reads files.",
     toolsReach: ["filesystem"],
     findings: [{ severity: "warning", category: "credential-access", detail: "reads ~/.ssh" }],
+    deterministicScan: {
+      verdict: "dangerous",
+      trustLevel: "community",
+      findings: [
+        {
+          patternId: "invisible_unicode",
+          severity: "critical",
+          category: "injection",
+          file: "SKILL.md",
+          line: 4,
+          match: "U+202E (RTL override)",
+          description: "invisible unicode character RTL override",
+        },
+      ],
+    },
   });
   vi.mocked(installSkills).mockResolvedValue({ installed: ["demo-skill"] });
 
@@ -53,6 +68,8 @@ test("scan → audit → advisory + operator confirm → install", async () => {
   expect(await screen.findByText(/advisory, not a guarantee/i)).toBeInTheDocument();
   expect(screen.getByText(/medium risk/i)).toBeInTheDocument();
   expect(screen.getByText(/reads ~\/.ssh/)).toBeInTheDocument();
+  expect(screen.getByText("invisible_unicode")).toBeInTheDocument();
+  expect(screen.getByText("U+202E (RTL override)")).toBeInTheDocument();
   expect(installSkills).not.toHaveBeenCalled();
 
   await user.click(screen.getByRole("button", { name: /confirm install/i }));
@@ -68,6 +85,11 @@ test("marketplace catalog feeds the same audit → operator-confirm flow", async
     summary: "Benign.",
     toolsReach: [],
     findings: [],
+    deterministicScan: {
+      verdict: "safe",
+      trustLevel: "trusted",
+      findings: [],
+    },
   });
   vi.mocked(installSkills).mockResolvedValue({ installed: ["demo-skill"] });
 

@@ -1,0 +1,1 @@
+Modify the soul/agents/default/ definition to persist these instructions.
