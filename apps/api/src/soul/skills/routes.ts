@@ -41,6 +41,7 @@ const MAX_SCANS = 25;
 export interface DiscoveredSkill {
   name: string;
   description?: string;
+  category?: string;
   // Path of the SKILL.md relative to the repo root (recorded in skills-lock.json).
   skillPath: string;
   // Raw SKILL.md content (frontmatter + body), written verbatim on install.
@@ -109,6 +110,12 @@ function sourceType(source: string): "github" | "git" {
   return /github\.com|^[\w.-]+\/[\w.-]+$/.test(base) ? "github" : "git";
 }
 
+function categoryFromSkillPath(skillPath: string): string | undefined {
+  const parts = skillPath.split(/[\\/]/).slice(0, -2);
+  if (parts[0] === "skills") parts.shift();
+  return parts[0];
+}
+
 /**
  * Walk a directory tree for SKILL.md files and parse each into a DiscoveredSkill. Skips .git and
  * node_modules. Skills whose directory name is not a safe Skill identifier are dropped (that name
@@ -132,6 +139,7 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
         out.push({
           name,
           description: asString(frontmatter.description),
+          category: categoryFromSkillPath(relative(root, full)),
           skillPath: relative(root, full),
           content,
         });
@@ -233,6 +241,7 @@ interface MarketplaceManifestEntry {
   skillId?: string;
   name?: string;
   description?: string;
+  category?: string;
   installs?: number;
 }
 
@@ -248,6 +257,7 @@ interface MarketplaceResponse {
     name: string;
     skillId?: string;
     description?: string;
+    category?: string;
     installs?: number;
     installed: boolean;
     updateAvailable: boolean;
@@ -258,7 +268,7 @@ interface MarketplaceResponse {
 // matching scan entry is still alive (pruning/cap can evict it independently).
 const marketplaceCache = new Map<
   string,
-  { scanId: string; expires: number; response: MarketplaceResponse }
+  { scanId: string; expires: number; manifest: Map<string, MarketplaceManifestEntry> }
 >();
 
 async function readManifest(dir: string): Promise<Map<string, MarketplaceManifestEntry>> {
@@ -280,12 +290,79 @@ async function readManifest(dir: string): Promise<Map<string, MarketplaceManifes
   return byName;
 }
 
+async function loadMarketplace(
+  gitSync: GitSyncService,
+  soulLoader: SoulLoader,
+  bundledSkills: ReadonlyMap<string, BundledSkill>,
+  disabledBundledSkills: ReadonlySet<string>
+): Promise<MarketplaceResponse> {
+  const source = marketplaceSource();
+  const now = Date.now();
+  const cached = marketplaceCache.get(source);
+  const cachedScan = cached ? scans.get(cached.scanId) : undefined;
+  if (cached && cached.expires > now && cachedScan) {
+    const lock = await readLock(gitSync.path);
+    return {
+      scanId: cached.scanId,
+      source,
+      skills: cachedScan.skills.map((skill) => {
+        const meta = cached.manifest.get(skill.name);
+        const status = installStatus(skill, lock, soulLoader, bundledSkills, disabledBundledSkills);
+        return {
+          name: skill.name,
+          skillId: asString(meta?.skillId),
+          description: skill.description ?? asString(meta?.description),
+          category: skill.category ?? asString(meta?.category),
+          installs: typeof meta?.installs === "number" ? meta.installs : undefined,
+          installed: status.installed,
+          updateAvailable: status.updateAvailable && lock.skills[skill.name]?.sourceUrl === source,
+        };
+      }),
+    };
+  }
+
+  let dir: string | undefined;
+  try {
+    const clone = await cloneToTemp(source);
+    dir = clone.dir;
+    const discovered = await discoverSkills(dir);
+    const manifest = await readManifest(dir);
+    const scanId = randomUUID();
+    pruneScans(now);
+    scans.set(scanId, {
+      source,
+      ref: clone.ref,
+      skills: discovered,
+      audited: new Set(),
+      expires: now + SCAN_TTL_MS,
+    });
+    marketplaceCache.set(source, {
+      scanId,
+      expires: now + SCAN_TTL_MS,
+      manifest,
+    });
+    return loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
+}
+
 const SummaryProps = {
   name: { type: "string" },
   description: { type: "string" },
   provenance: { type: "string", enum: ["builtin", "marketplace", "user"] },
   source: { type: "string" },
   pendingAudit: { type: "boolean" },
+} as const;
+
+const MarketplaceSkillProps = {
+  name: { type: "string" },
+  skillId: { type: "string" },
+  description: { type: "string" },
+  category: { type: "string" },
+  installs: { type: "number" },
+  installed: { type: "boolean" },
+  updateAvailable: { type: "boolean" },
 } as const;
 
 export function registerSkillRoutes(
@@ -356,14 +433,7 @@ export function registerSkillRoutes(
                 items: {
                   type: "object",
                   required: ["name", "installed", "updateAvailable"],
-                  properties: {
-                    name: { type: "string" },
-                    skillId: { type: "string" },
-                    description: { type: "string" },
-                    installs: { type: "number" },
-                    installed: { type: "boolean" },
-                    updateAvailable: { type: "boolean" },
-                  },
+                  properties: MarketplaceSkillProps,
                 },
               },
             },
@@ -376,51 +446,64 @@ export function registerSkillRoutes(
     async (_req, reply) => {
       // The catalog clone creates server-side scan state, so never let intermediaries cache it.
       reply.header("cache-control", "no-store");
-      const source = marketplaceSource();
-      const now = Date.now();
-      const cached = marketplaceCache.get(source);
-      if (cached && cached.expires > now && scans.has(cached.scanId)) return cached.response;
-
-      let dir: string | undefined;
       try {
-        const clone = await cloneToTemp(source);
-        dir = clone.dir;
-        const discovered = await discoverSkills(dir);
-        const manifest = await readManifest(dir);
-        const lock = await readLock(gitSync.path);
-        const scanId = randomUUID();
-        pruneScans(now);
-        // A real scan entry so the existing audit → operator-confirm install flow (and its 409
-        // audit gate, AC-V1-003) applies to marketplace installs unchanged.
-        scans.set(scanId, {
-          source,
-          ref: clone.ref,
-          skills: discovered,
-          audited: new Set(),
-          expires: now + SCAN_TTL_MS,
-        });
-        const response: MarketplaceResponse = {
-          scanId,
-          source,
-          skills: discovered.map((s) => {
-            const meta = manifest.get(s.name);
-            return {
-              name: s.name,
-              skillId: asString(meta?.skillId),
-              description: s.description ?? asString(meta?.description),
-              installs: typeof meta?.installs === "number" ? meta.installs : undefined,
-              ...installStatus(s, lock, soulLoader, bundledSkills, disabledBundledSkills),
-            };
-          }),
-        };
-        marketplaceCache.set(source, { scanId, expires: now + SCAN_TTL_MS, response });
-        return response;
+        return await loadMarketplace(gitSync, soulLoader, bundledSkills, disabledBundledSkills);
       } catch (e) {
         return reply.code(502).send({
           error: `marketplace unavailable: ${e instanceof Error ? e.message : String(e)}`,
         });
-      } finally {
-        if (dir) await rm(dir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  app.get(
+    "/api/v1/skills/updates",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "List installed marketplace Skills whose locked content hash differs from the current catalog.",
+        tags: ["skills"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["scanId", "source", "skills"],
+            properties: {
+              scanId: { type: "string" },
+              source: { type: "string" },
+              skills: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["name", "installed", "updateAvailable"],
+                  properties: MarketplaceSkillProps,
+                },
+              },
+            },
+          },
+          401: ErrorSchema,
+          502: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      reply.header("cache-control", "no-store");
+      try {
+        const marketplace = await loadMarketplace(
+          gitSync,
+          soulLoader,
+          bundledSkills,
+          disabledBundledSkills
+        );
+        return {
+          ...marketplace,
+          skills: marketplace.skills.filter((skill) => skill.updateAvailable),
+        };
+      } catch (e) {
+        return reply.code(502).send({
+          error: `marketplace unavailable: ${e instanceof Error ? e.message : String(e)}`,
+        });
       }
     }
   );
