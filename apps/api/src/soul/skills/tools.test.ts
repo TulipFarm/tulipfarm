@@ -398,6 +398,153 @@ describe("skill_update", () => {
     );
     expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill code-review");
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
+    expect(mockBuildAudit).not.toHaveBeenCalled();
+    const content = vi.mocked(writeFile).mock.calls[0][1] as string;
+    expect(content).not.toContain("_pendingAudit");
+  });
+
+  it("surgically patches a unique body match without re-running SkillAudit", async () => {
+    const ctx = makeCtx([existingSkill]);
+    const res = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Old body.",
+        new_string: "Sharpened body.",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: true,
+      data: {
+        name: "code-review",
+        frontmatter: frontmatter("code-review", { tags: ["review"] }),
+        body: "Sharpened body.",
+      },
+    });
+    expect(writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("SKILL.md"),
+      expect.stringContaining("Sharpened body."),
+      "utf8"
+    );
+    expect(mockBuildAudit).not.toHaveBeenCalled();
+  });
+
+  it("requires a unique patch match unless replace_all is true", async () => {
+    const repeated: SoulSkill = {
+      ...existingSkill,
+      body: "Check the output.\nCheck the output.",
+    };
+    const ctx = makeCtx([repeated]);
+
+    const ambiguous = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Check the output.",
+        new_string: "Verify the output.",
+      },
+      ctx
+    );
+    expect(ambiguous).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("matched 2 times") },
+    });
+    expect(writeFile).not.toHaveBeenCalled();
+
+    const replaced = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Check the output.",
+        new_string: "Verify the output.",
+        replace_all: true,
+      },
+      ctx
+    );
+    expect(replaced).toMatchObject({
+      success: true,
+      data: { body: "Verify the output.\nVerify the output." },
+    });
+  });
+
+  it("allows an empty new_string to delete a unique body match", async () => {
+    const ctx = makeCtx([
+      {
+        ...existingSkill,
+        body: "Keep this.\nRemove this.\nVerify this.",
+      },
+    ]);
+    const res = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Remove this.\n",
+        new_string: "",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: true,
+      data: { body: "Keep this.\nVerify this." },
+    });
+  });
+
+  it("validates the final Skill before writing a surgical patch", async () => {
+    const ctx = makeCtx([existingSkill]);
+    const res = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Old body.",
+        new_string: "",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("body") },
+    });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  it("rejects incomplete, missing, or mixed surgical patch arguments", async () => {
+    const ctx = makeCtx([existingSkill]);
+
+    const missingReplacement = await updateTool.handler(
+      { name: "code-review", old_string: "Old body." },
+      ctx
+    );
+    expect(missingReplacement).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("new_string") },
+    });
+
+    const missingMatch = await updateTool.handler(
+      {
+        name: "code-review",
+        old_string: "Not present.",
+        new_string: "Replacement.",
+      },
+      ctx
+    );
+    expect(missingMatch).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("not found") },
+    });
+
+    const mixed = await updateTool.handler(
+      {
+        name: "code-review",
+        body: "Full replacement.",
+        old_string: "Old body.",
+        new_string: "Patch.",
+      },
+      ctx
+    );
+    expect(mixed).toMatchObject({
+      success: false,
+      error: { code: "validation_error", message: expect.stringContaining("cannot combine") },
+    });
+    expect(writeFile).not.toHaveBeenCalled();
   });
 
   it("updates frontmatter only, preserves existing body", async () => {
@@ -465,6 +612,7 @@ describe("skill_update", () => {
     });
     const content = vi.mocked(writeFile).mock.calls[0][1] as string;
     expect(content).toContain("_pendingAudit: true");
+    expect(mockBuildAudit).not.toHaveBeenCalled();
   });
 
   it("rejects caller attempts to set the pending audit marker", async () => {
@@ -519,6 +667,36 @@ describe("skill_update", () => {
     );
     expect(disabled.has("resource-forge")).toBe(false);
     expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill resource-forge");
+  });
+
+  it("materializes a bundled-only Skill before surgically patching it", async () => {
+    const bundled = bundledSkill("resource-forge");
+    const ctx = makeCtx([], undefined, [bundled]);
+
+    const res = await updateTool.handler(
+      {
+        name: "resource-forge",
+        old_string: "Bundled body.",
+        new_string: "Customized body.",
+      },
+      ctx
+    );
+
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: "resource-forge", body: "Customized body." },
+    });
+    expect(cp).toHaveBeenCalledWith(bundled.directory, "/fake/soul/skills/resource-forge", {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    expect(writeFile).toHaveBeenCalledWith(
+      "/fake/soul/skills/resource-forge/SKILL.md",
+      expect.stringContaining("Customized body."),
+      "utf8"
+    );
+    expect(mockBuildAudit).not.toHaveBeenCalled();
   });
 });
 

@@ -305,7 +305,7 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
       })
     );
     expect(out).toContain(
-      "<available-skills>\n- code-review: Review code for bugs.\n- data-export: Export resources to CSV.\n</available-skills>"
+      "- code-review: Review code for bugs.\n- data-export: Export resources to CSV.\n</available-skills>"
     );
   });
 
@@ -313,10 +313,10 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
     const out = assembleSystemPrompt(
       baseCtx({ availableSkills: [{ name: "bare", description: "" }] })
     );
-    expect(out).toContain("<available-skills>\n- bare\n</available-skills>");
+    expect(out).toContain("\n\n- bare\n</available-skills>");
   });
 
-  it("groups bundled Skills under deterministic category headers", () => {
+  it("keeps the self-improvement directive inside a deterministic, budgeted block", () => {
     const context = baseCtx({
       availableSkills: [
         {
@@ -339,9 +339,20 @@ describe("assembleSystemPrompt — available-skills (lazy L1)", () => {
     const second = assembleSystemPrompt(context);
 
     expect(first).toBe(second);
+    const blockStart = first.indexOf("<available-skills>");
+    const directive = first.indexOf("Before replying, scan this list");
+    const list = first.indexOf("- user-skill: A Soul Skill.");
+    const blockEnd = first.indexOf("</available-skills>");
+    expect(blockStart).toBeLessThan(directive);
+    expect(directive).toBeLessThan(list);
+    expect(list).toBeLessThan(blockEnd);
+    expect(first).toContain("load any Skill that is even partially relevant with load_skill");
+    expect(first).toContain(
+      "patch it immediately with skill_update using old_string and new_string"
+    );
+    expect(first).toContain("offer to save the reusable approach as a new Skill");
     expect(first).toContain(
       [
-        "<available-skills>",
         "- user-skill: A Soul Skill.",
         "core: Core workflows.",
         "  - business-records: Work with Records.",

@@ -123,6 +123,34 @@ describe("loadBundledSkills", () => {
     }
   });
 
+  it("ships Skill Forge with the compact description and mandatory authoring section order", async () => {
+    const skills = await loadBundledSkills(makeLogger());
+    const skillForge = skills.get("skill-forge");
+    const description = skillForge?.frontmatter.description;
+    expect(typeof description).toBe("string");
+    if (typeof description !== "string" || !skillForge) return;
+
+    expect(description.length).toBeLessThanOrEqual(60);
+    expect(description.endsWith(".")).toBe(true);
+    const headings = [
+      "# Skill Forge Skill",
+      "## When to Use",
+      "## Prerequisites",
+      "## How to Run",
+      "## Quick Reference",
+      "## Procedure",
+      "## Pitfalls",
+      "## Verification",
+    ];
+    const positions = headings.map((heading) => skillForge.body.indexOf(heading));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+
+    const source = await readFile(join(skillForge.directory, "SKILL.md"), "utf8");
+    expect(source.split("\n").length).toBeGreaterThanOrEqual(90);
+    expect(source.split("\n").length).toBeLessThanOrEqual(150);
+  });
+
   it("returns an empty map when the bundled tree does not exist", async () => {
     const logger = makeLogger();
     const skills = await loadBundledSkills(logger, "/path/that/does/not/exist");

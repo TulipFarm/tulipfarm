@@ -837,8 +837,10 @@ describe("chat routes", () => {
 
       const prompt = capturedPrompts[0] as Array<{ role: string; content: unknown }>;
       expect(prompt[0]?.role).toBe("system");
-      expect(JSON.stringify(prompt[0]?.content)).toContain(
-        "<available-skills>\\n- code-review: Review code for bugs."
+      const systemContent = JSON.stringify(prompt[0]?.content);
+      expect(systemContent).toContain("<available-skills>\\nBefore replying, scan this list");
+      expect(systemContent).toContain(
+        "\\n\\n- code-review: Review code for bugs.\\n</available-skills>"
       );
     });
 
