@@ -58,6 +58,10 @@ TF_INSTALL_DIR="$INSTALL_DIR" \
 TF_PORT="$PORT" \
   bash "${REPO_ROOT}/scripts/install.sh" \
   || fail "installer exited non-zero"
+grep -qx "managed-by=tulipfarm-installer" "${INSTALL_DIR}/.tulipfarm-install" \
+  || fail "installer ownership marker was not written"
+grep -qx "compose-project=${COMPOSE_PROJECT_NAME}" "${INSTALL_DIR}/.tulipfarm-install" \
+  || fail "installer marker did not record the Compose project"
 
 # 3. Re-assert /health on the host port (the installer already gates on this).
 log "asserting /health on :${PORT}…"

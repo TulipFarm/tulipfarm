@@ -335,6 +335,18 @@ update_runtime_port() {
 # shellcheck disable=SC2086  # $SUDO may be empty and $ENGINE is a bare word — both must split
 compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose "$@" ); }
 
+write_install_marker() {
+  local project_name="${COMPOSE_PROJECT_NAME:-tulipfarm}" tmp
+  tmp="$($SUDO mktemp "${INSTALL_DIR}/.tulipfarm-install.tmp.XXXXXX")"
+  $SUDO tee "$tmp" >/dev/null <<EOF
+managed-by=tulipfarm-installer
+compose-project=${project_name}
+runtime=${ENGINE}
+EOF
+  $SUDO chmod 644 "$tmp"
+  $SUDO mv "$tmp" "${INSTALL_DIR}/.tulipfarm-install"
+}
+
 stack_app_owns_port() {
   local container mapping mappings
   container="$(compose ps -q app 2>/dev/null || true)"
@@ -419,6 +431,7 @@ main() {
   fetch_file docker-compose.yml "${INSTALL_DIR}/docker-compose.yml"
   fetch_file .env.example "${INSTALL_DIR}/.env.example" || true
   configure_runtime_port
+  write_install_marker
   bring_up
   wait_health
 }
