@@ -5,8 +5,9 @@
 #   curl -fsSL https://tulipfarm.site/install.sh | sudo bash
 #
 # Detects/installs a container engine, fetches docker-compose.yml + .env.example,
-# generates bootstrap secrets (zero questions), brings the 3-service stack up, polls
-# /health, and prints the setup-wizard URL. Re-running = update (preserves .env, PGDATA).
+# generates bootstrap secrets, resolves host-port conflicts interactively, brings the
+# 3-service stack up, polls /health, and prints the setup-wizard URL. Re-running = update
+# (preserves secrets and PGDATA).
 #
 # Files are fetched from https://tulipfarm.site, which serves a flat layout built from the
 # tip of main. TF_VERSION still pins the app image, but the compose file is always latest.
@@ -31,15 +32,87 @@ TF_BASE_URL="${TF_BASE_URL:-https://tulipfarm.site}"
 TF_REF="${TF_REF:-}"
 TF_VERSION="${TF_VERSION:-latest}"
 INSTALL_DIR="${TF_INSTALL_DIR:-/opt/tulipfarm}"
-PORT="${TF_PORT:-${HOST_PORT:-8080}}"
+PORT_OVERRIDE="${TF_PORT:-${HOST_PORT:-}}"
+PORT="${PORT_OVERRIDE:-8080}"
 TF_RUNTIME="${TF_RUNTIME:-}"
 TF_LOCAL_SRC="${TF_LOCAL_SRC:-}"
+TTY_INPUT="/dev/tty"
+TTY_OUTPUT="/dev/tty"
 
 # ---- logging -----------------------------------------------------------------
 log()  { printf '\033[0;32m▸\033[0m %s\n' "$*"; }
 warn() { printf '\033[0;33m⚠\033[0m  %s\n' "$*"; }
 die()  { printf '\033[0;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+# ---- host port ---------------------------------------------------------------
+normalize_port() {
+  local value="$1"
+  [[ "$value" =~ ^[0-9]{1,5}$ ]] || return 1
+  value=$((10#$value))
+  [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || return 1
+  printf '%s' "$value"
+}
+
+port_is_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    [ -n "$(ss -H -ltn "sport = :${port}" 2>/dev/null)" ]
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1
+    return
+  fi
+  ( exec 3<>"/dev/tcp/127.0.0.1/${port}" ) >/dev/null 2>&1
+}
+
+next_available_port() {
+  local candidate attempts=0
+  candidate=$((PORT + 1))
+  [ "$candidate" -le 65535 ] || candidate=1024
+  while [ "$attempts" -lt 1000 ]; do
+    if ! port_is_in_use "$candidate"; then
+      printf '%s' "$candidate"
+      return 0
+    fi
+    candidate=$((candidate + 1))
+    [ "$candidate" -le 65535 ] || candidate=1024
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+prompt_for_available_port() {
+  local answer normalized suggested
+  if ! exec 8<"$TTY_INPUT" 2>/dev/null || ! exec 9>"$TTY_OUTPUT" 2>/dev/null; then
+    die "host port ${PORT} is already in use — re-run with TF_PORT=<free-port>"
+  fi
+
+  warn "Host port ${PORT} is already in use."
+  while true; do
+    suggested="$(next_available_port)" \
+      || die "could not find a free host port — re-run with TF_PORT=<free-port>"
+    printf 'Choose another host port [%s]: ' "$suggested" >&9
+    IFS= read -r answer <&8 \
+      || die "could not read a host port — re-run with TF_PORT=<free-port>"
+    answer="${answer:-$suggested}"
+    if ! normalized="$(normalize_port "$answer")"; then
+      printf 'Port must be a number from 1 to 65535.\n' >&9
+      continue
+    fi
+    if port_is_in_use "$normalized"; then
+      printf 'Host port %s is also in use.\n' "$normalized" >&9
+      PORT="$normalized"
+      continue
+    fi
+    exec 8<&-
+    exec 9>&-
+    PORT="$normalized"
+    log "Using host port ${PORT}."
+    return
+  done
+}
 
 # ---- privilege ---------------------------------------------------------------
 SUDO=""
@@ -195,9 +268,120 @@ load_runtime_info() {
   [ -n "$u" ] && PUBLIC_URL="$u"
 }
 
+read_env_value() {
+  local key="$1"
+  $SUDO grep -E "^${key}=" "${INSTALL_DIR}/.env" 2>/dev/null \
+    | head -1 | cut -d= -f2- || true
+}
+
+update_runtime_port() {
+  local old_port="$1" old_public old_cors new_public new_cors tmp
+  old_public="$(read_env_value PUBLIC_URL)"
+  old_cors="$(read_env_value CORS_ORIGIN)"
+  new_public="$old_public"
+  new_cors="$old_cors"
+
+  # Keep custom reverse-proxy origins intact. Only adjust the direct HTTP origin that
+  # the installer generated, where the old host port is visibly part of the URL.
+  if [[ "$old_public" =~ ^http://[^/]+:${old_port}$ ]]; then
+    new_public="${old_public%:*}:${PORT}"
+    [ -n "$old_cors" ] && [ "$old_cors" != "$old_public" ] \
+      || new_cors="$new_public"
+  elif [ -z "$old_public" ]; then
+    detect_public_url
+    new_public="$PUBLIC_URL"
+    [ -n "$old_cors" ] || new_cors="$new_public"
+  fi
+
+  tmp="$($SUDO mktemp "${INSTALL_DIR}/.env.tmp.XXXXXX")"
+  $SUDO awk \
+    -v host_port="$PORT" \
+    -v public_url="$new_public" \
+    -v cors_origin="$new_cors" '
+      BEGIN {
+        saw_host_port = 0
+        saw_public_url = 0
+        saw_cors_origin = 0
+      }
+      /^HOST_PORT=/ {
+        print "HOST_PORT=" host_port
+        saw_host_port = 1
+        next
+      }
+      /^PUBLIC_URL=/ {
+        print "PUBLIC_URL=" public_url
+        saw_public_url = 1
+        next
+      }
+      /^CORS_ORIGIN=/ {
+        print "CORS_ORIGIN=" cors_origin
+        saw_cors_origin = 1
+        next
+      }
+      { print }
+      END {
+        if (!saw_host_port) print "HOST_PORT=" host_port
+        if (!saw_public_url) print "PUBLIC_URL=" public_url
+        if (!saw_cors_origin) print "CORS_ORIGIN=" cors_origin
+      }
+    ' "${INSTALL_DIR}/.env" | $SUDO tee "$tmp" >/dev/null
+  $SUDO chmod 600 "$tmp"
+  $SUDO mv "$tmp" "${INSTALL_DIR}/.env"
+  PUBLIC_URL="$new_public"
+  log "Updated the existing install to host port ${PORT}."
+}
+
 # ---- compose -----------------------------------------------------------------
 # shellcheck disable=SC2086  # $SUDO may be empty and $ENGINE is a bare word — both must split
 compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose "$@" ); }
+
+stack_app_owns_port() {
+  local container mapping mappings
+  container="$(compose ps -q app 2>/dev/null || true)"
+  [ -n "$container" ] || return 1
+  mappings="$(compose port app 8080 2>/dev/null || true)"
+  while IFS= read -r mapping; do
+    [ "${mapping##*:}" = "$PORT" ] && return 0
+  done <<<"$mappings"
+  return 1
+}
+
+ensure_port_available() {
+  local allow_running_stack="${1:-0}" normalized
+  normalized="$(normalize_port "$PORT")" \
+    || die "invalid host port '${PORT}' — expected a number from 1 to 65535"
+  PORT="$normalized"
+  port_is_in_use "$PORT" || return 0
+  if [ "$allow_running_stack" = "1" ] && stack_app_owns_port; then
+    return
+  fi
+  prompt_for_available_port
+}
+
+configure_runtime_port() {
+  local saved_port
+  if $SUDO test -f "${INSTALL_DIR}/.env"; then
+    write_env
+    load_runtime_info
+    saved_port="$PORT"
+    if [ -n "$PORT_OVERRIDE" ]; then
+      PORT="$PORT_OVERRIDE"
+    fi
+    if [ "$PORT" = "$saved_port" ]; then
+      ensure_port_available 1
+    else
+      ensure_port_available 0
+    fi
+    if [ "$PORT" != "$saved_port" ]; then
+      update_runtime_port "$saved_port"
+    fi
+    return
+  fi
+
+  ensure_port_available 0
+  write_env
+  load_runtime_info
+}
 
 bring_up() {
   log "Pulling images and starting the stack…"
@@ -234,10 +418,11 @@ main() {
   $SUDO mkdir -p "$INSTALL_DIR"
   fetch_file docker-compose.yml "${INSTALL_DIR}/docker-compose.yml"
   fetch_file .env.example "${INSTALL_DIR}/.env.example" || true
-  write_env
-  load_runtime_info
+  configure_runtime_port
   bring_up
   wait_health
 }
 
-main "$@"
+if [[ -z "${BASH_SOURCE[0]:-}" || "${BASH_SOURCE[0]}" = "$0" ]]; then
+  main "$@"
+fi

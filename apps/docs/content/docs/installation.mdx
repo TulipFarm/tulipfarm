@@ -7,7 +7,10 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 The one-line installer stands up the full TulipFarm stack (the `app` image + a bundled
 PostgreSQL 17 + pgvector) with Docker or Podman, generates all secrets for you, and
-prints the setup-wizard URL. It asks **zero configuration questions**.
+prints the setup-wizard URL. It normally asks **zero configuration questions**.
+
+If the selected host port is already in use, the installer asks for another port in the
+terminal and suggests the next available one. Press Enter to accept the suggestion.
 
 <Callout type="info">
   There is nothing to clone, build, or compile. The installer pulls a published container
@@ -30,8 +33,9 @@ brings the stack up, polls `/health`, and prints the URL to open.
   On macOS with no container runtime, install Docker Desktop or Podman first.
 </Callout>
 
-Re-running the installer is the upgrade path: it preserves your `.env` (never regenerating
-secrets) and your database, pulls the pinned version, and restarts. See
+Re-running the installer is the upgrade path: it preserves your secrets and database,
+pulls the pinned version, and restarts. An explicit `TF_PORT` changes the saved host port
+and its installer-generated local URLs. See
 [Updating and rollback](/docs/deploy/updating).
 
 ## Windows
@@ -100,7 +104,7 @@ All optional, set as environment variables before running:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `TF_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/tulipfarm:<tag>`). |
-| `TF_PORT` | `8080` | Host port to publish. |
+| `TF_PORT` | `8080` | Host port to publish; also changes it on an existing install. |
 | `TF_INSTALL_DIR` | `/opt/tulipfarm` | Install directory. |
 | `TF_RUNTIME` | auto | Force `docker` or `podman`. |
 | `TF_BASE_URL` / `TF_REF` | `{{SITE_URL}}` / empty | Where compose + `.env.example` are fetched from. |
@@ -111,6 +115,10 @@ Example — pin a version on a custom port:
 TF_VERSION=v0.1.0 TF_PORT=9000 \
   bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
 ```
+
+When no port override is supplied and the saved port belongs to another process, the
+installer prompts for a replacement. In a non-interactive environment, set `TF_PORT`
+before running instead.
 
 ### Installing an exact ref
 

@@ -13,7 +13,8 @@
 
 One line stands up the full stack (the `app` image + bundled PostgreSQL 17 + pgvector)
 with Docker or Podman, generates all secrets, and prints the setup-wizard URL — zero
-config questions. Re-running is the upgrade path (preserves `.env` + data).
+config questions unless the host port is occupied, in which case it suggests a free port
+and asks you to confirm it. Re-running is the upgrade path (preserves secrets + data).
 
 **Linux / macOS:**
 ```bash
@@ -31,6 +32,8 @@ Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
 `TF_BASE_URL`/`TF_REF`. Full guide: see `apps/docs/content/docs/installation.mdx`.
+An explicit `TF_PORT` also moves an existing install to that host port without rotating
+its generated secrets.
 
 > `TF_VERSION=<tag>` pins the app image. The site serves the compose file from the tip of
 > `main`; to install an exact ref instead, set
