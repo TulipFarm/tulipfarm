@@ -1,0 +1,180 @@
+import { randomUUID } from "node:crypto";
+import { RunLeaseManager, RunResumeGateway, WaitTimerSweeper } from "@tulipfarm/run-kernel";
+import { EventStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { config as loadEnv } from "dotenv";
+import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
+import { connectPg, transactionPort } from "./db";
+import { DeliveryTargetRegistry } from "./delivery";
+import { EventOutboxDispatcher } from "./event-dispatcher";
+import { RunExecutorRegistry } from "./executors";
+import { type LoopLogger, runLoop } from "./loop";
+import { assertSchemaFloor } from "./preflight";
+import { startProbeServer } from "./probe-server";
+import { RunDispatcher } from "./run-dispatcher";
+import { type DrainableLoop, drain } from "./shutdown";
+
+/** Consumer identity recorded on every outbox receipt this process writes. */
+const OUTBOX_CONSUMER = "worker.run-dispatch";
+
+const logger = {
+  info: (message: string) => console.log(message),
+  error: (message: string, error?: unknown) =>
+    error === undefined ? console.error(message) : console.error(message, error),
+} satisfies LoopLogger & { info: (message: string) => void };
+
+/**
+ * Composition root for the durable worker.
+ *
+ * Three loops run side by side. Run dispatch claims queued Runs and drives them to a terminal
+ * status. The wait sweep resolves durable waits whose deadline passed and requeues their Runs.
+ * Outbox delivery drains accepted integration events to their targets. Each is independent: a
+ * failing loop backs off on its own without stopping the others, because a stuck delivery target
+ * must not stop Runs from progressing.
+ */
+export async function main(): Promise<void> {
+  loadEnv({ path: ".env.local" });
+
+  const config: WorkerConfig = loadConfig();
+  const pool = await connectPg(config.databaseUrl);
+
+  // Fail closed before a single Run is claimed: the API owns migrations, and a worker running
+  // ahead of them would write columns that do not exist yet.
+  const schemaVersion = await assertSchemaFloor(pool, REQUIRED_SCHEMA_VERSION);
+
+  const transactions = transactionPort(pool);
+  const runStore = new RunStore(transactions);
+  const waitStore = new WaitStore(transactions);
+  const eventStore = new EventStore(transactions, randomUUID);
+
+  const leases = new RunLeaseManager(runStore);
+  const resume = new RunResumeGateway(runStore);
+  const sweeper = new WaitTimerSweeper(waitStore, resume);
+
+  const executors = new RunExecutorRegistry();
+  const deliveryTargets = new DeliveryTargetRegistry();
+
+  const runDispatcher = new RunDispatcher({
+    leases,
+    businessId: config.businessId,
+    owner: config.owner,
+    handler: (run) => executors.execute(run),
+    now: () => new Date(),
+    leaseDurationMs: config.leaseDurationMs,
+    batchSize: config.batchSize,
+  });
+
+  const outboxDispatcher = new EventOutboxDispatcher({
+    outbox: eventStore,
+    businessId: config.businessId,
+    owner: config.owner,
+    consumer: OUTBOX_CONSUMER,
+    handler: (message) => deliveryTargets.deliver(message),
+    now: () => new Date().toISOString(),
+    leaseDurationMs: config.leaseDurationMs,
+    batchSize: config.batchSize,
+  });
+
+  const controller = new AbortController();
+  const { signal } = controller;
+  let serving = true;
+
+  const loops: DrainableLoop[] = [
+    {
+      name: "run-dispatch",
+      settled: runLoop({
+        name: "run-dispatch",
+        intervalMs: config.runPollMs,
+        tick: async () => {
+          await runDispatcher.dispatchBatch();
+        },
+        signal,
+        logger,
+      }),
+    },
+    {
+      name: "wait-sweep",
+      settled: runLoop({
+        name: "wait-sweep",
+        intervalMs: config.waitSweepMs,
+        tick: async () => {
+          await sweeper.sweep({
+            businessId: config.businessId,
+            now: new Date(),
+            limit: config.batchSize,
+          });
+        },
+        signal,
+        logger,
+      }),
+    },
+    {
+      name: "outbox-delivery",
+      settled: runLoop({
+        name: "outbox-delivery",
+        intervalMs: config.outboxPollMs,
+        tick: async () => {
+          await outboxDispatcher.dispatchBatch();
+        },
+        signal,
+        logger,
+      }),
+    },
+  ];
+
+  const probeServer = await startProbeServer({
+    port: config.port,
+    database: pool,
+    requiredSchemaVersion: REQUIRED_SCHEMA_VERSION,
+    isServing: () => serving,
+  });
+
+  logger.info(
+    `worker ready: owner=${config.owner} business=${config.businessId} ` +
+      `schema=${schemaVersion} port=${config.port} ` +
+      `executors=${executors.size} deliveryTargets=${deliveryTargets.size}`
+  );
+
+  let shuttingDown = false;
+  const shutdown = async (reason: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    // Readiness fails first so the orchestrator stops routing to this instance while it drains.
+    serving = false;
+    logger.info(`worker draining (${reason})`);
+
+    const outcome = await drain({
+      loops,
+      abort: () => controller.abort(),
+      timeoutMs: config.drainTimeoutMs,
+    });
+
+    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
+    await pool.end();
+
+    if (outcome.status === "drained") {
+      logger.info("worker drained cleanly");
+      process.exit(0);
+    }
+    logger.error(
+      `worker drain timed out after ${config.drainTimeoutMs}ms; ` +
+        `loops still in flight: ${outcome.pending.join(", ")}. ` +
+        "Their Run leases will be reclaimed on expiry."
+    );
+    process.exit(1);
+  };
+
+  for (const signalName of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signalName, () => {
+      shutdown(signalName).catch((error: unknown) => {
+        // A drain that cannot even run is an unsafe shutdown, and must not look like a clean one.
+        logger.error("worker shutdown failed", error);
+        process.exit(1);
+      });
+    });
+  }
+}
+
+main().catch((error) => {
+  console.error(`❌ Worker boot failed: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+});

@@ -98,6 +98,12 @@ export interface TurnFinishedPayload {
   model?: string;
   tier?: string;
   durationMs?: number;
+  /**
+   * The durable Run this turn executed under, when the chat path claimed one. Present with
+   * `businessId` or not at all — the subscriber that releases the Run lease needs both.
+   */
+  runId?: string;
+  businessId?: string;
 }
 
 export interface SurfaceRenderedPayload {

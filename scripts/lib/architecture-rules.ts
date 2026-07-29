@@ -151,10 +151,13 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "memory",
       "observability",
     ],
-    // Applications compose packages; they never import another application.
+    // Applications compose packages; they never import another application. `constants` holds the
+    // shared, non-sensitive deployment defaults (e.g. the business scope) that the API and the
+    // worker must agree on and cannot share any other way.
     api: [
       "schema",
       "soul",
+      "constants",
       "authz",
       "audit",
       "secrets",
@@ -173,6 +176,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
     ],
     worker: [
       "schema",
+      "constants",
       "authz",
       "audit",
       "secrets",

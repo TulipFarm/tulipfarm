@@ -1,15 +1,8 @@
 import { assertPrincipalAuthenticatable, type Principal } from "@tulipfarm/authz";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { AuthMethod } from "../auth/session-store";
 import type { UserDoc } from "../auth/users";
 import type { ApiClientDoc } from "./api-clients";
-
-/**
- * Single-deployment business scope. TulipFarm runs one business per deployment today, so every
- * principal resolved by this API belongs to the same business. It exists as a named constant
- * rather than an implicit blank so authority checks in `@tulipfarm/authz` — which are
- * business-scoped by contract — never compare an empty string against an empty string.
- */
-export const DEPLOYMENT_BUSINESS_ID = "tulipfarm-local";
 
 /** How the credential presented on a request was carried. */
 export type CredentialKind = "session" | "api_token" | "client_secret";

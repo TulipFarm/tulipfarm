@@ -4,7 +4,7 @@ import {
   collectRoleGrants,
   type Role,
 } from "@tulipfarm/authz";
-import { DEPLOYMENT_BUSINESS_ID } from "./principal";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 
 /**
  * The roles this deployment actually enforces.

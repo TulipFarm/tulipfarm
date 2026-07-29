@@ -34,6 +34,7 @@ export async function runHeadlessChatTurn(
 ): Promise<HeadlessTurnResult> {
   const prepared = await prepareChatTurn(ctx, input);
   if (isPrepareError(prepared)) {
+    await input.abandonRun?.();
     return { text: "", status: "prepare_error", errorMessage: prepared.error };
   }
   const handle = await startChatTurn(ctx, prepared, input);

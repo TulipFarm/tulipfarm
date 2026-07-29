@@ -9,7 +9,7 @@ All 14 phases were executed and merged. The gap this file tracks is not "were th
 (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`) pass on code that nothing imports —
 they never checked reachability.
 
-Last verified: 2026-07-27.
+Last verified: 2026-07-29.
 
 ## How a verdict is derived
 
@@ -40,7 +40,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | ID | Defect | Status |
 | --- | --- | --- |
 | D1 | API route options gated on optional `buildApp` opts were never passed, so whole route areas did not exist on the running server | **Partly fixed** — `operationalApi` and `runEvents` composed; five opts deferred with named owners; regression test added |
-| D2 | `apps/worker` and `apps/integration-worker` are export barrels with no `main()`, dispatch loop, or signal handling | Open — PR 1 |
+| D2 | `apps/worker` and `apps/integration-worker` are export barrels with no `main()`, dispatch loop, or signal handling | **Partly fixed** — `apps/worker` has a composition root, three loops, fail-closed preflight, probes, and a drain (PR 1); `apps/integration-worker` is still a barrel — PR 6 |
 | D3 | Governed packages have zero runtime consumers while parallel `apps/api` implementations serve traffic | Open — PR 6 (direction decided: packages win, locals get migrated then deleted) |
 | D4 | Phase 14 legacy removal was largely renames; `legacy-inventory.test.ts` asserts filenames, not behavior | Open — PR 8 |
 
@@ -50,8 +50,8 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | --- | --- | --- |
 | `operationalApi` | yes | `/api/v1/runs`, `/admin/operations`, `/inbox`, `/roles`, `/guardrails` |
 | `runEvents` | yes | `/api/v1/runs/:id/events`; the stream is legitimately empty until the worker writes events |
-| `triggerInvoke` | no | needs a bootable worker to act on the invocation — PR 1 |
-| `hookIngress` | no | signed webhook ingress is inert without a worker — PR 1 |
+| `triggerInvoke` | no | the worker boots as of PR 1, but no Run source has an executor, so a trigger would only mint Runs to be parked — PR 3 |
+| `hookIngress` | no | same: signed webhook ingress is inert until a Run source has an executor — PR 3 |
 | `runReplay` | no | replays events no writer produces yet — PR 3 |
 | `routines` / `routineAuthoring` | no | `@tulipfarm/routine-engine` is being retired, not revived — PR 4 |
 | `forms` | no | no form storage; `GovernedFormView` is rendered by no route — PR 6 |
@@ -96,6 +96,30 @@ validation on tool calls, the LLM provider chain, secrets, and the editor surfac
 Empty sections in the Run inspector (effects, waits, Guardrail decisions, costs) and in the
 Operations console (quarantine, recovery) are empty because nothing writes them yet — not because
 data is withheld. They fill in when PR 1/3/4 land their writers.
+
+## What PR 1 changed
+
+- `apps/worker` boots. `src/main.ts` is a composition root: config validation, a fail-closed
+  preflight that refuses to start below `schema_version` 15 (the API owns migrations — the worker
+  only reads), three independent loops (Run dispatch, wait sweep, outbox delivery), `/livez` +
+  `/readyz` over `node:http` mirroring the API's probe names, and a `SIGTERM`/`SIGINT` drain that
+  exits 0 on a clean finish and **non-zero when the drain times out**.
+- The Dockerfile emits a second entrypoint (`worker.cjs`) from the same image, and compose runs it
+  as a `worker` service gated on `app` being healthy, so an API and a worker sharing a tag can
+  never disagree about the schema.
+- No Run source has an executor yet. An unmatched Run releases to `needs_reconciliation` with the
+  missing executor named — never a silent success, and never a failure with no recorded cause.
+  Executors arrive in PR 3; the outbox delivery registry is likewise empty until PR 6.
+- **The chat path now completes the Runs it mints.** Before this PR every chat message inserted a
+  `queued` Run that nothing ever executed, so `/runs` accumulated orphans and enabling the worker's
+  Run loop would have made it steal Runs the API had already run. The API now claims its Run before
+  the stream opens and releases it from `TURN_FINISHED`. A human-in-the-loop pause parks the Run in
+  `waiting` holding no lease — the resume path still mints a fresh Run, which PR 3 replaces with a
+  durable wait. The two exits that emit no `TURN_FINISHED` — a validation failure and a
+  guardrail-blocked input — release the Run themselves, so an ordinary bad request never turns into
+  reconciliation work a lease expiry later.
+- Pre-existing orphan `queued` rows were deliberately left in place. A data migration would have to
+  guess at the outcome of Runs nobody recorded, and a guessed status is worse than a visible one.
 
 ## Remaining work
 

@@ -41,6 +41,11 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
   && pnpm --filter @tulipfarm/api exec esbuild src/hooks/hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/hook-worker.cjs \
   --external:isolated-vm --external:pg
+# The durable worker: a second long-running entrypoint off the same image, so one image tag
+# always pairs an API with a worker that speaks the same schema.
+RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
+  --external:pg
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
@@ -60,6 +65,9 @@ COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
 # Hook sandbox worker — spawned as a sibling file by HookExecutor (worker_threads
 # can't run code out of the server.cjs bundle).
 COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
+# Durable worker entrypoint. Not the image CMD — compose runs it as its own service off this
+# same image, so the API and the worker can never drift out of schema agreement.
+COPY --from=builder /app/apps/worker/dist/worker.cjs ./worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 COPY --from=builder /app/skills ./skills
 # /data holds the bootstrap secrets generated on first boot when the operator supplies none

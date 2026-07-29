@@ -12,10 +12,11 @@
   },
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web",
+    "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web --filter=@tulipfarm/worker",
     "dev:api": "turbo dev --filter=@tulipfarm/api",
     "dev:docs": "turbo dev --filter=@tulipfarm/docs",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
+    "dev:worker": "turbo dev --filter=@tulipfarm/worker",
     "reset:dev": "bash scripts/reset-dev.sh",
     "architecture:check": "node scripts/architecture-check.ts",
     "architecture:test": "vitest run scripts",

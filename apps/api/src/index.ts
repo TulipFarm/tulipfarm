@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
+import { RunLeaseManager } from "@tulipfarm/run-kernel";
 import {
   loadEncryptionKeys,
   loadOrProvisionActiveDek,
@@ -38,7 +40,6 @@ import { registerGuardrailsReload } from "./guardrails/reload";
 import { HookExecutor } from "./hooks/hook-executor";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { PgExternalIdentityRepo } from "./identity/external-links";
-import { DEPLOYMENT_BUSINESS_ID } from "./identity/principal";
 import { IngressDeliveriesRepo } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
@@ -68,6 +69,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { ChatRunLifecycle, subscribeChatRunCompletion } from "./runtime/chat-run-lifecycle";
 import { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
@@ -172,6 +174,13 @@ async function boot() {
     const runTransactions = transactionPort(pool);
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
+    // The API executes chat turns in-process, so it owns the lease on the Runs it mints. Without
+    // this every chat message would leave a `queued` Run behind for a worker to execute twice.
+    const chatRunLifecycle = new ChatRunLifecycle({
+      leases: new RunLeaseManager(runStore),
+      store: runStore,
+      owner: `api:${process.pid}`,
+    });
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -308,6 +317,7 @@ async function boot() {
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,
+      chatRunLifecycle,
       approvalsRepo,
       approvalRegistry,
       runEvents: {
@@ -416,6 +426,9 @@ async function boot() {
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
+    // The chat route returns as soon as the reply is hijacked, so the Run is completed here —
+    // TURN_FINISHED is the one signal guaranteed on every exit, including stops and throws.
+    subscribeChatRunCompletion(domainEventEmitter, chatRunLifecycle, app.log);
     // Optional Grafana Cloud OTLP metrics export (gated). Only constructed when enabled + targeted +
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;

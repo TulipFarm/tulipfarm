@@ -58,6 +58,7 @@ import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
+import type { ChatRunLifecycle } from "./runtime/chat-run-lifecycle";
 import type { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
@@ -132,6 +133,11 @@ export interface AppOptions {
   operationalApi?: OperationalApiDeps;
   /** Persist-first authority shared by Chat and every Trigger ingress. */
   invocations?: DurableInvocationGateway;
+  /**
+   * Claims and completes the Runs the chat path mints. Absent means Runs are minted but never
+   * advanced — the pre-cutover behavior, kept only for partial assemblies and tests.
+   */
+  chatRunLifecycle?: ChatRunLifecycle;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness
    * reports ok on process liveness alone.
@@ -480,7 +486,8 @@ export async function buildApp(opts: AppOptions = {}) {
         surfaceActionStore,
         opts.invocations,
         opts.bundledSkills,
-        opts.disabledBundledSkills
+        opts.disabledBundledSkills,
+        opts.chatRunLifecycle
       );
       registerSurfaceRoutes(
         app,
