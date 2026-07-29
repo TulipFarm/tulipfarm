@@ -23,11 +23,12 @@ function simulatedTerminal(): { inputPath: string; outputPath: string } {
   return { inputPath, outputPath };
 }
 
-function runInstallerFunctions(script: string, args: string[] = [], input = ""): string {
-  return execFileSync("bash", ["-c", `source "$1"\n${script}`, "bash", INSTALLER, ...args], {
+function runInstallerFunctions(script: string, args: string[] = []): string {
+  const harnessPath = join(temporaryDirectory(), "harness.sh");
+  writeFileSync(harnessPath, `source "$1"\n${script}`);
+  return execFileSync("bash", [harnessPath, INSTALLER, ...args], {
     cwd: ROOT,
     encoding: "utf8",
-    input,
   });
 }
 
