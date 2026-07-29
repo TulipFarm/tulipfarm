@@ -1,0 +1,129 @@
+---
+title: Docker Compose
+description: Run TulipFarm from the Compose file alone — no .env, no key generation. The file every self-host platform consumes.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The [one-line installer](/docs/installation) is the fastest path on a machine you have a
+shell on. When you deploy through a UI instead — Portainer, Coolify, Dokploy, Unraid — you
+paste a Compose file into a form, and there is no shell to run a script in. TulipFarm's
+`docker-compose.yml` is written for exactly that: **every variable has a default, and no
+`.env` is required.**
+
+## Run it
+
+Download `docker-compose.yml` and bring it up:
+
+```bash
+curl -fsSLO {{SITE_URL}}/docker-compose.yml
+docker compose up -d
+```
+
+Open `http://localhost:8080` and finish the [setup wizard](/docs/installation#finish-setup).
+
+That is the whole procedure. Two services start: `app` (the API, the web UI, and the
+in-process workers, all one image) and `postgres` (PostgreSQL 17 with pgvector).
+
+<Callout type="info">
+  Deploying through a UI instead? The same file goes straight into
+  [Coolify](/docs/deploy/coolify), [Portainer](/docs/deploy/portainer), or
+  [Dokploy, Unraid, Synology, and CasaOS](/docs/deploy/other-platforms) — those pages cover
+  only what differs per platform.
+</Callout>
+
+## What happens to your secrets
+
+TulipFarm needs three secrets: `ENCRYPTION_KEY` (which encrypts every secret the instance
+stores — LLM keys, integration credentials), `JWT_SECRET`, and `WEBHOOK_SIGNING_SECRET`.
+
+If you do not supply them, the app **generates them on first boot** and writes them to
+`/data/secrets.env` inside the `tulipfarm-data` volume, `mode 0600`. Every later boot reads
+them back from that file, so sessions and encrypted secrets survive restarts and upgrades.
+The first-boot log prints the path in a banner you cannot miss.
+
+<Callout type="warn">
+  **Back up the `tulipfarm-data` volume.** It holds the key that decrypts every secret this
+  instance stores. Losing it means losing them — restoring the database alone is not
+  enough, because the database only holds ciphertext.
+
+  If the app starts with a freshly generated `ENCRYPTION_KEY` against a database that
+  already contains encrypted secrets, it **refuses to boot** rather than quietly orphaning
+  them. That error means the data volume was lost: restore it, or set `ENCRYPTION_KEY`
+  back to its original value.
+</Callout>
+
+Environment variables always win. Set `ENCRYPTION_KEY` yourself — from your platform's
+secret store, or `openssl rand -base64 32` — and the file lane is never used. That is what
+the installer does, and it is what you should do for anything beyond a personal instance:
+a generated key sits on the same host as the database volume, so a full host compromise
+yields both.
+
+## Things worth changing
+
+Put these in a `.env` file next to `docker-compose.yml`, or in your platform's environment
+form. All are optional.
+
+| Variable | Default | Why you would set it |
+| --- | --- | --- |
+| `HOST_PORT` | `8080` | Publish on a different host port. |
+| `PUBLIC_URL` | `http://localhost:8080` | The URL users actually type. Drives CORS and the cookie `Secure` flag — set it to your real origin or logins will not stick. |
+| `POSTGRES_PASSWORD` | `tulipfarm` | Replace the default database password. |
+| `TULIPFARM_VERSION` | `latest` | Pin an image tag instead of tracking `latest`. |
+
+<Callout type="warn">
+  The bundled database defaults to the password `tulipfarm`. That is what lets the file run
+  with no prior setup — Postgres demands a password at init time and cannot ask the app for
+  one. It is safe **only** because port 5432 is never published to the host. Do not publish
+  it. On anything reachable from a network you do not control, set `POSTGRES_PASSWORD`.
+</Callout>
+
+### PUBLIC_URL and the Secure cookie flag
+
+`PUBLIC_URL` decides whether session cookies are marked `Secure`:
+
+- `https://…` → cookies are `Secure`. Correct behind TLS.
+- `http://…` → cookies are not. Browsers discard `Secure` cookies sent over plain HTTP
+  (localhost excepted), so marking them on an HTTP origin would make login silently fail.
+
+Leave it at the default for a local instance; set it to `http://<your-lan-ip>:8080` for a
+LAN box; set it to `https://your-domain` once TLS is in front.
+
+## Use a managed database instead
+
+Point `DATABASE_URL` at your own PostgreSQL 17, set `EXTERNAL_DATASTORE=true`, and start
+only the app — the bundled `postgres` service is then never created:
+
+```bash
+docker compose up -d app
+```
+
+Full walkthrough, including the extensions your provider must allow:
+[Use a managed database](/docs/deploy/managed-database).
+
+## Health checks
+
+Two endpoints, for the two questions an orchestrator asks:
+
+| Endpoint | Meaning | Use for |
+| --- | --- | --- |
+| `/livez` | The process is running. Checks nothing else. | Liveness probes — restart the container when this fails. |
+| `/readyz` | The datastore is reachable and this instance can serve. `503` when not. | Readiness and startup probes, load-balancer checks. |
+
+`/health` is kept as an alias of `/readyz`. Give startup probes a generous timeout:
+database migrations run on boot, before the server starts listening.
+
+## Update
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Migrations apply automatically on boot, and there are **no down-migrations** — read
+[Updating and rollback](/docs/deploy/updating) before your first upgrade.
+
+## Scale-out is not supported
+
+Run **exactly one `app` replica**. The soul is a git working tree on a local volume and the
+job workers run inside the same process; a second replica would race both. Vertical scaling
+is the supported path. This is a deliberate design constraint, not a missing feature.

@@ -17,14 +17,14 @@ config questions. Re-running is the upgrade path (preserves `.env` + data).
 
 **Linux / macOS:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo bash
+curl -fsSL https://tulipfarm.site/install.sh | sudo bash
 ```
 On Linux with no engine it auto-installs Podman; on macOS install Docker Desktop or
-Podman first (the no-VM native lane is not yet available).
+Podman first.
 
 **Windows (WSL2)** — from PowerShell:
 ```powershell
-irm https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 | iex
+irm https://tulipfarm.site/install.ps1 | iex
 ```
 Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 
@@ -32,7 +32,21 @@ Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (def
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
 `TF_BASE_URL`/`TF_REF`. Full guide: see `apps/docs/content/docs/installation.mdx`.
 
-> To install a specific version or branch, set `TF_VERSION=<tag>` or `TF_REF=<branch>` before running the installer. To test a local build, set `TF_LOCAL_SRC=1`.
+> `TF_VERSION=<tag>` pins the app image. The site serves the compose file from the tip of
+> `main`; to install an exact ref instead, set
+> `TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm` together with
+> `TF_REF=<tag-or-branch>`. To test a local build, set `TF_LOCAL_SRC=1`.
+
+**Compose by hand** (Portainer, Coolify, Dokploy, Unraid, or a plain `docker compose`) —
+grab `docker-compose.yml` from <https://tulipfarm.site/docker-compose.yml> and run it
+as-is; no `.env` and no key generation are needed.
+The app generates its bootstrap secrets on first boot and persists them to the
+`tulipfarm-data` volume, so **back that volume up** — it holds the key that decrypts every
+secret the instance stores. The bundled database uses the default password `tulipfarm`
+(safe only because port 5432 is never published — don't publish it); set
+`POSTGRES_PASSWORD` to change it. For TLS, put a reverse proxy in front and set
+`PUBLIC_URL` to the external `https://` origin. See the header of `docker-compose.yml` for
+every knob.
 
 ## Local Development
 
@@ -40,36 +54,25 @@ Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (def
 
 - **Node.js** (see `.node-version`)
 - **pnpm** (`npm install -g pnpm`)
-- **Homebrew** (for macOS)
-- **PostgreSQL 17 + pgvector** (installed and started via the setup script)
+- **Docker** (Docker Desktop or Docker Engine, with the Compose v2 plugin)
 
 ### Quick Start
 
-App processes always run **native** in dev (`pnpm dev`, hot reload); Postgres is the
-developer's choice (both options satisfy AC-006).
+Postgres always runs as the bundled `pgvector/pgvector:pg17` container — the same image CI
+and production use, so dev cannot drift from the tested path. App processes run on the host
+(`pnpm dev`, hot reload).
 
 1. **Provision Postgres** — run the setup script:
    ```bash
    bash scripts/setup-dev.sh
    ```
-   It **prompts** for how to run Postgres:
-
-   - **Docker** (default) — starts the bundled `pgvector/pgvector:pg17` container (the
-     same image CI/prod use), exposed on `localhost:5432`, and wires `DATABASE_URL`
-     (with a generated `POSTGRES_PASSWORD` in `.env`) into `.env.local`.
-   - **Native** — installs PostgreSQL 17 + pgvector via Homebrew/apt/yum, starts the
-     service, and creates the `tulipfarm` database.
-
-   Either way it initializes the soul directory and generates `.env.local` with
-   bootstrap env config. For a non-interactive run, preset the choice:
-   ```bash
-   DB_MODE=docker bash scripts/setup-dev.sh   # or DB_MODE=native
-   ```
+   It starts the container (exposed on `localhost:5432`, password generated into `.env`),
+   wires `DATABASE_URL` into `.env.local`, initializes the soul directory, and generates the
+   rest of `.env.local`. No prompts.
 
 2. **Verify the datastore is running:**
    ```bash
-   psql tulipfarm -c 'select 1'                       # native
-   pg_isready -h localhost -p 5432 -U tulipfarm       # docker
+   pg_isready -h localhost -p 5432 -U tulipfarm
    ```
 
 3. **Install dependencies and start development:**
@@ -94,8 +97,8 @@ developer's choice (both options satisfy AC-006).
 ### Environment Setup
 
 The `scripts/setup-dev.sh` script automatically:
-- Installs and starts PostgreSQL 17 + pgvector
-- Creates the `tulipfarm` database
+- Starts the bundled PostgreSQL 17 + pgvector container on `localhost:5432`
+- Generates `POSTGRES_PASSWORD` into `.env` and points `DATABASE_URL` at the container
 - Initializes the soul git repository at `~/.tulipfarm/soul` with the required directory structure
 - Generates `.env.local` with random bootstrap env config (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
 
@@ -170,10 +173,9 @@ Updating a connected integration restarts its MCP server automatically.
 
 ### Stopping Services
 
-To stop PostgreSQL:
+To stop PostgreSQL (keeps the data volume):
 ```bash
-brew services stop postgresql@17                                              # native
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down           # docker (keeps data)
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 ```
 
 To stop the dev servers, press `Ctrl+C` in the terminal running `pnpm dev`.

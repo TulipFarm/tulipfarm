@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the OCI installer (scripts/get.tulipfarm.sh) — the real AC-001 path,
+# Smoke test for the OCI installer (scripts/install.sh) — the real AC-001 path,
 # exercised hermetically: build the app image locally as :ci, run the installer against
 # this repo (TF_LOCAL_SRC) into a throwaway dir on a throwaway port, and assert /health.
 #
@@ -35,8 +35,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Fail fast (and meaningfully) before the slow image build when the script is absent.
-[ -f "${REPO_ROOT}/scripts/get.tulipfarm.sh" ] \
-  || fail "scripts/get.tulipfarm.sh not found — implement the installer (AW-002)"
+[ -f "${REPO_ROOT}/scripts/install.sh" ] \
+  || fail "scripts/install.sh not found — implement the installer (AW-002)"
 command -v docker >/dev/null 2>&1 || fail "docker not on PATH"
 docker compose version >/dev/null 2>&1 || fail "docker compose v2 plugin required"
 
@@ -56,7 +56,7 @@ TF_VERSION="ci" \
 TF_RUNTIME="docker" \
 TF_INSTALL_DIR="$INSTALL_DIR" \
 TF_PORT="$PORT" \
-  bash "${REPO_ROOT}/scripts/get.tulipfarm.sh" \
+  bash "${REPO_ROOT}/scripts/install.sh" \
   || fail "installer exited non-zero"
 
 # 3. Re-assert /health on the host port (the installer already gates on this).
@@ -70,7 +70,7 @@ env_before="$(sha256sum "${INSTALL_DIR}/.env" | awk '{print $1}')"
 log "re-running installer (idempotency check)…"
 TF_LOCAL_SRC="$REPO_ROOT" TF_VERSION="ci" TF_RUNTIME="docker" \
 TF_INSTALL_DIR="$INSTALL_DIR" TF_PORT="$PORT" \
-  bash "${REPO_ROOT}/scripts/get.tulipfarm.sh" >/dev/null 2>&1 \
+  bash "${REPO_ROOT}/scripts/install.sh" >/dev/null 2>&1 \
   || fail "installer re-run exited non-zero"
 env_after="$(sha256sum "${INSTALL_DIR}/.env" | awk '{print $1}')"
 [ "$env_before" = "$env_after" ] || fail "re-run mutated .env (secrets not preserved)"

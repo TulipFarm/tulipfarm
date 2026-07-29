@@ -1,6 +1,6 @@
 ---
-title: Install (self-host)
-description: One-line install of the TulipFarm OCI stack on Linux, macOS, or Windows (WSL2).
+title: Install
+description: One-line install of the TulipFarm stack on Linux, macOS, or Windows — no repository to clone.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -10,14 +10,15 @@ PostgreSQL 17 + pgvector) with Docker or Podman, generates all secrets for you, 
 prints the setup-wizard URL. It asks **zero configuration questions**.
 
 <Callout type="info">
-  Re-running the installer is the upgrade path: it preserves your `.env` (never
-  re-generates secrets) and your database, then pulls the pinned version and restarts.
+  There is nothing to clone, build, or compile. The installer pulls a published container
+  image. Node, pnpm, and the source tree are only needed to
+  [work on TulipFarm](/docs/development), not to run it.
 </Callout>
 
 ## Linux / macOS
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo bash
 ```
 
 What it does: detects a container engine (on Linux, auto-installs Podman if neither
@@ -26,20 +27,37 @@ generates `ENCRYPTION_KEY` / `JWT_SECRET` / `WEBHOOK_SIGNING_SECRET` / `POSTGRES
 brings the stack up, polls `/health`, and prints the URL to open.
 
 <Callout type="warn">
-  On macOS with no container runtime, install Docker Desktop or Podman first. The
-  no-VM native lane is not yet available.
+  On macOS with no container runtime, install Docker Desktop or Podman first.
 </Callout>
 
-## Windows (WSL2)
+Re-running the installer is the upgrade path: it preserves your `.env` (never regenerating
+secrets) and your database, pulls the pinned version, and restarts. See
+[Updating and rollback](/docs/deploy/updating).
+
+## Windows
 
 From PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 | iex
+irm {{SITE_URL}}/install.ps1 | iex
 ```
 
 This verifies WSL2 (and a Linux distro) is installed, then runs the Linux installer
 inside WSL. If WSL is missing it prints the `wsl --install` steps to run first.
+
+## Docker Compose
+
+If you deploy through a UI rather than a shell — Portainer, Coolify, Dokploy, Unraid — take
+the Compose file and run it as-is. No `.env`, no key generation:
+
+```bash
+curl -fsSLO {{SITE_URL}}/docker-compose.yml
+docker compose up -d
+```
+
+The app generates its own secrets on first boot and persists them to the `tulipfarm-data`
+volume. See [Docker Compose](/docs/deploy/docker-compose) for what to back up, and
+[Deploy](/docs/deploy) for the platform-specific pages.
 
 ## Finish setup
 
@@ -61,11 +79,17 @@ wizard.
 <Callout type="warn">
   If the installer detected a public IP it prints a TLS warning: the instance is
   reachable over HTTP and the first visitor becomes admin — complete setup immediately
-  and put a reverse proxy with TLS in front for production.
+  and [put TLS in front](/docs/deploy/tls) before running it for real.
 </Callout>
 
-Once you are in, you run TulipFarm by talking to it — describe what you want and agents
-build it. See [Building by chat](/docs/concepts/building) to get started.
+Once you are in, continue with [Get started](/docs/getting-started) — you run TulipFarm by
+talking to it.
+
+## Before real data
+
+The defaults are tuned for "runs with no setup", not for production. Work through the
+[production checklist](/docs/deploy/production-checklist) — TLS, your own `ENCRYPTION_KEY`,
+a replaced database password, a pinned image tag, and backups.
 
 ## Overrides
 
@@ -79,28 +103,48 @@ All optional, set as environment variables before running:
 | `TF_PORT` | `8080` | Host port to publish. |
 | `TF_INSTALL_DIR` | `/opt/tulipfarm` | Install directory. |
 | `TF_RUNTIME` | auto | Force `docker` or `podman`. |
-| `TF_BASE_URL` / `TF_REF` | GitHub raw / `main` | Where compose + `.env.example` are fetched from. |
+| `TF_BASE_URL` / `TF_REF` | `{{SITE_URL}}` / empty | Where compose + `.env.example` are fetched from. |
 
 Example — pin a version on a custom port:
 
 ```bash
 TF_VERSION=v0.1.0 TF_PORT=9000 \
-  bash -c "curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo -E bash"
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
 ```
 
-### Windows (WSL2)
+### Installing an exact ref
+
+`TF_VERSION` pins the **app image**, but the files above are fetched from this site, which
+serves them from the tip of `main`. That is normally what you want — `docker-compose.yml`
+is written so every variable has a default, so it stays compatible across versions.
+
+When you need the compose file from a specific tag too, fetch from GitHub instead. A
+non-empty `TF_REF` switches the installer back to the `<base>/<ref>/<path>` layout:
+
+```bash
+TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm \
+  TF_REF=v0.1.0 TF_VERSION=v0.1.0 \
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
+```
+
+<Callout type="info">
+  The installer does not configure TLS. To add it afterwards, edit
+  `/opt/tulipfarm/.env` and follow [Put TLS in front](/docs/deploy/tls).
+</Callout>
+
+### Windows
 
 The PowerShell script accepts named parameters. Download it first, then run with the parameters you need:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/install.ps1 -OutFile install.ps1
+Invoke-WebRequest {{SITE_URL}}/install.ps1 -OutFile install.ps1
 .\install.ps1 -Version v0.1.0
 ```
 
 | Parameter | Default | Purpose |
 | --- | --- | --- |
 | `-Version` | `latest` | App image tag (`TF_VERSION` inside WSL). |
-| `-BaseUrl` | GitHub raw | Base URL for fetched files. |
-| `-Ref` | `main` | Git ref under `-BaseUrl`. |
+| `-BaseUrl` | `{{SITE_URL}}` | Base URL for fetched files. |
+| `-Ref` | empty | Git ref under `-BaseUrl`. Set it with a GitHub raw `-BaseUrl` to install an exact ref. |
 
 To set `TF_PORT`, `TF_INSTALL_DIR`, or `TF_RUNTIME`, open your WSL terminal and run the bash installer directly with those env vars instead.

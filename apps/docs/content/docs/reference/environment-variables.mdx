@@ -7,15 +7,39 @@ TulipFarm is configured through environment variables. In self-hosted installs t
 installer writes these to `/opt/tulipfarm/.env`; in local development they live in
 `.env.local`. The tables below cover every variable the `app` reads.
 
+Deploying? [Deploy](/docs/deploy) covers which of these matter per platform, and the
+[production checklist](/docs/deploy/production-checklist) covers which ones you must not
+leave at their defaults.
+
 ## Required (all deployments)
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | — | PostgreSQL 17 connection string. The single datastore (pgvector + pg-boss). Must allow the `vector` and `citext` extensions — the app creates them at boot. |
 | `SOUL_PATH` | — | Absolute path to the soul git repository. Must be outside the project repo — a relative or in-repo path is rejected at boot. |
-| `ENCRYPTION_KEY` | — | Base64-encoded 32-byte key for encrypting application secrets. Startup fails fast if the key is absent or not 32 bytes. Generate with `openssl rand -base64 32`. |
-| `JWT_SECRET` | — | Required, validated as 32-byte base64 at boot. Reserved for request signing — no feature is wired to it yet (API tokens are stored as hashes, not JWTs — see [Hashing](/docs/security/hashing)). Generate with `openssl rand -base64 32`. |
-| `WEBHOOK_SIGNING_SECRET` | — | Required, validated as 32-byte base64 at boot. Reserved for webhook signature verification — not yet wired (the routine webhook uses a per-trigger shared secret instead). Generate with `openssl rand -base64 32`. |
+
+Both are already set by the container image and the Compose file; you only supply them
+when running the API outside a container.
+
+## Bootstrap secrets
+
+Three keys, each validated as 32-byte base64 at boot. **In a container they are optional**:
+if any is missing, the app generates it on first boot and persists it to
+`$TF_DATA_DIR/secrets.env` (`mode 0600`), reusing it on every later boot. Setting the
+variable always overrides the generated value. Outside a container — where there is no data
+directory — all three are required and boot fails fast without them.
+
+Generate your own with `openssl rand -base64 32`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENCRYPTION_KEY` | generated | Key that encrypts every secret the instance stores. Losing it makes those secrets unrecoverable, so the app refuses to boot if it generates a fresh one against a database that already holds encrypted secrets. |
+| `JWT_SECRET` | generated | Reserved for request signing — no feature is wired to it yet (API tokens are stored as hashes, not JWTs — see [Hashing](/docs/security/hashing)). |
+| `WEBHOOK_SIGNING_SECRET` | generated | Reserved for webhook signature verification — not yet wired (the routine webhook uses a per-trigger shared secret instead). |
+
+| Variable | Default | Description |
+|---|---|---|
+| `TF_DATA_DIR` | `/data` | Directory holding generated bootstrap secrets. Must be a mounted volume — the app refuses to boot rather than generate keys that a restart would destroy. Outside a container the default is only used if it already exists, so local development is unaffected. |
 
 ## Headless seeding
 
@@ -42,13 +66,15 @@ generates and writes these; they are documented here for reference.
 
 | Variable | Default | Description |
 |---|---|---|
-| `PUBLIC_URL` | `http://localhost:8080` | The externally reachable URL for this instance. Drives CORS and the cookie `Secure` flag. Set to an `https://` URL once behind TLS. |
+| `PUBLIC_URL` | `http://localhost:8080` | The externally reachable URL for this instance. Drives CORS and the cookie `Secure` flag: cookies are marked `Secure` when this is an `https://` URL, and deliberately not when it is `http://` (browsers discard `Secure` cookies on plain-HTTP origins, which would break login). |
 | `CORS_ORIGIN` | value of `PUBLIC_URL` | Allowed browser origin for the API. Override only if the web UI is served from a different origin than the API. |
-| `COMPOSE_PROFILES` | `bundled` | Set to `bundled` to start the included `postgres` container. Set to empty (`COMPOSE_PROFILES=`) to use an external database (see `EXTERNAL_DATASTORE`). |
-| `EXTERNAL_DATASTORE` | `false` | Set to `true` when `COMPOSE_PROFILES` is empty and `DATABASE_URL` points to a managed Postgres. Suppresses the bundled container. |
-| `POSTGRES_PASSWORD` | — | Password for the bundled Postgres container. Installer-generated; not used when `EXTERNAL_DATASTORE=true`. |
+| `EXTERNAL_DATASTORE` | `false` | Documentation marker only — **no code reads it**. It records that `DATABASE_URL` points at a managed Postgres; what actually skips the bundled container is starting only the app (`docker compose up -d app`). See [Use a managed database](/docs/deploy/managed-database). |
+| `POSTGRES_PASSWORD` | `tulipfarm` | Password for the bundled Postgres container. The default exists so the Compose file runs with no setup and is safe only because port 5432 is never published — set your own on any networked host. Installer-generated. Not used when `EXTERNAL_DATASTORE=true`. |
+| `HOST_PORT` | `8080` | Host port the app is published on. |
+| `HOST_BIND` | `0.0.0.0` | Host interface the app is published on. Set to `127.0.0.1` when a reverse proxy fronts it, so the plain-HTTP port is not independently reachable. |
+| `TULIPFARM_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/tulipfarm:<tag>`). |
 | `PORT` | `8080` | Port the API listens on inside the container. |
-| `NODE_ENV` | `production` | Runtime environment. Affects logging, cookie flags, and headless-seeding validation. |
+| `NODE_ENV` | `production` | Runtime environment. Affects logging, the cookie `Secure` fallback when `PUBLIC_URL` is unset, and headless-seeding validation. |
 
 ## Optional (all deployments)
 

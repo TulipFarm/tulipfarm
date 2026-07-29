@@ -1,0 +1,99 @@
+---
+title: Kubernetes
+description: What the TulipFarm image requires from an orchestrator — and why there is no official Helm chart yet.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+  **There is no official Helm chart and no published Kubernetes manifests.** Nothing is
+  hosted at an `oci://` or `https://charts…` URL — any command you find that claims
+  otherwise will fail. Kubernetes is not a tested deployment target: CI exercises the
+  [Docker Compose](/docs/deploy/docker-compose) stack on every run, and nothing else.
+
+  This page documents the contract the image expects, so you can write manifests you own
+  and verify. It is not a supported install path.
+</Callout>
+
+If you want a supported deployment today, run the Compose stack on a VM. It is a single
+image and a single Postgres — Kubernetes buys you very little here, because TulipFarm
+**cannot scale horizontally** (see below).
+
+## The hard constraint: one replica
+
+`replicas: 1`, `strategy: Recreate`. Not a default — a requirement.
+
+- The **soul** is a git working tree on a `ReadWriteOnce` volume. Two pods writing commits
+  to the same tree corrupt it; two pods with separate trees diverge silently.
+- The **job workers** (pg-boss) run inside the API process. A second replica double-runs
+  every scheduled routine.
+
+`RollingUpdate` is equally wrong: it briefly runs two pods, and the new one cannot mount an
+RWO volume the old one still holds. Use `Recreate` and accept the restart gap.
+
+## What the container needs
+
+| | |
+| --- | --- |
+| **Image** | `ghcr.io/tulipfarm/tulipfarm:<tag>` — multi-arch (amd64, arm64). Pin a tag; do not track `latest` in a cluster. |
+| **Container port** | `8080` |
+| **Liveness probe** | `GET /livez` — process check only, never touches the database. |
+| **Readiness probe** | `GET /readyz` — returns `503` while Postgres is unreachable. |
+| **Startup probe** | `GET /readyz`, with a **generous** `failureThreshold`. Migrations run before the server listens, so a fresh database can take minutes on the first boot. Without a startup probe, the liveness probe will kill the pod mid-migration and loop forever. |
+| **Volume** `/opt/tulipfarm/soul` | RWO PVC. The soul git tree. |
+| **Volume** `/data` | RWO PVC. Generated bootstrap secrets — see below. |
+| **Filesystem group** | The image runs as UID `1000` (`node`). Set `podSecurityContext.fsGroup: 1000` or the mounted PVCs are not writable. |
+
+## Required environment
+
+| Variable | Notes |
+| --- | --- |
+| `DATABASE_URL` | PostgreSQL 17 that permits `CREATE EXTENSION vector` and `citext`. Use a managed instance or an operator — see [Managed database](/docs/deploy/managed-database). |
+| `PUBLIC_URL` | The `https://` origin your Ingress serves. Drives CORS and the cookie `Secure` flag; wrong value means login silently fails. |
+| `SOUL_PATH` | `/opt/tulipfarm/soul` |
+| `TF_DATA_DIR` | `/data` |
+| `ENCRYPTION_KEY` | **Supply this from a `Secret`.** Do not let the app generate it in a cluster. |
+| `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET` | Same — from a `Secret`. |
+
+Every variable is listed in [Environment variables](/docs/reference/environment-variables).
+
+<Callout type="warn">
+  If `ENCRYPTION_KEY` is unset, the app generates one and writes it to `/data/secrets.env`.
+  In a cluster that is a trap: a PVC lost to a node failure, a namespace rebuild, or a
+  `StatefulSet` recreate takes the key with it, and the database — which holds only
+  ciphertext — becomes undecryptable. The app detects this and **refuses to boot** rather
+  than orphaning your secrets, which is the correct behaviour but not a recovery. Put the
+  key in a `Secret` from day one.
+</Callout>
+
+## First boot
+
+There is no browser at first boot in most cluster workflows. Use
+[headless seeding](/docs/deploy/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
+`LLM_API_KEY` together, and the instance seeds itself and skips the wizard.
+
+## Ingress
+
+Terminate TLS at the Ingress.
+
+**Disable response buffering.** Chat streams over Server-Sent Events; a buffering ingress
+holds every token until the turn completes and the UI looks frozen. On ingress-nginx:
+
+```yaml
+nginx.ingress.kubernetes.io/proxy-buffering: "off"
+nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+```
+
+## Backups
+
+Back up the Postgres database **and** both PVCs. `/data` holds the encryption key when you
+have not supplied one; `/opt/tulipfarm/soul` holds your entire configuration unless it is
+mirrored to a git remote (`SOUL_GIT_REMOTE_URL`), which is the better arrangement in a
+cluster. See [Updating and rollback](/docs/deploy/updating).
+
+## When a chart lands
+
+A Helm chart is planned — `replicas: 1` hard-coded, `Recreate` strategy, optional bundled
+Postgres `StatefulSet`, optional `Secret` for the three keys, and `helm lint` plus a `kind`
+install running in CI. Until that ships and is exercised on every build, treat the section
+above as a specification for manifests you maintain, not as a supported product surface.

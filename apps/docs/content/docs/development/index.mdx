@@ -1,0 +1,129 @@
+---
+title: Local development
+description: Clone the repository and run TulipFarm from source — for contributors, not for running an instance.
+---
+
+import { Step, Steps } from "fumadocs-ui/components/steps";
+import { Callout } from "fumadocs-ui/components/callout";
+
+This section is for people **changing TulipFarm's code**.
+
+<Callout type="warn">
+  If you only want to *run* TulipFarm, do not clone this repository. Use the
+  [one-line installer](/docs/installation) or [Docker Compose](/docs/deploy/docker-compose) —
+  they pull a published image and need no source tree, no Node, and no pnpm.
+</Callout>
+
+## Prerequisites
+
+| | |
+| --- | --- |
+| **Node.js** | `26.5.0` — the version pinned in `.node-version`. Use `fnm`, `nvm`, or `mise`. |
+| **pnpm** | `11.5.3`. Never npm or yarn — the lockfile is pnpm's. |
+| **Docker** | Docker Desktop or Docker Engine, with the Compose v2 plugin. |
+
+Postgres always runs as the bundled `pgvector/pgvector:pg17` container — the same image CI
+and production use. **There is no host-installed PostgreSQL option**, so a local checkout
+cannot drift from the tested path.
+
+<Steps>
+
+<Step>
+
+### Clone and run the setup script
+
+```bash
+git clone https://github.com/TulipFarm/tulipfarm.git
+cd tulipfarm
+bash scripts/setup-dev.sh
+```
+
+It asks nothing, and does four things:
+
+1. Starts the `pgvector/pgvector:pg17` container on `localhost:5432`, generating
+   `POSTGRES_PASSWORD` into `.env` (and reusing it on later runs so it keeps matching the
+   data volume).
+2. Initializes your soul repository at `~/.tulipfarm/soul` — its own git repo, deliberately
+   outside the project tree so its commits never touch yours.
+3. Writes `.env.local` with generated `ENCRYPTION_KEY`, `JWT_SECRET`, and
+   `WEBHOOK_SIGNING_SECRET`, plus a `DATABASE_URL` pointing at the container.
+4. Symlinks `.env.local` into `apps/api/` (Turbo runs each task from its package directory).
+
+Confirm the database is up:
+
+```bash
+pg_isready -h localhost -p 5432 -U tulipfarm
+```
+
+</Step>
+
+<Step>
+
+### Install dependencies and start
+
+```bash
+pnpm install
+pnpm dev
+```
+
+| Service | URL |
+| --- | --- |
+| API | `http://localhost:4010` |
+| Web UI | `http://localhost:4000` |
+| Docs (this site) | `http://localhost:4020` — `pnpm dev:docs` |
+
+App processes run on the host with hot reload; only Postgres is containerized. Run one side
+alone with `pnpm dev:api` or `pnpm dev:web`.
+
+Check the API:
+
+```bash
+curl http://localhost:4010/livez     # process is up
+curl http://localhost:4010/readyz    # database reachable too
+```
+
+</Step>
+
+<Step>
+
+### Create your admin account
+
+Open `http://localhost:4000`. With no users in the database, the app redirects to the setup
+wizard at `/setup` — create the first admin there, then continue with
+[Get started](/docs/getting-started).
+
+No admin is seeded automatically. To skip the wizard on a fresh database, set
+`ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` in `.env.local` before starting the API —
+the same [headless seeding](/docs/deploy/headless) path production uses.
+
+</Step>
+
+</Steps>
+
+## Starting over
+
+```bash
+pnpm reset:dev
+```
+
+Drops and recreates the database, removes `~/.tulipfarm/soul` and `.env.local`, then re-runs
+setup with fresh keys. Stop `pnpm dev` first. Narrower variants:
+
+```bash
+bash scripts/reset-dev.sh --db-only    # database only, keep soul + .env.local
+bash scripts/reset-dev.sh --keep-env   # database + soul, keep your keys
+```
+
+## Stopping
+
+`Ctrl-C` the `pnpm dev` process, then stop the database container (its data volume
+survives):
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+```
+
+## Next
+
+[Development workflow](/docs/development/workflow) — the checks CI runs, where tests live,
+and the conventions a change has to satisfy.

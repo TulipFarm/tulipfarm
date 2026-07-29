@@ -3,14 +3,23 @@ title: Commands
 description: The scripts that set up, run, and check a TulipFarm checkout.
 ---
 
+import { Callout } from "fumadocs-ui/components/callout";
+
 TulipFarm is a pnpm + Turborepo monorepo. Run these from the repository root unless
 noted. The package manager is `pnpm` — do not substitute npm or yarn.
+
+<Callout type="info">
+  These are **source-tree commands**, for people working on TulipFarm — see
+  [Local development](/docs/development). Running an instance needs none of them; a
+  deployed instance is managed with `docker compose` and the pages under
+  [Deploy](/docs/deploy).
+</Callout>
 
 ## Setup
 
 | Command | What it does |
 |---|---|
-| `bash scripts/setup-dev.sh` | Installs PostgreSQL 17 + pgvector, starts the database, creates the `tulipfarm` database, initializes the soul repo at `~/.tulipfarm/soul`, and writes `.env.local` with generated secrets. |
+| `bash scripts/setup-dev.sh` | Starts the bundled `pgvector/pgvector:pg17` container on `localhost:5432`, initializes the soul repo at `~/.tulipfarm/soul`, and writes `.env.local` with generated secrets and a `DATABASE_URL` pointing at the container. Requires Docker; there is no host-installed PostgreSQL option. |
 | `pnpm install` | Installs workspace dependencies. Use `--frozen-lockfile` in CI. |
 | `pnpm reset:dev` | Tears down the local dev database and soul, then re-runs setup. Use when you want a clean slate. |
 
@@ -22,7 +31,8 @@ noted. The package manager is `pnpm` — do not substitute npm or yarn.
 | `pnpm dev:api` | Starts only the API. |
 | `pnpm dev:web` | Starts only the web UI. |
 | `pnpm dev:docs` | Starts this documentation site (`:4020`). |
-| `curl http://localhost:4010/health` | Checks API health; returns `{ "status": "ok" }`. |
+| `curl http://localhost:4010/livez` | Liveness — the process is running. Checks no dependencies. |
+| `curl http://localhost:4010/readyz` | Readiness — the datastore is reachable. `503` when it is not. `/health` is an alias. |
 
 ## Build and check
 

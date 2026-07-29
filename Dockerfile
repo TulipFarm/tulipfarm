@@ -53,6 +53,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     PORT=8080 \
     SOUL_PATH=/opt/tulipfarm/soul \
+    TF_DATA_DIR=/data \
     WEB_DIST=/app/apps/web/build/client
 COPY --from=builder /deploy/node_modules ./node_modules
 COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
@@ -61,10 +62,16 @@ COPY --from=builder /app/apps/api/dist/server.cjs ./server.cjs
 COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 COPY --from=builder /app/skills ./skills
-RUN mkdir -p /opt/tulipfarm/soul
+# /data holds the bootstrap secrets generated on first boot when the operator supplies none
+# (and, later, backups) — it must be a mounted volume or those keys die with the container.
+RUN mkdir -p /opt/tulipfarm/soul /data
 # Drop root: the app shells out to git (soul sync) and runs isolated-vm — no need for root.
-# node:26.5.0-slim ships a `node` user; give it the app + soul dirs it writes to.
-RUN chown -R node:node /app /opt/tulipfarm
+# node:26.5.0-slim ships a `node` user; give it the app + soul + data dirs it writes to.
+RUN chown -R node:node /app /opt/tulipfarm /data
+# OpenShift (and any platform using `runAsUser` with a random UID) ignores USER and runs as an
+# arbitrary uid in group 0. Making the writable trees group-owned by root and group-writable
+# keeps them writable in that case without granting anything to other users.
+RUN chgrp -R 0 /app /opt/tulipfarm /data && chmod -R g=u /app /opt/tulipfarm /data
 USER node
 EXPOSE 8080
 CMD ["node", "server.cjs"]

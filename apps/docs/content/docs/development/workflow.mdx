@@ -1,0 +1,118 @@
+---
+title: Development workflow
+description: The checks CI runs, where tests live, and the conventions a change has to satisfy.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+## The gate
+
+Three commands. CI runs the same ones and blocks merge on any of them:
+
+```bash
+pnpm lint && pnpm typecheck && pnpm test
+```
+
+Run them from the repository root — Turbo fans each one out across every workspace. Target a
+single workspace with a filter:
+
+```bash
+pnpm --filter @tulipfarm/api test
+pnpm --filter @tulipfarm/web typecheck
+```
+
+<Callout type="info">
+  Documentation-only changes skip the gate. Run the docs site's own checks instead —
+  `pnpm --filter @tulipfarm/docs build` is the one that actually exercises MDX components
+  and navigation.
+</Callout>
+
+## Lint and format — Biome only
+
+`biome.json` at the repository root is the single source of truth. **No ESLint, no
+Prettier.** Do not add them.
+
+```bash
+pnpm exec biome check --write .   # lint + format + organize imports
+pnpm exec biome check .           # check only
+```
+
+A `pre-commit` hook (lefthook → lint-staged) runs `biome check --write` on staged files, so
+conforming code makes it a no-op. The formatting rules: 2-space indent, 100-column lines,
+double quotes, semicolons always, `es5` trailing commas, imports auto-sorted.
+
+The lint rules that catch people out: no `any`, no non-null `!` assertions, `const` over
+`let`, template literals over concatenation, and `import type` for type-only imports. If a
+rule genuinely has to break, suppress it on the line with a reason —
+`// biome-ignore lint/suspicious/noExplicitAny: <why>` — never globally.
+
+## Tests
+
+Vitest, in `*.test.ts` files colocated with the source they cover. `pnpm test` passes with
+no tests present (`--passWithNoTests`).
+
+```bash
+pnpm test                                    # everything
+pnpm --filter @tulipfarm/api test            # one workspace
+pnpm exec vitest run apps/api/src/app.test.ts   # one file
+```
+
+## Where things live
+
+| Path | What |
+| --- | --- |
+| `apps/api` | Fastify API. PostgreSQL, migration-on-boot, the soul git store, in-process workers. |
+| `apps/web` | Remix + React web UI. |
+| `apps/docs` | This documentation site (Fumadocs, static export). |
+| `packages/*` | Shared libraries — `llm`, `soul`, `schema`, `secrets`, `surface`, `ui`, `types`, and more. |
+| `scripts/` | `setup-dev.sh`, `reset-dev.sh`, and the installer. |
+
+Every app and package has its own `AGENTS.md` with local conventions. Read the nearest one
+before editing — it is the authoritative guide for that directory.
+
+## Database migrations
+
+Migrations live in `apps/api/src/pg-migrations/`, registered in the `PG_MIGRATIONS` array
+with a monotonic `version`, a `description`, and an async `up()`. `runPgMigrations`
+(`apps/api/src/pg-migrate.ts`) runs the pending ones in order at boot, before the server
+listens, and records the applied version in a single-row `schema_version` table.
+
+They are **forward-only**: there is no down-path, by design. A migration that ships and then
+turns out to be wrong is fixed by a new migration, not by reverting the old one. Write each
+`up()` idempotently anyway — a failed boot leaves the version unadvanced, so the next start
+retries it.
+
+## API routes need schemas
+
+Every Fastify route must declare a `schema`. The OpenAPI spec at
+`/api/v1/openapi.json` is generated from them, so a route without one is invisible in the
+API documentation. Include `description`, `tags`, the request shapes, and a `response` entry
+for **every** status the handler can return. Protected routes also need
+`security: [{ sessionCookie: [] }, { bearerToken: [] }]`.
+
+Confirm the spec picked it up:
+
+```bash
+curl -s http://localhost:4010/api/v1/openapi.json | jq '.paths'
+```
+
+## Commits and pull requests
+
+Conventional Commits, enforced by CI on PR titles:
+
+```
+type(scope): subject
+```
+
+`type` is one of `feat`, `fix`, `chore`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`,
+`style`, `revert`. Keep the subject imperative, under about 72 characters, and without a
+trailing period. Use the body to explain *why* — the diff already shows what.
+
+One logical change per commit. A pull request wants a short summary of what changed and why,
+plus a test plan listing the commands you actually ran.
+
+## Terminology is binding
+
+`metadata/terminologies.md` decides what every concept is called, in code, in the database,
+in URLs, in the UI, and in these docs. It also lists retired synonyms. When you are unsure
+what to name something, that file is the answer — not a judgement call.

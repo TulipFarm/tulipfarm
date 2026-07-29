@@ -1,6 +1,7 @@
 import { metaSchema, pageSchema } from "fumadocs-core/source/schema";
 import { defineConfig, defineDocs } from "fumadocs-mdx/config";
 import { remarkPrompt } from "./lib/remark-prompt";
+import { remarkSiteUrl } from "./lib/remark-site-url";
 
 // You can customize Zod schemas for frontmatter and `meta.json` here
 // see https://fumadocs.dev/docs/mdx/collections
@@ -19,8 +20,8 @@ export const docs = defineDocs({
 
 export default defineConfig({
   mdxOptions: {
-    // Prepend remarkPrompt so ```prompt blocks become <PromptBlock> before the
-    // syntax highlighter runs. Keep fumadocs' built-in remark plugins (`v`).
-    remarkPlugins: (v) => [remarkPrompt, ...v],
+    // Prepend our plugins so ```prompt blocks become <PromptBlock> and {{SITE_URL}}
+    // resolves before the syntax highlighter runs. Keep fumadocs' built-ins (`v`).
+    remarkPlugins: (v) => [remarkPrompt, remarkSiteUrl, ...v],
   },
 });

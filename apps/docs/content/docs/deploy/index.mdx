@@ -1,0 +1,98 @@
+---
+title: Deploy
+description: Every supported way to run TulipFarm in production — one-line installer, Docker Compose, self-host PaaS UIs, and managed platforms.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Cards, Card } from "fumadocs-ui/components/card";
+
+TulipFarm ships as **one container image** — `ghcr.io/tulipfarm/tulipfarm` — containing the
+API, the built web UI, and the in-process job workers. It needs PostgreSQL 17 with the
+`vector` and `citext` extensions, and two volumes. That is the entire deployment surface.
+
+You never clone the repository to run TulipFarm. The source tree is for
+[contributors](/docs/development).
+
+## Pick a path
+
+<Cards>
+  <Card
+    title="One-line installer"
+    href="/docs/installation"
+    description="A Linux, macOS, or Windows machine you have a shell on. Generates strong secrets, brings the stack up, prints the URL."
+  />
+  <Card
+    title="Docker Compose"
+    href="/docs/deploy/docker-compose"
+    description="Any Docker host. One file, no .env, no key generation. This is what every UI below consumes."
+  />
+  <Card
+    title="Coolify"
+    href="/docs/deploy/coolify"
+    description="Deploy as a Docker Compose resource, with Coolify handling the domain and certificate."
+  />
+  <Card
+    title="Portainer"
+    href="/docs/deploy/portainer"
+    description="Deploy as a Stack from the web editor or a git repository."
+  />
+  <Card
+    title="Dokploy, Unraid, Synology, CasaOS"
+    href="/docs/deploy/other-platforms"
+    description="Anything that accepts a Compose file — the same file, with per-platform notes."
+  />
+  <Card
+    title="Kubernetes"
+    href="/docs/deploy/kubernetes"
+    description="What the image requires from an orchestrator. No official Helm chart yet — read this before you write manifests."
+  />
+</Cards>
+
+## Which one should you use
+
+| Situation | Use |
+| --- | --- |
+| A VPS or home server, shell access | [One-line installer](/docs/installation) |
+| A Docker host, you want to see the file first | [Docker Compose](/docs/deploy/docker-compose) |
+| You already run Coolify / Portainer / Dokploy / Unraid | That platform's page — paste the same Compose file |
+| Managed Postgres, backups handled by your provider | [Managed database](/docs/deploy/managed-database) |
+| No browser available at first boot (CI, IaC, Terraform) | [Headless seeding](/docs/deploy/headless) |
+| Kubernetes | [Kubernetes](/docs/deploy/kubernetes) — read the constraints first |
+
+Whatever you pick, walk the [production checklist](/docs/deploy/production-checklist)
+before you put real data in it.
+
+## What every deployment needs
+
+Identical across all of the above, because it is a property of the image, not the platform:
+
+| Requirement | Detail |
+| --- | --- |
+| **Image** | `ghcr.io/tulipfarm/tulipfarm:latest`, or a pinned `:v…` tag. Multi-arch (amd64 + arm64). |
+| **Exactly one replica** | The soul is a git working tree on a volume and the job workers run inside the API process. Two replicas race both. Scale vertically. |
+| **PostgreSQL 17** | Must allow `CREATE EXTENSION vector` and `citext`; the app creates them at boot. |
+| **Volume: soul** | `/opt/tulipfarm/soul` — the git-backed configuration store. |
+| **Volume: data** | `/data` — generated bootstrap secrets. **Losing it loses the key that decrypts every stored secret.** |
+| **Port** | `8080` inside the container. |
+| **Liveness probe** | `GET /livez` — process is up, checks nothing else. |
+| **Readiness probe** | `GET /readyz` — datastore reachable; `503` when not. `/health` is an alias. |
+| **Startup budget** | Migrations run on boot, before the server listens. Give startup probes room. |
+
+<Callout type="warn">
+  **`PUBLIC_URL` is not optional in production.** It is the origin users actually reach, and
+  it drives both CORS and the session cookie's `Secure` flag. Set it to your real
+  `https://` URL or logins will not stick. See
+  [Put TLS in front](/docs/deploy/tls).
+</Callout>
+
+## Not yet supported
+
+Stated plainly so you do not go looking:
+
+- **No official Helm chart or Kubernetes manifests.** See [Kubernetes](/docs/deploy/kubernetes).
+- **No one-click templates** in the Coolify, Portainer, Unraid, or DigitalOcean
+  marketplaces. Every platform page below uses the Compose file directly instead, which
+  works today.
+- **No horizontal scaling.** One replica, by design — see the table above.
+- **No built-in scheduled backups.** Back up PostgreSQL and the `/data` volume with your
+  own tooling; [Updating](/docs/deploy/updating) covers what to capture and when.

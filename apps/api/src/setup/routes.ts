@@ -4,6 +4,7 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import { generateText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { sessionCookieOptions } from "../auth/cookie-security";
 import { setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
@@ -37,13 +38,7 @@ function setSessionCookies(
   csrfToken: string,
   ttlSeconds: number
 ): void {
-  reply.setCookie(SESSION_COOKIE, sid, {
-    httpOnly: true,
-    sameSite: "strict",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: ttlSeconds,
-  });
+  reply.setCookie(SESSION_COOKIE, sid, sessionCookieOptions(ttlSeconds));
   setCsrfCookie(reply, csrfToken, ttlSeconds);
 }
 

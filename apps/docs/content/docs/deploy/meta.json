@@ -1,0 +1,18 @@
+{
+  "title": "Deploy",
+  "pages": [
+    "index",
+    "---Get it running---",
+    "docker-compose",
+    "coolify",
+    "portainer",
+    "other-platforms",
+    "kubernetes",
+    "---Make it production-ready---",
+    "production-checklist",
+    "tls",
+    "managed-database",
+    "headless",
+    "updating"
+  ]
+}

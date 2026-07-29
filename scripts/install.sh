@@ -2,15 +2,23 @@
 # TulipFarm one-line installer — OCI lane (Docker/Podman + Compose v2).
 # Spec: specs/INSTALLATION.md INST-002/003, AC-001. Native lane is deferred.
 #
-#   curl -fsSL https://raw.githubusercontent.com/TulipFarm/tulipfarm/main/scripts/get.tulipfarm.sh | sudo bash
+#   curl -fsSL https://tulipfarm.site/install.sh | sudo bash
 #
 # Detects/installs a container engine, fetches docker-compose.yml + .env.example,
 # generates bootstrap secrets (zero questions), brings the 2-service stack up, polls
 # /health, and prints the setup-wizard URL. Re-running = update (preserves .env, PGDATA).
 #
+# Files are fetched from https://tulipfarm.site, which serves a flat layout built from the
+# tip of main. TF_VERSION still pins the app image, but the compose file is always latest.
+# To install an exact ref, point at GitHub raw instead — a non-empty TF_REF switches back
+# to the ${base}/${ref}/${path} layout:
+#
+#   TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm \
+#     TF_REF=v0.1.0 TF_VERSION=v0.1.0 bash install.sh
+#
 # Overrides (env):
-#   TF_BASE_URL   raw base URL for fetched files (default: GitHub raw; later get.tulipfarm.site)
-#   TF_REF        git ref under TF_BASE_URL (default: main)
+#   TF_BASE_URL   base URL for fetched files (default: https://tulipfarm.site)
+#   TF_REF        git ref under TF_BASE_URL; empty = flat layout (default: empty)
 #   TF_VERSION    app image tag → TULIPFARM_VERSION (default: latest)
 #   TF_INSTALL_DIR install dir (default: /opt/tulipfarm)
 #   TF_PORT / HOST_PORT  host port to publish (default: 8080)
@@ -19,8 +27,8 @@
 set -euo pipefail
 
 # ---- config (all overridable) ------------------------------------------------
-TF_BASE_URL="${TF_BASE_URL:-https://raw.githubusercontent.com/TulipFarm/tulipfarm}"
-TF_REF="${TF_REF:-main}"
+TF_BASE_URL="${TF_BASE_URL:-https://tulipfarm.site}"
+TF_REF="${TF_REF:-}"
 TF_VERSION="${TF_VERSION:-latest}"
 INSTALL_DIR="${TF_INSTALL_DIR:-/opt/tulipfarm}"
 PORT="${TF_PORT:-${HOST_PORT:-8080}}"
@@ -96,19 +104,32 @@ ensure_engine() {
     if [ "$OS" = linux ]; then
       install_podman_linux
     else
-      die "no container engine found — on macOS install Docker Desktop or Podman, then re-run (the native lane is not yet available)"
+      die "no container engine found — on macOS install Docker Desktop or Podman, then re-run"
     fi
   fi
   log "Using container engine: ${ENGINE}"
 }
 
 # ---- file acquisition --------------------------------------------------------
+# Args are always repo-relative paths, so TF_LOCAL_SRC keeps working unchanged.
+remote_url() {
+  local rel="$1"
+  # Ref mode (GitHub raw): ${base}/${ref}/${path}.
+  [ -n "$TF_REF" ] && { printf '%s/%s/%s' "$TF_BASE_URL" "$TF_REF" "$rel"; return; }
+  # Flat mode (tulipfarm.site): Cloudflare Pages does not serve dot-prefixed files, so
+  # .env.example is published as env.example.
+  case "$rel" in
+    .env.example) printf '%s/env.example' "$TF_BASE_URL" ;;
+    *)            printf '%s/%s' "$TF_BASE_URL" "$rel" ;;
+  esac
+}
+
 fetch_file() {
   local rel="$1" dest="$2"
   if [ -n "$TF_LOCAL_SRC" ]; then
     $SUDO cp "${TF_LOCAL_SRC}/${rel}" "$dest"
   else
-    $SUDO curl -fsSL "${TF_BASE_URL}/${TF_REF}/${rel}" -o "$dest"
+    $SUDO curl -fsSL "$(remote_url "$rel")" -o "$dest"
   fi
 }
 
@@ -136,8 +157,8 @@ detect_public_url() {
 }
 
 write_env() {
-  # Update mode: a real prior install has BOTH .env and .lane. Preserve secrets/PGDATA.
-  if $SUDO test -f "${INSTALL_DIR}/.env" && $SUDO test -f "${INSTALL_DIR}/.lane"; then
+  # Update mode: a prior install is identified by its .env. Preserve secrets/PGDATA.
+  if $SUDO test -f "${INSTALL_DIR}/.env"; then
     log "Existing install found — preserving .env (update mode)"
     return
   fi
@@ -155,7 +176,6 @@ PUBLIC_URL=${PUBLIC_URL}
 CORS_ORIGIN=${PUBLIC_URL}
 HOST_PORT=${PORT}
 TULIPFARM_VERSION=${TF_VERSION}
-COMPOSE_PROFILES=bundled
 EXTERNAL_DATASTORE=false
 POSTGRES_PASSWORD=${pw}
 DATABASE_URL=postgresql://tulipfarm:${pw}@postgres:5432/tulipfarm
@@ -215,7 +235,6 @@ main() {
   fetch_file docker-compose.yml "${INSTALL_DIR}/docker-compose.yml"
   fetch_file .env.example "${INSTALL_DIR}/.env.example" || true
   write_env
-  printf 'oci\n' | $SUDO tee "${INSTALL_DIR}/.lane" >/dev/null
   load_runtime_info
   bring_up
   wait_health

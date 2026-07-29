@@ -71,6 +71,11 @@ import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
+import {
+  assertNoOrphanedDeks,
+  type BootstrapSecretsResult,
+  bootstrapSecrets,
+} from "./setup/bootstrap-secrets";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
@@ -82,6 +87,18 @@ import { buildToolRegistry } from "./tools/setup";
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
 
+// Fill any bootstrap secret the operator did not supply, from the data volume or fresh
+// randomness, so the shipped compose file needs no `.env` at all. Runs before
+// validateEnvironment, which requires all three to be present.
+const secretsBootstrap = ((): BootstrapSecretsResult => {
+  try {
+    return bootstrapSecrets();
+  } catch (err) {
+    console.error(`❌ ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+})();
+
 validateEnvironment();
 
 const port = Number.parseInt(process.env.PORT || "4010", 10);
@@ -90,6 +107,10 @@ async function boot() {
   try {
     const pool = await connectPg();
     await runPgMigrations(pool);
+
+    // Second half of the key-loss guard: a KEK invented this boot against a database that
+    // already holds wrapped DEKs means the real key was lost, not that this is a first boot.
+    await assertNoOrphanedDeks((sql) => pool.query(sql), secretsBootstrap);
 
     const secretRepo = new PgSecretRepo(pool);
     const dekRepo = new PgDekRepo(pool);
@@ -252,6 +273,7 @@ async function boot() {
     });
 
     const app = await buildApp({
+      readiness: pool,
       sessionStore,
       userRepo,
       tokenRepo,

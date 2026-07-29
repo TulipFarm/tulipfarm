@@ -1,0 +1,82 @@
+---
+title: Use a managed database
+description: Point TulipFarm at RDS, Cloud SQL, Neon, Supabase, or any PostgreSQL 17 with pgvector, and skip the bundled container.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+The bundled `postgres` container is there so the stack runs with no setup. For anything
+holding real data, a managed PostgreSQL is the better arrangement: backups, point-in-time
+restore, and failover become your provider's problem instead of yours.
+
+## What your provider must support
+
+| Requirement | Detail |
+| --- | --- |
+| **PostgreSQL 17** | Earlier majors are not tested. |
+| **`vector` extension** | pgvector. The app runs `CREATE EXTENSION IF NOT EXISTS vector` at boot, so the connecting role needs permission — on managed providers this usually means the extension is *allow-listed*, not that you install it yourself. |
+| **`citext` extension** | Same. Used for case-insensitive email lookups. |
+| **A dedicated database and role** | The app creates and migrates its own tables. Give it its own database. |
+| **SSL** | Recommended. Append `?sslmode=require` to `DATABASE_URL`. |
+
+Known-good: AWS RDS/Aurora PostgreSQL, Google Cloud SQL, Azure Database for PostgreSQL
+(enable `vector` in `azure.extensions`), Neon, Supabase, Timescale, and self-managed
+Postgres 17 with pgvector installed.
+
+<Callout type="warn">
+  Check pgvector availability **before** you deploy. Without it the app fails at boot on the
+  first migration — knowledge search and every embedding column depend on it. There is no
+  degraded mode.
+</Callout>
+
+## Switch to it
+
+Set `DATABASE_URL` and start only the `app` service:
+
+```bash
+DATABASE_URL=postgresql://tulipfarm:<password>@db.example.com:5432/tulipfarm?sslmode=require \
+  docker compose up -d app
+```
+
+Naming only `app` is what keeps the bundled `postgres` service from ever being created — it
+is not skipped by a flag, it simply is not part of the run. `depends_on` is declared
+`required: false` for exactly this case, so nothing blocks waiting for it.
+
+<Callout type="info">
+  `EXTERNAL_DATASTORE=true` appears in `.env.example` and in the installer's generated
+  `.env`. **No code reads it.** It is a marker for whoever opens the file next; the real
+  switch is `DATABASE_URL` plus starting only `app`. Setting it is harmless, and leaving it
+  out changes nothing.
+</Callout>
+
+On Kubernetes and managed app platforms there is no bundled Postgres to begin with —
+`DATABASE_URL` is all there is.
+
+## Verify
+
+```bash
+curl -fsS http://localhost:8080/readyz
+```
+
+`/readyz` runs an actual query against the pool, so a `200` means the app reached your
+database and migrations completed. A `503` with a connection error in the body means it did
+not — check the security group, the SSL mode, and whether the role can create extensions.
+
+## Backups
+
+With a managed database, backups split in two:
+
+- **Your provider** handles the records, chats, knowledge, and job queue.
+- **You** still handle the `tulipfarm-soul` and `tulipfarm-data` volumes. The soul holds
+  your entire configuration; `/data` holds the generated `ENCRYPTION_KEY` unless you
+  supplied one.
+
+<Callout type="warn">
+  A provider snapshot alone does **not** make you recoverable. The database stores secrets
+  as ciphertext; without the encryption key from `/data` (or your own secret store) a
+  restore comes back with unreadable LLM keys and integration credentials.
+</Callout>
+
+Set `ENCRYPTION_KEY` yourself from a real secret store and mirror the soul to a git remote
+(`SOUL_GIT_REMOTE_URL`), and the volumes stop being irreplaceable. See
+[Updating and rollback](/docs/deploy/updating).
