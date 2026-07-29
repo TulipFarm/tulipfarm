@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { sessionCookieOptions } from "../cookie-security";
 import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, verifyPassword } from "../passwords";
@@ -14,16 +15,6 @@ function getDummyHash(): Promise<string> {
     dummyHashPromise = hashPassword("tulipfarm-timing-equalizer");
   }
   return dummyHashPromise;
-}
-
-function cookieOptions(maxAge: number) {
-  return {
-    httpOnly: true,
-    sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge,
-  };
 }
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -95,7 +86,7 @@ export function registerSessionRoutes(
         userId: user._id,
         authMethods: ["password"],
       });
-      reply.setCookie(SESSION_COOKIE, session.sid, cookieOptions(ttlSeconds));
+      reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
       setCsrfCookie(reply, session.csrfToken, ttlSeconds);
       return reply.code(200).send({ user: toPublicUser(user) });
     }

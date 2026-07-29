@@ -4,14 +4,42 @@ description: The AI-native business operating system — install it, give it a s
 ---
 
 import { Cards, Card } from "fumadocs-ui/components/card";
+import { Callout } from "fumadocs-ui/components/callout";
 
 TulipFarm is a self-hosted control panel where autonomous agents run your business
 operations. You **describe what you want in chat** — "track our customers", "create a
 support agent", "set up a hiring pipeline" — and agents build and run it for you. You do
 not configure it by editing files.
 
-It runs on your own machine. A single command sets up the datastore, generates your
-secrets, and boots the API and web UI. The first account you create is the admin.
+## Install it
+
+One command on any Linux or macOS machine with a shell. It detects a container engine,
+generates every secret, brings the stack up, and prints the URL to open:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo bash
+```
+
+Then open the printed URL and create your admin account. That is the whole install.
+
+Windows, from PowerShell:
+
+```powershell
+irm {{SITE_URL}}/install.ps1 | iex
+```
+
+Prefer to see the file first, or deploying through Coolify, Portainer, Dokploy, or Unraid?
+[Docker Compose](/docs/deploy/docker-compose) runs with no `.env` and no key generation:
+
+```bash
+curl -fsSLO {{SITE_URL}}/docker-compose.yml
+docker compose up -d
+```
+
+<Callout type="info">
+  You never clone the repository to run TulipFarm — every path above pulls a published
+  image. The source tree is for [contributors](/docs/development).
+</Callout>
 
 ## The mental model
 
@@ -30,11 +58,14 @@ together — read [Concepts](/docs/concepts) for the full picture.
 ## Where to start
 
 <Cards>
-  <Card title="Install" href="/docs/installation" description="One-line self-hosted install on Linux, macOS, or Windows (WSL2)." />
-  <Card title="Get started" href="/docs/getting-started" description="Run it, configure a model, and build your first resource type by chatting." />
+  <Card title="Install" href="/docs/installation" description="The one-line installer, in detail — Linux, macOS, and Windows." />
+  <Card title="Deploy" href="/docs/deploy" description="Every supported deployment: Compose, Coolify, Portainer, Unraid, managed databases, TLS." />
+  <Card title="Get started" href="/docs/getting-started" description="First sign-in, configure a model, and build your first resource type by chatting." />
+  <Card title="Production checklist" href="/docs/deploy/production-checklist" description="What to change before the instance holds real data." />
   <Card title="Building by chat" href="/docs/concepts/building" description="The core idea — describe what you want, and agents build it for you." />
   <Card title="Concepts" href="/docs/concepts" description="How the soul, resources, agents, skills, knowledge, and LLM tiers fit together." />
-  <Card title="Guides" href="/docs/guides" description="Task recipes: define a resource, install a skill, configure providers." />
-  <Card title="Reference" href="/docs/reference" description="Environment variables and the commands that run the project." />
+  <Card title="Guides" href="/docs/guides/define-a-resource-type" description="Task recipes: define a resource, install a skill, configure providers." />
+  <Card title="Reference" href="/docs/reference/environment-variables" description="Environment variables and the commands that run the project." />
   <Card title="Security" href="/docs/security/encryption" description="How secrets are encrypted, hashed, and rotated." />
+  <Card title="Development" href="/docs/development" description="Run TulipFarm from source — for contributors changing the code." />
 </Cards>

@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { SITE_URL } from "@/lib/shared";
 
 /**
- * A terminal window that types out the real install sequence from the
- * getting-started guide when scrolled into view. Commands type character by
+ * A terminal window that types out the real one-line install from
+ * `scripts/install.sh` when scrolled into view. Commands type character by
  * character; output lines land whole. Plays once; `prefers-reduced-motion`
  * (or a disconnected IntersectionObserver) shows the finished transcript.
  */
@@ -16,16 +17,15 @@ type Line =
   | { kind: "out"; text: string };
 
 const LINES: Line[] = [
-  { kind: "cmd", text: "git clone https://github.com/TulipFarm/tulipfarm.git" },
-  { kind: "cmd", text: "bash scripts/setup-dev.sh" },
+  { kind: "cmd", text: `curl -fsSL ${SITE_URL}/install.sh | sudo bash` },
+  { kind: "ok", text: "container engine detected" },
+  { kind: "ok", text: "secrets generated → /opt/tulipfarm/.env" },
   { kind: "ok", text: "postgres 17 + pgvector ready" },
-  { kind: "ok", text: "soul planted at ~/.tulipfarm/soul" },
-  { kind: "ok", text: "bootstrap env config generated" },
-  { kind: "cmd", text: "pnpm dev" },
-  { kind: "svc", text: "api  http://localhost:4010" },
-  { kind: "svc", text: "web  http://localhost:4000" },
-  { kind: "cmd", text: "curl http://localhost:4010/health" },
+  { kind: "ok", text: "soul planted at /opt/tulipfarm/soul" },
+  { kind: "svc", text: "app  http://localhost:8080" },
+  { kind: "cmd", text: "curl http://localhost:8080/readyz" },
   { kind: "out", text: '{ "status": "ok" }' },
+  { kind: "out", text: "open http://localhost:8080 to create your admin" },
 ];
 
 function Prompt() {
@@ -123,7 +123,7 @@ export function BootSequence() {
         <span className="text-xs uppercase tracking-[0.2em] text-fd-muted-foreground">
           [install]
         </span>
-        <span className="text-xs text-fd-muted-foreground">~/tulipfarm</span>
+        <span className="text-xs text-fd-muted-foreground">/opt/tulipfarm</span>
       </div>
       <pre className="min-h-[16.5rem] overflow-x-auto rounded-md border border-fd-border bg-fd-background p-4 text-[13px] leading-6">
         {LINES.slice(0, done).map((line, i) => (

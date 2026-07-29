@@ -8,8 +8,8 @@ set -euo pipefail
 #   • the soul repo (~/.tulipfarm/soul)
 #   • .env.local (+ the apps/api symlink)
 #
-# This is DESTRUCTIVE and cannot be undone. It does NOT uninstall Postgres/pgvector
-# or stop the Postgres service — only the project's own data.
+# This is DESTRUCTIVE and cannot be undone. It does NOT remove the bundled Postgres
+# container or its image — only the project's own data.
 #
 # Usage:
 #   scripts/reset-dev.sh             # interactive: confirm, then full reset
@@ -47,23 +47,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-# macOS: postgresql@17 is keg-only — expose its client tools (dropdb/createdb).
-if [[ "$OSTYPE" == "darwin"* ]] && command -v brew &>/dev/null; then
-  PG_PREFIX="$(brew --prefix postgresql@17 2>/dev/null || true)"
-  [ -n "$PG_PREFIX" ] && export PATH="$PG_PREFIX/bin:$PATH"
-fi
-
 # Resolve the actual targets from .env.local when present; else use setup-dev.sh defaults.
 read_env() { [ -f ".env.local" ] && grep -E "^$1=" ".env.local" | head -1 | cut -d= -f2- || true; }
 
 DATABASE_URL="$(read_env DATABASE_URL)"
-DATABASE_URL="${DATABASE_URL:-postgres://localhost:5432/tulipfarm}"
 DB_NAME="$(basename "${DATABASE_URL%%\?*}")"
 DB_NAME="${DB_NAME:-tulipfarm}"
 
-# Detect the bundled Docker container vs. a native install — dropdb/createdb below must
-# authenticate very differently against each, and getting this wrong silently no-ops (see below).
-COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.dev.yml --profile bundled)
+# The database always lives in the bundled pgvector container (setup-dev.sh has no native lane).
+COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.dev.yml)
 DOCKER_CONTAINER=""
 if command -v docker &>/dev/null && docker compose "${COMPOSE_ARGS[@]}" ps -q postgres 2>/dev/null | grep -q .; then
   DOCKER_CONTAINER="$(docker compose "${COMPOSE_ARGS[@]}" ps -q postgres)"
@@ -111,20 +103,9 @@ if [ -n "$DOCKER_CONTAINER" ]; then
   else
     echo "   (could not reset database in container — is it healthy? \`docker ps\`)"
   fi
-elif command -v dropdb &>/dev/null; then
-  echo "🗄  Dropping database '$DB_NAME'..."
-  # --force terminates lingering connections (e.g. a still-running dev server). Falls back for
-  # older clients without --force.
-  dropdb --force --if-exists "$DB_NAME" 2>/dev/null \
-    || dropdb --if-exists "$DB_NAME" 2>/dev/null \
-    || echo "   (could not drop — is Postgres running? is the dev server still connected?)"
-  if createdb "$DB_NAME" 2>/dev/null; then
-    echo "✅ Recreated empty database '$DB_NAME'"
-  else
-    echo "   (could not recreate '$DB_NAME' — create it manually or re-run setup-dev.sh)"
-  fi
 else
-  echo "⚠ dropdb not on PATH — drop the '$DB_NAME' database manually"
+  echo "⚠ Bundled Postgres container is not running — start it, then re-run:"
+  echo "    docker compose ${COMPOSE_ARGS[*]} up -d postgres"
 fi
 
 if $DB_ONLY; then

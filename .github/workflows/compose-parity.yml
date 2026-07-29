@@ -1,10 +1,17 @@
 name: Compose parity
 
 # Reusable parity gate (INST-008 / AC-007): boot the FULL bundled compose stack
-# and prove `/health` passes in-container. The container path — not native
+# and prove the health probes pass in-container. The container path — not native
 # `pnpm dev` — is the tested release path. Called from two places:
 #   - ci.yml (every PR / main push) as a standalone quality signal
 #   - publish-image.yml (tag pushes), which gates the GHCR publish on it
+#
+# Three phases, all against the one image built below:
+#   1. zero-env   — no `.env` at all, the paste-and-run path (INST-002). Also proves the
+#                   generated secrets survive a restart.
+#   2. key-loss   — data volume wiped, database intact: the app must REFUSE to boot rather
+#                   than silently orphan every encrypted secret.
+#   3. configured — the installer's path, with real secrets supplied in `.env`.
 on:
   workflow_call:
 
@@ -15,11 +22,16 @@ jobs:
   compose-parity:
     name: Compose parity
     runs-on: ubuntu-latest
+    env:
+      # `--pull missing` (below) + this pinned tag make compose reuse the image built here
+      # instead of pulling the not-yet-published tag from GHCR. Exported rather than written
+      # to `.env` so phase 1 can genuinely run with no `.env` file on disk.
+      TULIPFARM_VERSION: ci
     steps:
       - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v4
       # Build the single bundled image once and load it into the local daemon, tagged
-      # to match what compose resolves (TULIPFARM_VERSION=ci below). No push, no creds.
+      # to match what compose resolves. No push, no creds.
       - name: Build app image (load into daemon)
         uses: docker/build-push-action@v7
         with:
@@ -28,13 +40,53 @@ jobs:
           tags: ghcr.io/tulipfarm/tulipfarm:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Throwaway CI-only secrets — never real. `--pull never` (below) + this pinned
-      # TULIPFARM_VERSION make compose reuse the image we just built.
+
+      # --- Phase 1: zero-env ---------------------------------------------------------
+      # `--wait` blocks until BOTH services report healthy (postgres pg_isready, app's
+      # /readyz healthcheck) or the timeout trips — this is the health gate.
+      # `--pull missing`: pull images absent locally (the `pgvector/pgvector:pg17` base)
+      # but reuse the loaded app image. (`--pull never` would also block postgres.)
+      - name: Boot with no .env at all
+        run: |
+          set -o pipefail
+          test ! -f .env
+          docker compose up -d --wait --wait-timeout 180 --pull missing 2>&1 | tee compose-parity.log
+      - name: Assert /readyz and /livez on the host port
+        run: |
+          set -o pipefail
+          curl -fsS --retry 5 --retry-connrefused --retry-delay 3 \
+            http://localhost:8080/readyz 2>&1 | tee -a compose-parity.log
+          curl -fsS http://localhost:8080/livez 2>&1 | tee -a compose-parity.log
+      - name: Assert generated secrets are reused across a restart
+        run: |
+          set -o pipefail
+          before=$(docker compose exec -T app cat /data/secrets.env)
+          echo "$before" | grep -q '^ENCRYPTION_KEY='
+          docker compose down
+          docker compose up -d --wait --wait-timeout 180 --pull missing 2>&1 | tee -a compose-parity.log
+          after=$(docker compose exec -T app cat /data/secrets.env)
+          [ "$before" = "$after" ] || { echo "secrets.env changed across restart"; exit 1; }
+
+      # --- Phase 2: key-loss guard ---------------------------------------------------
+      - name: Assert boot refuses when the data volume is lost but the database is not
+        run: |
+          set -o pipefail
+          docker compose down
+          docker volume rm tulipfarm_tulipfarm-data
+          if docker compose up -d --wait --wait-timeout 90 --pull missing 2>&1 | tee -a compose-parity.log; then
+            echo "app booted with a regenerated ENCRYPTION_KEY over existing wrapped DEKs"
+            exit 1
+          fi
+          docker compose logs --no-color app 2>&1 | tee -a compose-parity.log \
+            | grep -q "already holds encrypted secrets"
+      - name: Tear down zero-env stack
+        run: docker compose down -v
+
+      # --- Phase 3: configured (installer path) --------------------------------------
+      # Throwaway CI-only secrets — never real.
       - name: Write CI .env
         run: |
           cat > .env <<EOF
-          TULIPFARM_VERSION=ci
-          COMPOSE_PROFILES=bundled
           POSTGRES_PASSWORD=ci-postgres-pw
           ENCRYPTION_KEY=$(openssl rand -base64 32)
           JWT_SECRET=$(openssl rand -base64 32)
@@ -42,20 +94,19 @@ jobs:
           HOST_PORT=8080
           SETUP_MODE=wizard
           EOF
-      # `--wait` blocks until BOTH services report healthy (postgres pg_isready, app's
-      # /health healthcheck) or the timeout trips — this is the health gate.
-      # `--pull missing`: pull images absent locally (the bundled `pgvector/pgvector:pg17`
-      # base) but REUSE the `tulipfarm:ci` image the buildx step just loaded — never try to pull
-      # the not-yet-published app tag from GHCR. (`--pull never` would also block postgres.)
-      - name: Bring up the bundled stack and wait for health
+      - name: Bring up the configured stack and wait for health
         run: |
           set -o pipefail
-          docker compose up -d --wait --wait-timeout 180 --pull missing 2>&1 | tee compose-parity.log
+          docker compose up -d --wait --wait-timeout 180 --pull missing 2>&1 | tee -a compose-parity.log
       - name: Assert /health on the host port
         run: |
           set -o pipefail
           curl -fsS --retry 5 --retry-connrefused --retry-delay 3 \
             http://localhost:8080/health 2>&1 | tee -a compose-parity.log
+      - name: Assert no secrets file was written when the environment supplied them
+        run: |
+          docker compose exec -T app sh -c '! test -f /data/secrets.env'
+
       - name: Dump compose logs on failure
         if: failure()
         run: docker compose logs --no-color 2>&1 | tee -a compose-parity.log
@@ -70,7 +121,7 @@ jobs:
           {
             echo "## Compose parity"
             if [ "$STATUS" = "success" ]; then
-              echo "✅ **Bundled stack booted and /health passed**"
+              echo "✅ **Zero-env boot, key-loss guard, and configured stack all passed**"
             else
               echo "❌ **Compose parity failed** — last 100 lines:"
               echo ""

@@ -1,0 +1,91 @@
+---
+title: Updating and rollback
+description: How to upgrade a TulipFarm instance, what to back up first, and what rolling back actually costs.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Updates are always manual. TulipFarm never updates itself — no background pull, no auto-restart.
+
+## Versions
+
+Releases publish `ghcr.io/tulipfarm/tulipfarm:<version>`, plus `:latest` for stable
+releases. Pin `TULIPFARM_VERSION` in production so an unattended pull cannot move you across
+a breaking migration at a time you did not choose.
+
+## Back up first
+
+Every update runs migrations, and migrations have no down-path. Take these before you pull:
+
+| What | How |
+| --- | --- |
+| The database | `pg_dump` it, or take your managed provider's snapshot. |
+| `tulipfarm-data` (`/data`) | Volume copy. Holds the generated `ENCRYPTION_KEY` if you did not supply your own. |
+| `tulipfarm-soul` | Volume copy — or nothing, if `SOUL_GIT_REMOTE_URL` already mirrors it to git. |
+
+<Callout type="warn">
+  A database backup alone is not a recovery plan. Secrets are stored as ciphertext; without
+  the encryption key the restore comes back with unusable LLM keys and integration
+  credentials.
+</Callout>
+
+## Update
+
+**One-line installer:** re-run the same command. It preserves your `.env` (never
+regenerating secrets) and the Postgres volume, pulls the pinned `TULIPFARM_VERSION`, and
+restarts.
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo bash
+```
+
+**Docker Compose:**
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+**Pinned installs:** bump `TULIPFARM_VERSION` in `.env` first, then pull and up.
+
+**Coolify / Portainer / Dokploy:** redeploy the resource or update the stack with *re-pull
+image* enabled.
+
+## What happens on boot
+
+The app runs ordered, idempotent migrations **before** it starts listening. So:
+
+- The instance is briefly unavailable during a migration. Health checks report `503` on
+  `/readyz` — that is correct, not a failure.
+- A failed migration restart-loops the container. Read the logs; the failing statement is in
+  them.
+- First boot after a big schema change can take minutes. Do not shorten your startup probe
+  to "fix" it.
+
+Verify afterwards:
+
+```bash
+curl -fsS https://your-domain/readyz
+```
+
+## Rolling back
+
+Repointing the image tag to an older version **is not a rollback** once a migration has run.
+There are no down-migrations: the old image meets a schema it does not understand.
+
+An actual rollback is:
+
+1. Stop the app.
+2. Restore the database backup you took before the update.
+3. Restore the `/data` volume if you also restored an older database — the encryption key
+   must match the ciphertext.
+4. Start the previous image tag.
+
+This is the whole reason the backup step is not optional.
+
+## Updating skills and integrations
+
+Installed skills and integrations version **independently of the app**. Their marketplace
+pages show an **Update** button when the source repository has newer content than the
+locked hash. Updating a connected integration restarts its MCP server automatically.
+
+Nothing there requires an app update or a restart.

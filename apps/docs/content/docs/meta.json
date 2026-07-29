@@ -1,11 +1,17 @@
 {
   "pages": [
     "index",
+    "---Self-host---",
     "installation",
+    "deploy",
+    "---Use TulipFarm---",
     "getting-started",
     "concepts",
     "guides",
+    "---Reference---",
     "reference",
-    "security"
+    "security",
+    "---Contribute---",
+    "development"
   ]
 }

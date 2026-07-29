@@ -1,6 +1,6 @@
 ---
-title: Deploy without the setup wizard
-description: Seed the first admin and LLM key from environment variables for automated and container-platform deployments.
+title: Headless seeding
+description: Seed the first admin and LLM key from environment variables, for deployments with no browser at first boot.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
@@ -9,6 +9,10 @@ Container platforms (Cloud Run, Fly.io, Azure App Service, Kubernetes) inject
 configuration as environment variables and do not support a browser interaction at
 first boot. TulipFarm's headless mode seeds the instance automatically when it detects
 the right variables.
+
+It is also the safest way to stand up an internet-facing instance: on a fresh install the
+`/setup` route is unauthenticated, so the first visitor to reach it becomes the admin.
+Seeding closes that window before the instance ever serves a browser.
 
 ## Before you begin
 

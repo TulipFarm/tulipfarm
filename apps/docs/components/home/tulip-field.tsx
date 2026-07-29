@@ -145,6 +145,7 @@ export function TulipField({ className }: { className?: string }) {
     if (!ctx) return;
 
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const finePointer = window.matchMedia("(pointer: fine)").matches;
     const pointer = { x: 0, active: false };
     let colors = resolveColors();
     let width = 0;
@@ -175,7 +176,7 @@ export function TulipField({ className }: { className?: string }) {
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = rect.width;
       height = rect.height;
       canvas.width = Math.round(width * dpr);
@@ -208,7 +209,7 @@ export function TulipField({ className }: { className?: string }) {
     });
 
     const onPointerMove = (e: PointerEvent) => {
-      if (reduceMotion) return;
+      if (reduceMotion || !finePointer) return;
       const rect = canvas.getBoundingClientRect();
       pointer.x = e.clientX - rect.left;
       pointer.active = true;

@@ -1,0 +1,102 @@
+---
+title: Dokploy, Unraid, Synology, CasaOS
+description: Any platform that accepts a Compose file runs TulipFarm — the same file, with the per-platform details that differ.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+TulipFarm's `docker-compose.yml` is a plain Compose v2 file with no build step, no
+`extends`, and no external files. Anything that consumes Compose runs it.
+
+The universal procedure, whatever the UI calls it:
+
+1. Paste or fetch
+   [`docker-compose.yml`]({{SITE_URL}}/docker-compose.yml).
+2. Set `PUBLIC_URL` to the URL you will actually open, and `POSTGRES_PASSWORD` to something
+   of your own.
+3. Deploy, wait for the health check, open the URL, create the admin account.
+
+Everything below is only the part that differs per platform.
+
+## Dokploy
+
+Create a **Compose** service and paste the file. Dokploy's environment form maps directly
+onto the variables in [Docker Compose → Things worth changing](/docs/deploy/docker-compose#things-worth-changing).
+
+Attach the domain to the `app` service on port `8080` and let Dokploy's Traefik terminate
+TLS. Set `PUBLIC_URL` to the `https://` domain.
+
+## Unraid
+
+Use the **Docker Compose Manager** plugin (Community Applications → Apps → Plugins). Create
+a new stack, paste the file, and deploy.
+
+<Callout type="info">
+  There is no TulipFarm entry in Unraid's Community Applications catalogue. The Compose
+  Manager route is the supported path today.
+</Callout>
+
+Unraid specifics:
+
+- Set `HOST_PORT` to something outside Unraid's own range if `8080` is taken — the WebUI and
+  several stock containers cluster around it.
+- The named volumes land under Docker's storage, not `/mnt/user/appdata`. If you want them
+  on a share you back up, replace the volume entries with bind mounts to
+  `/mnt/user/appdata/tulipfarm/{postgres,soul,data}` and make sure the paths exist first.
+- Set `PUBLIC_URL` to `http://<tower-ip>:<HOST_PORT>`, not `localhost` — a browser on
+  another machine on the LAN is the whole point, and a mismatched origin blocks login.
+
+## Synology (Container Manager)
+
+Container Manager's **Project** feature takes a Compose file directly. Create a project,
+choose *Create docker-compose.yml*, paste, and build.
+
+- DSM already uses ports 5000/5001; `8080` is usually free, but set `HOST_PORT` if it is
+  not.
+- Give the project its own folder under `/volume1/docker/tulipfarm`. If you switch the named
+  volumes to bind mounts there, Hyper Backup can capture them.
+- DSM's reverse proxy (Control Panel → Login Portal → Advanced) can terminate TLS in front.
+  Set `PUBLIC_URL` to the `https://` hostname and **disable response buffering** on the
+  rule, or streamed chat replies arrive all at once at the end of the turn.
+
+## CasaOS, Runtipi, and similar home-server UIs
+
+Any of these that offer "install from Compose / custom app" work the same way. The two
+things they commonly get wrong:
+
+- They default `PUBLIC_URL`-style settings to `localhost`. Set it to the LAN address you
+  browse to.
+- They sometimes offer to publish every port in the file. Only `8080` (via `HOST_PORT`)
+  should be published — **never** `5432`.
+
+## Managed app platforms
+
+Fly.io, Cloud Run, Azure Container Apps, App Runner, Railway, and Render can all run the
+image, but they need two things the Compose file assumes are local:
+
+- **A database.** Use a [managed PostgreSQL 17](/docs/deploy/managed-database) with the
+  `vector` and `citext` extensions available, and set `EXTERNAL_DATASTORE=true`.
+- **A persistent volume for the soul at `/opt/tulipfarm/soul` and data at `/data`.** On
+  platforms where the filesystem is ephemeral, a restart discards the soul *and* the
+  generated encryption key. Supply `ENCRYPTION_KEY` from the platform's secret store so it
+  survives, and set `SOUL_GIT_REMOTE_URL` + `SOUL_GIT_CREDENTIAL` so the soul is cloned back
+  from git when the directory comes up empty.
+
+Combine that with [headless seeding](/docs/deploy/headless) — these platforms have no
+browser at first boot.
+
+<Callout type="warn">
+  **Verify this yourself before relying on it.** TulipFarm ships no tested manifests for
+  these platforms and none are exercised in CI. Two specifics that bite: soul git auth is
+  **HTTPS + token only** (`SOUL_GIT_CREDENTIAL` is injected as
+  `https://<token>@host/…`; SSH remotes fail), and a failed clone at boot is **logged, not
+  fatal** — the instance comes up with an empty soul rather than refusing to start. Restart
+  the app once and confirm your resources and agents are still there.
+</Callout>
+
+## Anything else
+
+If the platform can run a container, give it: the image, one replica, PostgreSQL 17,
+volumes at `/opt/tulipfarm/soul` and `/data`, port `8080`, and probes on `/livez` and
+`/readyz`. The full contract is in [Deploy](/docs/deploy#what-every-deployment-needs) and
+[Kubernetes](/docs/deploy/kubernetes).

@@ -1,119 +1,44 @@
 ---
 title: Get started
-description: Install TulipFarm, run it, log in, and define your first resource type.
+description: Sign in to a fresh TulipFarm instance, give it a model, and build your first resource type by chatting.
 ---
 
 import { Step, Steps } from "fumadocs-ui/components/steps";
 import { Callout } from "fumadocs-ui/components/callout";
 
-In this guide you install TulipFarm on your own machine, sign in as the admin, and
-define your first resource type. By the end you will have a running instance with a
-custom data type you can create records against.
-
-This guide targets macOS and Linux. You need a terminal and about ten minutes.
-
-## Before you begin
-
-Install these first:
-
-- **Node.js 24** (the version pinned in `.node-version`)
-- **pnpm** — `npm install -g pnpm`
-- **Docker with Compose v2** (recommended) — the setup script starts a bundled `pgvector/pgvector:pg17` container so nothing needs installing on the host
-
-If you prefer a native PostgreSQL install instead, Docker is not required. The setup script will prompt you.
+You have a running instance and its URL. This guide takes you from there to a working
+resource type with a record in it — about ten minutes, all of it in the browser.
 
 <Callout type="info">
-  On macOS with native mode, you also need **Homebrew** — the script uses it to
-  install PostgreSQL 17 + pgvector.
+  No instance yet? [Install one](/docs/installation) — a single command, nothing to clone.
 </Callout>
 
 <Steps>
 
 <Step>
 
-### Clone the repository and run the setup script
+### Create your admin account
 
-```bash
-git clone https://github.com/TulipFarm/tulipfarm.git
-cd tulipfarm
-bash scripts/setup-dev.sh
-```
-
-The script prompts you to choose how to run PostgreSQL:
-
-- **Docker** (default) — starts a `pgvector/pgvector:pg17` container exposed on `localhost:5432`.
-  No system packages are installed. This is the same image CI and production use.
-- **Native** — installs PostgreSQL 17 + pgvector via Homebrew (macOS) or apt/yum (Linux) and
-  starts the system service.
-
-Either way, the script initializes your soul repository at `~/.tulipfarm/soul` and generates a
-`.env.local` file with random bootstrap env config (`ENCRYPTION_KEY`, `JWT_SECRET`,
-`WEBHOOK_SIGNING_SECRET`).
-
-For a non-interactive run (CI, scripted environments), set `DB_MODE` before running:
-
-```bash
-DB_MODE=docker bash scripts/setup-dev.sh
-```
-
-Confirm the database is accepting connections:
-
-```bash
-# Docker mode
-pg_isready -h localhost -p 5432 -U tulipfarm
-# Native mode
-psql tulipfarm -c 'select 1'
-```
-
-</Step>
-
-<Step>
-
-### Install dependencies and start TulipFarm
-
-```bash
-pnpm install
-pnpm dev
-```
-
-This starts two services:
-
-- the **API** on `http://localhost:4010`
-- the **web UI** on `http://localhost:4000`
-
-Confirm the API is healthy:
-
-```bash
-curl http://localhost:4010/health
-```
-
-You should see:
-
-```json
-{ "status": "ok" }
-```
-
-</Step>
-
-<Step>
-
-### Complete the setup wizard
-
-Open `http://localhost:4000`. Because no admin exists yet, the app redirects to the
-setup wizard at `/setup`. Work through the four steps:
+Open your instance's URL. Because no admin exists yet, the app redirects to the setup
+wizard at `/setup`. Work through the four steps:
 
 1. **Admin account** — enter an email and password. This creates the first admin and logs
    you in.
 2. **Business profile** — give your instance a name and optional description.
 3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure OpenAI, or an
    OpenAI-compatible endpoint), enter the credentials, and pick a model. You can skip this
-   and configure it later in **Settings → LLM Config**.
+   and configure it later.
 4. **Soul backup** — optionally point the soul at a git remote for backup. You can skip
-   this and set it up later in **Settings**.
+   this and set it up in **Settings** later.
 
-After step 4, the wizard calls `POST /api/v1/setup/complete` and redirects to the main
-workspace. The setup route locks — a second browser visitor cannot create another admin
-through the wizard.
+After step 4 the wizard redirects to the main workspace and the setup route locks — a
+second browser visitor cannot create another admin through it.
+
+<Callout type="warn">
+  Until an admin exists, `/setup` is unauthenticated: on an internet-reachable instance,
+  whoever arrives first claims it. Do this immediately after installing, or seed the admin
+  from environment variables with [headless seeding](/docs/deploy/headless).
+</Callout>
 
 </Step>
 
@@ -121,10 +46,13 @@ through the wizard.
 
 ### Give the assistant a model
 
-You build everything else by talking to the assistant, so it needs a model to run.
+You build everything else by talking to the assistant, so it needs a model to run. If you
+skipped step 3 of the wizard:
+
 Open **Settings → Secrets**, add an API key for a provider (Anthropic, OpenAI, Azure, or
 any OpenAI-compatible endpoint), then open **Settings → LLM** and assign a model to each
-tier. The walkthrough is in [Configure LLM providers](/docs/guides/configure-llm-providers).
+tier. The walkthrough is in
+[Configure LLM providers](/docs/guides/configure-llm-providers).
 
 </Step>
 
@@ -138,12 +66,12 @@ Open **Chat** and type what you want in plain language:
 Create a customer resource type with a name and an email.
 ```
 
-The assistant confirms a couple of details and builds the type for you. There is no schema to write and no restart — the
-new `customer` table is ready the moment it finishes. Open **Resources** and you will see
-`customer` in the list.
+The assistant confirms a couple of details and builds the type for you. There is no schema
+to write and no restart — the new `customer` table is ready the moment it finishes. Open
+**Resources** and you will see `customer` in the list.
 
-This is the normal way to build in TulipFarm; see [Building by chat](/docs/concepts/building)
-for the full picture.
+This is the normal way to build in TulipFarm; see
+[Building by chat](/docs/concepts/building) for the full picture.
 
 </Step>
 
@@ -169,3 +97,4 @@ have a running TulipFarm instance with a custom resource type and your first rec
 - Read how [building by chat](/docs/concepts/building), the [soul](/docs/concepts/soul), and [resources](/docs/concepts/resources) fit together.
 - Ask the assistant to "create a support agent" — see [Agents](/docs/concepts/agents).
 - [Install a skill](/docs/guides/install-a-skill) from a git repository.
+- Before this instance holds real data, walk the [production checklist](/docs/deploy/production-checklist).

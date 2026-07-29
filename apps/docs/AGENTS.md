@@ -51,6 +51,34 @@ How it works — do not route prompts through the syntax highlighter:
   (component map). **Changing `source.config.ts` requires a dev-server restart** (content
   `.mdx`/`meta.json` edits hot-reload; build config does not).
 
+## Never write the site domain — use `{{SITE_URL}}`
+
+Install commands point at the docs site itself (`https://tulipfarm.site/install.sh`), which
+also serves `docker-compose.yml`, `install.ps1`, and `env.example`. The domain lives in
+exactly one place: `SITE_URL` in `lib/shared.ts`.
+
+In MDX, write the token — `lib/remark-site-url.ts` substitutes it at the mdast stage, so
+fences stay real ` ```bash ` blocks with highlighting and a copy button:
+
+````md
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo bash
+```
+````
+
+It works in prose, inline code, and link URLs too. In `.ts`/`.tsx`, import
+`SITE_URL` from `@/lib/shared`. `scripts/site-url.test.ts` fails the build on a bare
+domain in any `.ts`, `.tsx`, or `.mdx` file. A `git clone` URL is different — that is
+GitHub, and stays spelled out.
+
+**Anything `source.config.ts` imports must use relative paths only.** fumadocs-mdx bundles
+that file with esbuild into `.source/source.config.mjs`, which plain Node then evaluates
+*outside* webpack. esbuild inlines relative imports but leaves bare specifiers external, so
+a `@tulipfarm/*` import there has to be resolved at runtime, where `transpilePackages` does
+not apply — it fails with `Cannot find package`. This is why `SITE_URL` is defined in this
+app rather than pulled from a shared package, and why `lib/shared.ts` has no imports of its
+own. Keep any new remark plugin free of bare workspace specifiers.
+
 ## Accuracy is non-negotiable
 
 Documentation that lies is worse than none. Before writing any factual claim:

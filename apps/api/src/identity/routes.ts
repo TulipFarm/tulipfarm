@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { sessionCookieOptions } from "../auth/cookie-security";
 import { setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { ErrorSchema, PublicApiClientSchema, PublicUserSchema } from "../auth/schemas";
@@ -73,16 +74,6 @@ const CREDENTIAL_LIMIT = 10;
 const CREDENTIAL_WINDOW_MS = 900_000;
 
 const AUTH_METHODS: AuthMethod[] = ["password", "oidc", "totp", "passkey"];
-
-function cookieOptions(maxAge: number) {
-  return {
-    httpOnly: true,
-    sameSite: "strict" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge,
-  };
-}
 
 function isAuthMethod(value: unknown): value is AuthMethod {
   return typeof value === "string" && (AUTH_METHODS as string[]).includes(value);
@@ -236,7 +227,7 @@ function registerOidcRoutes(
         authMethods: ["oidc"],
         mfaVerifiedAt: mfaProven ? new Date() : null,
       });
-      reply.setCookie(SESSION_COOKIE, session.sid, cookieOptions(ttlSeconds));
+      reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
       setCsrfCookie(reply, session.csrfToken, ttlSeconds);
 
       if (claims.redirectTo) return reply.redirect(claims.redirectTo, 302);
@@ -314,7 +305,7 @@ function registerStepUpRoute(
         authMethods: [...principal.authMethods, body.method],
         mfaVerifiedAt,
       });
-      reply.setCookie(SESSION_COOKIE, session.sid, cookieOptions(ttlSeconds));
+      reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
       setCsrfCookie(reply, session.csrfToken, ttlSeconds);
       return reply.code(200).send({ mfaVerifiedAt: mfaVerifiedAt.toISOString() });
     }

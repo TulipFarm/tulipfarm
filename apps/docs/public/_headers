@@ -1,0 +1,15 @@
+# Cloudflare Pages header rules. Serve the install assets as plain text so a browser
+# renders them for inspection instead of downloading them — people should be able to read
+# a script before piping it to a shell.
+
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+
+/docker-compose.yml
+  Content-Type: text/plain; charset=utf-8
+
+/env.example
+  Content-Type: text/plain; charset=utf-8

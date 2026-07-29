@@ -10,9 +10,10 @@ import scalar from "@scalar/fastify-api-reference";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import Fastify from "fastify";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
+import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/health";
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
 import { DurableApprovalGate } from "./approvals/chat-gate";
 import { registerApprovalRoutes } from "./approvals/routes";
@@ -131,6 +132,11 @@ export interface AppOptions {
   operationalApi?: OperationalApiDeps;
   /** Persist-first authority shared by Chat and every Trigger ingress. */
   invocations?: DurableInvocationGateway;
+  /**
+   * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness
+   * reports ok on process liveness alone.
+   */
+  readiness?: QueryableProbeTarget;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -158,11 +164,13 @@ export async function buildApp(opts: AppOptions = {}) {
     }
   })();
   // Non-SPA surfaces keep their own handling: the API (JSON), the Scalar docs UI, the
-  // OpenAPI doc, and the health probe. Everything else is a client-routed SPA path.
+  // OpenAPI doc, and the health probes. Everything else is a client-routed SPA path.
   const isAppApiPath = (url: string) =>
     url.startsWith("/api") ||
     url.startsWith("/docs") ||
     url.startsWith("/health") ||
+    url.startsWith("/livez") ||
+    url.startsWith("/readyz") ||
     url.startsWith("/openapi");
 
   await app.register(swagger, {
@@ -179,7 +187,12 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   await app.register(cors, {
-    origin: process.env.CORS_ORIGIN ?? `http://localhost:${process.env.VITE_PORT ?? 4000}`,
+    // PUBLIC_URL is the origin users actually reach in a deployed install; CORS_ORIGIN stays an
+    // independent override for split-origin setups. The localhost fallback is the dev SPA.
+    origin:
+      process.env.CORS_ORIGIN ??
+      process.env.PUBLIC_URL ??
+      `http://localhost:${process.env.VITE_PORT ?? 4000}`,
     credentials: true,
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
@@ -229,22 +242,59 @@ export async function buildApp(opts: AppOptions = {}) {
   // sufficient); the stateless hook remains for deployments assembled without session auth.
   app.addHook("preHandler", opts.sessionStore ? makeCsrfHook(opts.sessionStore) : csrfHook);
 
+  // Kubernetes-shaped probe trio. Liveness must never consult a dependency — a Postgres
+  // outage should not make the orchestrator kill and restart an otherwise-fine process.
+  // Readiness does, so an instance that cannot reach its datastore is pulled out of the
+  // load balancer instead of serving errors.
+  //
+  // Migration completion needs no explicit signal: `index.ts` runs `runPgMigrations` before
+  // `buildApp`, and the server does not listen until that resolves, so anything able to
+  // answer these routes at all is already migrated.
+  const probeStatusSchema = {
+    type: "object",
+    properties: { status: { type: "string" } },
+    required: ["status"],
+  } as const;
+
   app.get(
-    "/health",
+    "/livez",
     {
       schema: {
-        description: "Health check",
+        description: "Liveness probe — the process is running. Checks no dependencies.",
         tags: ["system"],
-        response: {
-          200: {
-            type: "object",
-            properties: { status: { type: "string" } },
-            required: ["status"],
-          },
-        },
+        response: { 200: probeStatusSchema },
       },
     },
     async () => ({ status: "ok" })
+  );
+
+  const readyHandler = async (_req: FastifyRequest, reply: FastifyReply) => {
+    if (!opts.readiness) return { status: "ok" };
+    const [postgres] = await probeHealth([postgresProbe(opts.readiness)]);
+    if (postgres.status === "ok") return { status: "ok" };
+    return reply.code(503).send({ status: postgres.status, detail: postgres.detail });
+  };
+
+  const readySchema = {
+    description: "Readiness probe — the datastore is reachable and this instance can serve.",
+    tags: ["system"],
+    response: {
+      200: probeStatusSchema,
+      503: {
+        type: "object",
+        properties: { status: { type: "string" }, detail: { type: "string" } },
+        required: ["status"],
+      },
+    },
+  } as const;
+
+  app.get("/readyz", { schema: readySchema }, readyHandler);
+  // Retained alias: the installer's health poll, the compose healthcheck, and every published
+  // doc reference /health. It tracks readiness, which is what those callers actually mean.
+  app.get(
+    "/health",
+    { schema: { ...readySchema, description: "Alias of /readyz." } },
+    readyHandler
   );
 
   app.get("/api/v1/openapi.json", async () => app.swagger());
