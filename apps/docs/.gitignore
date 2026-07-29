@@ -6,6 +6,7 @@
 
 # install assets copied from the repo root by scripts/sync-public-assets.mjs
 /public/install.sh
+/public/uninstall.sh
 /public/install.ps1
 /public/docker-compose.yml
 /public/env.example

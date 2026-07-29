@@ -4,7 +4,8 @@
     "docker-compose.yml",
     ".env.example",
     "scripts/install.sh",
-    "scripts/install.ps1"
+    "scripts/install.ps1",
+    "scripts/uninstall.sh"
   ],
   "tasks": {
     "build": {

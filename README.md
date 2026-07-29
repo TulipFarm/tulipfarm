@@ -31,7 +31,8 @@ Verifies WSL2 + a distro, then runs the Linux installer inside WSL.
 
 Overrides (env vars): `TF_VERSION` (image tag, default `latest`), `TF_PORT` (default
 `8080`), `TF_INSTALL_DIR` (default `/opt/tulipfarm`), `TF_RUNTIME` (`docker`|`podman`),
-`TF_BASE_URL`/`TF_REF`. Full guide: see `apps/docs/content/docs/installation.mdx`.
+`TF_BASE_URL`/`TF_REF`. See the
+[installation guide](https://tulipfarm.site/docs/installation) for every option.
 An explicit `TF_PORT` also moves an existing install to that host port without rotating
 its generated secrets.
 
@@ -39,6 +40,14 @@ its generated secrets.
 > `main`; to install an exact ref instead, set
 > `TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm` together with
 > `TF_REF=<tag-or-branch>`. To test a local build, set `TF_LOCAL_SRC=1`.
+
+**Uninstall permanently** (deletes the database, soul, secrets, backups, volumes, and
+TulipFarm images after a typed confirmation):
+```bash
+curl -fsSL https://tulipfarm.site/uninstall.sh | bash
+```
+Docker/Podman itself and externally managed databases are left untouched. See the
+[uninstall guide](https://tulipfarm.site/docs/uninstall) before running it.
 
 **Compose by hand** (Portainer, Coolify, Dokploy, Unraid, or a plain `docker compose`) —
 grab `docker-compose.yml` from <https://tulipfarm.site/docker-compose.yml> and run it

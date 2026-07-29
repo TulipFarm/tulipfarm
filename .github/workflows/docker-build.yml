@@ -30,7 +30,11 @@ jobs:
           docker buildx build --check .
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
-          bash -n scripts/install.sh scripts/test/compose-parity.sh scripts/test/installer-smoke.sh
+          bash -n \
+            scripts/install.sh \
+            scripts/uninstall.sh \
+            scripts/test/compose-parity.sh \
+            scripts/test/installer-smoke.sh
 
   build:
     name: Build image (${{ matrix.platform }})

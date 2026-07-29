@@ -1,7 +1,7 @@
 /**
  * Copies the install assets from the repo root into `public/`, so the static export serves
- * them at the domain root — `{SITE_URL}/install.sh`, `{SITE_URL}/docker-compose.yml`, and
- * so on. Runs before `next build` and `next dev` (see package.json); the copies are
+ * them at the domain root — `{SITE_URL}/install.sh`, `{SITE_URL}/uninstall.sh`,
+ * `{SITE_URL}/docker-compose.yml`, and so on. Runs before `next build` and `next dev`; the copies are
  * gitignored, and `scripts/site-url.test.ts` asserts every source below still exists.
  *
  * Copies are byte-identical on purpose: the file a user curls is the same artifact CI
@@ -22,6 +22,7 @@ const PUBLIC_DIR = join(DOCS_ROOT, "public");
 /** Served path (relative to the domain root) → source path (relative to the repo root). */
 export const PUBLIC_ASSETS = {
   "install.sh": "scripts/install.sh",
+  "uninstall.sh": "scripts/uninstall.sh",
   "install.ps1": "scripts/install.ps1",
   "docker-compose.yml": "docker-compose.yml",
   "env.example": ".env.example",

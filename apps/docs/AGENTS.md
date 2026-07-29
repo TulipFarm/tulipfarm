@@ -54,8 +54,8 @@ How it works — do not route prompts through the syntax highlighter:
 ## Never write the site domain — use `{{SITE_URL}}`
 
 Install commands point at the docs site itself (`https://tulipfarm.site/install.sh`), which
-also serves `docker-compose.yml`, `install.ps1`, and `env.example`. The domain lives in
-exactly one place: `SITE_URL` in `lib/shared.ts`.
+also serves `uninstall.sh`, `docker-compose.yml`, `install.ps1`, and `env.example`. The
+domain lives in exactly one place: `SITE_URL` in `lib/shared.ts`.
 
 In MDX, write the token — `lib/remark-site-url.ts` substitutes it at the mdast stage, so
 fences stay real ` ```bash ` blocks with highlighting and a copy button:

@@ -27,18 +27,20 @@ pnpm --filter @tulipfarm/docs typecheck  # fumadocs-mdx + next typegen + tsc
 | `app/docs` | Documentation layout and pages |
 | `app/api/search` | Search index, statically generated (Orama) |
 | `source.config.ts` | Fumadocs MDX config (frontmatter schema etc.) |
-| `scripts/sync-public-assets.mjs` | Copies the install assets into `public/` before build/dev |
+| `scripts/sync-public-assets.mjs` | Copies the install and uninstall assets into `public/` before build/dev |
 
 ## Published install assets
 
 The site is the distribution point for the installer and the Compose file, so
-`https://tulipfarm.site/install.sh` works. `scripts/sync-public-assets.mjs` runs ahead of
-`next build` and `next dev` (chained in `package.json` — **not** a `prebuild` hook, which
-pnpm does not run by default) and copies these byte-identical from the repo root:
+`https://tulipfarm.site/install.sh` and `https://tulipfarm.site/uninstall.sh` work.
+`scripts/sync-public-assets.mjs` runs ahead of `next build` and `next dev` (chained in
+`package.json` — **not** a `prebuild` hook, which pnpm does not run by default) and copies
+these byte-identical from the repo root:
 
 | Served at | Source |
 | --- | --- |
 | `/install.sh` | `scripts/install.sh` |
+| `/uninstall.sh` | `scripts/uninstall.sh` |
 | `/install.ps1` | `scripts/install.ps1` |
 | `/docker-compose.yml` | `docker-compose.yml` |
 | `/env.example` | `.env.example` |

@@ -43,6 +43,7 @@ describe("site URL stays in one place", () => {
       "apps/docs/README.md",
       "apps/docs/AGENTS.md",
       "scripts/install.sh",
+      "scripts/uninstall.sh",
       "scripts/install.ps1",
     ];
     for (const file of files) {
