@@ -149,7 +149,7 @@ jobs:
           provenance: mode=max
           sbom: true
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
       - name: Verify candidate platforms
         env:
           CANDIDATE_IMAGE: ${{ needs.metadata.outputs.candidate }}
