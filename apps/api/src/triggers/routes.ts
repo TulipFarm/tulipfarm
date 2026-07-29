@@ -1,3 +1,4 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   buildInvocation,
   type RegisteredTrigger,
@@ -7,7 +8,6 @@ import {
 import { event as eventSchema } from "@tulipfarm/schema";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import { DEPLOYMENT_BUSINESS_ID } from "../identity/principal";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
 export interface TriggerInvokeDeps {

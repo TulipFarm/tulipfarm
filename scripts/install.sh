@@ -5,7 +5,7 @@
 #   curl -fsSL https://tulipfarm.site/install.sh | sudo bash
 #
 # Detects/installs a container engine, fetches docker-compose.yml + .env.example,
-# generates bootstrap secrets (zero questions), brings the 2-service stack up, polls
+# generates bootstrap secrets (zero questions), brings the 3-service stack up, polls
 # /health, and prints the setup-wizard URL. Re-running = update (preserves .env, PGDATA).
 #
 # Files are fetched from https://tulipfarm.site, which serves a flat layout built from the

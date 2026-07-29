@@ -64,6 +64,15 @@ curl -fsS --retry 5 --retry-connrefused --retry-delay 3 \
   "http://localhost:${PORT}/readyz" >/dev/null
 curl -fsS "http://localhost:${PORT}/livez" >/dev/null
 
+# The worker publishes no port — reach its probes from inside its own container. The `--wait`
+# above already gated on its healthcheck; asserting it here names the failure when the worker is
+# the thing that did not come up.
+log "asserting the worker booted and reports ready…"
+[ "$(compose ps -q worker | wc -l)" -eq 1 ] || fail "the worker service is not running"
+compose exec -T worker node -e \
+  "fetch('http://localhost:4020/readyz').then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})" \
+  || fail "the worker did not report ready"
+
 log "asserting generated secrets survive a restart…"
 secrets_before="$(compose exec -T app cat /data/secrets.env)"
 grep -q '^ENCRYPTION_KEY=' <<<"$secrets_before"

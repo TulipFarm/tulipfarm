@@ -19,10 +19,11 @@ const indexSource = readFileSync(join(__dirname, "index.ts"), "utf8");
  * decision with an owner, never a silent omission.
  */
 const DEFERRED_OPTIONS: Readonly<Record<string, string>> = {
-  // PR 1/3: needs a bootable worker to dispatch the invocation the trigger creates.
-  triggerInvoke: "PR 1 — bootable workers",
-  // PR 1/3: signed webhook ingress is pointless until a worker acts on the Run.
-  hookIngress: "PR 1 — bootable workers",
+  // PR 3: the worker boots as of PR 1, but no executor owns a Run source yet — a trigger
+  // composed today would mint Runs the worker can only park for reconciliation.
+  triggerInvoke: "PR 3 — chat/agent execution on the worker",
+  // PR 3: same reason. Signed webhook ingress is pointless until a Run source has an executor.
+  hookIngress: "PR 3 — chat/agent execution on the worker",
   // PR 3: replay reads run events the worker does not write yet.
   runReplay: "PR 3 — chat/agent execution on the worker",
   // PR 4: the @tulipfarm/routine-engine subtree is being retired, not revived.

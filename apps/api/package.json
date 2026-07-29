@@ -20,6 +20,7 @@
     "@scalar/fastify-api-reference": "^1.62.0",
     "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/authz": "workspace:*",
+    "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/schema": "workspace:*",

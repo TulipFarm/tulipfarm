@@ -108,6 +108,20 @@ export interface TurnInput {
   log: FastifyBaseLogger;
   /** Resolved by the server entrypoint; never accepted from the wire body. */
   presentationContext?: PresentationContext;
+  /**
+   * The durable Run this turn executes, when the caller claimed one. Carried onto TURN_FINISHED so
+   * the subscriber that owns Run completion can release the lease — this function returns as soon
+   * as the reply is hijacked, long before the turn is over.
+   */
+  runId?: string;
+  businessId?: string;
+  /**
+   * Releases the claimed Run when the turn ends before a producer ever launches — a validation
+   * failure or a blocked input. Those exits emit no TURN_FINISHED, so without this the Run would
+   * sit `running` under this process's lease until it expired and a worker parked it for an
+   * operator, turning an ordinary user-facing error into reconciliation work.
+   */
+  abandonRun?: () => Promise<void>;
 }
 
 /** Early validation failure from prepareChatTurn; the HTTP wrapper maps it to a status code. */
@@ -447,7 +461,7 @@ export async function startChatTurn(
     surfaceActionStore,
     streamControllers,
   } = ctx;
-  const { user, body, log, presentationContext } = input;
+  const { user, body, log, presentationContext, runId, businessId } = input;
   const {
     convo,
     isNew,
@@ -504,6 +518,9 @@ export async function startChatTurn(
       });
       await emitter.emit("finish", { reason: "guardrail_block" });
       hub.finish(streamId);
+      // Same reason as the prepare-error path: the producer never launches, so nothing else will
+      // ever release this Run.
+      await input.abandonRun?.();
       // Pending interaction stays open — the user can re-submit the answer. The producer never
       // launches; subscribers see the buffered guardrail_block + finish on attach/replay.
       return {
@@ -583,6 +600,7 @@ export async function startChatTurn(
         conversationId: convo._id,
         agentId: activeAgent.name,
         status,
+        ...(runId && businessId ? { runId, businessId } : {}),
         steps: turnSteps,
         tokensIn: turnTokensIn,
         tokensOut: turnTokensOut,
@@ -835,7 +853,12 @@ export async function startChatTurn(
  * the detached producer, and attach this connection to the stream (live from seq 0) — so the turn
  * finishes (and keeps buffering) even after the client disconnects.
  */
-export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx: ChatTurnContext) {
+export async function runChatTurn(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  ctx: ChatTurnContext,
+  run?: { runId?: string; businessId?: string; abandonRun?: () => Promise<void> }
+) {
   const input: TurnInput = {
     user: req.user as UserDoc,
     body: req.body as ChatBody,
@@ -844,9 +867,19 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
       { channel: "web", surface: "chat" },
       `conversation:${(req.body as ChatBody).conversationId ?? "new"}`
     ),
+    ...(run?.runId && run.businessId
+      ? {
+          runId: run.runId,
+          businessId: run.businessId,
+          ...(run.abandonRun ? { abandonRun: run.abandonRun } : {}),
+        }
+      : {}),
   };
   const prepared = await prepareChatTurn(ctx, input);
   if (isPrepareError(prepared)) {
+    // The Run was minted and claimed before this validation ran, and no producer will launch to
+    // finish it. Release it here rather than leaving a leased Run behind for a bad request.
+    await input.abandonRun?.();
     return reply.code(prepared.status).send({ error: prepared.error });
   }
   const handle = await startChatTurn(ctx, prepared, input);

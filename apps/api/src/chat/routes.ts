@@ -9,6 +9,7 @@ import type { GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
 import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
+import type { ChatRunLifecycle } from "../runtime/chat-run-lifecycle";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import type { BundledSkill } from "../soul/skills/bundled";
 import type { SurfaceActionStore } from "../surfaces/action-store";
@@ -52,7 +53,8 @@ export function registerChatRoutes(
   surfaceActionStore?: SurfaceActionStore,
   invocations?: DurableInvocationGateway,
   bundledSkills?: ReadonlyMap<string, BundledSkill>,
-  disabledBundledSkills?: ReadonlySet<string>
+  disabledBundledSkills?: ReadonlySet<string>,
+  chatRunLifecycle?: ChatRunLifecycle
 ): void {
   // One approval gate shared by the chat turn and decision route. Production injects its
   // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
@@ -110,6 +112,8 @@ export function registerChatRoutes(
       },
     },
     async (req, reply) => {
+      let runId: string | undefined;
+      let businessId: string | undefined;
       if (invocations) {
         const body = req.body as { agentId?: string };
         const principal = req.principal;
@@ -137,8 +141,39 @@ export function registerChatRoutes(
         if (result.outcome === "duplicate") {
           return reply.code(409).send({ error: "duplicate chat invocation" });
         }
+        runId = result.runId;
+        businessId = principal.businessId;
+        // Claim before a single byte streams: the API executes this turn in-process, so the Run
+        // must not stay `queued` for a worker to claim and execute a second time. A lost race is
+        // logged, never fatal — the user still gets their reply.
+        if (chatRunLifecycle) {
+          const claimed = await chatRunLifecycle.claim(businessId, runId);
+          if (!claimed) {
+            req.log.warn({ runId }, "chat run was not claimable; streaming without a lease");
+            runId = undefined;
+          }
+        }
       }
-      return runChatTurn(req, reply, turnCtx);
+      const claimedRun =
+        chatRunLifecycle && runId && businessId ? { runId, businessId } : undefined;
+      return runChatTurn(req, reply, turnCtx, {
+        runId,
+        businessId,
+        ...(claimedRun && chatRunLifecycle
+          ? {
+              abandonRun: async () => {
+                const completed = await chatRunLifecycle.complete(
+                  claimedRun.businessId,
+                  claimedRun.runId,
+                  "failed"
+                );
+                if (!completed) {
+                  req.log.warn({ runId: claimedRun.runId }, "chat run was not releasable");
+                }
+              },
+            }
+          : {}),
+      });
     }
   );
 

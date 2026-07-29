@@ -58,10 +58,14 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `integrations`, `storage`, `observability` |
-| `apps/worker` | `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
+| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `integrations`, `storage`, `observability` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
+
+`packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
+and the worker must resolve the same business scope or the worker claims nothing, and an app may
+not import another app, so both read it from there. Secrets never belong in it.
 
 Package names in application rows are relative to `packages/`. Existing v1 packages may remain
 during capability cutover, but target code must not create additional legacy dependencies. Each

@@ -1,7 +1,7 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
-import { DEPLOYMENT_BUSINESS_ID } from "../identity/principal";
 import {
   type CanonicalRoutineAuthoringService,
   RoutineAuthoringError,

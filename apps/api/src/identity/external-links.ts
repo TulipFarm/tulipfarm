@@ -4,8 +4,8 @@ import {
   ExternalIdentityDeniedError,
   type ExternalIdentityMapping,
 } from "@tulipfarm/authz";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Queryable } from "../db";
-import { DEPLOYMENT_BUSINESS_ID } from "./principal";
 
 /**
  * External identity linking (SPEC §12): Slack/Telegram/GitHub/etc. subjects only act for a
