@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { HookError, HookExecutor } from "./hook-executor.js";
 
 // Same Node-25 caveat as hook-executor.test.ts: isolated-vm has no abi141 prebuild, so
@@ -11,11 +11,13 @@ const FAKE_DATABASE_URL = "postgresql://localhost:5432/test";
 describe("routine sandbox variants", () => {
   let executor: HookExecutor;
 
-  beforeEach(() => {
+  // Match the production lifecycle and avoid isolated-vm's known worker-thread teardown race
+  // (#464), which can abort Node when a fresh worker is terminated after every test.
+  beforeAll(() => {
     executor = new HookExecutor(FAKE_DATABASE_URL);
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await executor.close();
   });
 
