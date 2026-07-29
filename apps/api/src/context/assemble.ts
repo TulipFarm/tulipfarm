@@ -66,6 +66,8 @@ export interface AssembleContext {
    * scoped to the agent's allowlist (the same set used to build its toolset). Unset → block omitted.
    */
   availableTools?: { name: string; description: string }[];
+  /** Generated catalog guidance, supplied only for the server-assigned web UI channel. */
+  surfaceCatalog?: string;
   /**
    * Per-turn `~knowledge` pins from the composer — full page content the user explicitly attached for
    * this turn, injected into `<pinned-knowledge>`. Each carries its pageId so the agent can cite
@@ -322,6 +324,11 @@ function renderAvailableTools(ctx: AssembleContext): string {
   return block("available-tools", body);
 }
 
+function renderSurfaceCatalog(ctx: AssembleContext): string {
+  const catalog = ctx.surfaceCatalog?.trim();
+  return catalog ? block("surface-catalog", catalog) : "";
+}
+
 /**
  * `<pinned-knowledge>` budget — total chars across all pinned page `title`+`content` pairs. Over
  * this the whole block is dropped (never half-rendered), mirroring the other block budgets. Pages
@@ -403,6 +410,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderAvailableSkills(ctx),
     renderTaggedResources(ctx),
     renderSoulContext(ctx),
+    renderSurfaceCatalog(ctx),
     renderAvailableTools(ctx),
     renderPinnedKnowledge(ctx),
     renderKnowledgeGrounding(ctx),

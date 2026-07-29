@@ -32,7 +32,7 @@ app/
     agents.ts  skills.ts  # typed wrappers over /api/v1/agents, /api/v1/skills (+ scan/audit/install)
     utils.ts  nav.ts  badges.ts   # cn(); sidebar nav config; mocked badge counts
     chat/               # chat SSE wire contract (types.ts: ChatEvent incl. guardrail_block) + parser (sse-client.ts) + timeline reducer (reducer.ts)
-    a2ui/               # A2UI security/rendering foundation (sandboxed iframe for agent HTML) — see lib/a2ui/README.md
+    surface/            # Tulip Surface Protocol browser integration
   components/
     app-sidebar.tsx     # persistent sidebar (8 sections, responsive mobile drawer)
     theme-toggle.tsx    # [data-theme] + localStorage toggle
@@ -41,7 +41,7 @@ app/
     schema-table.tsx  detail-view.tsx                 # schema-driven list / detail (read side)
     link-combobox.tsx   # searchable combobox for x-links fields
     markdown-view.tsx   # renders agent/skill markdown body
-    a2ui-frame.tsx      # <A2uiFrame>: sandboxed-iframe renderer for agent HTML (A2UI foundation)
+    surface-artifact.tsx # native trusted React renderer for Surface Artifacts
     chat/parts.tsx      # renders timeline parts (text/tool/plan/…) incl. the guardrail_block alert (ruby)
     ui/*.tsx            # vendored shadcn primitives (flat)
   routes/

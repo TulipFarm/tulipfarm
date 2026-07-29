@@ -1,9 +1,11 @@
+import type { PresentationContext } from "@tulipfarm/surface";
 import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { KnowledgeService } from "../knowledge/service";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import type { PlatformAgent } from "../soul/agents/registry";
+import type { ToolCallResult } from "../tools/types";
 import {
   fromAssistantParts,
   fromAssistantText,
@@ -20,7 +22,7 @@ export const SUMMARY_PROMPT =
   "tasks the assistant must remember to continue. Write only the summary.";
 
 /**
- * HITL resume: rewrite the pending `ask_user` tool-result in the reconstructed model messages so the
+ * HITL resume: rewrite the pending `request_input` Tool result in reconstructed model messages so the
  * placeholder ("awaiting user input") becomes the user's actual answer. The DB row stays the
  * placeholder (append-only history); only the in-memory messages handed to `streamText` carry the
  * answer, so the model continues as if its own question was answered. Returns whether a result was
@@ -60,7 +62,7 @@ export interface ChatBody {
   // Per-turn `~knowledge` pins from the composer: pageIds whose full page content is injected
   // into `<pinned-knowledge>` for THIS turn only. Unknown/inactive ids are dropped.
   knowledgePages?: string[];
-  // What the user is viewing this turn (A2UI P3) — exposed to the agent via `get_client_context`.
+  // What the user is viewing this Turn — exposed to the Agent via `get_client_context`.
   clientContext?: { route?: string; title?: string };
 }
 
@@ -137,6 +139,32 @@ export function parseLastEventId(
   return typeof query === "number" && query >= 0 ? query : 0;
 }
 
+/**
+ * Stop after terminal control Tools, but only pause for `request_input` when its backing Surface
+ * and action handles were created successfully. A failed input presentation must remain in the
+ * model loop so the model can correct the call or explain the failure instead of leaving an
+ * apparently idle transcript.
+ */
+export function shouldStopToolLoop(
+  steps: ReadonlyArray<{
+    readonly toolCalls?: ReadonlyArray<{
+      readonly toolCallId: string;
+      readonly toolName: string;
+    }>;
+  }>,
+  fullResults: ReadonlyMap<string, ToolCallResult>,
+  maxToolSteps: number
+): boolean {
+  if (steps.length >= maxToolSteps) return true;
+  const last = steps[steps.length - 1];
+  return (last?.toolCalls ?? []).some(
+    (call) =>
+      call.toolName === "transfer_to_agent" ||
+      call.toolName === "cite_sources" ||
+      (call.toolName === "request_input" && fullResults.get(call.toolCallId)?.success === true)
+  );
+}
+
 /** The subset of an AI SDK `StepResult` that persistence needs. */
 export interface PersistableStep {
   text: string;
@@ -175,7 +203,8 @@ export async function persistStep(
   // reply (and the row feedback references) share an id. Tool-call steps keep their own ids.
   replyIdHolder?: { id?: string },
   // The model + agent that produced this step, stamped into the assistant message's metadata.
-  provenance?: MessageProvenance
+  provenance?: MessageProvenance,
+  persistSurfaces = false
 ): Promise<void> {
   if (step.finishReason === "error") return;
 
@@ -194,12 +223,34 @@ export async function persistStep(
     await messageRepo.create(assistantDoc).catch(onError);
 
     if (step.toolResults.length > 0) {
-      const resultParts: MessagePart[] = step.toolResults.map((tr) => ({
-        type: "tool-result",
-        toolCallId: tr.toolCallId,
-        toolName: tr.toolName,
-        result: tr.output,
-      }));
+      const resultParts: MessagePart[] = [];
+      for (const tr of step.toolResults) {
+        const result = tr.output as ToolCallResult;
+        const artifact =
+          persistSurfaces &&
+          result.success &&
+          typeof result.data === "object" &&
+          result.data !== null
+            ? (result.data as { artifact?: { id?: unknown; revision?: unknown } }).artifact
+            : undefined;
+        const artifactReference =
+          artifact && typeof artifact.id === "string" && typeof artifact.revision === "number"
+            ? { artifactId: artifact.id, revision: artifact.revision }
+            : null;
+        resultParts.push({
+          type: "tool-result",
+          toolCallId: tr.toolCallId,
+          toolName: tr.toolName,
+          result: artifactReference ? { success: true, data: artifactReference } : tr.output,
+        });
+        if (artifactReference) {
+          resultParts.push({
+            type: "surface",
+            artifactId: artifactReference.artifactId,
+            revision: artifactReference.revision,
+          });
+        }
+      }
       const toolDoc = fromToolResult(conversationId, resultParts);
       // History orders by (created_at, id). The tool-result and its assistant tool-call are written
       // back-to-back and can share a millisecond; a random id tiebreak could then sort the result
@@ -249,12 +300,37 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
 // allowlist, which the production adapter treats as deny-all.
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
-  pa: PlatformAgent | undefined
+  pa: PlatformAgent | undefined,
+  presentationContext?: PresentationContext
 ): ReadonlySet<string> | undefined {
   if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
-  if (pa?.toolAllowlist) return new Set(pa.toolAllowlist);
-  return new Set(toolRegistry.getAll().map((toolDefinition) => toolDefinition.name));
+  const agentAllowed = pa?.toolAllowlist
+    ? new Set(pa.toolAllowlist)
+    : new Set(toolRegistry.getAll().map((toolDefinition) => toolDefinition.name));
+  return new Set(
+    [...agentAllowed].filter((name) => {
+      if (!presentationContext && PRESENTATION_TOOL_NAMES.has(name)) return false;
+      if (
+        WEB_ONLY_TOOL_NAMES.has(name) &&
+        (presentationContext?.target.channel !== "web" ||
+          presentationContext.target.surface !== "chat")
+      ) {
+        return false;
+      }
+      return true;
+    })
+  );
 }
+
+export const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
+
+/** Imperative client Tools are available only to the browser Chat surface. */
+export const WEB_ONLY_TOOL_NAMES = new Set([
+  "get_client_context",
+  "navigate_to",
+  "prefill_form",
+  "invoke_action",
+]);
 
 /**
  * Whether to instruct knowledge grounding + citation (and surface pinned pages) for an agent this
@@ -273,10 +349,11 @@ export function canGroundKnowledge(
 // for a byte-stable prompt prefix (AC-V1-001). `[]` when no registry → the block is omitted.
 export function availableToolsFor(
   toolRegistry: ToolRegistry | undefined,
-  pa: PlatformAgent | undefined
+  pa: PlatformAgent | undefined,
+  presentationContext?: PresentationContext
 ): { name: string; description: string }[] {
   if (!toolRegistry) return [];
-  const allowed = allowedToolNamesFor(toolRegistry, pa);
+  const allowed = allowedToolNamesFor(toolRegistry, pa, presentationContext);
   return toolRegistry
     .getAll()
     .filter((t) => !allowed || allowed.has(t.name))

@@ -1,12 +1,12 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-/* Shared theme-token contract (oklch light/dark custom properties). Single source of truth,
- * also injectable into A2UI iframes. Defines the vars the @theme inline block below maps. */
+/* Shared theme-token contract (oklch light/dark custom properties). */
 @import "./tokens.css";
+@import "@tulipfarm/surface-web/styles.css";
 
 /*
  * Dark mode is driven by [data-theme="dark"] on <html> (NOT shadcn's default .dark class),
- * so the shell + future A2UI iframes can read one attribute. See AC-V1-005.
+ * so every trusted React component reads one attribute. See AC-V1-005.
  */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 

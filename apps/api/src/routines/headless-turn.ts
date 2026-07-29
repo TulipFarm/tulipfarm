@@ -51,6 +51,7 @@ export async function runHeadlessTurn(
     userId: ROUTINE_ACTOR,
     agentId: input.agentId,
     autonomy: "full",
+
     routineContext: input.routineContext,
   };
   const tools = deps.registry.buildToolSet(ctx) as ToolSet;

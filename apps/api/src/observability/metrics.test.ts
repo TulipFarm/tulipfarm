@@ -75,6 +75,33 @@ describe("OtlpMetricsExporter", () => {
     expect(names).not.toContain("llm_cost_usd_total"); // no cost point ⇒ metric pruned
   });
 
+  it("records Surface validation, rendering, interaction, and delivery", () => {
+    const e = exporter();
+    e.recordSurface({
+      target: "slack/message",
+      component: "RecordTable",
+      version: "1.0",
+      validation: "invalid",
+      render: "failed",
+      interaction: "rejected",
+      delivery: "failed",
+      validationPaths: ["/props/records"],
+    });
+    const payload = e.buildPayload() as {
+      resourceMetrics: [{ scopeMetrics: [{ metrics: Array<{ name: string }> }] }];
+    };
+    const names = payload.resourceMetrics[0].scopeMetrics[0].metrics.map((metric) => metric.name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "surface_render_total",
+        "surface_validation_total",
+        "surface_interaction_total",
+        "surface_delivery_total",
+      ])
+    );
+  });
+
   it("POSTs OTLP JSON with basic auth to /v1/metrics", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const e = exporter(fetchMock as unknown as typeof fetch);

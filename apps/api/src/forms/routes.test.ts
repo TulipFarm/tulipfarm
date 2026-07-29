@@ -1,4 +1,8 @@
-import { FormSubmissionError, type FormSubmissionResult, type GovernedForm } from "@tulipfarm/a2ui";
+import {
+  FormSubmissionError,
+  type FormSubmissionResult,
+  type GovernedForm,
+} from "@tulipfarm/surface";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import { buildApp } from "../app";

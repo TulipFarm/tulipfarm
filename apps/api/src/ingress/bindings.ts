@@ -31,7 +31,10 @@ export async function executeToolBinding(
   for (const [key, template] of Object.entries(binding.args)) {
     args[key] = renderVarTemplate(template, vars);
   }
-  return tool.execute(args, { userId: INGRESS_ACTOR, autonomy: "full" });
+  return tool.execute(args, {
+    userId: INGRESS_ACTOR,
+    autonomy: "full",
+  });
 }
 
 /**

@@ -79,10 +79,12 @@ export function makeCsrfHook(store: SessionStore) {
       return reply.code(403).send({ error: "invalid csrf token" });
     }
 
+    // A stale/expired sid cookie (e.g. left over from before a dev DB reset) resolves to no
+    // session. That's not a CSRF violation — there's no authenticated session to forge a request
+    // against — so let the request through; requireAuth downstream will 401 it on its own terms
+    // instead of this hook masking that with a confusing "invalid csrf token".
     const session = await store.read(sid);
-    if (!session) {
-      return reply.code(403).send({ error: "invalid csrf token" });
-    }
+    if (!session) return;
     // An unbound session (legacy `SessionStore.create`) has already been checked by the
     // double-submit comparison above; a bound one must also match its stored token.
     if (session.csrfToken && !tokensMatch(session.csrfToken, headerToken)) {

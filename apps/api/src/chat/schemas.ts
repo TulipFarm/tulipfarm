@@ -39,6 +39,25 @@ export const MessageSchema = {
                   result: {},
                 },
               },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["type", "artifactId", "revision"],
+                properties: {
+                  type: { const: "surface" },
+                  artifactId: { type: "string" },
+                  revision: { type: "integer", minimum: 1 },
+                },
+              },
+              {
+                type: "object",
+                additionalProperties: false,
+                required: ["type", "message"],
+                properties: {
+                  type: { const: "surface-unavailable" },
+                  message: { const: "Legacy presentation unavailable" },
+                },
+              },
             ],
           },
         },

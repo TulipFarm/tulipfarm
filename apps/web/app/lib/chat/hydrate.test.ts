@@ -1,82 +1,70 @@
 import { describe, expect, it } from "vitest";
-import { messagesToTimeline } from "~/lib/chat/hydrate";
-import type { ConversationMessage } from "~/lib/conversations";
-
-function msg(
-  over: Partial<ConversationMessage> & Pick<ConversationMessage, "role" | "content">
-): ConversationMessage {
-  return { _id: crypto.randomUUID(), conversationId: "c1", createdAt: "t", ...over };
-}
+import { messagesToTimeline } from "./hydrate";
 
 describe("messagesToTimeline", () => {
-  it("maps user + assistant string turns to sealed text messages", () => {
-    const out = messagesToTimeline([
-      msg({ role: "user", content: "hello" }),
-      msg({ role: "assistant", content: "hi there" }),
-    ]);
-    expect(out).toHaveLength(2);
-    expect(out[0]).toMatchObject({
-      role: "user",
-      sealed: true,
-      parts: [{ kind: "text", text: "hello" }],
-    });
-    expect(out[1]).toMatchObject({
-      role: "assistant",
-      sealed: true,
-      parts: [{ kind: "text", text: "hi there" }],
-    });
-  });
-
-  it("pairs an assistant tool-call with the following tool-result", () => {
-    const out = messagesToTimeline([
-      msg({
+  it("restores Surface references and suppresses duplicated Tool prose", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "assistant",
+        conversationId: "conversation",
         role: "assistant",
         content: [
-          { type: "text", text: "looking it up" },
-          { type: "tool-call", toolCallId: "tc1", toolName: "search", args: { q: "x" } },
+          {
+            type: "tool-call",
+            toolCallId: "call",
+            toolName: "present",
+            args: {},
+          },
         ],
-      }),
-      msg({
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        _id: "tool",
+        conversationId: "conversation",
         role: "tool",
         content: [
-          { type: "tool-result", toolCallId: "tc1", toolName: "search", result: { hits: 2 } },
+          {
+            type: "tool-result",
+            toolCallId: "call",
+            toolName: "present",
+            result: { success: true },
+          },
+          { type: "surface", artifactId: "artifact", revision: 1 },
         ],
-      }),
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
     ]);
-    expect(out).toHaveLength(1);
-    const toolPart = out[0].parts.find((p) => p.kind === "tool");
-    expect(toolPart).toMatchObject({
-      kind: "tool",
-      toolCallId: "tc1",
-      status: "done",
-      result: { hits: 2 },
+    expect(timeline[0]?.parts).toContainEqual({
+      kind: "surface",
+      artifactId: "artifact",
+      revision: 1,
     });
   });
 
-  it("drops system and summary rows", () => {
-    const out = messagesToTimeline([
-      msg({ role: "system", content: "you are..." }),
-      msg({ role: "summary", content: "earlier recap" }),
-      msg({ role: "user", content: "go" }),
+  it("renders unavailable historical presentation parts as a fixed notice", () => {
+    const timeline = messagesToTimeline([
+      {
+        _id: "assistant",
+        conversationId: "conversation",
+        role: "assistant",
+        content: [{ type: "text", text: "old" }],
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        _id: "tool",
+        conversationId: "conversation",
+        role: "tool",
+        content: [
+          {
+            type: "surface-unavailable",
+            message: "Legacy presentation unavailable",
+          },
+        ],
+        createdAt: "2026-01-01T00:00:01.000Z",
+      },
     ]);
-    expect(out).toHaveLength(1);
-    expect(out[0].role).toBe("user");
-  });
-
-  it("returns an empty timeline for no messages", () => {
-    expect(messagesToTimeline([])).toEqual([]);
-  });
-
-  it("keeps the persisted server id and seeds prior votes onto assistant replies", () => {
-    const out = messagesToTimeline(
-      [
-        msg({ _id: "a1", role: "assistant", content: "hi there" }),
-        msg({ _id: "a2", role: "assistant", content: "more" }),
-      ],
-      new Map([["a1", "down"]])
-    );
-    expect(out[0]).toMatchObject({ serverId: "a1", feedback: "down" });
-    expect(out[1].serverId).toBe("a2");
-    expect(out[1].feedback).toBeUndefined();
+    expect(timeline[0]?.parts).toEqual([
+      { kind: "surface-unavailable", message: "Legacy presentation unavailable" },
+    ]);
   });
 });

@@ -1,15 +1,9 @@
 /*
  * Shared design-token contract — the single source of truth for theme tokens.
  *
- * Consumed in two places:
- *  1. The shell, via `@import "./tokens.css"` in app.css.
- *  2. Future A2UI iframes, injected verbatim as an inline `<style>` (import this file
- *     with `?raw` and embed it in the srcdoc <head>) so sandboxed agent content shares
- *     the same tokens without a network round-trip.
- *
- * Plain CSS custom properties only — NO Tailwind at-rules — so the file is portable into
- * a non-Tailwind iframe document as-is. Dark mode swaps via [data-theme="dark"] on <html>
- * in both contexts (AC-V1-005).
+ * Consumed by the shell and native TSP React components through app.css.
+ * Plain CSS custom properties only — NO Tailwind at-rules. Dark mode swaps via
+ * [data-theme="dark"] on <html> (AC-V1-005).
  *
  * OpenCode-terminal palette with ruby brand discipline (UI-V1-006 design direction):
  * warm cream canvas + warm near-black ink for body; ruby reserved for brand/primary;

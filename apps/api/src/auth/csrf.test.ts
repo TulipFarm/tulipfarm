@@ -1,7 +1,8 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
-import { CSRF_COOKIE, CSRF_HEADER, csrfHook, generateCsrfToken } from "./csrf";
+import { CSRF_COOKIE, CSRF_HEADER, csrfHook, generateCsrfToken, makeCsrfHook } from "./csrf";
 import { SESSION_COOKIE } from "./middleware";
+import type { SessionStore } from "./session-store";
 
 function makeReq(
   opts: {
@@ -120,5 +121,41 @@ describe("csrfHook", () => {
       await csrfHook(req, reply);
       expect(reply.code).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("makeCsrfHook", () => {
+  it("passes a matching double-submit token when the session no longer exists (stale cookie) — requireAuth handles rejection", async () => {
+    const store = { read: vi.fn().mockResolvedValue(null) } as unknown as SessionStore;
+    const boundCsrfHook = makeCsrfHook(store);
+    const token = generateCsrfToken();
+    const req = makeReq({ sessionCookie: "stale-sid", csrfCookie: token, csrfHeader: token });
+    const reply = makeReply();
+    await boundCsrfHook(req, reply);
+    expect(reply.code).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 when the session exists and its stored csrfToken does not match the header", async () => {
+    const store = {
+      read: vi.fn().mockResolvedValue({ csrfToken: "server-side-token" }),
+    } as unknown as SessionStore;
+    const boundCsrfHook = makeCsrfHook(store);
+    const token = generateCsrfToken();
+    const req = makeReq({ sessionCookie: "sid", csrfCookie: token, csrfHeader: token });
+    const reply = makeReply();
+    await boundCsrfHook(req, reply);
+    expect(reply.code).toHaveBeenCalledWith(403);
+  });
+
+  it("passes when the session exists and its stored csrfToken matches the header", async () => {
+    const token = generateCsrfToken();
+    const store = {
+      read: vi.fn().mockResolvedValue({ csrfToken: token }),
+    } as unknown as SessionStore;
+    const boundCsrfHook = makeCsrfHook(store);
+    const req = makeReq({ sessionCookie: "sid", csrfCookie: token, csrfHeader: token });
+    const reply = makeReply();
+    await boundCsrfHook(req, reply);
+    expect(reply.code).not.toHaveBeenCalled();
   });
 });

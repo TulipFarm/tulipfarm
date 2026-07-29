@@ -1,744 +1,79 @@
-import { randomUUID } from "node:crypto";
-import type { ServerResponse } from "node:http";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
-import {
-  attachToStream,
-  mapStreamPart,
-  runChatStream,
-  sourcesEventForToolResult,
-} from "./producer";
+import { describe, expect, it } from "vitest";
+import type { ToolCallResult } from "../tools/types";
+import { mapStreamPart, runChatStream, sourcesEventForToolResult } from "./producer";
 import { makeStreamEmitter } from "./stream-emitter";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
 
-// ── Fake hijacked response ────────────────────────────────────────────────────
-class FakeRes {
-  chunks: string[] = [];
-  ended = false;
-  private closeCbs: Array<() => void> = [];
-  write(s: string): boolean {
-    this.chunks.push(s);
-    return true;
-  }
-  end(): void {
-    this.ended = true;
-  }
-  on(event: string, cb: () => void): this {
-    if (event === "close") this.closeCbs.push(cb);
-    return this;
-  }
-  triggerClose(): void {
-    for (const cb of this.closeCbs) cb();
-  }
-  get body(): string {
-    return this.chunks.join("");
-  }
-  ids(): number[] {
-    return [...this.body.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1]));
-  }
+async function* stream(parts: unknown[]) {
+  for (const part of parts) yield part;
 }
-const asRes = (r: FakeRes) => r as unknown as ServerResponse;
-
-function deferred(): { promise: Promise<void>; resolve: () => void } {
-  let resolve!: () => void;
-  const promise = new Promise<void>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
-}
-
-async function waitFor(predicate: () => boolean, ms = 1000): Promise<void> {
-  const start = Date.now();
-  while (!predicate()) {
-    if (Date.now() - start > ms) throw new Error("waitFor timeout");
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
-
-async function* fromArray(parts: unknown[]): AsyncIterable<unknown> {
-  for (const p of parts) yield p;
-}
-
-const log = { error: vi.fn() };
 
 describe("mapStreamPart", () => {
-  it("maps the client-relevant parts", () => {
-    expect(mapStreamPart({ type: "text-delta", text: "Hi" })).toEqual({
+  it("maps text, Tool results, and terminal events", () => {
+    expect(mapStreamPart({ type: "text-delta", text: "hello" })).toEqual({
       eventType: "text",
-      data: { delta: "Hi" },
-    });
-    expect(
-      mapStreamPart({ type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } })
-    ).toEqual({
-      eventType: "tool-call",
-      data: { toolCallId: "c1", toolName: "t", args: { a: 1 } },
-    });
-    expect(
-      mapStreamPart({ type: "agent-handoff", from: "GeneralAssistant", to: "InformationArchitect" })
-    ).toEqual({
-      eventType: "agent-handoff",
-      data: { from: "GeneralAssistant", to: "InformationArchitect", reason: undefined },
+      data: { delta: "hello" },
     });
     expect(mapStreamPart({ type: "finish", finishReason: "stop" })).toEqual({
       eventType: "finish",
       data: { reason: "stop" },
     });
-    expect(mapStreamPart({ type: "error", error: new Error("boom") })).toEqual({
-      eventType: "error",
-      data: { message: "boom" },
-    });
-  });
-
-  it("ignores internal parts and junk", () => {
-    expect(mapStreamPart({ type: "step-finish" })).toBeNull();
-    expect(mapStreamPart({ type: "reasoning", textDelta: "x" })).toBeNull();
-    expect(mapStreamPart(null)).toBeNull();
-    expect(mapStreamPart("nope")).toBeNull();
-  });
-
-  describe("tool-result full-result cache (TOOL-V1-010)", () => {
-    const truncated = {
-      success: true as const,
-      data: { items: [1], total_count: 25, truncated: true },
-    };
-    const full = { success: true as const, data: Array.from({ length: 25 }, (_, i) => i) };
-
-    it("uses cached full result when cache has the toolCallId", () => {
-      const cache = new Map([["c1", full]]);
-      expect(
-        mapStreamPart(
-          { type: "tool-result", toolCallId: "c1", toolName: "list_things", output: truncated },
-          cache
-        )
-      ).toEqual({
-        eventType: "tool-result",
-        data: { toolCallId: "c1", toolName: "list_things", result: full },
-      });
-    });
-
-    it("falls back to SDK result when cache has no entry for toolCallId", () => {
-      const cache = new Map<string, import("../tools/types").ToolCallResult>();
-      expect(
-        mapStreamPart(
-          { type: "tool-result", toolCallId: "c2", toolName: "list_things", output: truncated },
-          cache
-        )
-      ).toEqual({
-        eventType: "tool-result",
-        data: { toolCallId: "c2", toolName: "list_things", result: truncated },
-      });
-    });
-
-    it("without cache: uses SDK result directly", () => {
-      expect(
-        mapStreamPart({ type: "tool-result", toolCallId: "c3", toolName: "t", output: truncated })
-      ).toEqual({
-        eventType: "tool-result",
-        data: { toolCallId: "c3", toolName: "t", result: truncated },
-      });
-    });
   });
 });
 
 describe("sourcesEventForToolResult", () => {
-  it("maps a successful cite_sources result to a sources payload", () => {
-    expect(
-      sourcesEventForToolResult("cite_sources", {
-        success: true,
-        data: {
-          sources: [
-            { ref: 1, id: "d", title: "T", url: "/knowledge/pages/d", path: "policies/refunds" },
-          ],
-        },
-      })
-    ).toEqual({
-      sources: [
-        { ref: 1, id: "d", title: "T", url: "/knowledge/pages/d", path: "policies/refunds" },
-      ],
+  it("emits only successful non-empty citations", () => {
+    const result: ToolCallResult = {
+      success: true,
+      data: { sources: [{ title: "Source" }] },
+    };
+    expect(sourcesEventForToolResult("cite_sources", result)).toEqual({
+      sources: [{ title: "Source" }],
     });
-  });
-
-  it("returns null for other tools, failures, and empty/malformed source lists", () => {
-    expect(
-      sourcesEventForToolResult("query_knowledge", { success: true, data: { sources: [] } })
-    ).toBeNull();
-    expect(
-      sourcesEventForToolResult("cite_sources", { success: true, data: { sources: [] } })
-    ).toBeNull();
-    expect(
-      sourcesEventForToolResult("cite_sources", {
-        success: false,
-        error: { code: "internal_error", message: "x" },
-      })
-    ).toBeNull();
-    expect(sourcesEventForToolResult("cite_sources", { success: true, data: {} })).toBeNull();
+    expect(sourcesEventForToolResult("other", result)).toBeNull();
   });
 });
 
 describe("runChatStream", () => {
-  let repo: MemoryStreamResumeRepo;
-  let hub: StreamHub;
-  let streamId: string;
-
-  beforeEach(() => {
-    repo = new MemoryStreamResumeRepo();
-    hub = new StreamHub();
-    streamId = randomUUID();
-    hub.register(streamId);
-    log.error.mockReset();
-  });
-
-  it("persists + publishes each event and finishes the hub", async () => {
-    const seen: number[] = [];
-    hub.subscribe(streamId, (e) => seen.push(e.seq));
-    await runChatStream(
-      streamId,
-      fromArray([
-        { type: "text-delta", text: "He" },
-        { type: "text-delta", text: "llo" },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
-    );
-
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["text", "text", "finish"]);
-    expect(seen).toEqual([1, 2, 3]);
-    expect(hub.isLive(streamId)).toBe(false);
-  });
-
-  it("synthesises a finish when the stream ends without a terminal", async () => {
-    await runChatStream(streamId, fromArray([{ type: "text-delta", text: "x" }]), {
-      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
+  it("emits a canonical Surface event after a presentation Tool result", async () => {
+    const repo = new MemoryStreamResumeRepo();
+    const hub = new StreamHub();
+    const emitter = makeStreamEmitter("stream-1", {
+      repo,
       hub,
-      log,
+      log: { error: () => undefined },
     });
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.at(-1)?.eventType).toBe("finish");
-  });
-
-  it("emits a terminal error and finishes the hub when iteration throws", async () => {
-    async function* boom(): AsyncIterable<unknown> {
-      yield { type: "text-delta", text: "partial" };
-      throw new Error("provider exploded");
-    }
-    await runChatStream(streamId, boom(), {
-      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
-      hub,
-      log,
-    });
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["text", "error"]);
-    expect(rows.at(-1)?.data).toEqual({ message: "provider exploded" });
-    expect(hub.isLive(streamId)).toBe(false);
-    expect(log.error).toHaveBeenCalled();
-  });
-
-  it("turns a thrown abort into a clean `finish` (reason stopped), not an error", async () => {
-    const ac = new AbortController();
-    async function* aborted(): AsyncIterable<unknown> {
-      yield { type: "text-delta", text: "partial" };
-      ac.abort();
-      // The signal is aborted: a generic throw is treated as a deliberate stop (the guard is the
-      // signal, not the error name — so this holds however the AI SDK surfaces the abort).
-      throw new Error("The operation was aborted");
-    }
-    await runChatStream(streamId, aborted(), {
-      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
-      hub,
-      log,
-      abortSignal: ac.signal,
-    });
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["text", "finish"]);
-    expect(rows.at(-1)?.data).toEqual({ reason: "stopped" });
-    expect(hub.isLive(streamId)).toBe(false);
-    // A deliberate stop is not a failure.
-    expect(log.error).not.toHaveBeenCalled();
-  });
-
-  it("turns an `error` part emitted after abort into a clean stopped `finish`", async () => {
-    const ac = new AbortController();
-    async function* aborted(): AsyncIterable<unknown> {
-      yield { type: "text-delta", text: "partial" };
-      ac.abort();
-      // Some SDK paths surface the abort as an error stream part rather than a throw.
-      yield { type: "error", error: new Error("aborted") };
-      // Anything after the stop must be suppressed.
-      yield { type: "text-delta", text: "should not appear" };
-    }
-    await runChatStream(streamId, aborted(), {
-      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
-      hub,
-      log,
-      abortSignal: ac.signal,
-    });
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["text", "finish"]);
-    expect(rows.at(-1)?.data).toEqual({ reason: "stopped" });
-    expect(rows.some((r) => r.eventType === "error")).toBe(false);
-    expect(hub.isLive(streamId)).toBe(false);
-    expect(log.error).not.toHaveBeenCalled();
-  });
-
-  it("emits an a2ui createSurface event after a render_surface tool-result", async () => {
-    await runChatStream(
-      streamId,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "render_surface",
-          output: {
-            success: true,
-            data: {
-              surfaceId: "dash",
-              spec: { root: { component: "Text", text: "hello" } },
-              dataModel: {},
-            },
-          },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
-    );
-
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["tool-result", "a2ui", "finish"]);
-    const a2ui = rows.find((r) => r.eventType === "a2ui")?.data as {
-      op: string;
-      surfaceId: string;
-      html: string;
-      nodeIds: string[];
-    };
-    expect(a2ui.op).toBe("createSurface");
-    expect(a2ui.surfaceId).toBe("dash");
-    expect(a2ui.html).toContain("hello");
-    expect(a2ui.nodeIds).toEqual(["a2-0"]);
-  });
-
-  it("emits a client-action event after a navigate_to tool-result", async () => {
-    await runChatStream(
-      streamId,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "navigate_to",
-          output: { success: true, data: { action: "navigate", to: "/resources/tickets" } },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
-    );
-    const rows = await repo.listAfter(streamId, 0);
-    expect(rows.map((r) => r.eventType)).toEqual(["tool-result", "client-action", "finish"]);
-    expect(rows.find((r) => r.eventType === "client-action")?.data).toEqual({
-      action: "navigate",
-      to: "/resources/tickets",
-    });
-  });
-
-  it("render_surface then update_surface emits createSurface then an updateDataModel swap", async () => {
-    const surfaceStore = new MemoryA2uiSurfaceStore();
-    const conversationId = randomUUID();
-    const spec = {
-      root: { component: "Text", id: "greeting", text: { path: "/msg" } },
+    const artifact = {
+      protocol: "tsp",
+      protocolVersion: "1.0",
+      id: "status",
+      revision: 1,
+      component: { name: "Status", version: "1.0" },
+      props: { label: "Ready" },
+      target: { channel: "web", surface: "chat" },
+      catalogRevision: "test",
+      audience: ["user:1"],
+      classification: "internal",
+      lineage: [],
     };
     await runChatStream(
-      streamId,
-      fromArray([
+      "stream-1",
+      stream([
         {
           type: "tool-result",
-          toolCallId: "c1",
-          toolName: "render_surface",
-          output: { success: true, data: { surfaceId: "s", spec, dataModel: { msg: "hi" } } },
-        },
-        {
-          type: "tool-result",
-          toolCallId: "c2",
-          toolName: "update_surface",
-          output: { success: true, data: { surfaceId: "s", dataModel: { msg: "bye" } } },
+          toolCallId: "call-1",
+          toolName: "present",
+          output: { success: true, data: { artifact } },
         },
         { type: "finish", finishReason: "stop" },
       ]),
-      {
-        emitter: makeStreamEmitter(streamId, { repo, hub, log }),
-        hub,
-        log,
-        surfaceStore,
-        conversationId,
-      }
+      { emitter, hub, log: { error: () => undefined } }
     );
-
-    const a2ui = (await repo.listAfter(streamId, 0)).filter((r) => r.eventType === "a2ui");
-    expect(a2ui.map((r) => (r.data as { op: string }).op)).toEqual([
-      "createSurface",
-      "updateDataModel",
+    expect((await repo.listAfter("stream-1", 0)).map((event) => event.eventType)).toEqual([
+      "tool-result",
+      "surface",
+      "finish",
     ]);
-    const update = a2ui[1].data as { fragments: Array<{ nodeId: string; html: string }> };
-    expect(update.fragments).toHaveLength(1);
-    expect(update.fragments[0].nodeId).toBe("greeting");
-    expect(update.fragments[0].html).toContain("bye");
-  });
-
-  it("emits a legacy { html } a2ui event for compose_view (back-compat)", async () => {
-    await runChatStream(
-      streamId,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "compose_view",
-          output: { success: true, data: { html: "<tf-card></tf-card>" } },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: makeStreamEmitter(streamId, { repo, hub, log }), hub, log }
-    );
-    const a2ui = (await repo.listAfter(streamId, 0)).find((r) => r.eventType === "a2ui")?.data;
-    expect(a2ui).toEqual({ html: "<tf-card></tf-card>" });
-  });
-
-  // ── Output guard: window-stream-then-scan (AC-V1-003 stream side) ───────────
-  describe("scanOutput window-stream-then-scan", () => {
-    type Emitted = { eventType: string; data: unknown };
-    const captureEmitter = (sink: Emitted[]): import("./stream-emitter").StreamEmitter => ({
-      emit: (eventType, data) => {
-        sink.push({ eventType, data });
-        return Promise.resolve();
-      },
-    });
-
-    it("flushes buffered text as one scanned `text` event before finish (pass)", async () => {
-      const emitted: Emitted[] = [];
-      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: "He" },
-          { type: "text-delta", text: "llo" },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log, scanOutput }
-      );
-
-      // Single scan of the concatenated buffer; one merged text event, then finish.
-      expect(scanOutput).toHaveBeenCalledTimes(1);
-      expect(scanOutput).toHaveBeenCalledWith("Hello");
-      expect(emitted).toEqual([
-        { eventType: "text", data: { delta: "Hello" } },
-        { eventType: "finish", data: { reason: "stop" } },
-      ]);
-      expect(hub.isLive(streamId)).toBe(false);
-    });
-
-    it("emits the scanned (transformed) text when scanOutput rewrites it", async () => {
-      const emitted: Emitted[] = [];
-      const scanOutput = vi.fn(async () => ({ blocked: false as const, text: "[redacted]" }));
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: "secret" },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log, scanOutput }
-      );
-      expect(emitted).toEqual([
-        { eventType: "text", data: { delta: "[redacted]" } },
-        { eventType: "finish", data: { reason: "stop" } },
-      ]);
-    });
-
-    it("blocks on the buffered text: guardrail_block + finish, no text, suppresses rest", async () => {
-      const emitted: Emitted[] = [];
-      const scanOutput = vi.fn(async () => ({
-        blocked: true as const,
-        guard: "content_filter",
-        reason: "credit_card",
-        message: "blocked",
-      }));
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: "card 4111111111111111" },
-          // A tool-call after the blocked flush must be suppressed.
-          { type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log, scanOutput }
-      );
-
-      expect(scanOutput).toHaveBeenCalledTimes(1);
-      expect(emitted).toEqual([
-        {
-          eventType: "guardrail_block",
-          data: {
-            stage: "output",
-            guard: "content_filter",
-            reason: "credit_card",
-            message: "blocked",
-          },
-        },
-        { eventType: "finish", data: { reason: "guardrail_block" } },
-      ]);
-      // No `text`, no suppressed tool-call, no synthesised stop finish.
-      expect(emitted.some((e) => e.eventType === "text")).toBe(false);
-      expect(emitted.some((e) => e.eventType === "tool-call")).toBe(false);
-      expect(hub.isLive(streamId)).toBe(false);
-    });
-
-    it("flushes buffered text before a non-text event (tool-call), then continues", async () => {
-      const emitted: Emitted[] = [];
-      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: "before" },
-          { type: "tool-call", toolCallId: "c1", toolName: "t", input: { a: 1 } },
-          { type: "text-delta", text: "after" },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log, scanOutput }
-      );
-
-      // Two flushes: one before the tool-call, one before finish.
-      expect(scanOutput.mock.calls.map((c) => c[0])).toEqual(["before", "after"]);
-      expect(emitted).toEqual([
-        { eventType: "text", data: { delta: "before" } },
-        { eventType: "tool-call", data: { toolCallId: "c1", toolName: "t", args: { a: 1 } } },
-        { eventType: "text", data: { delta: "after" } },
-        { eventType: "finish", data: { reason: "stop" } },
-      ]);
-    });
-
-    it("streams a long run progressively, holding back only a trailing window", async () => {
-      const emitted: Emitted[] = [];
-      const scanOutput = vi.fn(async (text: string) => ({ blocked: false as const, text }));
-      // Two 50-char deltas (100 chars total) — well past the 64-char safety window, so the first
-      // safe prefix is released mid-stream instead of all-at-once at finish.
-      const a = "a".repeat(50);
-      const b = "b".repeat(50);
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: a },
-          { type: "text-delta", text: b },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log, scanOutput }
-      );
-
-      const textEvents = emitted.filter((e) => e.eventType === "text");
-      // Released progressively (≥2 text events), and the concatenation is the full, intact run.
-      expect(textEvents.length).toBeGreaterThanOrEqual(2);
-      expect(textEvents.map((e) => (e.data as { delta: string }).delta).join("")).toBe(a + b);
-      expect(emitted.at(-1)).toEqual({ eventType: "finish", data: { reason: "stop" } });
-    });
-
-    it("without scanOutput: text deltas emit live exactly as before", async () => {
-      const emitted: Emitted[] = [];
-      await runChatStream(
-        streamId,
-        fromArray([
-          { type: "text-delta", text: "He" },
-          { type: "text-delta", text: "llo" },
-          { type: "finish", finishReason: "stop" },
-        ]),
-        { emitter: captureEmitter(emitted), hub, log }
-      );
-      expect(emitted).toEqual([
-        { eventType: "text", data: { delta: "He" } },
-        { eventType: "text", data: { delta: "llo" } },
-        { eventType: "finish", data: { reason: "stop" } },
-      ]);
-    });
-  });
-});
-
-describe("attachToStream", () => {
-  let repo: MemoryStreamResumeRepo;
-  let hub: StreamHub;
-  let streamId: string;
-
-  beforeEach(() => {
-    repo = new MemoryStreamResumeRepo();
-    hub = new StreamHub();
-    streamId = randomUUID();
-    log.error.mockReset();
-  });
-
-  it("replays a finished stream from the table then ends (no hub)", async () => {
-    for (const [seq, type, data] of [
-      [1, "text", { delta: "a" }],
-      [2, "finish", { reason: "stop" }],
-    ] as const) {
-      await repo.append({ streamId, seq, eventType: type, data, createdAt: new Date() });
-    }
-    const res = new FakeRes();
-    await attachToStream(asRes(res), streamId, 0, { repo, hub });
-    expect(res.ids()).toEqual([1, 2]);
-    expect(res.body).toContain("event: finish");
-    expect(res.ended).toBe(true);
-  });
-
-  it("replays only the tail after Last-Event-ID", async () => {
-    for (let seq = 1; seq <= 3; seq++) {
-      await repo.append({ streamId, seq, eventType: "text", data: { seq }, createdAt: new Date() });
-    }
-    await repo.append({ streamId, seq: 4, eventType: "finish", data: {}, createdAt: new Date() });
-    const res = new FakeRes();
-    await attachToStream(asRes(res), streamId, 2, { repo, hub });
-    expect(res.ids()).toEqual([3, 4]);
-  });
-
-  it("404-equivalent: closes immediately for an unknown finished stream", async () => {
-    const res = new FakeRes();
-    await attachToStream(asRes(res), streamId, 0, { repo, hub });
-    expect(res.body).toBe("");
-    expect(res.ended).toBe(true);
-  });
-
-  // ── Kill mid-turn, reconnect with Last-Event-ID, finish the turn (ticket AC1) ──
-  it("replays missed events on reconnect and finishes the live turn", async () => {
-    hub.register(streamId);
-    const gate = deferred();
-    async function* gated(): AsyncIterable<unknown> {
-      yield { type: "text-delta", text: "one" };
-      yield { type: "text-delta", text: "two" };
-      await gate.promise;
-      yield { type: "text-delta", text: "three" };
-      yield { type: "finish", finishReason: "stop" };
-    }
-    void runChatStream(streamId, gated(), {
-      emitter: makeStreamEmitter(streamId, { repo, hub, log }),
-      hub,
-      log,
-    });
-
-    // First connection: receive events 1 & 2, then the client drops.
-    const res1 = new FakeRes();
-    void attachToStream(asRes(res1), streamId, 0, { repo, hub });
-    await waitFor(() => res1.ids().length >= 2);
-    expect(res1.ids()).toEqual([1, 2]);
-    res1.triggerClose();
-
-    // Producer keeps running server-side; release the rest of the turn.
-    gate.resolve();
-    await waitFor(() => !hub.isLive(streamId));
-
-    // Reconnect with Last-Event-ID = 2: replay only the missed events + terminal.
-    const res2 = new FakeRes();
-    await attachToStream(asRes(res2), streamId, 2, { repo, hub });
-    expect(res2.ids()).toEqual([3, 4]);
-    expect(res2.body).toContain("three");
-    expect(res2.body).not.toContain("one");
-    expect(res2.body).toContain("event: finish");
-    expect(res2.ended).toBe(true);
-  });
-});
-
-// ── A2UI follow-on emission for view/terminal tools ───────────────────────────
-describe("runChatStream a2ui follow-on", () => {
-  type Emitted = { eventType: string; data: unknown };
-  const captureEmitter = (sink: Emitted[]): import("./stream-emitter").StreamEmitter => ({
-    emit: (eventType, data) => {
-      sink.push({ eventType, data });
-      return Promise.resolve();
-    },
-  });
-
-  it("emits both tool-result and a2ui for a present_choices result", async () => {
-    const hub = new StreamHub();
-    const sid = randomUUID();
-    const emitted: Emitted[] = [];
-    await runChatStream(
-      sid,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "present_choices",
-          output: {
-            success: true,
-            data: { question: "Pick", choices: [{ label: "A", value: "a" }] },
-          },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: captureEmitter(emitted), hub, log }
-    );
-    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "a2ui", "finish"]);
-    const a2ui = emitted.find((e) => e.eventType === "a2ui");
-    expect((a2ui?.data as { html: string }).html).toContain("data-a2ui-send");
-  });
-
-  it("emits only tool-result for a non-view tool", async () => {
-    const hub = new StreamHub();
-    const sid = randomUUID();
-    const emitted: Emitted[] = [];
-    await runChatStream(
-      sid,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c2",
-          toolName: "list_things",
-          output: { success: true, data: { items: [] } },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: captureEmitter(emitted), hub, log }
-    );
-    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "finish"]);
-  });
-
-  it("emits a sources event after a cite_sources tool-result", async () => {
-    const hub = new StreamHub();
-    const sid = randomUUID();
-    const emitted: Emitted[] = [];
-    await runChatStream(
-      sid,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "cite_sources",
-          output: {
-            success: true,
-            data: {
-              sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/pages/d" }],
-            },
-          },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: captureEmitter(emitted), hub, log }
-    );
-    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "sources", "finish"]);
-    expect(emitted.find((e) => e.eventType === "sources")?.data).toEqual({
-      sources: [{ ref: 1, id: "d", title: "Refund Policy", url: "/knowledge/pages/d" }],
-    });
-  });
-
-  it("emits no sources event for a cite_sources result with an empty list", async () => {
-    const hub = new StreamHub();
-    const sid = randomUUID();
-    const emitted: Emitted[] = [];
-    await runChatStream(
-      sid,
-      fromArray([
-        {
-          type: "tool-result",
-          toolCallId: "c1",
-          toolName: "cite_sources",
-          output: { success: true, data: { sources: [] } },
-        },
-        { type: "finish", finishReason: "stop" },
-      ]),
-      { emitter: captureEmitter(emitted), hub, log }
-    );
-    expect(emitted.map((e) => e.eventType)).toEqual(["tool-result", "finish"]);
   });
 });

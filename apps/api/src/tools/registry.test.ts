@@ -1,11 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
-import { type RunToolCallGuard, TOOL_TIMEOUT_MS, ToolRegistry } from "../broker/tool-adapter";
+import {
+  MAX_PRESENTATION_CORRECTIVE_ATTEMPTS,
+  type RunToolCallGuard,
+  TOOL_TIMEOUT_MS,
+  ToolRegistry,
+} from "../broker/tool-adapter";
 import { BatchCoordinator } from "./batch-executor";
 import type {
   ApprovalDecision,
   ApprovalGate,
   ApprovalRequestInfo,
   RequestContext,
+  ToolCallResult,
   ToolDef,
 } from "./types";
 
@@ -220,6 +226,70 @@ describe("ToolRegistry", () => {
       expect(execute).not.toHaveBeenCalled();
     });
 
+    it("reports all useful argument errors instead of forcing field-by-field corrections", async () => {
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "strict_shape",
+          inputSchema: {
+            type: "object",
+            required: ["name", "version"],
+            properties: {
+              name: { type: "string" },
+              version: { type: "string" },
+            },
+          },
+        })
+      );
+      const result = await reg
+        .buildToolSet(ctx)
+        .strict_shape.execute?.({}, { messages: [], context: undefined, toolCallId: "tc-errors" });
+
+      expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+      expect(JSON.stringify(result)).toContain("name");
+      expect(JSON.stringify(result)).toContain("version");
+    });
+
+    it("enforces the presentation correction limit for one Turn", async () => {
+      const execute = vi.fn(async () => ({ success: true as const, data: "presented" }));
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          name: "present",
+          inputSchema: {
+            type: "object",
+            required: ["component"],
+            properties: { component: { type: "object" } },
+          },
+          execute,
+        })
+      );
+      const presentationContext: RequestContext = {
+        userId: "u1",
+        presentationContext: {
+          target: { channel: "web", surface: "chat" },
+          destination: "conversation:1",
+          rendererCapabilities: [],
+        },
+      };
+      const present = reg.buildToolSet(presentationContext).present;
+      for (let attempt = 0; attempt <= MAX_PRESENTATION_CORRECTIVE_ATTEMPTS; attempt += 1) {
+        const result = await present.execute?.(
+          {},
+          { messages: [], context: undefined, toolCallId: `tc-present-${attempt}` }
+        );
+        expect(result).toMatchObject({ success: false, error: { code: "validation_error" } });
+      }
+      const blocked = await present.execute?.(
+        { component: {} },
+        { messages: [], context: undefined, toolCallId: "tc-present-blocked" }
+      );
+
+      expect(blocked).toMatchObject({ success: false, error: { code: "surface_invalid" } });
+      expect(JSON.stringify(blocked)).toContain("correction limit");
+      expect(execute).not.toHaveBeenCalled();
+    });
+
     it("valid args pass through to execute", async () => {
       const execute = vi.fn(async () => ({ success: true as const, data: "reached" }));
       const reg = new ToolRegistry();
@@ -275,6 +345,32 @@ describe("ToolRegistry", () => {
         { messages: [], context: undefined, toolCallId: "tc-small" }
       );
       expect(result).toEqual({ success: true, data: [1, 2] });
+    });
+
+    it("turns thrown Tool errors into a visible, cached result", async () => {
+      const reg = new ToolRegistry();
+      reg.register(
+        makeTool({
+          execute: async () => {
+            throw new Error("private database detail");
+          },
+        })
+      );
+      const cache = new Map<string, ToolCallResult>();
+      const result = await reg
+        .buildToolSet(ctx, undefined, cache)
+        .test_tool.execute?.({}, { messages: [], context: undefined, toolCallId: "tc-thrown" });
+
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: "internal_error",
+          message:
+            "The Tool could not be completed because the server encountered an internal error.",
+        },
+      });
+      expect(cache.get("tc-thrown")).toEqual(result);
+      expect(JSON.stringify(result)).not.toContain("private database detail");
     });
 
     it("cache not set when args are invalid (validation_error short-circuits)", async () => {

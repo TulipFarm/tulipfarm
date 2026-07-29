@@ -3,7 +3,7 @@
  * These mirror the live backend contract (see the chat route): the wire `ChatEvent` union is what
  * the SSE parser yields, and the timeline (`ChatMessage` / `TimelinePart` / `ChatState`) is the
  * immutable shape components render. Several event kinds are CONTRACT-ONLY (reasoning/plan/task/
- * sources/agent-handoff/a2ui) — typed and reduced now so renderers can light up when the backend
+ * sources/agent-handoff/surface) — typed and reduced now so renderers can light up when the backend
  * starts emitting them. No Zod: validate by hand at the parse boundary.
  */
 
@@ -20,7 +20,7 @@ export type ChatEventType =
   | "task"
   | "sources"
   | "agent-handoff"
-  | "a2ui"
+  | "surface"
   | "client-action"
   | "guardrail_block"
   | "finish"
@@ -58,19 +58,12 @@ export type ChatEvent =
   | { type: "sources"; data: { sources: SourceRef[] } }
   | { type: "agent-handoff"; data: { from?: string; to: string; reason?: string } }
   | {
-      type: "a2ui";
-      // Additive: legacy view tools emit `{ html }`; `render_surface` emits a `createSurface` op with
-      // a surfaceId + node ids; live updates (P2) carry compiled tf-* fragments keyed by node id.
-      data:
-        | { html: string }
-        // createSurface renders a surface; re-emitting it for the same surfaceId replaces it in place
-        // (live structure update). updateDataModel swaps the changed leaf fragments without a rebuild.
-        | { op: "createSurface"; surfaceId: string; html: string; nodeIds?: string[] }
-        | {
-            op: "updateDataModel";
-            surfaceId: string;
-            fragments: Array<{ nodeId: string; html: string }>;
-          };
+      type: "surface";
+      data: {
+        artifact: SurfaceArtifact;
+        actionHandles?: Readonly<Record<string, string>>;
+        resolvedView?: ResolvedSurfaceViewNode;
+      };
     }
   // Imperative agent→client action (navigate, …). Executed by the chat hook, not rendered as a part.
   | { type: "client-action"; data: { action: string; to?: string; reason?: string | null } }
@@ -120,12 +113,14 @@ export type TimelinePart =
   | { kind: "sources"; sources: SourceRef[] }
   | { kind: "agent-handoff"; to: string; from?: string; reason?: string }
   | {
-      kind: "a2ui";
-      html: string;
-      surfaceId?: string;
-      // Pending compiled tf-* fragments (by node id) the frame swaps in without rebuilding (P2).
-      fragments?: Array<{ nodeId: string; html: string }>;
+      kind: "surface";
+      artifactId: string;
+      revision: number;
+      artifact?: SurfaceArtifact;
+      actionHandles?: Readonly<Record<string, string>>;
+      resolvedView?: ResolvedSurfaceViewNode;
     }
+  | { kind: "surface-unavailable"; message: "Legacy presentation unavailable" }
   | {
       kind: "guardrail";
       stage: "input" | "output";
@@ -165,3 +160,5 @@ export type ChatState = {
   currentAgent?: string;
   error?: string;
 };
+
+import type { ResolvedSurfaceViewNode, SurfaceArtifact } from "@tulipfarm/surface";

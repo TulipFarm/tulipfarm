@@ -2,7 +2,6 @@ import type { EventEmitter } from "node:events";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { type A2uiSurfaceStore, MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { DurableApprovalGate } from "../approvals/chat-gate";
 import { ErrorSchema } from "../auth/schemas";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -12,6 +11,8 @@ import type { WorkingMemoryService } from "../memory/service";
 import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import type { BundledSkill } from "../soul/skills/bundled";
+import type { SurfaceActionStore } from "../surfaces/action-store";
+import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "../surfaces/artifact-store";
 import { registerConversationRoutes } from "./conversation-routes";
 import type { ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
@@ -47,7 +48,8 @@ export function registerChatRoutes(
   approvals?: DurableApprovalGate,
   guardrails?: GuardrailsService,
   pendingInteractionRepo?: PendingInteractionRepo,
-  a2uiSurfaceStore?: A2uiSurfaceStore,
+  injectedSurfaceStore?: SurfaceArtifactStore,
+  surfaceActionStore?: SurfaceActionStore,
   invocations?: DurableInvocationGateway,
   bundledSkills?: ReadonlyMap<string, BundledSkill>,
   disabledBundledSkills?: ReadonlySet<string>
@@ -55,11 +57,10 @@ export function registerChatRoutes(
   // One approval gate shared by the chat turn and decision route. Production injects its
   // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
   const approvalRegistry = approvals ?? new DurableApprovalGate();
-  // HITL suspend/resume store (A2UI ask_user). Tests may use the in-memory default; buildApp injects
+  // HITL suspend/resume store. Tests may use the in-memory default; buildApp injects
   // the PostgreSQL-backed repository so production pauses survive restarts.
   const pendingInteractions = pendingInteractionRepo ?? new MemoryPendingInteractionRepo();
-  // A2UI live-surface store: render_surface persists each surface; update_surface diffs + swaps it.
-  const surfaceStore = a2uiSurfaceStore ?? new MemoryA2uiSurfaceStore();
+  const surfaceStore = injectedSurfaceStore ?? new MemorySurfaceArtifactStore();
   // In-flight turns keyed by streamId, so the stop endpoint can abort the LLM mid-stream. Each entry
   // is removed when its producer settles (single-instance V1, mirroring the approval registry).
   const streamControllers = new Map<string, AbortController>();
@@ -81,6 +82,7 @@ export function registerChatRoutes(
     approvalRegistry,
     pendingInteractions,
     surfaceStore,
+    surfaceActionStore,
     streamControllers,
   };
   // Expose the turn context so headless callers (integration ingress worker, wired in index.ts)

@@ -84,25 +84,26 @@ function appendText(
   return [...parts, { kind, text: delta }];
 }
 
-// A2UI surfaces are addressed by `surfaceId` and can be re-rendered / live-updated across turns, so
-// they're located anywhere in the transcript (not just the current message).
-function hasSurface(messages: ChatMessage[], surfaceId: string): boolean {
-  return messages.some((m) => m.parts.some((p) => p.kind === "a2ui" && p.surfaceId === surfaceId));
+function hasSurface(messages: ChatMessage[], artifactId: string): boolean {
+  return messages.some((message) =>
+    message.parts.some((part) => part.kind === "surface" && part.artifactId === artifactId)
+  );
 }
 
-// Replace every a2ui part matching `surfaceId` (across all messages) via `fn`, preserving order.
 function mapSurface(
   messages: ChatMessage[],
-  surfaceId: string,
-  fn: (part: Extract<TimelinePart, { kind: "a2ui" }>) => TimelinePart
+  artifactId: string,
+  fn: (part: Extract<TimelinePart, { kind: "surface" }>) => TimelinePart
 ): ChatMessage[] {
-  return messages.map((m) =>
-    m.parts.some((p) => p.kind === "a2ui" && p.surfaceId === surfaceId)
+  return messages.map((message) =>
+    message.parts.some((part) => part.kind === "surface" && part.artifactId === artifactId)
       ? {
-          ...m,
-          parts: m.parts.map((p) => (p.kind === "a2ui" && p.surfaceId === surfaceId ? fn(p) : p)),
+          ...message,
+          parts: message.parts.map((part) =>
+            part.kind === "surface" && part.artifactId === artifactId ? fn(part) : part
+          ),
         }
-      : m
+      : message
   );
 }
 
@@ -252,39 +253,31 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       };
     }
 
-    case "a2ui": {
-      const d = event.data;
-      // updateDataModel: stash the compiled leaf fragments on the surface part (located anywhere in the
-      // transcript) so the frame swaps them in place without rebuilding. No-op if the surface is gone.
-      if ("op" in d && d.op === "updateDataModel") {
+    case "surface": {
+      const artifact = event.data.artifact;
+      if (hasSurface(state.messages, artifact.id)) {
         return {
           ...state,
           status: "streaming",
-          messages: mapSurface(state.messages, d.surfaceId, (p) => ({
-            ...p,
-            fragments: d.fragments,
+          messages: mapSurface(state.messages, artifact.id, () => ({
+            kind: "surface",
+            artifactId: artifact.id,
+            revision: artifact.revision,
+            artifact,
+            actionHandles: event.data.actionHandles,
+            resolvedView: event.data.resolvedView,
           })),
         };
       }
-      // createSurface for an id already in the transcript REPLACES it in place (a live re-render /
-      // structure change → the frame rebuilds on the new html, clearing any pending fragments).
-      const surfaceId = "op" in d ? d.surfaceId : undefined;
-      if (surfaceId && hasSurface(state.messages, surfaceId)) {
-        return {
-          ...state,
-          status: "streaming",
-          messages: mapSurface(state.messages, surfaceId, () => ({
-            kind: "a2ui",
-            surfaceId,
-            html: d.html,
-          })),
-        };
-      }
-      // A brand-new surface (createSurface) or a legacy { html } block appends a fresh part.
       const { messages, target } = ensureAssistant(state.messages);
-      const part: TimelinePart = surfaceId
-        ? { kind: "a2ui", surfaceId, html: d.html }
-        : { kind: "a2ui", html: d.html };
+      const part: TimelinePart = {
+        kind: "surface",
+        artifactId: artifact.id,
+        revision: artifact.revision,
+        artifact,
+        actionHandles: event.data.actionHandles,
+        resolvedView: event.data.resolvedView,
+      };
       return {
         ...state,
         status: "streaming",

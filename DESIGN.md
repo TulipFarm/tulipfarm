@@ -89,7 +89,7 @@ Ruby is lightened in dark mode (`0.46 → 0.70`) for contrast. The `--ring` toke
 
 ## Dark mode
 
-`[data-theme="dark"]` on `<html>` (not shadcn's `.dark`) so the shell + future A2UI iframes read one
+`[data-theme="dark"]` on `<html>` (not shadcn's `.dark`) so the shell and native Surface components read one
 attribute. Wiring (`apps/web/app/root.tsx`):
 1. **No-flash script** sets `data-theme` from `localStorage.theme` (or system pref) before paint.
 2. **Mount effect** re-asserts it after hydration — SPA React reconciles `<html>` and would otherwise

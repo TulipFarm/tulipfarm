@@ -45,6 +45,24 @@ function sourcesFromResult(result: unknown): SourceRef[] {
 // citations (and inline [n] links) survive a page refresh.
 function mergeToolResults(assistant: ChatMessage, content: WireMessagePart[]): void {
   for (const part of content) {
+    if (part.type === "surface") {
+      assistant.parts = [
+        ...assistant.parts.filter((existing) => existing.kind !== "text"),
+        {
+          kind: "surface",
+          artifactId: part.artifactId,
+          revision: part.revision,
+        },
+      ];
+      continue;
+    }
+    if (part.type === "surface-unavailable") {
+      assistant.parts = [
+        ...assistant.parts.filter((existing) => existing.kind !== "text"),
+        { kind: "surface-unavailable", message: part.message },
+      ];
+      continue;
+    }
     if (part.type !== "tool-result") continue;
     for (const p of assistant.parts) {
       if (p.kind === "tool" && p.toolCallId === part.toolCallId) {
@@ -69,12 +87,15 @@ export function messagesToTimeline(
 ): ChatMessage[] {
   const out: ChatMessage[] = [];
   let lastAssistant: ChatMessage | undefined;
+  let surfaceOnly = false;
   for (const doc of docs) {
     if (doc.role === "user") {
       const text = typeof doc.content === "string" ? doc.content : "";
       out.push({ id: newId(), role: "user", parts: [{ kind: "text", text }], sealed: true });
       lastAssistant = undefined;
+      surfaceOnly = false;
     } else if (doc.role === "assistant") {
+      if (surfaceOnly) continue;
       const message: ChatMessage = {
         id: newId(),
         serverId: doc._id,
@@ -87,6 +108,9 @@ export function messagesToTimeline(
       lastAssistant = message;
     } else if (doc.role === "tool" && lastAssistant && Array.isArray(doc.content)) {
       mergeToolResults(lastAssistant, doc.content);
+      surfaceOnly = doc.content.some(
+        (part) => part.type === "surface" || part.type === "surface-unavailable"
+      );
     }
     // system / summary / orphan tool rows are not part of the rendered timeline.
   }

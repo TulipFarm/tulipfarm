@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { LlmService } from "@tulipfarm/llm";
 import { describe, expect, it, vi } from "vitest";
-import { MemoryA2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { DurableApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
+import { ToolRegistry } from "../broker/tool-adapter";
 import { GuardrailsService } from "../guardrails";
 import type { PaginatedResult } from "../pagination";
 import type { ChatTurnContext } from "../runtime/chat-run";
+import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { runHeadlessChatTurn } from "./headless-chat-turn";
 import type { MessageDoc, MessageRepo } from "./messages";
@@ -112,7 +113,7 @@ function makeCtx(model: LanguageModelV3, guardrails?: GuardrailsService) {
     guardrails,
     approvalRegistry: new DurableApprovalGate(),
     pendingInteractions: new MemoryPendingInteractionRepo(),
-    surfaceStore: new MemoryA2uiSurfaceStore(),
+    surfaceStore: new MemorySurfaceArtifactStore(),
     streamControllers: new Map(),
   };
   return { ctx, repo, messageRepo, streamRepo };
@@ -136,7 +137,20 @@ const log = {
 
 describe("runHeadlessChatTurn", () => {
   it("runs a turn and returns the concatenated final text", async () => {
-    const { ctx, repo, messageRepo } = makeCtx(makeFakeModel(["Hello", " from", " TulipFarm"]));
+    const model = makeFakeModel(["Hello", " from", " TulipFarm"]);
+    const { ctx, repo, messageRepo } = makeCtx(model);
+    const registry = new ToolRegistry();
+    for (const name of ["present", "query_knowledge"]) {
+      registry.register({
+        name,
+        tier: "platform",
+        mutating: false,
+        description: `${name} description`,
+        inputSchema: { type: "object", properties: {} },
+        execute: async () => ({ success: true, data: {} }),
+      });
+    }
+    ctx.toolRegistry = registry;
     const result = await runHeadlessChatTurn(ctx, {
       user,
       body: { message: { role: "user", content: "hi there" } },
@@ -150,6 +164,10 @@ describe("runHeadlessChatTurn", () => {
     const roles = messageRepo.docs.map((d) => d.role);
     expect(roles).toContain("user");
     expect(roles).toContain("assistant");
+    const providerRequest = JSON.stringify((model.doStream as ReturnType<typeof vi.fn>).mock.calls);
+    expect(providerRequest).not.toContain("<surface-catalog>");
+    expect(providerRequest).not.toContain('"present"');
+    expect(providerRequest).toContain("query_knowledge");
   });
 
   it("continues an existing conversation when conversationId is supplied", async () => {

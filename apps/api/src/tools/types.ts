@@ -2,6 +2,8 @@ export type ToolTier = "system" | "platform" | "integration";
 
 export type ToolErrorCode =
   | "validation_error"
+  | "surface_invalid"
+  | "presentation_unavailable"
   | "oversize_value"
   | "not_found"
   | "internal_error"
@@ -20,8 +22,7 @@ export const err = (code: ToolErrorCode, message: string): ToolCallResult => ({
 
 /** Chat autonomy mode for a turn (mirrors the POST /chat request field). */
 export type ChatAutonomy = "full" | "supervised" | "approval-required" | "manual";
-
-/** A read-only snapshot of what the user is looking at, sent with the chat request (A2UI P3). */
+/** A read-only snapshot of what the user is looking at, sent with the Chat request. */
 export interface ClientContext {
   /** Current route (pathname + search), e.g. "/resources/tickets/TICK-1042". */
   route?: string;
@@ -32,6 +33,18 @@ export interface ClientContext {
 /** Per-request caller identity. Service references are closed over at registration time. */
 export interface RequestContext {
   userId: string;
+  /** Server-resolved target. Request payloads cannot override it. */
+  presentationContext?: PresentationContext;
+  surfaceCatalog?: readonly SurfaceComponentDefinition[];
+  surfaceCatalogRevision?: string;
+  surfaceRendererManifest?: SurfaceRendererManifest;
+  surfaceComponents?: readonly SoulSurfaceComponent[];
+  conversationId?: string;
+  surfaceStore?: SurfaceArtifactStore;
+  surfaceActionStore?: SurfaceActionStore;
+  guardrailRevision?: string;
+  runId?: string;
+  events?: EventEmitter;
   agentId?: string;
   autonomy?: ChatAutonomy;
   /** What the user is viewing this turn — read by the `get_client_context` frontend tool. */
@@ -57,6 +70,8 @@ export interface ToolDef {
   description: string;
   /** Plain JSON Schema — fed to AJV in the handler and to jsonSchema() for the LLM API. */
   inputSchema: Record<string, unknown>;
+  /** Builds a target-scoped schema without exposing cross-channel component vocabulary. */
+  inputSchemaFor?: (ctx: RequestContext) => Record<string, unknown>;
   execute: (args: unknown, ctx: RequestContext) => Promise<ToolCallResult>;
   requiresApproval?: boolean;
 }
@@ -76,3 +91,13 @@ export interface ApprovalRequestInfo {
 export interface ApprovalGate {
   request(info: ApprovalRequestInfo): Promise<ApprovalDecision>;
 }
+
+import type { EventEmitter } from "node:events";
+import type {
+  PresentationContext,
+  SoulSurfaceComponent,
+  SurfaceComponentDefinition,
+  SurfaceRendererManifest,
+} from "@tulipfarm/surface";
+import type { SurfaceActionStore } from "../surfaces/action-store";
+import type { SurfaceArtifactStore } from "../surfaces/artifact-store";

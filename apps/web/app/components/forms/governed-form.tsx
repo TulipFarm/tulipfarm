@@ -1,4 +1,4 @@
-import type { FormSubmissionResult, GovernedForm } from "@tulipfarm/a2ui";
+import type { FormSubmissionResult, GovernedForm } from "@tulipfarm/surface";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { type FormSubmissionBody, submitGovernedForm } from "~/lib/forms";

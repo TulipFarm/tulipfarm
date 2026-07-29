@@ -17,7 +17,12 @@ import {
   rewindLastTurn,
 } from "~/lib/chat/reducer";
 import type { ChatStreamMeta } from "~/lib/chat/sse-client";
-import { postChat, sendApprovalDecision, stopChatStream } from "~/lib/chat/sse-client";
+import {
+  postChat,
+  postSurfaceInteraction,
+  sendApprovalDecision,
+  stopChatStream,
+} from "~/lib/chat/sse-client";
 import type {
   Autonomy,
   ChatEvent,
@@ -71,6 +76,7 @@ type ChatAction =
   | { type: "user"; text: string }
   | { type: "meta"; meta: ChatStreamMeta }
   | { type: "regenerate" }
+  | { type: "surface-submit" }
   | { type: "stopped" }
   | { type: "reset" };
 
@@ -101,64 +107,22 @@ function handleClientAction(data: unknown, navigate: NavigateFunction): void {
 }
 
 /** "emailNotifications" / "email_notifications" → "Email notifications" for a readable submission. */
-function humanizeKey(key: string): string {
-  const s = key
-    .replace(/[_-]+/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .trim();
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : key;
-}
-
-function formatFieldValue(v: unknown): string {
-  if (typeof v === "boolean") return v ? "Yes" : "No";
-  if (v === null || v === undefined || v === "") return "—";
-  return String(v);
-}
-
-/**
- * Map an A2UI bridge `agent` payload (posted by a tf-* control click via the iframe runtime) into a
- * follow-up user turn. `choice` submits the chosen label (falling back to its value); `suggest_agent`
- * submits a prompt and switches the active agent; `a2ui-form` (HITL submit) renders the gathered field
- * values as a readable markdown list (the server injects it as the open `ask_user` tool-result and
- * resumes the run); `a2ui-action` submits a button's event (+ payload). Unknown payloads are ignored.
- */
-export function a2uiAgentToSend(payload: unknown): { text: string; opts?: SendOptions } | null {
-  if (typeof payload !== "object" || payload === null) return null;
-  const p = payload as Record<string, unknown>;
-  if (p.kind === "choice") {
-    const text = typeof p.label === "string" ? p.label : typeof p.value === "string" ? p.value : "";
-    return text ? { text } : null;
-  }
-  if (p.kind === "suggest_agent") {
-    const text = typeof p.label === "string" ? p.label : "";
-    const agentId = typeof p.agentId === "string" ? p.agentId : undefined;
-    return text ? { text, opts: agentId ? { agentId } : undefined } : null;
-  }
-  if (p.kind === "a2ui-form") {
-    const data =
-      typeof p.data === "object" && p.data !== null ? (p.data as Record<string, unknown>) : {};
-    const lines = Object.entries(data).map(
-      ([k, v]) => `- **${humanizeKey(k)}:** ${formatFieldValue(v)}`
-    );
-    return { text: lines.length > 0 ? lines.join("\n") : "(submitted)" };
-  }
-  if (p.kind === "a2ui-action") {
-    const event = typeof p.event === "string" ? p.event : "";
-    if (!event) return null;
-    const hasPayload = typeof p.payload === "object" && p.payload !== null;
-    return { text: hasPayload ? `${event} ${JSON.stringify(p.payload)}` : event };
-  }
-  return null;
-}
-
-// A turn is in flight — used to reject duplicate A2UI postbacks (e.g. a re-clicked, already-
-// answered wizard step) rather than firing another identical user turn.
 export function isChatBusy(status: ChatStatus): boolean {
   return status === "submitted" || status === "streaming";
 }
 
+export function surfaceInteractionAnswer(input: Readonly<Record<string, unknown>>): string {
+  if (typeof input.value === "string" && input.value.trim().length > 0) return input.value;
+  const entries = Object.entries(input);
+  if (entries.length === 0) return "Submitted";
+  return entries
+    .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
+    .join("\n");
+}
+
 function reducer(state: ChatState, action: ChatAction): ChatState {
   if (action.type === "user") return appendUserMessage(state, action.text);
+  if (action.type === "surface-submit") return { ...state, status: "submitted", error: undefined };
   if (action.type === "reset") return initialChatState;
   // Stop: rewind the in-flight turn (drop the user message + partial reply). The composer restores
   // the original prompt into its editor so it can be fixed and resent.
@@ -322,15 +286,18 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     dispatch({ type: "reset" });
   }, []);
 
-  // Bridge postback from an A2UI tf-* control: turn the `agent` payload into a follow-up user turn.
-  // A2UI surfaces have no composer-level disabled state of their own, so a re-clicked/stale prompt
-  // can fire this while the previous turn is still in flight — reject it rather than sending a
-  // duplicate turn.
-  const sendA2uiAgent = useCallback(
-    (payload: unknown) => {
+  const sendSurfaceInteraction = useCallback(
+    (handle: string, input: Readonly<Record<string, unknown>>) => {
       if (isChatBusy(stateRef.current.status)) return;
-      const mapped = a2uiAgentToSend(payload);
-      if (mapped) void send(mapped.text, mapped.opts);
+      dispatch({ type: "surface-submit" });
+      void postSurfaceInteraction(handle, { ...input })
+        .then(() => send(surfaceInteractionAnswer(input), lastOptsRef.current))
+        .catch((error) => {
+          dispatch({
+            type: "error",
+            data: { message: error instanceof Error ? error.message : "interaction failed" },
+          });
+        });
     },
     [send]
   );
@@ -349,6 +316,6 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     regenerate,
     sendFeedback,
     reset,
-    sendA2uiAgent,
+    sendSurfaceInteraction,
   };
 }

@@ -10,6 +10,7 @@ import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
+import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
 import { MessageSchema } from "./schemas";
@@ -298,7 +299,8 @@ export function registerConversationRoutes(
       }
 
       const result = await messageRepo.listByConversation(id, limit, after);
-      return reply.send({ messages: result.items, nextCursor: result.nextCursor });
+      const messages = result.items;
+      return reply.send({ messages, nextCursor: result.nextCursor });
     }
   );
 
@@ -352,7 +354,12 @@ export function registerConversationRoutes(
         const platformAgent = getDefaultAssistant(agent.name);
         const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
         const governancePages = knowledge ? await knowledge.governancePages() : [];
-        const tools = availableToolsFor(toolRegistry, platformAgent);
+        const presentationContext = presentationContextFor(
+          { channel: "web", surface: "chat" },
+          `conversation:${id}`
+        );
+        const tools = availableToolsFor(toolRegistry, platformAgent, presentationContext);
+        const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
@@ -365,6 +372,7 @@ export function registerConversationRoutes(
           taggedResources: [],
           soulCatalogue: buildSoulCatalogue(soulLoader),
           availableTools: tools,
+          surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
           knowledgeGrounding: canGroundKnowledge(knowledge, tools),
         });
         const history = await messageRepo.listByConversation(id, 1000);

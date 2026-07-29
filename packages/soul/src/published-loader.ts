@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { validateResourceSchema } from "@tulipfarm/schema";
+import {
+  type SoulSurfaceComponent,
+  type SurfaceComponentSupport,
+  validateSoulSurfaceCatalog,
+  validateSoulSurfaceComponent,
+} from "@tulipfarm/surface";
 import { parse as parseYaml } from "yaml";
 import type {
   IntegrationConnection,
@@ -61,6 +67,7 @@ export class SoulLoader {
   resources: Map<string, SoulResource> = new Map();
   routines: Map<string, SoulRoutine> = new Map();
   integrations: Map<string, SoulIntegration> = new Map();
+  surfaceComponents: Map<string, SoulSurfaceComponent> = new Map();
   llmConfig: Record<string, unknown> | null = null;
   guardrailsConfig: Record<string, unknown> | null = null;
   observabilityConfig: Record<string, unknown> | null = null;
@@ -68,7 +75,8 @@ export class SoulLoader {
 
   constructor(
     private readonly soulPath: string,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly surfaceSupport?: SurfaceComponentSupport
   ) {}
 
   async load(): Promise<void> {
@@ -78,6 +86,7 @@ export class SoulLoader {
       resources,
       routines,
       integrations,
+      surfaceComponents,
       guardrailsConfig,
       observabilityConfig,
       manifest,
@@ -87,6 +96,7 @@ export class SoulLoader {
       this.loadResources(),
       this.loadRoutines(),
       this.loadIntegrations(),
+      this.loadSurfaceComponents(),
       this.loadYamlFile(join(this.soulPath, "guardrails.yaml"), "guardrails.yaml"),
       this.loadYamlFile(
         join(this.soulPath, "observability.config.yaml"),
@@ -100,13 +110,14 @@ export class SoulLoader {
     this.resources = resources;
     this.routines = routines;
     this.integrations = integrations;
+    this.surfaceComponents = surfaceComponents;
     this.llmConfig = (manifest?.llm as Record<string, unknown> | undefined) ?? null;
     this.guardrailsConfig = guardrailsConfig;
     this.observabilityConfig = observabilityConfig;
     this.manifest = manifest;
 
     this.logger.info(
-      `Soul: loaded ${agents.size} agent(s), ${skills.size} skill(s), ${resources.size} resource(s), ${routines.size} routine(s), ${integrations.size} integration(s)`
+      `Soul: loaded ${agents.size} agent(s), ${skills.size} skill(s), ${resources.size} resource(s), ${routines.size} routine(s), ${integrations.size} integration(s), ${surfaceComponents.size} Surface component(s)`
     );
   }
 
@@ -198,6 +209,35 @@ export class SoulLoader {
         throw artifactLoadError("routine", name, err);
       }
     }
+    return map;
+  }
+
+  private async loadSurfaceComponents(): Promise<Map<string, SoulSurfaceComponent>> {
+    const map = new Map<string, SoulSurfaceComponent>();
+    const slugs = await subdirs(join(this.soulPath, "surface-components"));
+    for (const slug of slugs) {
+      const dir = join(this.soulPath, "surface-components", slug);
+      try {
+        const definition = (parseYaml(await readFile(join(dir, "component.yaml"), "utf8")) ??
+          {}) as Omit<SoulSurfaceComponent, "slug" | "views">;
+        const views: Record<string, unknown> = {};
+        for (const file of await readdir(join(dir, "views"))) {
+          if (!file.endsWith(".yaml")) continue;
+          views[file.slice(0, -5)] =
+            parseYaml(await readFile(join(dir, "views", file), "utf8")) ?? {};
+        }
+        const component = {
+          ...definition,
+          slug,
+          views,
+        } as SoulSurfaceComponent;
+        validateSoulSurfaceComponent(component, this.surfaceSupport);
+        map.set(component.name, component);
+      } catch (err) {
+        throw artifactLoadError("Surface component", slug, err);
+      }
+    }
+    validateSoulSurfaceCatalog([...map.values()], this.surfaceSupport);
     return map;
   }
 

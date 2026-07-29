@@ -26,7 +26,9 @@ export type Conversation = ConversationSummary & {
 export type WireMessagePart =
   | { type: "text"; text: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown };
+  | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown }
+  | { type: "surface"; artifactId: string; revision: number }
+  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" };
 
 export type ConversationMessage = {
   _id: string;

@@ -16,7 +16,7 @@ vi.mock("~/lib/chat/use-chat-stream", () => ({
     approve: vi.fn(),
     regenerate: vi.fn(),
     reset: vi.fn(),
-    sendA2uiAgent: vi.fn(),
+    sendSurfaceInteraction: vi.fn(),
   }),
 }));
 

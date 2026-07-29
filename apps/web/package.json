@@ -6,7 +6,6 @@
   "scripts": {
     "build": "remix vite:build",
     "dev": "remix vite:dev",
-    "gen:chart-source": "node scripts/gen-chart-source.mjs",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -25,9 +24,10 @@
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
     "@tiptap/suggestion": "^3.27.1",
-    "@tulipfarm/a2ui": "workspace:*",
     "@tulipfarm/editor": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/surface": "workspace:*",
+    "@tulipfarm/surface-web": "workspace:*",
     "@xyflow/react": "^12.11.2",
     "chart.js": "^4.5.1",
     "class-variance-authority": "^0.7.1",

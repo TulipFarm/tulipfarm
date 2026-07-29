@@ -20,7 +20,7 @@ const KNOWN_EVENT_TYPES = new Set<ChatEventType>([
   "task",
   "sources",
   "agent-handoff",
-  "a2ui",
+  "surface",
   "client-action",
   "guardrail_block",
   "finish",
@@ -135,8 +135,23 @@ async function readChatError(res: Response): Promise<ApiError> {
 // `X-Conversation-Id`/`X-Stream-Id` headers via `onMeta`, then streams typed events to `onEvent`,
 // stopping at the first terminal event (finish/error) or when the reader is exhausted.
 export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers): Promise<void> {
+  return postTurnStream("/api/v1/chat", body, handlers);
+}
+
+export async function postSurfaceInteraction(
+  handle: string,
+  input: Record<string, unknown>
+): Promise<unknown> {
+  return apiWrite("POST", "/api/v1/surfaces/interactions", { handle, input });
+}
+
+async function postTurnStream(
+  path: string,
+  body: unknown,
+  handlers: PostChatHandlers
+): Promise<void> {
   const { signal, onMeta } = handlers;
-  const res = await fetch(`${API_BASE}/api/v1/chat`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     credentials: "include",
     headers: mutationHeaders(),

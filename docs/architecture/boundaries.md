@@ -66,7 +66,7 @@ contract; they do not reimplement its decisions.
 | Agent and model behavior | `packages/agent-runtime` | Context assembly, model profiles, bounded Tool loop, budgets, delegation |
 | Knowledge authorization | `packages/knowledge` | Source ACL ingestion, retrieval, provenance, invalidation, deletion |
 | Durable Memory | `packages/memory` | Scoped assertions, confirmation, provenance, supersession, expiry |
-| A2UI and forms | `packages/a2ui` | Safe presentation schemas, Artifacts, signed actions, form contracts |
+| Tulip Surface Protocol and forms | `packages/surface` | Safe presentation schemas, Artifacts, signed actions, form contracts |
 | Integrations | `packages/integrations` | Adapter contracts, event normalization, delivery, identity mapping, checkpoints |
 | Isolated execution | `packages/sandbox` | Execution request, backend ports, workspace, egress and resource controls |
 | Persistence and infrastructure ports | `packages/storage` | PostgreSQL repositories, transactions, outbox/inbox, blob/vector/cache ports |
@@ -159,8 +159,8 @@ the current API or trust boundary is preserved.
 | `apps/api/src/auth/users.ts` | Replace | Two fixed roles become custom roles and scoped grants in `packages/authz` |
 | `packages/secrets/src/crypto.ts` | Reuse after vectors | Preserve AES-256-GCM primitives behind scoped leases, rotation, and revocation tests |
 | `packages/secrets/src/service.ts` | Adapt | Make it the Secret Broker owner; forbid stale resolution and plaintext propagation |
-| `apps/api/src/a2ui/compiler.ts` | Adapt | Preserve escaping/compiler ideas inside safe `packages/a2ui` Artifact contracts |
-| `apps/api/src/a2ui/surface-store.ts` | Replace boundary | Process/local surfaces become immutable authorized Artifacts and signed actions |
+| `apps/api/src/surface/compiler.ts` | Adapt | Preserve escaping/compiler ideas inside safe `packages/surface` Artifact contracts |
+| `apps/api/src/surface/surface-store.ts` | Replace boundary | Process/local surfaces become immutable authorized Artifacts and signed actions |
 | `apps/api/src/knowledge/retrieval-service.ts` | Replace authorization seam | `packages/knowledge` enforces source ACLs before ranking/candidate exposure |
 | `apps/api/src/ingress/service.ts` | Replace identity path | Integration events resolve the external principal; never borrow a Conversation owner's identity |
 | `apps/api/src/integrations/mcp-client-service.ts` | Replace enablement path | Discovery creates a pinned Soul proposal; it never registers a Tool directly in process |

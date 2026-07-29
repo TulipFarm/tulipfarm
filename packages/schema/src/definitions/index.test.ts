@@ -26,7 +26,6 @@ describe("Authored definition registry integration", () => {
       "KnowledgeSource",
       "MemorySettings",
       "Form",
-      "A2UITemplate",
     ]);
     expect(DEFINITION_REGISTRATIONS.map((r) => r.kind)).toEqual([...DEFINITION_KINDS]);
   });
@@ -70,5 +69,6 @@ describe("definitions namespace", () => {
     expect(definitions.routine.ROUTINE_STATE_TYPES).toContain("agent");
     expect(definitions.trigger.TRIGGER_TYPES).toContain("webhook");
     expect(definitions.event.EVENT_VERIFICATION_STATUSES).toContain("verified");
+    expect(definitions).not.toHaveProperty("surface");
   });
 });

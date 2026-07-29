@@ -1,0 +1,8 @@
+{
+  "extends": "@tulipfarm/tsconfig/remix.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

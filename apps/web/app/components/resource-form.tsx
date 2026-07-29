@@ -7,7 +7,7 @@ import type { FieldDescriptor } from "~/lib/schema";
 
 /*
  * Generic schema-driven create/edit form (AC-V1-002 write subset). Renders one control per editable
- * field (from `formFields`) following the A2UI type→input mapping: string→text, number→numeric,
+ * field (from `formFields`) following the Tulip Surface Protocol type→input mapping: string→text, number→numeric,
  * boolean→checkbox, enum→select, date→date input, array/object→JSON textarea, x-links→combobox.
  * `x-immutable` fields are read-only on edit. Validation is server-authoritative: the parent passes
  * `formError` (banner) and `fieldErrors` (mapped from the API's 422 `path`). The only client-side

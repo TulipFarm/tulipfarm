@@ -1,4 +1,5 @@
-import { createHash } from "node:crypto";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { CanonicalizationError } from "./errors";
 
 export const CANONICAL_HASH_ALGORITHM = "sha256" as const;
@@ -80,5 +81,5 @@ export function canonicalize(value: unknown): string {
 
 /** Lowercase SHA-256 hex over the UTF-8 bytes of {@link canonicalize}. */
 export function canonicalHash(value: unknown): string {
-  return createHash(CANONICAL_HASH_ALGORITHM).update(canonicalize(value), "utf8").digest("hex");
+  return bytesToHex(sha256(new TextEncoder().encode(canonicalize(value))));
 }

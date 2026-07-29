@@ -58,7 +58,7 @@ If `validate_artifact` is available, validate the Schema and fix any errors befo
 
 ### Step 6 — Preview & approve
 
-Summarize the type briefly (name, purpose, key fields) and use `present_choices` for Approval
+Summarize the type briefly (name, purpose, key fields) and use `request_input` for Approval
 (e.g. "Create it" / "Edit first" / "Cancel"). Keep the summary concise — do not dump the full raw
 YAML. Never list Approval options as plain-text bullets.
 
@@ -70,7 +70,7 @@ materializes the PostgreSQL table.
 
 ### Step 8 — Hooks (optional)
 
-After the Resource type is created, assess whether it needs lifecycle hooks. Use `present_choices`
+After the Resource type is created, assess whether it needs lifecycle hooks. Use `request_input`
 to ask whether hooks are needed — never list the options as plain-text bullets. If you recommend
 hooks, explain why in one sentence, then present the choice. Common triggers that suggest hooks:
 

@@ -26,8 +26,8 @@ hairline borders, 4px interactive radius / square containers, 100% JetBrains Mon
 markers (`[+]`, `[…]`) carry content iconography; Lucide icons label the sidebar nav rows.
 
 Tokens are oklch CSS variables under `:root` (light) and `[data-theme="dark"]` (dark), mapped
-into Tailwind v4 via `@theme inline`. Dark mode is one attribute on `<html>` so the shell (and
-future A2UI iframes) swap together.
+into Tailwind v4 via `@theme inline`. Dark mode is one attribute on `<html>` so the shell and
+native Surface components swap together.
 
 ## Acceptance criteria (tested in `*.test.tsx`)
 
