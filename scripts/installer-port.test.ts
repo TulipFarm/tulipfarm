@@ -14,6 +14,15 @@ function temporaryDirectory(): string {
   return directory;
 }
 
+function simulatedTerminal(): { inputPath: string; outputPath: string } {
+  const directory = temporaryDirectory();
+  const inputPath = join(directory, "input");
+  const outputPath = join(directory, "output");
+  writeFileSync(inputPath, "\n");
+  writeFileSync(outputPath, "");
+  return { inputPath, outputPath };
+}
+
 function runInstallerFunctions(script: string, args: string[] = [], input = ""): string {
   return execFileSync("bash", ["-c", `source "$1"\n${script}`, "bash", INSTALLER, ...args], {
     cwd: ROOT,
@@ -30,18 +39,18 @@ afterEach(() => {
 
 describe("installer host-port handling", () => {
   it("prompts on the terminal and accepts the suggested free port", () => {
+    const terminal = simulatedTerminal();
     const output = runInstallerFunctions(
       `
         PORT=8080
-        TTY_INPUT=/dev/stdin
-        TTY_OUTPUT=/dev/stdout
+        TTY_INPUT="$2"
+        TTY_OUTPUT="$3"
         port_is_in_use() { [ "$1" = 8080 ]; }
         stack_app_owns_port() { return 1; }
         ensure_port_available 0
         printf "%s" "$PORT"
       `,
-      [],
-      "\n"
+      [terminal.inputPath, terminal.outputPath]
     );
 
     expect(output).toContain("Using host port 8081.");
@@ -62,6 +71,7 @@ describe("installer host-port handling", () => {
 
   it("repairs a failed first install whose saved port was claimed", () => {
     const installDirectory = temporaryDirectory();
+    const terminal = simulatedTerminal();
     const envPath = join(installDirectory, ".env");
     writeFileSync(
       envPath,
@@ -80,14 +90,13 @@ describe("installer host-port handling", () => {
         SUDO=""
         PORT_OVERRIDE=""
         PORT=8080
-        TTY_INPUT=/dev/stdin
-        TTY_OUTPUT=/dev/stdout
+        TTY_INPUT="$3"
+        TTY_OUTPUT="$4"
         port_is_in_use() { [ "$1" = 8080 ]; }
         stack_app_owns_port() { return 1; }
         configure_runtime_port
       `,
-      [installDirectory],
-      "\n"
+      [installDirectory, terminal.inputPath, terminal.outputPath]
     );
 
     expect(readFileSync(envPath, "utf8")).toContain("HOST_PORT=8081\n");
