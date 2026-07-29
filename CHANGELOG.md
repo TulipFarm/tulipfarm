@@ -1,5 +1,7 @@
 # Changelog
 
+## [0.4.1](https://github.com/TulipFarm/tulipfarm/compare/v0.4.0...v0.4.1) (2026-07-29)
+
 ## [0.4.0](https://github.com/TulipFarm/tulipfarm/compare/v0.3.0-integrations.1...v0.4.0) (2026-07-29)
 
 ### Features
