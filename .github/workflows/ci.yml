@@ -1,11 +1,13 @@
 name: CI
 
-# Quality suite for PRs and main pushes. Tag pushes (`v*`) are handled entirely
-# by publish-image.yml — this workflow never runs on tags.
+# Quality suite for PRs and main pushes. Prepare release can also dispatch it
+# explicitly when its PR was created with GITHUB_TOKEN (whose pushes do not
+# start other workflows).
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
 concurrency:
@@ -35,6 +37,9 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            head="${{ github.sha }}"
+            base="$(git merge-base origin/main "$head")"
           else
             base="${{ github.event.before }}"
             head="${{ github.sha }}"
