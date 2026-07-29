@@ -3,8 +3,8 @@
 # exercised hermetically: build the app image locally as :ci, run the installer against
 # this repo (TF_LOCAL_SRC) into a throwaway dir on a throwaway port, and assert /health.
 #
-# Mirrors ci.yml's compose-parity: no GHCR pull of the not-yet-published app image, only
-# the bundled postgres base is pulled. Used both locally and by the CI `installer-smoke` job.
+# Mirrors the Compose parity workflow: no GHCR pull of the not-yet-published app image,
+# only the bundled postgres base is pulled. Used both locally and by the Installer smoke workflow.
 #
 # Env:
 #   SMOKE_REBUILD=1   force `docker build` even if ghcr.io/tulipfarm/tulipfarm:ci already exists
