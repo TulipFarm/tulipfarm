@@ -3,6 +3,11 @@
 **/dist
 **/build
 **/.turbo
+**/.next
+**/.source
+**/coverage
+**/out
+**/*.tsbuildinfo
 .env
 .env.*
 !.env.example
