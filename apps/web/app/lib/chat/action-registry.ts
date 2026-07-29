@@ -1,5 +1,5 @@
 /**
- * Client-side action registry + form prefill for agent→client actions (A2UI P3, `invoke_action` /
+ * Client-side action registry + form prefill for agent→client actions (Tulip Surface Protocol P3, `invoke_action` /
  * `prefill_form`). A page registers named handlers (in an effect); the chat hook dispatches a
  * `client-action` to them. Prefill is generic — it sets fields by `name` / `data-name` on whatever
  * form the user has open, no registration required.

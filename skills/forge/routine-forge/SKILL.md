@@ -119,8 +119,8 @@ literal, no import/export:
 
 1. Assemble the `definition` object (id = the slug, `version` e.g. "1.0", `start`, `states`,
    `functions?`, `retries?`, `x-triggers`, `x-inputs?`).
-2. Preview it concisely (purpose, Trigger, the State flow as a short list) with `render_surface` or
-   plain text — do not dump raw YAML — and get Approval via `present_choices`.
+2. Preview it concisely (purpose, Trigger, the State flow as a short list) with `present` or
+   plain text — do not dump raw YAML — and get Approval via `request_input`.
 3. On Approval call `routine_forge` with `name` (the slug), `definition`, and `hooks?` (the
    object-literal source). It validates against the V1 meta-Schema, writes
    `routines/<slug>/routine.yaml` (+ `hooks.ts`), and commits — no Approval step (ROUT-V1-002).

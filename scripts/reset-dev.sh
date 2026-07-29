@@ -61,6 +61,14 @@ DATABASE_URL="${DATABASE_URL:-postgres://localhost:5432/tulipfarm}"
 DB_NAME="$(basename "${DATABASE_URL%%\?*}")"
 DB_NAME="${DB_NAME:-tulipfarm}"
 
+# Detect the bundled Docker container vs. a native install — dropdb/createdb below must
+# authenticate very differently against each, and getting this wrong silently no-ops (see below).
+COMPOSE_ARGS=(-f docker-compose.yml -f docker-compose.dev.yml --profile bundled)
+DOCKER_CONTAINER=""
+if command -v docker &>/dev/null && docker compose "${COMPOSE_ARGS[@]}" ps -q postgres 2>/dev/null | grep -q .; then
+  DOCKER_CONTAINER="$(docker compose "${COMPOSE_ARGS[@]}" ps -q postgres)"
+fi
+
 SOUL_PATH="$(read_env SOUL_PATH)"
 SOUL_PATH="${SOUL_PATH:-$HOME/.tulipfarm/soul}"
 SOUL_PATH="${SOUL_PATH/#\~/$HOME}" # expand a leading ~ (dotenv stores it literally)
@@ -89,7 +97,21 @@ if ! $ASSUME_YES; then
 fi
 
 # 1) Database — drop, then recreate empty so the next boot migrates from scratch.
-if command -v dropdb &>/dev/null; then
+if [ -n "$DOCKER_CONTAINER" ]; then
+  echo "🗄  Dropping database '$DB_NAME' in the Docker container..."
+  # Run inside the container over its local Unix socket (trust auth) as the tulipfarm superuser —
+  # bare native dropdb/createdb can't authenticate against the container's password-auth TCP
+  # listener without credentials, and silently no-op on failure, leaving stale data (and a stale
+  # DEK wrap) behind while setup-dev.sh still writes a fresh ENCRYPTION_KEY.
+  if docker exec -i "$DOCKER_CONTAINER" psql -U tulipfarm -d postgres \
+      -c "DROP DATABASE IF EXISTS \"$DB_NAME\" WITH (FORCE);" &>/dev/null \
+    && docker exec -i "$DOCKER_CONTAINER" psql -U tulipfarm -d postgres \
+      -c "CREATE DATABASE \"$DB_NAME\" OWNER tulipfarm;" &>/dev/null; then
+    echo "✅ Recreated empty database '$DB_NAME'"
+  else
+    echo "   (could not reset database in container — is it healthy? \`docker ps\`)"
+  fi
+elif command -v dropdb &>/dev/null; then
   echo "🗄  Dropping database '$DB_NAME'..."
   # --force terminates lingering connections (e.g. a still-running dev server). Falls back for
   # older clients without --force.

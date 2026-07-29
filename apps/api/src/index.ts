@@ -12,7 +12,6 @@ import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
 import { RunEventStore, RunStore } from "@tulipfarm/storage";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
-import { PgA2uiSurfaceStore } from "./a2ui/artifact-surface";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
@@ -75,6 +74,9 @@ import { bootstrapFromEnv } from "./setup/bootstrap";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
+import { PgSurfaceActionStore } from "./surfaces/action-store";
+import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
+import { surfaceRendererRegistry } from "./surfaces/renderer-registry";
 import { buildToolRegistry } from "./tools/setup";
 
 // Load .env.local (symlinked from root by setup script)
@@ -123,7 +125,7 @@ async function boot() {
 
     await runSoulMigrations(soulPath, console);
 
-    const soulLoader = new SoulLoader(soulPath, console);
+    const soulLoader = new SoulLoader(soulPath, console, surfaceRendererRegistry);
     await soulLoader.load();
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
@@ -163,7 +165,8 @@ async function boot() {
     const feedbackRepo = new FeedbackRepo(pool);
     const streamResumeRepo = new PgStreamResumeRepo(pool);
     const pendingInteractionRepo = new PgPendingInteractionRepo(pool);
-    const a2uiSurfaceStore = new PgA2uiSurfaceStore(pool);
+    const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
+    const surfaceActionStore = new PgSurfaceActionStore(pool);
     const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const kvService = new KvService(new PgKvRepo(pool));
@@ -203,6 +206,7 @@ async function boot() {
       workingMemory: workingMemoryService,
       kv: kvService,
       knowledge: knowledgeService,
+      surfaceComponents: { gitSync, surfaceSupport: surfaceRendererRegistry },
       resources: {
         repoFactory: resourceRepoFactory,
         counterStore,
@@ -220,6 +224,7 @@ async function boot() {
         disabledBundledSkills,
       },
       platform: {
+        events: domainEventEmitter,
         soulLoader,
         soulPath: process.env.SOUL_PATH,
         gitSync,
@@ -270,7 +275,8 @@ async function boot() {
       feedbackRepo,
       streamResumeRepo,
       pendingInteractionRepo,
-      a2uiSurfaceStore,
+      surfaceArtifactStore,
+      surfaceActionStore,
       streamHub,
       workingMemoryService,
       kvService,

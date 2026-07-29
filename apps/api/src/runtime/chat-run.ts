@@ -3,10 +3,14 @@ import type { EventEmitter } from "node:events";
 import type { LlmService, ResolvedModel } from "@tulipfarm/llm";
 import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
+import type {
+  PresentationContext,
+  SoulSurfaceComponent,
+  SurfaceComponentDefinition,
+} from "@tulipfarm/surface";
 import { generateText, type ModelMessage, streamText } from "ai";
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
-import type { A2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { type DurableApprovalGate, makeApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
 import type { RunToolCallGuard, ToolRegistry } from "../broker/tool-adapter";
@@ -32,6 +36,7 @@ import {
   patchToolResult,
   persistStep,
   SUMMARY_PROMPT,
+  shouldStopToolLoop,
 } from "../chat/turn-helpers";
 import { DOMAIN_EVENTS } from "../domain-events";
 import type { GuardContext, GuardrailsService } from "../guardrails";
@@ -58,6 +63,15 @@ import {
   listEagerSkills,
   resolveSkill,
 } from "../soul/skills/registry";
+import type { SurfaceActionStore } from "../surfaces/action-store";
+import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
+import {
+  presentationContextFor,
+  surfaceCatalogFor,
+  surfaceCatalogPromptFor,
+  surfaceCatalogRevisionFor,
+  surfaceRendererRegistry,
+} from "../surfaces/renderer-registry";
 import { BatchCoordinator } from "../tools/batch-executor";
 import type { ToolCallResult } from "../tools/types";
 
@@ -82,7 +96,8 @@ export interface ChatTurnContext {
   guardrails?: GuardrailsService;
   approvalRegistry: DurableApprovalGate;
   pendingInteractions: PendingInteractionRepo;
-  surfaceStore: A2uiSurfaceStore;
+  surfaceStore: SurfaceArtifactStore;
+  surfaceActionStore?: SurfaceActionStore;
   streamControllers: Map<string, AbortController>;
 }
 
@@ -91,6 +106,8 @@ export interface TurnInput {
   user: UserDoc;
   body: ChatBody;
   log: FastifyBaseLogger;
+  /** Resolved by the server entrypoint; never accepted from the wire body. */
+  presentationContext?: PresentationContext;
 }
 
 /** Early validation failure from prepareChatTurn; the HTTP wrapper maps it to a status code. */
@@ -114,6 +131,9 @@ export interface PreparedTurn {
   resolvedModelId: string;
   messages: ModelMessage[];
   pending: Awaited<ReturnType<PendingInteractionRepo["findOpenByConversation"]>>;
+  surfaceCatalog: readonly SurfaceComponentDefinition[];
+  surfaceCatalogRevision: string;
+  surfaceComponents: readonly SoulSurfaceComponent[];
   buildSystemFor: (
     a: ReturnType<typeof resolveAgent>,
     pa: ReturnType<typeof getDefaultAssistant>
@@ -151,7 +171,7 @@ export async function prepareChatTurn(
     toolRegistry,
     pendingInteractions,
   } = ctx;
-  const { user, body, log } = input;
+  const { user, body, log, presentationContext } = input;
 
   // 1. Load or create the conversation (before any streaming).
   let convo: ConversationDoc;
@@ -310,9 +330,16 @@ export async function prepareChatTurn(
         .filter((d): d is NonNullable<typeof d> => d?.active === true)
         .map((d) => ({ id: d._id, title: d.title, content: d.content }))
     : [];
+  const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
+  const surfaceCatalog = presentationContext
+    ? surfaceCatalogFor(presentationContext.target, surfaceComponents)
+    : [];
+  const catalogRevision = presentationContext
+    ? surfaceCatalogRevisionFor(presentationContext.target, surfaceComponents)
+    : "none";
   const buildSystemFor = (a: typeof agent, pa: typeof platformAgent): string => {
     // Tools THIS agent may call — per-agent, so a handoff target gets its own scoped index.
-    const tools = availableToolsFor(toolRegistry, pa);
+    const tools = availableToolsFor(toolRegistry, pa, presentationContext);
     // Grounding+citation guidance AND the user's ~knowledge pins move together: both only go to an
     // agent that can actually cite (cite_sources in its scoped toolset). Otherwise a handoff target
     // without cite_sources (e.g. the IA) would receive pinned pages telling it to call a tool it lacks.
@@ -338,6 +365,9 @@ export async function prepareChatTurn(
       taggedResources: turnTaggedResources,
       soulCatalogue,
       availableTools: tools,
+      surfaceCatalog: presentationContext
+        ? surfaceCatalogPromptFor(presentationContext.target, surfaceComponents)
+        : undefined,
       pinnedKnowledge: canCite ? turnPinnedKnowledge : [],
       knowledgeGrounding: canCite,
     });
@@ -359,7 +389,7 @@ export async function prepareChatTurn(
       }).then((r) => r.text),
     log,
   });
-  // HITL resume: if this conversation is paused on an `ask_user`, the incoming message is the
+  // HITL resume: if this Conversation is paused on `request_input`, the incoming message is the
   // ANSWER, not a new user turn — inject it as the pending tool-call's result and continue the run
   // (the model sees its own question answered). The answer is still persisted as a user message for
   // durable history; only THIS turn's model messages carry the patched tool-result.
@@ -385,6 +415,9 @@ export async function prepareChatTurn(
     resolvedModelId,
     messages,
     pending,
+    surfaceCatalog,
+    surfaceCatalogRevision: catalogRevision,
+    surfaceComponents,
     buildSystemFor,
   };
 }
@@ -411,9 +444,10 @@ export async function startChatTurn(
     approvalRegistry,
     pendingInteractions,
     surfaceStore,
+    surfaceActionStore,
     streamControllers,
   } = ctx;
-  const { user, body, log } = input;
+  const { user, body, log, presentationContext } = input;
   const {
     convo,
     isNew,
@@ -423,6 +457,9 @@ export async function startChatTurn(
     resolved,
     resolvedModelId,
     pending,
+    surfaceCatalog,
+    surfaceCatalogRevision: catalogRevision,
+    surfaceComponents,
     buildSystemFor,
   } = prepared;
   const { messages } = prepared;
@@ -577,6 +614,18 @@ export async function startChatTurn(
             ? toolRegistry.buildToolSet(
                 {
                   userId: user._id,
+                  presentationContext,
+                  conversationId: convo._id,
+                  surfaceStore,
+                  surfaceActionStore,
+                  surfaceCatalog,
+                  surfaceCatalogRevision: catalogRevision,
+                  surfaceRendererManifest: presentationContext
+                    ? surfaceRendererRegistry.manifestFor(presentationContext.target)
+                    : undefined,
+                  surfaceComponents,
+                  guardrailRevision: gr?.revision ?? "none",
+                  events,
                   agentId: activeAgent.name,
                   autonomy: body.autonomy,
                   clientContext: body.clientContext,
@@ -586,7 +635,7 @@ export async function startChatTurn(
                 fullResultCache,
                 makeApprovalGate(approvalRegistry, emitter),
                 runToolCallGuard,
-                allowedToolNamesFor(toolRegistry, activePlatform)
+                allowedToolNamesFor(toolRegistry, activePlatform, presentationContext)
               )
             : undefined;
 
@@ -601,17 +650,7 @@ export async function startChatTurn(
           abortSignal: abortController.signal,
           // Stop the agent's own loop at the step budget, or as soon as it hands off —
           // so control returns to this loop without the agent rambling after the control tool.
-          stopWhen: ({ steps }) => {
-            if (steps.length >= MAX_TOOL_STEPS) return true;
-            const last = steps[steps.length - 1];
-            return (last?.toolCalls ?? []).some(
-              (c) =>
-                c.toolName === "transfer_to_agent" ||
-                c.toolName === "ask_user" || // HITL: end the turn cleanly with the form rendered
-                c.toolName === "cite_sources" // terminal: cite_sources is the answer's last act —
-              // stopping here prevents the model running another step that restates the whole answer
-            );
-          },
+          stopWhen: ({ steps }) => shouldStopToolLoop(steps, fullResultCache, MAX_TOOL_STEPS),
           onError: ({ error }) => {
             log.error({ err: error, conversationId: convo._id }, "chat stream error");
           },
@@ -661,13 +700,14 @@ export async function startChatTurn(
               step as unknown as PersistableStep,
               (e) => log.error({ err: e, conversationId: convo._id }, "persist failed"),
               replyIdHolder,
-              { model: resolvedModelId, agentId: activeAgent.name }
+              { model: resolvedModelId, agentId: activeAgent.name },
+              presentationContext !== undefined
             );
           },
         });
 
         let control: { type: "transfer"; target: string; reason?: string } | undefined;
-        // Set when this agent calls `ask_user`: the turn ends with the form rendered and a pending
+        // Set when this Agent calls `request_input`: the Turn ends with a pending
         // interaction is persisted so the next request resumes with the user's answer.
         let pendingAsk:
           | { toolCallId: string; surfaceId: string | null; schema: Record<string, unknown> }
@@ -678,14 +718,17 @@ export async function startChatTurn(
           // Suppress each agent's own terminal `finish`; one synthetic finish closes the whole turn.
           if (p.type === "finish") continue;
           if (p.type === "error") errored = true;
-          if (p.type === "tool-result" && p.toolName === "ask_user") {
+          if (p.type === "tool-result" && p.toolName === "request_input") {
             const full = fullResultCache.get(p.toolCallId as string);
             if (full?.success) {
               const data = full.data as Record<string, unknown>;
               pendingAsk = {
                 toolCallId: p.toolCallId as string,
-                surfaceId: typeof data.surfaceId === "string" ? data.surfaceId : null,
-                schema: (data.schema as Record<string, unknown>) ?? {},
+                surfaceId:
+                  typeof (data.artifact as { id?: unknown } | undefined)?.id === "string"
+                    ? (data.artifact as { id: string }).id
+                    : null,
+                schema: (data.awaitedSchema as Record<string, unknown>) ?? {},
               };
             }
           }
@@ -714,7 +757,7 @@ export async function startChatTurn(
             id: randomUUID(),
             conversationId: convo._id,
             toolCallId: pendingAsk.toolCallId,
-            toolName: "ask_user",
+            toolName: "request_input",
             awaitedSchema: pendingAsk.schema,
             surfaceId: pendingAsk.surfaceId,
             createdAt: new Date(),
@@ -773,8 +816,6 @@ export async function startChatTurn(
     log,
     fullResultCache,
     scanOutput,
-    surfaceStore,
-    conversationId: convo._id,
     abortSignal: abortController.signal,
   }).finally(() => streamControllers.delete(streamId));
 
@@ -799,6 +840,10 @@ export async function runChatTurn(req: FastifyRequest, reply: FastifyReply, ctx:
     user: req.user as UserDoc,
     body: req.body as ChatBody,
     log: req.log,
+    presentationContext: presentationContextFor(
+      { channel: "web", surface: "chat" },
+      `conversation:${(req.body as ChatBody).conversationId ?? "new"}`
+    ),
   };
   const prepared = await prepareChatTurn(ctx, input);
   if (isPrepareError(prepared)) {

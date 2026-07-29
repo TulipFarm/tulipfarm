@@ -108,6 +108,7 @@ describe("loadBundledSkills", () => {
       "routine-forge",
       "skill-forge",
       "structured-results",
+      "surface-component-forge",
     ]);
     for (const name of [
       "agent-forge",
@@ -115,6 +116,7 @@ describe("loadBundledSkills", () => {
       "resource-forge",
       "routine-forge",
       "skill-forge",
+      "surface-component-forge",
     ]) {
       const skill = skills.get(name);
       expect(skill?.body).toContain("## Execution Contract");

@@ -23,14 +23,18 @@ export type RunToolCallGuard = (input: {
   toolCallId: string;
 }) => Promise<ToolGuardOutcome>;
 
-function firstArgError(errors: AjvErrors): string {
-  const e = errors?.[0];
-  return e
-    ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
-    : "invalid arguments";
+function argumentErrors(errors: AjvErrors): string {
+  const messages = new Set(
+    (errors ?? []).map((error) =>
+      `${error.instancePath || "(root)"} ${error.message ?? "is invalid"}`.trim()
+    )
+  );
+  return [...messages].slice(0, 8).join("; ") || "invalid arguments";
 }
 
 export const TOOL_TIMEOUT_MS = 30_000;
+export const MAX_PRESENTATION_CORRECTIVE_ATTEMPTS = 2;
+const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
 
 function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
   return Promise.race([
@@ -47,18 +51,15 @@ function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
  */
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
-  private readonly validators = new Map<string, ReturnType<typeof ajv.compile>>();
-
   constructor(private readonly options: { defaultDeny?: boolean } = {}) {}
 
   register(tool: ToolDef): void {
     this.tools.set(tool.name, tool);
-    this.validators.set(tool.name, ajv.compile(tool.inputSchema));
+    ajv.compile(tool.inputSchema);
   }
 
   unregister(name: string): void {
     this.tools.delete(name);
-    this.validators.delete(name);
   }
 
   getAll(): ToolDef[] {
@@ -73,20 +74,58 @@ export class ToolRegistry {
     runToolCallGuard?: RunToolCallGuard,
     allowedToolNames?: ReadonlySet<string>
   ): ToolSet {
-    const exposed = allowedToolNames
+    let presentationValidationFailures = 0;
+    const authorized = allowedToolNames
       ? this.getAll().filter((toolDefinition) => allowedToolNames.has(toolDefinition.name))
       : this.options.defaultDeny
         ? []
         : this.getAll();
+    const exposed = authorized.filter(
+      (toolDefinition) =>
+        ctx.presentationContext !== undefined || !PRESENTATION_TOOL_NAMES.has(toolDefinition.name)
+    );
     return Object.fromEntries(
       exposed.map((t) => [
         t.name,
         tool({
           description: t.description,
-          inputSchema: jsonSchema(t.inputSchema as Parameters<typeof jsonSchema>[0]),
+          inputSchema: jsonSchema(
+            (t.inputSchemaFor?.(ctx) ?? t.inputSchema) as Parameters<typeof jsonSchema>[0]
+          ),
           execute: async (args: unknown, opts: { toolCallId: string }) => {
-            const v = this.validators.get(t.name) ?? ajv.compile(t.inputSchema);
-            if (!v(args)) return err("validation_error", firstArgError(v.errors));
+            const isPresentationTool = PRESENTATION_TOOL_NAMES.has(t.name);
+            if (
+              isPresentationTool &&
+              presentationValidationFailures > MAX_PRESENTATION_CORRECTIVE_ATTEMPTS
+            ) {
+              return err(
+                "surface_invalid",
+                "Surface correction limit reached. Do not call this presentation Tool again during this Turn."
+              );
+            }
+            const schema = t.inputSchemaFor?.(ctx) ?? t.inputSchema;
+            const v = ajv.compile(schema);
+            if (!v(args)) {
+              if (isPresentationTool) presentationValidationFailures += 1;
+              const shapeHint = isPresentationTool
+                ? ' Expected component shape: {"name":"ComponentName","version":"1.0","props":{...}}. Keep name and version separate.'
+                : "";
+              const attemptsRemaining = isPresentationTool
+                ? Math.max(
+                    0,
+                    MAX_PRESENTATION_CORRECTIVE_ATTEMPTS + 1 - presentationValidationFailures
+                  )
+                : 0;
+              const correctionHint = isPresentationTool
+                ? attemptsRemaining > 0
+                  ? ` ${attemptsRemaining} corrective attempt${attemptsRemaining === 1 ? "" : "s"} remaining.`
+                  : " Correction limit reached; do not call this Tool again during this Turn."
+                : "";
+              return err(
+                "validation_error",
+                `${argumentErrors(v.errors)}.${shapeHint}${correctionHint}`
+              );
+            }
             // Tool-call guard (GR-V1-001): runs after arg-validate, before the approval gate. A `block`
             // returns a denial the LLM sees (AC-V1-002). A `pass`/transform yields effectiveArgs — the
             // transform path is plumbed but unused by V1 guards, so effectiveArgs is NOT re-validated
@@ -121,12 +160,22 @@ export class ToolRegistry {
                 return truncateResult(denied);
               }
             }
-            const full = await (coordinator
-              ? coordinator.schedule(
-                  () => withToolTimeout(t.execute(effectiveArgs, ctx)),
-                  t.mutating
-                )
-              : withToolTimeout(t.execute(effectiveArgs, ctx)));
+            let full: ToolCallResult;
+            try {
+              full = await (coordinator
+                ? coordinator.schedule(
+                    () => withToolTimeout(t.execute(effectiveArgs, ctx)),
+                    t.mutating
+                  )
+                : withToolTimeout(t.execute(effectiveArgs, ctx)));
+            } catch {
+              full = err(
+                "internal_error",
+                isPresentationTool
+                  ? "The presentation could not be created because the server encountered an internal error."
+                  : "The Tool could not be completed because the server encountered an internal error."
+              );
+            }
             fullResultCache?.set(opts.toolCallId, full);
             return truncateResult(full);
           },

@@ -34,14 +34,18 @@ An omitted edge is forbidden.
 | `packages/storage` | `packages/schema`, `packages/observability` |
 | `packages/authz` | `packages/schema`, `packages/observability` |
 | `packages/audit` | `packages/schema`, `packages/storage`, `packages/observability` |
-| `packages/soul` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
+| `packages/soul` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability`, `packages/surface` |
 | `packages/secrets` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/run-kernel` | `packages/schema`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/sandbox` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/tool-broker` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/secrets`, `packages/sandbox`, `packages/storage`, `packages/observability` |
 | `packages/knowledge` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
 | `packages/memory` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/storage`, `packages/observability` |
-| `packages/a2ui` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/observability` |
+| `packages/surface` | `packages/schema` |
+| `packages/surface-web` | `packages/surface`, `packages/ui` |
+| `packages/surface-slack` | `packages/surface` |
+| `packages/surface-telegram` | `packages/surface` |
+| `packages/surface-github` | `packages/surface` |
 | `packages/integrations` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/tool-broker`, `packages/storage`, `packages/observability` |
 | `packages/agent-runtime` | `packages/schema`, `packages/authz`, `packages/audit`, `packages/run-kernel`, `packages/tool-broker`, `packages/knowledge`, `packages/memory`, `packages/observability` |
 
@@ -54,10 +58,10 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `knowledge`, `memory`, `a2ui`, `integrations`, `storage`, `observability` |
-| `apps/worker` | `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `a2ui`, `integrations`, `sandbox`, `storage`, `observability` |
+| `apps/api` | `schema`, `soul`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `integrations`, `storage`, `observability` |
+| `apps/worker` | `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
-| `apps/web` | `schema`, `a2ui`, and presentation-only packages such as `ui`/`editor` |
+| `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
 
 Package names in application rows are relative to `packages/`. Existing v1 packages may remain
 during capability cutover, but target code must not create additional legacy dependencies. Each

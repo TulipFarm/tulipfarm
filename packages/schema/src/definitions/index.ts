@@ -1,5 +1,4 @@
 import type { SchemaRegistration } from "../registry";
-import { A2UI_TEMPLATE_DEFINITION } from "./a2ui";
 import { AGENT_DEFINITION } from "./agent";
 import { FORM_DEFINITION } from "./form";
 import { GUARDRAIL_DEFINITION } from "./guardrail";
@@ -19,7 +18,6 @@ import { SKILL_DEFINITION } from "./skill";
 import { TOOL_CONTRACT_DEFINITION } from "./tool";
 import { TRIGGER_DEFINITION } from "./trigger";
 
-export * from "./a2ui";
 export {
   AGENT_DEFINITION,
   type AgentDefinition,
@@ -72,7 +70,6 @@ export const DEFINITION_REGISTRATIONS: readonly SchemaRegistration[] = [
   KNOWLEDGE_SOURCE_DEFINITION,
   MEMORY_SETTINGS_DEFINITION,
   FORM_DEFINITION,
-  A2UI_TEMPLATE_DEFINITION,
 ];
 
 /** Canonical `kind` discriminators owned by AW-008. */
@@ -93,7 +90,6 @@ export const DEFINITION_KINDS = [
   "KnowledgeSource",
   "MemorySettings",
   "Form",
-  "A2UITemplate",
 ] as const;
 export type DefinitionKind = (typeof DEFINITION_KINDS)[number];
 

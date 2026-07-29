@@ -8,7 +8,7 @@ completion). tsconfig
 extends `@tulipfarm/tsconfig/node.json`. See root `AGENTS.md` for commands/lint.
 
 May import: `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`,
-`knowledge`, `memory`, `a2ui`, `integrations`, `sandbox`, `storage`, `observability` (all under
+`knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` (all under
 `@tulipfarm/*`). See
 [`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). This app
 never imports another application (`apps/api`, `apps/integration-worker`, `apps/web`).

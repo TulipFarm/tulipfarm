@@ -11,7 +11,6 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify from "fastify";
-import type { A2uiSurfaceStore } from "./a2ui/artifact-surface";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
@@ -69,6 +68,9 @@ import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
 import { registerSoulRoutes } from "./soul/routes";
 import type { BundledSkill } from "./soul/skills/bundled";
 import { registerSkillRoutes } from "./soul/skills/routes";
+import { MemorySurfaceActionStore, type SurfaceActionStore } from "./surfaces/action-store";
+import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "./surfaces/artifact-store";
+import { registerSurfaceRoutes } from "./surfaces/routes";
 import { registerSystemRoutes, type SystemRoutesDeps } from "./system/routes";
 import { buildToolRegistry } from "./tools/setup";
 import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes";
@@ -108,7 +110,8 @@ export interface AppOptions {
   approvalRegistry?: DurableApprovalGate;
   guardrailsService?: GuardrailsService;
   pendingInteractionRepo?: PendingInteractionRepo;
-  a2uiSurfaceStore?: A2uiSurfaceStore;
+  surfaceArtifactStore?: SurfaceArtifactStore;
+  surfaceActionStore?: SurfaceActionStore;
   activityService?: ActivityService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
@@ -397,6 +400,8 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     if (opts.llmService && opts.conversationRepo && opts.messageRepo) {
+      const surfaceArtifactStore = opts.surfaceArtifactStore ?? new MemorySurfaceArtifactStore();
+      const surfaceActionStore = opts.surfaceActionStore ?? new MemorySurfaceActionStore();
       const toolRegistry =
         opts.toolRegistry ??
         buildToolRegistry({
@@ -421,10 +426,20 @@ export async function buildApp(opts: AppOptions = {}) {
         approvalRegistry,
         opts.guardrailsService,
         opts.pendingInteractionRepo,
-        opts.a2uiSurfaceStore,
+        surfaceArtifactStore,
+        surfaceActionStore,
         opts.invocations,
         opts.bundledSkills,
         opts.disabledBundledSkills
+      );
+      registerSurfaceRoutes(
+        app,
+        surfaceArtifactStore,
+        surfaceActionStore,
+        requireAuth,
+        opts.domainEventEmitter,
+        opts.guardrailsService,
+        opts.soulLoader
       );
       registerApprovalRoutes(
         app,

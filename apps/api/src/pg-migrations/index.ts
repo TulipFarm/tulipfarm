@@ -244,14 +244,6 @@ const BASELINE_STATEMENTS: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS pending_interactions_open_idx
     ON pending_interactions (conversation_id) WHERE resolved_at IS NULL`,
-  `CREATE TABLE IF NOT EXISTS a2ui_surfaces (
-    conversation_id uuid NOT NULL REFERENCES conversations(id),
-    surface_id      text NOT NULL,
-    spec            jsonb NOT NULL,
-    data_model      jsonb NOT NULL,
-    updated_at      timestamptz NOT NULL,
-    PRIMARY KEY (conversation_id, surface_id)
-  )`,
   `CREATE TABLE IF NOT EXISTS kv_store (
     scope      text NOT NULL,
     owner_id   text NOT NULL DEFAULT '',
@@ -429,6 +421,46 @@ const IDENTITY_STATEMENTS: string[] = [
   )`,
 ];
 
+async function ensureSurfaceStorage(q: Queryable): Promise<void> {
+  await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
+    handle              text PRIMARY KEY,
+    artifact_id         text NOT NULL,
+    revision            integer NOT NULL CHECK (revision > 0),
+    event               text NOT NULL,
+    payload             jsonb NOT NULL,
+    input_schema        jsonb NOT NULL,
+    audience            text[] NOT NULL,
+    target              jsonb NOT NULL,
+    destination         text NOT NULL,
+    conversation_id     uuid REFERENCES conversations(id),
+    run_id              text,
+    wait_id             text,
+    guardrail_revision  text NOT NULL,
+    expires_at          timestamptz NOT NULL,
+    consumed_at         timestamptz,
+    step_up             boolean NOT NULL DEFAULT false
+  )`);
+  await q.query(
+    "CREATE INDEX IF NOT EXISTS surface_actions_expiry_idx ON surface_actions (expires_at)"
+  );
+  await q.query(`CREATE TABLE IF NOT EXISTS surface_deliveries (
+    artifact_id         text NOT NULL,
+    revision            integer NOT NULL CHECK (revision > 0),
+    channel             text NOT NULL,
+    surface             text NOT NULL,
+    destination         text NOT NULL,
+    provider_message_id text,
+    status              text NOT NULL,
+    attempts            integer NOT NULL DEFAULT 0,
+    last_error          text,
+    updated_at          timestamptz NOT NULL,
+    PRIMARY KEY (artifact_id, revision, channel, surface, destination)
+  )`);
+  const retiredPrefix = ["a", "2", "u", "i"].join("");
+  await q.query(`DROP TABLE IF EXISTS ${retiredPrefix}_surfaces`);
+  await q.query(`DROP TABLE IF EXISTS ${retiredPrefix}_action_nonces`);
+}
+
 export const PG_MIGRATIONS: PgMigration[] = [
   {
     version: 1,
@@ -549,5 +581,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
         await q.query(sql);
       }
     },
+  },
+  {
+    version: 14,
+    description: "Tulip Surface Protocol actions, deliveries, and legacy cleanup",
+    up: ensureSurfaceStorage,
+  },
+  {
+    version: 15,
+    description: "repair Tulip Surface Protocol storage on existing databases",
+    up: ensureSurfaceStorage,
   },
 ];

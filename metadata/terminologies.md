@@ -67,7 +67,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
 | First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
-| Agent-to-UI rendering protocol | **A2UI** | `A2UI` | `/dev/a2ui` | "A2UI" | acronym, verbatim |
+| Agent-to-channel presentation standard | **Tulip Surface Protocol** | `TSP`, `SurfaceArtifact`, `SurfaceRenderer`, `SurfaceInteraction` | `/api/v1/surfaces`, `/dev/surfaces`, `surface-components/` | "Tulip Surface Protocol", "presentation" | Channel-neutral semantic components; never persisted provider payloads or executable UI |
 
 ¹ `plugin` remains valid ONLY for build/library tooling (vite, rehype, Chart.js) — never for a Skill.
 ² `collection` is reserved exclusively for "a Postgres/MongoDB collection" (infra). It never means a knowledge grouping.

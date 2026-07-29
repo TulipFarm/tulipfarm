@@ -75,6 +75,25 @@ if [ "$DB_MODE" = "docker" ]; then
     sleep 2
   done
 
+  # POSTGRES_PASSWORD only takes effect on a container's FIRST init of an empty data volume — an
+  # existing volume initialized under a different password (e.g. .env hand-edited, or the volume
+  # outlived a password rotation) silently drifts out of sync, and the app fails at boot with
+  # "password authentication failed" instead of at setup time. Verify the reused/generated
+  # password actually authenticates over TCP (what the app uses) and self-heal via the container's
+  # local socket (trust auth, no password needed) if not.
+  if ! docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+    exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
+    psql -h 127.0.0.1 -U tulipfarm -d tulipfarm -c "select 1" &> /dev/null; then
+    echo "⚠ POSTGRES_PASSWORD in .env doesn't match the running container's role — syncing..."
+    if docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+      exec -T postgres psql -U tulipfarm -d tulipfarm \
+      -c "ALTER USER tulipfarm WITH PASSWORD '${POSTGRES_PASSWORD}';" &> /dev/null; then
+      echo "✅ Synced Postgres role password to match .env"
+    else
+      echo "❌ Could not sync role password — check \`docker compose logs postgres\`"
+    fi
+  fi
+
   # The container auto-creates the tulipfarm DB + user (POSTGRES_DB/POSTGRES_USER),
   # so no createdb step. Wire the dev app at the host-exposed port with the password.
   DATABASE_URL_OVERRIDE="postgresql://tulipfarm:${POSTGRES_PASSWORD}@localhost:5432/tulipfarm"

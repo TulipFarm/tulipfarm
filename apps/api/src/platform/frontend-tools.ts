@@ -2,7 +2,7 @@ import { ajv } from "@tulipfarm/schema";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../tools/types";
 
 /**
- * Frontend tools + shared state (A2UI Phase 3). Unlike platform tools (which only see the static
+ * Frontend Tools + shared state. Unlike platform Tools (which only see the static
  * PlatformToolContext), these are raw `ToolDef`s so their `execute` receives the per-request
  * `RequestContext` — `get_client_context` reads `ctx.clientContext` (what the user is viewing) and
  * flips `ctx.contextRead`; the action tools (navigate_to / prefill_form / invoke_action) return a

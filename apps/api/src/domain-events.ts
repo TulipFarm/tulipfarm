@@ -1,3 +1,5 @@
+import type { SurfaceInteraction } from "@tulipfarm/surface";
+
 // Neutral in-process domain-event contract (design §3 — EventEmitter bus; LISTEN/NOTIFY
 // is future). Emitters (resources routes, chat) and subscribers (knowledge indexing)
 // both depend on this module so neither domain depends on the other.
@@ -11,6 +13,9 @@ export const DOMAIN_EVENTS = {
   // chat turn. The observability subscriber turns these into obs_event rows; nothing else listens.
   LLM_STEP_FINISHED: "llm.step_finished",
   TURN_FINISHED: "turn.finished",
+  SURFACE_RENDERED: "surface.rendered",
+  SURFACE_INTERACTED: "surface.interacted",
+  SURFACE_DELIVERED: "surface.delivered",
   // Webhook-kind integration ingress: raised when an inbound integration event is persisted
   // (ingress worker). Routine event triggers consume it, narrowed via their `filter` expression
   // (e.g. trigger.payload.integration === "slack" && trigger.payload.event === "member_joined_channel").
@@ -93,4 +98,17 @@ export interface TurnFinishedPayload {
   model?: string;
   tier?: string;
   durationMs?: number;
+}
+
+export interface SurfaceRenderedPayload {
+  conversationId?: string;
+  target: string;
+  component: string;
+  version: string;
+  validation: "ok" | "invalid";
+  render: "ok" | "failed";
+  interaction?: "accepted" | "rejected";
+  delivery?: "pending" | "delivered" | "ambiguous" | "failed";
+  validationPaths: readonly string[];
+  surfaceInteraction?: SurfaceInteraction;
 }

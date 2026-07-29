@@ -11,6 +11,11 @@ import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
 import { AGENT_TOOLS, type AgentToolContext } from "../soul/agents/tools.js";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "../soul/resource-types/tools.js";
 import { SKILL_TOOLS, type SkillToolContext } from "../soul/skills/tools.js";
+import {
+  SURFACE_COMPONENT_TOOLS,
+  type SurfaceComponentToolContext,
+} from "../soul/surface-components/tools.js";
+import { SURFACE_TOOLS } from "../surfaces/tools";
 
 /**
  * Builds the startup ToolRegistry by adapting module-specific tool definitions to the
@@ -25,6 +30,7 @@ export function buildToolRegistry(services: {
   resourceTypes?: ResourceTypeToolContext;
   agentTools?: AgentToolContext;
   skillTools?: SkillToolContext;
+  surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
@@ -130,6 +136,21 @@ export function buildToolRegistry(services: {
     }
   }
 
+  if (services.surfaceComponents) {
+    const ctx = services.surfaceComponents;
+    for (const t of SURFACE_COMPONENT_TOOLS) {
+      registry.register({
+        name: t.name,
+        tier: "system",
+        mutating: t.mutating,
+        requiresApproval: false,
+        description: t.description,
+        inputSchema: t.inputSchema,
+        execute: (args, _ctx) => t.handler(args, ctx),
+      });
+    }
+  }
+
   if (services.platform !== undefined) {
     const ctx = services.platform;
     for (const t of PLATFORM_TOOLS) {
@@ -144,13 +165,19 @@ export function buildToolRegistry(services: {
         execute: (args, reqCtx) =>
           t.handler(
             args,
-            reqCtx.routineContext ? { ...ctx, routineContext: reqCtx.routineContext } : ctx
+            reqCtx.routineContext
+              ? { ...ctx, routineContext: reqCtx.routineContext, requestContext: reqCtx }
+              : { ...ctx, requestContext: reqCtx }
           ),
       });
     }
   }
 
-  // Frontend tools (A2UI P3) are already ToolDefs — they read the per-request RequestContext directly
+  for (const tool of SURFACE_TOOLS) {
+    registry.register(tool);
+  }
+
+  // Frontend tools are already ToolDefs — they read the per-request RequestContext directly
   // (client context) and return client-action descriptors. No services to close over.
   for (const t of FRONTEND_TOOLS) {
     registry.register(t);

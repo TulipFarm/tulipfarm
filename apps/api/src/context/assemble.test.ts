@@ -57,6 +57,25 @@ describe("assembleSystemPrompt — block order", () => {
     expect(positions.every((p) => p >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
   });
+
+  it("places the optional Surface catalog before available Tools and omits it otherwise", () => {
+    const withCatalog = assembleSystemPrompt(
+      baseCtx({
+        surfaceCatalog: "RecordTable: repeated Records",
+        availableTools: [{ name: "present", description: "present" }],
+      })
+    );
+
+    expect(withCatalog).toContain("<surface-catalog>");
+    expect(withCatalog.indexOf("<surface-catalog>")).toBeLessThan(
+      withCatalog.indexOf("<available-tools>")
+    );
+    expect(
+      assembleSystemPrompt(
+        baseCtx({ availableTools: [{ name: "query_knowledge", description: "search" }] })
+      )
+    ).not.toContain("<surface-catalog>");
+  });
 });
 
 describe("assembleSystemPrompt — pinned knowledge block", () => {

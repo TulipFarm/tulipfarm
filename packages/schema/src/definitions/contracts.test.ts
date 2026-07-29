@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { SchemaRegistry, SchemaValidationError } from "../index";
-import { A2UIActionDescriptorSchema, A2UITemplateSchema } from "./a2ui";
 import { FormActionDescriptorSchema, FormSchema } from "./form";
 import { GuardrailSchema } from "./guardrail";
 import {
@@ -48,8 +47,6 @@ const registrations = [
   { apiVersion, kind: "MemorySettings", schema: MemorySettingsSchema },
   { apiVersion, kind: "Form", schema: FormSchema },
   { apiVersion, kind: "FormActionDescriptor", schema: FormActionDescriptorSchema },
-  { apiVersion, kind: "A2UITemplate", schema: A2UITemplateSchema },
-  { apiVersion, kind: "A2UIActionDescriptor", schema: A2UIActionDescriptorSchema },
 ] as const;
 
 function registry(): SchemaRegistry {
@@ -271,46 +268,6 @@ describe("AW-010 authored definition schemas", () => {
       },
       {
         apiVersion,
-        kind: "A2UITemplate",
-        metadata: metadata("incident-card"),
-        spec: {
-          root: {
-            component: "Card",
-            children: [
-              { component: "Heading", text: { path: "/title" } },
-              { component: "Button", label: "Open", actionRef: "open-incident" },
-            ],
-          },
-          actions: [
-            {
-              id: "open-incident",
-              action: "incident.open",
-              targetRefs: [{ type: "incident", id: "incident-42" }],
-              routineId: definitionId,
-              stateId: "openIncident",
-              inputSchema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  incident: {
-                    type: "object",
-                    additionalProperties: false,
-                    properties: { summary: { type: "string", minLength: 1 } },
-                    required: ["summary"],
-                  },
-                },
-                required: ["incident"],
-              },
-              audience: { roleIds: [definitionId] },
-              expiresInSeconds: 300,
-              guardrailId: definitionId,
-              guardrailVersion: 1,
-            },
-          ],
-        },
-      },
-      {
-        apiVersion,
         kind: "FormActionDescriptor",
         formId: definitionId,
         runId: definitionId,
@@ -320,21 +277,6 @@ describe("AW-010 authored definition schemas", () => {
         resumeToken: "abcdefghijklmnopqrstuvwxyzABCDEFG123456",
         nonce: "nonce-abcdefghijklmnopqrstuvwxyz123456",
         expiresAt,
-      },
-      {
-        apiVersion,
-        kind: "A2UIActionDescriptor",
-        action: "incident.open",
-        targetRefs: [{ type: "incident", id: "incident-42" }],
-        inputSchemaDigest: digest,
-        routineId: definitionId,
-        stateId: "openIncident",
-        audience: { roleIds: [definitionId] },
-        context: { kind: "run", runId: definitionId },
-        nonce: "nonce-abcdefghijklmnopqrstuvwxyz123456",
-        expiresAt,
-        guardrailRevision: digest,
-        signature: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_",
       },
     ];
 
@@ -512,38 +454,7 @@ describe("AW-010 authored definition schemas", () => {
     });
   });
 
-  it("rejects executable A2UI actions and plaintext secret form fields", () => {
-    expectInvalidAt(
-      {
-        apiVersion,
-        kind: "A2UITemplate",
-        metadata: metadata("scripted-ui"),
-        spec: {
-          root: {
-            component: "Button",
-            label: "Run",
-            actionRef: "run-action",
-            onClick: "javascript:steal()",
-          },
-          actions: [
-            {
-              id: "run-action",
-              action: "incident.open",
-              targetRefs: [{ type: "incident", id: "incident-42" }],
-              routineId: definitionId,
-              stateId: "openIncident",
-              inputSchema: { type: "object", additionalProperties: false, properties: {} },
-              audience: { roleIds: [definitionId] },
-              expiresInSeconds: 300,
-              guardrailId: definitionId,
-              guardrailVersion: 1,
-            },
-          ],
-        },
-      },
-      "/spec/root",
-      "additionalProperties"
-    );
+  it("rejects plaintext secret form fields", () => {
     expectInvalid({
       apiVersion,
       kind: "Form",
@@ -616,94 +527,6 @@ describe("AW-010 authored definition schemas", () => {
       delete incomplete[field];
       expectInvalidRequired(incomplete, field);
     }
-  });
-
-  it("requires signed A2UI actions to bind target, Context, nonce, expiry, and Guardrail", () => {
-    expectInvalidAt(
-      {
-        apiVersion,
-        kind: "A2UIActionDescriptor",
-        action: "incident.open",
-        targetRefs: [{ type: "incident", id: "incident-42" }],
-        inputSchemaDigest: digest,
-        routineId: definitionId,
-        stateId: "openIncident",
-        audience: { roleIds: [definitionId] },
-        context: { kind: "run", runId: definitionId },
-        nonce: "nonce-abcdefghijklmnopqrstuvwxyz123456",
-        expiresAt,
-        guardrailRevision: digest,
-        signature: "short",
-      },
-      "/signature",
-      "minLength"
-    );
-
-    const descriptor: Record<string, unknown> = {
-      apiVersion,
-      kind: "A2UIActionDescriptor",
-      action: "incident.open",
-      targetRefs: [{ type: "incident", id: "incident-42" }],
-      inputSchemaDigest: digest,
-      routineId: definitionId,
-      stateId: "openIncident",
-      audience: { roleIds: [definitionId] },
-      context: { kind: "run", runId: definitionId },
-      nonce: "nonce-abcdefghijklmnopqrstuvwxyz123456",
-      expiresAt,
-      guardrailRevision: digest,
-      signature: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_",
-    };
-    for (const field of [
-      "action",
-      "targetRefs",
-      "inputSchemaDigest",
-      "routineId",
-      "stateId",
-      "audience",
-      "context",
-      "nonce",
-      "expiresAt",
-      "guardrailRevision",
-      "signature",
-    ]) {
-      const incomplete = { ...descriptor };
-      delete incomplete[field];
-      expectInvalidRequired(incomplete, field);
-    }
-  });
-
-  it("rejects malformed property schemas in A2UI action inputs", () => {
-    expectInvalidAt(
-      {
-        apiVersion,
-        kind: "A2UITemplate",
-        metadata: metadata("malformed-input-schema"),
-        spec: {
-          root: { component: "Button", label: "Open", actionRef: "open-incident" },
-          actions: [
-            {
-              id: "open-incident",
-              action: "incident.open",
-              targetRefs: [{ type: "incident", id: "incident-42" }],
-              routineId: definitionId,
-              stateId: "openIncident",
-              inputSchema: {
-                type: "object",
-                additionalProperties: false,
-                properties: { amount: "not-a-schema" },
-              },
-              audience: { roleIds: [definitionId] },
-              expiresInSeconds: 300,
-              guardrailId: definitionId,
-              guardrailVersion: 1,
-            },
-          ],
-        },
-      },
-      "/spec/actions/0/inputSchema/properties/amount",
-      "type"
-    );
   });
 
   it("rejects unsafe Guardrail constraints without accepting free-form expressions", () => {

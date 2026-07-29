@@ -1,0 +1,24 @@
+{
+  "name": "@tulipfarm/surface-github",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./manifest": "./src/manifest.ts"
+  },
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/surface": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}

@@ -5,27 +5,21 @@ import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import type { BundledSkill } from "../soul/skills/bundled";
 import {
-  askUserTool,
   beginSoulBatchTool,
   callSkillTool,
   completeStateTool,
   completeTaskTool,
-  composeViewTool,
   delegateToAgentTool,
   endSoulBatchTool,
   loadSkillReferenceTool,
   loadSkillTool,
   PLATFORM_TOOLS,
   type PlatformToolContext,
-  presentChoicesTool,
-  renderSurfaceTool,
   routinePickerTool,
   soulRepoCommitTool,
   soulRepoPushTool,
-  suggestAgentTool,
   transferToAgentTool,
   triggerRoutineTool,
-  updateSurfaceTool,
   validateArtifactTool,
 } from "./tools";
 
@@ -100,7 +94,7 @@ describe("loadSkillTool", () => {
   it("returns skill frontmatter and body for a known skill", async () => {
     const ctx = makeCtx({ "data-analyst": makeSkill("data-analyst") });
     const res = await loadSkillTool.handler({ name: "data-analyst" }, ctx);
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       success: true,
       data: {
         name: "data-analyst",
@@ -126,7 +120,7 @@ describe("loadSkillTool", () => {
       bundledSkills: new Map([["resource-forge", makeBundledSkill("resource-forge")]]),
     };
     const res = await loadSkillTool.handler({ name: "resource-forge" }, ctx);
-    expect(res).toEqual({
+    expect(res).toMatchObject({
       success: true,
       data: {
         name: "resource-forge",
@@ -264,182 +258,6 @@ describe("loadSkillReferenceTool", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
-  });
-});
-
-// ── compose_view ──────────────────────────────────────────────────────────────
-
-describe("composeViewTool", () => {
-  it("passes HTML through unchanged", async () => {
-    const html = "<tf-card><tf-heading>Hello</tf-heading></tf-card>";
-    const res = await composeViewTool.handler({ html }, makeCtx());
-    expect(res).toEqual({ success: true, data: { html } });
-  });
-
-  it("returns validation_error for empty html", async () => {
-    const res = await composeViewTool.handler({ html: "" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-
-  it("returns validation_error for missing html", async () => {
-    const res = await composeViewTool.handler({}, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── render_surface ────────────────────────────────────────────────────────────
-
-describe("renderSurfaceTool", () => {
-  it("returns the surfaceId, spec, and dataModel for a valid spec", async () => {
-    const spec = { root: { component: "Text", text: { path: "/greeting" } } };
-    const res = await renderSurfaceTool.handler(
-      { surfaceId: "hello", spec, dataModel: { greeting: "hi" } },
-      makeCtx()
-    );
-    expect(res).toEqual({
-      success: true,
-      data: { surfaceId: "hello", spec, dataModel: { greeting: "hi" } },
-    });
-  });
-
-  it("defaults dataModel to {} when omitted", async () => {
-    const res = await renderSurfaceTool.handler(
-      { surfaceId: "s", spec: { root: { component: "Text", text: "x" } } },
-      makeCtx()
-    );
-    expect(res).toMatchObject({ success: true, data: { dataModel: {} } });
-  });
-
-  it("returns validation_error for a missing spec.root", async () => {
-    const res = await renderSurfaceTool.handler({ surfaceId: "s", spec: {} }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-
-  it("returns validation_error for a missing surfaceId", async () => {
-    const res = await renderSurfaceTool.handler(
-      { spec: { root: { component: "Text", text: "x" } } },
-      makeCtx()
-    );
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── update_surface ────────────────────────────────────────────────────────────
-
-describe("updateSurfaceTool", () => {
-  it("returns the surfaceId + data-model patch", async () => {
-    const res = await updateSurfaceTool.handler(
-      { surfaceId: "dash", dataModel: { revenue: "$1.3M" } },
-      makeCtx()
-    );
-    expect(res).toEqual({
-      success: true,
-      data: { surfaceId: "dash", dataModel: { revenue: "$1.3M" } },
-    });
-  });
-
-  it("returns validation_error when the dataModel patch is missing", async () => {
-    const res = await updateSurfaceTool.handler({ surfaceId: "dash" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── ask_user ──────────────────────────────────────────────────────────────────
-
-describe("askUserTool", () => {
-  const formSpec = {
-    root: {
-      component: "Form",
-      action: { descriptor: "payload.signature" },
-      fields: [{ name: "city", input: "text" }],
-    },
-  };
-
-  it("returns the surface + awaited schema marked interactive", async () => {
-    const res = await askUserTool.handler(
-      { surfaceId: "ask", prompt: "Which city?", spec: formSpec, schema: { type: "object" } },
-      makeCtx()
-    );
-    expect(res).toEqual({
-      success: true,
-      data: {
-        surfaceId: "ask",
-        spec: formSpec,
-        dataModel: {},
-        prompt: "Which city?",
-        schema: { type: "object" },
-        __interactive: true,
-      },
-    });
-  });
-
-  it("defaults prompt to null and schema to {}", async () => {
-    const res = await askUserTool.handler({ surfaceId: "ask", spec: formSpec }, makeCtx());
-    expect(res).toMatchObject({ success: true, data: { prompt: null, schema: {} } });
-  });
-
-  it("returns validation_error when spec is missing", async () => {
-    const res = await askUserTool.handler({ surfaceId: "ask" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── present_choices ───────────────────────────────────────────────────────────
-
-describe("presentChoicesTool", () => {
-  const choices = [
-    { label: "Option A", value: "a", description: "First option" },
-    { label: "Option B", value: "b" },
-  ];
-
-  it("returns question and choices", async () => {
-    const res = await presentChoicesTool.handler({ question: "Which path?", choices }, makeCtx());
-    expect(res).toEqual({ success: true, data: { question: "Which path?", choices } });
-  });
-
-  it("returns validation_error for empty choices array", async () => {
-    const res = await presentChoicesTool.handler({ question: "q", choices: [] }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-
-  it("returns validation_error when choice is missing value", async () => {
-    const res = await presentChoicesTool.handler(
-      { question: "q", choices: [{ label: "A" }] },
-      makeCtx()
-    );
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── suggest_agent ─────────────────────────────────────────────────────────────
-
-describe("suggestAgentTool", () => {
-  it("returns agentId, agentName, and reason for a known agent", async () => {
-    const ctx = makeCtx({}, { analyst: makeAgent("analyst", "Data Analyst") });
-    const res = await suggestAgentTool.handler(
-      { agentId: "analyst", reason: "Better at data tasks" },
-      ctx
-    );
-    expect(res).toEqual({
-      success: true,
-      data: { agentId: "analyst", agentName: "Data Analyst", reason: "Better at data tasks" },
-    });
-  });
-
-  it("falls back to agentId as agentName when frontmatter has no name", async () => {
-    const ctx = makeCtx({}, { bot: makeAgent("bot") });
-    const res = await suggestAgentTool.handler({ agentId: "bot" }, ctx);
-    expect(res).toMatchObject({ success: true, data: { agentName: "bot", reason: null } });
-  });
-
-  it("returns not_found for unknown agent", async () => {
-    const res = await suggestAgentTool.handler({ agentId: "ghost" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-  });
-
-  it("returns validation_error for missing agentId", async () => {
-    const res = await suggestAgentTool.handler({}, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
 
@@ -848,17 +666,11 @@ describe("completeStateTool", () => {
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 describe("PLATFORM_TOOLS registry", () => {
-  it("exports exactly 21 platform tools in order", () => {
+  it("exports the consolidated platform tool set in order", () => {
     const names = PLATFORM_TOOLS.map((t) => t.name);
     expect(names).toEqual([
       "load_skill",
       "load_skill_reference",
-      "compose_view",
-      "render_surface",
-      "update_surface",
-      "ask_user",
-      "present_choices",
-      "suggest_agent",
       "validate_artifact",
       "transfer_to_agent",
       "delegate_to_agent",

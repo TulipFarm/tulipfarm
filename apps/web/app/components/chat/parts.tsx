@@ -1,6 +1,6 @@
 import { Link } from "@remix-run/react";
 import { type ReactNode, useState } from "react";
-import { A2uiFrame } from "~/components/a2ui-frame";
+import { SurfaceArtifact } from "~/components/surface-artifact";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 import { ApprovalCard } from "./approval-card";
@@ -174,6 +174,16 @@ function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
 
 const SOURCE_LINK_CLASS =
   "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
+const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
+
+function toolSucceeded(result: unknown): boolean {
+  return (
+    typeof result === "object" &&
+    result !== null &&
+    "success" in result &&
+    (result as { success?: unknown }).success === true
+  );
+}
 
 function SourcesPart({ sources }: { sources: SourceRef[] }) {
   return (
@@ -214,14 +224,17 @@ export function MessagePartView({
   streaming,
   citations,
   onApprove,
-  onA2uiAgent,
+  onSurfaceInteraction,
 }: {
   part: TimelinePart;
   streaming?: boolean;
   /** The message's cited-source links, so `[n]` markers in a text part become clickable. */
   citations?: { ref: number; url: string }[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
-  onA2uiAgent?: (payload: unknown) => void;
+  onSurfaceInteraction?: (
+    handle: string,
+    input: Readonly<Record<string, unknown>>
+  ) => void | Promise<void>;
 }) {
   switch (part.kind) {
     case "text":
@@ -231,7 +244,14 @@ export function MessagePartView({
     case "tool":
       // cite_sources is citation plumbing — its output already renders as the source chips and the
       // inline [n] links, so its tool row is noise. Hide it (it never needs approval).
-      if (part.toolName === "cite_sources") return null;
+      // Successful presentation Tools are equally redundant once their native Surface renders.
+      // Failed calls stay visible so the user can inspect the error rather than seeing a blank gap.
+      if (
+        part.toolName === "cite_sources" ||
+        (PRESENTATION_TOOL_NAMES.has(part.toolName) && toolSucceeded(part.result))
+      ) {
+        return null;
+      }
       return (
         <ToolPart
           toolName={part.toolName}
@@ -270,14 +290,22 @@ export function MessagePartView({
           <span className="text-foreground">{part.message ?? part.reason}</span>
         </div>
       );
-    case "a2ui":
+    case "surface":
       return (
-        <A2uiFrame
-          html={part.html}
-          fragments={part.fragments}
-          onAgent={onA2uiAgent}
-          className="w-full rounded-sm border border-border"
+        <SurfaceArtifact
+          artifact={part.artifact}
+          artifactId={part.artifactId}
+          revision={part.revision}
+          actionHandles={part.actionHandles}
+          resolvedView={part.resolvedView}
+          onInteraction={onSurfaceInteraction}
         />
+      );
+    case "surface-unavailable":
+      return (
+        <div role="status" className="rounded-sm border border-border px-3 py-2 text-sm">
+          {part.message}
+        </div>
       );
   }
 }

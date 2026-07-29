@@ -116,7 +116,7 @@ export function ChatPanel({
     approve,
     regenerate,
     sendFeedback,
-    sendA2uiAgent,
+    sendSurfaceInteraction,
     connectionState,
   } = useChatStream({
     initialConversationId,
@@ -180,7 +180,7 @@ export function ChatPanel({
           onApprove={approve}
           onRegenerate={regenerate}
           onFeedback={sendFeedback}
-          onA2uiAgent={sendA2uiAgent}
+          onSurfaceInteraction={sendSurfaceInteraction}
         />
       ) : (
         <EmptyState

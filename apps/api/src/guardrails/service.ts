@@ -1,4 +1,4 @@
-import { type GuardrailsConfig, validateGuardrailsConfig } from "@tulipfarm/schema";
+import { canonicalHash, type GuardrailsConfig, validateGuardrailsConfig } from "@tulipfarm/schema";
 import { DEFAULT_GUARDRAILS } from "./default-policy";
 import { makeContentFilterGuard } from "./guards/content-filter";
 import { makePromptInjectionGuard } from "./guards/prompt-injection";
@@ -23,6 +23,11 @@ export class GuardrailsService {
   private input: Guard<string>[] = [];
   private toolCall: Guard<ToolCallInput>[] = [];
   private output: Guard<string>[] = [];
+  private revisionValue = canonicalHash(DEFAULT_GUARDRAILS);
+
+  get revision(): string {
+    return this.revisionValue;
+  }
 
   init(raw: Record<string, unknown> | null, log: ServiceLogger): void {
     this.log = log;
@@ -46,6 +51,7 @@ export class GuardrailsService {
     this.input = input;
     this.toolCall = toolCall;
     this.output = output;
+    this.revisionValue = canonicalHash(cfg);
   }
 
   runInput(text: string, ctx: GuardContext): Promise<StageResult<string>> {

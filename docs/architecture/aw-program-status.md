@@ -22,7 +22,7 @@ Reproduce the package-level evidence:
 ```bash
 # Non-test app files importing each governed package.
 for p in sandbox validation testkit audit observability knowledge memory agent-runtime \
-         tool-broker run-kernel routine-engine integrations authz storage a2ui; do
+         tool-broker run-kernel routine-engine integrations authz storage surface; do
   printf '%s: %s\n' "$p" \
     "$(grep -rl "@tulipfarm/$p" apps/*/src | grep -cv '\.test\.')"
 done
@@ -64,7 +64,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | `storage` | 7 | composed — `RunStore` / `RunEventStore` back the operational Run browser |
 | `run-kernel` | 6 | partly composed — the invocation gateway and Run event reader are reachable; replay is not |
 | `authz` | 4 | partly composed — principal/identity types plus the deployment role catalog (`apps/api/src/identity/roles.ts`); the policy engine (`decideEffectivePermission`, `evaluateGuardrail`, `checkDlpBoundary`) still has no production caller |
-| `a2ui` | 4 | composed — the compiler is reached from `chat/producer.ts` |
+| `surface` | 4 | composed — the compiler is reached from `chat/producer.ts` |
 | `integrations` | 4 | not composed — all four importers are in `apps/integration-worker`, which never starts (D2) |
 | `agent-runtime`, `tool-broker` | 1 each | not composed — type-only import / SQL DDL constant only |
 | `routine-engine` | 2 | orphan subtree, scheduled for retirement |
@@ -72,7 +72,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 
 ## Correctly hooked, no action needed
 
-Skills (bundled Skill overlay, frontmatter validation, catalog UI), A2UI compile through
+Skills (bundled Skill overlay, frontmatter validation, catalog UI), Tulip Surface Protocol compile through
 `chat/producer.ts`, Chat/SSE with durable resume, the Soul loader, `@tulipfarm/schema` AJV
 validation on tool calls, the LLM provider chain, secrets, and the editor surfaces.
 

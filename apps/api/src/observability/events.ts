@@ -3,6 +3,7 @@ import { type ModelPrice, priceFor } from "@tulipfarm/llm";
 import {
   DOMAIN_EVENTS,
   type LlmStepFinishedPayload,
+  type SurfaceRenderedPayload,
   type TurnFinishedPayload,
 } from "../domain-events";
 import type { MetricsSink } from "./metrics";
@@ -79,6 +80,15 @@ export function subscribeObservability(
   );
   emitter.on(DOMAIN_EVENTS.TURN_FINISHED, (p: TurnFinishedPayload): void =>
     guard(() => onTurnFinished(p))
+  );
+  emitter.on(DOMAIN_EVENTS.SURFACE_RENDERED, (p: SurfaceRenderedPayload): void =>
+    guard(() => metrics?.recordSurface?.(p))
+  );
+  emitter.on(DOMAIN_EVENTS.SURFACE_INTERACTED, (p: SurfaceRenderedPayload): void =>
+    guard(() => metrics?.recordSurface?.(p))
+  );
+  emitter.on(DOMAIN_EVENTS.SURFACE_DELIVERED, (p: SurfaceRenderedPayload): void =>
+    guard(() => metrics?.recordSurface?.(p))
   );
 
   function onLlmStep(p: LlmStepFinishedPayload): void {

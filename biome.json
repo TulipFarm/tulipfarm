@@ -15,8 +15,7 @@
       "!**/.agent",
       "!**/.agents",
       "!**/.claude",
-      "!brand",
-      "!**/a2ui/chart-source.ts"
+      "!brand"
     ]
   },
   "formatter": {

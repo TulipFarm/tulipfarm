@@ -1,10 +1,8 @@
 import type { ServerResponse } from "node:http";
 import { APICallError } from "ai";
-import type { A2uiSurfaceStore } from "../a2ui/artifact-surface";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import { clientActionEvent } from "../platform/frontend-tools";
 import type { ToolCallResult } from "../tools/types";
-import { a2uiEventsForToolResult } from "./a2ui-surface";
 import { writeSseEvent } from "./sse";
 import type { StreamEmitter } from "./stream-emitter";
 import { isTerminalEvent, type StreamEvent, type StreamHub } from "./stream-hub";
@@ -109,9 +107,6 @@ export interface StreamProducerDeps {
   hub: StreamHub;
   log: { error: (obj: unknown, msg?: string) => void };
   fullResultCache?: Map<string, ToolCallResult>;
-  // A2UI live surfaces: persisted on render_surface, loaded + diffed on update_surface (per conversation).
-  surfaceStore?: A2uiSurfaceStore;
-  conversationId?: string;
   // The per-turn abort signal (from the chat stop endpoint). When it fires, the LLM stream is
   // aborted: the producer converts the resulting AbortError / error part into a clean
   // `finish` (reason `stopped`) rather than a terminal `error`, so a deliberate stop reads as a stop.
@@ -227,18 +222,25 @@ export async function runChatStream(
         if (blocked) continue;
       }
       await deps.emitter.emit(mapped.eventType, mapped.data);
-      // A view/terminal tool (compose_view, present_choices, suggest_agent, render_surface) result
-      // also emits a follow-on `a2ui` event carrying the rendered tf-* block / compiled surface; the
-      // tool-result stays intact so the model still reads the structured data. Non-view tools → null.
       if (mapped.eventType === "tool-result") {
-        const { toolName, result } = mapped.data as { toolName: string; result: ToolCallResult };
-        // View/surface tools emit `a2ui` events (createSurface / updateDataModel / legacy html) and
-        // keep the surface store current so a later update_surface can diff + swap in place.
-        const a2uiEvents = await a2uiEventsForToolResult(toolName, result, {
-          store: deps.surfaceStore,
-          conversationId: deps.conversationId,
-        });
-        for (const ev of a2uiEvents) await deps.emitter.emit("a2ui", ev);
+        const { toolName, result } = mapped.data as {
+          toolName: string;
+          result: ToolCallResult;
+        };
+        if (result.success && typeof result.data === "object" && result.data !== null) {
+          const data = result.data as {
+            artifact?: unknown;
+            actionHandles?: Readonly<Record<string, string>>;
+            resolvedView?: unknown;
+          };
+          if (data.artifact) {
+            await deps.emitter.emit("surface", {
+              artifact: data.artifact,
+              actionHandles: data.actionHandles ?? {},
+              resolvedView: data.resolvedView,
+            });
+          }
+        }
         // Frontend-action tools (navigate_to, …) also emit a `client-action` the web shell executes.
         const action = clientActionEvent(toolName, result);
         if (action) await deps.emitter.emit("client-action", action);

@@ -10,6 +10,11 @@ import {
 
 const ctx = (overrides: Partial<RequestContext> = {}): RequestContext => ({
   userId: "u1",
+  presentationContext: {
+    target: { channel: "web", surface: "chat" },
+    destination: "conversation:1",
+    rendererCapabilities: [],
+  },
   ...overrides,
 });
 

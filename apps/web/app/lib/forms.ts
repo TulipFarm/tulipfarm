@@ -1,4 +1,4 @@
-import type { FormSubmissionResult, SubmitFormInput } from "@tulipfarm/a2ui";
+import type { FormSubmissionResult, SubmitFormInput } from "@tulipfarm/surface";
 import { apiWrite } from "./api";
 
 export type FormSubmissionBody = Omit<SubmitFormInput, "formId" | "principal" | "submittedAt">;

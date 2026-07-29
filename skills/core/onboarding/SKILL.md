@@ -16,10 +16,10 @@ the matching forge directly.
 
 ### 1. Discovery
 
-Use `present_choices` (if available) to offer domain starting points plus Custom: Software
+Use `request_input` (if available) to offer domain starting points plus Custom: Software
 Development, Customer Support, Sales & CRM, HR & People Ops, General Operations, Custom. Then run a
 focused 3–5 minute interview: the entities to track, the work to automate, the team roles, and the
-external systems used. Use `present_choices` for structured picks and plain language for open
+external systems used. Use `request_input` for structured picks and plain language for open
 questions.
 
 ### 2. Plan

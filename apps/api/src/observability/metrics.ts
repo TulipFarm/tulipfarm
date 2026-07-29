@@ -22,6 +22,16 @@ export interface MetricsSink {
   recordToolCall(d: { toolName: string; status: string }): void;
   recordTurn(d: { status: string }): void;
   recordJob(d: { queue: string; status: string }): void;
+  recordSurface?(d: {
+    target: string;
+    component: string;
+    version: string;
+    validation: string;
+    render: string;
+    interaction?: string;
+    delivery?: string;
+    validationPaths: readonly string[];
+  }): void;
 }
 
 type LabelSet = Record<string, string>;
@@ -81,6 +91,10 @@ export class OtlpMetricsExporter implements MetricsSink {
     tool_calls_total: new Counter(),
     turns_total: new Counter(),
     job_runs_total: new Counter(),
+    surface_render_total: new Counter(),
+    surface_validation_total: new Counter(),
+    surface_interaction_total: new Counter(),
+    surface_delivery_total: new Counter(),
   };
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly startUnixNano: string;
@@ -118,6 +132,34 @@ export class OtlpMetricsExporter implements MetricsSink {
 
   recordJob(d: { queue: string; status: string }): void {
     this.counters.job_runs_total.add({ queue: d.queue, status: d.status });
+  }
+
+  recordSurface(d: {
+    target: string;
+    component: string;
+    version: string;
+    validation: string;
+    render: string;
+    interaction?: string;
+    delivery?: string;
+    validationPaths: readonly string[];
+  }): void {
+    const labels = {
+      target: d.target,
+      component: d.component,
+      version: d.version,
+    };
+    this.counters.surface_render_total.add({ ...labels, result: d.render });
+    this.counters.surface_validation_total.add({ ...labels, result: d.validation });
+    for (const path of d.validationPaths) {
+      this.counters.surface_validation_total.add({ ...labels, result: "invalid", path });
+    }
+    if (d.interaction) {
+      this.counters.surface_interaction_total.add({ ...labels, result: d.interaction });
+    }
+    if (d.delivery) {
+      this.counters.surface_delivery_total.add({ ...labels, status: d.delivery });
+    }
   }
 
   /** Build the OTLP/JSON ExportMetricsServiceRequest for the current cumulative totals. */

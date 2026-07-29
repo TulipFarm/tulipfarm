@@ -3,7 +3,7 @@ import {
   type FormSubmissionResult,
   type GovernedForm,
   type SubmitFormInput,
-} from "@tulipfarm/a2ui";
+} from "@tulipfarm/surface";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";

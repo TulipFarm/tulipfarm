@@ -43,7 +43,7 @@ export const THREAT_MODEL_CONTROLS: readonly ThreatModelControl[] = [
     category: "replay_substitution",
     evidence: [
       "packages/integrations/src/generic/webhook.test.ts",
-      "packages/a2ui/src/action.test.ts",
+      "packages/surface/src/action.test.ts",
     ],
   },
   {

@@ -123,7 +123,7 @@ describe("ARCHITECTURE_CONFIG", () => {
       "tool-broker",
       "knowledge",
       "memory",
-      "a2ui",
+      "surface",
       "integrations",
       "agent-runtime",
     ]) {
@@ -141,7 +141,7 @@ describe("ARCHITECTURE_CONFIG", () => {
 
   it("encodes the soul allowlist from the contract", () => {
     expect(new Set(ARCHITECTURE_CONFIG.allowlist.soul)).toEqual(
-      new Set(["schema", "authz", "audit", "storage", "observability"])
+      new Set(["schema", "authz", "audit", "storage", "observability", "surface"])
     );
   });
 

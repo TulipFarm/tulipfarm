@@ -1,0 +1,33 @@
+{
+  "name": "@tulipfarm/surface-web",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./manifest": "./src/manifest.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "lint": "biome check --no-errors-on-unmatched .",
+    "test": "vitest run --passWithNoTests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tulipfarm/surface": "workspace:*",
+    "@tulipfarm/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@tulipfarm/tsconfig": "workspace:*",
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -206,7 +206,7 @@ function Message({
   onApprove,
   onRegenerate,
   onFeedback,
-  onA2uiAgent,
+  onSurfaceInteraction,
 }: {
   message: ChatMessage;
   status: ChatStatus;
@@ -215,7 +215,10 @@ function Message({
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
-  onA2uiAgent?: (payload: unknown) => void;
+  onSurfaceInteraction?: (
+    handle: string,
+    input: Readonly<Record<string, unknown>>
+  ) => void | Promise<void>;
 }) {
   // Cited-source links for this message, gathered from its `sources` part(s), so inline `[n]` markers
   // in the text become clickable. Memoized on `parts` so the markdown isn't re-parsed each render.
@@ -246,7 +249,7 @@ function Message({
           streaming={streaming && i === lastIndex && part.kind === "text"}
           citations={citations}
           onApprove={onApprove}
-          onA2uiAgent={onA2uiAgent}
+          onSurfaceInteraction={onSurfaceInteraction}
         />
       ))}
       {message.sealed && text ? (
@@ -281,7 +284,7 @@ export function Transcript({
   onApprove,
   onRegenerate,
   onFeedback,
-  onA2uiAgent,
+  onSurfaceInteraction,
 }: {
   messages: ChatMessage[];
   status: ChatStatus;
@@ -289,7 +292,10 @@ export function Transcript({
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
-  onA2uiAgent?: (payload: unknown) => void;
+  onSurfaceInteraction?: (
+    handle: string,
+    input: Readonly<Record<string, unknown>>
+  ) => void | Promise<void>;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
@@ -318,7 +324,7 @@ export function Transcript({
             onApprove={onApprove}
             onRegenerate={onRegenerate}
             onFeedback={onFeedback}
-            onA2uiAgent={onA2uiAgent}
+            onSurfaceInteraction={onSurfaceInteraction}
           />
         ))}
         {status === "submitted" ? <Loader /> : null}

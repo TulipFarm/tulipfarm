@@ -1,7 +1,7 @@
 # Layer-1 chat UI
 
-The product's primary surface (route `/`, `_app._index.tsx`): a streaming chat rendered **outside** the
-A2UI iframe, terminal-native per `DESIGN.md`. Components are hand-authored (shadcn-style, modeled on AI
+The product's primary surface (route `/`, `_app._index.tsx`): streaming Chat with native trusted
+Tulip Surface Protocol React components. Components are hand-authored (shadcn-style, modeled on AI
 SDK Elements) and fed by the custom fetch-SSE client in `app/lib/chat/` — **not** the Vercel `ai` SDK.
 
 ## Data flow
@@ -62,7 +62,7 @@ inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarr
 |---|---|
 | `parts.tsx` Response (text) | `text` (live) |
 | `parts.tsx` tool block + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
-| `parts.tsx` reasoning / plan / task / sources / agent-handoff / a2ui (`<A2uiFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits |
+| `parts.tsx` reasoning / plan / task / sources / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits |
 | `model-selector.tsx` | sets POST `model` — a portalled dropdown over quick/standard/complex (signal-bar intensity icons); each option explains the tier (line 1) and lists its configured models (line 2, from `GET /api/v1/llm-config`) |
 | `autonomy-control.tsx` | sets POST `autonomy`; `approval-required` arms the live tool-approval gate |
 

@@ -6,7 +6,9 @@ import { type PaginatedResult, toPage } from "../pagination";
 export type MessagePart =
   | { type: "text"; text: string }
   | { type: "tool-call"; toolCallId: string; toolName: string; args: unknown }
-  | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown };
+  | { type: "tool-result"; toolCallId: string; toolName: string; result: unknown }
+  | { type: "surface"; artifactId: string; revision: number }
+  | { type: "surface-unavailable"; message: "Legacy presentation unavailable" };
 
 export type MessageRole = "system" | "user" | "assistant" | "tool" | "summary";
 
@@ -67,7 +69,11 @@ export function assertValidMessage(role: MessageRole, content: string | MessageP
     throw new InvalidMessageError("tool message parts array cannot be empty");
   }
   for (const part of content) {
-    if (part.type !== "tool-result") {
+    if (
+      part.type !== "tool-result" &&
+      part.type !== "surface" &&
+      part.type !== "surface-unavailable"
+    ) {
       throw new InvalidMessageError(`tool message cannot contain a "${part.type}" part`);
     }
   }
@@ -124,6 +130,7 @@ export function toModelMessage(doc: MessageDoc): ModelMessage {
           output: { type: "json" as const, value: part.result as import("ai").JSONValue },
         });
       }
+      // Presentation references are durable UI Artifacts, not model-input Tool results.
     }
   }
   return { role: "tool", content: toolParts };
@@ -204,11 +211,23 @@ export interface MessageRepo {
 }
 
 function rowToMessage(row: Record<string, unknown>): MessageDoc {
+  const rawContent = row.content as string | Array<Record<string, unknown>>;
+  const content =
+    typeof rawContent === "string"
+      ? rawContent
+      : rawContent.map((part) =>
+          typeof part.html === "string"
+            ? ({
+                type: "surface-unavailable",
+                message: "Legacy presentation unavailable",
+              } as const)
+            : (part as MessagePart)
+        );
   const doc: MessageDoc = {
     _id: row.id as string,
     conversationId: row.conversation_id as string,
     role: row.role as MessageRole,
-    content: row.content as string | MessagePart[],
+    content,
     createdAt: row.created_at as Date,
   };
   if (row.metadata != null) {

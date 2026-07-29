@@ -39,6 +39,7 @@ describe("SoulLoader", () => {
       expect(loader.resources.size).toBe(0);
       expect(loader.routines.size).toBe(0);
       expect(loader.integrations.size).toBe(0);
+      expect(loader.surfaceComponents.size).toBe(0);
       expect(loader.llmConfig).toBeNull();
       expect(loader.guardrailsConfig).toBeNull();
       expect(loader.manifest).toBeNull();
@@ -90,6 +91,83 @@ describe("SoulLoader", () => {
         tags: ["foo"],
       });
       expect(loader.skills.get("my-skill")?.body).toBe("Skill body here.");
+    });
+  });
+
+  describe("Surface components", () => {
+    it("loads and validates a published declarative composition", async () => {
+      await write(
+        join(TMP, "surface-components", "release-status", "component.yaml"),
+        [
+          "name: business.release-status",
+          'version: "1.0"',
+          "description: Release readiness",
+          "propsSchema:",
+          "  type: object",
+          "  required: [label]",
+          "  properties:",
+          "    label: { type: string }",
+          "events: []",
+          "examples:",
+          "  - label: Ready",
+          "targets:",
+          "  - channel: web",
+          "    surface: chat",
+        ].join("\n")
+      );
+      await write(
+        join(TMP, "surface-components", "release-status", "views", "default.yaml"),
+        [
+          "component:",
+          "  name: Status",
+          '  version: "1.0"',
+          "props:",
+          "  label:",
+          '    $prop: "/label"',
+          "  tone: positive",
+        ].join("\n")
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.surfaceComponents.get("business.release-status")).toMatchObject({
+        slug: "release-status",
+        version: "1.0",
+      });
+    });
+
+    it("fails closed when a composition references an unknown version", async () => {
+      await write(
+        join(TMP, "surface-components", "release-status", "component.yaml"),
+        [
+          "name: business.release-status",
+          'version: "1.0"',
+          "description: Release readiness",
+          "propsSchema:",
+          "  type: object",
+          "  required: [label]",
+          "  properties:",
+          "    label: { type: string }",
+          "events: []",
+          "examples:",
+          "  - label: Ready",
+          "targets:",
+          "  - channel: web",
+          "    surface: chat",
+        ].join("\n")
+      );
+      await write(
+        join(TMP, "surface-components", "release-status", "views", "default.yaml"),
+        [
+          "component:",
+          "  name: Status",
+          '  version: "9.0"',
+          "props:",
+          "  label:",
+          '    $prop: "/label"',
+        ].join("\n")
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow("unknown component Status@9.0");
     });
   });
 

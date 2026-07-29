@@ -1,3 +1,4 @@
+import type { EventEmitter } from "node:events";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
@@ -9,9 +10,9 @@ import type {
   SoulSkill,
 } from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
-import { A2UI_COMPONENTS_REF, A2UI_SPEC_SCHEMA } from "../a2ui/spec";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { resolveSkill } from "../soul/skills/registry";
+import type { RequestContext } from "../tools/types";
 import { err, ok, type ToolCallResult } from "./tool-result";
 
 export interface PlatformToolContext {
@@ -33,6 +34,10 @@ export interface PlatformToolContext {
   disabledBundledSkills?: ReadonlySet<string>;
   /** Reserved names of the code-defined platform agents, valid `transfer_to_agent` targets. */
   platformAgentNames?: ReadonlySet<string>;
+  /** Per-call state supplied by the Tool registry, never captured at startup. */
+  requestContext?: RequestContext;
+  /** Best-effort metrics bus; listeners must never affect tool correctness. */
+  events?: EventEmitter;
 }
 
 export interface PlatformTool {
@@ -45,8 +50,20 @@ export interface PlatformTool {
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
+// `oneOf` fan-out can make AJV report the failure
+// against the outermost branch it tried first, not the field that's actually wrong several
+// levels down. Prefer the deepest non-"oneOf" error so the message points at the real defect.
+function bestError(errors: AjvErrors): NonNullable<AjvErrors>[number] | undefined {
+  if (!errors || errors.length === 0) return undefined;
+  const specific = errors.filter((e) => e.keyword !== "oneOf");
+  const pool = specific.length > 0 ? specific : errors;
+  return pool.reduce((deepest, e) =>
+    e.instancePath.length > deepest.instancePath.length ? e : deepest
+  );
+}
+
 function firstError(errors: AjvErrors): string {
-  const e = errors?.[0];
+  const e = bestError(errors);
   return e
     ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
     : "invalid arguments";
@@ -145,246 +162,6 @@ export const loadSkillReferenceTool: PlatformTool = {
     } catch {
       return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
     }
-  },
-};
-
-// ── compose_view ──────────────────────────────────────────────────────────────
-
-const COMPOSE_VIEW_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["html"],
-  properties: {
-    html: {
-      type: "string",
-      minLength: 1,
-      description:
-        "HTML using tf-* web components (tf-card, tf-data-table, tf-schema-form, etc.). Rendered in the A2UI sandboxed iframe.",
-    },
-  },
-};
-const validateComposeView = ajv.compile(COMPOSE_VIEW_SCHEMA);
-
-export const composeViewTool: PlatformTool = {
-  name: "compose_view",
-  description:
-    "Emit an A2UI rich-content block using tf-* web components. The HTML is sanitised and rendered in a sandboxed iframe in the chat UI. Use tf-card, tf-data-table, tf-schema-form, tf-metric-card, tf-chart-bar, etc.",
-  mutating: false,
-  inputSchema: COMPOSE_VIEW_SCHEMA,
-  handler: async (args, _ctx) => {
-    if (!validateComposeView(args))
-      return err("validation_error", firstError(validateComposeView.errors));
-    const { html } = args as { html: string };
-    return ok({ html });
-  },
-};
-
-// ── render_surface ────────────────────────────────────────────────────────────
-
-const RENDER_SURFACE_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["surfaceId", "spec"],
-  properties: {
-    surfaceId: {
-      type: "string",
-      minLength: 1,
-      description: 'A stable id for this surface, e.g. "q2-dashboard".',
-    },
-    spec: A2UI_SPEC_SCHEMA,
-    dataModel: {
-      type: "object",
-      description:
-        "Optional data object the spec's { path } bindings resolve against (JSON-pointer).",
-    },
-  },
-};
-const validateRenderSurface = ajv.compile(RENDER_SURFACE_SCHEMA);
-
-export const renderSurfaceTool: PlatformTool = {
-  name: "render_surface",
-  description:
-    "Render a rich UI surface from a declarative A2UI component spec (preferred over compose_view's raw HTML). `spec.root` is a component node or an array of nodes. The surface renders in the sandboxed iframe in chat. " +
-    A2UI_COMPONENTS_REF,
-  mutating: false,
-  inputSchema: RENDER_SURFACE_SCHEMA,
-  handler: async (args, _ctx) => {
-    if (!validateRenderSurface(args))
-      return err("validation_error", firstError(validateRenderSurface.errors));
-    const { surfaceId, spec, dataModel } = args as {
-      surfaceId: string;
-      spec: unknown;
-      dataModel?: Record<string, unknown>;
-    };
-    return ok({ surfaceId, spec, dataModel: dataModel ?? {} });
-  },
-};
-
-// ── update_surface ────────────────────────────────────────────────────────────
-
-const UPDATE_SURFACE_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["surfaceId", "dataModel"],
-  properties: {
-    surfaceId: {
-      type: "string",
-      minLength: 1,
-      description:
-        "The id of a surface previously rendered with render_surface in this conversation.",
-    },
-    dataModel: {
-      type: "object",
-      description:
-        "A patch merged into the surface's data model (top-level keys). Nodes bound via { path } recompute and swap in place — so bind values you want to update later instead of inlining literals.",
-    },
-  },
-};
-const validateUpdateSurface = ajv.compile(UPDATE_SURFACE_SCHEMA);
-
-export const updateSurfaceTool: PlatformTool = {
-  name: "update_surface",
-  description:
-    "Update an already-rendered surface in place by patching its data model. Bound nodes ({ path }) recompute and swap without re-rendering the whole surface. Use after render_surface to reflect new data (a changed metric, a refreshed table) — the surface must have used { path } bindings for the values you patch.",
-  mutating: false,
-  inputSchema: UPDATE_SURFACE_SCHEMA,
-  handler: async (args, _ctx) => {
-    if (!validateUpdateSurface(args))
-      return err("validation_error", firstError(validateUpdateSurface.errors));
-    const { surfaceId, dataModel } = args as {
-      surfaceId: string;
-      dataModel: Record<string, unknown>;
-    };
-    return ok({ surfaceId, dataModel });
-  },
-};
-
-// ── ask_user ──────────────────────────────────────────────────────────────────
-
-const ASK_USER_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["surfaceId", "spec"],
-  properties: {
-    surfaceId: { type: "string", minLength: 1, description: "A stable id for the form surface." },
-    prompt: { type: "string", description: "The question shown to the user (also recorded)." },
-    spec: A2UI_SPEC_SCHEMA,
-    schema: {
-      type: "object",
-      description: "JSON Schema describing the expected answer (stored as the awaited schema).",
-    },
-  },
-};
-const validateAskUser = ajv.compile(ASK_USER_SCHEMA);
-
-export const askUserTool: PlatformTool = {
-  name: "ask_user",
-  description:
-    "Pause the run and ask the user for input via an interactive A2UI form, then resume with their answer as THIS tool's result. `spec` is the surface to render — include a Form whose action contains an opaque server-signed descriptor; usually a Card wrapping a Heading (the question) and the Form. The turn ends with the form on screen; the user's submission resumes the SAME run with their answer. Use for genuine human-in-the-loop decisions, not rhetorical questions. " +
-    A2UI_COMPONENTS_REF,
-  mutating: false,
-  inputSchema: ASK_USER_SCHEMA,
-  handler: async (args, _ctx) => {
-    if (!validateAskUser(args)) return err("validation_error", firstError(validateAskUser.errors));
-    const { surfaceId, prompt, spec, schema } = args as {
-      surfaceId: string;
-      prompt?: string;
-      spec: unknown;
-      schema?: Record<string, unknown>;
-    };
-    return ok({
-      surfaceId,
-      spec,
-      dataModel: {},
-      prompt: prompt ?? null,
-      schema: schema ?? {},
-      __interactive: true,
-    });
-  },
-};
-
-// ── present_choices ───────────────────────────────────────────────────────────
-
-const CHOICE_ITEM_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["label", "value"],
-  properties: {
-    label: { type: "string", minLength: 1 },
-    value: { type: "string", minLength: 1 },
-    description: { type: "string" },
-  },
-};
-
-const PRESENT_CHOICES_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["question", "choices"],
-  properties: {
-    question: {
-      type: "string",
-      minLength: 1,
-      description: "The question or prompt to display to the user.",
-    },
-    choices: {
-      type: "array",
-      minItems: 1,
-      maxItems: 10,
-      items: CHOICE_ITEM_SCHEMA,
-      description:
-        "Selectable options. Each choice has a label (display text) and a value (machine token).",
-    },
-  },
-};
-const validatePresentChoices = ajv.compile(PRESENT_CHOICES_SCHEMA);
-
-export const presentChoicesTool: PlatformTool = {
-  name: "present_choices",
-  description:
-    "Present the user with a set of labelled choices and pause for their selection. The UI renders an interactive choice picker from the tool result. Use for branching decisions, disambiguation, or option selection.",
-  mutating: false,
-  inputSchema: PRESENT_CHOICES_SCHEMA,
-  handler: async (args, _ctx) => {
-    if (!validatePresentChoices(args))
-      return err("validation_error", firstError(validatePresentChoices.errors));
-    const { question, choices } = args as {
-      question: string;
-      choices: Array<{ label: string; value: string; description?: string }>;
-    };
-    return ok({ question, choices });
-  },
-};
-
-// ── suggest_agent ─────────────────────────────────────────────────────────────
-
-const SUGGEST_AGENT_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  additionalProperties: false,
-  required: ["agentId"],
-  properties: {
-    agentId: { type: "string", minLength: 1, description: "Soul name of the agent to suggest." },
-    reason: {
-      type: "string",
-      description: "Why this agent is more appropriate for the user's need.",
-    },
-  },
-};
-const validateSuggestAgent = ajv.compile(SUGGEST_AGENT_SCHEMA);
-
-export const suggestAgentTool: PlatformTool = {
-  name: "suggest_agent",
-  description:
-    "Suggest a more appropriate agent for the user's current need without transferring the conversation. The UI surfaces an agent-suggestion card. Use when the user's intent clearly fits a specialist agent but the handoff should be user-confirmed.",
-  mutating: false,
-  inputSchema: SUGGEST_AGENT_SCHEMA,
-  handler: async (args, ctx) => {
-    if (!validateSuggestAgent(args))
-      return err("validation_error", firstError(validateSuggestAgent.errors));
-    const { agentId, reason } = args as { agentId: string; reason?: string };
-    const agent = ctx.soulLoader?.agents.get(agentId);
-    if (!agent) return err("not_found", `Agent "${agentId}" not found in soul.`);
-    const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
-    return ok({ agentId, agentName, reason: reason ?? null });
   },
 };
 
@@ -919,12 +696,6 @@ export const completeTaskTool: PlatformTool = {
 export const PLATFORM_TOOLS: PlatformTool[] = [
   loadSkillTool,
   loadSkillReferenceTool,
-  composeViewTool,
-  renderSurfaceTool,
-  updateSurfaceTool,
-  askUserTool,
-  presentChoicesTool,
-  suggestAgentTool,
   validateArtifactTool,
   transferToAgentTool,
   delegateToAgentTool,

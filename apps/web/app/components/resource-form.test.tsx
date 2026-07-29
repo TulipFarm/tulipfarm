@@ -35,7 +35,7 @@ function renderForm(node: ReactElement) {
   return render(<Stub initialEntries={["/"]} />);
 }
 
-test("renders one control per kind following the A2UI mapping", () => {
+test("renders one control per kind following the Tulip Surface Protocol mapping", () => {
   const { container } = renderForm(
     <ResourceForm
       fields={fields}

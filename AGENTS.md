@@ -34,7 +34,11 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation (`@tulipfarm/agent-runtime`). Scaffold (AW-002). |
 | [`packages/knowledge`](packages/knowledge/AGENTS.md) | ACL-preserving source ingestion, retrieval, provenance (`@tulipfarm/knowledge`). Scaffold (AW-002). |
 | [`packages/memory`](packages/memory/AGENTS.md) | Scoped, versioned memory assertions and supersession (`@tulipfarm/memory`). Scaffold (AW-002). |
-| [`packages/a2ui`](packages/a2ui/AGENTS.md) | Safe presentation schemas, Artifacts, signed actions (`@tulipfarm/a2ui`). Scaffold (AW-002). |
+| [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts, interactions, linting, and renderer interfaces (`@tulipfarm/surface`). |
+| [`packages/surface-web`](packages/surface-web/AGENTS.md) | Native trusted React renderer (`@tulipfarm/surface-web`). |
+| `packages/surface-slack` | Native Slack Block Kit renderer (`@tulipfarm/surface-slack`). |
+| `packages/surface-telegram` | Native Telegram message renderer (`@tulipfarm/surface-telegram`). |
+| `packages/surface-github` | Native GitHub comment and Check Run renderer (`@tulipfarm/surface-github`). |
 | [`packages/integrations`](packages/integrations/AGENTS.md) | Integration adapter contracts, event normalization, identity mapping (`@tulipfarm/integrations`). Scaffold (AW-002). |
 | [`packages/sandbox`](packages/sandbox/AGENTS.md) | Isolated execution request contract and backend ports (`@tulipfarm/sandbox`). Scaffold (AW-002). |
 | [`packages/storage`](packages/storage/AGENTS.md) | PostgreSQL repositories, outbox/inbox, blob/vector/cache ports (`@tulipfarm/storage`). Scaffold (AW-002). |
@@ -159,24 +163,29 @@ When adding or modifying a route:
 
 ## Local Dev Credentials
 
-Default seed credentials for local dev (used by `scripts/setup-dev.sh`):
+No admin is auto-seeded on plain `pnpm dev` — `bootstrapFromEnv` (`apps/api/src/setup/bootstrap.ts`)
+is a no-op unless `ADMIN_EMAIL` + `ADMIN_PASSWORD` are set, and `bootstrapAdmin`
+(`apps/api/src/auth/users/index.ts`, the dev-default `admin@tulipfarm.dev`/`password123` seeder) is
+exported but never called from `index.ts` — its "sign-in-ready with zero setup" comment does not
+reflect current wiring. On first boot with no users, the web app falls through to the `/setup`
+wizard (`apps/web/app/routes/setup.tsx`) — create the admin account there.
 
-- **Email**: `admin@example.com`
-- **Password**: `mypassword`
+To headless-seed a known admin instead, set `ADMIN_EMAIL` + `ADMIN_PASSWORD` (+ `LLM_API_KEY` for
+the full headless seed) before starting the API — see `apps/api/src/setup/bootstrap.ts`.
 
 ### Start API
 
 ```bash
-ADMIN_EMAIL=admin@example.com ADMIN_PASSWORD=mypassword pnpm --filter @tulipfarm/api dev
+pnpm --filter @tulipfarm/api dev
 ```
 
 ### Test with curl
 
 ```bash
-# Login + save cookie
+# Login + save cookie (after creating the admin via the /setup wizard, or headless-seeding one)
 curl -c /tmp/tulip.txt -X POST http://localhost:4010/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"mypassword"}'
+  -d '{"email":"<your-admin-email>","password":"<your-admin-password>"}'
 
 # Authenticated requests
 curl -b /tmp/tulip.txt "http://localhost:4010/api/v1/auth/tokens"

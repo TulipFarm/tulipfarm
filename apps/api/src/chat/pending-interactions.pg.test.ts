@@ -30,7 +30,7 @@ describe("PgPendingInteractionRepo", () => {
     id: randomUUID(),
     conversationId,
     toolCallId: "call-1",
-    toolName: "ask_user",
+    toolName: "request_input",
     awaitedSchema: { type: "object" },
     surfaceId: "s1",
     createdAt: new Date(),
@@ -45,7 +45,7 @@ describe("PgPendingInteractionRepo", () => {
     expect(found).toMatchObject({
       id: r.id,
       toolCallId: "call-1",
-      toolName: "ask_user",
+      toolName: "request_input",
       surfaceId: "s1",
     });
     expect(found?.awaitedSchema).toEqual({ type: "object" });

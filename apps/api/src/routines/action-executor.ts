@@ -28,6 +28,7 @@ export function makeActionExecutor(deps: HeadlessTurnDeps): ActionExecutor {
       const result = await tool.execute(args, {
         userId: ROUTINE_ACTOR,
         autonomy: "full",
+
         routineContext: { routineId: run.slug, runId: run.runId },
       });
       if (!result.success) {

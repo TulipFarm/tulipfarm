@@ -25,6 +25,7 @@ export function assembleAgentSystemPrompt(args: {
   taggedResources: AssembleContext["taggedResources"];
   soulCatalogue: SoulCatalogue;
   availableTools: AssembleContext["availableTools"];
+  surfaceCatalog?: string;
   pinnedKnowledge?: AssembleContext["pinnedKnowledge"];
   knowledgeGrounding?: boolean;
 }): string {
@@ -41,6 +42,7 @@ export function assembleAgentSystemPrompt(args: {
     taggedResources,
     soulCatalogue,
     availableTools,
+    surfaceCatalog,
     pinnedKnowledge,
     knowledgeGrounding,
   } = args;
@@ -75,6 +77,7 @@ export function assembleAgentSystemPrompt(args: {
     taggedResources,
     soulCatalogue,
     availableTools,
+    surfaceCatalog,
     pinnedKnowledge,
     knowledgeGrounding,
   });
