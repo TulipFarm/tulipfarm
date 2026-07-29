@@ -1,64 +1,133 @@
-name: Release
+name: Prepare release
 
-# Cut a release from `main` with release-it: derive the version bump from
-# Conventional Commits, write CHANGELOG.md, commit, tag `v<version>`, push, and
-# create the matching GitHub Release. Pushing the `v*` tag triggers the
-# Publish image workflow (publish-image.yml), which verifies the bundled stack
-# and pushes the multi-arch image to GHCR — so the Docker image ships as a
-# consequence of the release.
-#
-# This is the CI counterpart to running `pnpm release` locally; both use the same
-# .release-it.json so the two paths produce identical releases.
+# A maintainer starts this workflow through `pnpm release <version>`. It updates
+# the version and changelog on a dedicated branch, opens a ready-for-review PR,
+# and stops. Merging that PR is the approval that starts publish-image.yml.
 on:
   workflow_dispatch:
     inputs:
-      increment:
-        description: "Version bump (auto = derive from Conventional Commits)"
-        type: choice
-        options: [auto, patch, minor, major]
-        default: auto
-      dry-run:
-        description: "Dry run — compute everything but do not commit/tag/push/release"
-        type: boolean
-        default: false
+      version:
+        description: "Exact SemVer to release (for example, 0.5.0 or 0.5.0-beta.0)"
+        required: true
+        type: string
 
-# Only ever one release in flight; never cancel a half-done release.
 concurrency:
-  group: release
+  group: prepare-release
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
+  pull-requests: write
 
 jobs:
-  release:
-    name: Cut release
+  prepare:
+    name: Open release PR
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          # Full history so conventional-changelog can read the commit log since
-          # the last tag.
-          fetch-depth: 0
-          # A PAT with `contents: write` (RELEASE_TOKEN) makes the pushed `v*`
-          # tag trigger ci.yml's publish-image. The default GITHUB_TOKEN works to
-          # cut the release, but pushes made with it do NOT trigger other
-          # workflows (GitHub's recursion guard) — so without the PAT the image
-          # would not auto-publish and you'd re-push the tag manually.
-          token: ${{ secrets.RELEASE_TOKEN || github.token }}
-      - uses: ./.github/actions/setup
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - name: Run release-it
-        env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
-          INCREMENT: ${{ inputs.increment }}
-          DRY_RUN: ${{ inputs.dry-run }}
+      - name: Require main
         run: |
           set -euo pipefail
-          args=(--ci)
-          [ "$INCREMENT" != "auto" ] && args+=("$INCREMENT")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          pnpm exec release-it "${args[@]}"
+          [ "$GITHUB_REF" = "refs/heads/main" ] || {
+            echo "Release preparation must run from main, not $GITHUB_REF"
+            exit 1
+          }
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN || github.token }}
+      - uses: ./.github/actions/setup
+      - name: Validate release request
+        run: |
+          set -euo pipefail
+          node --input-type=module -e '
+            import { isReleaseVersion } from "./scripts/request-release.ts";
+            if (!isReleaseVersion(process.env.VERSION ?? "")) {
+              throw new Error("Invalid release version: " + process.env.VERSION);
+            }
+          '
+          tag="v$VERSION"
+          branch="release/$tag"
+          if git rev-parse --verify --quiet "refs/tags/$tag"; then
+            echo "Tag $tag already exists"
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "Branch $branch already exists"
+            exit 1
+          fi
+      - name: Generate version and changelog
+        run: pnpm exec release-it "$VERSION" --ci --no-git.requireBranch
+      - name: Verify generated files
+        run: |
+          set -euo pipefail
+          expected_version="$(node -p "require('./package.json').version")"
+          [ "$expected_version" = "$VERSION" ] || {
+            echo "release-it generated $expected_version instead of $VERSION"
+            exit 1
+          }
+          changed="$(git diff --name-only)"
+          [ -n "$changed" ] || {
+            echo "release-it did not generate any changes"
+            exit 1
+          }
+          while IFS= read -r file; do
+            case "$file" in
+              CHANGELOG.md|package.json) ;;
+              *)
+                echo "Unexpected generated file: $file"
+                exit 1
+                ;;
+            esac
+          done <<< "$changed"
+      - name: Commit release proposal
+        run: |
+          set -euo pipefail
+          branch="release/v$VERSION"
+          git switch -c "$branch"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md package.json
+          git commit -m "chore(release): v$VERSION"
+          git push --set-upstream origin "$branch"
+      - name: Open release PR
+        env:
+          BODY_FILE: ${{ runner.temp }}/release-pr.md
+        run: |
+          set -euo pipefail
+          branch="release/v$VERSION"
+          {
+            echo "## Summary"
+            echo
+            echo "- prepare TulipFarm v$VERSION"
+            echo "- update the package version and generated changelog"
+            echo "- publish the verified GHCR image and GitHub Release automatically after merge"
+            echo
+            echo "## Test plan"
+            echo
+            echo "- [ ] Required PR checks pass"
+            echo "- [ ] Version and changelog are approved"
+          } > "$BODY_FILE"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "chore(release): v$VERSION" \
+            --body-file "$BODY_FILE"
+      - name: Start CI when using the workflow token
+        if: ${{ env.RELEASE_TOKEN == '' }}
+        run: |
+          # GitHub suppresses push/PR workflows created by GITHUB_TOKEN. A
+          # workflow_dispatch is allowed, so attach the normal CI checks to the
+          # release branch explicitly when no RELEASE_TOKEN is configured.
+          gh workflow run ci.yml --ref "release/v$VERSION"
+      - name: Summarize
+        run: |
+          {
+            echo "## Release v$VERSION proposed"
+            echo
+            echo "Review and merge the release PR. Publication starts automatically after merge."
+          } >> "$GITHUB_STEP_SUMMARY"

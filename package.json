@@ -22,8 +22,8 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
-    "release": "release-it",
-    "release:canary": "release-it --no-git.requireBranch --preRelease",
+    "release": "node scripts/request-release.ts",
+    "release:canary": "node scripts/request-release.ts",
     "prepare": "lefthook install"
   },
   "lint-staged": {

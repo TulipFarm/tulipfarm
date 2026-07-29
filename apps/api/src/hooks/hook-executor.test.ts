@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Worker } from "node:worker_threads";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 // isolated-vm 7.x ships prebuilds for Node 24 (abi137) and Node 26 (abi147) but not Node 25 (abi141).
 // Tests that require the isolate to actually execute and return a successful result must be
@@ -18,11 +18,13 @@ const FAKE_DATABASE_URL = "postgresql://localhost:5432/test";
 describe("HookExecutor", () => {
   let executor: HookExecutor;
 
-  beforeEach(() => {
+  // Production keeps one executor worker alive for the process lifetime. Reusing it here also
+  // avoids isolated-vm's known worker-thread teardown race (#464) between individual tests.
+  beforeAll(() => {
     executor = new HookExecutor(FAKE_DATABASE_URL);
   });
 
-  afterEach(async () => {
+  afterAll(async () => {
     await executor.close();
   });
 
@@ -203,23 +205,14 @@ describe("HookExecutor", () => {
   });
 
   describe("L5: circuit breaker", () => {
-    let cbExecutor: HookExecutor;
     const FAIL_HOOK = `({ async before() { throw new Error('deliberate'); } })`;
-
-    beforeEach(() => {
-      cbExecutor = new HookExecutor(FAKE_DATABASE_URL);
-    });
-
-    afterEach(async () => {
-      await cbExecutor.close();
-    });
 
     it("disables hook after 3 consecutive failures", async () => {
       const type = "cb-resource";
       for (let i = 0; i < 3; i++) {
-        await cbExecutor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
+        await executor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
       }
-      const err = await cbExecutor.runBeforeHook(FAIL_HOOK, type, {}).catch((e) => e);
+      const err = await executor.runBeforeHook(FAIL_HOOK, type, {}).catch((e) => e);
       expect(err).toBeInstanceOf(HookError);
       expect(err.message).toBe("hook disabled by circuit breaker");
     });
@@ -228,12 +221,12 @@ describe("HookExecutor", () => {
       const type = "cb-reset";
       const GOOD_HOOK = "({})";
       // 2 failures then a success then a failure — should not trip breaker
-      await cbExecutor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
-      await cbExecutor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
-      await cbExecutor.runBeforeHook(GOOD_HOOK, type, {}); // success resets
-      await cbExecutor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
+      await executor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
+      await executor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
+      await executor.runBeforeHook(GOOD_HOOK, type, {}); // success resets
+      await executor.runBeforeHook(FAIL_HOOK, type, {}).catch(() => {});
       // Only 1 failure after reset — should NOT be circuit-broken
-      const result = await cbExecutor.runBeforeHook(GOOD_HOOK, type, {});
+      const result = await executor.runBeforeHook(GOOD_HOOK, type, {});
       expect(result).toBeDefined();
     });
   });

@@ -1,40 +1,125 @@
-name: Publish image
+name: Publish release
 
-# Release publish path (INST-001/011, AC-003): on every `v*` tag (pushed by
-# `pnpm release` locally or the Release workflow), re-verify the bundled stack
-# via the reusable compose-parity workflow, then build the single bundled image
-# for linux/amd64 + linux/arm64 and push it to GHCR under one pinned version
-# tag (no skew). The quality suite (lint/test/…) is NOT rerun here — it already
-# ran in ci.yml for the same SHA on the PR and the main push.
-run-name: Publish image ${{ github.ref_name }} → GHCR
-
+# A merged release PR is the only publication trigger. The workflow validates
+# the merge commit, builds one immutable multi-arch candidate, verifies that
+# exact candidate, promotes its manifest, and creates the GitHub Release last.
 on:
-  push:
-    tags: ["v*"]
+  pull_request:
+    types: [closed]
 
-# One publish per tag; never cancel a half-done registry push.
 concurrency:
-  group: publish-image-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  # Verification gate: only health-checked images ship.
-  compose-parity:
-    name: Verify
-    uses: ./.github/workflows/compose-parity.yml
-
-  publish-image:
-    name: Publish image
+  metadata:
+    name: Validate release merge
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'release/v')
     runs-on: ubuntu-latest
-    needs: [compose-parity]
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      candidate: ${{ steps.release.outputs.candidate }}
+      release_sha: ${{ steps.release.outputs.release_sha }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "26.5.0"
+      - id: release
+        name: Validate release metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          set -euo pipefail
+          version="${HEAD_BRANCH#release/v}"
+          tag="v$version"
+          package_version="$(node -p "require('./package.json').version")"
+          [ "$package_version" = "$version" ] || {
+            echo "Release branch requests $version but package.json contains $package_version"
+            exit 1
+          }
+          VERSION="$version" node --input-type=module -e '
+            import { isReleaseVersion } from "./scripts/request-release.ts";
+            if (!isReleaseVersion(process.env.VERSION ?? "")) {
+              throw new Error("Invalid release version: " + process.env.VERSION);
+            }
+          '
+          while IFS= read -r file; do
+            case "$file" in
+              CHANGELOG.md|package.json) ;;
+              *)
+                echo "Release PR contains an unexpected file: $file"
+                exit 1
+                ;;
+            esac
+          done < <(gh pr diff "$PR_NUMBER" --name-only)
+          grep -Fq "## [$version]" CHANGELOG.md || {
+            echo "CHANGELOG.md has no section for $version"
+            exit 1
+          }
+          git fetch origin main --tags
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main || {
+            echo "$RELEASE_SHA is not reachable from main"
+            exit 1
+          }
+          if git rev-parse --verify --quiet "refs/tags/$tag^{commit}" >/dev/null; then
+            tagged_sha="$(git rev-parse "refs/tags/$tag^{commit}")"
+            [ "$tagged_sha" = "$RELEASE_SHA" ] || {
+              echo "$tag already points to $tagged_sha"
+              exit 1
+            }
+          fi
+          {
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "release_sha=$RELEASE_SHA"
+            echo "candidate=ghcr.io/tulipfarm/tulipfarm:sha-$RELEASE_SHA"
+          } >> "$GITHUB_OUTPUT"
+  quality:
+    name: Verify merged source
+    needs: metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.metadata.outputs.release_sha }}
+      - uses: ./.github/actions/setup
+      - name: Lint
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  build-candidate:
+    name: Build immutable candidate
+    needs: [metadata, quality]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.metadata.outputs.release_sha }}
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
@@ -42,28 +127,142 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      # Always tag the exact version. Only move `:latest` for STABLE releases —
-      # prerelease/canary tags carry a `-` identifier (e.g. v0.1.0-alpha.0, from
-      # `pnpm release:canary`) and must not clobber the latest stable image.
-      - name: Compute image tags
-        id: imgtags
+          password: ${{ github.token }}
+      - id: candidate
+        name: Check for an existing candidate
+        env:
+          CANDIDATE_IMAGE: ${{ needs.metadata.outputs.candidate }}
         run: |
-          ref="${{ github.ref_name }}"
-          {
-            echo "tags<<EOF"
-            echo "ghcr.io/tulipfarm/tulipfarm:${ref}"
-            if [[ "$ref" != *-* ]]; then
-              echo "ghcr.io/tulipfarm/tulipfarm:latest"
-            fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-      - name: Build and push (multi-arch)
+          if docker buildx imagetools inspect "$CANDIDATE_IMAGE" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build and push candidate
+        if: ${{ steps.candidate.outputs.exists != 'true' }}
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.imgtags.outputs.tags }}
+          tags: ${{ needs.metadata.outputs.candidate }}
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify candidate platforms
+        env:
+          CANDIDATE_IMAGE: ${{ needs.metadata.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$CANDIDATE_IMAGE" --raw > manifest.json
+          jq -e '
+            [
+              .manifests[].platform
+              | select(.os == "linux")
+              | "\(.os)/\(.architecture)"
+            ] | unique | sort
+              == ["linux/amd64", "linux/arm64"]
+          ' manifest.json
+
+  verify-image:
+    name: Verify candidate
+    needs: [metadata, build-candidate]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/compose-parity.yml
+    with:
+      image: ${{ needs.metadata.outputs.candidate }}
+    secrets: inherit
+
+  publish:
+    name: Publish release
+    needs: [metadata, verify-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      CANDIDATE_IMAGE: ${{ needs.metadata.outputs.candidate }}
+      GH_TOKEN: ${{ github.token }}
+      IMAGE: ghcr.io/tulipfarm/tulipfarm
+      RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
+      TAG: ${{ needs.metadata.outputs.tag }}
+      VERSION: ${{ needs.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.metadata.outputs.release_sha }}
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Create source tag
+        run: |
+          set -euo pipefail
+          git fetch origin main --tags
+          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          if git rev-parse --verify --quiet "refs/tags/$TAG^{commit}" >/dev/null; then
+            [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$RELEASE_SHA" ]
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag --annotate "$TAG" "$RELEASE_SHA" --message "Release $TAG"
+            git push origin "refs/tags/$TAG"
+          fi
+      - name: Promote verified image
+        run: |
+          set -euo pipefail
+          tags=(--tag "$IMAGE:$TAG")
+          if [[ "$VERSION" != *-* ]]; then
+            tags+=(--tag "$IMAGE:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "$CANDIDATE_IMAGE"
+          docker buildx imagetools inspect "$IMAGE:$TAG"
+      - name: Generate release notes
+        env:
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: |
+          {
+            echo "## Container image"
+            echo
+            echo '```sh'
+            echo "docker pull $IMAGE:$TAG"
+            echo '```'
+            echo
+            awk '
+              /^## / {
+                sections += 1
+                if (sections == 2) exit
+              }
+              sections == 1 { print }
+            ' CHANGELOG.md
+          } > "$NOTES_FILE"
+      - name: Create GitHub Release
+        env:
+          NOTES_FILE: ${{ runner.temp }}/release-notes.md
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists"
+            exit 0
+          fi
+          args=(release create "$TAG" --verify-tag --title "$TAG" --notes-file "$NOTES_FILE")
+          if [[ "$VERSION" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          gh "${args[@]}"
+      - name: Summarize
+        run: |
+          {
+            echo "## $TAG published"
+            echo
+            echo "- Source: \`$RELEASE_SHA\`"
+            echo "- Image: \`$IMAGE:$TAG\`"
+            echo "- Candidate: \`$CANDIDATE_IMAGE\`"
+          } >> "$GITHUB_STEP_SUMMARY"
