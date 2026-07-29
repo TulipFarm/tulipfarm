@@ -67,6 +67,8 @@ curl -fsS --retry 5 --retry-connrefused --retry-delay 2 \
 
 # 4. Assert idempotency: a second run preserves the generated .env (update mode).
 env_before="$(sha256sum "${INSTALL_DIR}/.env" | awk '{print $1}')"
+secrets_before="$(grep -E '^(POSTGRES_PASSWORD|ENCRYPTION_KEY|JWT_SECRET|WEBHOOK_SIGNING_SECRET)=' \
+  "${INSTALL_DIR}/.env")"
 log "re-running installer (idempotency check)…"
 TF_LOCAL_SRC="$REPO_ROOT" TF_VERSION="ci" TF_RUNTIME="docker" \
 TF_INSTALL_DIR="$INSTALL_DIR" TF_PORT="$PORT" \
@@ -75,4 +77,21 @@ TF_INSTALL_DIR="$INSTALL_DIR" TF_PORT="$PORT" \
 env_after="$(sha256sum "${INSTALL_DIR}/.env" | awk '{print $1}')"
 [ "$env_before" = "$env_after" ] || fail "re-run mutated .env (secrets not preserved)"
 
-log "PASS — stack healthy and re-run preserved secrets"
+# 5. A deliberate port override updates runtime settings without rotating secrets.
+UPDATED_PORT=$((PORT + 1))
+log "moving existing install to port ${UPDATED_PORT}…"
+TF_LOCAL_SRC="$REPO_ROOT" TF_VERSION="ci" TF_RUNTIME="docker" \
+TF_INSTALL_DIR="$INSTALL_DIR" TF_PORT="$UPDATED_PORT" \
+  bash "${REPO_ROOT}/scripts/install.sh" >/dev/null 2>&1 \
+  || fail "installer port override exited non-zero"
+grep -qx "HOST_PORT=${UPDATED_PORT}" "${INSTALL_DIR}/.env" \
+  || fail "port override did not update HOST_PORT"
+[ "$secrets_before" = \
+  "$(grep -E '^(POSTGRES_PASSWORD|ENCRYPTION_KEY|JWT_SECRET|WEBHOOK_SIGNING_SECRET)=' \
+    "${INSTALL_DIR}/.env")" ] \
+  || fail "port override changed generated secrets"
+curl -fsS --retry 5 --retry-connrefused --retry-delay 2 \
+  "http://localhost:${UPDATED_PORT}/health" >/dev/null \
+  || fail "/health did not move to :${UPDATED_PORT}"
+
+log "PASS — stack healthy, re-runs preserved secrets, and the host port changed cleanly"
