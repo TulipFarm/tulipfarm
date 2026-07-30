@@ -206,10 +206,11 @@ pnpm release 0.5.0
 ```
 
 The command dispatches **Prepare release**, which opens a PR containing only the generated
-`package.json` and `CHANGELOG.md` changes. Merging that PR automatically validates the merge
-commit, builds one immutable multi-architecture candidate image, runs Compose parity against that
-exact image, promotes it to `v<version>` and `latest`, and creates the Git tag and GitHub Release.
-The GitHub Release is created last; no post-merge command or approval is required.
+`package.json` and `CHANGELOG.md` changes for a frozen `main` snapshot. Merging that PR
+automatically validates and builds the reviewed snapshot, runs Compose parity against that exact
+multi-architecture image, promotes it to `v<version>` and `latest`, and creates the Git tag and
+GitHub Release with the matching changelog section. The GitHub Release is created last; no
+post-merge command or approval is required.
 
 See [docs/RELEASES.md](docs/RELEASES.md) for setup, retry semantics, and the complete release
 contract.
