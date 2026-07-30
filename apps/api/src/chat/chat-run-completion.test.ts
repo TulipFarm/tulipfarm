@@ -8,7 +8,7 @@ import { DurableApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
 import type { GuardrailsService } from "../guardrails";
 import type { PaginatedResult } from "../pagination";
-import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
+import { type ChatTurnContext, type ChatTurnSubmitter, runChatTurn } from "../runtime/chat-run";
 import { ChatRunLifecycle, subscribeChatRunCompletion } from "../runtime/chat-run-lifecycle";
 import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";
 import { FAKE_BUSINESS_ID, FAKE_RUN_ID, FakeRunStore } from "../test/fake-run-store";
@@ -18,6 +18,7 @@ import type { MessageDoc, MessageRepo } from "./messages";
 import { MemoryPendingInteractionRepo } from "./pending-interactions";
 import { StreamHub } from "./stream-hub";
 import { MemoryStreamResumeRepo } from "./stream-resume";
+import { messageOnlySubmitter } from "./turn-submit";
 
 const V3_USAGE = {
   inputTokens: { total: 1, noCache: undefined, cacheRead: undefined, cacheWrite: undefined },
@@ -127,6 +128,7 @@ async function runTurnWithRun(
   const events = new EventEmitter();
   subscribeChatRunCompletion(events, lifecycle, { warn: () => {} });
 
+  const messageRepo = new FakeMessageRepo();
   const ctx: ChatTurnContext = {
     ...(options.guardrails ? { guardrails: options.guardrails } : {}),
     llmService: {
@@ -138,7 +140,7 @@ async function runTurnWithRun(
       })),
     } as unknown as LlmService,
     repo: new FakeConversationRepo(),
-    messageRepo: new FakeMessageRepo(),
+    messageRepo,
     streamRepo: new MemoryStreamResumeRepo(),
     hub: new StreamHub(),
     events,
@@ -149,16 +151,20 @@ async function runTurnWithRun(
   };
 
   await lifecycle.claim(FAKE_BUSINESS_ID, FAKE_RUN_ID);
-  await runHeadlessChatTurn(ctx, {
-    user,
-    body: { message: { role: "user", content: "hi" } },
-    log,
-    runId: FAKE_RUN_ID,
-    businessId: FAKE_BUSINESS_ID,
-    abandonRun: async () => {
-      await lifecycle.complete(FAKE_BUSINESS_ID, FAKE_RUN_ID, "failed");
+  await runHeadlessChatTurn(
+    ctx,
+    {
+      user,
+      body: { message: { role: "user", content: "hi" } },
+      log,
+      runId: FAKE_RUN_ID,
+      businessId: FAKE_BUSINESS_ID,
+      abandonRun: async () => {
+        await lifecycle.complete(FAKE_BUSINESS_ID, FAKE_RUN_ID, "failed");
+      },
     },
-  });
+    messageOnlySubmitter(messageRepo)
+  );
   return store;
 }
 
@@ -197,19 +203,18 @@ describe("chat Run completion", () => {
     expect(store.run.leaseOwner).toBeNull();
   });
 
-  it("releases the Run when the turn fails validation before it starts", async () => {
+  it("mints no Run at all when the turn fails validation before it starts", async () => {
     const store = new FakeRunStore();
-    const lifecycle = new ChatRunLifecycle({
-      leases: new RunLeaseManager(store),
-      store,
-      owner: "api:test",
-    });
     const ctx = {
       repo: new FakeConversationRepo(),
     } as unknown as ChatTurnContext;
+    const sent: unknown[] = [];
     const reply = {
       code: () => reply,
-      send: () => reply,
+      send: (body: unknown) => {
+        sent.push(body);
+        return reply;
+      },
     } as unknown as import("fastify").FastifyReply;
     const req = {
       user,
@@ -218,16 +223,14 @@ describe("chat Run completion", () => {
       id: "req-1",
     } as unknown as import("fastify").FastifyRequest;
 
-    await lifecycle.claim(FAKE_BUSINESS_ID, FAKE_RUN_ID);
-    await runChatTurn(req, reply, ctx, {
-      runId: FAKE_RUN_ID,
-      businessId: FAKE_BUSINESS_ID,
-      abandonRun: async () => {
-        await lifecycle.complete(FAKE_BUSINESS_ID, FAKE_RUN_ID, "failed");
-      },
-    });
+    const submitter = { submit: vi.fn() };
+    await runChatTurn(req, reply, ctx, submitter as unknown as ChatTurnSubmitter);
 
-    expect(store.run.status).toBe("failed");
-    expect(store.run.leaseOwner).toBeNull();
+    // Submission happens after the conversation resolves, so a bad `conversationId` can no longer
+    // strand a claimed Run — there is nothing to release because nothing was minted.
+    expect(submitter.submit).not.toHaveBeenCalled();
+    expect(sent).toEqual([{ error: "conversation not found" }]);
+    expect(store.runStatuses).toEqual([]);
+    expect(store.run.status).toBe("queued");
   });
 });

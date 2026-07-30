@@ -16,7 +16,7 @@ import type { UserDoc } from "../auth/users";
 import type { RunToolCallGuard, ToolRegistry } from "../broker/tool-adapter";
 import { compactHistory, estimateTokens } from "../chat/compaction";
 import type { ConversationDoc, ConversationRepo } from "../chat/conversations";
-import { fromUserText, type MessageRepo, toModelMessage } from "../chat/messages";
+import { type MessageRepo, toModelMessage } from "../chat/messages";
 import type { PendingInteractionRepo } from "../chat/pending-interactions";
 import { attachToStream, type OutputScan, runChatStream } from "../chat/producer";
 import { writeSseHeaders } from "../chat/sse";
@@ -116,12 +116,49 @@ export interface TurnInput {
   runId?: string;
   businessId?: string;
   /**
-   * Releases the claimed Run when the turn ends before a producer ever launches — a validation
-   * failure or a blocked input. Those exits emit no TURN_FINISHED, so without this the Run would
-   * sit `running` under this process's lease until it expired and a worker parked it for an
-   * operator, turning an ordinary user-facing error into reconciliation work.
+   * Releases the claimed Run when the turn ends before a producer ever launches — a blocked input.
+   * That exit emits no TURN_FINISHED, so without this the Run would sit `running` under this
+   * process's lease until it expired and a worker parked it for an operator, turning an ordinary
+   * user-facing error into reconciliation work.
    */
   abandonRun?: () => Promise<void>;
+}
+
+/** What the request a turn answers is addressed to, and what the user actually said. */
+export interface ChatTurnRequest {
+  readonly conversationId: string;
+  readonly content: string;
+}
+
+/** The claimed Run a turn executes under, when the submitter minted one. */
+export interface ChatRunClaim {
+  readonly runId: string;
+  readonly businessId: string;
+  readonly abandonRun?: () => Promise<void>;
+}
+
+export type ChatSubmission =
+  | { readonly outcome: "submitted"; readonly run?: ChatRunClaim }
+  | { readonly outcome: "duplicate"; readonly runId: string };
+
+/**
+ * Persists the request a prepared turn will answer, and names the durable Run that answers it.
+ *
+ * Exactly one submitter runs per turn and the turn pipeline itself writes no user Message, which is
+ * what keeps that Message written once. The durable implementation writes a Turn row, the Message
+ * carrying that Turn's id, and — through the invocation gateway — a Run plus an immutable request
+ * Artifact, all before a byte streams; a replayed request resolves to `duplicate` instead of
+ * answering the same message twice.
+ */
+export interface ChatTurnSubmitter {
+  /**
+   * Resolves a request this submitter already answered, before the turn creates anything for it.
+   * Checked ahead of `prepareChatTurn` because preparing is not free: a request with no
+   * `conversationId` would open a fresh conversation and generate its title only to be refused, so
+   * without this a retry would leave a trail of empty conversations behind.
+   */
+  findSubmitted?(): Promise<{ readonly runId: string } | null>;
+  submit(request: ChatTurnRequest): Promise<ChatSubmission>;
 }
 
 /** Early validation failure from prepareChatTurn; the HTTP wrapper maps it to a status code. */
@@ -166,9 +203,12 @@ export interface TurnHandle {
 
 /**
  * Steps 1–4 of a chat turn: load/create the conversation, apply a sticky @mention switch, resolve
- * the model, assemble the per-turn system prompt + compacted history, and persist the user turn.
- * Pure of HTTP — callers are the SSE route wrapper (runChatTurn) and the headless entry
- * (runHeadlessChatTurn). Returns a PrepareError instead of throwing for caller-mappable failures.
+ * the model, and assemble the per-turn system prompt + compacted history. Pure of HTTP — callers
+ * are the SSE route wrapper (runChatTurn) and the headless entry (runHeadlessChatTurn). Returns a
+ * PrepareError instead of throwing for caller-mappable failures.
+ *
+ * Nothing here is durable: the request is persisted by the turn's `ChatTurnSubmitter` afterwards, so
+ * a turn rejected at this stage leaves no Message, no Turn, and no Run behind.
  */
 export async function prepareChatTurn(
   ctx: ChatTurnContext,
@@ -292,7 +332,7 @@ export async function prepareChatTurn(
     "chat turn"
   );
 
-  // 4. Build history + persist the user turn (survives an aborted stream). The full system
+  // 4. Build history for this turn. The full system
   //    prompt is reconstructed every turn from durable stores in a fixed block order
   //    (CONTEXT-ENGINE §1), so the cacheable prefix is byte-stable across turns (AC-V1-001).
   const history = await messageRepo.listByConversation(convo._id, 1000);
@@ -416,7 +456,8 @@ export async function prepareChatTurn(
   } else {
     messages.push(...renderedModel, { role: "user", content: body.message.content });
   }
-  await messageRepo.create(fromUserText(convo._id, body.message.content));
+  // The user Message itself is written by the turn's `ChatTurnSubmitter`, which carries the Turn id
+  // it belongs to — writing it here as well would persist the same request twice.
   await repo.touch(convo._id);
 
   return {
@@ -849,40 +890,50 @@ export async function startChatTurn(
 
 /**
  * Run one chat turn (streamed, AI SDK data-stream protocol) over HTTP. Thin wrapper: prepare the
- * turn (mapping early failures to status codes), write the SSE headers, hijack the reply, launch
- * the detached producer, and attach this connection to the stream (live from seq 0) — so the turn
- * finishes (and keeps buffering) even after the client disconnects.
+ * turn (mapping early failures to status codes), submit the request durably, write the SSE headers,
+ * hijack the reply, launch the detached producer, and attach this connection to the stream (live
+ * from seq 0) — so the turn finishes (and keeps buffering) even after the client disconnects.
+ *
+ * Submission sits between prepare and stream on purpose: the conversation must exist before a Turn
+ * can name it, and nothing may stream before the request that caused it is durable. A replay is
+ * refused ahead of both, so retrying a request changes nothing.
  */
 export async function runChatTurn(
   req: FastifyRequest,
   reply: FastifyReply,
   ctx: ChatTurnContext,
-  run?: { runId?: string; businessId?: string; abandonRun?: () => Promise<void> }
+  submitter: ChatTurnSubmitter
 ) {
+  const replayed = await submitter.findSubmitted?.();
+  if (replayed) {
+    return reply.code(409).send({ error: "duplicate chat invocation", runId: replayed.runId });
+  }
+  const body = req.body as ChatBody;
   const input: TurnInput = {
     user: req.user as UserDoc,
-    body: req.body as ChatBody,
+    body,
     log: req.log,
     presentationContext: presentationContextFor(
       { channel: "web", surface: "chat" },
-      `conversation:${(req.body as ChatBody).conversationId ?? "new"}`
+      `conversation:${body.conversationId ?? "new"}`
     ),
-    ...(run?.runId && run.businessId
-      ? {
-          runId: run.runId,
-          businessId: run.businessId,
-          ...(run.abandonRun ? { abandonRun: run.abandonRun } : {}),
-        }
-      : {}),
   };
   const prepared = await prepareChatTurn(ctx, input);
   if (isPrepareError(prepared)) {
-    // The Run was minted and claimed before this validation ran, and no producer will launch to
-    // finish it. Release it here rather than leaving a leased Run behind for a bad request.
-    await input.abandonRun?.();
+    // Nothing durable exists yet — the request is submitted below — so a rejected request has no
+    // Message, Turn, or Run to clean up.
     return reply.code(prepared.status).send({ error: prepared.error });
   }
-  const handle = await startChatTurn(ctx, prepared, input);
+  const submission = await submitter.submit({
+    conversationId: prepared.convo._id,
+    content: body.message.content,
+  });
+  if (submission.outcome === "duplicate") {
+    // This exact request was already submitted and already has a Run answering it. Streaming a
+    // second reply would answer one message twice; the client reattaches to the original Run.
+    return reply.code(409).send({ error: "duplicate chat invocation", runId: submission.runId });
+  }
+  const handle = await startChatTurn(ctx, prepared, { ...input, ...submission.run });
   if (handle.isNew) reply.raw.setHeader("X-Conversation-Id", handle.conversationId);
   writeSseHeaders(reply.raw, {
     "X-Stream-Id": handle.streamId,

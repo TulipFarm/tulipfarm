@@ -64,6 +64,17 @@ export function transactionPort(database: Queryable): TransactionPort {
   };
 }
 
+/**
+ * Runs storage repositories on an already-open transaction instead of opening a new one, so an
+ * app-owned write and a storage-owned write can share a single commit. `transactionPort` cannot do
+ * this: a transaction handle has neither `.transaction` nor `.connect`, so it would be rejected.
+ */
+export function ambientTransactionPort(transaction: Queryable): TransactionPort {
+  return {
+    withTransaction: (operation) => operation(transaction as unknown as StorageQueryable),
+  };
+}
+
 export async function connectPg(): Promise<Pool> {
   pool = new Pool({ connectionString: process.env.DATABASE_URL as string });
   // Force a connection now so boot fails loud if Postgres is unreachable.

@@ -5,10 +5,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { DurableApprovalGate } from "../approvals/chat-gate";
 import { ErrorSchema } from "../auth/schemas";
 import type { ToolRegistry } from "../broker/tool-adapter";
+import type { ConversationStore } from "../conversations/service";
 import type { GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
-import { type ChatTurnContext, runChatTurn } from "../runtime/chat-run";
+import { type ChatTurnContext, type ChatTurnSubmitter, runChatTurn } from "../runtime/chat-run";
 import type { ChatRunLifecycle } from "../runtime/chat-run-lifecycle";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import type { BundledSkill } from "../soul/skills/bundled";
@@ -23,8 +24,16 @@ import { writeSseHeaders } from "./sse";
 import type { StreamHub } from "./stream-hub";
 import type { StreamResumeRepo } from "./stream-resume";
 import { ChatBodySchema, corsPassthrough, parseLastEventId } from "./turn-helpers";
+import { durableTurnSubmitter, messageOnlySubmitter } from "./turn-submit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** 409 body for a replayed request: the Run that already answers it, so the client can reattach. */
+const DuplicateInvocationSchema = {
+  type: "object",
+  required: ["error"],
+  properties: { error: { type: "string" }, runId: { type: "string" } },
+} as const;
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -54,8 +63,14 @@ export function registerChatRoutes(
   invocations?: DurableInvocationGateway,
   bundledSkills?: ReadonlyMap<string, BundledSkill>,
   disabledBundledSkills?: ReadonlySet<string>,
-  chatRunLifecycle?: ChatRunLifecycle
+  chatRunLifecycle?: ChatRunLifecycle,
+  conversationStore?: ConversationStore
 ): void {
+  // A gateway with nowhere to record the Turn would mint Runs whose requests are unreachable — the
+  // exact hole this submission path closes. Refuse to boot half-wired rather than degrade silently.
+  if (invocations && !conversationStore) {
+    throw new Error("chat_routes_missing_conversation_store");
+  }
   // One approval gate shared by the chat turn and decision route. Production injects its
   // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
   const approvalRegistry = approvals ?? new DurableApprovalGate();
@@ -101,79 +116,73 @@ export function registerChatRoutes(
           "(tier name or model id) overrides the model for this turn only; it is never persisted.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        // The key a replayed turn is deduplicated by. Bounded because it is stored verbatim as the
+        // Turn's identity — an unbounded client value would reach the database as-is.
+        headers: {
+          type: "object",
+          properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
+        },
         body: ChatBodySchema,
         response: {
           400: ErrorSchema,
           401: ErrorSchema,
           404: ErrorSchema,
-          409: ErrorSchema,
+          409: DuplicateInvocationSchema,
           503: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
-      let runId: string | undefined;
-      let businessId: string | undefined;
-      if (invocations) {
-        const body = req.body as { agentId?: string };
-        const principal = req.principal;
-        if (!principal) {
-          return reply.code(401).send({ error: "unauthorized" });
-        }
-        const idempotencyHeader = req.headers["idempotency-key"];
-        const idempotencyKey =
-          typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
-            ? idempotencyHeader
-            : req.id;
-        const result = await invocations.start({
-          source: "chat",
-          businessId: principal.businessId,
-          initiator: { kind: principal.kind, id: principal.id },
-          effectiveSubject: { kind: principal.kind, id: principal.id },
-          definitionRef: `published:agent:${body.agentId ?? "assistant"}`,
-          payloadRef: `artifact:request:${req.id}`,
-          idempotencyKey,
-        });
-        // The chat response is hijacked for SSE below, so write this to the raw response as well as
-        // Fastify's header collection. Otherwise the durable Run identifier is lost at the wire.
-        reply.header("X-Run-Id", result.runId);
-        reply.raw.setHeader("X-Run-Id", result.runId);
-        if (result.outcome === "duplicate") {
-          return reply.code(409).send({ error: "duplicate chat invocation" });
-        }
-        runId = result.runId;
-        businessId = principal.businessId;
-        // Claim before a single byte streams: the API executes this turn in-process, so the Run
-        // must not stay `queued` for a worker to claim and execute a second time. A lost race is
-        // logged, never fatal — the user still gets their reply.
-        if (chatRunLifecycle) {
-          const claimed = await chatRunLifecycle.claim(businessId, runId);
-          if (!claimed) {
-            req.log.warn({ runId }, "chat run was not claimable; streaming without a lease");
-            runId = undefined;
-          }
-        }
+      if (!(invocations && conversationStore)) {
+        return runChatTurn(req, reply, turnCtx, messageOnlySubmitter(messageRepo));
       }
-      const claimedRun =
-        chatRunLifecycle && runId && businessId ? { runId, businessId } : undefined;
-      return runChatTurn(req, reply, turnCtx, {
-        runId,
-        businessId,
-        ...(claimedRun && chatRunLifecycle
-          ? {
-              abandonRun: async () => {
-                const completed = await chatRunLifecycle.complete(
-                  claimedRun.businessId,
-                  claimedRun.runId,
-                  "failed"
-                );
-                if (!completed) {
-                  req.log.warn({ runId: claimedRun.runId }, "chat run was not releasable");
-                }
-              },
-            }
-          : {}),
+      const principal = req.principal;
+      if (!principal) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      const idempotencyHeader = req.headers["idempotency-key"];
+      // A client that sends no key still gets idempotency, just only within its own retry of this
+      // request — `req.id` is unique per delivery, so a second POST is a second Turn.
+      const clientKey =
+        typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
+          ? idempotencyHeader
+          : req.id;
+      const durable = durableTurnSubmitter({
+        store: conversationStore,
+        invocations,
+        principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
+        payload: req.body,
+        agentId: (req.body as { agentId?: string }).agentId ?? "assistant",
+        // Scoped to the submitter. Turn keys are unique deployment-wide, and the value is whatever a
+        // client chose to send, so an unscoped key lets one caller claim another's: their turn would
+        // be refused as a duplicate and answered with a Run id that is not theirs.
+        idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
+        ...(chatRunLifecycle ? { lifecycle: chatRunLifecycle } : {}),
+        log: req.log,
       });
+      // The chat response is hijacked for SSE below, so the Run id goes onto the raw response as
+      // well as Fastify's header collection. Otherwise it is lost at the wire.
+      const withRunHeader = <T>(runId: string | undefined, result: T): T => {
+        if (runId) {
+          reply.header("X-Run-Id", runId);
+          reply.raw.setHeader("X-Run-Id", runId);
+        }
+        return result;
+      };
+      const submitter: ChatTurnSubmitter = {
+        findSubmitted: async () => {
+          const replayed = await durable.findSubmitted?.();
+          return withRunHeader(replayed?.runId, replayed ?? null);
+        },
+        submit: async (request) => {
+          const submission = await durable.submit(request);
+          return withRunHeader(
+            submission.outcome === "duplicate" ? submission.runId : submission.run?.runId,
+            submission
+          );
+        },
+      };
+      return runChatTurn(req, reply, turnCtx, submitter);
     }
   );
 

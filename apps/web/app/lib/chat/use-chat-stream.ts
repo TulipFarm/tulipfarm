@@ -177,6 +177,9 @@ export function useChatStream(opts?: UseChatStreamOptions) {
   const runStream = useCallback(async (text: string, opts?: SendOptions) => {
     const controller = new AbortController();
     abortRef.current = controller;
+    // Minted once per turn: it is what the server deduplicates a re-sent POST by. A regenerate is a
+    // deliberately new turn, so it mints its own key rather than resolving to the previous Run.
+    const idempotencyKey = crypto.randomUUID();
     try {
       await postChat(
         {
@@ -212,7 +215,8 @@ export function useChatStream(opts?: UseChatStreamOptions) {
               onConversationChangeRef.current?.(conversationIdRef.current);
           },
           onConnectionState: setConnectionState,
-        }
+        },
+        idempotencyKey
       );
     } catch (err) {
       // A user-initiated stop aborts the fetch (AbortError): rewind the turn instead of showing an
