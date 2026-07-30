@@ -61,18 +61,18 @@ jobs:
             exit 1
           fi
       - name: Generate version and changelog
-        run: pnpm exec release-it "$VERSION" --ci --no-git.requireBranch
+        run: node scripts/release-changelog.ts generate "$VERSION"
       - name: Verify generated files
         run: |
           set -euo pipefail
           expected_version="$(node -p "require('./package.json').version")"
           [ "$expected_version" = "$VERSION" ] || {
-            echo "release-it generated $expected_version instead of $VERSION"
+            echo "Release tooling generated $expected_version instead of $VERSION"
             exit 1
           }
           changed="$(git diff --name-only)"
           [ -n "$changed" ] || {
-            echo "release-it did not generate any changes"
+            echo "Release tooling did not generate any changes"
             exit 1
           }
           while IFS= read -r file; do
@@ -84,6 +84,7 @@ jobs:
                 ;;
             esac
           done <<< "$changed"
+          node scripts/release-changelog.ts validate "$VERSION"
       - name: Commit release proposal
         run: |
           set -euo pipefail

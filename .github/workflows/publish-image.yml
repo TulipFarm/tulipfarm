@@ -1,8 +1,9 @@
 name: Publish release
 
 # A merged release PR is the only publication trigger. The workflow validates
-# the merge commit, builds one immutable multi-arch candidate, verifies that
-# exact candidate, promotes its manifest, and creates the GitHub Release last.
+# the reviewed release-branch snapshot, builds one immutable multi-arch
+# candidate, verifies that exact candidate, promotes its manifest, and creates
+# the GitHub Release last.
 on:
   pull_request:
     types: [closed]
@@ -28,13 +29,14 @@ jobs:
     outputs:
       candidate: ${{ steps.release.outputs.candidate }}
       release_sha: ${{ steps.release.outputs.release_sha }}
+      source_sha: ${{ steps.release.outputs.source_sha }}
       tag: ${{ steps.release.outputs.tag }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version: "26.5.0"
@@ -44,7 +46,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          RELEASE_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           version="${HEAD_BRANCH#release/v}"
@@ -73,11 +75,32 @@ jobs:
             echo "CHANGELOG.md has no section for $version"
             exit 1
           }
+          node scripts/release-changelog.ts validate "$version"
           git fetch origin main --tags
-          git merge-base --is-ancestor "$RELEASE_SHA" origin/main || {
-            echo "$RELEASE_SHA is not reachable from main"
+          parent_fields="$(git rev-list --parents --max-count=1 "$RELEASE_SHA" | wc -w)"
+          [ "$parent_fields" -eq 2 ] || {
+            echo "Release snapshot must be one generated commit on top of its frozen source"
             exit 1
           }
+          source_sha="$(git rev-parse "$RELEASE_SHA^")"
+          git merge-base --is-ancestor "$source_sha" origin/main || {
+            echo "Release source $source_sha is not reachable from main"
+            exit 1
+          }
+          changed="$(git diff --name-only "$source_sha" "$RELEASE_SHA")"
+          [ -n "$changed" ] || {
+            echo "Release snapshot has no generated changes"
+            exit 1
+          }
+          while IFS= read -r file; do
+            case "$file" in
+              CHANGELOG.md|package.json) ;;
+              *)
+                echo "Release snapshot contains an unexpected file: $file"
+                exit 1
+                ;;
+            esac
+          done <<< "$changed"
           if git rev-parse --verify --quiet "refs/tags/$tag^{commit}" >/dev/null; then
             tagged_sha="$(git rev-parse "refs/tags/$tag^{commit}")"
             [ "$tagged_sha" = "$RELEASE_SHA" ] || {
@@ -89,6 +112,7 @@ jobs:
             echo "version=$version"
             echo "tag=$tag"
             echo "release_sha=$RELEASE_SHA"
+            echo "source_sha=$source_sha"
             echo "candidate=ghcr.io/tulipfarm/tulipfarm:sha-$RELEASE_SHA"
           } >> "$GITHUB_OUTPUT"
   quality:
@@ -188,6 +212,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       IMAGE: ghcr.io/tulipfarm/tulipfarm
       RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
+      SOURCE_SHA: ${{ needs.metadata.outputs.source_sha }}
       TAG: ${{ needs.metadata.outputs.tag }}
       VERSION: ${{ needs.metadata.outputs.version }}
     steps:
@@ -206,13 +231,15 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin main --tags
-          git merge-base --is-ancestor "$RELEASE_SHA" origin/main
+          git merge-base --is-ancestor "$SOURCE_SHA" origin/main
           if git rev-parse --verify --quiet "refs/tags/$TAG^{commit}" >/dev/null; then
             [ "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$RELEASE_SHA" ]
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag --annotate "$TAG" "$RELEASE_SHA" --message "Release $TAG"
+            git tag --annotate "$TAG" "$RELEASE_SHA" \
+              --message "Release $TAG" \
+              --message "TulipFarm-Source-SHA: $SOURCE_SHA"
             git push origin "refs/tags/$TAG"
           fi
       - name: Promote verified image
@@ -235,13 +262,7 @@ jobs:
             echo "docker pull $IMAGE:$TAG"
             echo '```'
             echo
-            awk '
-              /^## / {
-                sections += 1
-                if (sections == 2) exit
-              }
-              sections == 1 { print }
-            ' CHANGELOG.md
+            node scripts/release-changelog.ts section "$VERSION"
           } > "$NOTES_FILE"
       - name: Create GitHub Release
         env:
@@ -262,7 +283,8 @@ jobs:
           {
             echo "## $TAG published"
             echo
-            echo "- Source: \`$RELEASE_SHA\`"
+            echo "- Release snapshot: \`$RELEASE_SHA\`"
+            echo "- Main source boundary: \`$SOURCE_SHA\`"
             echo "- Image: \`$IMAGE:$TAG\`"
             echo "- Candidate: \`$CANDIDATE_IMAGE\`"
           } >> "$GITHUB_STEP_SUMMARY"
