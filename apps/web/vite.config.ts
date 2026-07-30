@@ -36,7 +36,9 @@ function cspHashPlugin(): Plugin {
         }
       }
 
-      const scriptSrc = ["'self'", ...hashes].join(" ");
+      // 'unsafe-eval' is required because Ajv (schema validation, @tulipfarm/surface) compiles
+      // validators via `new Function(...)` at runtime in the browser.
+      const scriptSrc = ["'self'", "'unsafe-eval'", ...hashes].join(" ");
       const cspHeader =
         `default-src 'self'; script-src ${scriptSrc}; style-src 'self' 'unsafe-inline'; ` +
         "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'";
