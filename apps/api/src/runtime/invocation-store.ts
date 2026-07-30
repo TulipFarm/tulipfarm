@@ -1,6 +1,13 @@
+import type { ArtifactService } from "@tulipfarm/run-kernel";
 import type { Queryable } from "../db";
 import { withTransaction } from "../db";
 import type { DurableInvocationRecord, DurableInvocationStore } from "./invocation-gateway";
+
+/**
+ * Binds an `ArtifactService` to an already-open transaction. A factory rather than an instance
+ * because the service must publish on the same transaction as the Run, not on the pool.
+ */
+export type TransactionalArtifactService = (transaction: Queryable) => ArtifactService;
 
 export const CUTOVER_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS durable_invocations (
@@ -21,11 +28,15 @@ interface InvocationRow {
 }
 
 /**
- * PostgreSQL cutover adapter. The deduplication claim, Run, and initial State commit together, so
- * an API crash cannot acknowledge work that the durable dispatcher cannot subsequently claim.
+ * PostgreSQL cutover adapter. The deduplication claim, the request Artifact, the Run, and its
+ * initial State commit together, so an API crash cannot acknowledge work that the durable dispatcher
+ * cannot subsequently claim — nor leave a Run whose recorded input was never stored.
  */
 export class PgDurableInvocationStore implements DurableInvocationStore {
-  constructor(private readonly database: Queryable) {}
+  constructor(
+    private readonly database: Queryable,
+    private readonly artifacts: TransactionalArtifactService
+  ) {}
 
   async persist(record: DurableInvocationRecord) {
     return withTransaction(this.database, async (transaction) => {
@@ -48,6 +59,11 @@ export class PgDurableInvocationStore implements DurableInvocationStore {
         if (!row) throw new Error("durable_invocation_conflict_without_run");
         return { outcome: "duplicate" as const, runId: row.run_id };
       }
+
+      // Only the claim winner publishes. A replay returns above with the stored `runId`, so the
+      // Artifact's `producer.runId` can never disagree with an existing row and raise
+      // `artifact_conflict` against an append-only table.
+      await this.artifacts(transaction).publish(record.requestArtifact);
 
       await transaction.query(
         `INSERT INTO runs (id, business_id, bundle, identity, bounds, created_at)

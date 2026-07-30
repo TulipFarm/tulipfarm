@@ -31,6 +31,7 @@ import type { PendingInteractionRepo } from "./chat/pending-interactions";
 import { registerChatRoutes } from "./chat/routes";
 import { StreamHub } from "./chat/stream-hub";
 import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
+import type { ConversationStore } from "./conversations/service";
 import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
@@ -133,6 +134,11 @@ export interface AppOptions {
   operationalApi?: OperationalApiDeps;
   /** Persist-first authority shared by Chat and every Trigger ingress. */
   invocations?: DurableInvocationGateway;
+  /**
+   * Durable Turns for Chat submissions. Required alongside `invocations` — a Run whose request was
+   * never recorded as a Turn is not reconstructable, so the chat routes refuse the half-wired pair.
+   */
+  conversationStore?: ConversationStore;
   /**
    * Claims and completes the Runs the chat path mints. Absent means Runs are minted but never
    * advanced — the pre-cutover behavior, kept only for partial assemblies and tests.
@@ -487,7 +493,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.invocations,
         opts.bundledSkills,
         opts.disabledBundledSkills,
-        opts.chatRunLifecycle
+        opts.chatRunLifecycle,
+        opts.conversationStore
       );
       registerSurfaceRoutes(
         app,

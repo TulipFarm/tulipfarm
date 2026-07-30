@@ -25,6 +25,16 @@ export type {
   ToolBlocklistConfig,
 } from "./guardrails";
 export { validateGuardrailsConfig } from "./guardrails";
+export type { InvocationRequestSchema } from "./invocation";
+export {
+  CHAT_REQUEST_SCHEMA,
+  CHAT_REQUEST_SCHEMA_REF,
+  INTEGRATION_REQUEST_SCHEMA,
+  INTEGRATION_REQUEST_SCHEMA_REF,
+  INVOCATION_REQUEST_SCHEMAS,
+  MANUAL_REQUEST_SCHEMA,
+  MANUAL_REQUEST_SCHEMA_REF,
+} from "./invocation";
 export type {
   EmbeddingProviderEntry,
   EmbeddingsConfig,

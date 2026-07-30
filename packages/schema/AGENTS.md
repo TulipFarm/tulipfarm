@@ -29,6 +29,10 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
   over parsed data; rejects values that JSON would silently erase or change.
 - **Schema contract errors** — stable error codes for invalid/unknown/duplicate schemas, validation,
   YAML parsing, and canonicalization without protected payload values.
+- **`INVOCATION_REQUEST_SCHEMAS`** (+ `CHAT_REQUEST_SCHEMA_REF`, `MANUAL_REQUEST_SCHEMA_REF`,
+  `INTEGRATION_REQUEST_SCHEMA_REF`) — plain JSON Schemas for every request that mints a Run; the
+  chat entry is the API's Fastify body schema, so the route and the request Artifact cannot drift.
+  Compiled by the API's invocation gateway, which denies an unregistered ref.
 
 ## Boundaries
 

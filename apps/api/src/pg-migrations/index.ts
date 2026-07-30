@@ -592,4 +592,29 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "repair Tulip Surface Protocol storage on existing databases",
     up: ensureSurfaceStorage,
   },
+  {
+    version: 16,
+    description: "durable Conversation Turns",
+    up: async (q) => {
+      // Pre-existing messages keep a NULL `turn_id`: they predate Turns, and a backfill would have
+      // to invent which Turn each belonged to. No `business_id` column — these tables are
+      // deployment-scoped, and `DEPLOYMENT_BUSINESS_ID` already says so.
+      await q.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS turn_id uuid");
+      await q.query(`CREATE TABLE IF NOT EXISTS conversation_turns (
+        id                  uuid PRIMARY KEY,
+        conversation_id     uuid NOT NULL REFERENCES conversations(id),
+        idempotency_key     text NOT NULL UNIQUE,
+        request_message_id  uuid NOT NULL,
+        status              text NOT NULL,
+        attempt             integer NOT NULL,
+        run_id              uuid,
+        cursor              bigint NOT NULL DEFAULT 0,
+        superseded_run_ids  uuid[] NOT NULL DEFAULT '{}',
+        created_at          timestamptz NOT NULL,
+        updated_at          timestamptz NOT NULL
+      )`);
+      await q.query(`CREATE INDEX IF NOT EXISTS conversation_turns_conversation_idx
+        ON conversation_turns (conversation_id, created_at)`);
+    },
+  },
 ];

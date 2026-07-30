@@ -1,3 +1,4 @@
+import { CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
@@ -66,36 +67,11 @@ export interface ChatBody {
   clientContext?: { route?: string; title?: string };
 }
 
-export const ChatBodySchema = {
-  type: "object",
-  required: ["message"],
-  additionalProperties: false,
-  properties: {
-    conversationId: { type: "string" },
-    message: {
-      type: "object",
-      required: ["role", "content"],
-      additionalProperties: false,
-      properties: {
-        role: { type: "string", enum: ["user"] },
-        content: { type: "string", minLength: 1 },
-      },
-    },
-    model: { type: "string", minLength: 1, pattern: "^\\S+$" },
-    agentId: { type: "string", minLength: 1 },
-    autonomy: { type: "string", enum: ["full", "supervised", "approval-required", "manual"] },
-    hasTools: { type: "boolean" },
-    llmDecision: { type: "boolean" },
-    skills: { type: "array", items: { type: "string", minLength: 1 } },
-    resources: { type: "array", items: { type: "string", minLength: 1 } },
-    knowledgePages: { type: "array", maxItems: 10, items: { type: "string", minLength: 1 } },
-    clientContext: {
-      type: "object",
-      additionalProperties: false,
-      properties: { route: { type: "string" }, title: { type: "string" } },
-    },
-  },
-} as const;
+/**
+ * The route's body schema is the same object the request Artifact is validated against, so what is
+ * accepted here and what is persisted can never disagree.
+ */
+export const ChatBodySchema = CHAT_REQUEST_SCHEMA;
 
 /** Per-turn observability record (AC4): which model served the turn and whether an override applied. */
 export function buildTurnLog(args: {

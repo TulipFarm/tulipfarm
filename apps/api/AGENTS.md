@@ -8,6 +8,8 @@ Each feature domain gets its own directory under `src/`:
 src/
   auth/           # session, CSRF, users, API tokens
   chat/           # conversations, messages, streaming chat turn + durable SSE resume
+  conversations/  # durable Turns: ConversationService + PgConversationStore (channel-agnostic)
+  runtime/        # invocation gateway (Run + request Artifact in one transaction), chat Run lifecycle
   context/        # deterministic system-prompt assembly (assembleSystemPrompt)
   resources/      # resource type + data CRUD, per-type Postgres tables, write-pipeline
   tools/          # central ToolRegistry, batch executor, result truncation
@@ -117,6 +119,22 @@ knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`k
 - Static business/identity facts (e.g. `soul.yaml`'s `businessName`/`businessDescription`) belong
   in the **system prompt** (`assembleSystemPrompt`), not `memory/` working_memory — don't route
   them through working_memory just because onboarding captured them at runtime.
+
+## Submitting a turn (`conversations/`, `runtime/`, `chat/turn-submit.ts`)
+
+Every request that mints a Run goes through `DurableInvocationGateway.start()`, which takes the
+payload plus the `payloadSchemaRef` it claims to satisfy (registered in `@tulipfarm/schema`'s
+`INVOCATION_REQUEST_SCHEMAS`) and commits the Run, its first State, and an immutable request
+Artifact in one transaction. Never pass a `payloadRef` that names nothing — the Artifact is what
+makes a Run reconstructable after a crash.
+
+A chat turn is persisted by exactly one `ChatTurnSubmitter` (`runtime/chat-run.ts` declares the
+port, `chat/turn-submit.ts` implements it): the turn pipeline itself writes no user Message, so a
+new entrypoint must submit through this port rather than writing its own. `durableTurnSubmitter`
+writes the Turn, the Message carrying its `turn_id`, and the Run; a replayed `Idempotency-Key`
+resolves to the Turn that already answered the request and the route returns `409` with its
+`runId`. Non-chat callers use `runtime/invocation-callers.ts` (`integrationInvoker`,
+`manualRoutineTrigger`).
 
 ## Guardrails (`src/guardrails/`)
 

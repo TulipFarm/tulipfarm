@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { RunLeaseManager } from "@tulipfarm/run-kernel";
+import { ArtifactService, RunLeaseManager, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadEncryptionKeys,
   loadOrProvisionActiveDek,
@@ -11,7 +10,7 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
-import { RunEventStore, RunStore } from "@tulipfarm/storage";
+import { ArtifactStore, RunEventStore, RunStore } from "@tulipfarm/storage";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
 import { subscribeActivityLogging } from "./activity/events";
@@ -32,7 +31,8 @@ import { PgMessageRepo } from "./chat/messages";
 import { PgPendingInteractionRepo } from "./chat/pending-interactions";
 import { StreamHub } from "./chat/stream-hub";
 import { PgStreamResumeRepo } from "./chat/stream-resume";
-import { connectPg, transactionPort } from "./db";
+import { PgConversationStore } from "./conversations/store.pg";
+import { ambientTransactionPort, connectPg, transactionPort } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
 import { GuardrailsService } from "./guardrails";
@@ -70,6 +70,7 @@ import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { ChatRunLifecycle, subscribeChatRunCompletion } from "./runtime/chat-run-lifecycle";
+import { integrationInvoker, manualRoutineTrigger } from "./runtime/invocation-callers";
 import { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
@@ -167,8 +168,19 @@ async function boot() {
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
     const rateLimiter = new PgRateLimiter(pool);
+    // One validator for the request boundary: the gateway rejects an unregistered schema reference
+    // before minting a Run, and the same instance re-validates on publish and on every later read.
+    const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const invocations = new DurableInvocationGateway({
-      store: new PgDurableInvocationStore(pool),
+      store: new PgDurableInvocationStore(
+        pool,
+        (transaction) =>
+          new ArtifactService(
+            new ArtifactStore(ambientTransactionPort(transaction)),
+            invocationValidator
+          )
+      ),
+      validator: invocationValidator,
     });
     // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
     const runTransactions = transactionPort(pool);
@@ -260,21 +272,7 @@ async function boot() {
         gitSync,
         bundledSkills,
         disabledBundledSkills,
-        triggerRoutine: async (slug, inputs) => {
-          const digest = createHash("sha256")
-            .update(JSON.stringify(inputs ?? {}))
-            .digest("hex");
-          const result = await invocations.start({
-            source: "manual",
-            businessId: DEPLOYMENT_BUSINESS_ID,
-            initiator: { kind: "agent", id: "assistant" },
-            effectiveSubject: { kind: "agent", id: "assistant" },
-            definitionRef: `published:routine:${slug}`,
-            payloadRef: `artifact:sha256:${digest}`,
-            idempotencyKey: `${slug}:${digest}`,
-          });
-          return { runId: result.runId };
-        },
+        triggerRoutine: manualRoutineTrigger(invocations),
         onRoutinesChanged: async () => {
           await soulLoader.reload();
         },
@@ -317,6 +315,7 @@ async function boot() {
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,
+      conversationStore: new PgConversationStore(pool),
       chatRunLifecycle,
       approvalsRepo,
       approvalRegistry,
@@ -363,18 +362,7 @@ async function boot() {
       ingress: {
         soulLoader,
         deliveries: ingressDeliveries,
-        invoke: async (job) => {
-          const digest = createHash("sha256").update(JSON.stringify(job)).digest("hex");
-          await invocations.start({
-            source: "integration",
-            businessId: DEPLOYMENT_BUSINESS_ID,
-            initiator: { kind: "integration", id: job.slug },
-            effectiveSubject: { kind: "integration", id: job.slug },
-            definitionRef: `published:integration:${job.slug}`,
-            payloadRef: `artifact:sha256:${digest}`,
-            idempotencyKey: digest,
-          });
-        },
+        invoke: integrationInvoker(invocations),
         resolveSecret: (value) => resolveSecretRef(value, secretsService),
       },
     });

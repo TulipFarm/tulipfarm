@@ -134,8 +134,12 @@ async function readChatError(res: Response): Promise<ApiError> {
 // POST to the chat endpoint and consume the hijacked SSE response. Reports the one-shot
 // `X-Conversation-Id`/`X-Stream-Id` headers via `onMeta`, then streams typed events to `onEvent`,
 // stopping at the first terminal event (finish/error) or when the reader is exhausted.
-export async function postChat(body: ChatRequestBody, handlers: PostChatHandlers): Promise<void> {
-  return postTurnStream("/api/v1/chat", body, handlers);
+export async function postChat(
+  body: ChatRequestBody,
+  handlers: PostChatHandlers,
+  idempotencyKey?: string
+): Promise<void> {
+  return postTurnStream("/api/v1/chat", body, handlers, idempotencyKey);
 }
 
 export async function postSurfaceInteraction(
@@ -148,13 +152,19 @@ export async function postSurfaceInteraction(
 async function postTurnStream(
   path: string,
   body: unknown,
-  handlers: PostChatHandlers
+  handlers: PostChatHandlers,
+  idempotencyKey?: string
 ): Promise<void> {
   const { signal, onMeta } = handlers;
+  const headers = mutationHeaders();
+  // One key per turn, so re-sending this POST resolves to the Turn and Run the first attempt already
+  // created instead of asking the agent the same question twice. Without it the server falls back to
+  // the request id, which makes every delivery a separate Turn.
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     credentials: "include",
-    headers: mutationHeaders(),
+    headers,
     body: JSON.stringify(body),
     signal,
   });
