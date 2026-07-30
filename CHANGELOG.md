@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.4](https://github.com/TulipFarm/tulipfarm/compare/v0.4.3...v0.4.4) (2026-07-30)
+
+### Features
+
+* **chat:** persist every request as an Artifact and submit turns durably ([#282](https://github.com/TulipFarm/tulipfarm/issues/282)) ([f5da11d](https://github.com/TulipFarm/tulipfarm/commit/f5da11dc672bbad593f48f7764fe40e767f9e348))
+
+### Bug Fixes
+
+* **web:** allow unsafe-eval in prod CSP for Ajv schema compilation ([#283](https://github.com/TulipFarm/tulipfarm/issues/283)) ([bac9434](https://github.com/TulipFarm/tulipfarm/commit/bac94349b2580103cc90d4bbd6b372f55a3ecabf))
+
 ## [0.4.3](https://github.com/TulipFarm/tulipfarm/compare/v0.4.2...v0.4.3) (2026-07-30)
 
 ### Features
