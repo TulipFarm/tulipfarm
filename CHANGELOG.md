@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.3](https://github.com/TulipFarm/tulipfarm/compare/v0.4.2...v0.4.3) (2026-07-30)
+
+### Features
+
+* **installer:** add production uninstaller ([#279](https://github.com/TulipFarm/tulipfarm/issues/279)) ([f153005](https://github.com/TulipFarm/tulipfarm/commit/f153005dc7ec384c5f74bfcb6cb1debaff5cbb83))
+* **worker:** boot the durable worker and close the orphan-Run leak ([#277](https://github.com/TulipFarm/tulipfarm/issues/277)) ([da2b610](https://github.com/TulipFarm/tulipfarm/commit/da2b61063277a8ef9a95da9b17cdfb048514e519))
+
+### Bug Fixes
+
+* **installer:** handle occupied host ports ([#278](https://github.com/TulipFarm/tulipfarm/issues/278)) ([c594fd5](https://github.com/TulipFarm/tulipfarm/commit/c594fd5a15486c64dae79feac57eba10dc2fd3fd))
+* **release:** restore per-version changelogs ([#280](https://github.com/TulipFarm/tulipfarm/issues/280)) ([98d63b5](https://github.com/TulipFarm/tulipfarm/commit/98d63b58176d42cc1748f9230b8f36244373733d))
+
 ## [0.4.2](https://github.com/TulipFarm/tulipfarm/compare/v0.4.1...v0.4.2) (2026-07-29)
 
 ## [0.4.1](https://github.com/TulipFarm/tulipfarm/compare/v0.4.0...v0.4.1) (2026-07-29)
