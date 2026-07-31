@@ -27,6 +27,30 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 `loop.ts` (abortable, backing-off loop), `executors.ts` / `delivery.ts` (registries),
 `probe-server.ts` (`/livez`, `/readyz`), `shutdown.ts` (drain).
 
+## Executing a turn (`src/turn/`)
+
+`TurnDriver` (`turn/driver.ts`) runs one turn end to end and owns nothing else: it announces the
+turn, resolves the Context **once**, hands the built `AgentLoopInput` to `AgentStateRunner`,
+persists the result through `ConversationTurnCompleter`, and closes the stream. Because it holds no
+policy, the same path serves web, Slack, Telegram, and any channel added later.
+
+Two orderings are load-bearing. `turn.finished` is emitted **after** completion is durable, so a
+reader that sees it can fetch the Message it names. And Context is resolved before the loop starts,
+so `context.assembled` is evidence of what the model was actually given — never a second resolution
+that might differ.
+
+`TurnEventWriter` (`turn/run-events.ts`) is the only way a turn reaches a reader. The event type
+fixes the audience and the payload is validated against `@tulipfarm/schema`'s published schema, so
+a writer cannot widen who sees what. Its projection of `AgentLoopEvent` is deliberately narrow:
+the loop contributes only model text and calls it refused before dispatch, because the driver holds
+the wait id and `messageId`, and the `ToolDispatchPort` holds the Tool arguments and output a
+`tool.call`/`tool.result` pair needs. **That is why a secret passed as a Tool argument cannot reach
+a participant's stream — keep the projection narrow.**
+
+`RunOutcome` (`run-dispatcher.ts`) says how the executor left the Run. `waiting` parks it for the
+wait sweep; `cancelled` means `RunCancellationManager` is already driving the transition and the
+dispatcher must **not** write a status of its own.
+
 ## Invariants
 
 - **Never migrate.** `apps/api` owns `schema_version`; the worker refuses to start below
@@ -40,12 +64,11 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 - **Leases are the only claim.** Every transition is CAS-guarded on `(expectedVersion,
   expectedStatus)`; a worker that dies without releasing is recovered by `reclaimExpired`, not by
   anyone forcing a status.
-- Registries (`RunExecutorRegistry`, `DeliveryTargetRegistry`) are empty today. Executors land in
-  PR 3, delivery targets in PR 6.
+- Registries (`RunExecutorRegistry`, `DeliveryTargetRegistry`) are empty today. Executors are
+  registered as PR 3 lands them; delivery targets in PR 6.
 
-`src/agent-state.ts` (Agent State execution around the bounded Agent loop), `src/conversation-turn.ts`
-(durable Turn completion), and `src/recovery/` stay unwired: `buildInput` has no implementation and
-`TurnCompletionStore` has neither an implementation nor a table. They belong to PR 3.
+`TurnContextPort` and `TurnCompletionStore` have no implementation yet — the API's internal turn
+host backs both, and registering the `chat` executor is what connects them.
 
 ## Tests
 

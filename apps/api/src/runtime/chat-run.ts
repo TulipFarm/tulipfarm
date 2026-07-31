@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
+import type { GuardContext, GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService, ResolvedModel } from "@tulipfarm/llm";
 import { LlmNotConfiguredError, UnknownModelError } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
@@ -39,7 +40,6 @@ import {
   shouldStopToolLoop,
 } from "../chat/turn-helpers";
 import { DOMAIN_EVENTS } from "../domain-events";
-import type { GuardContext, GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import { MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";

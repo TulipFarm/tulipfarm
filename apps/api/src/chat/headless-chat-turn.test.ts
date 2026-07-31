@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import { describe, expect, it, vi } from "vitest";
 import { DurableApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
 import { ToolRegistry } from "../broker/tool-adapter";
-import { GuardrailsService } from "../guardrails";
 import type { PaginatedResult } from "../pagination";
 import type { ChatTurnContext } from "../runtime/chat-run";
 import { MemorySurfaceArtifactStore } from "../surfaces/artifact-store";

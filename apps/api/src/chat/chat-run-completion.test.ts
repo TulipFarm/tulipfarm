@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import { RunLeaseManager } from "@tulipfarm/run-kernel";
 import { describe, expect, it, vi } from "vitest";
 import { DurableApprovalGate } from "../approvals/chat-gate";
 import type { UserDoc } from "../auth/users";
-import type { GuardrailsService } from "../guardrails";
 import type { PaginatedResult } from "../pagination";
 import { type ChatTurnContext, type ChatTurnSubmitter, runChatTurn } from "../runtime/chat-run";
 import { ChatRunLifecycle, subscribeChatRunCompletion } from "../runtime/chat-run-lifecycle";

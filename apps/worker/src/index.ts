@@ -19,6 +19,7 @@ export {
   ConversationTurnCompleter,
   type ConversationTurnCompleterOptions,
   type TurnCompletionRecord,
+  type TurnCompletionRef,
   type TurnCompletionStatus,
   type TurnCompletionStore,
   type TurnOutcome,
@@ -38,6 +39,9 @@ export {
   RunExecutorRegistry,
   UnregisteredRunSourceError,
 } from "./executors";
+export { InternalApiClient, InternalApiError } from "./internal/client";
+export { HttpTurnHost, type RemoteTurnIdentity } from "./internal/turn-host";
+export { SoulLlm, type SoulLlmOptions } from "./llm";
 export {
   backoffDelay,
   type LoopLogger,
@@ -45,6 +49,7 @@ export {
   type RunLoopOptions,
   runLoop,
 } from "./loop";
+export { LlmModelPort, type LlmModelPortOptions } from "./model";
 export { assertSchemaFloor, PreflightError } from "./preflight";
 export { probeReadiness, type ReadinessResult, startProbeServer } from "./probe-server";
 export {
@@ -54,3 +59,13 @@ export {
   type RunOutcome,
 } from "./run-dispatcher";
 export { type DrainableLoop, type DrainOptions, type DrainOutcome, drain } from "./shutdown";
+export {
+  type ChatExecutorOptions,
+  createChatExecutor,
+} from "./turn/chat-executor";
+export {
+  MissingStateError,
+  RunStoreStateTransitions,
+  reclaimWaitingState,
+  StateTransitionConflictError,
+} from "./turn/kernel-ports";

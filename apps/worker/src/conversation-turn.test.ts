@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ConversationTurnCompleter,
   type TurnCompletionRecord,
+  type TurnCompletionRef,
   type TurnCompletionStore,
 } from "./conversation-turn";
 
@@ -9,33 +10,32 @@ class FakeStore implements TurnCompletionStore {
   records: TurnCompletionRecord[] = [];
   appended: { turnId: string; attempt: number; content: string }[] = [];
   completed: { turnId: string; attempt: number; status: string; cursor: number }[] = [];
+  /** Every write states the Run it acts under; a store proving its authority needs it. */
+  runIds: string[] = [];
 
-  async findCompletion(
-    _businessId: string,
-    turnId: string,
-    attempt: number
-  ): Promise<TurnCompletionRecord | undefined> {
-    return this.records.find((record) => record.turnId === turnId && record.attempt === attempt);
+  async findCompletion(ref: TurnCompletionRef): Promise<TurnCompletionRecord | undefined> {
+    this.runIds.push(ref.runId);
+    return this.records.find(
+      (record) => record.turnId === ref.turnId && record.attempt === ref.attempt
+    );
   }
 
-  async appendAssistantMessage(input: {
-    businessId: string;
-    turnId: string;
-    attempt: number;
-    content: string;
-  }): Promise<{ messageId: string }> {
+  async appendAssistantMessage(
+    input: TurnCompletionRef & { content: string }
+  ): Promise<{ messageId: string }> {
+    this.runIds.push(input.runId);
     this.appended.push({ turnId: input.turnId, attempt: input.attempt, content: input.content });
     return { messageId: `msg-${this.appended.length}` };
   }
 
-  async completeTurn(input: {
-    businessId: string;
-    turnId: string;
-    attempt: number;
-    status: "succeeded" | "failed";
-    cursor: number;
-    messageId: string | null;
-  }): Promise<void> {
+  async completeTurn(
+    input: TurnCompletionRef & {
+      status: "succeeded" | "failed";
+      cursor: number;
+      messageId: string | null;
+    }
+  ): Promise<void> {
+    this.runIds.push(input.runId);
     this.completed.push({
       turnId: input.turnId,
       attempt: input.attempt,
@@ -53,6 +53,7 @@ class FakeStore implements TurnCompletionStore {
 
 const request = {
   businessId: "biz-1",
+  runId: "run-1",
   conversationId: "conv-1",
   turnId: "turn-1",
   attempt: 1,
@@ -76,6 +77,7 @@ describe("ConversationTurnCompleter", () => {
       { turnId: "turn-1", attempt: 1, status: "succeeded", cursor: 12 },
     ]);
     expect(result).toMatchObject({ status: "succeeded", messageId: "msg-1" });
+    expect(new Set(store.runIds)).toEqual(new Set(["run-1"]));
   });
 
   it("is idempotent when the same attempt is redelivered after a crash", async () => {

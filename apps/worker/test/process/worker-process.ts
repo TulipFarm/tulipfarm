@@ -52,6 +52,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
       PATH: process.env.PATH,
       NODE_ENV: "test",
       DATABASE_URL: options.databaseUrl,
+      // The turn host is never reached in these tests — no Chat Run is enqueued — but the worker
+      // refuses to boot without knowing where it is, so the harness has to say.
+      INTERNAL_API_URL: "http://127.0.0.1:1",
+      WORKER_API_CREDENTIAL: "tfc_test.secret",
       WORKER_OWNER: options.owner,
       WORKER_PORT: String(port),
       ...options.env,

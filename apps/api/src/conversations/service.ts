@@ -20,6 +20,31 @@ export interface PersistedMessage {
   readonly turnId: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  /**
+   * Which Worker attempt wrote this Message. Absent on a user Message — the request belongs to the
+   * Turn, not to an attempt at answering it — and on rows written before attempts existed.
+   */
+  readonly attempt?: number;
+  readonly createdAt: Date;
+}
+
+export type TurnCompletionStatus = Extract<TurnStatus, "succeeded" | "failed">;
+
+/**
+ * What one Worker attempt produced for a Turn.
+ *
+ * Keyed by `(turnId, attempt)` because a Worker killed mid-turn is retried under a *new* attempt:
+ * the dead attempt's record stays, and the retry's cannot collide with it. The Turn's answer is
+ * whichever attempt wrote a completion naming a Message.
+ */
+export interface TurnCompletion {
+  readonly businessId: string;
+  readonly turnId: string;
+  readonly attempt: number;
+  readonly status: TurnCompletionStatus;
+  readonly messageId: string | null;
+  /** Last Run event sequence this attempt wrote; readers resume strictly after it. */
+  readonly cursor: number;
   readonly createdAt: Date;
 }
 
@@ -42,9 +67,21 @@ export interface PersistedTurn {
 export interface ConversationStore {
   findTurnByIdempotencyKey(businessId: string, key: string): Promise<PersistedTurn | undefined>;
   findTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined>;
+  /**
+   * The Turn a Run is currently answering. A Run that was superseded by a `same_turn` retry no
+   * longer matches, which is what stops a stale executor from being handed the live Turn.
+   */
+  findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined>;
   appendMessage(message: PersistedMessage): Promise<void>;
   saveTurn(turn: PersistedTurn): Promise<void>;
   listMessages(businessId: string, conversationId: string): Promise<readonly PersistedMessage[]>;
+  findCompletion(
+    businessId: string,
+    turnId: string,
+    attempt: number
+  ): Promise<TurnCompletion | undefined>;
+  /** First write for an attempt wins; a redelivery of the same attempt must not overwrite it. */
+  saveCompletion(completion: TurnCompletion): Promise<void>;
 }
 
 export interface RunLauncher {

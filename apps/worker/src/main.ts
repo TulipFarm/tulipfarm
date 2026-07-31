@@ -1,20 +1,40 @@
 import { randomUUID } from "node:crypto";
 import { RunLeaseManager, RunResumeGateway, WaitTimerSweeper } from "@tulipfarm/run-kernel";
-import { EventStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import {
+  loadActiveDek,
+  loadEncryptionKeys,
+  PgDekRepo,
+  PgSecretRepo,
+  SecretsService,
+} from "@tulipfarm/secrets";
+import { BudgetStore, EventStore, RunEventStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
+import { InternalApiClient } from "./internal/client";
+import { HttpTurnHost } from "./internal/turn-host";
+import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
+import { LlmModelPort } from "./model";
 import { assertSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
+import { createChatExecutor } from "./turn/chat-executor";
+import { RunStoreStateTransitions } from "./turn/kernel-ports";
 
 /** Consumer identity recorded on every outbox receipt this process writes. */
 const OUTBOX_CONSUMER = "worker.run-dispatch";
+
+/**
+ * The Run source the Chat executor owns, as `DurableInvocationGateway` records it on the bundle.
+ * Slack and Telegram requests reach the same executor because the ingress path derives a chat
+ * request from the envelope — the executor never learns which channel asked.
+ */
+const CHAT_RUN_SOURCE = "chat";
 
 const logger = {
   info: (message: string) => console.log(message),
@@ -45,13 +65,50 @@ export async function main(): Promise<void> {
   const runStore = new RunStore(transactions);
   const waitStore = new WaitStore(transactions);
   const eventStore = new EventStore(transactions, randomUUID);
+  const runEventStore = new RunEventStore(transactions);
+  const budgetStore = new BudgetStore(transactions);
 
   const leases = new RunLeaseManager(runStore);
   const resume = new RunResumeGateway(runStore);
   const sweeper = new WaitTimerSweeper(waitStore, resume);
 
+  // The turn host answers every question a turn has that this process cannot answer itself: which
+  // Turn a Run answers, the assembled Context, Tool dispatch, and the durable completion.
+  const turnHost = new HttpTurnHost(
+    new InternalApiClient({
+      baseUrl: config.internalApiUrl,
+      credential: config.internalApiCredential,
+    })
+  );
+
+  // The Soul's LLM configuration names providers and `api_key_ref`s; the credentials themselves are
+  // unwrapped here, against this worker's own database, so no key material crosses the API hop.
+  // `loadActiveDek`, never `loadOrProvision*`: the API mints keys, exactly as it owns migrations.
+  const llm = new SoulLlm({
+    source: () => turnHost.llmConfig(),
+    secrets: async () =>
+      new SecretsService(
+        new PgSecretRepo(pool),
+        await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
+      ),
+  });
+
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
+
+  executors.register(
+    CHAT_RUN_SOURCE,
+    createChatExecutor({
+      host: turnHost,
+      context: turnHost,
+      runs: runStore,
+      events: runEventStore,
+      budgets: budgetStore,
+      transitions: new RunStoreStateTransitions(runStore),
+      waits: turnHost,
+      model: new LlmModelPort({ model: (id) => llm.model(id) }),
+    })
+  );
 
   const runDispatcher = new RunDispatcher({
     leases,

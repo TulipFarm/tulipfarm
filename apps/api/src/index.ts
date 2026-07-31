@@ -1,6 +1,13 @@
 import { EventEmitter } from "node:events";
+import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
-import { ArtifactService, RunLeaseManager, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import {
+  ArtifactService,
+  DurableWaitManager,
+  RunLeaseManager,
+  RunResumeGateway,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadEncryptionKeys,
@@ -10,7 +17,7 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
-import { ArtifactStore, RunEventStore, RunStore } from "@tulipfarm/storage";
+import { ArtifactStore, RunEventStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { config } from "dotenv";
 import { PgBoss } from "pg-boss";
 import { subscribeActivityLogging } from "./activity/events";
@@ -23,6 +30,7 @@ import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
 import { DurableApprovalGate } from "./approvals/chat-gate";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
+import { ToolApprovalService } from "./approvals/tool-approvals";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
@@ -35,13 +43,16 @@ import { PgConversationStore } from "./conversations/store.pg";
 import { ambientTransactionPort, connectPg, transactionPort } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
-import { GuardrailsService } from "./guardrails";
 import { registerGuardrailsReload } from "./guardrails/reload";
-import { HookExecutor } from "./hooks/hook-executor";
+import { createHookExecutor } from "./hooks/executor";
 import { PgApiClientRepo } from "./identity/api-clients";
+import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
 import { IngressDeliveriesRepo } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { RegistryToolDispatcher } from "./internal/tool-dispatch";
+import { ChatTurnContextResolver } from "./internal/turn-context";
+import { InternalTurnHost } from "./internal/turn-host";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
 import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
@@ -197,7 +208,7 @@ async function boot() {
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
         ? undefined
-        : new HookExecutor(process.env.DATABASE_URL as string);
+        : createHookExecutor(process.env.DATABASE_URL as string);
 
     const llmService = new LlmService();
     const guardrailsService = new GuardrailsService();
@@ -238,6 +249,13 @@ async function boot() {
 
     const approvalsRepo = new ApprovalsRepo(pool);
     const approvalRegistry = new DurableApprovalGate(approvalsRepo);
+    // A Worker-executed turn asks for approval by parking its Run on a durable wait. The wait is
+    // registered here rather than in the Worker because its one-use resume token must never leave
+    // the process that will redeem it — the Worker only ever learns the wait's id.
+    const toolApprovals = new ToolApprovalService({
+      repo: approvalsRepo,
+      waits: new DurableWaitManager(new WaitStore(runTransactions), new RunResumeGateway(runStore)),
+    });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
 
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
@@ -279,13 +297,70 @@ async function boot() {
       },
     });
 
+    // What the Worker calls back into while the history, the Soul artifacts, and the Tool catalog
+    // still live here. Every operation names a Run and acts as the subject that Run was minted
+    // with, so a worker credential is a key to a Run rather than a principal of its own.
+    const conversationStore = new PgConversationStore(pool);
+    const runArtifacts = new ArtifactService(
+      new ArtifactStore(runTransactions),
+      invocationValidator
+    );
+    const internalTurns = {
+      host: new InternalTurnHost({
+        runs: runStore,
+        store: conversationStore,
+        context: new ChatTurnContextResolver({
+          artifacts: runArtifacts,
+          store: conversationStore,
+          llmService,
+          soulLoader,
+          toolRegistry,
+          workingMemory: workingMemoryService,
+          knowledge: knowledgeService,
+          guardrails: guardrailsService,
+          bundledSkills,
+          disabledBundledSkills,
+        }),
+        tools: new RegistryToolDispatcher({
+          registry: toolRegistry,
+          artifacts: runArtifacts,
+          soulLoader,
+          approvals: toolApprovals,
+        }),
+        approvals: {
+          // The subject comes from the Run, so the principal allowed to decide is the one the Run
+          // was minted with — never one the Worker names for itself.
+          registerWait: (authority, input) =>
+            toolApprovals.registerWait({
+              businessId: authority.businessId,
+              runId: authority.runId,
+              stateKey: input.stateKey,
+              approvalId: input.approvalId,
+              subject: authority.subject,
+            }),
+        },
+      }),
+      // Read through the loader on every call, so a `soul.synced` reload reaches the Worker
+      // without restarting it.
+      llmConfig: () => soulLoader.llmConfig,
+    };
+
     const app = await buildApp({
       readiness: pool,
       sessionStore,
       userRepo,
       tokenRepo,
       // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.
-      identity: { apiClientRepo, externalIdentityRepo },
+      identity: {
+        apiClientRepo,
+        externalIdentityRepo,
+        // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
+        // constant in the image, which every deployment would share.
+        channelBind: {
+          repo: externalIdentityRepo,
+          signingKey: channelBindKeyResolver(secretsService),
+        },
+      },
       rateLimiter,
       secretsService,
       gitSync,
@@ -315,10 +390,12 @@ async function boot() {
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,
-      conversationStore: new PgConversationStore(pool),
+      conversationStore,
       chatRunLifecycle,
+      internalTurns,
       approvalsRepo,
       approvalRegistry,
+      toolApprovals,
       runEvents: {
         events: runEventStore,
         runs: runStore,

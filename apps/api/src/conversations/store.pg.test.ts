@@ -12,6 +12,7 @@ const USER_ID = "00000000-0000-4000-8000-000000000002";
 const TURN_ID = "00000000-0000-4000-8000-000000000003";
 const MESSAGE_ID = "00000000-0000-4000-8000-000000000004";
 const RUN_ID = "00000000-0000-4000-8000-000000000005";
+const REPLY_ID = "00000000-0000-4000-8000-000000000008";
 
 const CREATED_AT = new Date("2026-07-26T00:00:00.000Z");
 
@@ -116,6 +117,88 @@ describe("PgConversationStore", () => {
     );
 
     await expect(store.listMessages(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID)).resolves.toEqual([]);
+  });
+
+  it("finds the Turn a Run is answering", async () => {
+    await store.saveTurn(turn({ status: "running", runId: RUN_ID }));
+
+    await expect(store.findTurnByRunId(DEPLOYMENT_BUSINESS_ID, RUN_ID)).resolves.toMatchObject({
+      id: TURN_ID,
+      runId: RUN_ID,
+    });
+    // A superseded Run no longer names the Turn, so its executor cannot reach it.
+    await expect(
+      store.findTurnByRunId(DEPLOYMENT_BUSINESS_ID, "00000000-0000-4000-8000-000000000009")
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps the first outcome an attempt recorded", async () => {
+    await store.saveTurn(turn());
+    const completion = {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      turnId: TURN_ID,
+      attempt: 1,
+      status: "succeeded" as const,
+      messageId: REPLY_ID,
+      cursor: 4,
+      createdAt: CREATED_AT,
+    };
+    await store.saveCompletion(completion);
+    // A redelivered job must not rewrite the answer the Turn already has.
+    await store.saveCompletion({ ...completion, status: "failed", messageId: null, cursor: 9 });
+
+    await expect(store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 1)).resolves.toEqual(
+      completion
+    );
+    await expect(store.findCompletion(DEPLOYMENT_BUSINESS_ID, TURN_ID, 2)).resolves.toBeUndefined();
+  });
+
+  it("replays only the assistant Message that completed the Turn", async () => {
+    await store.saveTurn(turn());
+    // What a Worker killed after writing its reply leaves behind.
+    await store.appendMessage({
+      id: "00000000-0000-4000-8000-000000000007",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: "assistant",
+      content: "abandoned",
+      attempt: 1,
+      createdAt: CREATED_AT,
+    });
+    await store.appendMessage({
+      id: REPLY_ID,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: "assistant",
+      content: "the answer",
+      attempt: 2,
+      createdAt: new Date("2026-07-26T00:00:05.000Z"),
+    });
+    await store.saveCompletion({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      turnId: TURN_ID,
+      attempt: 2,
+      status: "succeeded",
+      messageId: REPLY_ID,
+      cursor: 4,
+      createdAt: CREATED_AT,
+    });
+
+    const messages = await store.listMessages(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID);
+    expect(messages).toEqual([
+      {
+        id: REPLY_ID,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        conversationId: CONVERSATION_ID,
+        turnId: TURN_ID,
+        role: "assistant",
+        content: "the answer",
+        attempt: 2,
+        createdAt: new Date("2026-07-26T00:00:05.000Z"),
+      },
+    ]);
   });
 
   it("refuses a businessId this deployment does not own", async () => {

@@ -14,27 +14,33 @@ export interface TurnCompletionRecord {
   readonly messageId: string | null;
 }
 
+/**
+ * Which attempt of which Turn a write concerns.
+ *
+ * Both identifiers travel because they answer different questions. `turnId` names *what* is being
+ * completed — completion is keyed by `(turnId, attempt)`. `runId` names the authority *under
+ * which* it is completed, which is what a store that has to prove it may write at all needs: the
+ * internal turn host takes the subject from the Run and refuses a Run no executor owns.
+ */
+export interface TurnCompletionRef {
+  readonly businessId: string;
+  readonly runId: string;
+  readonly turnId: string;
+  readonly attempt: number;
+}
+
 export interface TurnCompletionStore {
-  findCompletion(
-    businessId: string,
-    turnId: string,
-    attempt: number
-  ): Promise<TurnCompletionRecord | undefined>;
-  appendAssistantMessage(input: {
-    businessId: string;
-    conversationId: string;
-    turnId: string;
-    attempt: number;
-    content: string;
-  }): Promise<{ messageId: string }>;
-  completeTurn(input: {
-    businessId: string;
-    turnId: string;
-    attempt: number;
-    status: TurnCompletionStatus;
-    cursor: number;
-    messageId: string | null;
-  }): Promise<void>;
+  findCompletion(ref: TurnCompletionRef): Promise<TurnCompletionRecord | undefined>;
+  appendAssistantMessage(
+    input: TurnCompletionRef & { conversationId: string; content: string }
+  ): Promise<{ messageId: string }>;
+  completeTurn(
+    input: TurnCompletionRef & {
+      status: TurnCompletionStatus;
+      cursor: number;
+      messageId: string | null;
+    }
+  ): Promise<void>;
 }
 
 export type TurnOutcome =
@@ -44,6 +50,7 @@ export type TurnOutcome =
 
 export interface CompleteTurnInput {
   readonly businessId: string;
+  readonly runId: string;
   readonly conversationId: string;
   readonly turnId: string;
   readonly attempt: number;
@@ -67,21 +74,33 @@ export interface ConversationTurnCompleterOptions {
 export class ConversationTurnCompleter {
   constructor(private readonly options: ConversationTurnCompleterOptions) {}
 
+  /**
+   * Whether a newer attempt has already superseded this one.
+   *
+   * Exposed so a caller can ask **before** spending a model call or landing a Tool effect, rather
+   * than discovering it at completion time and throwing the work away. `complete` applies the same
+   * rule, so a caller that skips the question still cannot overwrite a newer answer.
+   */
+  isStale(input: Pick<CompleteTurnInput, "attempt" | "latestAttempt">): boolean {
+    return input.latestAttempt !== undefined && input.latestAttempt > input.attempt;
+  }
+
   async complete(input: CompleteTurnInput): Promise<CompleteTurnResult> {
-    if (input.latestAttempt !== undefined && input.latestAttempt > input.attempt) {
-      return { status: "stale" };
-    }
+    if (this.isStale(input)) return { status: "stale" };
 
     if (input.outcome.status === "waiting") {
       // The Turn is parked on a durable wait; resuming it will complete it later.
       return { status: "waiting", waitId: input.outcome.waitId };
     }
 
-    const existing = await this.options.store.findCompletion(
-      input.businessId,
-      input.turnId,
-      input.attempt
-    );
+    const ref: TurnCompletionRef = {
+      businessId: input.businessId,
+      runId: input.runId,
+      turnId: input.turnId,
+      attempt: input.attempt,
+    };
+
+    const existing = await this.options.store.findCompletion(ref);
     if (existing !== undefined) {
       return existing.status === "succeeded"
         ? { status: "succeeded", messageId: existing.messageId ?? "" }
@@ -93,9 +112,7 @@ export class ConversationTurnCompleter {
 
     if (input.outcome.status === "failed") {
       await this.options.store.completeTurn({
-        businessId: input.businessId,
-        turnId: input.turnId,
-        attempt: input.attempt,
+        ...ref,
         status: "failed",
         cursor: input.cursor,
         messageId: null,
@@ -104,16 +121,12 @@ export class ConversationTurnCompleter {
     }
 
     const { messageId } = await this.options.store.appendAssistantMessage({
-      businessId: input.businessId,
+      ...ref,
       conversationId: input.conversationId,
-      turnId: input.turnId,
-      attempt: input.attempt,
       content: input.outcome.text,
     });
     await this.options.store.completeTurn({
-      businessId: input.businessId,
-      turnId: input.turnId,
-      attempt: input.attempt,
+      ...ref,
       status: "succeeded",
       cursor: input.cursor,
       messageId,

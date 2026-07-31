@@ -6,6 +6,7 @@ import {
   type PersistedMessage,
   type PersistedTurn,
   type RunLauncher,
+  type TurnCompletion,
   type TurnGrant,
 } from "./service";
 
@@ -18,6 +19,7 @@ const GRANT: TurnGrant = {
 class FakeStore implements ConversationStore {
   messages: PersistedMessage[] = [];
   turns: PersistedTurn[] = [];
+  completions: TurnCompletion[] = [];
 
   async findTurnByIdempotencyKey(
     _businessId: string,
@@ -28,6 +30,10 @@ class FakeStore implements ConversationStore {
 
   async findTurn(_businessId: string, turnId: string): Promise<PersistedTurn | undefined> {
     return this.turns.find((turn) => turn.id === turnId);
+  }
+
+  async findTurnByRunId(_businessId: string, runId: string): Promise<PersistedTurn | undefined> {
+    return this.turns.find((turn) => turn.runId === runId);
   }
 
   async appendMessage(message: PersistedMessage): Promise<void> {
@@ -45,6 +51,25 @@ class FakeStore implements ConversationStore {
     conversationId: string
   ): Promise<readonly PersistedMessage[]> {
     return this.messages.filter((message) => message.conversationId === conversationId);
+  }
+
+  async findCompletion(
+    _businessId: string,
+    turnId: string,
+    attempt: number
+  ): Promise<TurnCompletion | undefined> {
+    return this.completions.find(
+      (completion) => completion.turnId === turnId && completion.attempt === attempt
+    );
+  }
+
+  async saveCompletion(completion: TurnCompletion): Promise<void> {
+    const recorded = await this.findCompletion(
+      completion.businessId,
+      completion.turnId,
+      completion.attempt
+    );
+    if (recorded === undefined) this.completions.push(completion);
   }
 }
 

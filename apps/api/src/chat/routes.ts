@@ -1,4 +1,5 @@
 import type { EventEmitter } from "node:events";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -6,7 +7,6 @@ import { DurableApprovalGate } from "../approvals/chat-gate";
 import { ErrorSchema } from "../auth/schemas";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationStore } from "../conversations/service";
-import type { GuardrailsService } from "../guardrails";
 import type { KnowledgeService } from "../knowledge/service";
 import type { WorkingMemoryService } from "../memory/service";
 import { type ChatTurnContext, type ChatTurnSubmitter, runChatTurn } from "../runtime/chat-run";

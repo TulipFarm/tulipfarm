@@ -7,7 +7,9 @@ import helmet from "@fastify/helmet";
 import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
+import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
@@ -18,6 +20,7 @@ import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/rout
 import { DurableApprovalGate } from "./approvals/chat-gate";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { ApprovalsRepo } from "./approvals/runtime-repo";
+import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
@@ -35,11 +38,10 @@ import type { ConversationStore } from "./conversations/service";
 import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
 import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
-import type { GuardrailsService } from "./guardrails";
-import type { HookExecutor } from "./hooks/hook-executor";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import { type InternalTurnRouteDeps, registerInternalTurnRoutes } from "./internal/routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -124,6 +126,8 @@ export interface AppOptions {
   routineAuthoring?: CanonicalRoutineAuthoringService;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
+  /** Tool approvals as durable kernel waits — a decision signals the wait its Run parked on. */
+  toolApprovals?: ToolApprovalService;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
   ingress?: IngressRoutesDeps;
   /** Trigger ingress: the canonical signed /hooks/:provider/:trigger webhook receiver. */
@@ -144,6 +148,11 @@ export interface AppOptions {
    * advanced — the pre-cutover behavior, kept only for partial assemblies and tests.
    */
   chatRunLifecycle?: ChatRunLifecycle;
+  /**
+   * The turn machinery the Worker calls back into while it cannot import this app. Service
+   * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
+   */
+  internalTurns?: InternalTurnRouteDeps;
   /**
    * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness
    * reports ok on process liveness alone.
@@ -518,11 +527,15 @@ export async function buildApp(opts: AppOptions = {}) {
                 return opts.routines.enqueuers.enqueueWake(job);
               },
             }
-          : undefined
+          : undefined,
+        opts.toolApprovals
       );
     }
     if (opts.runEvents) {
       registerRunEventRoutes(app, opts.runEvents, requireAuth, opts.rateLimiter);
+    }
+    if (opts.internalTurns) {
+      registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
     }
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
