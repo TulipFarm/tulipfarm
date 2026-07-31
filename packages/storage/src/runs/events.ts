@@ -67,6 +67,32 @@ export const RUN_EVENT_STORAGE_STATEMENTS: readonly string[] = [
     FOR EACH ROW EXECUTE FUNCTION reject_run_event_change()`,
 ];
 
+/** The channel a reader listens on to be told an event landed. */
+export const RUN_EVENT_NOTIFY_CHANNEL = "run_events";
+
+/**
+ * A wake-up hint for readers, and nothing more.
+ *
+ * The notification carries `<run_id>:<sequence>` so a listener knows which stream advanced, but a
+ * reader must still fetch by cursor: notifications are not delivered to a disconnected listener and
+ * are dropped outright if the queue overflows. Losing every notification therefore costs latency
+ * (the reader falls back to its poll interval) and never correctness — which is why this is a
+ * separate statement set rather than something the append path depends on.
+ */
+export const RUN_EVENT_NOTIFY_STATEMENTS: readonly string[] = [
+  `CREATE OR REPLACE FUNCTION notify_run_event()
+    RETURNS trigger LANGUAGE plpgsql AS $$
+    BEGIN
+      PERFORM pg_notify('${RUN_EVENT_NOTIFY_CHANNEL}', NEW.run_id || ':' || NEW.sequence);
+      RETURN NULL;
+    END;
+    $$`,
+  "DROP TRIGGER IF EXISTS run_events_notify ON run_events",
+  `CREATE TRIGGER run_events_notify
+    AFTER INSERT ON run_events
+    FOR EACH ROW EXECUTE FUNCTION notify_run_event()`,
+];
+
 interface RunEventRow {
   business_id: string;
   run_id: string;

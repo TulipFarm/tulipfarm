@@ -33,6 +33,17 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
   `INTEGRATION_REQUEST_SCHEMA_REF`) — plain JSON Schemas for every request that mints a Run; the
   chat entry is the API's Fastify body schema, so the route and the request Artifact cannot drift.
   Compiled by the API's invocation gateway, which denies an unregistered ref.
+- **`RUN_EVENT_DEFINITIONS`** (+ `RUN_EVENT_SCHEMAS`, `RUN_EVENT_TYPES`, `runEventDefinition`,
+  `runEventSchemaRef`, types `RunEventAudience`, `RunEventDefinition`, `RunEventGuardrailStage`,
+  `RunEventPayloads`, `RunEventSchema`,
+  `RunEventType`) — the channel-neutral vocabulary a Run emits while it executes, each type bound
+  to its audience (`participant` vs. operator-only evidence) and a payload schema. It lives here
+  because the writer (the Worker) and the readers (the API's stream adapter, channel renderers)
+  sit on opposite sides of an application boundary; adding an event means adding a definition, so
+  no writer can invent a shape a reader was never built to parse. `RunEventPayloads` binds the two
+  sides at compile time; a writer still validates, since a payload built from runtime data can be
+  wrong in ways a type cannot catch. Optional fields must be **omitted**, never set to `undefined` —
+  the schemas are `additionalProperties: false`.
 
 ## Boundaries
 

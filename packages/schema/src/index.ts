@@ -77,6 +77,21 @@ export {
   validateRoutineDefinition,
 } from "./routine";
 export type {
+  RunEventAudience,
+  RunEventDefinition,
+  RunEventGuardrailStage,
+  RunEventPayloads,
+  RunEventSchema,
+  RunEventType,
+} from "./run-events";
+export {
+  RUN_EVENT_DEFINITIONS,
+  RUN_EVENT_SCHEMAS,
+  RUN_EVENT_TYPES,
+  runEventDefinition,
+  runEventSchemaRef,
+} from "./run-events";
+export type {
   SkillFrontmatter,
   SkillValidationInput,
   SkillValidationResult,

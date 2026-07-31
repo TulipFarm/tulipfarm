@@ -31,6 +31,8 @@ export type {
 } from "./events";
 export {
   DEFAULT_RUN_EVENT_PAGE_SIZE,
+  RUN_EVENT_NOTIFY_CHANNEL,
+  RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RunEventStore,
 } from "./events";
