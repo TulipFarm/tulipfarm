@@ -19,6 +19,12 @@ import {
   toPublicApiClient,
 } from "./api-clients";
 import {
+  ChannelBindDeniedError,
+  type ChannelBindDeps,
+  previewChannelBind,
+  redeemChannelBindToken,
+} from "./channel-link";
+import {
   ExternalIdentityDeniedError,
   type ExternalIdentityRepo,
   LinkRedemptionDeniedError,
@@ -51,6 +57,8 @@ export interface IdentityRouteDeps {
   userRepo: UserRepo;
   apiClientRepo?: ApiClientRepo;
   externalIdentityRepo?: ExternalIdentityRepo;
+  /** Enables the channel bind flow. Absent → an unlinked sender is simply denied. */
+  channelBind?: ChannelBindDeps;
   oidc?: OidcConfig;
   mfa?: MfaVerifierRegistry;
   ttlSeconds?: number;
@@ -115,6 +123,7 @@ export function registerIdentityRoutes(
   registerStepUpRoute(app, limited, requireAuth, ttlSeconds);
   registerApiClientRoutes(app, limited, requireAuth);
   registerExternalLinkRoutes(app, limited, requireAuth);
+  registerChannelBindRoutes(app, limited, requireAuth);
 }
 
 function registerOidcRoutes(
@@ -677,6 +686,146 @@ function registerExternalLinkRoutes(
       }
       await repo.deleteMapping(provider, externalSubject);
       return reply.code(204).send();
+    }
+  );
+}
+
+const ChannelBindOfferSchema = {
+  type: "object",
+  properties: {
+    slug: { type: "string" },
+    senderId: { type: "string" },
+    expiresAt: { type: "string", format: "date-time" },
+    account: {
+      type: "object",
+      properties: { userId: { type: "string" }, email: { type: "string" } },
+      required: ["userId", "email"],
+    },
+  },
+  required: ["slug", "senderId", "expiresAt", "account"],
+} as const;
+
+/**
+ * The reverse link flow: an unknown channel sender is sent a signed, single-use link, and whoever
+ * opens it inside their own session claims that sender as themselves. Both routes require a *user*
+ * session — the token proves only that we issued it, never who is holding it, so the account being
+ * bound comes from the session and nothing else.
+ */
+function registerChannelBindRoutes(
+  app: FastifyInstance,
+  deps: IdentityRouteDeps,
+  requireAuth: PreHandler
+): void {
+  const bind = deps.channelBind;
+  if (!bind) return;
+
+  /** The token travels in the body: a query string would reach access logs and referrers. */
+  const TokenBody = {
+    type: "object",
+    required: ["token"],
+    properties: { token: { type: "string", minLength: 1 } },
+  } as const;
+
+  const readToken = (req: FastifyRequest): string | null => {
+    const body = (req.body ?? {}) as { token?: unknown };
+    return typeof body.token === "string" && body.token !== "" ? body.token : null;
+  };
+
+  app.post(
+    "/api/v1/identity/channel-links/preview",
+    {
+      preHandler: chain(deps.credentialRateLimitHook, requireAuth),
+      schema: {
+        description:
+          "Describe the channel identity a bind link would bind, and the account it would be " +
+          "bound to, without spending the link.",
+        tags: ["identity"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: TokenBody,
+        response: {
+          200: ChannelBindOfferSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal;
+      if (principal?.kind !== "user") {
+        return reply.code(403).send({ error: "only a user may bind a channel identity" });
+      }
+      const token = readToken(req);
+      if (!token) return reply.code(400).send({ error: "token is required" });
+
+      const user = await deps.userRepo.findById(principal.id);
+      if (!user) return reply.code(403).send({ error: "only a user may bind a channel identity" });
+
+      try {
+        const offer = await previewChannelBind(bind, token);
+        return reply.send({
+          slug: offer.slug,
+          senderId: offer.senderId,
+          expiresAt: offer.expiresAt.toISOString(),
+          account: { userId: user._id, email: user.email },
+        });
+      } catch (error) {
+        if (error instanceof ChannelBindDeniedError) {
+          req.log?.warn({ event: "identity.bind.denied", reason: error.reason }, "bind denied");
+          return reply.code(400).send({ error: "bind link is not usable" });
+        }
+        throw error;
+      }
+    }
+  );
+
+  app.post(
+    "/api/v1/identity/channel-links/confirm",
+    {
+      preHandler: chain(deps.credentialRateLimitHook, requireAuth),
+      schema: {
+        description:
+          "Bind the channel identity named by a bind link to the signed-in account. Single use.",
+        tags: ["identity"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: TokenBody,
+        response: {
+          201: { type: "object", properties: { link: ExternalLinkSchema }, required: ["link"] },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const principal = req.principal;
+      if (principal?.kind !== "user") {
+        return reply.code(403).send({ error: "only a user may bind a channel identity" });
+      }
+      const token = readToken(req);
+      if (!token) return reply.code(400).send({ error: "token is required" });
+
+      try {
+        const mapping = await redeemChannelBindToken(bind, token, principal.id);
+        req.log?.info(
+          { event: "identity.bind.confirmed", provider: mapping.provider },
+          "channel identity bound"
+        );
+        return reply.code(201).send({
+          link: {
+            provider: mapping.provider,
+            externalSubject: mapping.externalSubject,
+            userId: mapping.userId,
+            verifiedAt: mapping.verifiedAt.toISOString(),
+          },
+        });
+      } catch (error) {
+        if (error instanceof ChannelBindDeniedError) {
+          req.log?.warn({ event: "identity.bind.denied", reason: error.reason }, "bind denied");
+          return reply.code(400).send({ error: "bind link is not usable" });
+        }
+        throw error;
+      }
     }
   );
 }

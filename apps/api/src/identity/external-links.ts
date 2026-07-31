@@ -15,12 +15,22 @@ import type { Queryable } from "../db";
  * token twice cannot create a second mapping (SPEC §24 replay).
  */
 
+/**
+ * How a mapping came to exist. Not every link is equally strong evidence: `link_token` is a service
+ * identity asserting a subject it verified, `manifest_email` is an address the integration reported
+ * matching a known account, and `bind_link` is a signed-in human confirming the binding themselves.
+ * An audit that cannot tell them apart cannot judge any of them. Null on rows minted before the
+ * distinction existed.
+ */
+export type IdentityVerificationMethod = "link_token" | "manifest_email" | "bind_link";
+
 export interface ExternalIdentityMappingDoc {
   provider: string;
   externalSubject: string;
   userId: string;
   verifiedAt: Date;
   expiresAt: Date | null;
+  verifiedVia?: IdentityVerificationMethod | null;
 }
 
 export interface ExternalLinkTokenDoc {
@@ -30,6 +40,22 @@ export interface ExternalLinkTokenDoc {
   createdAt: Date;
   expiresAt: Date;
   consumedAt: Date | null;
+}
+
+/**
+ * An outstanding bind offer. The row exists so the nonce can be *spent*: the link is signed, but a
+ * signature alone cannot be revoked, so without a consumable record a captured link would re-bind
+ * the sender every time it was opened. No user id — at issue time no account is known, which is the
+ * whole reason the link is being sent.
+ */
+export interface ChannelBindTokenDoc {
+  nonceHash: string;
+  integrationSlug: string;
+  externalSenderId: string;
+  issuedAt: Date;
+  expiresAt: Date;
+  consumedAt: Date | null;
+  consumedBy: string | null;
 }
 
 export interface ExternalIdentityRepo {
@@ -43,6 +69,11 @@ export interface ExternalIdentityRepo {
   createLinkToken(token: ExternalLinkTokenDoc): Promise<void>;
   /** Atomically marks the token consumed; returns null when unknown, expired, or already used. */
   consumeLinkToken(tokenHash: string): Promise<ExternalLinkTokenDoc | null>;
+  createBindToken(token: ChannelBindTokenDoc): Promise<void>;
+  /** Unspent state of a bind offer, for showing a confirmation page without spending it. */
+  findBindToken(nonceHash: string): Promise<ChannelBindTokenDoc | null>;
+  /** Atomically spends the nonce for one user; null when unknown, expired, or already spent. */
+  consumeBindToken(nonceHash: string, userId: string): Promise<ChannelBindTokenDoc | null>;
 }
 
 export const DEFAULT_LINK_TOKEN_TTL_SECONDS = 900;
@@ -58,6 +89,19 @@ function rowToMapping(row: Record<string, unknown>): ExternalIdentityMappingDoc 
     userId: row.user_id as string,
     verifiedAt: row.verified_at as Date,
     expiresAt: (row.expires_at as Date | null) ?? null,
+    verifiedVia: (row.verified_via as IdentityVerificationMethod | null) ?? null,
+  };
+}
+
+function rowToBindToken(row: Record<string, unknown>): ChannelBindTokenDoc {
+  return {
+    nonceHash: row.nonce_hash as string,
+    integrationSlug: row.integration_slug as string,
+    externalSenderId: row.external_sender_id as string,
+    issuedAt: row.issued_at as Date,
+    expiresAt: row.expires_at as Date,
+    consumedAt: (row.consumed_at as Date | null) ?? null,
+    consumedBy: (row.consumed_by as string | null) ?? null,
   };
 }
 
@@ -96,16 +140,18 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
 
   async upsertMapping(mapping: ExternalIdentityMappingDoc): Promise<void> {
     await this.q.query(
-      `INSERT INTO external_identity_mappings (provider, external_subject, user_id, verified_at, expires_at)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO external_identity_mappings (provider, external_subject, user_id, verified_at, expires_at, verified_via)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (provider, external_subject)
-       DO UPDATE SET user_id = EXCLUDED.user_id, verified_at = EXCLUDED.verified_at, expires_at = EXCLUDED.expires_at`,
+       DO UPDATE SET user_id = EXCLUDED.user_id, verified_at = EXCLUDED.verified_at,
+                     expires_at = EXCLUDED.expires_at, verified_via = EXCLUDED.verified_via`,
       [
         mapping.provider,
         mapping.externalSubject,
         mapping.userId,
         mapping.verifiedAt,
         mapping.expiresAt,
+        mapping.verifiedVia ?? null,
       ]
     );
   }
@@ -140,6 +186,42 @@ export class PgExternalIdentityRepo implements ExternalIdentityRepo {
       [tokenHash]
     );
     return rows.length > 0 ? rowToLinkToken(rows[0]) : null;
+  }
+
+  async createBindToken(token: ChannelBindTokenDoc): Promise<void> {
+    await this.q.query(
+      `INSERT INTO channel_bind_tokens
+         (nonce_hash, integration_slug, external_sender_id, issued_at, expires_at, consumed_at, consumed_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        token.nonceHash,
+        token.integrationSlug,
+        token.externalSenderId,
+        token.issuedAt,
+        token.expiresAt,
+        token.consumedAt,
+        token.consumedBy,
+      ]
+    );
+  }
+
+  async findBindToken(nonceHash: string): Promise<ChannelBindTokenDoc | null> {
+    const { rows } = await this.q.query(
+      `SELECT * FROM channel_bind_tokens
+       WHERE nonce_hash = $1 AND consumed_at IS NULL AND expires_at > now()`,
+      [nonceHash]
+    );
+    return rows.length > 0 ? rowToBindToken(rows[0]) : null;
+  }
+
+  async consumeBindToken(nonceHash: string, userId: string): Promise<ChannelBindTokenDoc | null> {
+    const { rows } = await this.q.query(
+      `UPDATE channel_bind_tokens SET consumed_at = now(), consumed_by = $2
+       WHERE nonce_hash = $1 AND consumed_at IS NULL AND expires_at > now()
+       RETURNING *`,
+      [nonceHash, userId]
+    );
+    return rows.length > 0 ? rowToBindToken(rows[0]) : null;
   }
 }
 
@@ -199,6 +281,7 @@ export async function redeemLinkToken(
     userId: token.userId,
     verifiedAt: new Date(),
     expiresAt: null,
+    verifiedVia: "link_token",
   };
   await repo.upsertMapping(mapping);
   return mapping;
