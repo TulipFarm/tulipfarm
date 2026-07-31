@@ -9,6 +9,18 @@ function request(from: StateStatus = "claimed"): AgentStateRequest {
   return { businessId: "biz-1", runId: "run-1", stateKey: "state-1", from };
 }
 
+const LOOP_INPUT: AgentLoopInput = {
+  businessId: "biz-1",
+  runId: "run-1",
+  stateId: "state-1",
+  modelProfileId: "primary",
+  contextDigest: "sha256:context",
+  guardrailDigest: "sha256:guardrail",
+  messages: [],
+  tools: [],
+  limits: { maxIterations: 4, maxToolCalls: 4, maxRepairAttempts: 2 },
+};
+
 function runner(
   outcome: AgentLoopOutcome | (() => Promise<AgentLoopOutcome>),
   overrides: { waitId?: string } = {}
@@ -35,17 +47,6 @@ function runner(
         return { waitId: overrides.waitId ?? "wait-1" };
       },
     },
-    buildInput: async (): Promise<AgentLoopInput> => ({
-      businessId: "biz-1",
-      runId: "run-1",
-      stateId: "state-1",
-      modelProfileId: "primary",
-      contextDigest: "sha256:context",
-      guardrailDigest: "sha256:guardrail",
-      messages: [],
-      tools: [],
-      limits: { maxIterations: 4, maxToolCalls: 4, maxRepairAttempts: 2 },
-    }),
   });
 
   return {
@@ -61,7 +62,7 @@ function runner(
 describe("AgentStateRunner", () => {
   it("drives a completed loop through running to succeeded", async () => {
     const harness = runner({ status: "completed", output: { label: "bug" }, ...counters });
-    const result = await harness.agentState.execute(request());
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions).toEqual([
       { from: "claimed", to: "running" },
@@ -72,7 +73,7 @@ describe("AgentStateRunner", () => {
 
   it("fails the State when the loop hits a durable limit", async () => {
     const harness = runner({ status: "failed", reason: "iteration_limit", ...counters });
-    const result = await harness.agentState.execute(request());
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "failed" });
     expect(result).toMatchObject({ status: "failed", reason: "iteration_limit" });
@@ -85,7 +86,7 @@ describe("AgentStateRunner", () => {
       callId: "call-1",
       ...counters,
     });
-    const result = await harness.agentState.execute(request());
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.waits).toEqual([{ approvalId: "appr-1" }]);
     expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "waiting" });
@@ -94,7 +95,7 @@ describe("AgentStateRunner", () => {
 
   it("takes a cancelled loop through cancelling to cancelled", async () => {
     const harness = runner({ status: "cancelled", ...counters });
-    const result = await harness.agentState.execute(request());
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions).toEqual([
       { from: "claimed", to: "running" },
@@ -108,7 +109,7 @@ describe("AgentStateRunner", () => {
     const harness = runner(async () => {
       throw new Error("worker crashed");
     });
-    const result = await harness.agentState.execute(request());
+    const result = await harness.agentState.execute(request(), LOOP_INPUT);
 
     expect(harness.transitions.at(-1)).toEqual({ from: "running", to: "needs_reconciliation" });
     expect(result).toMatchObject({ status: "needs_reconciliation" });
@@ -117,9 +118,9 @@ describe("AgentStateRunner", () => {
   it("refuses to start from a terminal State status and never runs the loop", async () => {
     const harness = runner({ status: "completed", output: null, ...counters });
 
-    await expect(harness.agentState.execute(request("succeeded"))).rejects.toBeInstanceOf(
-      RunTransitionError
-    );
+    await expect(
+      harness.agentState.execute(request("succeeded"), LOOP_INPUT)
+    ).rejects.toBeInstanceOf(RunTransitionError);
     expect(harness.loopRuns).toBe(0);
   });
 });

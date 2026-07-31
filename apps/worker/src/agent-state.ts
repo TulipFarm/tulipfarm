@@ -44,7 +44,6 @@ export interface AgentStateRunnerOptions {
   readonly loop: AgentLoopRunner;
   readonly transitions: StateTransitionPort;
   readonly waits: ApprovalWaitPort;
-  buildInput(request: AgentStateRequest): Promise<AgentLoopInput>;
 }
 
 export type AgentStateResult =
@@ -57,14 +56,21 @@ export type AgentStateResult =
 export class AgentStateRunner {
   constructor(private readonly options: AgentStateRunnerOptions) {}
 
-  async execute(request: AgentStateRequest): Promise<AgentStateResult> {
+  /**
+   * Runs one Agent State over an already-resolved loop input.
+   *
+   * The input arrives built rather than being fetched here: the caller resolved the Context to
+   * announce what the model was given, and resolving it a second time would risk running the loop
+   * over a bundle nobody published evidence for.
+   */
+  async execute(request: AgentStateRequest, input: AgentLoopInput): Promise<AgentStateResult> {
     // Fail before any model or Tool work if the State cannot legally start.
     assertStateTransition(request.from, "running");
     await this.move(request, request.from, "running");
 
     let outcome: AgentLoopOutcome;
     try {
-      outcome = await this.options.loop.run(await this.options.buildInput(request));
+      outcome = await this.options.loop.run(input);
     } catch {
       // Effects may or may not have landed; reconciliation decides, not the worker.
       await this.move(request, "running", "needs_reconciliation", "agent_loop_error");
