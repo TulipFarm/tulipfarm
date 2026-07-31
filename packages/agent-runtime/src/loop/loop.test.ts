@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ModelInvocationResult, ModelPort } from "../ports";
+import type { ModelInvocationResult, ModelPort, ModelStreamChunk } from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
 import {
   AgentLoop,
@@ -38,6 +38,30 @@ function scriptedModel(...results: readonly ModelInvocationResult[]): ModelPort 
       const next = queue.shift();
       if (next === undefined) throw new Error("model called more times than scripted");
       return next;
+    },
+  };
+  return port;
+}
+
+/**
+ * A model that streams `deltas` and then reports `result`. Mirrors a real adapter: text arrives in
+ * pieces, and the same outcome a non-streaming call would return lands in the final chunk.
+ */
+function streamingModel(
+  deltas: readonly string[],
+  result: ModelInvocationResult
+): ModelPort & { invoked: number; streamed: number } {
+  const port = {
+    invoked: 0,
+    streamed: 0,
+    invoke: async () => {
+      port.invoked += 1;
+      return result;
+    },
+    stream: async function* (): AsyncIterable<ModelStreamChunk> {
+      port.streamed += 1;
+      for (const text of deltas) yield { kind: "text_delta" as const, text };
+      yield { kind: "completed" as const, result };
     },
   };
   return port;
@@ -353,5 +377,90 @@ describe("AgentLoop", () => {
     ]);
     expect(events.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4]);
     expect(JSON.stringify(events.events)).not.toContain("s3cret");
+  });
+
+  it("emits ordered text deltas while a streaming model is still answering", async () => {
+    const events = collector();
+    const model = streamingModel(["Hel", "lo ", "there"], textResult("Hello there"));
+
+    const outcome = await loop({ model, events: events.sink }).run(input());
+
+    expect(model.streamed).toBe(1);
+    expect(model.invoked).toBe(0);
+    expect(outcome).toMatchObject({ status: "completed", output: "Hello there" });
+
+    const deltas = events.events.filter((event) => event.type === "text_delta");
+    expect(deltas.map((event) => event.text)).toEqual(["Hel", "lo ", "there"]);
+    expect(deltas.map((event) => event.textIndex)).toEqual([1, 2, 3]);
+    // Deltas share the one monotonic sequence, so a reader resuming by cursor sees them in place.
+    expect(deltas.map((event) => event.sequence)).toEqual([2, 3, 4]);
+  });
+
+  it("falls back to invoke when the adapter cannot stream", async () => {
+    const events = collector();
+    const outcome = await loop({
+      model: scriptedModel(textResult("done")),
+      events: events.sink,
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed", output: "done" });
+    expect(events.events.some((event) => event.type === "text_delta")).toBe(false);
+  });
+
+  it("skips empty deltas so a reader never sees a no-op chunk", async () => {
+    const events = collector();
+    const model = streamingModel(["", "done", ""], textResult("done"));
+
+    await loop({ model, events: events.sink }).run(input());
+
+    const deltas = events.events.filter((event) => event.type === "text_delta");
+    expect(deltas.map((event) => event.text)).toEqual(["done"]);
+    expect(deltas.map((event) => event.textIndex)).toEqual([1]);
+  });
+
+  it("fails the turn when a stream ends without a result", async () => {
+    const model: ModelPort = {
+      invoke: async () => textResult("unused"),
+      stream: async function* (): AsyncIterable<ModelStreamChunk> {
+        yield { kind: "text_delta", text: "partial" };
+      },
+    };
+
+    const outcome = await loop({ model }).run(input());
+
+    // A truncated stream is a broken adapter, not an empty answer — never completed with "partial".
+    expect(outcome).toMatchObject({ status: "failed", reason: "model_error" });
+  });
+
+  it("numbers deltas continuously across iterations", async () => {
+    const events = collector();
+    const queue = [
+      {
+        deltas: ["thinking"],
+        result: toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "hi" } },
+        ]),
+      },
+      { deltas: ["all ", "done"], result: textResult("all done") },
+    ];
+    const model: ModelPort = {
+      invoke: async () => textResult("unused"),
+      stream: async function* (): AsyncIterable<ModelStreamChunk> {
+        const next = queue.shift();
+        if (next === undefined) throw new Error("model streamed more times than scripted");
+        for (const text of next.deltas) yield { kind: "text_delta" as const, text };
+        yield { kind: "completed" as const, result: next.result };
+      },
+    };
+
+    await loop({
+      model,
+      tools: dispatcher({ status: "succeeded", callId: "c1", output: {} }),
+      events: events.sink,
+    }).run(input());
+
+    const deltas = events.events.filter((event) => event.type === "text_delta");
+    expect(deltas.map((event) => event.text)).toEqual(["thinking", "all ", "done"]);
+    expect(deltas.map((event) => event.textIndex)).toEqual([1, 2, 3]);
   });
 });

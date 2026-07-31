@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
+import type { HookExecutor } from "@tulipfarm/sandbox";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
-import type { HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination.js";
 import { err, ok, type ToolCallResult } from "../tools/types.js";
 import {

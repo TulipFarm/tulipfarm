@@ -1,6 +1,6 @@
+import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
 import type { SoulAgent } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
-import { assembleSystemPrompt } from "../context/assemble";
 import { DEFAULT_ASSISTANT } from "../soul/agents/platform-agents";
 import type { SoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";

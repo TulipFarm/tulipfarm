@@ -1,12 +1,12 @@
 import { existsSync } from "node:fs";
 import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../../auth/schemas";
-import { analyzeHook, HookAnalysisError } from "../../hooks/hook-analyzer.js";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 

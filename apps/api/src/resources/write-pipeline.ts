@@ -1,7 +1,7 @@
+import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { CounterFn } from "@tulipfarm/schema";
 import { ajv, applyTransforms, TulipFarmValidationError } from "@tulipfarm/schema";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
-import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import type { ResourceDoc, ResourceRepo, ResourceRepoFactory } from "./repo";
 
 export function stripSystemFields(data: Record<string, unknown>): Record<string, unknown> {

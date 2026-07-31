@@ -1,4 +1,15 @@
 export type {
+  AssembleContext,
+  AvailableSkill,
+  EagerSkill,
+  MemoryEntry,
+  SoulCatalogue,
+  SoulCatalogueEntry,
+} from "./assemble";
+export { assembleSystemPrompt } from "./assemble";
+export type { GovernancePage } from "./governance";
+export { BLOCK_CHAR_CAP, buildGovernanceBlock, PER_DOC_CHAR_CAP } from "./governance";
+export type {
   AssembleContextInput,
   ContextAssemblyErrorCode,
   ContextAuthorization,

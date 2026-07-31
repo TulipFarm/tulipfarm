@@ -1,31 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgePage } from "../knowledge/types";
-import { MAX_TOTAL_CHARS } from "../memory/limits";
-import type { WorkingMemoryDoc } from "../memory/working-memory";
-import { type AssembleContext, assembleSystemPrompt } from "./assemble";
+import { type AssembleContext, assembleSystemPrompt, type MemoryEntry } from "./assemble";
+import type { GovernancePage } from "./governance";
 
-const EPOCH = new Date(0);
+/** The render-side `<memory>` budget declared in `assemble.ts` (100 entries × 256 value chars). */
+const MAX_TOTAL_CHARS = 25_600;
 
-function mem(key: string, value: string): WorkingMemoryDoc {
-  return { _id: `u:${key}`, userId: "u", key, value, createdAt: EPOCH, lastWrittenAt: EPOCH };
+function mem(key: string, value: string): MemoryEntry {
+  return { key, value };
 }
 
-function govDoc(title: string, body: string): KnowledgePage {
-  return {
-    _id: title,
-    title,
-    content: body,
-    plainText: body,
-    source: "authored",
-    sourceId: title,
-    domain: null,
-    tags: [],
-    active: true,
-    alwaysLoadForAgents: true,
-    version: 1,
-    createdAt: EPOCH,
-    updatedAt: EPOCH,
-  };
+function govDoc(title: string, body: string): GovernancePage {
+  return { title, plainText: body, domain: null };
 }
 
 function baseCtx(over: Partial<AssembleContext> = {}): AssembleContext {
@@ -303,7 +288,7 @@ describe("assembleSystemPrompt — governance", () => {
 
   it("stays tenant-wide regardless of the agent domain (display-only, AGT-V1-007)", () => {
     const tenantWide = govDoc("Tenant Policy", "Applies to all.");
-    const crmScoped: KnowledgePage = { ...govDoc("CRM Policy", "CRM only."), domain: "crm" };
+    const crmScoped: GovernancePage = { ...govDoc("CRM Policy", "CRM only."), domain: "crm" };
     const out = assembleSystemPrompt(
       baseCtx({ domain: "crm", governancePages: [tenantWide, crmScoped] })
     );

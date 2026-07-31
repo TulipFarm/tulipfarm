@@ -1,9 +1,45 @@
-import { buildGovernanceBlock } from "../knowledge/governance";
-import type { KnowledgePage } from "../knowledge/types";
-import { MAX_TOTAL_CHARS } from "../memory/limits";
-import type { WorkingMemoryDoc } from "../memory/working-memory";
-import type { SoulCatalogue } from "../soul/catalogue";
-import type { AvailableSkill, EagerSkill } from "../soul/skills/registry";
+import { buildGovernanceBlock, type GovernancePage } from "./governance";
+
+/**
+ * The inputs below are declared structurally rather than imported from whichever store produced
+ * them. A store record carries ids, versions, and timestamps that must never reach a prompt, and
+ * assembly runs in the Worker, which cannot import an application. Naming only the fields that get
+ * rendered is what keeps both true, and a richer record still assigns to these shapes unchanged.
+ */
+
+/** One working-memory entry as the `<memory>` block renders it. */
+export interface MemoryEntry {
+  readonly key: string;
+  readonly value: string;
+}
+
+/** One Skill projected to its eager surface — the full body goes into `<skills>`. */
+export interface EagerSkill {
+  readonly name: string;
+  readonly body: string;
+}
+
+/** One Skill projected to its L1 surface for `<available-skills>`. */
+export interface AvailableSkill {
+  readonly name: string;
+  readonly description: string;
+  readonly category?: string;
+  readonly categoryDescription?: string;
+}
+
+export interface SoulCatalogueEntry {
+  readonly name: string;
+  readonly description: string;
+}
+
+/** The repo catalogue for `<soul-context>`, one L1 list per soul artifact type. */
+export interface SoulCatalogue {
+  readonly agents: readonly SoulCatalogueEntry[];
+  readonly skills: readonly SoulCatalogueEntry[];
+  readonly resourceTypes: readonly SoulCatalogueEntry[];
+  readonly routines: readonly SoulCatalogueEntry[];
+  readonly integrations: readonly SoulCatalogueEntry[];
+}
 
 /**
  * Resolved inputs for one turn's system prompt. `assembleSystemPrompt` is pure — the caller
@@ -34,9 +70,9 @@ export interface AssembleContext {
   /** The agent's AGENT.md body. */
   personality?: string;
   /** Per-user working memory, store-capped, oldest-written first (MEM-V1-003). */
-  memory: WorkingMemoryDoc[];
+  memory: MemoryEntry[];
   /** Active `alwaysLoadForAgents` knowledge docs (KN-V1-005). */
-  governancePages: KnowledgePage[];
+  governancePages: GovernancePage[];
   /**
    * Eager skill bodies for `<skills>` — skills with `eager: true` in their SKILL.md frontmatter.
    * Their full body is included in the prompt so the agent can apply them without a `load_skill`
@@ -120,10 +156,18 @@ function renderAgentPersonality(ctx: AssembleContext): string {
  * Shared by `renderMemoryInstructions` and `renderMemory` so the static preamble never orphans —
  * it appears exactly when the entry block does.
  */
+/**
+ * `<memory>` budget — total key+value chars, matching the other block budgets. Set to the working
+ * memory store's own aggregate ceiling (100 entries × 256 value chars). Entries already pass their
+ * write-time caps, so this is the render-side floor: a store that ever exceeds its own cap drops
+ * the block whole rather than half-rendering it.
+ */
+const MAX_MEMORY_CHARS = 25_600;
+
 function memoryRenders(ctx: AssembleContext): boolean {
   if (ctx.memory.length === 0) return false;
   const total = ctx.memory.reduce((n, e) => n + e.key.length + e.value.length, 0);
-  return total <= MAX_TOTAL_CHARS;
+  return total <= MAX_MEMORY_CHARS;
 }
 
 /**

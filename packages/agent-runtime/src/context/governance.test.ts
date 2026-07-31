@@ -1,25 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { BLOCK_CHAR_CAP, buildGovernanceBlock, PER_DOC_CHAR_CAP } from "./governance";
-import type { KnowledgePage } from "./types";
+import {
+  BLOCK_CHAR_CAP,
+  buildGovernanceBlock,
+  type GovernancePage,
+  PER_DOC_CHAR_CAP,
+} from "./governance";
 
-function govPage(over: Partial<KnowledgePage>): KnowledgePage {
-  const now = new Date();
-  return {
-    _id: "x",
-    title: "Policy",
-    content: "",
-    plainText: "body",
-    source: "authored",
-    sourceId: "x",
-    domain: null,
-    tags: [],
-    active: true,
-    alwaysLoadForAgents: true,
-    version: 1,
-    createdAt: now,
-    updatedAt: now,
-    ...over,
-  };
+function govPage(over: Partial<GovernancePage>): GovernancePage {
+  return { title: "Policy", plainText: "body", domain: null, ...over };
 }
 
 describe("buildGovernanceBlock", () => {

@@ -1,5 +1,5 @@
+import { type AssembleContext, assembleSystemPrompt } from "@tulipfarm/agent-runtime";
 import type { SoulAgent } from "@tulipfarm/soul";
-import { type AssembleContext, assembleSystemPrompt } from "../context/assemble";
 import type { PlatformAgent } from "../soul/agents/platform-agents";
 import type { SoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";

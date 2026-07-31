@@ -38,7 +38,7 @@ dropdown via `ReactRenderer` (no tippy, mirrors `model-selector.tsx` positioning
 fetches the agent/skill/resource lists once (the `~knowledge` menu is server-searched per keystroke instead).
 Enter sends (deferred to the suggestion menu while one is open); Shift+Enter
 newlines. The backend eager-injection lives in `apps/api/src/chat/turn.ts` (`buildSystemFor`) +
-`apps/api/src/context/assemble.ts` (`<skills>` + `<eager-resources>` + `<pinned-knowledge>` blocks); the tags are ephemeral per turn.
+`packages/agent-runtime/src/context/assemble.ts` (`<skills>` + `<eager-resources>` + `<pinned-knowledge>` blocks); the tags are ephemeral per turn.
 Note: ProseMirror can't be driven under jsdom — the editor's behavior is covered by `serialize.test.ts`
 (pure) + a mocked `composer.test.tsx`; the live flow is Playwright-verified.
 

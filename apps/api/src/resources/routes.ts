@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
+import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { DOMAIN_EVENTS } from "../domain-events";
-import type { HookExecutor } from "../hooks/hook-executor.js";
 import { parsePaginationQuery } from "../pagination";
 import { type CounterStore, makeHistoryEntry, type ResourceRepoFactory, toApiRecord } from "./repo";
 import {

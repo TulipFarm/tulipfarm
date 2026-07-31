@@ -1,8 +1,8 @@
 import { EventEmitter } from "node:events";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { registerGuardrailsReload } from "./reload";
-import type { GuardrailsService } from "./service";
 
 const flush = () => new Promise((r) => setImmediate(r));
 
