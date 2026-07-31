@@ -2,10 +2,14 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { describe, expect, it } from "vitest";
 import { loadConfig, WorkerConfigError } from "./config";
 
-const MINIMAL = { DATABASE_URL: "postgres://localhost:5432/tulipfarm" };
+const MINIMAL = {
+  DATABASE_URL: "postgres://localhost:5432/tulipfarm",
+  INTERNAL_API_URL: "http://api:4010",
+  WORKER_API_CREDENTIAL: "tfc_client.secret",
+};
 
 describe("loadConfig", () => {
-  it("applies documented defaults when only DATABASE_URL is set", () => {
+  it("applies documented defaults when only the required variables are set", () => {
     const config = loadConfig(MINIMAL);
 
     expect(config).toMatchObject({
@@ -25,6 +29,22 @@ describe("loadConfig", () => {
   it("refuses to start without a database url", () => {
     expect(() => loadConfig({})).toThrow(WorkerConfigError);
     expect(() => loadConfig({ DATABASE_URL: "   " })).toThrow("DATABASE_URL is required");
+  });
+
+  it("refuses to start without a reachable turn host", () => {
+    // Discovering this after a Chat Run is claimed would cost a participant a turn to learn
+    // something the deployment already knew.
+    const { INTERNAL_API_URL, ...withoutUrl } = MINIMAL;
+    expect(() => loadConfig(withoutUrl)).toThrow("INTERNAL_API_URL is required");
+
+    const { WORKER_API_CREDENTIAL, ...withoutCredential } = MINIMAL;
+    expect(() => loadConfig(withoutCredential)).toThrow("WORKER_API_CREDENTIAL is required");
+  });
+
+  it("normalises a trailing slash on the turn host, so paths do not double up", () => {
+    expect(loadConfig({ ...MINIMAL, INTERNAL_API_URL: "http://api:4010/" }).internalApiUrl).toBe(
+      "http://api:4010"
+    );
   });
 
   it("rejects a non-integer interval instead of coercing it", () => {
