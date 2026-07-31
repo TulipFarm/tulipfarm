@@ -8,12 +8,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
 const skipNoIsovm = nodeMajor === 25;
 
-import { HookError, HookExecutor } from "./hook-executor.js";
+import { HookError, HookExecutor, resolveHookWorkerPath } from "./executor";
 
-// HookExecutor needs a worker thread running hook-worker.ts via tsx.
-// Tests for AC-V1-003 (timeout) and AC-V1-004 (sandbox isolation) don't need a database.
-// We pass a fake connection string — the worker only connects when ctx.resources.get is called.
-const FAKE_DATABASE_URL = "postgresql://localhost:5432/test";
+// HookExecutor needs a worker thread; the capability-free entrypoint is enough here, since
+// AC-V1-003 (timeout) and AC-V1-004 (isolation) never reach back out of the isolate.
+const WORKER_PATH = resolveHookWorkerPath(__dirname, "worker");
 
 describe("HookExecutor", () => {
   let executor: HookExecutor;
@@ -21,7 +20,7 @@ describe("HookExecutor", () => {
   // Production keeps one executor worker alive for the process lifetime. Reusing it here also
   // avoids isolated-vm's known worker-thread teardown race (#464) between individual tests.
   beforeAll(() => {
-    executor = new HookExecutor(FAKE_DATABASE_URL);
+    executor = new HookExecutor({ workerPath: WORKER_PATH });
   });
 
   afterAll(async () => {

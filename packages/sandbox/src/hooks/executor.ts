@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Worker } from "node:worker_threads";
-import { analyzeHook, HookAnalysisError } from "./hook-analyzer.js";
-import type { WorkerRequest, WorkerResponse } from "./types.js";
+import { analyzeHook, HookAnalysisError } from "./analyzer";
+import type { WorkerRequest, WorkerResponse } from "./protocol";
 
 export class HookError extends Error {
   constructor(
@@ -17,6 +17,25 @@ export class HookError extends Error {
 
 const CIRCUIT_BREAKER_THRESHOLD = 3;
 
+export interface HookExecutorOptions {
+  /** Entrypoint module for the worker thread — see `resolveHookWorkerPath`. */
+  readonly workerPath: string;
+  /** Passed to the worker thread verbatim; whatever its entrypoint needs to build its host. */
+  readonly workerData?: unknown;
+}
+
+/**
+ * Locate an application's hook worker entrypoint, given the directory it ships in.
+ *
+ * A production image bundles the worker to a sibling `.cjs` (the runtime ships neither TS source
+ * nor tsx); dev and tests run the `.ts` source under tsx. The convention lives here so every host
+ * spawns its worker the same way.
+ */
+export function resolveHookWorkerPath(directory: string, basename: string): string {
+  const bundled = join(directory, `${basename}.cjs`);
+  return existsSync(bundled) ? bundled : join(directory, `${basename}.ts`);
+}
+
 export class HookExecutor {
   private readonly worker: Worker;
   private reqId = 0;
@@ -27,16 +46,11 @@ export class HookExecutor {
   private readonly breaker = new Map<string, { failures: number; disabled: boolean }>();
   private workerError: Error | null = null;
 
-  constructor(connectionString: string) {
-    // The production image bundles the worker to a sibling hook-worker.cjs (the runtime ships
-    // neither TS source nor tsx — see Dockerfile); dev/tests run the .ts source under tsx.
-    const bundledWorker = join(__dirname, "hook-worker.cjs");
-    const workerPath = existsSync(bundledWorker)
-      ? bundledWorker
-      : join(__dirname, "hook-worker.ts");
+  constructor(options: HookExecutorOptions) {
+    const { workerPath } = options;
     this.worker = new Worker(workerPath, {
       execArgv: workerPath.endsWith(".ts") ? ["--import", "tsx"] : [],
-      workerData: { connectionString },
+      workerData: options.workerData,
     });
 
     this.worker.on("message", (res: WorkerResponse) => {

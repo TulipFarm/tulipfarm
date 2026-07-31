@@ -58,7 +58,7 @@ the Agent runtime. Applications register implementations during composition.
 
 | Consumer | May import from |
 | --- | --- |
-| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `integrations`, `storage`, `observability` |
+| `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability` |
 | `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
@@ -66,6 +66,14 @@ the Agent runtime. Applications register implementations during composition.
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may
 not import another app, so both read it from there. Secrets never belong in it.
+
+`apps/api` may import `sandbox` and `agent-runtime` for one reason only: those packages own the
+single implementation of something both applications need, and the alternative is a second copy.
+The API spawns the `sandbox` hook isolate for resource hooks and the Worker spawns it for ingress
+classification — one isolate, two capability grants. Likewise `agent-runtime` owns system-prompt
+assembly, so the API's debug-context route renders the same prompt the Worker actually sent rather
+than a lookalike. Neither edge licenses running a turn in the API: durable execution belongs to the
+Worker, and these packages are pure — they open no connections and mint no Runs.
 
 Package names in application rows are relative to `packages/`. Existing v1 packages may remain
 during capability cutover, but target code must not create additional legacy dependencies. Each

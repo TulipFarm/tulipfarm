@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { HookError, HookExecutor } from "./hook-executor.js";
+import { HookError, HookExecutor, resolveHookWorkerPath } from "./executor";
 
 // Same Node-25 caveat as hook-executor.test.ts: isolated-vm has no abi141 prebuild, so
 // value-returning assertions are skipped there while error-path tests still run.
 const nodeMajor = parseInt(process.version.slice(1).split(".")[0], 10);
 const skipNoIsovm = nodeMajor === 25;
 
-const FAKE_DATABASE_URL = "postgresql://localhost:5432/test";
+const WORKER_PATH = resolveHookWorkerPath(__dirname, "worker");
 
 describe("routine sandbox variants", () => {
   let executor: HookExecutor;
@@ -14,7 +14,7 @@ describe("routine sandbox variants", () => {
   // Match the production lifecycle and avoid isolated-vm's known worker-thread teardown race
   // (#464), which can abort Node when a fresh worker is terminated after every test.
   beforeAll(() => {
-    executor = new HookExecutor(FAKE_DATABASE_URL);
+    executor = new HookExecutor({ workerPath: WORKER_PATH });
   });
 
   afterAll(async () => {

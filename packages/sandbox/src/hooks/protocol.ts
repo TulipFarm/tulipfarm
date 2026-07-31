@@ -1,3 +1,11 @@
+/**
+ * The message contract between a host process and the isolate worker it spawns.
+ *
+ * It is a wire protocol, not an internal type: the two sides run in different threads (and, once
+ * bundled, in different files), so a change here that only one side knows about surfaces as a
+ * hung request rather than a compile error.
+ */
+
 export type HookType = "before" | "after";
 
 /** Resource before/after hook (original shape — `kind` absent for compatibility). */

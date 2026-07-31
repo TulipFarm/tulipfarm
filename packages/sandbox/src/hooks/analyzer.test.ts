@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { analyzeHook, HookAnalysisError } from "./hook-analyzer.js";
+import { analyzeHook, HookAnalysisError } from "./analyzer";
 
 describe("analyzeHook", () => {
   describe("banned patterns", () => {
