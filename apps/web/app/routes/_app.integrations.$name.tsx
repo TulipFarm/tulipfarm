@@ -13,6 +13,7 @@ import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Modal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
+import { copyText } from "~/lib/clipboard";
 import {
   connectIntegration,
   deleteIntegration,
@@ -299,7 +300,7 @@ export default function IntegrationDetailPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  void navigator.clipboard.writeText(integration.ingress?.webhookUrl ?? "");
+                  void copyText(integration.ingress?.webhookUrl ?? "");
                 }}
               >
                 Copy

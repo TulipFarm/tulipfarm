@@ -14,6 +14,7 @@ import type {
   ChatState,
   TimelinePart,
 } from "~/lib/chat/types";
+import { randomUUID } from "~/lib/uuid";
 
 export const initialChatState: ChatState = {
   messages: [],
@@ -22,7 +23,7 @@ export const initialChatState: ChatState = {
 };
 
 function newId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 // Push a user message and mark the turn submitted. Used by the hook before opening the stream.

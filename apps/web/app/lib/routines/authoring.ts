@@ -1,5 +1,6 @@
 import type { routine as routineSchema } from "@tulipfarm/schema";
 import { apiCommand, apiGet, apiWrite } from "../api";
+import { randomUUID } from "../uuid";
 
 export interface RoutineAuthoringBase {
   readonly definition: routineSchema.RoutineDefinition;
@@ -45,9 +46,5 @@ export async function proposeRoutineChangeset(
   slug: string,
   body: RoutineAuthoringBody
 ): Promise<{ readonly changesetId: string; readonly status: string }> {
-  return apiCommand(
-    `/api/v1/routines/${encodeURIComponent(slug)}/changesets`,
-    body,
-    crypto.randomUUID()
-  );
+  return apiCommand(`/api/v1/routines/${encodeURIComponent(slug)}/changesets`, body, randomUUID());
 }
