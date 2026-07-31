@@ -1,5 +1,6 @@
 import type { ChatMessage, SourceRef, TimelinePart } from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
+import { randomUUID } from "~/lib/uuid";
 
 /*
  * Rehydrate a restored conversation's persisted messages into the renderable timeline the chat
@@ -10,7 +11,7 @@ import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
  */
 
 function newId(): string {
-  return crypto.randomUUID();
+  return randomUUID();
 }
 
 // Map a persisted assistant `content` (string or parts) to renderable timeline parts.

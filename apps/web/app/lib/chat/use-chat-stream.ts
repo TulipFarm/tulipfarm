@@ -32,6 +32,7 @@ import type {
   ModelTier,
 } from "~/lib/chat/types";
 import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
+import { randomUUID } from "~/lib/uuid";
 
 export type SendOptions = {
   model?: ModelTier;
@@ -179,7 +180,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     abortRef.current = controller;
     // Minted once per turn: it is what the server deduplicates a re-sent POST by. A regenerate is a
     // deliberately new turn, so it mints its own key rather than resolving to the previous Run.
-    const idempotencyKey = crypto.randomUUID();
+    const idempotencyKey = randomUUID();
     try {
       await postChat(
         {

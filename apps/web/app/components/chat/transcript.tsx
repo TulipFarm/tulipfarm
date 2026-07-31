@@ -2,6 +2,7 @@ import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
+import { copyText } from "~/lib/clipboard";
 import { MessagePartView } from "./parts";
 import type { MentionEntry } from "./use-mention-catalog";
 
@@ -68,13 +69,9 @@ function IconAction({
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (e.g. a non-secure context) — no-op
-    }
+    if (!(await copyText(text))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
   return (
     <IconAction label={copied ? "copied" : "copy"} onClick={copy}>

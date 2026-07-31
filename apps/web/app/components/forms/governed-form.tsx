@@ -2,6 +2,7 @@ import type { FormSubmissionResult, GovernedForm } from "@tulipfarm/surface";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { type FormSubmissionBody, submitGovernedForm } from "~/lib/forms";
+import { randomUUID } from "~/lib/uuid";
 
 interface FieldSchema {
   readonly type?: string;
@@ -63,7 +64,7 @@ export function GovernedFormView({
         schemaRef: form.schemaRef,
         guardrailRevision: form.guardrailRevision,
         data: values,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: randomUUID(),
         ...(form.mode === "run_wait" ? { runId: form.runId, resumeToken } : {}),
       });
       setResult(submitted);

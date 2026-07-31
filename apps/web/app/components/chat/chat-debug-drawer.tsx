@@ -1,5 +1,6 @@
 import { Bug, Check, Copy, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { copyText } from "~/lib/clipboard";
 import { type DebugContext, getDebugContext } from "~/lib/conversations";
 import { cn } from "~/lib/utils";
 
@@ -123,13 +124,9 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
     : "";
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(json);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard unavailable (non-secure context) — no-op
-    }
+    if (!(await copyText(json))) return;
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
   }
 
   const iconBtn =
