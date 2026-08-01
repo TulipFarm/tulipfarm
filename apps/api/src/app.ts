@@ -499,6 +499,7 @@ export async function buildApp(opts: AppOptions = {}) {
             conversationStore: opts.conversationStore,
             invocations: opts.invocations,
             stream: opts.runEvents,
+            ...(opts.rateLimiter ? { rateLimiter: opts.rateLimiter } : {}),
             ...(opts.runCancel ? { cancel: opts.runCancel } : {}),
             ...(opts.soulLoader ? { soulLoader: opts.soulLoader } : {}),
             ...(opts.domainEventEmitter ? { events: opts.domainEventEmitter } : {}),

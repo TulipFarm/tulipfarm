@@ -4,6 +4,7 @@ import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { ConversationStore } from "../conversations/service";
+import { MemoryRateLimiter, makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import {
   type RunEventStreamDeps,
   type RunStreamGrant,
@@ -48,7 +49,18 @@ export interface ChatRoutesOptions {
   readonly cancel?: ChatRunCanceller;
   readonly soulLoader?: SoulLoader;
   readonly events?: EventEmitter;
+  /** Shared limiter; absent falls back to an in-process one, so a turn is never unbudgeted. */
+  readonly rateLimiter?: RateLimiter;
 }
+
+/**
+ * Per-caller budget on submitting a turn. A turn is the most expensive thing this API accepts —
+ * it mints a Run, spends model tokens, and occupies a Worker — so it is capped by principal
+ * rather than by IP: behind a proxy every caller shares one address, and a budget keyed on that
+ * would let one participant exhaust everyone's.
+ */
+const CHAT_LIMIT = 60;
+const CHAT_WINDOW_MS = 60_000;
 
 /**
  * The Chat turn over HTTP: submit durably, then read back the Run's own event stream.
@@ -65,11 +77,19 @@ export function registerChatRoutes(
   requireAuth: PreHandler
 ): void {
   const { stream } = options;
+  // Authenticated, so the key is the principal — `req.ip` only stands in before `requireAuth` has
+  // resolved one, which is a request that is refused anyway.
+  const rateLimitHook = makeRateLimitHook(
+    options.rateLimiter ?? new MemoryRateLimiter(),
+    (req) => `rl:chat:${req.principal?.id ?? req.ip}`,
+    CHAT_LIMIT,
+    CHAT_WINDOW_MS
+  );
 
   app.post(
     "/api/v1/chat",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, rateLimitHook],
       schema: {
         description:
           "Submit one chat turn and stream the Run that answers it (SSE, Run event vocabulary — " +
@@ -91,6 +111,7 @@ export function registerChatRoutes(
           403: ErrorSchema,
           404: ErrorSchema,
           409: DuplicateInvocationSchema,
+          429: ErrorSchema,
           503: ErrorSchema,
         },
       },
@@ -191,7 +212,7 @@ export function registerChatRoutes(
   app.post(
     "/api/v1/chat/runs/:runId/stop",
     {
-      preHandler: requireAuth,
+      preHandler: [requireAuth, rateLimitHook],
       schema: {
         description:
           "Stop the Run answering a chat turn. Cancellation is requested of the Run itself, so it " +
@@ -209,6 +230,7 @@ export function registerChatRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          429: ErrorSchema,
           503: ErrorSchema,
         },
       },
