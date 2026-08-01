@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import { attachToStream } from "../chat/producer";
 import { writeSseHeaders } from "../chat/sse";
+import { attachToStream } from "../chat/stream-attach";
 import type { StreamHub } from "../chat/stream-hub";
 import { corsPassthrough, parseLastEventId } from "../chat/turn-helpers";
 import { definitionHash } from "./definition-hash";

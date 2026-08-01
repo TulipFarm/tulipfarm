@@ -1,5 +1,6 @@
 import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime";
 import { assertStateTransition, type StateStatus } from "@tulipfarm/run-kernel";
+import { StateTransitionConflictError } from "./turn/kernel-ports";
 
 /**
  * Agent State execution (SPEC §10). Composition only: the bounded loop lives in
@@ -44,27 +45,39 @@ export interface AgentStateRunnerOptions {
   readonly loop: AgentLoopRunner;
   readonly transitions: StateTransitionPort;
   readonly waits: ApprovalWaitPort;
-  buildInput(request: AgentStateRequest): Promise<AgentLoopInput>;
 }
 
 export type AgentStateResult =
   | { readonly status: "succeeded"; readonly output: unknown }
   | { readonly status: "failed"; readonly reason: string }
-  | { readonly status: "waiting"; readonly waitId: string; readonly approvalId: string }
+  | {
+      readonly status: "waiting";
+      readonly waitId: string;
+      readonly approvalId: string;
+      /** The Tool call being held, so a reader can show the decision against that call. */
+      readonly callId: string;
+    }
   | { readonly status: "cancelled" }
   | { readonly status: "needs_reconciliation" };
 
 export class AgentStateRunner {
   constructor(private readonly options: AgentStateRunnerOptions) {}
 
-  async execute(request: AgentStateRequest): Promise<AgentStateResult> {
+  /**
+   * Runs one Agent State over an already-resolved loop input.
+   *
+   * The input arrives built rather than being fetched here: the caller resolved the Context to
+   * announce what the model was given, and resolving it a second time would risk running the loop
+   * over a bundle nobody published evidence for.
+   */
+  async execute(request: AgentStateRequest, input: AgentLoopInput): Promise<AgentStateResult> {
     // Fail before any model or Tool work if the State cannot legally start.
     assertStateTransition(request.from, "running");
     await this.move(request, request.from, "running");
 
     let outcome: AgentLoopOutcome;
     try {
-      outcome = await this.options.loop.run(await this.options.buildInput(request));
+      outcome = await this.options.loop.run(input);
     } catch {
       // Effects may or may not have landed; reconciliation decides, not the worker.
       await this.move(request, "running", "needs_reconciliation", "agent_loop_error");
@@ -89,14 +102,44 @@ export class AgentStateRunner {
           callId: outcome.callId,
         });
         await this.move(request, "running", "waiting", "approval_required");
-        return { status: "waiting", waitId, approvalId: outcome.approvalId };
+        return {
+          status: "waiting",
+          waitId,
+          approvalId: outcome.approvalId,
+          callId: outcome.callId,
+        };
       }
 
       case "cancelled":
-        await this.move(request, "running", "cancelling", "cancelled");
-        await this.move(request, "cancelling", "cancelled");
+        // `RunCancellationManager` is walking this State down the same two steps from the other
+        // side. Whoever loses the CAS has still observed the cancellation it was told about, so a
+        // lost race is the expected outcome, not a failure to report.
+        try {
+          await this.move(request, "running", "cancelling", "cancelled");
+          await this.move(request, "cancelling", "cancelled");
+        } catch (error) {
+          if (!(error instanceof StateTransitionConflictError)) throw error;
+        }
         return { status: "cancelled" };
     }
+  }
+
+  /**
+   * Ends a State that was decided before the model was ever asked.
+   *
+   * A guardrail refusal is still a State that ran and reached a conclusion, so it walks the same
+   * `claimed → running → succeeded` path rather than being left mid-flight for the lease to
+   * reclaim. The kernel therefore sees one shape of Agent State, whether a model produced the
+   * answer or a guard did.
+   */
+  async settle(
+    request: AgentStateRequest,
+    output: unknown
+  ): Promise<Extract<AgentStateResult, { status: "succeeded" }>> {
+    assertStateTransition(request.from, "running");
+    await this.move(request, request.from, "running");
+    await this.move(request, "running", "succeeded");
+    return { status: "succeeded", output };
   }
 
   private async move(

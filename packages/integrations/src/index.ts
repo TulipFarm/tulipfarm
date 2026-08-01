@@ -6,6 +6,7 @@ export * from "./google-drive";
 export * from "./grants";
 export * from "./http";
 export * from "./import";
+export * from "./ingress";
 export * from "./jira";
 export * from "./knowledge";
 export * from "./model";

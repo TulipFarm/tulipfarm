@@ -63,6 +63,39 @@ export class ApprovalsRepo {
     return rows.length === 1;
   }
 
+  /**
+   * Merges keys into an existing row's payload, leaving every other key as it stands.
+   *
+   * Used to bind a wait to the approval it belongs to, after the Run has actually parked. A
+   * whole-payload write would race the request that created the row.
+   */
+  async mergePayload(id: string, patch: Record<string, unknown>): Promise<void> {
+    await this.db.query(`UPDATE approvals SET payload = payload || $2::jsonb WHERE id = $1`, [
+      id,
+      JSON.stringify(patch),
+    ]);
+  }
+
+  /**
+   * The approval recorded for one Run's Tool intent, whatever it was decided.
+   *
+   * Settled rows count: a resumed turn re-proposes the approved call and must be told the decision
+   * that was already made, not asked to collect it a second time.
+   */
+  async findByIntent(runId: string, intentDigest: string): Promise<ApprovalRow | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
+       FROM approvals
+       WHERE kind = 'tool_call'
+         AND payload->>'runId' = $1
+         AND payload->>'intentDigest' = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [runId, intentDigest]
+    );
+    return rows.length > 0 ? rowToApproval(rows[0]) : null;
+  }
+
   async findById(id: string): Promise<ApprovalRow | null> {
     const { rows } = await this.db.query(
       `SELECT id, kind, status, payload, expires_at, created_at, resolved_at

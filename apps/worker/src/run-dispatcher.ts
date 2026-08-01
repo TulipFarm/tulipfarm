@@ -1,7 +1,17 @@
 import type { RunLeaseManager } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
 
-export type RunOutcome = "succeeded" | "failed";
+/**
+ * How an executor left the Run.
+ *
+ * `succeeded`, `failed`, and `needs_reconciliation` are terminal-in-one-step and released here.
+ * `waiting` parks the Run on a durable wait — the wait sweep requeues it, so releasing it as either
+ * terminal status would drop work the Run is still owed. `cancelled` is the one outcome this
+ * dispatcher must **not** write: `RunCancellationManager` owns Run cancellation and is already
+ * driving `cancelling` -> `cancelled` with child propagation, so the executor stops and leaves the
+ * transition to the authority that started it.
+ */
+export type RunOutcome = "succeeded" | "failed" | "waiting" | "needs_reconciliation" | "cancelled";
 
 export interface RunDispatcherOptions {
   leases: RunLeaseManager;
@@ -17,6 +27,8 @@ export interface DispatchRunsResult {
   reclaimed: number;
   claimed: number;
   dispatched: number;
+  /** Runs parked on a durable wait, plus those left to the cancellation manager. */
+  waiting: number;
   failed: number;
 }
 
@@ -43,6 +55,7 @@ export class RunDispatcher {
     });
 
     let dispatched = 0;
+    let waiting = 0;
     let failed = 0;
     for (const run of claimed) {
       const started = await this.options.leases.claim({
@@ -59,6 +72,11 @@ export class RunDispatcher {
 
       try {
         const outcome = await this.options.handler(started.run);
+        if (outcome === "cancelled") {
+          // The cancellation manager holds this Run; touching it here would race that transition.
+          waiting += 1;
+          continue;
+        }
         const released = await this.options.leases.release({
           businessId: this.options.businessId,
           runId: run.id,
@@ -71,6 +89,7 @@ export class RunDispatcher {
           continue;
         }
         if (outcome === "succeeded") dispatched += 1;
+        else if (outcome === "waiting") waiting += 1;
         else failed += 1;
       } catch {
         await this.options.leases.release({
@@ -84,6 +103,6 @@ export class RunDispatcher {
       }
     }
 
-    return { reclaimed: reclaimed.length, claimed: claimed.length, dispatched, failed };
+    return { reclaimed: reclaimed.length, claimed: claimed.length, dispatched, waiting, failed };
   }
 }

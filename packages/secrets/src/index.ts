@@ -20,6 +20,7 @@ export {
   generateDek,
   generateRecoveryKek,
   KeyManagerError,
+  loadActiveDek,
   loadOrProvisionActiveDek,
   makeCanary,
   provisionRecoveryKey,

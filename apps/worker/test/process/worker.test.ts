@@ -98,7 +98,11 @@ describe("worker process", () => {
       const scratchDb = scratch as ScratchDatabase;
 
       const runId = randomUUID();
-      await insertQueuedRun(scratchDb, { businessId: DEPLOYMENT_BUSINESS_ID, runId });
+      await insertQueuedRun(scratchDb, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        source: "no-such-source",
+      });
 
       const run = await waitFor(
         () => scratchDb.findRun(DEPLOYMENT_BUSINESS_ID, runId),
@@ -106,7 +110,7 @@ describe("worker process", () => {
         { describe: `Run ${runId} to reach needs_reconciliation` }
       );
 
-      // No executor exists until PR 3, so the honest terminal status is "parked with a named
+      // No executor owns this source, so the honest terminal status is "parked with a named
       // cause" — never a silent success, and never a failure nobody can explain.
       expect(run?.status).toBe("needs_reconciliation");
       expect(run?.leaseOwner).toBeNull();
@@ -138,7 +142,13 @@ describe("worker process", () => {
       const scratchDb = scratch as ScratchDatabase;
 
       const runId = randomUUID();
-      await insertQueuedRun(scratchDb, { businessId: DEPLOYMENT_BUSINESS_ID, runId });
+      // A source no executor owns, so the Run's fate depends only on lease recovery — the subject
+      // of this test — and not on whether a turn host happened to answer.
+      await insertQueuedRun(scratchDb, {
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        runId,
+        source: "no-such-source",
+      });
       await waitFor(
         () => scratchDb.findRun(DEPLOYMENT_BUSINESS_ID, runId),
         (value) => value?.status === "needs_reconciliation",

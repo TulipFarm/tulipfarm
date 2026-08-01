@@ -45,7 +45,10 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
 # always pairs an API with a worker that speaks the same schema.
 RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
-  --external:pg
+  --external:pg --external:isolated-vm \
+  && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
+  --external:isolated-vm
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
@@ -68,6 +71,9 @@ COPY --from=builder /app/apps/api/dist/hook-worker.cjs ./hook-worker.cjs
 # Durable worker entrypoint. Not the image CMD — compose runs it as its own service off this
 # same image, so the API and the worker can never drift out of schema agreement.
 COPY --from=builder /app/apps/worker/dist/worker.cjs ./worker.cjs
+# The worker's own hook sandbox entrypoint. Deliberately a different basename from the API's: both
+# land in this directory, and sharing one would hand an Integration's classifier the API's grant.
+COPY --from=builder /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 COPY --from=builder /app/skills ./skills
 # /data holds the bootstrap secrets generated on first boot when the operator supplies none

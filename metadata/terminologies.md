@@ -47,9 +47,13 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | A single data instance | **Record** | `Record` | `/resources/:type/:id` | "Record" | ⛔ bare "resource" for an instance is BANNED |
 | A scheduled/triggered automation | **Routine** | `Routine` | `/routines`, `/api/v1/routines` | "Routines" | `workflow` = only the CNCF spec-format ref |
 | One execution of a routine | **Run** | `Run` | `/routines/:id/runs/:runId` | "Run" | `execution` → retired |
+| A durable, ordered fact a Run emitted while executing | **Run event** | `RunEvent` | `/api/v1/runs/:id/events` | — | DB: run_events; types are the closed vocabulary in `@tulipfarm/schema`; ⛔ `SSE event`/`stream frame` name the transport, not the fact |
+| Who a Run event may be shown to | **Audience** | `RunEventAudience` | — | — | `participant` (in the conversation) \| `operator` (evidence: digests, dispatch records) |
 | How a routine starts | **Trigger** | `Trigger` | — | "Trigger" | event·manual·cron·webhook·agent |
 | A step in a routine | **State** | `State` | — | "State" | CNCF Serverless Workflow term |
 | A connected third-party | **Integration** | `Integration` | `/integrations`, `/api/v1/integrations` | "Integrations" | `connection`/`connector` → retired |
+| A channel sender bound to a TulipFarm account | **Channel link** | `ChannelLink` | `/api/v1/identity/channel-links/*`, `/link-channel` | "Link channel" | stored in external_identity_mappings, provider = integration slug; ⛔ "channel identity" as the *link* — that names the sender side only |
+| The single-use invitation that creates one | **Bind link** | `ChannelBind*` | — | "Link your account" | HMAC-signed, 15 min, nonce consumed on redemption; a credential — never logged, never in a query string |
 | Auth material for a provider/integration | **Credential** | `Credential` | — | "Credentials" | API key/token/login; *backed by* a Secret |
 | Encrypted at-rest value (storage primitive) | **Secret** | `Secret` | `/settings/secrets` | "Secrets" | the store; ≠ Credential |
 | Boot-time value from `.env`/`process.env` | **Env Config** | — | — | — | restart-required; not all values are secret (e.g. `SOUL_PATH`) — the one genuinely secret value inside it is the KEK (`ENCRYPTION_KEY`), named directly, not by renaming this bucket |

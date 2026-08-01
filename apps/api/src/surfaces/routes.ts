@@ -1,5 +1,6 @@
 import type { EventEmitter } from "node:events";
 import { Value } from "@sinclair/typebox/value";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { SoulLoader } from "@tulipfarm/soul";
 import {
   type PresentationContext,
@@ -10,7 +11,6 @@ import {
 } from "@tulipfarm/surface";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import { DOMAIN_EVENTS } from "../domain-events";
-import type { GuardrailsService } from "../guardrails";
 import { evaluateStepUp } from "../identity/step-up";
 import type { SurfaceActionStore } from "./action-store";
 import type { SurfaceArtifactStore } from "./artifact-store";

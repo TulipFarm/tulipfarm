@@ -87,6 +87,19 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       WORKER_PORT: "4020"
+      # The turn runs here, so this process calls back into the API for Context, Tool dispatch
+      # and Turn completion. Service-to-service on the compose network — never the public URL.
+      INTERNAL_API_URL: http://app:8080
+      # Both empty by default, and both persisted to /data by `app` on its first boot: the
+      # encryption key by the bootstrap-secrets pass, the credential by the `run-executor`
+      # client it mints for this process. Setting either here overrides the file.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-}
+      WORKER_API_CREDENTIAL: ${WORKER_API_CREDENTIAL:-}
+      TF_DATA_DIR: /data
+    volumes:
+      # Read-only: `app` owns everything on this volume. The worker only reads back the two
+      # values it was given.
+      - tulipfarm-data:/data:ro
     # No published port: the probes are for the orchestrator, not for users.
     healthcheck:
       test:

@@ -155,7 +155,8 @@ export function parseAfterCursor(
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0;
 }
 
-function sinkFor(reply: FastifyReply): SseSink {
+/** Adapts a hijacked Fastify reply to the sink `streamRunEvents` writes through. */
+export function sinkFor(reply: FastifyReply): SseSink {
   const raw = reply.raw;
   return {
     get destroyed() {

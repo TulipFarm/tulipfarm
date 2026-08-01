@@ -1,23 +1,39 @@
 import type { FastifyBaseLogger } from "fastify";
 import { type ChatTurnPrincipal, chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
-import type { ChatTurnSubmitter } from "../runtime/chat-run";
-import type { ChatRunLifecycle } from "../runtime/chat-run-lifecycle";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
-import { fromUserText, type MessageRepo } from "./messages";
+
+/** What the request a turn answers is addressed to, and what the user actually said. */
+export interface ChatTurnRequest {
+  readonly conversationId: string;
+  readonly content: string;
+}
+
+/** The Run minted for a submitted turn. */
+export interface ChatRunClaim {
+  readonly runId: string;
+  readonly businessId: string;
+}
+
+export type ChatSubmission =
+  | { readonly outcome: "submitted"; readonly run?: ChatRunClaim }
+  | { readonly outcome: "duplicate"; readonly runId: string };
 
 /**
- * Writes the user Message and nothing else — the submitter for callers with no Turn table and no
- * invocation gateway wired. The turn still runs and stays visible in the UI, but nothing about it is
- * reconstructable: there is no Run, and no persisted request to reconstruct one from.
+ * Persists the request a turn will answer, and names the durable Run that answers it.
+ *
+ * Exactly one submitter runs per turn and no other path writes the user Message, which is what keeps
+ * that Message written once. A replayed request resolves to `duplicate` instead of answering the
+ * same message twice.
  */
-export function messageOnlySubmitter(messageRepo: MessageRepo): ChatTurnSubmitter {
-  return {
-    submit: async ({ conversationId, content }) => {
-      await messageRepo.create(fromUserText(conversationId, content));
-      return { outcome: "submitted" };
-    },
-  };
+export interface ChatTurnSubmitter {
+  /**
+   * Resolves a request this submitter already answered, before the turn creates anything for it.
+   * Checked ahead of opening the conversation, because a request with no `conversationId` would open
+   * one (and generate its title) only to be refused — leaving a trail of empty conversations behind.
+   */
+  findSubmitted?(): Promise<{ readonly runId: string } | null>;
+  submit(request: ChatTurnRequest): Promise<ChatSubmission>;
 }
 
 export interface DurableTurnSubmitterDeps {
@@ -28,7 +44,6 @@ export interface DurableTurnSubmitterDeps {
   readonly payload: unknown;
   readonly agentId: string;
   readonly idempotencyKey: string;
-  readonly lifecycle?: ChatRunLifecycle;
   readonly log: FastifyBaseLogger;
 }
 
@@ -36,9 +51,8 @@ export interface DurableTurnSubmitterDeps {
  * The submission path every channel converges on: one durable Turn, one Run, one request Artifact,
  * committed before anything streams.
  *
- * A replayed idempotency key resolves to the Turn that already answered the request instead of
- * appending a second Message, and the Run is claimed here — before the first byte — so the API owns
- * the Run it just minted rather than leaving it `queued` for a Worker to execute a second time.
+ * The Run is left `queued`. Whoever claims it executes it — a Worker, today, for every channel
+ * alike — so this process minting the Run never means this process answering it.
  */
 export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSubmitter {
   const businessId = deps.principal.businessId;
@@ -53,7 +67,7 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
   return {
     findSubmitted,
     submit: async ({ conversationId, content }) => {
-      // Re-checked after prepare: a replay that raced this turn's own prepare still must not stream.
+      // Re-checked after the conversation is opened: a replay that raced this turn must not stream.
       const replayed = await findSubmitted();
       if (replayed) return { outcome: "duplicate", runId: replayed.runId };
 
@@ -68,34 +82,7 @@ export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSu
         idempotencyKey: deps.idempotencyKey,
       });
 
-      const lifecycle = deps.lifecycle;
-      if (!lifecycle) return { outcome: "submitted", run: { runId: started.runId, businessId } };
-
-      // The API executes this turn in-process, so the Run must not stay `queued` for a worker to
-      // claim and execute too. A lost race is logged, never fatal — the user still gets their reply,
-      // it just streams without a lease.
-      const claimed = await lifecycle.claim(businessId, started.runId);
-      if (!claimed) {
-        deps.log.warn(
-          { runId: started.runId },
-          "chat run was not claimable; streaming without a lease"
-        );
-        return { outcome: "submitted" };
-      }
-
-      return {
-        outcome: "submitted",
-        run: {
-          runId: started.runId,
-          businessId,
-          abandonRun: async () => {
-            const completed = await lifecycle.complete(businessId, started.runId, "failed");
-            if (!completed) {
-              deps.log.warn({ runId: started.runId }, "chat run was not releasable");
-            }
-          },
-        },
-      };
+      return { outcome: "submitted", run: { runId: started.runId, businessId } };
     },
   };
 }

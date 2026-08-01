@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import type { FastifyRequest } from "fastify";
 import type { ActivityService } from "../activity/service";
-import type { DurableApprovalGate } from "../approvals/chat-gate";
+import { listPendingToolApprovals, type PendingToolApproval } from "../approvals/pending";
 import type { ApprovalsRepo } from "../approvals/runtime-repo";
+import type { ToolApprovalService } from "../approvals/tool-approvals";
 import { describeDeploymentRoles } from "../identity/roles";
 import { type HealthProbe, probeHealth } from "./health";
 import type {
@@ -18,7 +19,8 @@ import type { RunReader } from "./run-reader";
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
   approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
-  approvalRegistry: Pick<DurableApprovalGate, "decide" | "listPending">;
+  /** Settles a Tool approval and resumes the Run parked on it. Absent leaves only the routine path. */
+  toolApprovals?: Pick<ToolApprovalService, "signal">;
   runs: RunReader;
   healthProbes: readonly HealthProbe[];
   enqueueWake(job: {
@@ -80,9 +82,7 @@ function safeActivity(item: Awaited<ReturnType<ActivityService["list"]>>["items"
   };
 }
 
-function toolApproval(
-  item: Awaited<ReturnType<DurableApprovalGate["listPending"]>>[number]
-): InboxItemReadModel {
+function toolApproval(item: PendingToolApproval): InboxItemReadModel {
   const args =
     typeof item.args === "object" && item.args !== null
       ? (item.args as Record<string, unknown>)
@@ -220,7 +220,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
 
     async getInbox() {
       const [toolCalls, routineRows] = await Promise.all([
-        deps.approvalRegistry.listPending(),
+        listPendingToolApprovals(deps.approvals),
         deps.approvals.listPending("routine_state"),
       ]);
       return {
@@ -228,12 +228,23 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       };
     },
 
-    async decideApproval(_grant, input: ApprovalDecisionInput) {
+    async decideApproval(grant: OperationalGrant, input: ApprovalDecisionInput) {
       const cached = decisions.get(input.idempotencyKey);
       if (cached) return cached;
 
-      const resolved = await deps.approvalRegistry.decide(input.approvalId, input.decision);
-      if (!resolved) {
+      // A Tool approval is settled by signalling the wait its Run parked on, so the decision reaches
+      // the turn wherever it is executing. `not_found` means the row is not a Tool approval — the
+      // routine branch below owns those.
+      const signalled = await deps.toolApprovals?.signal({
+        businessId: grant.businessId,
+        approvalId: input.approvalId,
+        decision: input.decision,
+        principal: `user:${grant.principalId}`,
+      });
+      if (signalled === "forbidden") throw new Error("This approval is not yours to decide.");
+      if (signalled === "already_settled")
+        throw new Error("Approval not found or already resolved.");
+      if (signalled !== "resumed") {
         const row = await deps.approvals.findById(input.approvalId);
         const payload =
           typeof row?.payload === "object" && row.payload !== null

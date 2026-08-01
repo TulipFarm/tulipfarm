@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type IngressDecision, parseDecision } from "@tulipfarm/integrations";
+import type { HookExecutor } from "@tulipfarm/sandbox";
+import { analyzeHook } from "@tulipfarm/sandbox";
 import { beforeAll, describe, expect, it } from "vitest";
-import { analyzeHook } from "../hooks/hook-analyzer";
-import { HookExecutor } from "../hooks/hook-executor";
-import { type IngressDecision, parseDecision } from "./classification";
+import { createHookExecutor } from "../hooks/executor";
 
 /*
  * Parity guard for the REFERENCE integration: runs a vendored copy of the integrations repo's
@@ -24,7 +25,7 @@ let executor: HookExecutor;
 
 beforeAll(async () => {
   source = await readFile(join(__dirname, "__fixtures__", "slack-ingress.hook.txt"), "utf8");
-  executor = new HookExecutor(FAKE_DATABASE_URL);
+  executor = createHookExecutor(FAKE_DATABASE_URL);
   return async () => {
     await executor.close();
   };

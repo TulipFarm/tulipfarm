@@ -7,6 +7,7 @@ import {
   EVENT_STORAGE_STATEMENTS,
   INTEGRATION_STORAGE_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
+  RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
@@ -615,6 +616,92 @@ export const PG_MIGRATIONS: PgMigration[] = [
       )`);
       await q.query(`CREATE INDEX IF NOT EXISTS conversation_turns_conversation_idx
         ON conversation_turns (conversation_id, created_at)`);
+    },
+  },
+  {
+    version: 17,
+    description: "worker-owned turn execution: attempt bookkeeping and channel identity binding",
+    up: async (q) => {
+      // What a Worker attempt produced. Keyed by `(turn_id, attempt)` rather than by Turn, because
+      // a Worker killed mid-turn is retried under a *new* attempt: without the attempt in the key,
+      // the retry's completion would collide with the dead attempt's and the turn would either
+      // duplicate its assistant Message or refuse to finish at all.
+      await q.query(`CREATE TABLE IF NOT EXISTS turn_completions (
+        turn_id    uuid NOT NULL REFERENCES conversation_turns(id),
+        attempt    integer NOT NULL CHECK (attempt >= 0),
+        status     text NOT NULL,
+        message_id uuid,
+        cursor     bigint NOT NULL DEFAULT 0,
+        created_at timestamptz NOT NULL,
+        PRIMARY KEY (turn_id, attempt)
+      )`);
+      // Which attempt wrote a Message, so a reader can tell a superseded attempt's output from the
+      // one that completed the Turn. NULL on every pre-existing row: they predate Worker attempts.
+      await q.query("ALTER TABLE messages ADD COLUMN IF NOT EXISTS attempt integer");
+      // The Worker asks for a Turn by the Run it claimed, never the other way round, so this is the
+      // lookup every executed turn makes before it does anything else.
+      await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS conversation_turns_run_idx
+        ON conversation_turns (run_id) WHERE run_id IS NOT NULL`);
+
+      // A channel sender bound to a TulipFarm account is an external identity mapping like any
+      // other — `external_identity_mappings (provider, external_subject)` already keys on exactly
+      // that, and `assertExternalIdentityMapped` already fails closed over it. A second table would
+      // be a second authority for the same question, so channels reuse this one with the
+      // integration slug as the provider. What is new is `verified_via`: an auto-link from a
+      // provider-verified email and a human confirming a bind link are not equally strong evidence
+      // and an audit must be able to tell them apart. NULL on pre-existing rows, which predate the
+      // distinction.
+      await q.query(
+        "ALTER TABLE external_identity_mappings ADD COLUMN IF NOT EXISTS verified_via text"
+      );
+      // Outstanding bind offers. The row exists so a nonce can be *consumed*: the link is signed,
+      // but a signature alone cannot be revoked or spent, so replaying a redeemed link would
+      // otherwise re-bind the sender. No `user_id` — at issue time no account is known yet, which
+      // is the whole reason the link is being sent.
+      await q.query(`CREATE TABLE IF NOT EXISTS channel_bind_tokens (
+        nonce_hash         text PRIMARY KEY,
+        integration_slug   text NOT NULL,
+        external_sender_id text NOT NULL,
+        issued_at          timestamptz NOT NULL,
+        expires_at         timestamptz NOT NULL,
+        consumed_at        timestamptz,
+        consumed_by        uuid REFERENCES users(id)
+      )`);
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS channel_bind_tokens_expiry_idx ON channel_bind_tokens (expires_at)"
+      );
+
+      for (const sql of RUN_EVENT_NOTIFY_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 18,
+    description: "retire the in-process chat stream buffer",
+    up: async (q) => {
+      // `stream_resume` buffered the SSE frames one API process produced, so that the client that
+      // lost the connection could ask that process for them again. A chat turn is now executed by
+      // the Worker and read back from `run_events` — durable, gapless, and readable from any
+      // instance — which leaves this table buffering a stream nothing writes.
+      await q.query("DROP TABLE IF EXISTS stream_resume");
+    },
+  },
+  {
+    version: 19,
+    description: "allow a deployment-owned service client",
+    up: async (q) => {
+      // Every API client so far was minted by a person, so `owner_user_id` recorded who is
+      // accountable for it. The client this API mints for its own Worker has no such person: it is
+      // created on first boot, before the setup wizard has made a single user, and a deployment
+      // that never opens the wizard still has to execute the Runs it accepts.
+      //
+      // NULL therefore means "owned by the deployment", and it is not an authorization change:
+      // `apiClientPrincipal` has always derived authority from the client itself, never from its
+      // owner, so nothing reads this column to decide anything. What it costs is that the client
+      // list can show an owner nobody can page — which is the truth about a process, and better
+      // than attributing it to whichever human happened to run setup first.
+      await q.query("ALTER TABLE api_clients ALTER COLUMN owner_user_id DROP NOT NULL");
     },
   },
 ];

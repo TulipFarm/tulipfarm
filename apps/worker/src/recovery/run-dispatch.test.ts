@@ -168,7 +168,7 @@ describe("Run dispatch recovery", () => {
       throw new Error("effect ambiguous");
     }).dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, failed: 1 });
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 1 });
     expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
       status: "needs_reconciliation",
       leaseOwner: null,
@@ -196,7 +196,7 @@ describe("Run dispatch recovery", () => {
       () => AFTER_LEASE
     ).dispatchBatch();
 
-    expect(recovered).toEqual({ reclaimed: 1, claimed: 1, dispatched: 1, failed: 0 });
+    expect(recovered).toEqual({ reclaimed: 1, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
     expect(handled).toEqual([RUN_ID]);
     expect(await store.find(BUSINESS_ID, RUN_ID)).toMatchObject({
       status: "succeeded",
@@ -218,8 +218,8 @@ describe("Run dispatch recovery", () => {
     const current = dispatcher(store, SURVIVOR, handler);
     const [first, second] = [await stale.dispatchBatch(), await current.dispatchBatch()];
 
-    expect(first).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, failed: 0 });
-    expect(second).toEqual({ reclaimed: 0, claimed: 0, dispatched: 0, failed: 0 });
+    expect(first).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
+    expect(second).toEqual({ reclaimed: 0, claimed: 0, dispatched: 0, waiting: 0, failed: 0 });
     expect(handled).toEqual([OWNER]);
     expect(store.commits.filter((commit) => commit.to === "succeeded")).toHaveLength(1);
   });

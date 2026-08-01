@@ -1,6 +1,6 @@
 import type { EventEmitter } from "node:events";
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { SoulLoader } from "@tulipfarm/soul";
-import type { GuardrailsService } from "./service";
 
 /** Pino-style logger surface used by the reload listener (object-first). */
 type ReloadLogger = {

@@ -4,4 +4,5 @@ export type {
   ModelMessage,
   ModelOutput,
   ModelPort,
+  ModelStreamChunk,
 } from "./model";

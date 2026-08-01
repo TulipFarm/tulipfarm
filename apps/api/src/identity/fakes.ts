@@ -4,6 +4,7 @@
  */
 import type { ApiClientDoc, ApiClientRepo, ApiClientStatus } from "./api-clients";
 import type {
+  ChannelBindTokenDoc,
   ExternalIdentityMappingDoc,
   ExternalIdentityRepo,
   ExternalLinkTokenDoc,
@@ -41,6 +42,9 @@ export class MemoryApiClientRepo implements ApiClientRepo {
 export class MemoryExternalIdentityRepo implements ExternalIdentityRepo {
   mappings: ExternalIdentityMappingDoc[] = [];
   tokens: ExternalLinkTokenDoc[] = [];
+  bindTokens: ChannelBindTokenDoc[] = [];
+  /** Stands in for Postgres `now()`, so a test can age a token without waiting for one. */
+  now: () => Date = () => new Date();
 
   async findMapping(
     provider: string,
@@ -71,11 +75,32 @@ export class MemoryExternalIdentityRepo implements ExternalIdentityRepo {
     this.tokens.push({ ...token });
   }
   async consumeLinkToken(tokenHash: string): Promise<ExternalLinkTokenDoc | null> {
+    const now = this.now();
     const token = this.tokens.find(
-      (t) => t.tokenHash === tokenHash && t.consumedAt === null && t.expiresAt > new Date()
+      (t) => t.tokenHash === tokenHash && t.consumedAt === null && t.expiresAt > now
     );
     if (!token) return null;
-    token.consumedAt = new Date();
+    token.consumedAt = now;
+    return { ...token };
+  }
+  async createBindToken(token: ChannelBindTokenDoc): Promise<void> {
+    this.bindTokens.push({ ...token });
+  }
+  private unspentBindToken(nonceHash: string): ChannelBindTokenDoc | undefined {
+    const now = this.now();
+    return this.bindTokens.find(
+      (t) => t.nonceHash === nonceHash && t.consumedAt === null && t.expiresAt > now
+    );
+  }
+  async findBindToken(nonceHash: string): Promise<ChannelBindTokenDoc | null> {
+    const token = this.unspentBindToken(nonceHash);
+    return token ? { ...token } : null;
+  }
+  async consumeBindToken(nonceHash: string, userId: string): Promise<ChannelBindTokenDoc | null> {
+    const token = this.unspentBindToken(nonceHash);
+    if (!token) return null;
+    token.consumedAt = this.now();
+    token.consumedBy = userId;
     return { ...token };
   }
 }

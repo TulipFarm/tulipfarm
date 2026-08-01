@@ -21,6 +21,21 @@ export {
   assertSandboxResultWithinRequest,
   authorizeSandboxExecutionRequest,
 } from "./guardrail";
+export { analyzeHook, HookAnalysisError } from "./hooks/analyzer";
+export type { HookExecutorOptions } from "./hooks/executor";
+export { HookError, HookExecutor, resolveHookWorkerPath } from "./hooks/executor";
+export type { ResourceLookup } from "./hooks/isolate";
+export { runExpression, runResourceHook, runRoutineHook } from "./hooks/isolate";
+export type {
+  ExpressionRequest,
+  HookType,
+  ResourceHookRequest,
+  RoutineHookRequest,
+  WorkerRequest,
+  WorkerResponse,
+} from "./hooks/protocol";
+export type { HookWorkerHostOptions } from "./hooks/worker-host";
+export { handleHookRequest, serveHookRequests } from "./hooks/worker-host";
 export * from "./ports";
 export type {
   SandboxComputeLimits,

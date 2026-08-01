@@ -71,6 +71,18 @@ function loadFromEnvWrap(envWrap: WrappedDekRow, envKek: EncryptionKeys): Active
   return { dekId: envWrap.dekId, key };
 }
 
+// Read-only loader, for processes that consume secrets but must never mint keys — the durable
+// worker, which reads provider credentials but leaves key provisioning to the API exactly as it
+// leaves migrations there. Refusing here is the point: a second process that provisions could wrap
+// a fresh DEK under a different ENCRYPTION_KEY and orphan every secret already written.
+export async function loadActiveDek(repo: DekRepo, envKek: EncryptionKeys): Promise<ActiveDek> {
+  const envWrap = (await repo.listActive()).find((w) => w.kekLabel === "env");
+  if (!envWrap) {
+    throw new KeyManagerError("no active env-wrapped DEK exists — the API provisions it on boot");
+  }
+  return loadFromEnvWrap(envWrap, envKek);
+}
+
 // Boot loader. Returns the active DEK, auto-provisioning one (wrapped under the env KEK, with a
 // canary) on first boot when none exists — preserving zero-setup. Throws KeyManagerError if an
 // existing env wrap won't unwrap or its canary won't authenticate: the fail-fast boot signal.

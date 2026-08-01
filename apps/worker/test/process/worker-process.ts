@@ -6,23 +6,40 @@ import { freePort } from "./free-port";
 
 const APP_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = resolve(APP_ROOT, "dist/worker.cjs");
+const HOOK_BUNDLE = resolve(APP_ROOT, "dist/ingress-hook-worker.cjs");
 
 /**
  * Bundles the worker exactly as the Dockerfile does. The subject of these tests is the shipped
  * artifact — a `tsx` run of the sources would not catch a bundling failure, which is precisely the
  * class of break that makes a container refuse to boot.
+ *
+ * Both entrypoints are built, and into the same directory the image lays them out in, because the
+ * hook sandbox is found by looking for a sibling file: a worker whose own bundle builds but whose
+ * sandbox entrypoint is missing boots fine and then fails on the first delivery.
  */
 export async function buildWorkerBundle(): Promise<string> {
-  await build({
-    entryPoints: [resolve(APP_ROOT, "src/main.ts")],
-    bundle: true,
-    platform: "node",
-    target: "node26",
-    format: "cjs",
-    outfile: BUNDLE,
-    external: ["pg"],
-    logLevel: "silent",
-  });
+  await Promise.all([
+    build({
+      entryPoints: [resolve(APP_ROOT, "src/main.ts")],
+      bundle: true,
+      platform: "node",
+      target: "node26",
+      format: "cjs",
+      outfile: BUNDLE,
+      external: ["pg", "isolated-vm"],
+      logLevel: "silent",
+    }),
+    build({
+      entryPoints: [resolve(APP_ROOT, "src/hooks/ingress-hook-worker.ts")],
+      bundle: true,
+      platform: "node",
+      target: "node26",
+      format: "cjs",
+      outfile: HOOK_BUNDLE,
+      external: ["isolated-vm"],
+      logLevel: "silent",
+    }),
+  ]);
   return BUNDLE;
 }
 
@@ -52,6 +69,10 @@ export async function startWorker(options: StartWorkerOptions): Promise<WorkerHa
       PATH: process.env.PATH,
       NODE_ENV: "test",
       DATABASE_URL: options.databaseUrl,
+      // The turn host is never reached in these tests — no Chat Run is enqueued — but the worker
+      // refuses to boot without knowing where it is, so the harness has to say.
+      INTERNAL_API_URL: "http://127.0.0.1:1",
+      WORKER_API_CREDENTIAL: "tfc_test.secret",
       WORKER_OWNER: options.owner,
       WORKER_PORT: String(port),
       ...options.env,

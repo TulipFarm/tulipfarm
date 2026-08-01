@@ -8,6 +8,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { createApiClient, formatApiClientCredential } from "./api-clients";
+import { CHANNEL_BIND_TTL_MS, issueChannelBindToken } from "./channel-link";
 import { MemoryApiClientRepo, MemoryExternalIdentityRepo, MemoryOidcRequestRepo } from "./fakes";
 import type { OidcClaims, OidcProvider } from "./oidc";
 import { type MfaVerifier, MfaVerifierRegistry } from "./step-up";
@@ -97,6 +98,7 @@ async function makeHarness(options: { withOidc?: boolean; mfa?: MfaVerifier[] } 
     identity: {
       apiClientRepo: apiClients,
       externalIdentityRepo: external,
+      channelBind: { repo: external, signingKey: async () => Buffer.alloc(32, 3) },
       ...(options.withOidc
         ? { oidc: { provider, requestRepo: oidcRequests, redirectUri: REDIRECT_URI } }
         : {}),
@@ -608,5 +610,117 @@ describe("step-up authentication", () => {
 
     expect(response.statusCode).toBe(403);
     await harness.app.close();
+  });
+});
+
+describe("channel identity bind links", () => {
+  let harness: Harness;
+
+  const offer = (sender: string) =>
+    issueChannelBindToken(
+      { repo: harness.external, signingKey: async () => Buffer.alloc(32, 3) },
+      { slug: "chatapp", senderId: sender }
+    );
+
+  const post = (path: string, token: string, session?: { sid: string; csrf: string }) =>
+    harness.app.inject({
+      method: "POST",
+      url: `/api/v1/identity/channel-links/${path}`,
+      payload: { token },
+      ...(session
+        ? {
+            cookies: { [SESSION_COOKIE]: session.sid, [CSRF_COOKIE]: session.csrf },
+            headers: { [CSRF_HEADER]: session.csrf },
+          }
+        : {}),
+    });
+
+  beforeEach(async () => {
+    harness = await makeHarness();
+  });
+
+  afterEach(async () => {
+    await harness.app.close();
+  });
+
+  it("refuses to open a bind link without a session, so a leaked link binds nothing", async () => {
+    const { token } = await offer("EXT1");
+
+    const preview = await post("preview", token);
+    const confirm = await post("confirm", token);
+
+    expect(preview.statusCode).toBe(401);
+    expect(confirm.statusCode).toBe(401);
+    expect(harness.external.mappings).toHaveLength(0);
+  });
+
+  it("names the sender and the account before anything is bound", async () => {
+    // The person confirming has to see exactly what they are claiming, and as whom.
+    const session = await login(harness, "member@example.com");
+    const { token } = await offer("EXT1");
+
+    const response = await post("preview", token, session);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      slug: "chatapp",
+      senderId: "EXT1",
+      account: { userId: harness.member._id, email: "member@example.com" },
+    });
+    // Previewing does not bind.
+    expect(harness.external.mappings).toHaveLength(0);
+  });
+
+  it("binds the sender to the confirming session, never to whoever the link names", async () => {
+    // The token carries no user id at all; the account comes from the session and nothing else.
+    const session = await login(harness, "member@example.com");
+    const { token } = await offer("EXT1");
+
+    const response = await post("confirm", token, session);
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().link).toMatchObject({
+      provider: "chatapp",
+      externalSubject: "EXT1",
+      userId: harness.member._id,
+    });
+  });
+
+  it("refuses a link already redeemed, leaving the first claim standing", async () => {
+    const first = await login(harness, "member@example.com");
+    const second = await login(harness, "admin@example.com");
+    const { token } = await offer("EXT1");
+
+    expect((await post("confirm", token, first)).statusCode).toBe(201);
+    const replay = await post("confirm", token, second);
+
+    expect(replay.statusCode).toBe(400);
+    expect(harness.external.mappings).toHaveLength(1);
+    expect(harness.external.mappings[0]?.userId).toBe(harness.member._id);
+  });
+
+  it("refuses an expired link", async () => {
+    const session = await login(harness, "member@example.com");
+    const { token } = await offer("EXT1");
+
+    harness.external.now = () => new Date(Date.now() + CHANNEL_BIND_TTL_MS + 1_000);
+
+    const response = await post("confirm", token, session);
+
+    expect(response.statusCode).toBe(400);
+    expect(harness.external.mappings).toHaveLength(0);
+  });
+
+  it("says the same thing about a forged link as about a spent one", async () => {
+    const session = await login(harness, "member@example.com");
+
+    const response = await post(
+      "preview",
+      `${Buffer.from("{}").toString("base64url")}.deadbeef`,
+      session
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "bind link is not usable" });
   });
 });

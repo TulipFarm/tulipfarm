@@ -1,6 +1,13 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Queryable } from "../db";
-import type { ConversationStore, PersistedMessage, PersistedTurn, TurnStatus } from "./service";
+import type {
+  ConversationStore,
+  PersistedMessage,
+  PersistedTurn,
+  TurnCompletion,
+  TurnCompletionStatus,
+  TurnStatus,
+} from "./service";
 
 /**
  * A `businessId` other than this deployment's would silently write rows that carry no business
@@ -32,6 +39,16 @@ interface MessageRow {
   turn_id: string;
   role: string;
   content: string;
+  attempt: number | null;
+  created_at: Date;
+}
+
+interface CompletionRow {
+  turn_id: string;
+  attempt: number;
+  status: string;
+  message_id: string | null;
+  cursor: string | number;
   created_at: Date;
 }
 
@@ -64,6 +81,19 @@ function toMessage(row: MessageRow): PersistedMessage {
     turnId: row.turn_id,
     role: row.role as PersistedMessage["role"],
     content: row.content,
+    ...(row.attempt === null ? {} : { attempt: row.attempt }),
+    createdAt: row.created_at,
+  };
+}
+
+function toCompletion(row: CompletionRow): TurnCompletion {
+  return {
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    turnId: row.turn_id,
+    attempt: row.attempt,
+    status: row.status as TurnCompletionStatus,
+    messageId: row.message_id,
+    cursor: Number(row.cursor),
     createdAt: row.created_at,
   };
 }
@@ -100,19 +130,30 @@ export class PgConversationStore implements ConversationStore {
     return row ? toTurn(row) : undefined;
   }
 
+  async findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined> {
+    assertDeploymentBusiness(businessId);
+    const { rows } = await this.q.query(
+      `SELECT ${TURN_COLUMNS} FROM conversation_turns WHERE run_id = $1`,
+      [runId]
+    );
+    const row = rows[0] as unknown as TurnRow | undefined;
+    return row ? toTurn(row) : undefined;
+  }
+
   async appendMessage(message: PersistedMessage): Promise<void> {
     assertDeploymentBusiness(message.businessId);
     // `content` is jsonb, and a Turn message is always text — `JSON.stringify` makes it a JSON
     // string, matching what `PgMessageRepo` writes for a user message.
     await this.q.query(
-      `INSERT INTO messages (id, conversation_id, turn_id, role, content, created_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+      `INSERT INTO messages (id, conversation_id, turn_id, role, content, attempt, created_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
       [
         message.id,
         message.conversationId,
         message.turnId,
         message.role,
         JSON.stringify(message.content),
+        message.attempt ?? null,
         message.createdAt,
       ]
     );
@@ -155,16 +196,60 @@ export class PgConversationStore implements ConversationStore {
     assertDeploymentBusiness(businessId);
     // Only Turn messages, and only the text ones: rows predating migration 16 have a NULL
     // `turn_id`, and tool/summary rows hold part arrays that are not a Turn's request or reply.
+    //
+    // An assistant Message additionally has to be the one an attempt *completed* its Turn with. A
+    // Worker killed after writing its reply leaves that reply behind, and the retry writes its own
+    // under a new attempt — replaying both would show the conversation answering itself twice.
     const { rows } = await this.q.query(
-      `SELECT id, conversation_id, turn_id, role, content #>> '{}' AS content, created_at
-         FROM messages
-        WHERE conversation_id = $1
-          AND turn_id IS NOT NULL
-          AND role IN ('user', 'assistant')
-          AND jsonb_typeof(content) = 'string'
-        ORDER BY created_at, id`,
+      `SELECT m.id, m.conversation_id, m.turn_id, m.role,
+              m.content #>> '{}' AS content, m.attempt, m.created_at
+         FROM messages m
+        WHERE m.conversation_id = $1
+          AND m.turn_id IS NOT NULL
+          AND jsonb_typeof(m.content) = 'string'
+          AND (
+            m.role = 'user'
+            OR (m.role = 'assistant' AND EXISTS (
+                 SELECT 1 FROM turn_completions c
+                  WHERE c.turn_id = m.turn_id AND c.message_id = m.id))
+          )
+        ORDER BY m.created_at, m.id`,
       [conversationId]
     );
     return (rows as unknown as MessageRow[]).map(toMessage);
+  }
+
+  async findCompletion(
+    businessId: string,
+    turnId: string,
+    attempt: number
+  ): Promise<TurnCompletion | undefined> {
+    assertDeploymentBusiness(businessId);
+    const { rows } = await this.q.query(
+      `SELECT turn_id, attempt, status, message_id, cursor, created_at
+         FROM turn_completions WHERE turn_id = $1 AND attempt = $2`,
+      [turnId, attempt]
+    );
+    const row = rows[0] as unknown as CompletionRow | undefined;
+    return row ? toCompletion(row) : undefined;
+  }
+
+  async saveCompletion(completion: TurnCompletion): Promise<void> {
+    assertDeploymentBusiness(completion.businessId);
+    // `DO NOTHING`, not `DO UPDATE`: an attempt states its outcome once. A redelivered completion
+    // must leave the recorded answer — and the Message it names — exactly as it stands.
+    await this.q.query(
+      `INSERT INTO turn_completions (turn_id, attempt, status, message_id, cursor, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (turn_id, attempt) DO NOTHING`,
+      [
+        completion.turnId,
+        completion.attempt,
+        completion.status,
+        completion.messageId,
+        completion.cursor,
+        completion.createdAt,
+      ]
+    );
   }
 }

@@ -1,31 +1,18 @@
 /*
  * SSE transport for the chat endpoint. `parseSseFrames` is a pure, incremental frame splitter
- * (unit-tested without a network); `postChat` drives the hijacked SSE stream and maps each raw
- * frame to a typed `ChatEvent`; `sendApprovalDecision` posts an approval verdict via the shared
- * write client. Auth mirrors the rest of the app: cookie-first + optional Bearer + CSRF echo,
- * supplied by `mutationHeaders()`.
+ * (unit-tested without a network); `postChat` drives the hijacked SSE stream and projects each Run
+ * event onto the typed `ChatEvent`s this app renders; `sendApprovalDecision` posts an approval
+ * verdict via the shared write client. Auth mirrors the rest of the app: cookie-first + optional
+ * Bearer + CSRF echo, supplied by `mutationHeaders()`.
+ *
+ * The wire is the durable Run event vocabulary — the same frames `GET /api/v1/runs/:id/events`
+ * replays and a Slack or Telegram reader consumes — so this file is the one place the web's own
+ * vocabulary is derived from it. Nothing here is the source of truth for a turn: the Run is, which
+ * is why a lost connection reconnects by cursor instead of resending the question.
  */
 
 import { API_BASE, ApiError, apiWrite, mutationHeaders } from "~/lib/api";
 import type { Autonomy, ChatEvent, ChatEventType, ParsedFrame } from "~/lib/chat/types";
-
-const KNOWN_EVENT_TYPES = new Set<ChatEventType>([
-  "text",
-  "reasoning",
-  "tool-call",
-  "tool-result",
-  "approval-request",
-  "approval-resolved",
-  "plan",
-  "task",
-  "sources",
-  "agent-handoff",
-  "surface",
-  "client-action",
-  "guardrail_block",
-  "finish",
-  "error",
-]);
 
 // Terminal events end the stream — the reader stops once one is seen.
 const TERMINAL_EVENT_TYPES = new Set<ChatEventType>(["finish", "error"]);
@@ -79,12 +66,147 @@ export function parseSseFrames(buffer: string): { frames: ParsedFrame[]; rest: s
   return { frames, rest };
 }
 
-// Map a raw frame to a typed `ChatEvent`, or null when the event type is unknown. The `data` is
-// trusted as the matching payload — the wire is server-controlled and the parser already JSON-
-// validated it; the cast narrows the union without re-checking every field.
-function toChatEvent(frame: ParsedFrame): ChatEvent | null {
-  if (!KNOWN_EVENT_TYPES.has(frame.type as ChatEventType)) return null;
-  return { type: frame.type, data: frame.data } as ChatEvent;
+// The Run event payloads this client reads. Trusted as the matching shape: the wire is
+// server-controlled, the payload was validated against its published schema before it was
+// persisted, and the parser already checked it is JSON.
+type RunEventData = {
+  text?: string;
+  callId?: string;
+  name?: string;
+  argsDigest?: string;
+  status?: string;
+  summary?: string;
+  errorCode?: string;
+  intentId?: string;
+  stage?: string;
+  reason?: string;
+  messageId?: string | null;
+};
+
+/**
+ * Projects the Run event stream onto the timeline's own vocabulary.
+ *
+ * Stateful by necessity, and only across one turn: a Tool's name arrives with `tool.call` and its
+ * result arrives later carrying just the call id, and an approval is settled by whoever decides it
+ * rather than announced back on this stream — so the mapper remembers which call is held and
+ * releases it when that call finally reports. One run event can therefore produce zero, one, or two
+ * timeline events.
+ *
+ * Two things the durable stream deliberately withholds are withheld here too: Tool arguments (a
+ * digest stands in) and the identity of a guard that refused. Neither is a rendering gap to be
+ * filled in later — they are the reason a participant's stream is safe to show.
+ */
+export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
+  const heldByCall = new Map<string, string>();
+  let finished = false;
+
+  return (frame: ParsedFrame): ChatEvent[] => {
+    const data = (frame.data ?? {}) as RunEventData;
+
+    switch (frame.type) {
+      case "text.delta":
+        return [{ type: "text", data: { delta: data.text ?? "" } }];
+
+      case "tool.call":
+        return [
+          {
+            type: "tool-call",
+            data: {
+              toolCallId: data.callId ?? "",
+              toolName: data.name ?? "tool",
+              // The arguments themselves never reach a participant; the digest is what the stream
+              // carries, and showing it is honest about that.
+              args: { argsDigest: data.argsDigest },
+            },
+          },
+        ];
+
+      case "tool.result": {
+        const callId = data.callId ?? "";
+        const events: ChatEvent[] = [
+          {
+            type: "tool-result",
+            data: {
+              toolCallId: callId,
+              toolName: "",
+              result: {
+                status: data.status,
+                ...(data.summary === undefined ? {} : { summary: data.summary }),
+                ...(data.errorCode === undefined ? {} : { errorCode: data.errorCode }),
+              },
+            },
+          },
+        ];
+        const approvalId = heldByCall.get(callId);
+        if (approvalId !== undefined) {
+          heldByCall.delete(callId);
+          // A held call that reports at all has been decided; a call refused at the approval is the
+          // one that comes back denied. Nothing else can move a call out of `awaiting_approval`.
+          events.push({
+            type: "approval-resolved",
+            data: {
+              approvalId,
+              toolCallId: callId,
+              outcome: data.errorCode === "denied" ? "denied" : "approved",
+            },
+          });
+        }
+        return events;
+      }
+
+      case "approval.requested": {
+        // Without the call it holds, an approval has nothing to render against; the operational
+        // inbox is where such a decision is made instead.
+        if (!data.callId || !data.intentId) return [];
+        heldByCall.set(data.callId, data.intentId);
+        return [
+          {
+            type: "approval-request",
+            data: { approvalId: data.intentId, toolCallId: data.callId },
+          },
+        ];
+      }
+
+      case "guardrail.blocked": {
+        // The tool-call stage is not shown: that block refuses one Tool, and the turn still answers.
+        if (data.stage !== "input" && data.stage !== "output") return [];
+        return [
+          {
+            type: "guardrail_block",
+            data: { stage: data.stage, reason: data.reason ?? "blocked by policy" },
+          },
+        ];
+      }
+
+      case "turn.finished": {
+        finished = true;
+        if (data.status === "succeeded") {
+          return [
+            {
+              type: "finish",
+              data: { reason: "stop", ...(data.messageId ? { messageId: data.messageId } : {}) },
+            },
+          ];
+        }
+        if (data.status === "cancelled") return [{ type: "finish", data: { reason: "cancelled" } }];
+        return [{ type: "error", data: { message: data.reason ?? "the turn failed" } }];
+      }
+
+      // The Run reached a terminal status. Normally `turn.finished` already said so; when it did
+      // not, the turn ended without announcing itself and the timeline still has to be released.
+      case "stream.closed":
+        return finished ? [] : [{ type: "finish", data: { reason: "closed" } }];
+
+      case "stream.revoked":
+        return [{ type: "error", data: { message: "access to this run was revoked" } }];
+
+      // `turn.started`, `surface.emitted`, and every operator-audience event have no timeline
+      // counterpart. Surfaces are not rendered from this stream: the event names an Artifact id,
+      // not the Artifact, and inventing one would show the participant something no Run produced.
+      default:
+        return [];
+    }
+  };
 }
 
 export type ChatRequestBody = {
@@ -105,8 +227,8 @@ export type ChatRequestBody = {
 
 export type ChatStreamMeta = {
   conversationId?: string;
-  streamId?: string;
-  messageId?: string;
+  // The Run answering this turn (X-Run-Id): what a reconnect resumes and what a stop cancels.
+  runId?: string;
   // The agent handling this turn (X-Agent-Id) so the header reflects the routed/@mentioned agent.
   agentId?: string;
 };
@@ -132,7 +254,7 @@ async function readChatError(res: Response): Promise<ApiError> {
 }
 
 // POST to the chat endpoint and consume the hijacked SSE response. Reports the one-shot
-// `X-Conversation-Id`/`X-Stream-Id` headers via `onMeta`, then streams typed events to `onEvent`,
+// `X-Conversation-Id`/`X-Run-Id` headers via `onMeta`, then streams typed events to `onEvent`,
 // stopping at the first terminal event (finish/error) or when the reader is exhausted.
 export async function postChat(
   body: ChatRequestBody,
@@ -171,16 +293,18 @@ async function postTurnStream(
 
   if (!res.ok) throw await readChatError(res);
 
-  const streamId = res.headers.get("X-Stream-Id") ?? undefined;
+  const runId = res.headers.get("X-Run-Id") ?? undefined;
   onMeta?.({
     conversationId: res.headers.get("X-Conversation-Id") ?? undefined,
-    streamId,
-    messageId: res.headers.get("X-Message-Id") ?? undefined,
+    runId,
     agentId: res.headers.get("X-Agent-Id") ?? undefined,
   });
 
-  let outcome = await consumeSse(res, handlers, 0);
-  if (outcome.terminal || !streamId) return;
+  // One mapper for the whole turn, reconnects included: it carries which Tool call is held on an
+  // approval, and a reconnect that started a fresh one would forget it mid-turn.
+  const map = createRunEventMapper();
+  let outcome = await consumeSse(res, handlers, 0, map);
+  if (outcome.terminal || !runId) return;
 
   for (let attempt = 1; attempt <= 3; attempt++) {
     handlers.onConnectionState?.("reconnecting");
@@ -188,8 +312,10 @@ async function postTurnStream(
     delete headers["Content-Type"];
     headers.Accept = "text/event-stream";
     headers["Last-Event-ID"] = String(outcome.lastSequence);
+    // The Run's own stream, resumed strictly after the last event this client saw — the turn kept
+    // running while the connection was gone, so nothing is replayed and nothing is missed.
     const resumed = await fetch(
-      `${API_BASE}/api/v1/chat/streams/${encodeURIComponent(streamId)}?lastEventId=${outcome.lastSequence}`,
+      `${API_BASE}/api/v1/runs/${encodeURIComponent(runId)}/events?after=${outcome.lastSequence}`,
       {
         method: "GET",
         credentials: "include",
@@ -198,7 +324,7 @@ async function postTurnStream(
       }
     );
     if (!resumed.ok) throw await readChatError(resumed);
-    outcome = await consumeSse(resumed, handlers, outcome.lastSequence);
+    outcome = await consumeSse(resumed, handlers, outcome.lastSequence, map);
     if (outcome.terminal) {
       handlers.onConnectionState?.("online");
       return;
@@ -210,7 +336,8 @@ async function postTurnStream(
 async function consumeSse(
   response: Response,
   handlers: PostChatHandlers,
-  afterSequence: number
+  afterSequence: number,
+  map: (frame: ParsedFrame) => ChatEvent[]
 ): Promise<{ terminal: boolean; lastSequence: number }> {
   if (!response.body) return { terminal: false, lastSequence: afterSequence };
   const reader = response.body.getReader();
@@ -229,25 +356,26 @@ async function consumeSse(
     for (const frame of frames) {
       if (frame.seq <= lastSequence) continue;
       lastSequence = frame.seq;
-      const event = toChatEvent(frame);
-      if (!event) continue;
-      handlers.onEvent(event);
-      if (TERMINAL_EVENT_TYPES.has(event.type)) {
-        await reader.cancel();
-        return { terminal: true, lastSequence };
+      for (const event of map(frame)) {
+        handlers.onEvent(event);
+        if (TERMINAL_EVENT_TYPES.has(event.type)) {
+          await reader.cancel();
+          return { terminal: true, lastSequence };
+        }
       }
     }
   }
   return { terminal: false, lastSequence };
 }
 
-// Stop an in-flight chat stream server-side: aborts the LLM so generation halts. Reuses the shared
-// write client (cookie/Bearer auth + CSRF echo). 404s if the stream already finished — callers
-// fire-and-forget since the client also aborts its own fetch.
-export function stopChatStream(streamId: string): Promise<{ status: string }> {
+// Stop the turn by cancelling its Run: whichever process is executing it observes the cancellation
+// and halts, so a turn no longer has to be stopped by the connection that started it. Reuses the
+// shared write client (cookie/Bearer auth + CSRF echo). 404s once the Run has finished — callers
+// fire-and-forget, since the client also abandons its own stream.
+export function stopChatRun(runId: string): Promise<{ status: string }> {
   return apiWrite<{ status: string }>(
     "POST",
-    `/api/v1/chat/streams/${encodeURIComponent(streamId)}/stop`,
+    `/api/v1/chat/runs/${encodeURIComponent(runId)}/stop`,
     {}
   );
 }

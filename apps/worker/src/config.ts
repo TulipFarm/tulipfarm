@@ -7,11 +7,21 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * not exist or may not have the columns it writes, so it refuses to start rather than corrupt.
  * Raise it whenever a migration lands that the worker's queries depend on.
  */
-export const REQUIRED_SCHEMA_VERSION = 15;
+export const REQUIRED_SCHEMA_VERSION = 17;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;
   readonly businessId: string;
+  /**
+   * Where the API's internal turn host answers, without a trailing slash.
+   *
+   * Required rather than optional: a worker that cannot reach it can claim a Chat Run and then
+   * discover it has no way to resolve the Context, which costs the participant a turn to learn
+   * something the deployment already knew. Refusing to start says it once, at boot.
+   */
+  readonly internalApiUrl: string;
+  /** `tfc_<clientId>.<secret>` for a service API client. Names a Run, never a principal. */
+  readonly internalApiCredential: string;
   /** Lease owner recorded on every Run this process claims; must be unique per process. */
   readonly owner: string;
   readonly port: number;
@@ -37,6 +47,18 @@ function requireString(env: Env, key: string): string {
   return value;
 }
 
+/**
+ * Trims trailing slashes so `http://api:8080/` and `http://api:8080` build the same request path.
+ *
+ * A scan, not `replace(/\/+$/, "")`: the regex backtracks on a long run of slashes, and this value
+ * comes from the environment, which a deployment tool composes rather than a person types.
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
 function positiveInt(env: Env, key: string, fallback: number): number {
   const raw = env[key];
   if (raw === undefined || raw.trim().length === 0) return fallback;
@@ -56,6 +78,8 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
   const config: WorkerConfig = {
     databaseUrl: requireString(env, "DATABASE_URL"),
     businessId: DEPLOYMENT_BUSINESS_ID,
+    internalApiUrl: stripTrailingSlashes(requireString(env, "INTERNAL_API_URL")),
+    internalApiCredential: requireString(env, "WORKER_API_CREDENTIAL"),
     owner: env.WORKER_OWNER ?? `${hostname()}:${process.pid}`,
     port: positiveInt(env, "WORKER_PORT", 4020),
     runPollMs: positiveInt(env, "WORKER_RUN_POLL_MS", 1_000),

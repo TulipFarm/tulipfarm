@@ -1,5 +1,10 @@
 import { ajv } from "@tulipfarm/schema";
-import type { ModelInvocationRequest, ModelMessage, ModelPort } from "../ports";
+import type {
+  ModelInvocationRequest,
+  ModelInvocationResult,
+  ModelMessage,
+  ModelPort,
+} from "../ports";
 import type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
 
 /**
@@ -67,6 +72,7 @@ export interface ToolDispatchPort {
 
 export type AgentLoopEventType =
   | "iteration_started"
+  | "text_delta"
   | "tool_call_dispatched"
   | "tool_call_rejected"
   | "awaiting_approval"
@@ -75,8 +81,15 @@ export type AgentLoopEventType =
   | "cancelled";
 
 /**
- * Persisted, content-free loop event. Consumers stream by `sequence`, so a reconnecting client
- * resumes from its cursor instead of replaying the model.
+ * Persisted loop event. Consumers stream by `sequence`, so a reconnecting client resumes from its
+ * cursor instead of replaying the model.
+ *
+ * The only content this carries is model text (`text_delta`) — the one thing that exists nowhere
+ * else, since the loop consumes the model stream itself. Tool arguments and Tool output are
+ * deliberately absent: the caller's `ToolDispatchPort` already holds both, so it emits whatever
+ * call/result/Surface record a channel should see, and decides there what is safe to reproduce.
+ * Keeping that decision at the dispatch boundary is why a secret passed as a Tool argument cannot
+ * reach a reader through this stream.
  */
 export interface AgentLoopEvent {
   readonly sequence: number;
@@ -88,6 +101,10 @@ export interface AgentLoopEvent {
   readonly toolName?: string;
   readonly callId?: string;
   readonly outcome?: string;
+  /** Model text released this chunk. Present only on `text_delta`. */
+  readonly text?: string;
+  /** 1-based ordinal of this delta within the State, so a reader can order and de-duplicate. */
+  readonly textIndex?: number;
   readonly occurredAt: string;
 }
 
@@ -150,6 +167,17 @@ export interface AgentLoopDependencies {
 const ITERATION_BUDGET_KEY = "agent_loop_iterations";
 const TOKEN_BUDGET_KEY = "agent_loop_tokens";
 
+/**
+ * Marks a failure that came from the event sink rather than the model, so the model's own error
+ * handling cannot swallow it. Never escapes this module: the original error is rethrown in its
+ * place, leaving the caller the same failure it would have seen from any other sink write.
+ */
+class EventSinkFailure extends Error {
+  constructor(readonly cause: unknown) {
+    super("event sink failed");
+  }
+}
+
 type CompiledValidator = ReturnType<typeof ajv.compile>;
 
 export class AgentLoop {
@@ -170,7 +198,9 @@ export class AgentLoop {
 
     const emit = async (
       type: AgentLoopEventType,
-      extra: Partial<Pick<AgentLoopEvent, "toolName" | "callId" | "outcome">> = {}
+      extra: Partial<
+        Pick<AgentLoopEvent, "toolName" | "callId" | "outcome" | "text" | "textIndex">
+      > = {}
     ): Promise<void> => {
       sequence += 1;
       await this.deps.events.append({
@@ -204,6 +234,40 @@ export class AgentLoop {
       return outcome;
     };
 
+    let textIndex = 0;
+
+    /**
+     * One model call, releasing text as it arrives when the adapter can stream.
+     *
+     * Deltas are emitted during the call rather than after it returns, which is what lets a
+     * participant on any channel watch the answer form. Both paths yield the same
+     * `ModelInvocationResult`, so nothing below this line forks on which one ran. A stream that
+     * ends without a `completed` chunk is a broken adapter contract, and is failed as a model
+     * error rather than silently treated as an empty answer.
+     */
+    const callModel = async (request: ModelInvocationRequest): Promise<ModelInvocationResult> => {
+      const stream = this.deps.model.stream?.(request);
+      if (stream === undefined) return this.deps.model.invoke(request);
+
+      let completed: ModelInvocationResult | undefined;
+      for await (const chunk of stream) {
+        if (chunk.kind === "completed") {
+          completed = chunk.result;
+          continue;
+        }
+        if (chunk.text.length === 0) continue;
+        textIndex += 1;
+        try {
+          await emit("text_delta", { text: chunk.text, textIndex });
+        } catch (error) {
+          // Losing a durable write is not the model failing; see the rethrow below.
+          throw new EventSinkFailure(error);
+        }
+      }
+      if (completed === undefined) throw new Error("model stream ended without a result");
+      return completed;
+    };
+
     for (;;) {
       if (await this.deps.isCancelled()) {
         return finish({ status: "cancelled", ...counters }, "cancelled");
@@ -232,10 +296,14 @@ export class AgentLoop {
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
       };
 
-      let result: Awaited<ReturnType<ModelPort["invoke"]>>;
+      let result: ModelInvocationResult;
       try {
-        result = await this.deps.model.invoke(request);
-      } catch {
+        result = await callModel(request);
+      } catch (error) {
+        // A model that errors is an outcome the loop owns. A sink that cannot record what already
+        // happened is not: the caller must reconcile it, so it escapes rather than being recorded
+        // as a model failure through the very sink that just failed.
+        if (error instanceof EventSinkFailure) throw error.cause;
         return finish({ status: "failed", reason: "model_error", ...counters }, "failed");
       }
 

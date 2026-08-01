@@ -89,11 +89,47 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, failed: 0 });
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 1, waiting: 0, failed: 0 });
     expect(dispatched).toEqual([persistedRun().id]);
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({ status: "succeeded", leaseOwner: null, leaseExpiresAt: null }),
     ]);
+  });
+
+  it("parks a Run that stopped on a durable wait instead of finishing it", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => "waiting",
+    });
+
+    const result = await dispatcher.dispatchBatch();
+
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 1, failed: 0 });
+    expect(store.releaseCalls).toEqual([
+      expect.objectContaining({ status: "waiting", leaseOwner: null, leaseExpiresAt: null }),
+    ]);
+  });
+
+  it("leaves a cancelled Run untouched, so it cannot race the cancellation manager", async () => {
+    const store = new FakeRunStore();
+    store.claimBatchResult = [persistedRun()];
+    const dispatcher = new RunDispatcher({
+      leases: new RunLeaseManager(store),
+      businessId: BUSINESS_ID,
+      owner: "worker-1",
+      now: () => new Date("2026-07-24T10:00:00.000Z"),
+      handler: async () => "cancelled",
+    });
+
+    const result = await dispatcher.dispatchBatch();
+
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 1, failed: 0 });
+    expect(store.releaseCalls).toEqual([]);
   });
 
   it("releases to needs_reconciliation when the handler throws", async () => {
@@ -112,7 +148,7 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, failed: 1 });
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 1 });
     expect(store.releaseCalls).toEqual([
       expect.objectContaining({ status: "needs_reconciliation" }),
     ]);
@@ -133,7 +169,7 @@ describe("RunDispatcher", () => {
 
     const result = await dispatcher.dispatchBatch();
 
-    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, failed: 0 });
+    expect(result).toEqual({ reclaimed: 0, claimed: 1, dispatched: 0, waiting: 0, failed: 0 });
   });
 
   it("does not report success when the terminal compare-and-swap loses the lease", async () => {
@@ -152,6 +188,7 @@ describe("RunDispatcher", () => {
       reclaimed: 0,
       claimed: 1,
       dispatched: 0,
+      waiting: 0,
       failed: 1,
     });
   });

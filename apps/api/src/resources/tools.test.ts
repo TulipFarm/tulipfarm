@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
-import { HookError, type HookExecutor } from "../hooks/hook-executor.js";
 import type { PaginatedResult } from "../pagination.js";
 import type {
   CounterStore,

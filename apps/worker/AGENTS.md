@@ -8,8 +8,14 @@ reimplement package-owned logic. tsconfig extends `@tulipfarm/tsconfig/node.json
 ## Running it
 
 `pnpm dev:worker` (tsx watch) or `node dist/worker.cjs` (the bundle the Dockerfile emits, run by
-the `worker` compose service). Requires `DATABASE_URL`; every `WORKER_*` variable has a default —
-see `.env.local.example`.
+the `worker` compose service). Requires `DATABASE_URL`, `INTERNAL_API_URL` and
+`WORKER_API_CREDENTIAL`; every `WORKER_*` variable has a default — see `.env.local.example`.
+
+In a container the last one and `ENCRYPTION_KEY` need not be set at all: `data-dir.ts` reads them
+back from the data volume the API wrote them to (`worker.env` and `secrets.env`, one owner each),
+which is what lets a compose file with no `.env` execute a turn. The environment always wins, and
+nothing is invented here — a value on neither the environment nor the volume stays missing, and
+`loadConfig` names it.
 
 ## Composition root (`src/main.ts`)
 
@@ -27,6 +33,73 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 `loop.ts` (abortable, backing-off loop), `executors.ts` / `delivery.ts` (registries),
 `probe-server.ts` (`/livez`, `/readyz`), `shutdown.ts` (drain).
 
+Two Run sources are registered, keyed by `RunExecutorRegistry.sourceOf` (`bundle.routineId`):
+`chat` (`turn/chat-executor.ts`) and `integration` (`turn/integration-executor.ts`). The
+Integration executor classifies its delivery and then hands the Run to **the same** chat executor
+instance, so a Slack turn and a web turn are answered by one code path.
+
+## Executing a turn (`src/turn/`)
+
+`TurnDriver` (`turn/driver.ts`) runs one turn end to end and owns nothing else: it announces the
+turn, resolves the Context **once**, hands the built `AgentLoopInput` to `AgentStateRunner`,
+persists the result through `ConversationTurnCompleter`, and closes the stream. Because it holds no
+policy, the same path serves web, Slack, Telegram, and any channel added later.
+
+Two orderings are load-bearing. `turn.finished` is emitted **after** completion is durable, so a
+reader that sees it can fetch the Message it names. And Context is resolved before the loop starts,
+so `context.assembled` is evidence of what the model was actually given — never a second resolution
+that might differ.
+
+`TurnEventWriter` (`turn/run-events.ts`) is the only way a turn reaches a reader. The event type
+fixes the audience and the payload is validated against `@tulipfarm/schema`'s published schema, so
+a writer cannot widen who sees what. Its projection of `AgentLoopEvent` is deliberately narrow:
+the loop contributes only model text and calls it refused before dispatch, because the driver holds
+the wait id and `messageId`, and the `ToolDispatchPort` holds the Tool arguments and output a
+`tool.call`/`tool.result` pair needs. **That is why a secret passed as a Tool argument cannot reach
+a participant's stream — keep the projection narrow.**
+
+`TurnGuardrails` (`turn/guardrails.ts`) enforces all three stages here, because this is where the
+turn actually executes — enforcement that lived in the API guarded web and nothing else. The policy
+is never read from the Soul: it arrives **with** the Context, already validated, and is rebuilt into
+the same guards the API compiled. `configure` then compares its own revision against the Context's
+`guardrailDigest` and **throws** on a mismatch, before the first event — a turn whose evidence names
+a policy it is not enforcing is refused, not run.
+
+A blocked input or output does not fail the turn: the State is settled through
+`AgentStateRunner.settle` (`claimed → running → succeeded`) and the guard's message is persisted as
+the reply, so a refused Slack message and a refused web message read the same. A blocked **Tool
+call** is different — it comes back to the model as a `denied` dispatch result and the turn
+continues. Blocks are recorded twice on purpose: `guardrail.decision` is operator evidence naming
+the guard; `guardrail.blocked` is what a participant sees and omits the guard's identity, so a
+refusal never teaches a reader which pattern to write around. The tool-call stage emits only the
+operator event.
+
+`RunOutcome` (`run-dispatcher.ts`) says how the executor left the Run. `waiting` parks it for the
+wait sweep; `cancelled` means `RunCancellationManager` is already driving the transition and the
+dispatcher must **not** write a status of its own.
+
+## Executing a delivery (`src/turn/integration-executor.ts`)
+
+A verified Integration delivery is acknowledged and stored as a Run by the API before anything
+interprets it; this executor is where it is interpreted. It asks the internal delivery host
+(`internal/delivery-host.ts`) what the delivery is, runs the Integration's own `classify(ctx)` in
+this process's sandbox, and turns the answer into a Turn, a recorded Integration event, or a
+recorded refusal. Every path ends in exactly **one** `delivery.classified` event, keyed
+`${runId}:0:classified` — "why did Slack not reply?" is answered by a row, never by its absence.
+
+The classifier runs here rather than in the API because it is untrusted per-Integration code and
+the API is the process holding every credential and every table. `hooks/ingress-hook-worker.ts` is
+this app's grant to the isolate, and it grants **nothing** — the API's entrypoint grants a resource
+lookup because its resource hooks need one. The two bundles must keep different basenames: the
+Dockerfile lays both flat in `/app`, and `resolveHookWorkerPath` finds a sandbox by looking for a
+sibling file, so sharing a name would silently hand a classifier the API's grant.
+
+Two things never cross from the API to this process: the **bind link** offered to an unlinked
+sender (a credential — the executor is told only that the sender was unlinked) and the **reply
+text** (read back out of the durable conversation; this side says which attempt finished and how,
+never the words). The reply is posted at least once — making the effect exactly-once is the Tool
+Broker's reconciliation story, not a second ledger here.
+
 ## Invariants
 
 - **Never migrate.** `apps/api` owns `schema_version`; the worker refuses to start below
@@ -40,12 +113,14 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 - **Leases are the only claim.** Every transition is CAS-guarded on `(expectedVersion,
   expectedStatus)`; a worker that dies without releasing is recovered by `reclaimExpired`, not by
   anyone forcing a status.
-- Registries (`RunExecutorRegistry`, `DeliveryTargetRegistry`) are empty today. Executors land in
-  PR 3, delivery targets in PR 6.
+- `RunExecutorRegistry` holds `chat` and `integration`; `DeliveryTargetRegistry` is still empty
+  (delivery targets land in PR 6).
 
-`src/agent-state.ts` (Agent State execution around the bounded Agent loop), `src/conversation-turn.ts`
-(durable Turn completion), and `src/recovery/` stay unwired: `buildInput` has no implementation and
-`TurnCompletionStore` has neither an implementation nor a table. They belong to PR 3.
+`TurnContextPort`, `TurnCompletionStore`, and the delivery host are all backed over HTTP by the
+API's `/api/v1/internal/*` routes (`internal/turn-host.ts`, `internal/delivery-host.ts`). The
+caller states **which Run, never as whom**: authority is re-derived from the Run's recorded
+identity on the API side, so a worker credential cannot escalate past what the Run was minted with.
+PR 4 replaces those handlers with in-worker implementations; the ports do not change.
 
 ## Tests
 
