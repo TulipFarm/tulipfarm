@@ -4,7 +4,7 @@ import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import {
   ArtifactService,
   DurableWaitManager,
-  RunLeaseManager,
+  RunCancellationManager,
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
@@ -17,8 +17,15 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
-import { ArtifactStore, RunEventStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import {
+  ArtifactStore,
+  ChildLinkStore,
+  RunEventStore,
+  RunStore,
+  WaitStore,
+} from "@tulipfarm/storage";
 import { config } from "dotenv";
+import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
@@ -28,7 +35,6 @@ import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
-import { DurableApprovalGate } from "./approvals/chat-gate";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
 import { ToolApprovalService } from "./approvals/tool-approvals";
 import { PgTokenRepo } from "./auth/api-tokens";
@@ -36,9 +42,6 @@ import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-stor
 import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
-import { PgPendingInteractionRepo } from "./chat/pending-interactions";
-import { StreamHub } from "./chat/stream-hub";
-import { PgStreamResumeRepo } from "./chat/stream-resume";
 import { PgConversationStore } from "./conversations/store.pg";
 import { ambientTransactionPort, connectPg, transactionPort } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
@@ -48,8 +51,14 @@ import { createHookExecutor } from "./hooks/executor";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
-import { IngressDeliveriesRepo } from "./ingress/repo";
+import { IngressIdentityResolver } from "./ingress/identity";
+import {
+  IngressDeliveriesRepo,
+  IntegrationConversationsRepo,
+  IntegrationEventsRepo,
+} from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { IngressDeliveryHost } from "./internal/delivery-host";
 import { RegistryToolDispatcher } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
@@ -80,7 +89,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
-import { ChatRunLifecycle, subscribeChatRunCompletion } from "./runtime/chat-run-lifecycle";
+import { runCanceller } from "./runs/cancel";
 import { integrationInvoker, manualRoutineTrigger } from "./runtime/invocation-callers";
 import { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "./runtime/invocation-store";
@@ -197,13 +206,11 @@ async function boot() {
     const runTransactions = transactionPort(pool);
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
-    // The API executes chat turns in-process, so it owns the lease on the Runs it mints. Without
-    // this every chat message would leave a `queued` Run behind for a worker to execute twice.
-    const chatRunLifecycle = new ChatRunLifecycle({
-      leases: new RunLeaseManager(runStore),
-      store: runStore,
-      owner: `api:${process.pid}`,
-    });
+    // Stopping a turn is cancelling its Run: the process executing it observes the cancellation and
+    // halts, so a participant can stop a turn no request handler here is holding.
+    const runCancel = runCanceller(
+      new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
+    );
 
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
@@ -216,11 +223,8 @@ async function boot() {
     const conversationRepo = new PgConversationRepo(pool);
     const messageRepo = new PgMessageRepo(pool);
     const feedbackRepo = new FeedbackRepo(pool);
-    const streamResumeRepo = new PgStreamResumeRepo(pool);
-    const pendingInteractionRepo = new PgPendingInteractionRepo(pool);
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
-    const streamHub = new StreamHub();
     const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
     const kvService = new KvService(new PgKvRepo(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
@@ -248,7 +252,6 @@ async function boot() {
     });
 
     const approvalsRepo = new ApprovalsRepo(pool);
-    const approvalRegistry = new DurableApprovalGate(approvalsRepo);
     // A Worker-executed turn asks for approval by parking its Run on a durable wait. The wait is
     // registered here rather than in the Worker because its one-use resume token must never leave
     // the process that will redeem it — the Worker only ever learns the wait's id.
@@ -257,6 +260,14 @@ async function boot() {
       waits: new DurableWaitManager(new WaitStore(runTransactions), new RunResumeGateway(runStore)),
     });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
+    const integrationThreads = new IntegrationConversationsRepo(pool);
+    const integrationEvents = new IntegrationEventsRepo(pool);
+    // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
+    // constant in the image, which every deployment would share.
+    const channelBind = {
+      repo: externalIdentityRepo,
+      signingKey: channelBindKeyResolver(secretsService),
+    };
 
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
@@ -340,6 +351,33 @@ async function boot() {
             }),
         },
       }),
+      // The channel side of the same boundary: a delivery Run classifies in the Worker and comes
+      // back here for the conversation, the identity, and the reply. Built per-app rather than
+      // eagerly because it logs through Fastify's logger, which does not exist until `buildApp`
+      // has run.
+      deliveries: (log: FastifyBaseLogger) =>
+        new IngressDeliveryHost({
+          runs: runStore,
+          artifacts: runArtifacts,
+          store: conversationStore,
+          conversations: conversationRepo,
+          threads: integrationThreads,
+          integrationEvents,
+          soulLoader,
+          identity: new IngressIdentityResolver({
+            users: userRepo,
+            log,
+            mappings: externalIdentityRepo,
+            bind: channelBind,
+          }),
+          toolRegistry,
+          domainEvents: domainEventEmitter,
+          // The link is redeemed inside an authenticated web session, so it must point at the
+          // origin users actually reach — not at this API's own host.
+          bindLinkUrl: (token) =>
+            `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+          log,
+        }),
       // Read through the loader on every call, so a `soul.synced` reload reaches the Worker
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
@@ -354,12 +392,7 @@ async function boot() {
       identity: {
         apiClientRepo,
         externalIdentityRepo,
-        // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
-        // constant in the image, which every deployment would share.
-        channelBind: {
-          repo: externalIdentityRepo,
-          signingKey: channelBindKeyResolver(secretsService),
-        },
+        channelBind,
       },
       rateLimiter,
       secretsService,
@@ -377,11 +410,8 @@ async function boot() {
       conversationRepo,
       messageRepo,
       feedbackRepo,
-      streamResumeRepo,
-      pendingInteractionRepo,
       surfaceArtifactStore,
       surfaceActionStore,
-      streamHub,
       workingMemoryService,
       kvService,
       knowledgeService,
@@ -391,10 +421,9 @@ async function boot() {
       observabilityConfig: obsConfig,
       invocations,
       conversationStore,
-      chatRunLifecycle,
+      runCancel,
       internalTurns,
       approvalsRepo,
-      approvalRegistry,
       toolApprovals,
       runEvents: {
         events: runEventStore,
@@ -416,7 +445,7 @@ async function boot() {
       operationalApi: createRuntimeOperationalApi({
         activity: activityService,
         approvals: approvalsRepo,
-        approvalRegistry,
+        toolApprovals,
         runs: createRunReader(runStore),
         healthProbes: [
           postgresProbe(pool),
@@ -491,9 +520,6 @@ async function boot() {
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
-    // The chat route returns as soon as the reply is hijacked, so the Run is completed here —
-    // TURN_FINISHED is the one signal guaranteed on every exit, including stops and throws.
-    subscribeChatRunCompletion(domainEventEmitter, chatRunLifecycle, app.log);
     // Optional Grafana Cloud OTLP metrics export (gated). Only constructed when enabled + targeted +
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;

@@ -1,5 +1,5 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { parseSseFrames, postChat } from "~/lib/chat/sse-client";
+import { createRunEventMapper, parseSseFrames, postChat } from "~/lib/chat/sse-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -85,18 +85,18 @@ test("defaults seq to 0 when no id line is present but event+data are", () => {
   expect(frames).toEqual([{ seq: 0, type: "text", data: { delta: "x" } }]);
 });
 
-test("recovers a dropped stream from the persisted cursor without duplicating events", async () => {
+test("recovers a dropped stream from the Run's own events without duplicating them", async () => {
   const fetchMock = vi
     .fn()
     .mockResolvedValueOnce(
-      streamResponse('id: 1\nevent: text\ndata: {"delta":"hello"}\n\n', {
-        "X-Stream-Id": "stream-1",
+      streamResponse('id: 1\nevent: text.delta\ndata: {"text":"hello","index":0}\n\n', {
+        "X-Run-Id": "run-1",
       })
     )
     .mockResolvedValueOnce(
       streamResponse(
-        'id: 1\nevent: text\ndata: {"delta":"hello"}\n\n' +
-          'id: 2\nevent: finish\ndata: {"reason":"stop"}\n\n'
+        'id: 1\nevent: text.delta\ndata: {"text":"hello","index":0}\n\n' +
+          'id: 2\nevent: turn.finished\ndata: {"status":"succeeded","messageId":"msg-1"}\n\n'
       )
     );
   vi.stubGlobal("fetch", fetchMock);
@@ -113,8 +113,77 @@ test("recovers a dropped stream from the persisted cursor without duplicating ev
 
   expect(events).toEqual(["text", "finish"]);
   expect(states).toEqual(["reconnecting", "online"]);
-  expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/v1/chat/streams/stream-1");
+  // The reconnect reads the Run, not a per-connection buffer: the turn kept running while the
+  // connection was gone, so the cursor is what makes the replay exact.
+  expect(fetchMock.mock.calls[1]?.[0]).toContain("/api/v1/runs/run-1/events?after=1");
   expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({
     headers: expect.objectContaining({ "Last-Event-ID": "1" }),
   });
+});
+
+test("projects Run events onto the timeline vocabulary", () => {
+  const map = createRunEventMapper();
+
+  expect(map({ seq: 1, type: "turn.started", data: { turnId: "t1" } })).toEqual([]);
+  expect(map({ seq: 2, type: "text.delta", data: { text: "hi", index: 0 } })).toEqual([
+    { type: "text", data: { delta: "hi" } },
+  ]);
+  expect(
+    map({ seq: 3, type: "tool.call", data: { callId: "c1", name: "send_email", argsDigest: "d1" } })
+  ).toEqual([
+    {
+      type: "tool-call",
+      data: { toolCallId: "c1", toolName: "send_email", args: { argsDigest: "d1" } },
+    },
+  ]);
+  // Operator-audience evidence has no participant counterpart, even when a reader is granted it.
+  expect(map({ seq: 4, type: "tool.dispatched", data: { callId: "c1" } })).toEqual([]);
+  expect(
+    map({ seq: 5, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
+  ).toEqual([{ type: "finish", data: { reason: "stop", messageId: "msg-1" } }]);
+});
+
+test("releases a held Tool call when the decision lets it report", () => {
+  const map = createRunEventMapper();
+
+  map({ seq: 1, type: "tool.call", data: { callId: "c1", name: "send_email", argsDigest: "d1" } });
+  expect(
+    map({
+      seq: 2,
+      type: "approval.requested",
+      data: { waitId: "w1", intentId: "a1", callId: "c1" },
+    })
+  ).toEqual([{ type: "approval-request", data: { approvalId: "a1", toolCallId: "c1" } }]);
+
+  const settled = map({ seq: 3, type: "tool.result", data: { callId: "c1", status: "ok" } });
+  expect(settled[1]).toEqual({
+    type: "approval-resolved",
+    data: { approvalId: "a1", toolCallId: "c1", outcome: "approved" },
+  });
+  // Released once: a later result for the same call is just a result.
+  expect(map({ seq: 4, type: "tool.result", data: { callId: "c1", status: "ok" } })).toHaveLength(
+    1
+  );
+});
+
+test("shows a guardrail refusal without naming the guard, and only for the stages a reader sees", () => {
+  const map = createRunEventMapper();
+
+  expect(
+    map({ seq: 1, type: "guardrail.blocked", data: { stage: "tool_call", reason: "blocklist" } })
+  ).toEqual([]);
+  expect(
+    map({ seq: 2, type: "guardrail.blocked", data: { stage: "input", reason: "prompt_injection" } })
+  ).toEqual([{ type: "guardrail_block", data: { stage: "input", reason: "prompt_injection" } }]);
+});
+
+test("releases the timeline when the Run ends without announcing the turn", () => {
+  const map = createRunEventMapper();
+  expect(map({ seq: 1, type: "stream.closed", data: { status: "cancelled" } })).toEqual([
+    { type: "finish", data: { reason: "closed" } },
+  ]);
+
+  const announced = createRunEventMapper();
+  announced({ seq: 1, type: "turn.finished", data: { status: "succeeded", messageId: "m1" } });
+  expect(announced({ seq: 2, type: "stream.closed", data: { status: "succeeded" } })).toEqual([]);
 });

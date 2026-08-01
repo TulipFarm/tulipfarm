@@ -1,6 +1,7 @@
-import type { GuardrailsService } from "@tulipfarm/agent-runtime";
+import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
+import { canonicalHash } from "@tulipfarm/schema";
 import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
@@ -24,6 +25,7 @@ const AUTHORITY: TurnAuthority = {
   runId: RUN_ID,
   turn: turn(),
   subject: { kind: "user", id: "user-1" },
+  source: "chat",
   bundleDigest: "bundle-digest",
 };
 
@@ -116,17 +118,28 @@ describe("ChatTurnContextResolver", () => {
     });
   });
 
-  it("names what it enforced even when the deployment enforces nothing", async () => {
+  it("ships the policy the Worker must enforce, alongside the digest naming it", async () => {
+    // The Worker cannot read the Soul, so the policy travels with the Context and the digest is
+    // what lets it prove the guards it rebuilt are the ones this evidence names.
+    const policy = { input: [{ guard: "prompt_injection", sensitivity: "high" }] };
     const guarded = makeResolver({
-      guardrails: { revision: "guardrail-7" } as unknown as GuardrailsService,
-    });
-    await expect(guarded.resolver.resolve(AUTHORITY)).resolves.toMatchObject({
-      guardrailDigest: "guardrail-7",
+      guardrails: { revision: "guardrail-7", config: policy } as unknown as GuardrailsService,
     });
 
-    const unguarded = makeResolver();
-    await expect(unguarded.resolver.resolve(AUTHORITY)).resolves.toMatchObject({
-      guardrailDigest: "none",
+    await expect(guarded.resolver.resolve(AUTHORITY)).resolves.toMatchObject({
+      guardrailDigest: "guardrail-7",
+      guardrailPolicy: policy,
+    });
+  });
+
+  it("falls back to the default policy rather than shipping an unguarded turn", async () => {
+    // A deployment that composed no guardrails service used to record `guardrailDigest: "none"`,
+    // which the Worker would now have to run under no policy at all. Fail-safe instead.
+    const { resolver } = makeResolver();
+
+    await expect(resolver.resolve(AUTHORITY)).resolves.toMatchObject({
+      guardrailDigest: canonicalHash(DEFAULT_GUARDRAILS),
+      guardrailPolicy: DEFAULT_GUARDRAILS,
     });
   });
 

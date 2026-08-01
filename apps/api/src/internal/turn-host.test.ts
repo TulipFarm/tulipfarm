@@ -30,9 +30,11 @@ function makeHost(options: { runs?: HostedRunReader; store?: FakeConversationSto
         seen.context.push(authority);
         return {
           agentId: "assistant",
+          subjectId: authority.subject.id,
           modelProfileId: "model-1",
           contextDigest: "context-digest",
           guardrailDigest: "guardrail-digest",
+          guardrailPolicy: { input: [] },
           messages: [],
           tools: [],
           limits: { maxIterations: 1, maxToolCalls: 1, maxRepairAttempts: 1 },

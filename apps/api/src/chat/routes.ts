@@ -1,30 +1,22 @@
 import type { EventEmitter } from "node:events";
-import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { DurableApprovalGate } from "../approvals/chat-gate";
 import { ErrorSchema } from "../auth/schemas";
-import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ConversationStore } from "../conversations/service";
-import type { KnowledgeService } from "../knowledge/service";
-import type { WorkingMemoryService } from "../memory/service";
-import { type ChatTurnContext, type ChatTurnSubmitter, runChatTurn } from "../runtime/chat-run";
-import type { ChatRunLifecycle } from "../runtime/chat-run-lifecycle";
+import {
+  type RunEventStreamDeps,
+  type RunStreamGrant,
+  sinkFor,
+  streamRunEvents,
+} from "../runs/events";
 import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
-import type { BundledSkill } from "../soul/skills/bundled";
-import type { SurfaceActionStore } from "../surfaces/action-store";
-import { MemorySurfaceArtifactStore, type SurfaceArtifactStore } from "../surfaces/artifact-store";
-import { registerConversationRoutes } from "./conversation-routes";
+import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/registry";
+import { isConversationEntryError, resolveConversationEntry } from "./conversation-entry";
 import type { ConversationRepo } from "./conversations";
-import type { MessageRepo } from "./messages";
-import { MemoryPendingInteractionRepo, type PendingInteractionRepo } from "./pending-interactions";
-import { attachToStream } from "./producer";
 import { writeSseHeaders } from "./sse";
-import type { StreamHub } from "./stream-hub";
-import type { StreamResumeRepo } from "./stream-resume";
-import { ChatBodySchema, corsPassthrough, parseLastEventId } from "./turn-helpers";
-import { durableTurnSubmitter, messageOnlySubmitter } from "./turn-submit";
+import { type ChatBody, ChatBodySchema, corsPassthrough } from "./turn-helpers";
+import { durableTurnSubmitter } from "./turn-submit";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -35,76 +27,44 @@ const DuplicateInvocationSchema = {
   properties: { error: { type: "string" }, runId: { type: "string" } },
 } as const;
 
-declare module "fastify" {
-  interface FastifyInstance {
-    /** Set by registerChatRoutes — the shared turn context headless callers reuse. */
-    chatTurnContext?: ChatTurnContext;
-  }
+/** Stops a Run a participant abandoned. `false` when the Run is gone or already terminal. */
+export interface ChatRunCanceller {
+  cancel(input: { businessId: string; runId: string; reason: string }): Promise<boolean>;
 }
 
+/** Reads the Run this turn produced. The same reader `GET /runs/:id/events` reconnects against. */
+export interface ChatStreamDeps
+  extends Pick<RunEventStreamDeps, "events" | "runs" | "pollIntervalMs" | "pageSize"> {
+  /** Re-evaluated on every poll, so a revoked grant closes the stream mid-turn. */
+  authorize(req: FastifyRequest, runId: string): Promise<RunStreamGrant | null>;
+}
+
+export interface ChatRoutesOptions {
+  readonly llmService: LlmService;
+  readonly repo: ConversationRepo;
+  readonly conversationStore: ConversationStore;
+  readonly invocations: DurableInvocationGateway;
+  readonly stream: ChatStreamDeps;
+  readonly cancel?: ChatRunCanceller;
+  readonly soulLoader?: SoulLoader;
+  readonly events?: EventEmitter;
+}
+
+/**
+ * The Chat turn over HTTP: submit durably, then read back the Run's own event stream.
+ *
+ * Nothing about the turn happens in this process any more. The route opens the conversation, hands
+ * the request to the submission path every channel shares, and then becomes a reader of
+ * `run_events` — the same rows, in the same vocabulary, that `GET /api/v1/runs/:id/events` serves on
+ * reconnect and that a Slack or Telegram reader would consume. Losing this connection therefore
+ * loses nothing: the Worker is executing the Run regardless, and the client reattaches by cursor.
+ */
 export function registerChatRoutes(
   app: FastifyInstance,
-  llmService: LlmService,
-  repo: ConversationRepo,
-  messageRepo: MessageRepo,
-  streamRepo: StreamResumeRepo,
-  hub: StreamHub,
-  requireAuth: PreHandler,
-  workingMemory?: WorkingMemoryService,
-  knowledge?: KnowledgeService,
-  soulLoader?: SoulLoader,
-  events?: EventEmitter,
-  toolRegistry?: ToolRegistry,
-  approvals?: DurableApprovalGate,
-  guardrails?: GuardrailsService,
-  pendingInteractionRepo?: PendingInteractionRepo,
-  injectedSurfaceStore?: SurfaceArtifactStore,
-  surfaceActionStore?: SurfaceActionStore,
-  invocations?: DurableInvocationGateway,
-  bundledSkills?: ReadonlyMap<string, BundledSkill>,
-  disabledBundledSkills?: ReadonlySet<string>,
-  chatRunLifecycle?: ChatRunLifecycle,
-  conversationStore?: ConversationStore
+  options: ChatRoutesOptions,
+  requireAuth: PreHandler
 ): void {
-  // A gateway with nowhere to record the Turn would mint Runs whose requests are unreachable — the
-  // exact hole this submission path closes. Refuse to boot half-wired rather than degrade silently.
-  if (invocations && !conversationStore) {
-    throw new Error("chat_routes_missing_conversation_store");
-  }
-  // One approval gate shared by the chat turn and decision route. Production injects its
-  // authoritative PostgreSQL repository; process-local waiters only resume the live stream.
-  const approvalRegistry = approvals ?? new DurableApprovalGate();
-  // HITL suspend/resume store. Tests may use the in-memory default; buildApp injects
-  // the PostgreSQL-backed repository so production pauses survive restarts.
-  const pendingInteractions = pendingInteractionRepo ?? new MemoryPendingInteractionRepo();
-  const surfaceStore = injectedSurfaceStore ?? new MemorySurfaceArtifactStore();
-  // In-flight turns keyed by streamId, so the stop endpoint can abort the LLM mid-stream. Each entry
-  // is removed when its producer settles (single-instance V1, mirroring the approval registry).
-  const streamControllers = new Map<string, AbortController>();
-
-  const turnCtx: ChatTurnContext = {
-    llmService,
-    repo,
-    messageRepo,
-    streamRepo,
-    hub,
-    workingMemory,
-    knowledge,
-    soulLoader,
-    bundledSkills,
-    disabledBundledSkills,
-    events,
-    toolRegistry,
-    guardrails,
-    approvalRegistry,
-    pendingInteractions,
-    surfaceStore,
-    surfaceActionStore,
-    streamControllers,
-  };
-  // Expose the turn context so headless callers (integration ingress worker, wired in index.ts)
-  // run through exactly the same pipeline as the HTTP route.
-  app.decorate("chatTurnContext", turnCtx);
+  const { stream } = options;
 
   app.post(
     "/api/v1/chat",
@@ -112,7 +72,9 @@ export function registerChatRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Run one chat turn (streamed, AI SDK data-stream protocol). An optional `model` " +
+          "Submit one chat turn and stream the Run that answers it (SSE, Run event vocabulary — " +
+          "the same frames as `GET /api/v1/runs/:id/events`). The Run id is returned in " +
+          "`X-Run-Id`; reconnect against that Run with `?after=<sequence>`. An optional `model` " +
           "(tier name or model id) overrides the model for this turn only; it is never persisted.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
@@ -126,6 +88,7 @@ export function registerChatRoutes(
         response: {
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: DuplicateInvocationSchema,
           503: ErrorSchema,
@@ -133,13 +96,12 @@ export function registerChatRoutes(
       },
     },
     async (req, reply) => {
-      if (!(invocations && conversationStore)) {
-        return runChatTurn(req, reply, turnCtx, messageOnlySubmitter(messageRepo));
-      }
       const principal = req.principal;
-      if (!principal) {
+      const user = req.user as { _id: string } | undefined;
+      if (!(principal && user)) {
         return reply.code(401).send({ error: "unauthorized" });
       }
+      const body = req.body as ChatBody;
       const idempotencyHeader = req.headers["idempotency-key"];
       // A client that sends no key still gets idempotency, just only within its own retry of this
       // request — `req.id` is unique per delivery, so a second POST is a second Turn.
@@ -147,136 +109,127 @@ export function registerChatRoutes(
         typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
           ? idempotencyHeader
           : req.id;
-      const durable = durableTurnSubmitter({
-        store: conversationStore,
-        invocations,
+      const submitter = durableTurnSubmitter({
+        store: options.conversationStore,
+        invocations: options.invocations,
         principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
-        payload: req.body,
-        agentId: (req.body as { agentId?: string }).agentId ?? "assistant",
+        payload: body,
+        agentId: body.agentId ?? "assistant",
         // Scoped to the submitter. Turn keys are unique deployment-wide, and the value is whatever a
         // client chose to send, so an unscoped key lets one caller claim another's: their turn would
         // be refused as a duplicate and answered with a Run id that is not theirs.
         idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
-        ...(chatRunLifecycle ? { lifecycle: chatRunLifecycle } : {}),
         log: req.log,
       });
-      // The chat response is hijacked for SSE below, so the Run id goes onto the raw response as
-      // well as Fastify's header collection. Otherwise it is lost at the wire.
-      const withRunHeader = <T>(runId: string | undefined, result: T): T => {
-        if (runId) {
-          reply.header("X-Run-Id", runId);
-          reply.raw.setHeader("X-Run-Id", runId);
-        }
-        return result;
-      };
-      const submitter: ChatTurnSubmitter = {
-        findSubmitted: async () => {
-          const replayed = await durable.findSubmitted?.();
-          return withRunHeader(replayed?.runId, replayed ?? null);
+
+      // Asked before the conversation is opened: a retried first message must not leave an empty
+      // conversation (and a generated title) behind for a turn that was already answered.
+      const replayed = await submitter.findSubmitted?.();
+      if (replayed) {
+        return reply.code(409).send({ error: "duplicate chat invocation", runId: replayed.runId });
+      }
+
+      const entry = await resolveConversationEntry(
+        {
+          repo: options.repo,
+          llmService: options.llmService,
+          ...(options.soulLoader ? { soulLoader: options.soulLoader } : {}),
+          ...(options.events ? { events: options.events } : {}),
         },
-        submit: async (request) => {
-          const submission = await durable.submit(request);
-          return withRunHeader(
-            submission.outcome === "duplicate" ? submission.runId : submission.run?.runId,
-            submission
-          );
+        { userId: user._id, body, log: req.log }
+      );
+      if (isConversationEntryError(entry)) {
+        return reply.code(entry.status).send({ error: entry.error });
+      }
+
+      const submission = await submitter.submit({
+        conversationId: entry.conversation._id,
+        content: body.message.content,
+      });
+      if (submission.outcome === "duplicate") {
+        // Already submitted and already answered by a Run. Streaming a second reply would answer one
+        // message twice; the client reattaches to the Run it is given here.
+        return reply
+          .code(409)
+          .send({ error: "duplicate chat invocation", runId: submission.runId });
+      }
+      const runId = submission.run?.runId;
+      if (!runId) {
+        return reply.code(503).send({ error: "chat turn could not be dispatched" });
+      }
+
+      const grant = await stream.authorize(req, runId);
+      if (!grant) return reply.code(403).send({ error: "run stream not authorized" });
+
+      // The reply is hijacked below, so every header a client needs goes onto the raw response too —
+      // Fastify's collection is not written once the socket is taken over.
+      reply.header("X-Run-Id", runId);
+      writeSseHeaders(reply.raw, {
+        "X-Run-Id": runId,
+        "X-Conversation-Id": entry.conversation._id,
+        // Only a user-selected Soul Agent is exposed to the client: normal chat has no Agent
+        // identity, and a removed Agent resolves back to normal chat.
+        ...(entry.agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": entry.agentId }),
+        ...corsPassthrough(reply),
+      });
+      reply.hijack();
+      await streamRunEvents(
+        sinkFor(reply),
+        {
+          events: stream.events,
+          runs: stream.runs,
+          authorize: () => stream.authorize(req, runId),
+          sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+          ...(stream.pollIntervalMs === undefined ? {} : { pollIntervalMs: stream.pollIntervalMs }),
+          ...(stream.pageSize === undefined ? {} : { pageSize: stream.pageSize }),
         },
-      };
-      return runChatTurn(req, reply, turnCtx, submitter);
+        { runId, after: 0 }
+      );
     }
   );
 
   app.post(
-    "/api/v1/chat/streams/:streamId/stop",
+    "/api/v1/chat/runs/:runId/stop",
     {
       preHandler: requireAuth,
       schema: {
         description:
-          "Stop an in-flight chat stream: aborts the LLM so generation halts immediately. The " +
-          "producer ends the stream with a `finish` (reason `stopped`). 404 if the stream already " +
-          "finished or never existed.",
+          "Stop the Run answering a chat turn. Cancellation is requested of the Run itself, so it " +
+          "halts the turn in whichever process is executing it — the stream then ends with the " +
+          "Run's terminal status. 404 if the Run is unknown or already finished.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
           type: "object",
-          required: ["streamId"],
-          properties: { streamId: { type: "string", minLength: 1 } },
+          required: ["runId"],
+          properties: { runId: { type: "string", minLength: 1 } },
         },
         response: {
           200: { type: "object", properties: { status: { type: "string" } }, required: ["status"] },
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
+          503: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
-      const { streamId } = req.params as { streamId: string };
-      const controller = streamControllers.get(streamId);
-      if (!controller) {
-        return reply.code(404).send({ error: "stream not found or already finished" });
+      const { runId } = req.params as { runId: string };
+      if (!options.cancel) {
+        return reply.code(503).send({ error: "run cancellation is not available" });
       }
-      controller.abort();
+      // The same grant that lets this caller read the Run is what lets them stop it: both are
+      // "is this your turn?", and answering them differently would let one reader halt another's.
+      const grant = await stream.authorize(req, runId);
+      if (!grant) return reply.code(403).send({ error: "run not yours to stop" });
+
+      const stopped = await options.cancel.cancel({
+        businessId: grant.businessId,
+        runId,
+        reason: "stopped by participant",
+      });
+      if (!stopped) return reply.code(404).send({ error: "run not found or already finished" });
       return reply.send({ status: "stopped" });
     }
-  );
-
-  app.get(
-    "/api/v1/chat/streams/:streamId",
-    {
-      preHandler: requireAuth,
-      schema: {
-        description:
-          "Resume an in-flight or recently-finished chat stream over SSE. Send the last " +
-          "received event id as the `Last-Event-ID` header (or `?lastEventId=`): buffered " +
-          "events after it are replayed, then the connection attaches to the live tail.",
-        tags: ["chat"],
-        security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        params: {
-          type: "object",
-          required: ["streamId"],
-          properties: { streamId: { type: "string" } },
-        },
-        querystring: {
-          type: "object",
-          properties: { lastEventId: { type: "integer", minimum: 0 } },
-        },
-        response: { 401: ErrorSchema, 404: ErrorSchema },
-      },
-    },
-    async (req, reply) => {
-      const { streamId } = req.params as { streamId: string };
-      const afterSeq = parseLastEventId(
-        req.headers["last-event-id"],
-        (req.query as { lastEventId?: number }).lastEventId
-      );
-
-      // Unknown stream (never existed or already GC'd) → 404. A live stream or any
-      // buffered row counts as known, even if the client already has every event.
-      if (!hub.isLive(streamId)) {
-        const existing = await streamRepo.listAfter(streamId, 0);
-        if (existing.length === 0) {
-          return reply.code(404).send({ error: "stream not found" });
-        }
-      }
-
-      writeSseHeaders(reply.raw, corsPassthrough(reply));
-      reply.hijack();
-      await attachToStream(reply.raw, streamId, afterSeq, { repo: streamRepo, hub });
-    }
-  );
-
-  registerConversationRoutes(
-    app,
-    {
-      repo,
-      messageRepo,
-      workingMemory,
-      knowledge,
-      soulLoader,
-      toolRegistry,
-      bundledSkills,
-      disabledBundledSkills,
-    },
-    requireAuth
   );
 }

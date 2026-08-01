@@ -14,6 +14,7 @@ const AUTHORITY: TurnAuthority = {
   runId: RUN_ID,
   turn: turn(),
   subject: { kind: "user", id: "user-1" },
+  source: "chat",
   bundleDigest: "bundle-digest",
 };
 

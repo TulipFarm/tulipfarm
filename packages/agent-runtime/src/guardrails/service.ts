@@ -23,10 +23,23 @@ export class GuardrailsService {
   private input: Guard<string>[] = [];
   private toolCall: Guard<ToolCallInput>[] = [];
   private output: Guard<string>[] = [];
+  private configValue: GuardrailsConfig = DEFAULT_GUARDRAILS;
   private revisionValue = canonicalHash(DEFAULT_GUARDRAILS);
 
   get revision(): string {
     return this.revisionValue;
+  }
+
+  /**
+   * The policy these guards were built from — the same object {@link revision} hashes.
+   *
+   * Exposed because the Worker enforces this policy on turns it executes and cannot read the Soul
+   * itself. Shipping the config rather than a compiled pipeline keeps one authority: whoever
+   * receives it rebuilds the identical guards through {@link init} and can prove it by comparing
+   * revisions.
+   */
+  get config(): GuardrailsConfig {
+    return this.configValue;
   }
 
   init(raw: Record<string, unknown> | null, log: ServiceLogger): void {
@@ -51,6 +64,7 @@ export class GuardrailsService {
     this.input = input;
     this.toolCall = toolCall;
     this.output = output;
+    this.configValue = cfg;
     this.revisionValue = canonicalHash(cfg);
   }
 

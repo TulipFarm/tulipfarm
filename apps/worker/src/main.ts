@@ -14,7 +14,9 @@ import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
+import { createHookExecutor } from "./hooks/executor";
 import { InternalApiClient } from "./internal/client";
+import { HttpDeliveryHost } from "./internal/delivery-host";
 import { HttpTurnHost } from "./internal/turn-host";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
@@ -24,6 +26,7 @@ import { startProbeServer } from "./probe-server";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
 import { createChatExecutor } from "./turn/chat-executor";
+import { createIntegrationExecutor } from "./turn/integration-executor";
 import { RunStoreStateTransitions } from "./turn/kernel-ports";
 
 /** Consumer identity recorded on every outbox receipt this process writes. */
@@ -36,11 +39,27 @@ const OUTBOX_CONSUMER = "worker.run-dispatch";
  */
 const CHAT_RUN_SOURCE = "chat";
 
+/**
+ * The Run source an Integration delivery is minted under.
+ *
+ * Its executor classifies the stored envelope and then hands the Run to the very same chat
+ * executor, so a Slack message and a web message are answered by one code path — the difference
+ * between them ends at the classifier.
+ */
+const INTEGRATION_RUN_SOURCE = "integration";
+
 const logger = {
   info: (message: string) => console.log(message),
+  // A guard that timed out or threw is skipped rather than allowed to stall the turn, so this is
+  // the only place it is ever heard about.
+  warn: (obj: unknown, message?: string) =>
+    message === undefined ? console.warn(obj) : console.warn(message, obj),
   error: (message: string, error?: unknown) =>
     error === undefined ? console.error(message) : console.error(message, error),
-} satisfies LoopLogger & { info: (message: string) => void };
+} satisfies LoopLogger & {
+  info: (message: string) => void;
+  warn: (obj: unknown, message?: string) => void;
+};
 
 /**
  * Composition root for the durable worker.
@@ -74,12 +93,11 @@ export async function main(): Promise<void> {
 
   // The turn host answers every question a turn has that this process cannot answer itself: which
   // Turn a Run answers, the assembled Context, Tool dispatch, and the durable completion.
-  const turnHost = new HttpTurnHost(
-    new InternalApiClient({
-      baseUrl: config.internalApiUrl,
-      credential: config.internalApiCredential,
-    })
-  );
+  const internalApi = new InternalApiClient({
+    baseUrl: config.internalApiUrl,
+    credential: config.internalApiCredential,
+  });
+  const turnHost = new HttpTurnHost(internalApi);
 
   // The Soul's LLM configuration names providers and `api_key_ref`s; the credentials themselves are
   // unwrapped here, against this worker's own database, so no key material crosses the API hop.
@@ -96,17 +114,29 @@ export async function main(): Promise<void> {
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
 
+  const chatExecutor = createChatExecutor({
+    host: turnHost,
+    context: turnHost,
+    runs: runStore,
+    events: runEventStore,
+    budgets: budgetStore,
+    transitions: new RunStoreStateTransitions(runStore),
+    waits: turnHost,
+    model: new LlmModelPort({ model: (id) => llm.model(id) }),
+    log: logger,
+  });
+  executors.register(CHAT_RUN_SOURCE, chatExecutor);
+
   executors.register(
-    CHAT_RUN_SOURCE,
-    createChatExecutor({
-      host: turnHost,
-      context: turnHost,
-      runs: runStore,
+    INTEGRATION_RUN_SOURCE,
+    createIntegrationExecutor({
+      deliveries: new HttpDeliveryHost(internalApi),
+      // Spawned once and shared: the isolate is stateless between calls and its circuit breaker is
+      // per-Integration, so a classifier that keeps failing is disabled for that Integration rather
+      // than rediscovered from scratch on every delivery.
+      hooks: createHookExecutor(),
       events: runEventStore,
-      budgets: budgetStore,
-      transitions: new RunStoreStateTransitions(runStore),
-      waits: turnHost,
-      model: new LlmModelPort({ model: (id) => llm.model(id) }),
+      turn: chatExecutor,
     })
   );
 

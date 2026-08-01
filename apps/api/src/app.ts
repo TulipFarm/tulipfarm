@@ -17,7 +17,6 @@ import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
 import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/health";
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
-import { DurableApprovalGate } from "./approvals/chat-gate";
 import { registerApprovalRoutes } from "./approvals/routes";
 import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { ToolApprovalService } from "./approvals/tool-approvals";
@@ -28,12 +27,10 @@ import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { UserRepo } from "./auth/users";
 import type { ToolRegistry } from "./broker/tool-adapter";
+import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
 import type { MessageRepo } from "./chat/messages";
-import type { PendingInteractionRepo } from "./chat/pending-interactions";
-import { registerChatRoutes } from "./chat/routes";
-import { StreamHub } from "./chat/stream-hub";
-import { MemoryStreamResumeRepo, type StreamResumeRepo } from "./chat/stream-resume";
+import { type ChatRunCanceller, registerChatRoutes } from "./chat/routes";
 import type { ConversationStore } from "./conversations/service";
 import type { FeedbackRepo } from "./feedback/repo";
 import { registerFeedbackRoutes } from "./feedback/routes";
@@ -61,7 +58,6 @@ import type { RoutineRoutesDeps } from "./routines/routes";
 import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
-import type { ChatRunLifecycle } from "./runtime/chat-run-lifecycle";
 import type { DurableInvocationGateway } from "./runtime/invocation-gateway";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
@@ -102,8 +98,6 @@ export interface AppOptions {
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
-  streamResumeRepo?: StreamResumeRepo;
-  streamHub?: StreamHub;
   workingMemoryService?: WorkingMemoryService;
   kvService?: KvService;
   /** Caller-initiated invocation of manual / internal-API Triggers. */
@@ -112,9 +106,7 @@ export interface AppOptions {
   forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
-  approvalRegistry?: DurableApprovalGate;
   guardrailsService?: GuardrailsService;
-  pendingInteractionRepo?: PendingInteractionRepo;
   surfaceArtifactStore?: SurfaceArtifactStore;
   surfaceActionStore?: SurfaceActionStore;
   activityService?: ActivityService;
@@ -144,10 +136,10 @@ export interface AppOptions {
    */
   conversationStore?: ConversationStore;
   /**
-   * Claims and completes the Runs the chat path mints. Absent means Runs are minted but never
-   * advanced — the pre-cutover behavior, kept only for partial assemblies and tests.
+   * Stops a Run a chat participant abandoned. Absent means the stop control reports 503 rather than
+   * pretending a turn was halted.
    */
-  chatRunLifecycle?: ChatRunLifecycle;
+  runCancel?: ChatRunCanceller;
   /**
    * The turn machinery the Worker calls back into while it cannot import this app. Service
    * principals only; PR 4 moves the implementations into the Worker and this surface goes away.
@@ -481,31 +473,39 @@ export async function buildApp(opts: AppOptions = {}) {
           kv: opts.kvService,
           knowledge: opts.knowledgeService,
         });
-      const approvalRegistry = opts.approvalRegistry ?? new DurableApprovalGate();
-      registerChatRoutes(
+      registerConversationRoutes(
         app,
-        opts.llmService,
-        opts.conversationRepo,
-        opts.messageRepo,
-        opts.streamResumeRepo ?? new MemoryStreamResumeRepo(),
-        opts.streamHub ?? new StreamHub(),
-        requireAuth,
-        opts.workingMemoryService,
-        opts.knowledgeService,
-        opts.soulLoader,
-        opts.domainEventEmitter,
-        toolRegistry,
-        approvalRegistry,
-        opts.guardrailsService,
-        opts.pendingInteractionRepo,
-        surfaceArtifactStore,
-        surfaceActionStore,
-        opts.invocations,
-        opts.bundledSkills,
-        opts.disabledBundledSkills,
-        opts.chatRunLifecycle,
-        opts.conversationStore
+        {
+          repo: opts.conversationRepo,
+          messageRepo: opts.messageRepo,
+          workingMemory: opts.workingMemoryService,
+          knowledge: opts.knowledgeService,
+          soulLoader: opts.soulLoader,
+          toolRegistry,
+          bundledSkills: opts.bundledSkills,
+          disabledBundledSkills: opts.disabledBundledSkills,
+        },
+        requireAuth
       );
+      // Submitting a turn needs the durable trio: the Run, the Turn it answers, and the event stream
+      // it is read back from. A half-composed assembly serves conversation history but refuses to
+      // start a turn it could not reconstruct — it never falls back to running one in this process.
+      if (opts.invocations && opts.conversationStore && opts.runEvents) {
+        registerChatRoutes(
+          app,
+          {
+            llmService: opts.llmService,
+            repo: opts.conversationRepo,
+            conversationStore: opts.conversationStore,
+            invocations: opts.invocations,
+            stream: opts.runEvents,
+            ...(opts.runCancel ? { cancel: opts.runCancel } : {}),
+            ...(opts.soulLoader ? { soulLoader: opts.soulLoader } : {}),
+            ...(opts.domainEventEmitter ? { events: opts.domainEventEmitter } : {}),
+          },
+          requireAuth
+        );
+      }
       registerSurfaceRoutes(
         app,
         surfaceArtifactStore,
@@ -515,20 +515,25 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.guardrailsService,
         opts.soulLoader
       );
+    }
+    if (opts.approvalsRepo) {
       registerApprovalRoutes(
         app,
-        approvalRegistry,
-        requireAuth,
-        opts.approvalsRepo && opts.routines
-          ? {
-              approvalsRepo: opts.approvalsRepo,
-              enqueueWake: (job) => {
-                if (!opts.routines) return Promise.resolve();
-                return opts.routines.enqueuers.enqueueWake(job);
-              },
-            }
-          : undefined,
-        opts.toolApprovals
+        {
+          approvals: opts.approvalsRepo,
+          ...(opts.toolApprovals ? { toolApprovals: opts.toolApprovals } : {}),
+          ...(opts.routines
+            ? {
+                routines: {
+                  enqueueWake: (job) => {
+                    if (!opts.routines) return Promise.resolve();
+                    return opts.routines.enqueuers.enqueueWake(job);
+                  },
+                },
+              }
+            : {}),
+        },
+        requireAuth
       );
     }
     if (opts.runEvents) {

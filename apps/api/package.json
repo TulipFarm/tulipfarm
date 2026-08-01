@@ -22,6 +22,7 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",

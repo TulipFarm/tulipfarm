@@ -1,15 +1,14 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
-import type { DurableApprovalGate } from "./chat-gate";
+import { listPendingToolApprovals } from "./pending";
 import type { ApprovalsRepo } from "./runtime-repo";
 import type { ToolApprovalService } from "./tool-approvals";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/** Routine-approval extension: DB-backed routine_state rows + run resumption (v0.11). */
+/** Routine-approval extension: run resumption for `routine_state` rows (v0.11). */
 export interface RoutineApprovalDeps {
-  approvalsRepo: ApprovalsRepo;
   enqueueWake: (job: {
     runId: string;
     reason: "approval";
@@ -18,16 +17,22 @@ export interface RoutineApprovalDeps {
   }) => Promise<void>;
 }
 
+export interface ApprovalRoutesDeps {
+  /** The authority for both kinds. Pending state is read from here, never from this process. */
+  readonly approvals: ApprovalsRepo;
+  /** Settles a `tool_call` approval and resumes the Run parked on it. */
+  readonly toolApprovals?: ToolApprovalService;
+  readonly routines?: RoutineApprovalDeps;
+}
+
 /**
  * Standalone approval routes (AGT-V1-002). Serves BOTH approval kinds behind one
  * discriminated list/decide surface. Both kinds are PostgreSQL-authoritative.
  */
 export function registerApprovalRoutes(
   app: FastifyInstance,
-  approvalRegistry: DurableApprovalGate,
-  requireAuth: PreHandler,
-  routineDeps?: RoutineApprovalDeps,
-  toolApprovals?: ToolApprovalService
+  deps: ApprovalRoutesDeps,
+  requireAuth: PreHandler
 ): void {
   app.get(
     "/api/v1/approvals",
@@ -74,33 +79,29 @@ export function registerApprovalRoutes(
       },
     },
     async (_req, reply) => {
-      const toolCalls = (await approvalRegistry.listPending()).map((item) => ({
-        kind: "tool_call" as const,
-        ...item,
-      }));
-
-      let routineItems: Array<Record<string, unknown>> = [];
-      if (routineDeps) {
-        const rows = await routineDeps.approvalsRepo.listPending("routine_state");
-        routineItems = rows.map((row) => {
-          const payload = (row.payload ?? {}) as {
-            routineSlug?: string;
-            runId?: string;
-            stateName?: string;
-            summary?: unknown;
-          };
-          return {
-            kind: "routine_state" as const,
-            approvalId: row.id,
-            routineSlug: payload.routineSlug,
-            runId: payload.runId,
-            stateName: payload.stateName,
-            summary: payload.summary,
-            expiresAt: row.expiresAt.toISOString(),
-            createdAt: row.createdAt.toISOString(),
-          };
-        });
-      }
+      const [pendingToolCalls, routineRows] = await Promise.all([
+        listPendingToolApprovals(deps.approvals),
+        deps.approvals.listPending("routine_state"),
+      ]);
+      const toolCalls = pendingToolCalls.map((item) => ({ kind: "tool_call" as const, ...item }));
+      const routineItems = routineRows.map((row) => {
+        const payload = (row.payload ?? {}) as {
+          routineSlug?: string;
+          runId?: string;
+          stateName?: string;
+          summary?: unknown;
+        };
+        return {
+          kind: "routine_state" as const,
+          approvalId: row.id,
+          routineSlug: payload.routineSlug,
+          runId: payload.runId,
+          stateName: payload.stateName,
+          summary: payload.summary,
+          expiresAt: row.expiresAt.toISOString(),
+          createdAt: row.createdAt.toISOString(),
+        };
+      });
       return reply.send({ items: [...toolCalls, ...routineItems] });
     }
   );
@@ -111,9 +112,9 @@ export function registerApprovalRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Approve or deny a pending approval. tool_call: resumes the suspended chat stream with " +
-          "the tool result (approve) or an error the model sees (deny). routine_state: settles the " +
-          "row and wakes the suspended routine run with the decision.",
+          "Approve or deny a pending approval. tool_call: settles the row and resumes the same Run " +
+          "the turn parked on, wherever it is executing. routine_state: settles the row and wakes " +
+          "the suspended routine run with the decision.",
         tags: ["approvals"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -145,11 +146,11 @@ export function registerApprovalRoutes(
       const { decision } = req.body as { decision: "approve" | "deny" };
       const settled = decision === "approve" ? "approved" : "denied";
 
-      // A Worker-executed turn parks on a durable wait, so its decision is a kernel signal that
-      // requeues the same Run — not a promise this process is holding. Asked first, because the
-      // in-process gate below would settle the row and then have nothing to resume.
-      if (toolApprovals && req.principal) {
-        const outcome = await toolApprovals.signal({
+      // A turn parks on a durable wait, so its decision is a kernel signal that requeues the same
+      // Run — nothing in this process is holding the call. `not_found` falls through: the row may be
+      // a `routine_state` approval, which the branch below owns.
+      if (deps.toolApprovals && req.principal) {
+        const outcome = await deps.toolApprovals.signal({
           businessId: DEPLOYMENT_BUSINESS_ID,
           approvalId,
           decision: settled,
@@ -164,16 +165,13 @@ export function registerApprovalRoutes(
         }
       }
 
-      const resolved = await approvalRegistry.decide(approvalId, settled);
-      if (resolved) return reply.send({ status: decision });
-
-      if (routineDeps) {
-        const row = await routineDeps.approvalsRepo.findById(approvalId);
+      if (deps.routines) {
+        const row = await deps.approvals.findById(approvalId);
         if (row && row.kind === "routine_state" && row.status === "pending") {
           const payload = (row.payload ?? {}) as { runId?: string };
           if (payload.runId) {
-            await routineDeps.approvalsRepo.settle(approvalId, settled);
-            await routineDeps.enqueueWake({
+            await deps.approvals.settle(approvalId, settled);
+            await deps.routines.enqueueWake({
               runId: payload.runId,
               reason: "approval",
               token: `approval:${approvalId}`,

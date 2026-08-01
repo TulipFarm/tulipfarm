@@ -85,6 +85,8 @@ export function fakeRuns(
   run: {
     status?: string;
     digest?: string;
+    /** What minted the Run — the `bundle.routineId` a host reads its source from. */
+    source?: string;
     subject?: { kind: string; id: string };
   } | null = {}
 ): HostedRunReader {
@@ -93,7 +95,7 @@ export function fakeRuns(
       if (run === null) return null;
       return {
         status: run.status ?? "running",
-        bundle: { digest: run.digest ?? "bundle-digest" },
+        bundle: { digest: run.digest ?? "bundle-digest", routineId: run.source ?? "chat" },
         identity: { effectiveSubject: run.subject ?? { kind: "user", id: "user-1" } },
       };
     },

@@ -45,6 +45,7 @@ export const RUN_EVENT_TYPES = [
   "context.assembled",
   "tool.dispatched",
   "guardrail.decision",
+  "delivery.classified",
 ] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
@@ -121,7 +122,13 @@ const SURFACE_EMITTED_SCHEMA = {
   },
 } as const;
 
-/** The turn is parked on a durable wait. The same Run resumes when the wait is signalled. */
+/**
+ * The turn is parked on a durable wait. The same Run resumes when the wait is signalled.
+ *
+ * `callId` names the Tool call being held, so a reader can show the decision against the call it
+ * belongs to instead of as a free-floating prompt. It is the id from the participant's own
+ * `tool.call` event — never the Tool's arguments, which stay behind the digest.
+ */
 const APPROVAL_REQUESTED_SCHEMA = {
   type: "object",
   required: ["waitId", "intentId"],
@@ -129,6 +136,7 @@ const APPROVAL_REQUESTED_SCHEMA = {
   properties: {
     waitId: { type: "string", minLength: 1 },
     intentId: { type: "string", minLength: 1 },
+    callId: { type: "string", minLength: 1 },
     summary: { type: "string" },
   },
 } as const;
@@ -213,6 +221,25 @@ const GUARDRAIL_DECISION_SCHEMA = {
 } as const;
 
 /**
+ * Operator evidence: what an Integration's classifier decided about one delivery.
+ *
+ * Most deliveries a channel sends are not questions — a reaction, a bot's own message, an event
+ * type nobody subscribed to — and a Run that answers none of them still has to say why it did
+ * nothing. Without this row, an operator asking "why did Slack not reply?" can only see a Run that
+ * succeeded silently, which is indistinguishable from one that was never delivered.
+ */
+const DELIVERY_CLASSIFIED_SCHEMA = {
+  type: "object",
+  required: ["decision"],
+  additionalProperties: false,
+  properties: {
+    decision: { type: "string", enum: ["ignore", "chat", "event", "invalid"] },
+    reason: { type: "string" },
+    eventType: { type: "string", minLength: 1 },
+  },
+} as const;
+
+/**
  * Every event a Run may emit. A type outside this set is refused before it can be appended, so the
  * durable stream cannot grow a shape no reader was built to understand.
  */
@@ -228,6 +255,7 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
   { type: "context.assembled", audience: "operator", schema: CONTEXT_ASSEMBLED_SCHEMA },
   { type: "tool.dispatched", audience: "operator", schema: TOOL_DISPATCHED_SCHEMA },
   { type: "guardrail.decision", audience: "operator", schema: GUARDRAIL_DECISION_SCHEMA },
+  { type: "delivery.classified", audience: "operator", schema: DELIVERY_CLASSIFIED_SCHEMA },
 ];
 
 /** The three points a guardrail can refuse a turn, shared by the block and decision records. */
@@ -264,6 +292,7 @@ export interface RunEventPayloads {
   readonly "approval.requested": {
     readonly waitId: string;
     readonly intentId: string;
+    readonly callId?: string;
     readonly summary?: string;
   };
   readonly "guardrail.blocked": {
@@ -297,6 +326,11 @@ export interface RunEventPayloads {
     readonly guard: string;
     readonly decision: "pass" | "transform" | "block";
     readonly reason?: string;
+  };
+  readonly "delivery.classified": {
+    readonly decision: "ignore" | "chat" | "event" | "invalid";
+    readonly reason?: string;
+    readonly eventType?: string;
   };
 }
 

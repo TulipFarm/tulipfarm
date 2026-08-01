@@ -112,9 +112,11 @@ describe("/api/v1/internal/turns", () => {
             async resolve(authority) {
               return {
                 agentId: "assistant",
+                subjectId: authority.subject.id,
                 modelProfileId: "model-1",
                 contextDigest: "context-digest",
                 guardrailDigest: "guardrail-digest",
+                guardrailPolicy: { input: [] },
                 messages: [{ role: "user", content: `as ${authority.subject.id}` }],
                 tools: [],
                 limits: { maxIterations: 25, maxToolCalls: 25, maxRepairAttempts: 2 },

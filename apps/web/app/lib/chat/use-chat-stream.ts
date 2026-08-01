@@ -21,7 +21,7 @@ import {
   postChat,
   postSurfaceInteraction,
   sendApprovalDecision,
-  stopChatStream,
+  stopChatRun,
 } from "~/lib/chat/sse-client";
 import type {
   Autonomy,
@@ -142,14 +142,10 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
     return {
       ...state,
       conversationId: action.meta.conversationId ?? state.conversationId,
-      streamId: action.meta.streamId ?? state.streamId,
+      runId: action.meta.runId ?? state.runId,
       // Server-authoritative active agent for this turn (the @mentioned/conversation agent), so the
       // header follows direct routing — not only transfer_to_agent handoffs. Kept if absent.
       currentAgent: action.meta.agentId ?? state.currentAgent,
-      // The reply's persisted id arrives once per turn, before any text; the `finish` case stamps it
-      // onto the sealed assistant message as `serverId`. Set it directly (NOT `?? state.pendingServerId`)
-      // so a turn whose header is absent clears it rather than inheriting the previous turn's id.
-      pendingServerId: action.meta.messageId,
     };
   }
   return chatReducer(state, action);
@@ -253,13 +249,14 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     await runStream(text, lastOptsRef.current);
   }, [runStream]);
 
-  // Stop the in-flight turn: best-effort halt the server's LLM (so token burn stops), then abort the
-  // local fetch — the catch dispatches `stopped`, rewinding the turn. The streamId arrives via the
-  // X-Stream-Id header (onMeta) almost immediately; a stop in the brief window before it lands still
-  // aborts locally (the server then runs that one turn to completion).
+  // Stop the in-flight turn: cancel its Run (the executing process halts the turn), then abandon the
+  // local stream — the catch dispatches `stopped`, rewinding the timeline. The runId arrives via the
+  // X-Run-Id header (onMeta) almost immediately; a stop in the brief window before it lands still
+  // detaches locally, and the Run then finishes on the server. Cancellation is eventually consistent:
+  // the turn stops once the executor observes it, not the instant this returns.
   const stop = useCallback(() => {
-    const sid = stateRef.current.streamId;
-    if (sid) void stopChatStream(sid).catch(() => {});
+    const runId = stateRef.current.runId;
+    if (runId) void stopChatRun(runId).catch(() => {});
     abortRef.current?.abort();
   }, []);
 

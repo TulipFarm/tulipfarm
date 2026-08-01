@@ -5,13 +5,16 @@
   "dependencies": {
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
+    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
+    "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
+    "isolated-vm": "^7.0.0",
     "pg": "^8.22.0"
   },
   "scripts": {
@@ -26,7 +29,6 @@
     "@electric-sql/pglite": "^0.5.3",
     "@electric-sql/pglite-socket": "^0.2.7",
     "@tulipfarm/authz": "workspace:*",
-    "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/memory": "workspace:*",
     "@tulipfarm/tool-broker": "workspace:*",

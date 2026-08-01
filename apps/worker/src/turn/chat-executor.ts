@@ -11,8 +11,10 @@ import { ConversationTurnCompleter, type TurnCompletionStore } from "../conversa
 import type { RunExecutor } from "../executors";
 import type { RunOutcome } from "../run-dispatcher";
 import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
+import { TurnGuardrails } from "./guardrails";
 import { reclaimWaitingState } from "./kernel-ports";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
+import { announceToolCalls } from "./tool-events";
 
 /**
  * The `chat` Run executor (plan §4; blocker §2).
@@ -48,6 +50,8 @@ export interface ChatExecutorOptions {
   readonly transitions: StateTransitionPort;
   readonly waits: ApprovalWaitPort;
   readonly model: ModelPort;
+  /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
+  readonly log: { warn(obj: unknown, msg?: string): void };
   now?(): Date;
 }
 
@@ -105,9 +109,16 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 
+    // Built here and configured by the driver once the Context names a policy: the dispatch port
+    // has to be wrapped before the loop exists, and the policy is not known until then. Until it is
+    // configured every stage refuses, so there is no window in which a Tool runs unguarded.
+    const guardrails = new TurnGuardrails(options.log);
+
     const loop = new AgentLoop({
       model: options.model,
-      tools: options.host,
+      // Guarding wraps announcing, not the other way round: a call a guard refuses never reached a
+      // Tool, so announcing it as a call that ran would misreport the turn.
+      tools: guardrails.guard(announceToolCalls(options.host, writer), writer),
       // Counters are also charged against the durable Run budget below, which is what actually
       // caps a resumed State. These are the loop's local view for one execution.
       checkpoints: new InMemoryLoopCheckpointStore(),
@@ -128,6 +139,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       }),
       context: options.context,
       completer: new ConversationTurnCompleter({ store: options.host }),
+      guardrails,
       buildEvents: () => writer,
     });
 

@@ -1,10 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { type IngressDecision, parseDecision } from "@tulipfarm/integrations";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import { analyzeHook } from "@tulipfarm/sandbox";
 import { beforeAll, describe, expect, it } from "vitest";
 import { createHookExecutor } from "../hooks/executor";
-import { type IngressDecision, parseDecision } from "./classification";
 
 /*
  * Parity guard for the github reference integration (events-only ingress): runs a vendored copy

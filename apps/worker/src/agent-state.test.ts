@@ -2,6 +2,7 @@ import type { AgentLoopInput, AgentLoopOutcome } from "@tulipfarm/agent-runtime"
 import { RunTransitionError, type StateStatus } from "@tulipfarm/run-kernel";
 import { describe, expect, it } from "vitest";
 import { type AgentStateRequest, AgentStateRunner } from "./agent-state";
+import { StateTransitionConflictError } from "./turn/kernel-ports";
 
 const counters = { iterations: 1, toolCalls: 0, repairs: 0 };
 
@@ -103,6 +104,31 @@ describe("AgentStateRunner", () => {
       { from: "cancelling", to: "cancelled" },
     ]);
     expect(result).toMatchObject({ status: "cancelled" });
+  });
+
+  it("still reports a cancelled State when the cancellation manager won the transition", async () => {
+    // `RunCancellationManager` walks the same State down the same two steps from the other side.
+    // Losing that race is the expected outcome of a cancellation, not a failed turn.
+    const agentState = new AgentStateRunner({
+      loop: { run: async () => ({ status: "cancelled", ...counters }) },
+      transitions: {
+        transition: async (input) => {
+          if (input.to === "cancelling") {
+            throw new StateTransitionConflictError(
+              input.runId,
+              input.stateKey,
+              "running",
+              "cancelling"
+            );
+          }
+        },
+      },
+      waits: { register: async () => ({ waitId: "wait-1" }) },
+    });
+
+    await expect(agentState.execute(request(), LOOP_INPUT)).resolves.toEqual({
+      status: "cancelled",
+    });
   });
 
   it("marks the State for reconciliation when the loop throws mid-flight", async () => {

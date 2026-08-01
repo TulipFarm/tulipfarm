@@ -1,51 +1,10 @@
 import { CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
 import type { PresentationContext } from "@tulipfarm/surface";
-import type { ModelMessage } from "ai";
 import type { FastifyReply } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { KnowledgeService } from "../knowledge/service";
 import { CITE_SOURCES_TOOL } from "../knowledge/tools";
 import type { PlatformAgent } from "../soul/agents/registry";
-import type { ToolCallResult } from "../tools/types";
-import {
-  fromAssistantParts,
-  fromAssistantText,
-  fromToolResult,
-  type MessageDoc,
-  type MessagePart,
-  type MessageRepo,
-} from "./messages";
-
-/** Instruction prefix for the quick-tier compaction summarizer (CTX-V1-001). */
-export const SUMMARY_PROMPT =
-  "Summarize the earlier portion of this conversation transcript into a concise, " +
-  "information-dense recap. Preserve facts, decisions, names, numbers, and any open " +
-  "tasks the assistant must remember to continue. Write only the summary.";
-
-/**
- * HITL resume: rewrite the pending `request_input` Tool result in reconstructed model messages so the
- * placeholder ("awaiting user input") becomes the user's actual answer. The DB row stays the
- * placeholder (append-only history); only the in-memory messages handed to `streamText` carry the
- * answer, so the model continues as if its own question was answered. Returns whether a result was
- * patched.
- */
-export function patchToolResult(
-  messages: ModelMessage[],
-  toolCallId: string,
-  value: unknown
-): boolean {
-  for (const m of messages) {
-    if (m.role !== "tool" || !Array.isArray(m.content)) continue;
-    for (const part of m.content) {
-      const p = part as { type?: string; toolCallId?: string; output?: unknown };
-      if (p.type === "tool-result" && p.toolCallId === toolCallId) {
-        p.output = { type: "json", value };
-        return true;
-      }
-    }
-  }
-  return false;
-}
 
 export interface ChatBody {
   conversationId?: string;
@@ -73,31 +32,6 @@ export interface ChatBody {
  */
 export const ChatBodySchema = CHAT_REQUEST_SCHEMA;
 
-/** Per-turn observability record (AC4): which model served the turn and whether an override applied. */
-export function buildTurnLog(args: {
-  conversationId: string;
-  userId: string;
-  requestedModel: string | undefined;
-  resolvedModelId: string;
-  isNewConversation: boolean;
-}): {
-  conversationId: string;
-  userId: string;
-  requestedModel: string | null;
-  overrideApplied: boolean;
-  resolvedModelId: string;
-  isNewConversation: boolean;
-} {
-  return {
-    conversationId: args.conversationId,
-    userId: args.userId,
-    requestedModel: args.requestedModel ?? null,
-    overrideApplied: args.requestedModel != null,
-    resolvedModelId: args.resolvedModelId,
-    isNewConversation: args.isNewConversation,
-  };
-}
-
 /**
  * Resolve the resume cursor: the `Last-Event-ID` header (set automatically by an
  * `EventSource` on reconnect) takes precedence over the `?lastEventId=` query. A
@@ -113,142 +47,6 @@ export function parseLastEventId(
     if (Number.isFinite(n) && n >= 0) return n;
   }
   return typeof query === "number" && query >= 0 ? query : 0;
-}
-
-/**
- * Stop after terminal control Tools, but only pause for `request_input` when its backing Surface
- * and action handles were created successfully. A failed input presentation must remain in the
- * model loop so the model can correct the call or explain the failure instead of leaving an
- * apparently idle transcript.
- */
-export function shouldStopToolLoop(
-  steps: ReadonlyArray<{
-    readonly toolCalls?: ReadonlyArray<{
-      readonly toolCallId: string;
-      readonly toolName: string;
-    }>;
-  }>,
-  fullResults: ReadonlyMap<string, ToolCallResult>,
-  maxToolSteps: number
-): boolean {
-  if (steps.length >= maxToolSteps) return true;
-  const last = steps[steps.length - 1];
-  return (last?.toolCalls ?? []).some(
-    (call) =>
-      call.toolName === "transfer_to_agent" ||
-      call.toolName === "cite_sources" ||
-      (call.toolName === "request_input" && fullResults.get(call.toolCallId)?.success === true)
-  );
-}
-
-/** The subset of an AI SDK `StepResult` that persistence needs. */
-export interface PersistableStep {
-  text: string;
-  finishReason: string;
-  toolCalls: ReadonlyArray<{ toolCallId: string; toolName: string; input: unknown }>;
-  toolResults: ReadonlyArray<{ toolCallId: string; toolName: string; output: unknown }>;
-}
-
-/**
- * Producing-context stamped onto each assistant message's metadata so a down-vote (which references a
- * message id) can later be traced to what generated it — the model tier is per-turn ephemeral and the
- * conversation's agent_id is mutated by handoffs, so neither is recoverable from the message alone.
- */
-export interface MessageProvenance {
-  model?: string;
-  agentId: string;
-}
-
-// Attach provenance to an assistant `MessageDoc` (tool messages aren't rated, so they're left bare).
-function withProvenance(doc: MessageDoc, provenance?: MessageProvenance): MessageDoc {
-  if (provenance) doc.metadata = { ...doc.metadata, provenance };
-  return doc;
-}
-
-/**
- * Persist one finished `streamText` step. A tool step yields an assistant message holding the
- * tool-call parts (plus any text) followed by a tool message holding the results; a final text step
- * yields a plain assistant message. Errored or empty steps persist nothing. Exported for tests.
- */
-export async function persistStep(
-  messageRepo: MessageRepo,
-  conversationId: string,
-  step: PersistableStep,
-  onError: (err: unknown) => void,
-  // The turn's pre-generated reply id, claimed once by the first final-text message so the live
-  // reply (and the row feedback references) share an id. Tool-call steps keep their own ids.
-  replyIdHolder?: { id?: string },
-  // The model + agent that produced this step, stamped into the assistant message's metadata.
-  provenance?: MessageProvenance,
-  persistSurfaces = false
-): Promise<void> {
-  if (step.finishReason === "error") return;
-
-  if (step.toolCalls.length > 0) {
-    const parts: MessagePart[] = [];
-    if (step.text) parts.push({ type: "text", text: step.text });
-    for (const tc of step.toolCalls) {
-      parts.push({
-        type: "tool-call",
-        toolCallId: tc.toolCallId,
-        toolName: tc.toolName,
-        args: tc.input,
-      });
-    }
-    const assistantDoc = withProvenance(fromAssistantParts(conversationId, parts), provenance);
-    await messageRepo.create(assistantDoc).catch(onError);
-
-    if (step.toolResults.length > 0) {
-      const resultParts: MessagePart[] = [];
-      for (const tr of step.toolResults) {
-        const result = tr.output as ToolCallResult;
-        const artifact =
-          persistSurfaces &&
-          result.success &&
-          typeof result.data === "object" &&
-          result.data !== null
-            ? (result.data as { artifact?: { id?: unknown; revision?: unknown } }).artifact
-            : undefined;
-        const artifactReference =
-          artifact && typeof artifact.id === "string" && typeof artifact.revision === "number"
-            ? { artifactId: artifact.id, revision: artifact.revision }
-            : null;
-        resultParts.push({
-          type: "tool-result",
-          toolCallId: tr.toolCallId,
-          toolName: tr.toolName,
-          result: artifactReference ? { success: true, data: artifactReference } : tr.output,
-        });
-        if (artifactReference) {
-          resultParts.push({
-            type: "surface",
-            artifactId: artifactReference.artifactId,
-            revision: artifactReference.revision,
-          });
-        }
-      }
-      const toolDoc = fromToolResult(conversationId, resultParts);
-      // History orders by (created_at, id). The tool-result and its assistant tool-call are written
-      // back-to-back and can share a millisecond; a random id tiebreak could then sort the result
-      // BEFORE the call, leaving the call without an adjacent result (provider MissingToolResults on
-      // the next turn's rebuild). Pin the result strictly after the call to keep the pair intact.
-      if (toolDoc.createdAt.getTime() <= assistantDoc.createdAt.getTime()) {
-        toolDoc.createdAt = new Date(assistantDoc.createdAt.getTime() + 1);
-      }
-      await messageRepo.create(toolDoc).catch(onError);
-    }
-    return;
-  }
-
-  if (step.text) {
-    // Claim the pre-generated reply id for this (final-text) message, once per turn; later text
-    // steps fall back to a fresh id.
-    const id = replyIdHolder?.id;
-    if (replyIdHolder) replyIdHolder.id = undefined;
-    await messageRepo
-      .create(withProvenance(fromAssistantText(conversationId, step.text, id), provenance))
-      .catch(onError);
-  }
 }
 
 // @fastify/cors adds CORS headers on the normal reply path, but `reply.hijack()` (used for the SSE

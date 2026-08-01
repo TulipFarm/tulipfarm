@@ -29,7 +29,7 @@ export interface HostedRunReader {
     runId: string
   ): Promise<{
     readonly status: string;
-    readonly bundle: { readonly digest: string };
+    readonly bundle: { readonly digest: string; readonly routineId: string };
     readonly identity: { readonly effectiveSubject: InvocationPrincipal };
   } | null>;
 }
@@ -51,6 +51,15 @@ export interface TurnAuthority {
   readonly turn: PersistedTurn;
   /** Whom the turn acts as, as recorded when the Run was minted. */
   readonly subject: InvocationPrincipal;
+  /**
+   * What minted the Run — `chat`, `integration`, and the rest of `INVOCATION_SOURCES`.
+   *
+   * It decides which Artifact holds the turn's parameters: a Chat Run's request *is* the Chat
+   * request, while an Integration Run's request is a provider envelope that a classifier turned
+   * into one. Taking it from the Run rather than from a caller-supplied hint is what keeps a
+   * delivery from claiming to be an interactive turn.
+   */
+  readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
   readonly bundleDigest: string;
 }
@@ -58,14 +67,26 @@ export interface TurnAuthority {
 /** Everything the model needs for one turn. Mirrors the Worker's `ResolvedTurnContext`. */
 export interface HostedTurnContext {
   readonly agentId: string;
+  /** Whom the turn acts as. Taken from the Run, so a guard is told who it is guarding. */
+  readonly subjectId: string;
   readonly modelProfileId: string;
   readonly contextDigest: string;
   readonly guardrailDigest: string;
+  /**
+   * The validated guardrail policy `guardrailDigest` names.
+   *
+   * The Worker enforces the three stages and cannot read the Soul, so the policy travels with the
+   * Context rather than being compiled twice from two sources. It rebuilds the identical guards and
+   * refuses the turn if its own hash disagrees with the digest above.
+   */
+  readonly guardrailPolicy: Record<string, unknown>;
   readonly messages: readonly { readonly role: string; readonly content: string }[];
   readonly tools: readonly {
     readonly name: string;
     readonly description?: string;
     readonly inputSchema: Record<string, unknown>;
+    /** The Tool's tier, so the tool-call guard can refuse a whole category rather than a name. */
+    readonly tier: string;
   }[];
   readonly limits: {
     readonly maxIterations: number;
@@ -174,6 +195,7 @@ export class InternalTurnHost {
       runId,
       turn,
       subject: run.identity.effectiveSubject,
+      source: run.bundle.routineId,
       bundleDigest: run.bundle.digest,
     };
   }

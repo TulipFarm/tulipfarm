@@ -44,9 +44,11 @@ export type ChatEvent =
       data: {
         approvalId: string;
         toolCallId: string;
-        toolName: string;
-        args: unknown;
-        expiresAt: string;
+        toolName?: string;
+        args?: unknown;
+        // Absent when the Run event stream carries no deadline for the wait; the card then shows no
+        // countdown rather than a fabricated one.
+        expiresAt?: string;
       };
     }
   | {
@@ -67,11 +69,15 @@ export type ChatEvent =
     }
   // Imperative agent→client action (navigate, …). Executed by the chat hook, not rendered as a part.
   | { type: "client-action"; data: { action: string; to?: string; reason?: string | null } }
+  // `guard` is withheld from a participant on purpose — naming the guard that refused teaches a
+  // reader what to write around — so it is optional here and absent on the live wire.
   | {
       type: "guardrail_block";
-      data: { stage: "input" | "output"; guard: string; reason: string; message?: string };
+      data: { stage: "input" | "output"; guard?: string; reason: string; message?: string };
     }
-  | { type: "finish"; data: { reason: string } }
+  // `messageId` is the persisted reply the turn produced; the turn's own finish event names it, so a
+  // reply can be given feedback without a separate header.
+  | { type: "finish"; data: { reason: string; messageId?: string | null } }
   | { type: "error"; data: { message: string } };
 
 // Raw output of the frame parser, before mapping to a typed `ChatEvent`.
@@ -124,7 +130,7 @@ export type TimelinePart =
   | {
       kind: "guardrail";
       stage: "input" | "output";
-      guard: string;
+      guard?: string;
       reason: string;
       message?: string;
     };
@@ -150,10 +156,9 @@ export type ChatState = {
   pendingApprovals: Record<string, { toolCallId: string; messageId: string }>;
   status: ChatStatus;
   conversationId?: string;
-  streamId?: string;
-  // The server's id for the in-flight reply (X-Message-Id, delivered via meta before any text);
-  // stamped onto the assistant message as `serverId` when the turn's `finish` seals it.
-  pendingServerId?: string;
+  // The Run answering the in-flight turn (X-Run-Id). Stopping the turn cancels this Run, and a
+  // reconnect resumes its event stream by cursor.
+  runId?: string;
   // The agent currently handling the conversation, updated live by `agent-handoff` events so the
   // header indicator follows transfers. Undefined until the first handoff — callers fall back to the
   // restored conversation's persisted agent.

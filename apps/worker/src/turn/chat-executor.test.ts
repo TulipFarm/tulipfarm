@@ -1,10 +1,12 @@
-import type {
-  ModelInvocationRequest,
-  ModelInvocationResult,
-  ModelPort,
-  ToolDispatchPort,
-  ToolDispatchResult,
+import {
+  DEFAULT_GUARDRAILS,
+  type ModelInvocationRequest,
+  type ModelInvocationResult,
+  type ModelPort,
+  type ToolDispatchPort,
+  type ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
+import { canonicalHash } from "@tulipfarm/schema";
 import type { BudgetConsumeResult, PersistedRun, PersistedState } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import type { TurnCompletionRecord, TurnCompletionStore } from "../conversation-turn";
@@ -50,9 +52,11 @@ const STATE: PersistedState = {
 
 const CONTEXT: ResolvedTurnContext = {
   agentId: "agent-1",
+  subjectId: "user-1",
   modelProfileId: "primary",
   contextDigest: "sha256:context",
-  guardrailDigest: "sha256:guardrail",
+  guardrailDigest: canonicalHash(DEFAULT_GUARDRAILS),
+  guardrailPolicy: DEFAULT_GUARDRAILS as unknown as Record<string, unknown>,
   messages: [{ role: "user", content: "how many tasks are open?" }],
   tools: [],
   limits: { maxIterations: 4, maxToolCalls: 4, maxRepairAttempts: 2 },
@@ -145,6 +149,7 @@ function harness(
     },
     waits: { register: async () => ({ waitId: "wait-1" }) },
     model,
+    log: { warn: () => {} },
     now: () => new Date("2026-01-01T00:00:00.000Z"),
   });
 

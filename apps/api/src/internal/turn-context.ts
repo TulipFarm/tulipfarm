@@ -1,6 +1,7 @@
 import {
   assembleContext,
   type ContextCandidate,
+  DEFAULT_GUARDRAILS,
   type GuardrailsService,
 } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
@@ -16,6 +17,7 @@ import type { KnowledgeService } from "../knowledge/service";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import {
+  chatRequestArtifactId,
   INVOKE_STATE_KEY,
   RUN_EXECUTOR_PRINCIPAL_REF,
   requestArtifactId,
@@ -49,12 +51,20 @@ export interface ChatRequestPayload {
   readonly llmDecision?: boolean;
 }
 
+/** Which Run source states its turn parameters directly, rather than through a derived Artifact. */
+const CHAT_SOURCE = "chat";
+
 /**
- * The request that minted a Run, read as the Run executor.
+ * The Chat request behind a Run, read as the Run executor.
  *
  * Shared with the Tool dispatcher so both answer "which Agent is this turn?" from the same
  * immutable record. Anything else would let a Tool run under an Agent whose instructions the model
  * was never given.
+ *
+ * Which Artifact that is follows from the Run's source, not from anything the caller says. A Chat
+ * Run's request *is* a Chat request; every other source arrives as something else — a provider
+ * envelope, a Trigger payload — and is answered only after a derived Chat request has been
+ * published for it, with lineage back to what it came from.
  */
 export async function readChatRequest(
   artifacts: ArtifactService,
@@ -63,7 +73,10 @@ export async function readChatRequest(
 ): Promise<ChatRequestPayload> {
   const artifact = await artifacts.read({
     businessId: authority.businessId,
-    artifactId: requestArtifactId(authority.runId),
+    artifactId:
+      authority.source === CHAT_SOURCE
+        ? requestArtifactId(authority.runId)
+        : chatRequestArtifactId(authority.runId),
     reader: RUN_EXECUTOR_PRINCIPAL_REF,
     allowedClassifications: [],
     now,
@@ -113,11 +126,15 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         name: tool.name,
         description: tool.description,
         inputSchema: tool.inputSchema,
+        tier: tool.tier,
       }));
 
-    // A deployment with no guardrails service still names what it enforced, so the recorded digest
-    // says "nothing" out loud instead of leaving the evidence blank.
-    const guardrailDigest = this.options.guardrails?.revision ?? "none";
+    // A deployment that composed no guardrails service still ships the default policy rather than
+    // "nothing": the Worker enforces what arrives here, and the documented fallback for an absent
+    // config is the default one — fail-safe, never unguarded.
+    const guardrails = this.options.guardrails;
+    const guardrailPolicy = (guardrails?.config ?? DEFAULT_GUARDRAILS) as Record<string, unknown>;
+    const guardrailDigest = guardrails?.revision ?? canonicalHash(DEFAULT_GUARDRAILS);
     const manifest = assembleContext({
       businessId: authority.businessId,
       runId: authority.runId,
@@ -144,9 +161,11 @@ export class ChatTurnContextResolver implements TurnContextResolver {
 
     return {
       agentId: agent.name,
+      subjectId: authority.subject.id,
       modelProfileId: this.resolveModelId(request),
       contextDigest: manifest.digest,
       guardrailDigest,
+      guardrailPolicy,
       messages,
       tools,
       limits: {

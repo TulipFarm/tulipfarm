@@ -35,7 +35,12 @@ describe("run event vocabulary", () => {
     const operator = RUN_EVENT_DEFINITIONS.filter((d) => d.audience === "operator").map(
       (d) => d.type
     );
-    expect(operator).toEqual(["context.assembled", "tool.dispatched", "guardrail.decision"]);
+    expect(operator).toEqual([
+      "context.assembled",
+      "tool.dispatched",
+      "guardrail.decision",
+      "delivery.classified",
+    ]);
   });
 
   it("has no definition for a type outside the vocabulary", () => {

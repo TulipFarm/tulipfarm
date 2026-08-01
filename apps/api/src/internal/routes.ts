@@ -1,6 +1,12 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import {
+  type DeliveryDenial,
+  DeliveryDeniedError,
+  type IngressDeliveryHost,
+  type ReplyOutcome,
+} from "./delivery-host";
 import {
   type HostedToolCall,
   type InternalTurnHost,
@@ -32,6 +38,17 @@ const DENIAL_STATUS: Readonly<Record<TurnAuthorityDenial, number>> = {
   turn_not_found: 404,
 };
 
+const DELIVERY_DENIAL_STATUS: Readonly<Record<DeliveryDenial, number>> = {
+  run_not_found: 404,
+  run_not_running: 409,
+  // The Run exists and is live, but it was not minted by an Integration delivery. Nothing about
+  // waiting or retrying changes that, so it is the caller's mistake rather than a conflict.
+  not_a_delivery: 400,
+  // The Integration was disconnected, removed, or lost its handler after the delivery was
+  // acknowledged. The delivery stays stored; there is simply nobody left to interpret it.
+  integration_unavailable: 409,
+};
+
 const ToolCallSchema = {
   type: "object",
   required: ["callId", "name"],
@@ -51,6 +68,15 @@ const RunParamsSchema = {
 
 export interface InternalTurnRouteDeps {
   readonly host: InternalTurnHost;
+  /**
+   * The channel side of the same boundary. Absent in a deployment that composes no Integration
+   * ingress at all, in which case the delivery routes are simply not registered.
+   *
+   * Built from the app's logger, which does not exist until the app does: a delivery that is
+   * ignored, refused, or answered with a bind link says so through the same Pino instance as
+   * everything else, rather than through a second logger nobody is watching.
+   */
+  deliveries?(log: FastifyBaseLogger): IngressDeliveryHost;
   /**
    * The Soul's LLM configuration, read fresh on every call so a `soul.synced` reload reaches the
    * Worker. It names providers and `api_key_ref`s, never a credential: the Worker resolves those
@@ -78,6 +104,10 @@ export function registerInternalTurnRoutes(
     } catch (error) {
       if (error instanceof TurnAuthorityError) {
         await reply.code(DENIAL_STATUS[error.code]).send({ error: error.code });
+        return undefined;
+      }
+      if (error instanceof DeliveryDeniedError) {
+        await reply.code(DELIVERY_DENIAL_STATUS[error.code]).send({ error: error.code });
         return undefined;
       }
       throw error;
@@ -167,9 +197,11 @@ export function registerInternalTurnRoutes(
             type: "object",
             required: [
               "agentId",
+              "subjectId",
               "modelProfileId",
               "contextDigest",
               "guardrailDigest",
+              "guardrailPolicy",
               "messages",
               "tools",
               "limits",
@@ -177,9 +209,11 @@ export function registerInternalTurnRoutes(
             ],
             properties: {
               agentId: { type: "string" },
+              subjectId: { type: "string" },
               modelProfileId: { type: "string" },
               contextDigest: { type: "string" },
               guardrailDigest: { type: "string" },
+              guardrailPolicy: { type: "object", additionalProperties: true },
               messages: {
                 type: "array",
                 items: {
@@ -192,11 +226,12 @@ export function registerInternalTurnRoutes(
                 type: "array",
                 items: {
                   type: "object",
-                  required: ["name", "inputSchema"],
+                  required: ["name", "inputSchema", "tier"],
                   properties: {
                     name: { type: "string" },
                     description: { type: "string" },
                     inputSchema: { type: "object", additionalProperties: true },
+                    tier: { type: "string" },
                   },
                 },
               },
@@ -484,6 +519,224 @@ export function registerInternalTurnRoutes(
       });
       if (recorded === undefined) return;
       return reply.send({ status: "recorded" });
+    }
+  );
+
+  const deliveries = deps.deliveries?.(app.log);
+  if (deliveries === undefined) return;
+
+  app.get(
+    "/api/v1/internal/deliveries/:runId",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Everything needed to classify one Integration delivery: the envelope as received, the " +
+          "Integration's classifier module with the hash the sandbox must verify, and whether " +
+          "this thread is already mapped to a Conversation. All of it is derived from the Run's " +
+          "immutable request Artifact, so a caller cannot claim a delivery arrived elsewhere.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        response: {
+          200: {
+            type: "object",
+            required: ["slug", "body", "headers", "classifier", "hasThreadMapping"],
+            properties: {
+              slug: { type: "string" },
+              body: { type: "object", additionalProperties: true },
+              headers: { type: "object", additionalProperties: { type: "string" } },
+              classifier: {
+                type: "object",
+                required: ["source", "hash"],
+                properties: { source: { type: "string" }, hash: { type: "string" } },
+              },
+              hasThreadMapping: { type: "boolean" },
+              chatEnabled: { type: "boolean" },
+              eventsEnabled: { type: "boolean" },
+            },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const described = await guard(reply, () =>
+        deliveries.describe(DEPLOYMENT_BUSINESS_ID, runId)
+      );
+      if (described === undefined) return;
+      return reply.send(described);
+    }
+  );
+
+  app.post(
+    "/api/v1/internal/deliveries/:runId/chat",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Attach a Chat Turn to this delivery's Run, resolving the sender to an account first. " +
+          "An unlinked sender gets no Turn and no model call — a single-use bind link is posted " +
+          "back to the channel from this app, so the link never crosses to the caller. Idempotent: " +
+          "a Run that already names a Turn returns it rather than re-posting the message.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        body: {
+          type: "object",
+          required: ["sender", "text", "reply"],
+          additionalProperties: false,
+          properties: {
+            sender: { type: "string", minLength: 1 },
+            text: { type: "string" },
+            requireExistingThread: { type: "boolean" },
+            reply: {
+              type: "object",
+              required: ["binding"],
+              additionalProperties: false,
+              properties: {
+                binding: { type: "string", minLength: 1 },
+                vars: { type: "object", additionalProperties: { type: "string" } },
+              },
+            },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome"],
+            properties: {
+              outcome: { type: "string", enum: ["attached", "unlinked", "ignored"] },
+              turnId: { type: "string" },
+              attempt: { type: "integer" },
+              reason: { type: "string" },
+            },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const body = req.body as Parameters<IngressDeliveryHost["attachChat"]>[2];
+      const attached = await guard(reply, () =>
+        deliveries.attachChat(DEPLOYMENT_BUSINESS_ID, runId, body)
+      );
+      if (attached === undefined) return;
+      return reply.send(attached);
+    }
+  );
+
+  app.post(
+    "/api/v1/internal/deliveries/:runId/events",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Record an `event` classification for this delivery and raise the domain event Routine " +
+          "triggers subscribe to. An event type the Integration manifest does not declare is " +
+          "ignored rather than recorded.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        body: {
+          type: "object",
+          required: ["eventType"],
+          additionalProperties: false,
+          properties: {
+            eventType: { type: "string", minLength: 1 },
+            payload: { type: "object", additionalProperties: true },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome"],
+            properties: {
+              outcome: { type: "string", enum: ["recorded", "ignored"] },
+              eventId: { type: "string" },
+              reason: { type: "string" },
+            },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const body = req.body as { eventType: string; payload?: Record<string, unknown> };
+      const recorded = await guard(reply, () =>
+        deliveries.recordEvent(DEPLOYMENT_BUSINESS_ID, runId, body)
+      );
+      if (recorded === undefined) return;
+      return reply.send(recorded);
+    }
+  );
+
+  app.post(
+    "/api/v1/internal/deliveries/:runId/reply",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Post this attempt's answer back to the channel through the Integration's declared " +
+          "reply binding. The text is the assistant Message the attempt's completion names, read " +
+          "from the durable conversation — the caller states which attempt finished and how, and " +
+          "cannot supply wording.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        body: {
+          type: "object",
+          required: ["attempt", "outcome", "binding"],
+          additionalProperties: false,
+          properties: {
+            attempt: { type: "integer", minimum: 1 },
+            outcome: { type: "string", enum: ["answered", "blocked", "failed"] },
+            binding: { type: "string", minLength: 1 },
+            vars: { type: "object", additionalProperties: { type: "string" } },
+          },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["delivered"],
+            properties: { delivered: { type: "boolean" } },
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const body = req.body as {
+        attempt: number;
+        outcome: ReplyOutcome;
+        binding: string;
+        vars?: Record<string, string>;
+      };
+      const posted = await guard(reply, () =>
+        deliveries.postReplyForAttempt(DEPLOYMENT_BUSINESS_ID, runId, body)
+      );
+      if (posted === undefined) return;
+      return reply.send(posted);
     }
   );
 }

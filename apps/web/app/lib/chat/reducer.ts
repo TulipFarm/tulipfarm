@@ -45,7 +45,7 @@ export function rewindLastTurn(state: ChatState): ChatState {
   const messages = state.messages.slice();
   while (messages.length > 0 && messages[messages.length - 1].role === "assistant") messages.pop();
   if (messages.length > 0 && messages[messages.length - 1].role === "user") messages.pop();
-  return { ...state, messages, status: "idle", error: undefined, pendingServerId: undefined };
+  return { ...state, messages, status: "idle", error: undefined };
 }
 
 // The assistant message events fold into: the last one if it is still open, else a fresh one.
@@ -304,19 +304,19 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "finish": {
       const { messages, target } = ensureAssistant(state.messages);
-      // Stamp the server's reply id (from the X-Message-Id meta) onto the sealed message so feedback
-      // can target it. `id` (the React key) stays the client uuid — swapping it would remount.
+      // Stamp the server's reply id onto the sealed message so feedback can target it. The turn's own
+      // finish event names the Message it persisted, so the id belongs to this reply and no other.
+      // `id` (the React key) stays the client uuid — swapping it would remount.
       const sealed = withParts(messages, target, target.parts).map((m) =>
         m.id === target.id
-          ? { ...m, sealed: true, serverId: state.pendingServerId ?? m.serverId }
+          ? { ...m, sealed: true, serverId: event.data.messageId ?? m.serverId }
           : m
       );
-      // Consume pendingServerId so it can never leak onto a later turn's reply.
-      return { ...state, status: "idle", messages: sealed, pendingServerId: undefined };
+      return { ...state, status: "idle", messages: sealed };
     }
 
     case "error":
-      return { ...state, status: "error", error: event.data.message, pendingServerId: undefined };
+      return { ...state, status: "error", error: event.data.message };
 
     // Imperative agent→client action — executed by the chat hook (navigate, …), no timeline change.
     case "client-action":

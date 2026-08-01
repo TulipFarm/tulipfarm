@@ -20,18 +20,8 @@ function request() {
 }
 
 function runtime() {
-  const decide = vi.fn(async () => true);
+  const signal = vi.fn(async () => "resumed" as const);
   const enqueueWake = vi.fn(async () => undefined);
-  const listPending = vi.fn(async () => [
-    {
-      approvalId: "approval-tool",
-      toolCallId: "call-1",
-      toolName: "send_email",
-      args: { recipient: "customer@example.com", body: "private" },
-      expiresAt: "2026-07-26T10:00:00.000Z",
-      createdAt: "2026-07-26T09:00:00.000Z",
-    },
-  ]);
   const activity = {
     list: vi.fn(async () => ({
       items: [
@@ -52,8 +42,27 @@ function runtime() {
       nextCursor: null,
     })),
   };
+  // Both kinds are read from the one authoritative table; nothing in this process holds them.
   const approvals = {
-    listPending: vi.fn(async () => []),
+    listPending: vi.fn(async (kind?: string) =>
+      kind === "tool_call"
+        ? [
+            {
+              id: "approval-tool",
+              kind: "tool_call" as const,
+              status: "pending" as const,
+              payload: {
+                toolCallId: "call-1",
+                toolName: "send_email",
+                args: { recipient: "customer@example.com", body: "private" },
+              },
+              expiresAt: new Date("2026-07-26T10:00:00.000Z"),
+              createdAt: new Date("2026-07-26T09:00:00.000Z"),
+              resolvedAt: null,
+            },
+          ]
+        : []
+    ),
     findById: vi.fn(async () => null),
     settle: vi.fn(async () => undefined),
   };
@@ -80,7 +89,7 @@ function runtime() {
   const api = createRuntimeOperationalApi({
     activity,
     approvals,
-    approvalRegistry: { decide, listPending },
+    toolApprovals: { signal },
     runs,
     healthProbes: [
       { component: "postgres", check: async () => ({ status: "ok" as const }) },
@@ -94,7 +103,7 @@ function runtime() {
     enqueueWake,
     guardrailsConfig: () => ({ input: { enabled: true } }),
   });
-  return { api, decide, enqueueWake, runs };
+  return { api, signal, enqueueWake, runs };
 }
 
 describe("runtime operational API", () => {
@@ -181,8 +190,8 @@ describe("runtime operational API", () => {
     expect(JSON.stringify(inbox)).not.toContain("private");
   });
 
-  it("settles a live Tool Approval through its owning registry", async () => {
-    const { api, decide } = runtime();
+  it("settles a Tool Approval by signalling the wait its Run parked on", async () => {
+    const { api, signal } = runtime();
     const grant = await api.authorize(request());
     if (!grant) throw new Error("expected an admin grant");
 
@@ -198,6 +207,13 @@ describe("runtime operational API", () => {
       decisions: 1,
       requiredDecisions: 1,
     });
-    expect(decide).toHaveBeenCalledWith("approval-tool", "approved");
+    // The deciding administrator is named to the kernel, which checks it again under the wait's
+    // lock — the operational API never decides on someone else's behalf.
+    expect(signal).toHaveBeenCalledWith({
+      businessId: "tulipfarm-local",
+      approvalId: "approval-tool",
+      decision: "approved",
+      principal: "user:user-1",
+    });
   });
 });

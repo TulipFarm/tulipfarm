@@ -1,3 +1,12 @@
+/**
+ * What an Integration's sandboxed ingress classifier is allowed to decide.
+ *
+ * The classifier is authored per Integration and runs untrusted in the isolate, so its output is
+ * parsed rather than believed. It lives in this package because the two sides that need it sit on
+ * opposite sides of an application boundary: the Worker runs the classifier while executing an
+ * Integration Run, and the API holds the parity fixtures that keep a shipped classifier honest.
+ */
+
 /** Validated output from an Integration's isolated ingress classifier. */
 export type IngressDecision =
   | { kind: "ignore"; reason?: string }

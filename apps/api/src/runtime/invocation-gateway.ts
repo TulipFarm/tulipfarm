@@ -37,6 +37,19 @@ export function requestPayloadRef(runId: string): string {
   return `artifact:${requestArtifactId(runId)}`;
 }
 
+/**
+ * Identity of the Artifact holding the Chat request a non-Chat Run was normalized into.
+ *
+ * An Integration delivery is not a Chat request: its request Artifact holds the provider envelope
+ * exactly as it arrived, which is what keeps the delivery replayable. Turning it into a turn
+ * produces a *second*, derived Artifact under this id, carrying `derived_from` lineage back to the
+ * envelope — so the question "what did the model actually answer, and what raw delivery produced
+ * it?" has one recorded answer rather than a reconstruction.
+ */
+export function chatRequestArtifactId(runId: string): string {
+  return `${runId}:chat-request`;
+}
+
 export interface DurableInvocationRecord {
   readonly runId: string;
   readonly source: InvocationSource;

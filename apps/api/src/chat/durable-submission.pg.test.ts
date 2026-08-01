@@ -1,13 +1,17 @@
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import type { PGlite } from "@electric-sql/pglite";
 import type { LlmService } from "@tulipfarm/llm";
-import { ArtifactService, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import {
+  ArtifactService,
+  RunCancellationManager,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import {
   CHAT_REQUEST_SCHEMA_REF,
   canonicalHash,
   INVOCATION_REQUEST_SCHEMAS,
 } from "@tulipfarm/schema";
-import { ArtifactStore } from "@tulipfarm/storage";
+import { ArtifactStore, ChildLinkStore, RunEventStore, RunStore } from "@tulipfarm/storage";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
@@ -20,6 +24,7 @@ import { PgConversationStore } from "../conversations/store.pg";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
+import { runCanceller } from "../runs/cancel";
 import { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import { PgDurableInvocationStore } from "../runtime/invocation-store";
 import { makePglite } from "../test/pglite";
@@ -137,6 +142,9 @@ describe("durable chat submission over HTTP", () => {
       validator,
     });
 
+    const runTransactions = transactionPort(queryable);
+    const runStore = new RunStore(runTransactions);
+
     app = await buildApp({
       sessionStore,
       userRepo,
@@ -153,6 +161,20 @@ describe("durable chat submission over HTTP", () => {
       messageRepo: new PgMessageRepo(queryable),
       invocations,
       conversationStore: new PgConversationStore(queryable),
+      // The route streams the Run back out of `run_events`, so the reader is part of what makes a
+      // turn submittable at all — a half-composed API refuses the turn rather than running it here.
+      runEvents: {
+        events: new RunEventStore(runTransactions),
+        runs: runStore,
+        authorize: async (req) =>
+          req.principal
+            ? { businessId: req.principal.businessId, audiences: ["participant"] }
+            : null,
+        pollIntervalMs: 5,
+      },
+      runCancel: runCanceller(
+        new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
+      ),
     });
   });
 
@@ -171,6 +193,53 @@ describe("durable chat submission over HTTP", () => {
     });
   }
 
+  /** Waits for the Run an in-flight request minted — it is committed before the stream opens. */
+  async function awaitRun(): Promise<{ id: string; businessId: string }> {
+    for (;;) {
+      const open = await db.query<{ id: string; business_id: string }>(
+        "SELECT id, business_id FROM runs WHERE status NOT IN ('succeeded', 'failed', 'cancelled')"
+      );
+      const row = open.rows[0];
+      if (row) return { id: row.id, businessId: row.business_id };
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+  }
+
+  async function appendEvent(
+    run: { id: string; businessId: string },
+    event: { sequence: number; type: string; audience: string; payload: unknown }
+  ): Promise<void> {
+    await db.query(
+      `INSERT INTO run_events
+         (business_id, run_id, sequence, event_type, audience, payload, idempotency_key, occurred_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+      [
+        run.businessId,
+        run.id,
+        event.sequence,
+        event.type,
+        event.audience,
+        JSON.stringify(event.payload),
+        `turn:1:${event.sequence}`,
+      ]
+    );
+  }
+
+  /**
+   * One turn, start to finish: submit, settle the Run, and read back the closed stream.
+   *
+   * The route hands the turn to a Worker and then only reads `run_events`, so the response does not
+   * arrive until the Run is terminal. Nothing in this process executes Runs, so the test plays the
+   * Worker's last step — which is what makes the stream's ending a fact about the Run rather than
+   * about the request handler finishing something itself.
+   */
+  async function chat(session = sid) {
+    const response = postChat(session);
+    const run = await awaitRun();
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+    return await response;
+  }
+
   async function count(table: string, where = ""): Promise<number> {
     const result = await db.query<{ count: number }>(
       `SELECT count(*)::int AS count FROM ${table} ${where}`
@@ -179,7 +248,7 @@ describe("durable chat submission over HTTP", () => {
   }
 
   it("commits a Turn, a Run, and the request Artifact before it streams", async () => {
-    const response = await postChat();
+    const response = await chat();
     expect(response.statusCode).toBe(200);
 
     const runId = response.headers["x-run-id"];
@@ -217,7 +286,7 @@ describe("durable chat submission over HTTP", () => {
   });
 
   it("lets the Run executor reconstruct the request, and denies a reader outside the ACL", async () => {
-    const response = await postChat();
+    const response = await chat();
     const runId = response.headers["x-run-id"] as string;
 
     const reader = new ArtifactService(
@@ -245,7 +314,7 @@ describe("durable chat submission over HTTP", () => {
   });
 
   it("answers a replayed Idempotency-Key with 409 and creates nothing new", async () => {
-    const first = await postChat();
+    const first = await chat();
     const runId = first.headers["x-run-id"];
 
     const replay = await postChat();
@@ -261,11 +330,73 @@ describe("durable chat submission over HTTP", () => {
     expect(await count("messages", "WHERE role = 'user'")).toBe(1);
   });
 
+  it("streams the Run's persisted events, withholding the ones this reader may not see", async () => {
+    const pending = postChat();
+    const run = await awaitRun();
+    await appendEvent(run, {
+      sequence: 1,
+      type: "text.delta",
+      audience: "participant",
+      payload: { text: "hello", index: 0 },
+    });
+    // Operator evidence lives in the same log; the grant is what decides who is shown it.
+    await appendEvent(run, {
+      sequence: 2,
+      type: "context.assembled",
+      audience: "operator",
+      payload: { contextDigest: "sha256:context" },
+    });
+    await db.query("UPDATE runs SET status = 'succeeded' WHERE id = $1", [run.id]);
+
+    const response = await pending;
+    expect(response.headers["content-type"]).toContain("text/event-stream");
+    expect(response.body).toContain("id: 1\nevent: text.delta\n");
+    expect(response.body).toContain('"text":"hello"');
+    expect(response.body).not.toContain("context.assembled");
+    // The stream ends on the Run's own status, so a reader learns the turn is over from the Run.
+    expect(response.body).toContain("event: stream.closed");
+    expect(response.body).toContain('"status":"succeeded"');
+  });
+
+  it("stops a turn by cancelling the Run, and the stream ends on that status", async () => {
+    const pending = postChat();
+    const run = await awaitRun();
+
+    const stopped = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/runs/${run.id}/stop`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+    });
+
+    expect(stopped.statusCode).toBe(200);
+    expect(stopped.json()).toEqual({ status: "stopped" });
+    // Stop is not "close my connection": the Run itself is cancelled, so the turn halts in whichever
+    // process is executing it and every other reader of the same Run sees the same ending.
+    const response = await pending;
+    expect(response.body).toContain('"status":"cancelled"');
+    const runs = await db.query<{ status: string }>("SELECT status FROM runs");
+    expect(runs.rows[0]?.status).toBe("cancelled");
+  });
+
+  it("refuses to stop a Run that is already finished", async () => {
+    const first = await chat();
+
+    const stopped = await app.inject({
+      method: "POST",
+      url: `/api/v1/chat/runs/${first.headers["x-run-id"]}/stop`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: CSRF },
+      headers: { "x-csrf-token": CSRF },
+    });
+
+    expect(stopped.statusCode).toBe(404);
+  });
+
   it("keeps one caller's idempotency key from claiming another's turn", async () => {
-    const first = await postChat();
+    const first = await chat();
     // The key is client-supplied and Turn keys are unique deployment-wide, so an unscoped key would
     // let this second caller be refused as a duplicate — and answered with someone else's Run id.
-    const second = await postChat(otherSid);
+    const second = await chat(otherSid);
 
     expect(second.statusCode).toBe(200);
     expect(second.headers["x-run-id"]).not.toBe(first.headers["x-run-id"]);

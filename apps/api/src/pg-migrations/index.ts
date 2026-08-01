@@ -676,4 +676,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 18,
+    description: "retire the in-process chat stream buffer",
+    up: async (q) => {
+      // `stream_resume` buffered the SSE frames one API process produced, so that the client that
+      // lost the connection could ask that process for them again. A chat turn is now executed by
+      // the Worker and read back from `run_events` — durable, gapless, and readable from any
+      // instance — which leaves this table buffering a stream nothing writes.
+      await q.query("DROP TABLE IF EXISTS stream_resume");
+    },
+  },
 ];
