@@ -19,6 +19,7 @@ import { createHookExecutor } from "./hooks/executor";
 import { InternalApiClient } from "./internal/client";
 import { HttpDeliveryHost } from "./internal/delivery-host";
 import { HttpTurnHost } from "./internal/turn-host";
+import { startJobConsumers } from "./job-consumers";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
@@ -65,11 +66,9 @@ const logger = {
 /**
  * Composition root for the durable worker.
  *
- * Three loops run side by side. Run dispatch claims queued Runs and drives them to a terminal
- * status. The wait sweep resolves durable waits whose deadline passed and requeues their Runs.
- * Outbox delivery drains accepted integration events to their targets. Each is independent: a
- * failing loop backs off on its own without stopping the others, because a stuck delivery target
- * must not stop Runs from progressing.
+ * Run dispatch, wait sweeping, and outbox delivery run side by side. A maintenance replica also
+ * owns the pg-boss consumer loop. Each is independent: a failing loop backs off on its own without
+ * stopping the others, because a stuck delivery target must not stop Runs from progressing.
  */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
@@ -87,6 +86,11 @@ export async function main(): Promise<void> {
   // Fail closed before a single Run is claimed: the API owns migrations, and a worker running
   // ahead of them would write columns that do not exist yet.
   const schemaVersion = await assertSchemaFloor(pool, REQUIRED_SCHEMA_VERSION);
+  let consumersReady = !config.maintenance;
+  const jobBoss = config.maintenance
+    ? await startJobConsumers({ databaseUrl: config.databaseUrl, database: pool })
+    : undefined;
+  consumersReady = true;
 
   const transactions = transactionPort(pool);
   const runStore = new RunStore(transactions);
@@ -216,17 +220,29 @@ export async function main(): Promise<void> {
     },
   ];
 
+  let stopJobConsumers = (): void => {};
+  if (jobBoss) {
+    const settled = new Promise<void>((resolve, reject) => {
+      stopJobConsumers = () => {
+        jobBoss.stop({ graceful: true }).then(resolve, reject);
+      };
+    });
+    loops.push({ name: "pg-boss-consumers", settled });
+  }
+
   const probeServer = await startProbeServer({
     port: config.port,
     database: pool,
     requiredSchemaVersion: REQUIRED_SCHEMA_VERSION,
     isServing: () => serving,
+    areConsumersReady: () => consumersReady,
   });
 
   logger.info(
     `worker ready: owner=${config.owner} business=${config.businessId} ` +
       `schema=${schemaVersion} port=${config.port} ` +
-      `executors=${executors.size} deliveryTargets=${deliveryTargets.size}`
+      `executors=${executors.size} deliveryTargets=${deliveryTargets.size} ` +
+      `maintenance=${config.maintenance}`
   );
 
   let shuttingDown = false;
@@ -235,11 +251,15 @@ export async function main(): Promise<void> {
     shuttingDown = true;
     // Readiness fails first so the orchestrator stops routing to this instance while it drains.
     serving = false;
+    consumersReady = false;
     logger.info(`worker draining (${reason})`);
 
     const outcome = await drain({
       loops,
-      abort: () => controller.abort(),
+      abort: () => {
+        controller.abort();
+        stopJobConsumers();
+      },
       timeoutMs: config.drainTimeoutMs,
     });
 

@@ -13,6 +13,8 @@ export interface ProbeServerOptions {
   readonly requiredSchemaVersion: number;
   /** False once shutdown begins, so the orchestrator stops routing before the drain finishes. */
   readonly isServing: () => boolean;
+  /** True once every consumer required by this replica is attached. */
+  readonly areConsumersReady: () => boolean;
 }
 
 /**
@@ -22,6 +24,9 @@ export interface ProbeServerOptions {
  */
 export async function probeReadiness(options: ProbeServerOptions): Promise<ReadinessResult> {
   if (!options.isServing()) return { status: "down", detail: "draining" };
+  if (!options.areConsumersReady()) {
+    return { status: "down", detail: "required consumers are not attached" };
+  }
   try {
     await assertSchemaFloor(options.database, options.requiredSchemaVersion);
     return { status: "ok" };

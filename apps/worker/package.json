@@ -7,6 +7,7 @@
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
@@ -15,7 +16,8 @@
     "ai": "^7.0.2",
     "dotenv": "^17.4.2",
     "isolated-vm": "^7.0.0",
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "pg-boss": "^12.23.0"
   },
   "scripts": {
     "build": "tsc",

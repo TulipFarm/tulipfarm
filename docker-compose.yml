@@ -87,6 +87,8 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       WORKER_PORT: "4020"
+      # Exactly one replica owns cron and maintenance consumers.
+      WORKER_MAINTENANCE: "true"
       # The turn runs here, so this process calls back into the API for Context, Tool dispatch
       # and Turn completion. Service-to-service on the compose network — never the public URL.
       INTERNAL_API_URL: http://app:8080

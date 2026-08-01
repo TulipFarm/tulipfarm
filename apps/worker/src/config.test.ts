@@ -22,6 +22,7 @@ describe("loadConfig", () => {
       batchSize: 25,
       leaseDurationMs: 60_000,
       drainTimeoutMs: 15_000,
+      maintenance: false,
     });
     expect(config.owner).not.toEqual("");
   });
@@ -69,6 +70,13 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...MINIMAL, WORKER_OWNER: "worker-a" }).owner).toBe("worker-a");
     expect(() => loadConfig({ ...MINIMAL, WORKER_OWNER: "  " })).toThrow(
       "WORKER_OWNER must not be blank"
+    );
+  });
+
+  it("enables maintenance only on an explicitly selected replica", () => {
+    expect(loadConfig({ ...MINIMAL, WORKER_MAINTENANCE: "true" }).maintenance).toBe(true);
+    expect(() => loadConfig({ ...MINIMAL, WORKER_MAINTENANCE: "yes" })).toThrow(
+      'WORKER_MAINTENANCE must be "true" or "false", got "yes"'
     );
   });
 });
