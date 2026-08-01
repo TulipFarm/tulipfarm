@@ -21,6 +21,10 @@ describe("runPgMigrations", () => {
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
+    await db.query(`CREATE TABLE api_clients (
+      id            uuid PRIMARY KEY,
+      owner_user_id uuid NOT NULL REFERENCES users(id)
+    )`);
     await db.query(`CREATE TABLE external_identity_mappings (
       provider         text NOT NULL,
       external_subject text NOT NULL,
@@ -104,6 +108,19 @@ describe("runPgMigrations", () => {
           WHERE event_object_table = 'run_events' AND trigger_name = 'run_events_notify'`
       );
       expect(triggers.rows).toHaveLength(1);
+    });
+  });
+
+  describe("migration 19", () => {
+    it("lets a client be owned by the deployment rather than a person", async () => {
+      // The `run-executor` client is minted on first boot, before the wizard has made a user.
+      await runPgMigrations(db, undefined, () => {});
+
+      const column = await db.query<{ is_nullable: string }>(
+        `SELECT is_nullable FROM information_schema.columns
+          WHERE table_name = 'api_clients' AND column_name = 'owner_user_id'`
+      );
+      expect(column.rows[0]?.is_nullable).toBe("YES");
     });
   });
 });

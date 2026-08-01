@@ -687,4 +687,21 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query("DROP TABLE IF EXISTS stream_resume");
     },
   },
+  {
+    version: 19,
+    description: "allow a deployment-owned service client",
+    up: async (q) => {
+      // Every API client so far was minted by a person, so `owner_user_id` recorded who is
+      // accountable for it. The client this API mints for its own Worker has no such person: it is
+      // created on first boot, before the setup wizard has made a single user, and a deployment
+      // that never opens the wizard still has to execute the Runs it accepts.
+      //
+      // NULL therefore means "owned by the deployment", and it is not an authorization change:
+      // `apiClientPrincipal` has always derived authority from the client itself, never from its
+      // owner, so nothing reads this column to decide anything. What it costs is that the client
+      // list can show an owner nobody can page — which is the truth about a process, and better
+      // than attributing it to whichever human happened to run setup first.
+      await q.query("ALTER TABLE api_clients ALTER COLUMN owner_user_id DROP NOT NULL");
+    },
+  },
 ];

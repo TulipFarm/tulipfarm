@@ -100,6 +100,7 @@ import {
   bootstrapSecrets,
 } from "./setup/bootstrap-secrets";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
+import { provisionWorkerCredential } from "./setup/worker-credential";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
@@ -489,6 +490,9 @@ async function boot() {
     registerGuardrailsReload(gitSync, soulLoader, guardrailsService, app.log);
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
+    // Before the wizard, and independent of it: a deployment that never opens the wizard still
+    // accepts Runs, so the Worker's credential cannot wait on a human creating the first account.
+    await provisionWorkerCredential(apiClientRepo, process.env, app.log);
     await bootstrapFromEnv({
       userRepo,
       secretsService,

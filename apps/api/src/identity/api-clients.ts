@@ -18,7 +18,8 @@ export interface ApiClientDoc {
   clientId: string;
   name: string;
   secretHash: string;
-  ownerUserId: string;
+  /** `null` means the deployment owns it, not a person — see migration 19. */
+  ownerUserId: string | null;
   status: ApiClientStatus;
   expiresAt: Date | null;
   createdAt: Date;
@@ -29,7 +30,7 @@ export interface PublicApiClient {
   id: string;
   clientId: string;
   name: string;
-  ownerUserId: string;
+  ownerUserId: string | null;
   status: ApiClientStatus;
   expiresAt: string | null;
   createdAt: string;
@@ -65,7 +66,7 @@ function rowToClient(row: Record<string, unknown>): ApiClientDoc {
     clientId: row.client_id as string,
     name: row.name as string,
     secretHash: row.secret_hash as string,
-    ownerUserId: row.owner_user_id as string,
+    ownerUserId: (row.owner_user_id as string | null) ?? null,
     status: row.status as ApiClientStatus,
     expiresAt: (row.expires_at as Date | null) ?? null,
     createdAt: row.created_at as Date,
@@ -154,7 +155,7 @@ function hashesMatch(a: string, b: string): boolean {
 
 export async function createApiClient(
   repo: ApiClientRepo,
-  input: { name: string; ownerUserId: string; expiresAt?: Date | null }
+  input: { name: string; ownerUserId: string | null; expiresAt?: Date | null }
 ): Promise<{ doc: ApiClientDoc; secret: string }> {
   const secret = newSecret();
   const doc: ApiClientDoc = {
