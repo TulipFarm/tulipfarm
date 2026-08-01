@@ -79,6 +79,14 @@ Package names in application rows are relative to `packages/`. Existing v1 packa
 during capability cutover, but target code must not create additional legacy dependencies. Each
 legacy edge is removed when its accountable owner passes replacement and cutover tests.
 
+`apps/worker` → `packages/llm` is the one edge added after that rule was written, and it is
+recorded as legacy rather than allowed. The Worker executes the turn, so it is the process that
+calls a model, and `packages/llm` holds the only provider and tier resolution that exists; the
+target home for it is `packages/agent-runtime` (see "Model provider" below). Writing a second copy
+in the Worker would create the same v1 debt twice and force it to be unwound twice. The edge
+retires when `agent-runtime` owns provider adapters, which removes the API's identical edge in the
+same change.
+
 ## Required ports and composition seams
 
 | Port or seam | Contract owner | Implemented/composed by |

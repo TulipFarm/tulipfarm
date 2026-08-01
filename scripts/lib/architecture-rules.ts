@@ -163,6 +163,12 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "secrets",
       "run-kernel",
       "tool-broker",
+      // Both applications need one implementation of these or they need two copies: `sandbox` owns
+      // the hook isolate the API spawns for resource hooks and the Worker spawns for ingress
+      // classification, and `agent-runtime` owns system-prompt assembly, so the API's debug-context
+      // route renders the prompt the Worker actually sent. Neither licenses running a turn here.
+      "agent-runtime",
+      "sandbox",
       "knowledge",
       "memory",
       "surface",
@@ -210,5 +216,12 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
   legacyExceptions: {
     soul: ["constants"],
     api: ["llm", "routine-engine"],
+    // The Worker executes the turn, so it is the process that calls a model. `@tulipfarm/llm` holds
+    // the only provider/tier resolution there is, and the target home for it is `agent-runtime`
+    // ("Model provider" in the extension-point table). Adding a second copy in the Worker would
+    // create the same v1 debt twice over and then have to be unwound twice, so the edge is recorded
+    // here instead: it retires when `agent-runtime` owns provider adapters, which drops the API's
+    // identical edge in the same change.
+    worker: ["llm"],
   },
 };

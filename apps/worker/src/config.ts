@@ -47,6 +47,18 @@ function requireString(env: Env, key: string): string {
   return value;
 }
 
+/**
+ * Trims trailing slashes so `http://api:8080/` and `http://api:8080` build the same request path.
+ *
+ * A scan, not `replace(/\/+$/, "")`: the regex backtracks on a long run of slashes, and this value
+ * comes from the environment, which a deployment tool composes rather than a person types.
+ */
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") end -= 1;
+  return value.slice(0, end);
+}
+
 function positiveInt(env: Env, key: string, fallback: number): number {
   const raw = env[key];
   if (raw === undefined || raw.trim().length === 0) return fallback;
@@ -66,7 +78,7 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
   const config: WorkerConfig = {
     databaseUrl: requireString(env, "DATABASE_URL"),
     businessId: DEPLOYMENT_BUSINESS_ID,
-    internalApiUrl: requireString(env, "INTERNAL_API_URL").replace(/\/+$/, ""),
+    internalApiUrl: stripTrailingSlashes(requireString(env, "INTERNAL_API_URL")),
     internalApiCredential: requireString(env, "WORKER_API_CREDENTIAL"),
     owner: env.WORKER_OWNER ?? `${hostname()}:${process.pid}`,
     port: positiveInt(env, "WORKER_PORT", 4020),
