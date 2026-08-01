@@ -118,8 +118,11 @@ describe("durable chat submission over HTTP", () => {
   let sid: string;
   let otherSid: string;
   let validator: TypedOutputValidator;
+  /** Flipped by the budget test; every other test runs with the budget open. */
+  let withinBudget: boolean;
 
   beforeEach(async () => {
+    withinBudget = true;
     db = await makePglite();
     await runPgMigrations(db as unknown as Queryable);
 
@@ -175,6 +178,14 @@ describe("durable chat submission over HTTP", () => {
       runCancel: runCanceller(
         new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
       ),
+      rateLimiter: {
+        check: async (_key, limit) => ({
+          allowed: withinBudget,
+          limit,
+          remaining: withinBudget ? limit - 1 : 0,
+          resetAt: Date.now() + 60_000,
+        }),
+      },
     });
   });
 
@@ -246,6 +257,19 @@ describe("durable chat submission over HTTP", () => {
     );
     return result.rows[0]?.count ?? 0;
   }
+
+  it("refuses a turn over budget before it mints anything", async () => {
+    withinBudget = false;
+
+    const response = await postChat();
+
+    expect(response.statusCode).toBe(429);
+    // The budget is worth having only if it is spent before the Run is: a refusal that still
+    // committed a Run would cap nothing a Worker or a model actually does.
+    expect(await count("runs")).toBe(0);
+    expect(await count("conversation_turns")).toBe(0);
+    expect(await count("messages")).toBe(0);
+  });
 
   it("commits a Turn, a Run, and the request Artifact before it streams", async () => {
     const response = await chat();
