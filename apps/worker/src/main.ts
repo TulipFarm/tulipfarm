@@ -10,6 +10,7 @@ import {
 import { BudgetStore, EventStore, RunEventStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
+import { loadDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { EventOutboxDispatcher } from "./event-dispatcher";
@@ -72,6 +73,13 @@ const logger = {
  */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
+  // The API mints the credential and the KEK on its first boot and persists them to the shared
+  // data volume; without this, a compose deployment that was never handed an `.env` cannot claim a
+  // single Run. Env always wins, so a managed deployment never reads the volume at all.
+  const fromVolume = loadDataDirEnv();
+  if (fromVolume.length > 0) {
+    logger.info(`Read ${fromVolume.join(", ")} from the data volume.`);
+  }
 
   const config: WorkerConfig = loadConfig();
   const pool = await connectPg(config.databaseUrl);

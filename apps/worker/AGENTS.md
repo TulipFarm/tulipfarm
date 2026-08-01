@@ -8,8 +8,14 @@ reimplement package-owned logic. tsconfig extends `@tulipfarm/tsconfig/node.json
 ## Running it
 
 `pnpm dev:worker` (tsx watch) or `node dist/worker.cjs` (the bundle the Dockerfile emits, run by
-the `worker` compose service). Requires `DATABASE_URL`; every `WORKER_*` variable has a default —
-see `.env.local.example`.
+the `worker` compose service). Requires `DATABASE_URL`, `INTERNAL_API_URL` and
+`WORKER_API_CREDENTIAL`; every `WORKER_*` variable has a default — see `.env.local.example`.
+
+In a container the last one and `ENCRYPTION_KEY` need not be set at all: `data-dir.ts` reads them
+back from the data volume the API wrote them to (`worker.env` and `secrets.env`, one owner each),
+which is what lets a compose file with no `.env` execute a turn. The environment always wins, and
+nothing is invented here — a value on neither the environment nor the volume stays missing, and
+`loadConfig` names it.
 
 ## Composition root (`src/main.ts`)
 
