@@ -98,4 +98,28 @@ curl -fsS --retry 5 --retry-connrefused --retry-delay 2 \
   "http://localhost:${UPDATED_PORT}/health" >/dev/null \
   || fail "/health did not move to :${UPDATED_PORT}"
 
-log "PASS — stack healthy, re-runs preserved secrets, and the host port changed cleanly"
+# 6. Drive the shipped SPA in a real browser at the installer's own PUBLIC_URL.
+#    /health only proves the API process is alive — it never loads the bundle. This step is the
+#    only thing in CI that executes the shipped JS, and it must use PUBLIC_URL verbatim: it is a
+#    LAN IP (⇒ a NON-secure context, where secure-context-only APIs vanish) and CORS_ORIGIN is
+#    pinned to it, so any other origin would be rejected before the app could boot.
+if [ "${SMOKE_SKIP_BROWSER:-0}" = "1" ]; then
+  log "skipping browser smoke (SMOKE_SKIP_BROWSER=1)"
+else
+  public_url="$(grep -E '^PUBLIC_URL=' "${INSTALL_DIR}/.env" | head -1 | cut -d= -f2-)"
+  [ -n "$public_url" ] || fail "could not read PUBLIC_URL from ${INSTALL_DIR}/.env"
+
+  # Locally the installer may fall back to localhost (a secure context by spec carve-out), which
+  # would silently make the run cover less than it claims. In CI a LAN IP is always detected, so
+  # demand it there rather than accept a weaker pass.
+  require_insecure=""
+  if [ "${CI:-}" = "true" ]; then
+    require_insecure="--require-insecure"
+  fi
+
+  log "running browser smoke against ${public_url}…"
+  node "${REPO_ROOT}/scripts/test/browser-smoke.mjs" "$public_url" $require_insecure \
+    || fail "browser smoke failed against ${public_url}"
+fi
+
+log "PASS — stack healthy, re-runs preserved secrets, host port changed cleanly, SPA boots"
