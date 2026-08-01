@@ -1,4 +1,3 @@
-import type { PgBoss } from "pg-boss";
 import { recordJobRun } from "./activity/job-run";
 import type { ActivityService } from "./activity/service";
 
@@ -21,11 +20,12 @@ export interface SoulArtifacts {
 export interface SoulSyncOptions {
   activity?: ActivityService;
   soulLoader?: SoulArtifacts;
+  log?: { error(obj: unknown, msg?: string): void };
 }
 
-export const SOUL_SYNC_QUEUE = "soul-sync";
+export const SOUL_SYNC_JOB = "soul-sync";
 /** Every 5 minutes — the periodic soul down-sync cadence. */
-export const SOUL_SYNC_CRON = "*/5 * * * *";
+export const SOUL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // Singular activity "kind" → the plural SoulArtifacts map key.
 const SOUL_KINDS = [
@@ -68,27 +68,27 @@ async function recordSoulDiff(
 }
 
 /**
- * Registers the periodic soul git-sync on pg-boss. Gated on a configured git remote —
- * without one there is nothing to sync. Returns whether the schedule was registered.
+ * Registers the periodic soul git-sync in this process. Gated on a configured git remote —
+ * without one there is nothing to sync. Returns the interval so shutdown can stop future pulls.
  *
  * When an activity service + soul loader are supplied, each run is recorded (category 'job') and
  * newly-added agents/routines/integrations/skills are detected by diffing the loader's artifact
  * key sets before vs after the pull (an explicit `reload()` makes the "after" snapshot deterministic;
  * the redundant reload is harmless — `load()` replaces whole maps).
  */
-export async function registerSoulSync(
-  boss: PgBoss,
+export function registerSoulSync(
   syncer: SoulSyncer,
   gitRemoteUrl: string | undefined,
   opts: SoulSyncOptions = {}
-): Promise<boolean> {
-  if (!gitRemoteUrl) {
-    return false;
-  }
-  const { activity, soulLoader } = opts;
-  await boss.createQueue(SOUL_SYNC_QUEUE);
-  await boss.work(SOUL_SYNC_QUEUE, () =>
-    recordJobRun(activity, SOUL_SYNC_QUEUE, async () => {
+): ReturnType<typeof setInterval> | undefined {
+  if (!gitRemoteUrl) return undefined;
+
+  const { activity, soulLoader, log } = opts;
+  let running = false;
+  return setInterval(() => {
+    if (running) return;
+    running = true;
+    void recordJobRun(activity, SOUL_SYNC_JOB, async () => {
       const before = activity && soulLoader ? snapshot(soulLoader) : null;
       await syncer.syncOnce();
       if (activity && soulLoader && before) {
@@ -96,7 +96,11 @@ export async function registerSoulSync(
         await recordSoulDiff(activity, before, snapshot(soulLoader));
       }
     })
-  );
-  await boss.schedule(SOUL_SYNC_QUEUE, SOUL_SYNC_CRON);
-  return true;
+      .catch((error: unknown) => {
+        log?.error({ error }, "periodic soul sync failed");
+      })
+      .finally(() => {
+        running = false;
+      });
+  }, SOUL_SYNC_INTERVAL_MS);
 }

@@ -27,7 +27,11 @@ src/
 ```
 
 All persistence is Postgres (`pg.Pool` in prod, PGlite in tests) via thin repos taking a
-`Queryable`; async work runs on in-process pg-boss. No other datastore.
+`Queryable`. The API may enqueue durable work, but pg-boss consumers run in the Worker. The one
+periodic task that remains in this process is Soul down-sync: it pulls the same filesystem worktree
+the API authors, then emits `soul.synced` to API-local reload subscribers. Moving that timer to the
+Worker would either pull into its unshared container filesystem or introduce concurrent Git writers
+on one worktree. No other datastore.
 
 `soul/` now has one subdir per soul-backed resource (`agents/`, `skills/`, `resource-types/`),
 each with its own `routes.ts` (HTTP) **and** `tools.ts` (LLM tools). `skills/` also has

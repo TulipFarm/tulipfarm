@@ -500,9 +500,10 @@ async function boot() {
       log: app.log,
     });
 
-    await registerSoulSync(boss, gitSync, gitRemoteUrl, {
+    const soulSyncInterval = registerSoulSync(gitSync, gitRemoteUrl, {
       activity: activityService,
       soulLoader,
+      log: app.log,
     });
     await registerObsPrune(boss, new PgObsRepo(pool), activityService, {
       obs: observabilityService,
@@ -583,6 +584,7 @@ async function boot() {
       }, 5000);
       force.unref();
       try {
+        if (soulSyncInterval) clearInterval(soulSyncInterval);
         await app.close();
         await boss.stop({ graceful: false });
         // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.
