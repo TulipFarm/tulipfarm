@@ -43,7 +43,10 @@ Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
   no writer can invent a shape a reader was never built to parse. `RunEventPayloads` binds the two
   sides at compile time; a writer still validates, since a payload built from runtime data can be
   wrong in ways a type cannot catch. Optional fields must be **omitted**, never set to `undefined` —
-  the schemas are `additionalProperties: false`.
+  the schemas are `additionalProperties: false`. Events pair by id, not by position: a reader ties
+  `tool.result` to its `tool.call` by `callId`, and `approval.requested` to the call it is holding
+  by the same `callId` — so a turn with several calls in flight can be rendered from the stream
+  alone, without a reader guessing which one an approval is about.
 
 ## Boundaries
 

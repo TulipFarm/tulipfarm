@@ -7,9 +7,9 @@ Each feature domain gets its own directory under `src/`:
 ```
 src/
   auth/           # session, CSRF, users, API tokens
-  chat/           # conversations, messages, streaming chat turn + durable SSE resume
+  chat/           # conversations, messages, turn submission; POST /chat streams the Run's events
   conversations/  # durable Turns: ConversationService + PgConversationStore (channel-agnostic)
-  runtime/        # invocation gateway (Run + request Artifact in one transaction), chat Run lifecycle
+  runtime/        # invocation gateway (Run + request Artifact in one transaction), invocation callers
   resources/      # resource type + data CRUD, per-type Postgres tables, write-pipeline
   tools/          # central ToolRegistry, batch executor, result truncation
   guardrails/     # reload-on-soul.synced wiring only; the guards live in @tulipfarm/agent-runtime
@@ -20,7 +20,8 @@ src/
   memory/         # per-user working memory
   secrets/        # secret storage
   soul/           # soul git ops (commit, push) + agents/, skills/, resource-types/ CRUD
-  runs/           # persisted Run event SSE stream (GET /api/v1/runs/:id/events, cursor recovery)
+  runs/           # persisted Run event SSE stream (GET /api/v1/runs/:id/events, cursor recovery) + cancellation
+  identity/       # principals, API clients, channel identity links + the single-use bind flow
   internal/       # /api/v1/internal/* — the turn machinery the Worker calls back into (service-only)
   pg-migrations/  # Postgres schema migrations (applied on boot)
 ```
@@ -115,9 +116,12 @@ knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`k
   passes it in, so the rendered prefix is deterministic and prompt-cacheable. This app keeps
   `chat/system-prompt.ts`, the adapter that projects Soul artifacts into its `AssembleContext`.
   See `packages/agent-runtime/src/context/README.md` for block order and budgets.
-- **Durable SSE** (`chat/`): the chat turn streams via an in-memory `StreamHub` (`stream-hub.ts`)
-  while persisting each event to the `stream_resume` table (`stream-resume.ts`). Reconnects replay
-  from `Last-Event-ID`; `stream-gc.ts` expires old buffers on pg-boss.
+- **Durable SSE** (`runs/events.ts`): `POST /api/v1/chat` submits the turn and then *reads* the
+  Run's persisted `run_events`, frame for frame the same stream `GET /api/v1/runs/:id/events`
+  serves — so a dropped connection reattaches by cursor (`?after=`, or `Last-Event-ID`) and loses
+  nothing, because the Worker is executing the Run regardless. Authorization is re-checked every
+  poll, and the stream ends on the Run's own terminal status. `chat/stream-hub.ts` and
+  `chat/stream-resume.ts` survive only for Routine streams and go with them in PR 4.
 - Static business/identity facts (e.g. `soul.yaml`'s `businessName`/`businessDescription`) belong
   in the **system prompt** (`assembleSystemPrompt`), not `memory/` working_memory — don't route
   them through working_memory just because onboarding captured them at runtime.
@@ -130,27 +134,41 @@ payload plus the `payloadSchemaRef` it claims to satisfy (registered in `@tulipf
 Artifact in one transaction. Never pass a `payloadRef` that names nothing — the Artifact is what
 makes a Run reconstructable after a crash.
 
-A chat turn is persisted by exactly one `ChatTurnSubmitter` (`runtime/chat-run.ts` declares the
-port, `chat/turn-submit.ts` implements it): the turn pipeline itself writes no user Message, so a
-new entrypoint must submit through this port rather than writing its own. `durableTurnSubmitter`
-writes the Turn, the Message carrying its `turn_id`, and the Run; a replayed `Idempotency-Key`
-resolves to the Turn that already answered the request and the route returns `409` with its
-`runId`. Non-chat callers use `runtime/invocation-callers.ts` (`integrationInvoker`,
-`manualRoutineTrigger`).
+A chat turn is persisted by exactly one `ChatTurnSubmitter` (declared and implemented in
+`chat/turn-submit.ts`): no turn machinery in this app writes a user Message, so a new entrypoint
+must submit through this port rather than writing its own. `durableTurnSubmitter` writes the Turn,
+the Message carrying its `turn_id`, and the Run; a replayed `Idempotency-Key` resolves to the Turn
+that already answered the request and the route returns `409` with its `runId`. Non-chat callers
+use `runtime/invocation-callers.ts` (`integrationInvoker`, `manualRoutineTrigger`).
+
+**No turn executes in this process.** Submission mints the Run and the request Artifact; the Worker
+loads that Artifact and runs the turn. Stopping one is therefore cancelling its Run
+(`POST /api/v1/chat/runs/:runId/stop` → `runs/cancel.ts`), which halts the turn in whichever
+process holds it — not closing a connection this one is holding.
+
+`internal/` is the other half: `/api/v1/internal/*` serves the Worker the Context, Tool dispatch,
+delivery classification, and Turn completion it cannot yet do itself. Those handlers take **which
+Run**, never **as whom** — authority is re-derived from the Run's recorded identity, so a worker
+credential cannot escalate past what the Run was minted with. PR 4 moves the implementations into
+the Worker; the ports do not change.
 
 ## Guardrails (`src/guardrails/`)
 
-Three guard stages wrap the chat turn (GR-V1-001/002) — **input** (`chat/routes.ts`, before
-`streamText`), **tool-call** (`tools/registry.ts` `buildToolSet` callback, before the approval
-gate), **output** (`chat/producer.ts`, buffer-then-scan each assistant text segment). Guards
-return `pass | transform | block`, run in array order, first `block` short-circuits, each bounded
-by a 5s timeout (timeout/throw → skip-as-pass + log). Input/output blocks emit a `guardrail_block`
-SSE event + `finish`; a tool-call block returns a denial the LLM sees (the turn continues).
+Three guard stages wrap a turn (GR-V1-001/002/003) — **input** before the model is asked anything,
+**tool-call** before dispatch, **output** before the answer is persisted. Guards return
+`pass | transform | block`, run in array order, first `block` short-circuits, each bounded by a 5s
+timeout (timeout/throw → skip-as-pass + log). An input/output block answers with the guard's
+message; a tool-call block returns a denial the LLM sees (the turn continues).
 
-`GuardrailsService` and the guards themselves now live in **`@tulipfarm/agent-runtime`** — the
-Worker enforces the same policy on a Slack or Telegram turn, and it may not import this app. What
-stays here is `guardrails/reload.ts`: the `soul.synced` subscription that re-reads the config, which
-is composition, not policy.
+**Enforcement is not here.** `GuardrailsService` and the guards live in
+**`@tulipfarm/agent-runtime`**, and the Worker applies all three stages inside the turn it executes
+(`apps/worker/src/turn/guardrails.ts`) — that is the only way a Slack or Telegram turn is guarded
+identically to a web one. What this app owns is the policy: it reads it, validates it, and **ships
+it with the resolved Context** (`internal/turn-context.ts` sets `guardrailPolicy` alongside
+`guardrailDigest`), so the Worker rebuilds the identical guards rather than deriving a second
+policy of its own. A Context that resolves no service still ships `DEFAULT_GUARDRAILS`, never an
+empty policy. `guardrails/reload.ts` — the `soul.synced` subscription that re-reads the config —
+also stays, because that is composition, not policy.
 
 The service is built from `soul/guardrails.yaml` (validated by `@tulipfarm/schema`
 `validateGuardrailsConfig`); an absent **or invalid** config falls back to `DEFAULT_GUARDRAILS` —

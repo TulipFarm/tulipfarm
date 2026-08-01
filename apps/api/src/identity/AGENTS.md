@@ -13,7 +13,24 @@ Hardened authentication surfaces layered on `auth/`: OIDC login, MFA step-up, AP
 | `step-up.ts` | `MfaVerifierRegistry`, `evaluateStepUp`, `makeRequireStepUp`. |
 | `api-clients.ts` | Service identities; `tfc_<clientId>.<secret>` bearer credentials, hash-only storage. |
 | `external-links.ts` | External identity mappings + one-use link tokens. |
+| `channel-link.ts` | Binding a channel sender (Slack, Telegram, …) to an account: the signed bind link, its preview, and its redemption. |
 | `routes.ts` | `registerIdentityRoutes(app, deps, requireAuth)`. |
+
+## Channel links
+
+A channel sender is an external identity like any other, so it is stored in
+`external_identity_mappings` with the Integration slug as the provider — not in a table of its own,
+which would be a second authority on the same question. `verified_via` records *how* the link was
+established, because an auto-link from a provider-verified email and a human confirming a bind link
+are not equally strong evidence and an audit has to tell them apart.
+
+The bind link is a credential. It is HMAC-signed with a key from `@tulipfarm/secrets`, encodes only
+`{slug, senderId, issuedAt, nonce}` — no account, since none is known when it is issued — expires in
+15 minutes, and its nonce is consumed on redemption (`channel_bind_tokens`), so a replayed link
+binds nothing. Redemption requires an authenticated session and an explicit confirm against a
+preview naming both sides; the token travels in the **body**, never a query string, so it stays out
+of access logs and referrer headers. Nothing outside this module ever sees an issued link — the
+Worker is told only that the sender was unlinked.
 
 ## Rules
 

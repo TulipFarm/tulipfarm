@@ -9,7 +9,7 @@ All 14 phases were executed and merged. The gap this file tracks is not "were th
 (`pnpm lint && pnpm typecheck && pnpm test && pnpm build`) pass on code that nothing imports —
 they never checked reachability.
 
-Last verified: 2026-07-29.
+Last verified: 2026-08-01.
 
 ## How a verdict is derived
 
@@ -40,7 +40,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | ID | Defect | Status |
 | --- | --- | --- |
 | D1 | API route options gated on optional `buildApp` opts were never passed, so whole route areas did not exist on the running server | **Partly fixed** — `operationalApi` and `runEvents` composed; five opts deferred with named owners; regression test added |
-| D2 | `apps/worker` and `apps/integration-worker` are export barrels with no `main()`, dispatch loop, or signal handling | **Partly fixed** — `apps/worker` has a composition root, three loops, fail-closed preflight, probes, and a drain (PR 1); `apps/integration-worker` is still a barrel — PR 6 |
+| D2 | `apps/worker` and `apps/integration-worker` are export barrels with no `main()`, dispatch loop, or signal handling | **Partly fixed** — `apps/worker` boots (PR 1) and now executes Chat and Integration Runs end to end (PR 3); `apps/integration-worker` is still a barrel — PR 6 |
 | D3 | Governed packages have zero runtime consumers while parallel `apps/api` implementations serve traffic | Open — PR 6 (direction decided: packages win, locals get migrated then deleted) |
 | D4 | Phase 14 legacy removal was largely renames; `legacy-inventory.test.ts` asserts filenames, not behavior | Open — PR 8 |
 
@@ -49,10 +49,11 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | `buildApp` opt | Composed | Note |
 | --- | --- | --- |
 | `operationalApi` | yes | `/api/v1/runs`, `/admin/operations`, `/inbox`, `/roles`, `/guardrails` |
-| `runEvents` | yes | `/api/v1/runs/:id/events`; the stream is legitimately empty until the worker writes events |
-| `triggerInvoke` | no | the worker boots as of PR 1, but no Run source has an executor, so a trigger would only mint Runs to be parked — PR 3 |
-| `hookIngress` | no | same: signed webhook ingress is inert until a Run source has an executor — PR 3 |
-| `runReplay` | no | replays events no writer produces yet — PR 3 |
+| `runEvents` | yes | `/api/v1/runs/:id/events`, and the same reader behind `POST /api/v1/chat` — the worker writes the events as of PR 3 |
+| `internalTurns` | yes | `/api/v1/internal/*` — Context, Tool dispatch, delivery classification, and Turn completion for the Worker (service principals only) |
+| `triggerInvoke` | no | Chat and Integration have executors as of PR 3, but Trigger/Routine Run sources do not, so a trigger would only mint Runs to be parked — PR 4 |
+| `hookIngress` | no | same: signed webhook ingress is inert until its Run source has an executor — PR 4 |
+| `runReplay` | no | replay recompiles the recorded Routine; the run-event stream it reads is only half of what it needs — PR 4 |
 | `routines` / `routineAuthoring` | no | `@tulipfarm/routine-engine` is being retired, not revived — PR 4 |
 | `forms` | no | no form storage; `GovernedFormView` is rendered by no route — PR 6 |
 
@@ -60,21 +61,24 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 
 | Package | Non-test app importers | Verdict |
 | --- | --- | --- |
-| `soul`, `schema`, `llm`, `secrets` | 41 / 38 / 21 / 11 | composed |
-| `storage` | 7 | composed — `RunStore` / `RunEventStore` back the operational Run browser, and `ArtifactStore` persists every request Artifact (PR 2) |
-| `run-kernel` | 6 | partly composed — the invocation gateway, Run event reader, and `ArtifactService` publish/read path are reachable (PR 2); replay is not |
-| `authz` | 4 | partly composed — principal/identity types plus the deployment role catalog (`apps/api/src/identity/roles.ts`); the policy engine (`decideEffectivePermission`, `evaluateGuardrail`, `checkDlpBoundary`) still has no production caller |
-| `surface` | 4 | composed — the compiler is reached from `chat/producer.ts` |
-| `integrations` | 4 | not composed — all four importers are in `apps/integration-worker`, which never starts (D2) |
-| `agent-runtime`, `tool-broker` | 1 each | not composed — type-only import / SQL DDL constant only |
+| `soul`, `schema`, `llm`, `secrets` | 46 / 43 / 23 / 13 | composed |
+| `storage` | 16 | composed — `RunStore` / `RunEventStore` back the Run browser and every stream, and `ArtifactStore` persists every request Artifact (PR 2) |
+| `run-kernel` | 17 | composed — the invocation gateway, waits, cancellation, and the `ArtifactService` publish/read path all run in production (PR 3); replay does not |
+| `agent-runtime` | 15 | composed — the turn engine the Worker executes: context assembly, the bounded loop, and all three guardrail stages (PR 3) |
+| `surface` | 11 | composed — Artifacts are created by the `surface_*` Tools the Worker dispatches through the internal host |
+| `sandbox` | 11 | composed — one isolated-vm implementation, used by the API's resource hooks and by the Worker's Integration classifier (PR 3) |
+| `authz` | 5 | partly composed — principal/identity types plus the deployment role catalog (`apps/api/src/identity/roles.ts`); the policy engine (`decideEffectivePermission`, `evaluateGuardrail`, `checkDlpBoundary`) still has no production caller |
+| `integrations` | 5 | partly composed — the Worker's Integration executor runs the manifest classifier and reply binding (PR 3); the four `apps/integration-worker` importers still never start (D2) |
+| `tool-broker` | 1 | not composed — SQL DDL constant only. The Worker's `ToolDispatchPort` is served over HTTP by `/api/v1/internal/tools`, so PR 3's dispatch path does **not** go through the broker as planned; PR 4 owns that move |
 | `routine-engine` | 2 | orphan subtree, scheduled for retirement |
-| `sandbox`, `validation`, `testkit`, `audit`, `observability`, `knowledge`, `memory` | 0 | not composed |
+| `validation`, `testkit`, `audit`, `observability`, `knowledge`, `memory` | 0 | not composed |
 
 ## Correctly hooked, no action needed
 
-Skills (bundled Skill overlay, frontmatter validation, catalog UI), Tulip Surface Protocol compile through
-`chat/producer.ts`, Chat/SSE with durable resume, the Soul loader, `@tulipfarm/schema` AJV
-validation on tool calls, the LLM provider chain, secrets, and the editor surfaces.
+Skills (bundled Skill overlay, frontmatter validation, catalog UI), Tulip Surface Protocol compile
+through the `surface_*` Tools the Worker dispatches, chat streaming with cursor recovery over
+`run_events`, the Soul loader, `@tulipfarm/schema` AJV validation on tool calls, the LLM provider
+chain, secrets, and the editor surfaces.
 
 ## What PR 0 changed
 
@@ -165,6 +169,66 @@ data is withheld. They fill in when PR 1/3/4 land their writers.
   writer until PR 3. Web still resumes over `stream_resume`.
 - Pre-existing `messages` rows keep `turn_id` NULL. They predate Turns, and inventing a Turn for
   them would be a guess.
+
+## What PR 3 changed
+
+- **The turn moved.** `apps/api/src/runtime/chat-run.ts` and `chat/producer.ts` are deleted; the
+  model loop, context assembly, compaction, the system prompt, and all three guardrail stages now
+  live in `@tulipfarm/agent-runtime`, and `apps/worker/src/turn/` drives them. The API authenticates,
+  submits durably, and reads events back — it executes nothing. That is what makes Slack and
+  Telegram equal to web rather than second-class: `TurnDriver` holds no channel policy, so one code
+  path answers all of them. Enforcement moved with it — guardrails that ran in the API guarded web
+  and nothing else.
+- **`run_events` is the one stream.** `@tulipfarm/schema`'s `RUN_EVENT_DEFINITIONS` fixes a
+  channel-neutral vocabulary, each type bound to an audience, and every payload is validated on the
+  way in. `POST /api/v1/chat` submits the turn and then reads that Run's persisted events —
+  frame for frame the stream `GET /api/v1/runs/:id/events` serves — so a dropped connection
+  reattaches by cursor and loses nothing, and an operator can read a finished turn back. Migration
+  `18` drops `stream_resume`, and `chat/stream-hub.ts` + `chat/stream-resume.ts` survive only as the
+  contract Routines still use.
+- **Operator evidence is withheld from participants, per event, at the source.** `context.assembled`,
+  `tool.dispatched`, `guardrail.decision`, and `delivery.classified` carry digests and decision
+  records; the reader re-checks the grant on every poll. Tool arguments reach a participant only as
+  `canonicalHash` — a secret passed as an argument cannot appear in a stream the conversation reads.
+- **Approvals are kernel waits.** The Run parks in `waiting` holding the bound Tool intent and
+  resumes at the same State on the same `runId` — PR 1's resume-mints-a-fresh-Run path,
+  `approvals/chat-gate.ts`, and `chat/pending-interactions.ts` are gone, so a resumed turn can no
+  longer duplicate its Message.
+- **A worker attempt is bookkept.** Migration `17` adds `turn_completions` keyed `(turn_id, attempt)`
+  and `messages.attempt`, so a worker killed mid-turn is retried under a new attempt without
+  colliding with the dead one. The worker's schema floor moves 15 → 17.
+- **Channels resolve to people.** An inbound sender is matched against `external_identity_mappings`
+  (reused, not duplicated — a second table would be a second authority for the same question),
+  then against the manifest identity binding, which auto-links a provider-verified email. An
+  unmatched sender never reaches the model: the Run is recorded as denied and the reply carries a
+  single-use, 15-minute HMAC bind link that only an authenticated session can redeem
+  (`identity/channel-link.ts`, `channel_bind_tokens`).
+- **One sandbox.** `packages/sandbox` holds the isolated-vm executor; the API's resource hooks and
+  the Worker's Integration classifier are both callers. The classifier runs in the Worker because it
+  is untrusted per-Integration code and the API is the process holding every credential — the two
+  entrypoints grant different capabilities and must keep different bundle basenames.
+
+### Deviations from the PR 3 plan
+
+- **Tool dispatch does not go through `@tulipfarm/tool-broker`.** The Worker's `ToolDispatchPort`
+  is served over HTTP by `/api/v1/internal/tools`, which runs the API's existing `ToolRegistry`.
+  The port is the contract, so PR 4 can swap the implementation, but the broker's approval and
+  reconciliation logic is still uncomposed today.
+- **`triggerInvoke`, `hookIngress`, and `runReplay` are still deferred.** Chat and Integration have
+  executors; Trigger/Routine Runs do not, so composing those opts would mint Runs nothing executes.
+  They move with the Routine work in PR 4.
+- **NOTIFY is installed but nothing listens.** Migration `17` creates the `run_events` trigger;
+  the API has no `LISTEN` connection yet, so streams still wake on the 500ms poll. This was always
+  a latency hint, never correctness — the reader re-reads by cursor regardless.
+- **Web chat lost two behaviors.** Surface Artifacts are created but not rendered in chat (the web
+  mapper emits nothing for `surface.emitted`), and model-resolution errors that used to answer
+  synchronously (`400 UnknownModelError`, `503 LlmNotConfiguredError`) now surface as a failed Run.
+  Approval cards no longer show a countdown — no `expiresAt` is on the wire — and are released by
+  the Tool's result rather than a dedicated event.
+- **`POST /api/v1/chat`'s wire event names changed.** The plan said the route keeps its contract;
+  it does not. It streams the raw run-event vocabulary and `apps/web/app/lib/chat/sse-client.ts`
+  projects it, so the web is one reader of a shared stream rather than the shape the stream is
+  built for.
 
 ## Remaining work
 

@@ -36,6 +36,16 @@ to these shapes unchanged, so the caller converts nothing — it just cannot ove
 Each block owns its own char budget and is dropped **whole** when over it, never half-rendered, so
 the cacheable prefix cannot drift mid-block (AC-V1-001).
 
+## Guardrails compile a policy; they never fetch one
+
+`GuardrailsService.init` takes the raw config and builds the three stages; nothing in this package
+reads the Soul. `revision` (the canonical hash) and `config` (the policy it hashed) are both public
+so a second process can rebuild the *identical* guards and prove it did: the API resolves the
+policy, ships it with the Context, and the Worker's `TurnGuardrails` refuses to execute a turn whose
+`guardrailDigest` does not match the revision it just compiled. Keep `config` returning the
+validated policy — an invalid or absent one falls back to `DEFAULT_GUARDRAILS`, so this getter never
+answers "unguarded", and the digest check downstream depends on that.
+
 ## `ModelPort.stream` is optional
 
 An adapter that cannot stream implements `invoke` alone and the loop falls back to it — losing the
