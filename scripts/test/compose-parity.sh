@@ -54,6 +54,7 @@ fi
 # Prevent ambient developer or runner variables from weakening the zero-env phase.
 unset COMPOSE_FILE COMPOSE_PROFILES CORS_ORIGIN DATABASE_URL ENCRYPTION_KEY
 unset JWT_SECRET POSTGRES_PASSWORD PUBLIC_URL SETUP_MODE WEBHOOK_SIGNING_SECRET
+unset WORKER_API_CREDENTIAL
 
 log "booting with no .env…"
 test ! -f "${TEST_DIR}/.env"
@@ -72,6 +73,12 @@ log "asserting the worker booted and reports ready…"
 compose exec -T worker node -e \
   "fetch('http://localhost:4020/readyz').then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})" \
   || fail "the worker did not report ready"
+
+# A worker that boots but holds no credential answers nothing, and says so only at the first
+# turn — so assert the handoff itself, not just that the process is up.
+log "asserting the app minted the worker credential…"
+compose exec -T app grep -q '^WORKER_API_CREDENTIAL=tfc_' /data/worker.env \
+  || fail "app did not write a worker credential to /data/worker.env"
 
 log "asserting generated secrets survive a restart…"
 secrets_before="$(compose exec -T app cat /data/secrets.env)"
