@@ -17,3 +17,4 @@ references
 .claude/logs
 .playwright-mcp
 .claude/worktrees
+browser-smoke-failure.png

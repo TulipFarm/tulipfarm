@@ -102,6 +102,12 @@ the type's JSON Schema fetched from the API. The logic lives in `lib/schema.ts`:
 - Reserve ruby (`--primary`) for brand/primary; coral/signal red (`--destructive`) for danger
   only — keep ruby on ≤10% of any screen. Containers `rounded-none`, interactive `rounded-sm/md`.
 - Badge counts are **mocked** (`lib/badges.ts`) in the V1 shell — wire to the API downstream.
+- **Never call secure-context-only browser APIs directly.** Prod is served over plain http from a
+  LAN IP, a NON-secure context where `crypto.randomUUID`, `crypto.subtle`, `navigator.clipboard`,
+  service workers, etc. are `undefined` and throw. Use `~/lib/uuid` (`randomUUID`) and
+  `~/lib/clipboard` (`copyText`); add a guarded helper before reaching for a new one. Enforced by
+  `pnpm check:secure-context` (CI, Lint job). Note that neither localhost dev nor the jsdom suite
+  can reproduce this — both are always secure contexts.
 - The API CORS-allows the web origin at `VITE_PORT` (default `:4000`); the API itself is `:4010`.
 
 ## Tests

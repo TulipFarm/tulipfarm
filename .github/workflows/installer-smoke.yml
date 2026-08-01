@@ -23,6 +23,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # The browser smoke (step 6 of the script) drives the shipped SPA in real Chromium.
+      - name: Install Chromium for the browser smoke
+        run: pnpm exec playwright install --with-deps chromium
       - uses: docker/setup-buildx-action@v4
       - name: Build app image (load into daemon)
         uses: docker/build-push-action@v7
@@ -65,5 +69,15 @@ jobs:
         with:
           name: log-installer-smoke
           path: installer-smoke.log
+          if-no-files-found: ignore
+          retention-days: 7
+      # Written by browser-smoke.mjs when it fails — the fastest way to see what the SPA
+      # actually rendered, since the failure is in a browser CI never shows you.
+      - name: Upload browser smoke screenshot
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-smoke-failure
+          path: browser-smoke-failure.png
           if-no-files-found: ignore
           retention-days: 7
