@@ -40,7 +40,7 @@ test.describe("product CRUD journeys", () => {
     await page.getByLabel("description").fill("browser CRUD fixture");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
-    await page.getByRole("link", { name: "New page" }).click();
+    await page.getByRole("link", { name: "New page", exact: true }).click();
     await page.getByLabel("path").fill(path);
     await page.getByRole("button", { name: "raw" }).click();
     await page.getByLabel("content").fill("---\ntitle: E2E page\n---\n\ncreated");
