@@ -125,8 +125,7 @@ else
   node "${REPO_ROOT}/scripts/test/mock-llm.mjs" >/tmp/tulipfarm-e2e-llm.log 2>&1 &
   LLM_MOCK_PID=$!
   sleep 1
-  mock_host="$(printf '%s' "$public_url" | sed -E 's#^https?://([^:/]+).*$#\1#')"
-  export E2E_LLM_BASE_URL="http://${mock_host}:${mock_port}/v1"
+  export E2E_LLM_BASE_URL="http://host.docker.internal:${mock_port}/v1"
 
   log "running browser smoke against ${public_url}…"
   node "${REPO_ROOT}/scripts/test/browser-smoke.mjs" "$public_url" $require_insecure \

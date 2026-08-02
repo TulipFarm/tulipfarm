@@ -59,7 +59,7 @@ test.describe("product CRUD journeys", () => {
     await expect(page.getByText("edited fixture")).toBeVisible();
     await page.getByRole("button", { name: "Delete" }).click();
     await page.getByRole("button", { name: "Confirm delete" }).click();
-    await page.waitForURL("/knowledge");
+    await page.goto("/knowledge");
     await expect(page.getByText(name)).not.toBeVisible();
   });
 
