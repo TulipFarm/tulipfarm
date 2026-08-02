@@ -115,13 +115,18 @@ describe("non-chat invocation callers", () => {
   it("stores a Routine trigger's inputs as its request Artifact", async () => {
     const { runId } = await manualRoutineTrigger(invocations)("daily-digest", { limit: 5 });
 
-    const runs = await db.query<{ source: string; identity: { initiator: { id: string } } }>(
-      `SELECT runs.identity, invocation.source
+    const runs = await db.query<{
+      source: string;
+      run_source: string;
+      identity: { initiator: { id: string } };
+    }>(
+      `SELECT runs.identity, runs.source AS run_source, invocation.source
          FROM runs
          JOIN durable_invocations invocation
            ON invocation.business_id = runs.business_id AND invocation.run_id = runs.id`
     );
     expect(runs.rows[0]?.source).toBe("manual");
+    expect(runs.rows[0]?.run_source).toBe("routine");
     expect(runs.rows[0]?.identity.initiator.id).toBe("assistant");
     await expect(
       reader().read({

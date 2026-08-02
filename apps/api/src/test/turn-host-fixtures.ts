@@ -85,7 +85,7 @@ export function fakeRuns(
   run: {
     status?: string;
     digest?: string;
-    /** What minted the Run — the `bundle.routineId` a host reads its source from. */
+    /** What minted the Run, persisted independently from its pinned Routine identity. */
     source?: string;
     subject?: { kind: string; id: string };
   } | null = {}
@@ -95,7 +95,8 @@ export function fakeRuns(
       if (run === null) return null;
       return {
         status: run.status ?? "running",
-        bundle: { digest: run.digest ?? "bundle-digest", routineId: run.source ?? "chat" },
+        source: run.source ?? "chat",
+        bundle: { digest: run.digest ?? "bundle-digest", routineId: "routine-id" },
         identity: { effectiveSubject: run.subject ?? { kind: "user", id: "user-1" } },
       };
     },

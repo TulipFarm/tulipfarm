@@ -140,6 +140,11 @@ Artifact in one transaction. The gateway and PostgreSQL adapter are owned by
 pass a `payloadRef` that names nothing — the Artifact is what makes a Run reconstructable after a
 crash.
 
+The invocation source (`manual`, `schedule`, `integration`, and so on) records what accepted the
+request. The Run source (`chat`, `integration`, `routine`) selects the Worker executor and is stored
+separately from the pinned bundle's canonical Routine id. Do not route work through
+`bundle.routineId`.
+
 A chat turn is persisted by exactly one `ChatTurnSubmitter` (declared and implemented in
 `chat/turn-submit.ts`): no turn machinery in this app writes a user Message, so a new entrypoint
 must submit through this port rather than writing its own. `durableTurnSubmitter` writes the Turn,

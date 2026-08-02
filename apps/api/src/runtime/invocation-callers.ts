@@ -24,6 +24,7 @@ export function manualRoutineTrigger(invocations: DurableInvocationGateway) {
     const payload = { slug, inputs: inputs ?? {} };
     const result = await invocations.start({
       source: "manual",
+      runSource: "routine",
       businessId: DEPLOYMENT_BUSINESS_ID,
       initiator: { kind: "agent", id: "assistant" },
       effectiveSubject: { kind: "agent", id: "assistant" },
@@ -57,6 +58,7 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
       job.headers === undefined ? { slug: job.slug, body: job.body } : job;
     await invocations.start({
       source: "integration",
+      runSource: "integration",
       businessId: DEPLOYMENT_BUSINESS_ID,
       initiator: { kind: "integration", id: job.slug },
       effectiveSubject: { kind: "integration", id: job.slug },

@@ -12,6 +12,7 @@ import type { RunEventAppendPort } from "./run-events";
 const RUN: PersistedRun = {
   id: "run-1",
   businessId: "business-1",
+  source: "integration",
   bundle: { digest: "sha256:bundle", routineId: "integration", routineVersion: "1" },
   identity: {
     initiator: { kind: "integration", id: "chatapp" },

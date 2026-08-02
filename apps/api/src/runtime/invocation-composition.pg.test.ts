@@ -23,6 +23,7 @@ const CHAT_REQUEST = { message: { role: "user", content: "hello" } };
 
 const START_INPUT = {
   source: "chat" as const,
+  runSource: "chat" as const,
   businessId: "business-1",
   initiator: { kind: "user", id: "user-1" },
   effectiveSubject: { kind: "user", id: "user-1" },
@@ -87,6 +88,9 @@ describe("PgDurableInvocationStore", () => {
     // A replay must not publish a second Artifact: `artifacts` is append-only, so a second write
     // under the same id with a different `producer.runId` could never be corrected.
     expect(await countRows(database, "artifacts")).toBe(1);
+
+    const runs = await database.query<{ source: string }>("SELECT source FROM runs");
+    expect(runs.rows[0]?.source).toBe("chat");
 
     const states = await database.query<{ resolved_input: { payloadRef: string } }>(
       "SELECT resolved_input FROM run_states"

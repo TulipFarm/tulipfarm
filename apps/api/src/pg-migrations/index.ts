@@ -718,4 +718,19 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 21,
+    description: "separate Run source from pinned Routine identity",
+    up: async (q) => {
+      await q.query("ALTER TABLE runs ADD COLUMN IF NOT EXISTS source text");
+      // Before this migration the dispatcher overloaded `bundle.routineId` as the Run source. Copy
+      // it once so queued and in-flight Runs keep the same executor after every reader cuts over to
+      // the dedicated column; new writers must supply the source explicitly.
+      await q.query("UPDATE runs SET source = bundle->>'routineId' WHERE source IS NULL");
+      await q.query("ALTER TABLE runs ALTER COLUMN source SET NOT NULL");
+      await q.query(
+        "ALTER TABLE runs ADD CONSTRAINT runs_source_nonempty CHECK (length(source) > 0)"
+      );
+    },
+  },
 ];

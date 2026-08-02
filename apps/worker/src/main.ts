@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { RunLeaseManager, RunResumeGateway, WaitTimerSweeper } from "@tulipfarm/run-kernel";
+import {
+  RunLeaseManager,
+  RunResumeGateway,
+  type RunSource,
+  WaitTimerSweeper,
+} from "@tulipfarm/run-kernel";
 import {
   loadActiveDek,
   loadEncryptionKeys,
@@ -35,11 +40,11 @@ import { RunStoreStateTransitions } from "./turn/kernel-ports";
 const OUTBOX_CONSUMER = "worker.run-dispatch";
 
 /**
- * The Run source the Chat executor owns, as `DurableInvocationGateway` records it on the bundle.
+ * The Run source the Chat executor owns, persisted independently from its pinned Routine identity.
  * Slack and Telegram requests reach the same executor because the ingress path derives a chat
  * request from the envelope — the executor never learns which channel asked.
  */
-const CHAT_RUN_SOURCE = "chat";
+const CHAT_RUN_SOURCE: RunSource = "chat";
 
 /**
  * The Run source an Integration delivery is minted under.
@@ -48,7 +53,7 @@ const CHAT_RUN_SOURCE = "chat";
  * executor, so a Slack message and a web message are answered by one code path — the difference
  * between them ends at the classifier.
  */
-const INTEGRATION_RUN_SOURCE = "integration";
+const INTEGRATION_RUN_SOURCE: RunSource = "integration";
 
 const logger = {
   info: (message: string) => console.log(message),

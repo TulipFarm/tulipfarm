@@ -60,6 +60,8 @@ export type RunLineageRelation = "child" | "replay";
 export interface StartRunInput {
   readonly id: string;
   readonly businessId: string;
+  /** Selects the Worker executor; independent of the Routine identity pinned in `bundle`. */
+  readonly source: string;
   readonly bundle: RunBundle;
   readonly identity: RunIdentity;
   readonly bounds: RunBounds;
@@ -72,6 +74,8 @@ export interface StartRunInput {
 export interface PersistedRun {
   readonly id: string;
   readonly businessId: string;
+  /** Selects the Worker executor; independent of the Routine identity pinned in `bundle`. */
+  readonly source: string;
   readonly bundle: RunBundle;
   readonly identity: RunIdentity;
   readonly bounds: RunBounds;
@@ -228,6 +232,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS runs (
     id                    uuid PRIMARY KEY,
     business_id           text NOT NULL,
+    source                text NOT NULL CHECK (length(source) > 0),
     bundle                jsonb NOT NULL CHECK (jsonb_typeof(bundle) = 'object'),
     identity              jsonb NOT NULL CHECK (jsonb_typeof(identity) = 'object'),
     bounds                jsonb NOT NULL CHECK (
@@ -374,6 +379,7 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
 interface RunRow {
   id: string;
   business_id: string;
+  source: string;
   bundle: RunBundle;
   identity: RunIdentity;
   bounds: RunBounds;
@@ -427,6 +433,7 @@ function persistedRun(row: RunRow): PersistedRun {
   return {
     id: row.id,
     businessId: row.business_id,
+    source: row.source,
     bundle: row.bundle,
     identity: row.identity,
     bounds: row.bounds,
@@ -484,7 +491,7 @@ function decodeRunCursor(decoded: string | undefined): RunCursor | null {
   return { createdAt, id };
 }
 
-const RUN_COLUMNS = `id, business_id, bundle, identity, bounds, status, version, created_at,
+const RUN_COLUMNS = `id, business_id, source, bundle, identity, bounds, status, version, created_at,
   started_at, finished_at, result_artifact_id, error_evidence_ref, lease_owner, lease_expires_at`;
 const STATE_COLUMNS = `business_id, run_id, state_key, definition_ref, resolved_input, status,
   version, created_at, started_at, finished_at, result_artifact_id, error_evidence_ref`;
@@ -496,12 +503,13 @@ export class RunStore {
   async start(input: StartRunInput): Promise<PersistedRun> {
     return this.transactions.withTransaction(async (transaction) => {
       const inserted = await transaction.query<RunRow>(
-        `INSERT INTO runs (id, business_id, bundle, identity, bounds, created_at)
-         VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz)
+        `INSERT INTO runs (id, business_id, source, bundle, identity, bounds, created_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::timestamptz)
          RETURNING ${RUN_COLUMNS}`,
         [
           input.id,
           input.businessId,
+          input.source,
           JSON.stringify(input.bundle),
           JSON.stringify(input.identity),
           JSON.stringify(input.bounds),
@@ -696,7 +704,7 @@ export class RunStore {
                 lease_expires_at = NULL
            FROM candidates
           WHERE runs.id = candidates.id
-         RETURNING runs.id, runs.business_id, runs.bundle, runs.identity, runs.bounds,
+         RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
                    runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                    runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                    runs.lease_expires_at`,
@@ -733,7 +741,7 @@ export class RunStore {
                 lease_expires_at = $3::timestamptz
            FROM candidates
           WHERE runs.id = candidates.id
-         RETURNING runs.id, runs.business_id, runs.bundle, runs.identity, runs.bounds,
+         RETURNING runs.id, runs.business_id, runs.source, runs.bundle, runs.identity, runs.bounds,
                    runs.status, runs.version, runs.created_at, runs.started_at, runs.finished_at,
                    runs.result_artifact_id, runs.error_evidence_ref, runs.lease_owner,
                    runs.lease_expires_at`,

@@ -37,9 +37,9 @@ export class RunExecutorRegistry {
     return this.executors.size;
   }
 
-  /** The Run's source, as `DurableInvocationGateway` records it on the bundle. */
+  /** The Run's persisted source, independent of its pinned Routine identity. */
   static sourceOf(run: PersistedRun): string {
-    return run.bundle.routineId;
+    return run.source;
   }
 
   async execute(run: PersistedRun): Promise<RunOutcome> {

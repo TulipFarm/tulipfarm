@@ -251,6 +251,7 @@ describe("approval routes — durable tool_call kind", () => {
     await runs.start({
       id: runId,
       businessId: DEPLOYMENT_BUSINESS_ID,
+      source: "chat",
       createdAt: new Date().toISOString(),
       bundle: { digest: "bundle-digest", routineId: "chat", routineVersion: "1" },
       identity: {

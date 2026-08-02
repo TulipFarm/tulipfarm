@@ -13,6 +13,10 @@ export const INVOCATION_SOURCES = [
 
 export type InvocationSource = (typeof INVOCATION_SOURCES)[number];
 
+/** Closed Worker executor selectors. Invocation sources map onto one of these explicitly. */
+export const RUN_SOURCES = ["chat", "integration", "routine"] as const;
+export type RunSource = (typeof RUN_SOURCES)[number];
+
 export interface InvocationPrincipal {
   readonly kind: string;
   readonly id: string;
@@ -49,7 +53,10 @@ export function chatRequestArtifactId(runId: string): string {
 
 export interface DurableInvocationRecord {
   readonly runId: string;
+  /** What accepted the invocation: manual, schedule, Integration delivery, and so on. */
   readonly source: InvocationSource;
+  /** Selects the Worker executor without overloading the pinned Routine identity. */
+  readonly runSource: RunSource;
   readonly businessId: string;
   readonly initiator: InvocationPrincipal;
   readonly effectiveSubject: InvocationPrincipal;
@@ -81,7 +88,10 @@ export interface DurableInvocationStore {
 }
 
 export interface StartInvocationInput {
+  /** What accepted the invocation: manual, schedule, Integration delivery, and so on. */
   readonly source: InvocationSource;
+  /** Selects the Worker executor without overloading the pinned Routine identity. */
+  readonly runSource: RunSource;
   readonly businessId: string;
   readonly initiator: InvocationPrincipal;
   readonly effectiveSubject: InvocationPrincipal;
@@ -142,6 +152,7 @@ export class DurableInvocationGateway {
     if (
       input.businessId.length === 0 ||
       input.idempotencyKey.length === 0 ||
+      !RUN_SOURCES.includes(input.runSource) ||
       input.initiator.id.length === 0 ||
       input.effectiveSubject.id.length === 0
     ) {
@@ -170,6 +181,7 @@ export class DurableInvocationGateway {
     return this.options.store.persist({
       runId,
       source: input.source,
+      runSource: input.runSource,
       businessId: input.businessId,
       initiator: input.initiator,
       effectiveSubject: input.effectiveSubject,
@@ -180,7 +192,7 @@ export class DurableInvocationGateway {
       createdAt,
       bundle: {
         digest: input.definitionRef,
-        routineId: input.source,
+        routineId: input.runSource,
         routineVersion: input.definitionRef,
       },
       state: {

@@ -47,6 +47,7 @@ function chatRunLauncher(
     start: async ({ businessId, turnId, attempt }) => {
       const result = await invocations.start({
         source: "chat",
+        runSource: "chat",
         businessId,
         initiator: principal,
         effectiveSubject: principal,

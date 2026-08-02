@@ -7,7 +7,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  * not exist or may not have the columns it writes, so it refuses to start rather than corrupt.
  * Raise it whenever a migration lands that the worker's queries depend on.
  */
-export const REQUIRED_SCHEMA_VERSION = 17;
+export const REQUIRED_SCHEMA_VERSION = 21;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;

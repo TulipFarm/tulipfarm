@@ -69,6 +69,7 @@ describe("tool approvals as durable waits", () => {
   async function startRunningRun(idempotencyKey = "key-1"): Promise<string> {
     const started = await invocations.start({
       source: "chat",
+      runSource: "chat",
       businessId: DEPLOYMENT_BUSINESS_ID,
       initiator: SUBJECT,
       effectiveSubject: SUBJECT,

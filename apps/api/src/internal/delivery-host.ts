@@ -430,7 +430,7 @@ export class IngressDeliveryHost {
     const run = await this.options.runs.find(businessId, runId);
     if (run === null) throw new DeliveryDeniedError("run_not_found");
     if (run.status !== "running") throw new DeliveryDeniedError("run_not_running");
-    if (run.bundle.routineId !== DELIVERY_SOURCE) {
+    if (run.source !== DELIVERY_SOURCE) {
       throw new DeliveryDeniedError("not_a_delivery");
     }
 
