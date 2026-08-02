@@ -1,5 +1,5 @@
-import { Outlet, redirect, useLocation } from "@remix-run/react";
-import { AppSidebar } from "~/components/app-sidebar";
+import { Outlet, redirect } from "@remix-run/react";
+import { AppShell } from "~/components/app-sidebar";
 import { GlobalConnectionStatus } from "~/components/shell/states";
 import { ApiError, getSession } from "~/lib/api";
 import { ApprovalsProvider } from "~/lib/approvals-context";
@@ -27,32 +27,19 @@ export async function clientLoader() {
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending
 // approvals (sidebar badge + Approvals page); ConversationsProvider holds the Recent chats list.
 export default function AppLayout() {
-  // Knowledge and Settings each provide their own section rail, so the main nav auto-collapses to
-  // its icon rail under those paths (transient — the persisted collapse preference is untouched).
-  const { pathname } = useLocation();
-  const collapseRail = pathname.startsWith("/knowledge") || pathname.startsWith("/settings");
   return (
     <ApprovalsProvider>
       <ConversationsProvider>
-        {/* Desktop shell is capped to the viewport (h-svh + overflow-hidden) so the sidebar nav and
-            the main panel each scroll internally instead of growing the whole page. */}
-        <div className="md:flex md:h-svh md:overflow-hidden">
+        <AppShell>
           <a
             href="#main-content"
             className="fixed left-2 top-2 z-[100] -translate-y-16 bg-background px-3 py-2 text-sm focus:translate-y-0"
           >
             Skip to main content
           </a>
-          <AppSidebar forceCollapsed={collapseRail} />
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className="min-h-[calc(100svh-3rem)] flex-1 overflow-auto md:h-svh md:min-h-0"
-          >
-            <Outlet />
-          </main>
+          <Outlet />
           <GlobalConnectionStatus />
-        </div>
+        </AppShell>
       </ConversationsProvider>
     </ApprovalsProvider>
   );

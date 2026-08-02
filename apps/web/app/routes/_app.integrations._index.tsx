@@ -9,6 +9,7 @@ import { useState } from "react";
 import { IntegrationsTabs } from "~/components/integrations-tabs";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
+import { StatusBadge, type StatusTone } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import {
@@ -25,22 +26,12 @@ export async function clientLoader() {
   return { integrations };
 }
 
-const STATUS_CLASS: Record<McpConnectionStatus, string> = {
-  connected: "border-border text-muted-foreground",
-  connecting: "border-primary text-primary",
-  error: "border-destructive text-destructive",
-  disconnected: "border-border text-muted-foreground",
+const STATUS_TONE: Record<McpConnectionStatus, StatusTone> = {
+  connected: "success",
+  connecting: "info",
+  error: "danger",
+  disconnected: "neutral",
 };
-
-function StatusBadge({ status }: { status: McpConnectionStatus }) {
-  return (
-    <span
-      className={`shrink-0 rounded-sm border px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${STATUS_CLASS[status]}`}
-    >
-      {status}
-    </span>
-  );
-}
 
 function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
   const [busy, setBusy] = useState(false);
@@ -80,7 +71,7 @@ function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
         ) : (
           <span className="flex-1" />
         )}
-        <StatusBadge status={integration.status} />
+        <StatusBadge label={integration.status} tone={STATUS_TONE[integration.status]} />
         {integration.status === "connected" ? (
           <Button size="sm" variant="outline" disabled={busy} onClick={handleDisconnect}>
             {busy ? "Disconnecting…" : "Disconnect"}

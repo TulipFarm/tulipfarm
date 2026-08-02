@@ -28,7 +28,7 @@ import { startJobConsumers } from "./job-consumers";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
-import { assertSchemaFloor } from "./preflight";
+import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
@@ -90,7 +90,15 @@ export async function main(): Promise<void> {
 
   // Fail closed before a single Run is claimed: the API owns migrations, and a worker running
   // ahead of them would write columns that do not exist yet.
-  const schemaVersion = await assertSchemaFloor(pool, REQUIRED_SCHEMA_VERSION);
+  const schemaVersion = await waitForSchemaFloor(pool, REQUIRED_SCHEMA_VERSION, {
+    attempts: 31,
+    delayMs: 1_000,
+    onRetry: (error, attempt) => {
+      logger.warn(
+        `Waiting for API migrations before worker boot (attempt ${attempt}/31): ${error.message}`
+      );
+    },
+  });
   let consumersReady = !config.maintenance;
   const jobBoss = config.maintenance
     ? await startJobConsumers({ databaseUrl: config.databaseUrl, database: pool })

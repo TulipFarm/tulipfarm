@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { DestructivePreview } from "~/components/shell/states";
+import { StatusBadge as SemanticStatusBadge, type StatusTone } from "~/components/status-badge";
 import type { OperationsModel } from "~/lib/operations";
 import { formatIso } from "~/lib/schema";
 import { cn } from "~/lib/utils";
@@ -46,29 +47,16 @@ function statusValue(item: OperationalItem, fallback: string): string {
   return fallback;
 }
 
-function statusTone(status: string): "positive" | "warning" | "danger" | "neutral" {
+function statusTone(status: string): StatusTone {
   const normalized = status.toLowerCase();
   if (/critical|error|failed|high|blocked|enabled/.test(normalized)) return "danger";
   if (/degraded|warning|medium|pending|quarantined/.test(normalized)) return "warning";
-  if (/ok|healthy|resolved|disabled|success|low/.test(normalized)) return "positive";
+  if (/ok|healthy|resolved|disabled|success|low/.test(normalized)) return "success";
   return "neutral";
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const tone = statusTone(status);
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded-sm border px-1.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide",
-        tone === "positive" && "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
-        tone === "warning" && "border-amber-500/30 bg-amber-500/10 text-amber-500",
-        tone === "danger" && "border-destructive/40 bg-destructive/10 text-destructive",
-        tone === "neutral" && "border-border bg-muted text-muted-foreground"
-      )}
-    >
-      {humanize(status)}
-    </span>
-  );
+  return <SemanticStatusBadge label={humanize(status)} tone={statusTone(status)} />;
 }
 
 function Section({
@@ -101,7 +89,7 @@ function Section({
 function EmptyPanel({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-16 items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-      <CheckCircle2 aria-hidden="true" className="size-3.5 text-emerald-500" />
+      <CheckCircle2 aria-hidden="true" className="size-3.5 text-status-success" />
       <span>{children}</span>
     </div>
   );
@@ -399,10 +387,10 @@ function AuditTable({ items }: { items: readonly OperationalItem[] }) {
 
 function attentionItems(model: OperationsModel): number {
   const unhealthy = model.health.filter(
-    (item) => statusTone(statusValue(item, "unknown")) !== "positive"
+    (item) => statusTone(statusValue(item, "unknown")) !== "success"
   ).length;
   const activeKillSwitches = model.killSwitches.filter(
-    (item) => statusTone(statusValue(item, "unknown")) !== "positive"
+    (item) => statusTone(statusValue(item, "unknown")) !== "success"
   ).length;
   return unhealthy + model.incidents.length + model.quarantine.length + activeKillSwitches;
 }
@@ -431,7 +419,7 @@ export function OperationsConsole({
             role="status"
             className={cn(
               "mt-2 inline-flex items-center gap-1.5 text-xs",
-              attentionCount > 0 ? "text-amber-500" : "text-emerald-500"
+              attentionCount > 0 ? "text-status-warning" : "text-status-success"
             )}
           >
             {attentionCount > 0 ? (

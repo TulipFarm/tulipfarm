@@ -47,23 +47,22 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-# POSTGRES_PASSWORD only takes effect on a container's FIRST init of an empty data volume — an
-# existing volume initialized under a different password (e.g. .env hand-edited, or the volume
-# outlived a password rotation) silently drifts out of sync, and the app fails at boot with
-# "password authentication failed" instead of at setup time. Verify the reused/generated
-# password actually authenticates over TCP (what the app uses) and self-heal via the container's
-# local socket (trust auth, no password needed) if not.
-if ! docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-  exec -T postgres env PGPASSWORD="$POSTGRES_PASSWORD" \
-  psql -h 127.0.0.1 -U tulipfarm -d tulipfarm -c "select 1" &> /dev/null; then
-  echo "⚠ POSTGRES_PASSWORD in .env doesn't match the running container's role — syncing..."
-  if docker compose -f docker-compose.yml -f docker-compose.dev.yml \
-    exec -T postgres psql -U tulipfarm -d tulipfarm \
-    -c "ALTER USER tulipfarm WITH PASSWORD '${POSTGRES_PASSWORD}';" &> /dev/null; then
-    echo "✅ Synced Postgres role password to match .env"
-  else
-    echo "❌ Could not sync role password — check \`docker compose logs postgres\`"
-  fi
+# POSTGRES_PASSWORD only takes effect on a container's FIRST init of an empty data volume. Always
+# synchronize the role through the trusted local socket so an existing volume cannot retain a
+# stale password. Do not use an in-container TCP login as a test: the image trusts its own loopback
+# connection, so even an incorrect password appears to authenticate successfully.
+echo "🔐 Synchronizing the Postgres role password with .env..."
+if docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+  exec -T postgres psql -U tulipfarm -d tulipfarm -v ON_ERROR_STOP=1 \
+  -v role_password="$POSTGRES_PASSWORD" \
+  &> /dev/null <<'SQL'
+ALTER USER tulipfarm WITH PASSWORD :'role_password';
+SQL
+then
+  echo "✅ Synced Postgres role password to match .env"
+else
+  echo "❌ Could not sync role password — check \`docker compose logs postgres\`"
+  exit 1
 fi
 
 # The container auto-creates the tulipfarm DB + user (POSTGRES_DB/POSTGRES_USER),
@@ -124,35 +123,36 @@ if [ ! -f ".env.local" ]; then
     sed -i "s|WEBHOOK_SIGNING_SECRET=<generate: openssl rand -base64 32>|WEBHOOK_SIGNING_SECRET=$WEBHOOK_SECRET|" .env.local
   fi
 
-  # Point the dev app at the bundled container (host port + generated password).
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s|^DATABASE_URL=.*|DATABASE_URL=$CONTAINER_DATABASE_URL|" .env.local
-  else
-    sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$CONTAINER_DATABASE_URL|" .env.local
-  fi
-  echo "✅ DATABASE_URL pointed at the bundled Postgres container"
-
-  # Expand SOUL_PATH to the absolute soul dir (dotenv does not expand ~).
-  if [[ "$OSTYPE" == "darwin"* ]]; then
-    sed -i '' "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
-  else
-    sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
-  fi
-
   echo "✅ .env.local created with generated secrets"
 else
   echo "✅ .env.local already exists"
-  echo "ℹ Ensure DATABASE_URL in .env.local is:"
-  echo "    $CONTAINER_DATABASE_URL"
 fi
 
-# Symlink .env.local to apps/api for turbo dev (turbo runs from package dir)
-if [ ! -L "apps/api/.env.local" ]; then
-  echo "🔗 Symlinking .env.local to apps/api..."
-  ln -s ../../.env.local apps/api/.env.local
+# Keep the app URL synchronized even when .env.local already existed. setup-dev has one supported
+# datastore lane, so retaining an older password here can only make the API fail authentication.
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  sed -i '' "s|^DATABASE_URL=.*|DATABASE_URL=$CONTAINER_DATABASE_URL|" .env.local
+  sed -i '' "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
 else
-  echo "✅ .env.local symlink already exists in apps/api"
+  sed -i "s|^DATABASE_URL=.*|DATABASE_URL=$CONTAINER_DATABASE_URL|" .env.local
+  sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
 fi
+echo "✅ DATABASE_URL synchronized with the bundled Postgres container"
+
+# Symlink .env.local into every app started by `pnpm dev` because Turbo runs each command from its
+# package directory and dotenv resolves relative paths from that directory.
+for app in api worker; do
+  env_link="apps/$app/.env.local"
+  if [ -L "$env_link" ]; then
+    echo "✅ .env.local symlink already exists in apps/$app"
+  elif [ -e "$env_link" ]; then
+    echo "❌ $env_link exists but is not a symlink; move it aside and re-run setup"
+    exit 1
+  else
+    echo "🔗 Symlinking .env.local to apps/$app..."
+    ln -s ../../.env.local "$env_link"
+  fi
+done
 
 echo ""
 echo "✨ Setup complete!"
