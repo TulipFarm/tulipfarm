@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const baseUrl = process.argv[2];
 const requireInsecure = process.argv.includes("--require-insecure");
-const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 if (!baseUrl || process.argv.some((arg, index) => index > 2 && arg !== "--require-insecure")) {
   console.error("usage: browser-smoke.mjs <base-url> [--require-insecure]");
