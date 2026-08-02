@@ -18,10 +18,17 @@ import {
   PgSecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
-import { GitSyncService, runSoulMigrations, SoulLoader } from "@tulipfarm/soul";
+import {
+  GitSyncService,
+  PgBundleStore,
+  runSoulMigrations,
+  SoulLoader,
+  SoulPublicationCoordinator,
+} from "@tulipfarm/soul";
 import {
   ArtifactStore,
   ChildLinkStore,
+  PgSoulPublicationStore,
   RunEventStore,
   RunStore,
   WaitStore,
@@ -93,6 +100,8 @@ import { reconcileResourceTables, registerResourceReconcile } from "./resources/
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
 import { integrationInvoker, manualRoutineTrigger } from "./runtime/invocation-callers";
+import { ActiveRoutineInvocationResolver } from "./runtime/invocation-definitions";
+import { resolveSoulBundleSigner } from "./runtime/soul-bundle-signer";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import {
   assertNoOrphanedDeks,
@@ -193,6 +202,12 @@ async function boot() {
     // before minting a Run, and the same instance re-validates on publish and on every later read.
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const runTransactions = transactionPort(pool);
+    const soulBundleSigner = await resolveSoulBundleSigner(secretsService);
+    const soulPublications = new SoulPublicationCoordinator(
+      new PgSoulPublicationStore(runTransactions),
+      new PgBundleStore(runTransactions),
+      console
+    );
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
         runTransactions,
@@ -203,6 +218,7 @@ async function boot() {
           )
       ),
       validator: invocationValidator,
+      routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleSigner),
     });
     // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
     const runStore = new RunStore(runTransactions);

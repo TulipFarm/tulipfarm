@@ -10,6 +10,7 @@ import {
   DurableInvocationGateway,
   type DurableInvocationRecord,
   type DurableInvocationStore,
+  type RoutineInvocationResolver,
 } from "./gateway";
 
 class FakeStore implements DurableInvocationStore {
@@ -37,6 +38,18 @@ const RUN_SOURCE = {
 } as const;
 
 const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+const routineDefinitions: RoutineInvocationResolver = {
+  async resolve({ definitionRef }) {
+    return {
+      bundle: {
+        digest: "active-bundle-digest",
+        routineId: "routine-id",
+        routineVersion: "7",
+      },
+      startState: { key: "invoke", definitionRef },
+    };
+  },
+};
 
 describe("DurableInvocationGateway", () => {
   it.each(SOURCES)("creates the same persist-first Run/State shape for %s", async (source) => {
@@ -44,6 +57,7 @@ describe("DurableInvocationGateway", () => {
     const gateway = new DurableInvocationGateway({
       store,
       validator,
+      routineDefinitions,
       nextId: () => `run-${source}`,
       now: () => "2026-07-26T00:00:00.000Z",
     });
@@ -81,6 +95,7 @@ describe("DurableInvocationGateway", () => {
     const gateway = new DurableInvocationGateway({
       store,
       validator,
+      routineDefinitions,
       nextId: () => "run-1",
       now: () => "2026-07-26T00:00:00.000Z",
     });
@@ -100,7 +115,11 @@ describe("DurableInvocationGateway", () => {
     expect(store.records[0]).toMatchObject({
       source: "manual",
       runSource: "routine",
-      bundle: { routineId: "routine" },
+      bundle: {
+        digest: "active-bundle-digest",
+        routineId: "routine-id",
+        routineVersion: "7",
+      },
     });
   });
 
@@ -109,6 +128,7 @@ describe("DurableInvocationGateway", () => {
     const gateway = new DurableInvocationGateway({
       store,
       validator,
+      routineDefinitions,
       nextId: () => "run-1",
       now: () => "2026-07-26T00:00:00.000Z",
     });
@@ -177,6 +197,7 @@ describe("DurableInvocationGateway", () => {
     const gateway = new DurableInvocationGateway({
       store,
       validator,
+      routineDefinitions,
       nextId: () => `run-${++id}`,
       now: () => "2026-07-26T00:00:00.000Z",
     });
@@ -195,6 +216,61 @@ describe("DurableInvocationGateway", () => {
     await expect(gateway.start(input)).resolves.toEqual({ outcome: "started", runId: "run-1" });
     await expect(gateway.start(input)).resolves.toEqual({ outcome: "duplicate", runId: "run-1" });
     expect(store.records).toHaveLength(1);
+  });
+
+  it("persists the resolved canonical start State and records it as the Artifact producer", async () => {
+    const store = new FakeStore();
+    const gateway = new DurableInvocationGateway({
+      store,
+      validator,
+      routineDefinitions: {
+        async resolve() {
+          return {
+            bundle: { digest: "digest-1", routineId: "routine-1", routineVersion: "3" },
+            startState: { key: "Collect", definitionRef: "bundle:digest-1/state:Collect" },
+          };
+        },
+      },
+      nextId: () => "run-1",
+    });
+
+    await gateway.start({
+      source: "manual",
+      runSource: "routine",
+      businessId: "business-1",
+      initiator: { kind: "user", id: "user-1" },
+      effectiveSubject: { kind: "user", id: "user-1" },
+      definitionRef: "published:routine:daily",
+      payload: { slug: "daily", inputs: {} },
+      payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      idempotencyKey: "delivery-1",
+    });
+
+    expect(store.records[0]).toMatchObject({
+      bundle: { digest: "digest-1", routineId: "routine-1", routineVersion: "3" },
+      state: { key: "Collect", definitionRef: "bundle:digest-1/state:Collect" },
+      requestArtifact: { producer: { runId: "run-1", stateKey: "Collect", attempt: 0 } },
+    });
+  });
+
+  it("denies a Routine invocation when no active definition resolves", async () => {
+    const store = new FakeStore();
+    const gateway = new DurableInvocationGateway({ store, validator });
+
+    await expect(
+      gateway.start({
+        source: "manual",
+        runSource: "routine",
+        businessId: "business-1",
+        initiator: { kind: "user", id: "user-1" },
+        effectiveSubject: { kind: "user", id: "user-1" },
+        definitionRef: "published:routine:missing",
+        payload: { slug: "missing", inputs: {} },
+        payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+        idempotencyKey: "delivery-1",
+      })
+    ).rejects.toMatchObject({ code: "unpublished_definition" });
+    expect(store.records).toHaveLength(0);
   });
 
   it("denies identity substitution before persistence", async () => {

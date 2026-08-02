@@ -23,6 +23,8 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
   records + enqueues, `drain()` is the durable job (resumes at the recorded stage after a crash),
   `activeDigest()`/`activeBundle()` are the runtime read side, `rebuildProjection()` recompiles the
   authored projection from Git. Persistence is `@tulipfarm/storage`'s `SoulPublicationStore`.
+  `apps/api` composes the verified `activeBundle()` read side for Routine invocation; it does not
+  consult live Git when pinning a Run.
 - **`runSoulMigrations()`** + type `SoulMigration`.
 - Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
 
