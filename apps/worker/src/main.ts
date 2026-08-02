@@ -1,10 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
+  ArtifactService,
+  RoutineStateScheduler,
   RunLeaseManager,
   RunResumeGateway,
   type RunSource,
+  TypedOutputValidator,
   WaitTimerSweeper,
 } from "@tulipfarm/run-kernel";
+import { INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import {
   loadActiveDek,
   loadEncryptionKeys,
@@ -12,7 +16,15 @@ import {
   PgSecretRepo,
   SecretsService,
 } from "@tulipfarm/secrets";
-import { BudgetStore, EventStore, RunEventStore, RunStore, WaitStore } from "@tulipfarm/storage";
+import { PgBundleStore } from "@tulipfarm/soul";
+import {
+  ArtifactStore,
+  BudgetStore,
+  EventStore,
+  RunEventStore,
+  RunStore,
+  WaitStore,
+} from "@tulipfarm/storage";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
 import { loadDataDirEnv } from "./data-dir";
@@ -30,6 +42,9 @@ import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
+import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
+import { createRoutineExecutor } from "./routine/executor";
+import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
 import { createChatExecutor } from "./turn/chat-executor";
@@ -54,6 +69,9 @@ const CHAT_RUN_SOURCE: RunSource = "chat";
  * between them ends at the classifier.
  */
 const INTEGRATION_RUN_SOURCE: RunSource = "integration";
+
+/** Routine Runs execute only from their exact immutable bundle in this process. */
+const ROUTINE_RUN_SOURCE: RunSource = "routine";
 
 const logger = {
   info: (message: string) => console.log(message),
@@ -111,6 +129,10 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  const artifactService = new ArtifactService(
+    new ArtifactStore(transactions),
+    new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS)
+  );
 
   const leases = new RunLeaseManager(runStore);
   const resume = new RunResumeGateway(runStore);
@@ -127,13 +149,14 @@ export async function main(): Promise<void> {
   // The Soul's LLM configuration names providers and `api_key_ref`s; the credentials themselves are
   // unwrapped here, against this worker's own database, so no key material crosses the API hop.
   // `loadActiveDek`, never `loadOrProvision*`: the API mints keys, exactly as it owns migrations.
+  const secrets = async () =>
+    new SecretsService(
+      new PgSecretRepo(pool),
+      await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
+    );
   const llm = new SoulLlm({
     source: () => turnHost.llmConfig(),
-    secrets: async () =>
-      new SecretsService(
-        new PgSecretRepo(pool),
-        await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
-      ),
+    secrets,
   });
 
   const executors = new RunExecutorRegistry();
@@ -162,6 +185,19 @@ export async function main(): Promise<void> {
       hooks: createHookExecutor(),
       events: runEventStore,
       turn: chatExecutor,
+    })
+  );
+
+  executors.register(
+    ROUTINE_RUN_SOURCE,
+    createRoutineExecutor({
+      definitions: new WorkerRoutineDefinitionLoader(
+        new WorkerPinnedDefinitionReader(new PgBundleStore(transactions), secrets)
+      ),
+      artifacts: artifactService,
+      runs: runStore,
+      scheduler: new RoutineStateScheduler(runStore),
+      transitions: new RunStoreStateTransitions(runStore),
     })
   );
 

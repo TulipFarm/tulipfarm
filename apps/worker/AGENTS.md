@@ -33,12 +33,21 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 `loop.ts` (abortable, backing-off loop), `executors.ts` / `delivery.ts` (registries),
 `probe-server.ts` (`/livez`, `/readyz`), `shutdown.ts` (drain).
 
-Two Run sources are registered, keyed by the Run's dedicated `source` column through
+Three Run sources are registered, keyed by the Run's dedicated `source` column through
 `RunExecutorRegistry.sourceOf`: `chat` (`turn/chat-executor.ts`) and `integration`
-(`turn/integration-executor.ts`). Source is independent of the Routine id in the pinned bundle, so
-a published Routine can carry its canonical identity without changing which executor owns it. The
-Integration executor classifies its delivery and then hands the Run to **the same** chat executor
-instance, so a Slack turn and a web turn are answered by one code path.
+(`turn/integration-executor.ts`), plus `routine` (`routine/executor.ts`). Source is independent of
+the Routine id in the pinned bundle, so a published Routine can carry its canonical identity
+without changing which executor owns it. The Integration executor classifies its delivery and then
+hands the Run to **the same** chat executor instance, so a Slack turn and a web turn are answered by
+one code path.
+
+The Routine executor opens only the Run's exact signed bundle and reconstructs manual input from
+its immutable request Artifact. Its first bounded capability is deterministic `branch` State
+execution: each successor is persisted before its predecessor succeeds, making a crash between the
+two writes replay through `ensureState` without duplicate work. State types with effects and
+Context roots the request Artifact cannot reconstruct are claimed and parked as
+`needs_reconciliation`; they are never interpreted as successful or dispatched through a second
+authority.
 
 ## Executing a turn (`src/turn/`)
 
@@ -115,7 +124,7 @@ Broker's reconciliation story, not a second ledger here.
 - **Leases are the only claim.** Every transition is CAS-guarded on `(expectedVersion,
   expectedStatus)`; a worker that dies without releasing is recovered by `reclaimExpired`, not by
   anyone forcing a status.
-- `RunExecutorRegistry` holds `chat` and `integration`; `DeliveryTargetRegistry` is still empty
+- `RunExecutorRegistry` holds `chat`, `integration`, and `routine`; `DeliveryTargetRegistry` is empty
   (delivery targets land in PR 6).
 
 `TurnContextPort`, `TurnCompletionStore`, and the delivery host are all backed over HTTP by the
