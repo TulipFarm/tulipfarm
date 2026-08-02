@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
+import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
-import type { InvocationPrincipal } from "../runtime/invocation-gateway";
 import type { ApprovalRow, ApprovalsRepo } from "./runtime-repo";
 
 /**

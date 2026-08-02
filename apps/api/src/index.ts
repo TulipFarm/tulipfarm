@@ -3,7 +3,9 @@ import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import {
   ArtifactService,
+  DurableInvocationGateway,
   DurableWaitManager,
+  PgDurableInvocationStore,
   RunCancellationManager,
   RunResumeGateway,
   TypedOutputValidator,
@@ -91,8 +93,6 @@ import { reconcileResourceTables, registerResourceReconcile } from "./resources/
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
 import { integrationInvoker, manualRoutineTrigger } from "./runtime/invocation-callers";
-import { DurableInvocationGateway } from "./runtime/invocation-gateway";
-import { PgDurableInvocationStore } from "./runtime/invocation-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import {
   assertNoOrphanedDeks,
@@ -192,9 +192,10 @@ async function boot() {
     // One validator for the request boundary: the gateway rejects an unregistered schema reference
     // before minting a Run, and the same instance re-validates on publish and on every later read.
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+    const runTransactions = transactionPort(pool);
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
-        pool,
+        runTransactions,
         (transaction) =>
           new ArtifactService(
             new ArtifactStore(ambientTransactionPort(transaction)),
@@ -204,7 +205,6 @@ async function boot() {
       validator: invocationValidator,
     });
     // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
-    const runTransactions = transactionPort(pool);
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
     // Stopping a turn is cancelling its Run: the process executing it observes the cancellation and

@@ -3,6 +3,7 @@ export * from "./budgets";
 export * from "./cancel";
 export * from "./children";
 export * from "./concurrency";
+export * from "./invocation";
 export * from "./lease";
 export * from "./limits";
 export * from "./lineage";

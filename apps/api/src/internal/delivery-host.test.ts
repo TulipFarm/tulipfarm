@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
-import { ArtifactService, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import {
+  ArtifactService,
+  chatRequestArtifactId,
+  RUN_EXECUTOR_PRINCIPAL_REF,
+  requestArtifactId,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import {
   CHAT_REQUEST_SCHEMA_REF,
   INTEGRATION_REQUEST_SCHEMA_REF,
@@ -19,11 +25,6 @@ import type {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "../ingress/repo";
-import {
-  chatRequestArtifactId,
-  RUN_EXECUTOR_PRINCIPAL_REF,
-  requestArtifactId,
-} from "../runtime/invocation-gateway";
 import { BUSINESS_ID, FakeConversationStore, fakeRuns, RUN_ID } from "../test/turn-host-fixtures";
 import type { ToolDef } from "../tools/types";
 import { DeliveryDeniedError, IngressDeliveryHost } from "./delivery-host";

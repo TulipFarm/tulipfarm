@@ -1,7 +1,6 @@
-import type { ArtifactService } from "@tulipfarm/run-kernel";
-import type { Queryable } from "../db";
-import { withTransaction } from "../db";
-import type { DurableInvocationRecord, DurableInvocationStore } from "./invocation-gateway";
+import type { Queryable, TransactionPort } from "@tulipfarm/storage";
+import type { ArtifactService } from "../artifacts";
+import type { DurableInvocationRecord, DurableInvocationStore } from "./gateway";
 
 /**
  * Binds an `ArtifactService` to an already-open transaction. A factory rather than an instance
@@ -9,7 +8,7 @@ import type { DurableInvocationRecord, DurableInvocationStore } from "./invocati
  */
 export type TransactionalArtifactService = (transaction: Queryable) => ArtifactService;
 
-export const CUTOVER_STORAGE_STATEMENTS: readonly string[] = [
+export const INVOCATION_STORAGE_STATEMENTS: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS durable_invocations (
     business_id      text NOT NULL,
     source           text NOT NULL,
@@ -28,18 +27,18 @@ interface InvocationRow {
 }
 
 /**
- * PostgreSQL cutover adapter. The deduplication claim, the request Artifact, the Run, and its
+ * PostgreSQL adapter. The deduplication claim, the request Artifact, the Run, and its
  * initial State commit together, so an API crash cannot acknowledge work that the durable dispatcher
  * cannot subsequently claim — nor leave a Run whose recorded input was never stored.
  */
 export class PgDurableInvocationStore implements DurableInvocationStore {
   constructor(
-    private readonly database: Queryable,
+    private readonly transactions: TransactionPort,
     private readonly artifacts: TransactionalArtifactService
   ) {}
 
   async persist(record: DurableInvocationRecord) {
-    return withTransaction(this.database, async (transaction) => {
+    return this.transactions.withTransaction(async (transaction) => {
       const claimed = await transaction.query(
         `INSERT INTO durable_invocations (
            business_id, source, idempotency_key, run_id, created_at

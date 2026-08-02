@@ -1,3 +1,4 @@
+import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
@@ -16,7 +17,6 @@ import {
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import type { Queryable } from "../db";
-import { CUTOVER_STORAGE_STATEMENTS } from "../runtime/invocation-store";
 
 export interface PgMigration {
   version: number;
@@ -571,7 +571,7 @@ export const PG_MIGRATIONS: PgMigration[] = [
     version: 12,
     description: "unified durable invocation cutover",
     up: async (q) => {
-      for (const sql of CUTOVER_STORAGE_STATEMENTS) {
+      for (const sql of INVOCATION_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

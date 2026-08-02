@@ -1,8 +1,8 @@
 import type { ArtifactService } from "@tulipfarm/run-kernel";
+import { RUN_EXECUTOR_PRINCIPAL_REF, requestArtifactId } from "@tulipfarm/run-kernel";
 import { describe, expect, it, vi } from "vitest";
 import type { ToolApprovalDecision, ToolApprovalService } from "../approvals/tool-approvals";
 import { ToolRegistry } from "../broker/tool-adapter";
-import { RUN_EXECUTOR_PRINCIPAL_REF, requestArtifactId } from "../runtime/invocation-gateway";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import { BUSINESS_ID, CONVERSATION_ID, RUN_ID, turn } from "../test/turn-host-fixtures";
 import { err, ok, type RequestContext, type ToolDef } from "../tools/types";

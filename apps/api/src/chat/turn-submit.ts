@@ -1,7 +1,7 @@
+import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { FastifyBaseLogger } from "fastify";
 import { type ChatTurnPrincipal, chatConversationService } from "../conversations/chat-turns";
 import type { ConversationStore } from "../conversations/service";
-import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 
 /** What the request a turn answers is addressed to, and what the user actually said. */
 export interface ChatTurnRequest {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
+import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
-import type { DurableInvocationGateway } from "../runtime/invocation-gateway";
 import {
   ConversationService,
   type ConversationStore,

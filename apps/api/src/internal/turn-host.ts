@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
+import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
 import type {
   ConversationStore,
   PersistedTurn,
   TurnCompletion,
   TurnCompletionStatus,
 } from "../conversations/service";
-import type { InvocationPrincipal } from "../runtime/invocation-gateway";
 
 /**
  * The internal turn host (blocker §2, plan §3).

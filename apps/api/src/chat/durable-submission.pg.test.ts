@@ -3,6 +3,8 @@ import type { PGlite } from "@electric-sql/pglite";
 import type { LlmService } from "@tulipfarm/llm";
 import {
   ArtifactService,
+  DurableInvocationGateway,
+  PgDurableInvocationStore,
   RunCancellationManager,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
@@ -25,8 +27,6 @@ import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
 import { runCanceller } from "../runs/cancel";
-import { DurableInvocationGateway } from "../runtime/invocation-gateway";
-import { PgDurableInvocationStore } from "../runtime/invocation-store";
 import { makePglite } from "../test/pglite";
 import { PgConversationRepo } from "./conversations";
 import { PgMessageRepo } from "./messages";
@@ -138,7 +138,7 @@ describe("durable chat submission over HTTP", () => {
     const queryable = db as unknown as Queryable;
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
-        queryable,
+        transactionPort(queryable),
         (transaction) =>
           new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
       ),
