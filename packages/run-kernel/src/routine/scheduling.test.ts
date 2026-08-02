@@ -1,0 +1,132 @@
+import type {
+  EnsureStateInput,
+  EnsureStateResult,
+  PersistedRun,
+  PersistedState,
+} from "@tulipfarm/storage";
+import { describe, expect, it } from "vitest";
+import {
+  RoutineStateScheduleError,
+  RoutineStateScheduler,
+  type RoutineStateScheduleStore,
+} from "./scheduling";
+
+const RUN: PersistedRun = {
+  id: "00000000-0000-4000-8000-000000000001",
+  businessId: "business-1",
+  source: "routine",
+  bundle: {
+    digest: "digest/one",
+    routineId: "routine one",
+    routineVersion: "7/beta",
+  },
+  identity: {
+    initiator: { kind: "user", id: "user-1" },
+    effectiveSubject: { kind: "agent", id: "agent-1" },
+    guardrailContextRef: "guardrail-context-1",
+  },
+  bounds: { wallTimeMs: 60_000, activeTimeMs: 30_000, attempts: 3, sideEffects: 2 },
+  status: "running",
+  version: 2,
+  createdAt: "2026-08-02T10:00:00.000Z",
+  startedAt: "2026-08-02T10:00:01.000Z",
+  finishedAt: null,
+  resultArtifactId: null,
+  errorEvidenceRef: null,
+  leaseOwner: "worker-1",
+  leaseExpiresAt: "2026-08-02T10:01:01.000Z",
+};
+
+function state(input: EnsureStateInput): PersistedState {
+  return {
+    businessId: input.businessId,
+    runId: input.runId,
+    key: input.key,
+    definitionRef: input.definitionRef,
+    resolvedInput: input.resolvedInput,
+    status: "pending",
+    version: 0,
+    createdAt: input.createdAt,
+    startedAt: null,
+    finishedAt: null,
+    resultArtifactId: null,
+    errorEvidenceRef: null,
+  };
+}
+
+class RecordingScheduleStore implements RoutineStateScheduleStore {
+  readonly inputs: EnsureStateInput[] = [];
+
+  async ensureState(input: EnsureStateInput): Promise<EnsureStateResult> {
+    this.inputs.push(input);
+    return { outcome: "inserted", state: state(input) };
+  }
+}
+
+describe("RoutineStateScheduler", () => {
+  it("pins an authored State to the Run bundle under a distinct durable occurrence key", async () => {
+    const store = new RecordingScheduleStore();
+    const scheduler = new RoutineStateScheduler(store);
+
+    await expect(
+      scheduler.schedule({
+        run: RUN,
+        stateKey: "Notify:item:0",
+        definitionStateKey: "Notify owner",
+        resolvedInput: { artifactId: "artifact-output-1" },
+        createdAt: "2026-08-02T10:00:02.000Z",
+      })
+    ).resolves.toMatchObject({ outcome: "inserted", state: { key: "Notify:item:0" } });
+    expect(store.inputs).toEqual([
+      {
+        businessId: "business-1",
+        runId: RUN.id,
+        key: "Notify:item:0",
+        definitionRef: "bundle:digest%2Fone/routines/routine%20one@7%2Fbeta/states/Notify%20owner",
+        resolvedInput: { artifactId: "artifact-output-1" },
+        createdAt: "2026-08-02T10:00:02.000Z",
+      },
+    ]);
+  });
+
+  it("rejects non-Routine Runs before persistence", async () => {
+    const store = new RecordingScheduleStore();
+    const scheduler = new RoutineStateScheduler(store);
+
+    await expect(
+      scheduler.schedule({
+        run: { ...RUN, source: "chat" },
+        stateKey: "Notify",
+        definitionStateKey: "Notify",
+        resolvedInput: {},
+        createdAt: "2026-08-02T10:00:02.000Z",
+      })
+    ).rejects.toEqual(new RoutineStateScheduleError("non_routine_run", RUN.id));
+    expect(store.inputs).toEqual([]);
+  });
+
+  it("rejects incomplete State or bundle identity before persistence", async () => {
+    const store = new RecordingScheduleStore();
+    const scheduler = new RoutineStateScheduler(store);
+
+    await expect(
+      scheduler.schedule({
+        run: RUN,
+        stateKey: "",
+        definitionStateKey: "Notify",
+        resolvedInput: {},
+        createdAt: "2026-08-02T10:00:02.000Z",
+      })
+    ).rejects.toEqual(new RoutineStateScheduleError("invalid_state_identity", RUN.id));
+    await expect(
+      scheduler.schedule({
+        run: { ...RUN, bundle: { ...RUN.bundle, digest: "" } },
+        stateKey: "Notify",
+        definitionStateKey: "Notify",
+        resolvedInput: {},
+        createdAt: "2026-08-02T10:00:02.000Z",
+      })
+    ).rejects.toEqual(new RoutineStateScheduleError("invalid_state_identity", RUN.id));
+    expect(store.inputs).toEqual([]);
+  });
+});

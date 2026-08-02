@@ -43,6 +43,8 @@ export type {
   AttemptEvent,
   AttemptEvidence,
   ClaimNextQueuedInput,
+  EnsureStateInput,
+  EnsureStateResult,
   HeartbeatInput,
   ListRunsInput,
   PersistedRun,
