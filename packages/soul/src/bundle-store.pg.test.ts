@@ -1,6 +1,6 @@
 import { PGlite } from "@electric-sql/pglite";
 import type { Queryable, TransactionPort } from "@tulipfarm/storage";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { computeBundleDigest, type ExecutionBundle, type SignedExecutionBundle } from "./bundle";
 import { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
 
@@ -30,10 +30,18 @@ describe("PgBundleStore", () => {
   let database: PGlite;
   let store: PgBundleStore;
 
-  beforeEach(async () => {
+  beforeAll(async () => {
     database = new PGlite();
     for (const statement of SOUL_BUNDLE_STORAGE_STATEMENTS) await database.query(statement);
     store = new PgBundleStore(transactions(database));
+  }, 30_000);
+
+  afterAll(async () => {
+    await database.close();
+  }, 30_000);
+
+  beforeEach(async () => {
+    await database.query("TRUNCATE TABLE soul_execution_bundles");
   });
 
   it("round-trips one immutable signed bundle", async () => {
