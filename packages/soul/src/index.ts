@@ -23,6 +23,7 @@ export {
   EXECUTION_BUNDLE_VERSION,
   InMemoryBundleStore,
 } from "./bundle";
+export { PgBundleStore, SOUL_BUNDLE_STORAGE_STATEMENTS } from "./bundle-store.pg";
 export type {
   SoulChangeset,
   SoulChangesetErrorCode,
