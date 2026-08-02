@@ -80,6 +80,7 @@ test.describe("product CRUD journeys", () => {
   });
 
   test("creates a Resource through the real Chat agent tool loop", async ({ page }) => {
+    test.skip(process.env.E2E_AGENTIC !== "1", "agentic provider harness is opt-in");
     await openProductionRoot(page);
     await completeOrSignIn(page);
     await configureMockLlm(page);
@@ -94,6 +95,7 @@ test.describe("product CRUD journeys", () => {
   });
 
   test("creates a Knowledge space through the real Chat agent tool loop", async ({ page }) => {
+    test.skip(process.env.E2E_AGENTIC !== "1", "agentic provider harness is opt-in");
     await openProductionRoot(page);
     await completeOrSignIn(page);
     await configureMockLlm(page);
