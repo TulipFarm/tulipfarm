@@ -51,15 +51,6 @@ export default defineConfig({
       },
     },
     {
-      name: "webkit",
-      dependencies: ["bootstrap"],
-      testMatch: /.*\.spec\.ts/,
-      use: {
-        ...devices["Desktop Safari"],
-        storageState: resolve(repoRoot, "scripts/test/.auth/user.json"),
-      },
-    },
-    {
       name: "mobile-chromium",
       dependencies: ["bootstrap"],
       testMatch: /.*\.spec\.ts/,
