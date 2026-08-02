@@ -9,7 +9,7 @@ src/
   auth/           # session, CSRF, users, API tokens
   chat/           # conversations, messages, turn submission; POST /chat streams the Run's events
   conversations/  # durable Turns: ConversationService + PgConversationStore (channel-agnostic)
-  runtime/        # invocation gateway (Run + request Artifact in one transaction), invocation callers
+  runtime/        # API invocation callers and transaction-composition tests
   resources/      # resource type + data CRUD, per-type Postgres tables, write-pipeline
   tools/          # central ToolRegistry, batch executor, result truncation
   guardrails/     # reload-on-soul.synced wiring only; the guards live in @tulipfarm/agent-runtime
@@ -135,8 +135,10 @@ knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`k
 Every request that mints a Run goes through `DurableInvocationGateway.start()`, which takes the
 payload plus the `payloadSchemaRef` it claims to satisfy (registered in `@tulipfarm/schema`'s
 `INVOCATION_REQUEST_SCHEMAS`) and commits the Run, its first State, and an immutable request
-Artifact in one transaction. Never pass a `payloadRef` that names nothing — the Artifact is what
-makes a Run reconstructable after a crash.
+Artifact in one transaction. The gateway and PostgreSQL adapter are owned by
+`@tulipfarm/run-kernel`; this app only composes them with its database and Artifact store. Never
+pass a `payloadRef` that names nothing — the Artifact is what makes a Run reconstructable after a
+crash.
 
 A chat turn is persisted by exactly one `ChatTurnSubmitter` (declared and implemented in
 `chat/turn-submit.ts`): no turn machinery in this app writes a user Message, so a new entrypoint

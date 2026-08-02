@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import { INTEGRATION_REQUEST_SCHEMA_REF, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { IngressJobPayload } from "../ingress/routes";
-import type { DurableInvocationGateway } from "./invocation-gateway";
 
 /**
  * Content-addressed idempotency for callers with no client-supplied key: an identical redelivery

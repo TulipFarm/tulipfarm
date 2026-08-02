@@ -1,9 +1,6 @@
 import { randomUUID } from "node:crypto";
-import {
-  type PublishArtifactInput,
-  TypedOutputError,
-  type TypedOutputValidator,
-} from "@tulipfarm/run-kernel";
+import type { PublishArtifactInput } from "../artifacts";
+import { TypedOutputError, type TypedOutputValidator } from "../outputs";
 
 export const INVOCATION_SOURCES = [
   "chat",

@@ -1,6 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { EventEmitter } from "node:events";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
+import {
+  chatRequestArtifactId,
+  INVOKE_STATE_KEY,
+  RUN_EXECUTOR_PRINCIPAL_REF,
+  requestArtifactId,
+} from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { ChatIngressConfig, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyBaseLogger } from "fastify";
@@ -12,12 +18,6 @@ import type { IngressIdentityResolver } from "../ingress/identity";
 import type { IntegrationConversationsRepo, IntegrationEventsRepo } from "../ingress/repo";
 import { postReply } from "../ingress/responder";
 import { dotPath, renderBodyTemplate } from "../ingress/template";
-import {
-  chatRequestArtifactId,
-  INVOKE_STATE_KEY,
-  RUN_EXECUTOR_PRINCIPAL_REF,
-  requestArtifactId,
-} from "../runtime/invocation-gateway";
 import type { HostedRunReader } from "./turn-host";
 
 /**

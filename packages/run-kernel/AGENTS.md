@@ -2,6 +2,7 @@
 
 `@tulipfarm/run-kernel` — Run and State state machines, attempts, scheduling, durable waits,
 retries, cancellation, child Runs, and concurrency. **Today:** `src/model` (state machines),
+`src/invocation` (the single persist-first Run/request-Artifact gateway and PostgreSQL adapter),
 `src/lease` (worker leases), `src/outputs` (AJV-validated typed State outputs + canonical hashes),
 `src/artifacts` (immutable Artifact publish/read with ACL, classification, retention, redaction,
 and tamper checks), `src/lineage` (named State-output mappings resolved into downstream
@@ -23,8 +24,7 @@ Chat turn and automation is a durable Run through this package; it never imports
 `@tulipfarm/agent-runtime` (the agent runtime submits child-Run commands through this package's
 public port, not the reverse).
 
-`src/artifacts` has a production consumer: `apps/api`'s invocation gateway publishes every request
-Artifact through `ArtifactService` inside the transaction that creates the Run, and PR 3's worker
-reads it back as `service:run-executor`. Artifact rows are append-only (a trigger rejects
-UPDATE/DELETE), so an ACL or classification must be correct on the first write — there is no
-correcting write.
+`src/invocation` is composed by `apps/api`: its gateway publishes every request Artifact through
+`ArtifactService` inside the transaction that creates the Run, and PR 3's worker reads it back as
+`service:run-executor`. Artifact rows are append-only (a trigger rejects UPDATE/DELETE), so an ACL
+or classification must be correct on the first write — there is no correcting write.

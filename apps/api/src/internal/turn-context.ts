@@ -6,6 +6,12 @@ import {
 } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
+import {
+  chatRequestArtifactId,
+  INVOKE_STATE_KEY,
+  RUN_EXECUTOR_PRINCIPAL_REF,
+  requestArtifactId,
+} from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import type { ToolRegistry } from "../broker/tool-adapter";
@@ -16,12 +22,6 @@ import type { ConversationStore, PersistedMessage } from "../conversations/servi
 import type { KnowledgeService } from "../knowledge/service";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
-import {
-  chatRequestArtifactId,
-  INVOKE_STATE_KEY,
-  RUN_EXECUTOR_PRINCIPAL_REF,
-  requestArtifactId,
-} from "../runtime/invocation-gateway";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";

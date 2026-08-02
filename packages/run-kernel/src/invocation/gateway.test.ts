@@ -1,4 +1,3 @@
-import { TypedOutputValidator } from "@tulipfarm/run-kernel";
 import {
   CHAT_REQUEST_SCHEMA_REF,
   INTEGRATION_REQUEST_SCHEMA_REF,
@@ -6,11 +5,12 @@ import {
   MANUAL_REQUEST_SCHEMA_REF,
 } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
+import { TypedOutputValidator } from "../outputs";
 import {
   DurableInvocationGateway,
   type DurableInvocationRecord,
   type DurableInvocationStore,
-} from "./invocation-gateway";
+} from "./gateway";
 
 class FakeStore implements DurableInvocationStore {
   readonly records: DurableInvocationRecord[] = [];

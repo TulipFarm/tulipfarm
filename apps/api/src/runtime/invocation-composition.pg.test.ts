@@ -1,5 +1,11 @@
 import { PGlite } from "@electric-sql/pglite";
-import { ArtifactService, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import {
+  ArtifactService,
+  DurableInvocationGateway,
+  INVOCATION_STORAGE_STATEMENTS,
+  PgDurableInvocationStore,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import { CHAT_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
@@ -8,8 +14,6 @@ import {
 } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
-import { DurableInvocationGateway } from "./invocation-gateway";
-import { CUTOVER_STORAGE_STATEMENTS, PgDurableInvocationStore } from "./invocation-store";
 
 const RUN_ID = "00000000-0000-4000-8000-000000000095";
 
@@ -47,7 +51,7 @@ describe("PgDurableInvocationStore", () => {
     for (const statement of [
       ...RUN_STORAGE_STATEMENTS,
       ...ARTIFACT_STORAGE_STATEMENTS,
-      ...CUTOVER_STORAGE_STATEMENTS,
+      ...INVOCATION_STORAGE_STATEMENTS,
     ]) {
       await database.query(statement);
     }
@@ -59,7 +63,7 @@ describe("PgDurableInvocationStore", () => {
 
   function buildGateway(store: Queryable = database as unknown as Queryable) {
     return new DurableInvocationGateway({
-      store: new PgDurableInvocationStore(store, artifacts),
+      store: new PgDurableInvocationStore(transactionPort(store), artifacts),
       validator,
       nextId: () => RUN_ID,
       now: () => "2026-07-26T00:00:00.000Z",

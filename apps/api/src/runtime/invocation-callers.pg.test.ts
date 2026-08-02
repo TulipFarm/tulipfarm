@@ -1,6 +1,12 @@
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import { ArtifactService, TypedOutputValidator } from "@tulipfarm/run-kernel";
+import {
+  ArtifactService,
+  DurableInvocationGateway,
+  InvocationDeniedError,
+  PgDurableInvocationStore,
+  TypedOutputValidator,
+} from "@tulipfarm/run-kernel";
 import { INTEGRATION_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
 import { ArtifactStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,8 +14,6 @@ import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { integrationInvoker, manualRoutineTrigger } from "./invocation-callers";
-import { DurableInvocationGateway, InvocationDeniedError } from "./invocation-gateway";
-import { PgDurableInvocationStore } from "./invocation-store";
 
 /** A verified Slack delivery as the ingress route hands it over, after signature + accept checks. */
 const SLACK_JOB = {
@@ -38,7 +42,7 @@ describe("non-chat invocation callers", () => {
     validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
-        db as unknown as Queryable,
+        transactionPort(db as unknown as Queryable),
         (transaction) =>
           new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
       ),

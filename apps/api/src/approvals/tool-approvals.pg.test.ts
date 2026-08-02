@@ -2,7 +2,9 @@ import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   ArtifactService,
+  DurableInvocationGateway,
   DurableWaitManager,
+  PgDurableInvocationStore,
   RunResumeGateway,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
@@ -11,8 +13,6 @@ import { ArtifactStore, RunStore, WaitStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { runPgMigrations } from "../pg-migrate";
-import { DurableInvocationGateway } from "../runtime/invocation-gateway";
-import { PgDurableInvocationStore } from "../runtime/invocation-store";
 import { makePglite } from "../test/pglite";
 import { ApprovalsRepo } from "./runtime-repo";
 import { ToolApprovalService } from "./tool-approvals";
@@ -45,7 +45,7 @@ describe("tool approvals as durable waits", () => {
     const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
-        queryable,
+        transactionPort(queryable),
         (transaction) =>
           new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
       ),
