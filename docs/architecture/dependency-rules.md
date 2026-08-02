@@ -59,13 +59,19 @@ the Agent runtime. Applications register implementations during composition.
 | Consumer | May import from |
 | --- | --- |
 | `apps/api` | `schema`, `soul`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `surface-web`, `surface-slack`, `surface-telegram`, `surface-github`, `sandbox`, `integrations`, `storage`, `observability` |
-| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
+| `apps/worker` | `schema`, `constants`, `authz`, `audit`, `secrets`, `soul`, `run-kernel`, `tool-broker`, `agent-runtime`, `knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability` |
 | `apps/integration-worker` | `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`, `observability` |
 | `apps/web` | `schema`, `surface`, `surface-web`, and presentation-only packages such as `ui`/`editor` |
 
 `packages/constants` is a dependency-free leaf holding non-sensitive deployment defaults. The API
 and the worker must resolve the same business scope or the worker claims nothing, and an app may
 not import another app, so both read it from there. Secrets never belong in it.
+
+The Worker may import `packages/soul` only for the Git-free execution-bundle read path. A durable
+Run is pinned to an immutable bundle digest and exact definition identity; `PgBundleStore`,
+`PinnedDefinitionLoader`, and signature verification are the single authority for opening that
+definition. This edge does not license `SoulLoader`, Git sync, changeset writes, publication, or
+active-alias resolution in the Worker.
 
 `apps/api` may import `sandbox` and `agent-runtime` for one reason only: those packages own the
 single implementation of something both applications need, and the alternative is a second copy.

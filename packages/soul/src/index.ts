@@ -75,6 +75,8 @@ export type {
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
+export type { PinnedDefinition, PinnedDefinitionRef } from "./pinned-definition";
+export { PinnedDefinitionLoader } from "./pinned-definition";
 export type {
   SoulPublicationErrorCode,
   SoulPublicationOutcome,

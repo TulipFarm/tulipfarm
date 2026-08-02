@@ -186,6 +186,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "authz",
       "audit",
       "secrets",
+      "soul",
       "run-kernel",
       "tool-broker",
       "agent-runtime",

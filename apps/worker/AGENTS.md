@@ -134,7 +134,11 @@ a Run a killed worker abandoned. Run with `--maxWorkers=1`.
 ## Imports
 
 May import: `schema`, `authz`, `audit`, `secrets`, `run-kernel`, `tool-broker`, `agent-runtime`,
-`knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `storage`, `observability`,
+`knowledge`, `memory`, `surface`, `integrations`, `sandbox`, `soul`, `storage`, `observability`,
 `constants` (all under `@tulipfarm/*`). See
 [`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). This app
 never imports another application (`apps/api`, `apps/integration-worker`, `apps/web`).
+
+The `soul` edge is narrow: execution may read a Run's exact immutable bundle through
+`PgBundleStore` and verify its signature. The Worker must never load the live Soul checkout,
+resolve an active alias, publish a changeset, or run Git sync.

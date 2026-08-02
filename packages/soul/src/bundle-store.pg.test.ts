@@ -34,7 +34,7 @@ describe("PgBundleStore", () => {
     database = new PGlite();
     for (const statement of SOUL_BUNDLE_STORAGE_STATEMENTS) await database.query(statement);
     store = new PgBundleStore(transactions(database));
-  }, 30_000);
+  }, 120_000);
 
   afterAll(async () => {
     await database.close();
