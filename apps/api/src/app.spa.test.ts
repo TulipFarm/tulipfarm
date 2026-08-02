@@ -19,6 +19,10 @@ describe("SPA static serving (WEB_DIST set)", () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), "tf-webdist-"));
     writeFileSync(join(dir, "index.html"), `<!doctype html><html>${INDEX_MARKER}</html>`);
+    writeFileSync(
+      join(dir, ".csp-header.txt"),
+      "default-src 'self'; script-src 'self' 'unsafe-eval' 'sha256-test'; style-src 'self'"
+    );
     mkdirSync(join(dir, "assets"));
     writeFileSync(join(dir, "assets", "app.js"), "export const ok = 1;\n");
     process.env.WEB_DIST = dir;
@@ -71,6 +75,17 @@ describe("SPA static serving (WEB_DIST set)", () => {
     expect(csp).toBeDefined();
     expect(csp).toContain("script-src 'self'");
     expect(csp).not.toContain("default-src 'none'");
+  });
+
+  it("fails closed when the production CSP artifact is missing", async () => {
+    const invalidDir = mkdtempSync(join(tmpdir(), "tf-webdist-invalid-"));
+    writeFileSync(join(invalidDir, "index.html"), "<!doctype html><html></html>");
+    const previous = process.env.WEB_DIST;
+    process.env.WEB_DIST = invalidDir;
+    await expect(buildApp()).rejects.toThrow("missing or invalid");
+    if (previous === undefined) delete process.env.WEB_DIST;
+    else process.env.WEB_DIST = previous;
+    rmSync(invalidDir, { recursive: true, force: true });
   });
 });
 

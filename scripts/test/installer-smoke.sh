@@ -15,6 +15,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="ghcr.io/tulipfarm/tulipfarm:ci"
 PORT="${TF_PORT:-8099}"
 INSTALL_DIR="$(mktemp -d)"
+LLM_MOCK_PID=""
 
 # Isolate the smoke's compose project + named volumes from any real `tulipfarm` install
 # on this host, so teardown's `down -v` can never wipe real data. Both COMPOSE_PROJECT_NAME
@@ -26,6 +27,7 @@ log() { printf '\033[0;36m[smoke]\033[0m %s\n' "$*"; }
 fail() { printf '\033[0;31m[smoke] FAIL:\033[0m %s\n' "$*" >&2; exit 1; }
 
 cleanup() {
+  if [ -n "$LLM_MOCK_PID" ]; then kill "$LLM_MOCK_PID" >/dev/null 2>&1 || true; fi
   if [ -f "${INSTALL_DIR}/docker-compose.yml" ]; then
     log "tearing down stack…"
     ( cd "$INSTALL_DIR" && docker compose down -v ) >/dev/null 2>&1 || true
@@ -116,6 +118,15 @@ else
   if [ "${CI:-}" = "true" ]; then
     require_insecure="--require-insecure"
   fi
+
+  # Agentic E2E turns use a local OpenAI-compatible server. No provider credentials or external
+  # LLM network is permitted in this harness; the app still performs the real tool dispatch.
+  mock_port="${E2E_LLM_PORT:-4899}"
+  node "${REPO_ROOT}/scripts/test/mock-llm.mjs" >/tmp/tulipfarm-e2e-llm.log 2>&1 &
+  LLM_MOCK_PID=$!
+  sleep 1
+  mock_host="$(printf '%s' "$public_url" | sed -E 's#^https?://([^:/]+).*$#\1#')"
+  export E2E_LLM_BASE_URL="http://${mock_host}:${mock_port}/v1"
 
   log "running browser smoke against ${public_url}…"
   node "${REPO_ROOT}/scripts/test/browser-smoke.mjs" "$public_url" $require_insecure \

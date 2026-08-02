@@ -1,0 +1,135 @@
+import { test as base, expect, type Page } from "@playwright/test";
+
+type Diagnostics = {
+  readonly pageErrors: string[];
+  readonly cspViolations: string[];
+  loadCount: number;
+};
+
+export const test = base.extend<{ diagnostics: Diagnostics }>({
+  diagnostics: async ({ page, context }, use, testInfo) => {
+    const diagnostics: Diagnostics = { pageErrors: [], cspViolations: [], loadCount: 0 };
+
+    await context.exposeBinding("__recordCspViolation", (_source, value: unknown) => {
+      diagnostics.cspViolations.push(String(value));
+    });
+    await context.addInitScript(() => {
+      document.addEventListener("securitypolicyviolation", (event) => {
+        const record = (window as Window & { __recordCspViolation?: (value: string) => void })
+          .__recordCspViolation;
+        record?.(`${event.violatedDirective} blocked ${event.blockedURI || "inline"}`);
+      });
+    });
+
+    // Keep browser-visible provider calls deterministic. Product/API traffic remains real; only
+    // calls made directly to a provider endpoint are fulfilled with a minimal OpenAI-compatible
+    // response so a test can never spend credentials or hit the network accidentally.
+    await page.route(
+      /https:\/\/(api\.openai\.com|api\.anthropic\.com|api\.openai\.com\/v1)\/.*/,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "e2e-mock",
+            object: "chat.completion",
+            choices: [{ index: 0, message: { role: "assistant", content: "E2E mocked response" } }],
+          }),
+        });
+      }
+    );
+
+    page.on("pageerror", (error) => diagnostics.pageErrors.push(error.message));
+    page.on("load", () => {
+      diagnostics.loadCount += 1;
+    });
+
+    await use(diagnostics);
+
+    const unique = (values: readonly string[]) => [...new Set(values)];
+    if (diagnostics.cspViolations.length > 0) {
+      await testInfo.attach("csp-violations", {
+        body: unique(diagnostics.cspViolations).join("\n"),
+        contentType: "text/plain",
+      });
+    }
+    expect(diagnostics.cspViolations, "CSP violations").toEqual([]);
+    expect(unique(diagnostics.pageErrors), "uncaught page errors").toEqual([]);
+    expect(diagnostics.loadCount, "reload-loop guard").toBeLessThanOrEqual(5);
+  },
+});
+
+export { expect };
+
+export async function openProductionRoot(page: Page): Promise<void> {
+  const response = await page.goto("/", { waitUntil: "domcontentloaded" });
+  expect(response, "root document response").not.toBeNull();
+  const headers = response?.headers() ?? {};
+  const csp = headers["content-security-policy"] ?? "";
+  expect(csp, "production CSP header").toMatch(/script-src[^;]*'sha256-/);
+  expect(csp, "script CSP must not use unsafe-inline").not.toMatch(
+    /script-src[^;]*'unsafe-inline'/
+  );
+  const html = await response?.text();
+  expect(html ?? "", "built bundle marker").not.toContain("/@vite/client");
+  if (process.env.BROWSER_SMOKE_REQUIRE_INSECURE === "1") {
+    const origin = new URL(page.url());
+    expect(origin.protocol, "browser smoke origin").toBe("http:");
+    expect(origin.hostname, "browser smoke origin").toMatch(/^\d{1,3}(?:\.\d{1,3}){3}$/);
+    expect(origin.hostname, "browser smoke must not use localhost").not.toBe("127.0.0.1");
+    expect(origin.hostname, "browser smoke must not use localhost").not.toBe("0.0.0.0");
+    expect(await page.evaluate(() => window.isSecureContext), "secure-context guard").toBe(false);
+    expect(
+      await page.evaluate(() => typeof crypto.randomUUID),
+      "secure-context API must be unavailable"
+    ).toBe("undefined");
+  }
+}
+
+export async function completeOrSignIn(page: Page): Promise<void> {
+  if (!/\/(setup|login)\b/.test(page.url())) {
+    await expect(page.getByLabel("Message")).toBeVisible();
+    return;
+  }
+  await page.waitForURL(/\/(setup|login)\b/, { timeout: 60_000 });
+  const onSetup = page.url().includes("/setup");
+  const email = "smoke@tulipfarm.test";
+  const password = "smoke-password-123";
+
+  if (onSetup) {
+    await page.locator('input[type="email"]').fill(email);
+    await page.locator('input[type="password"]').nth(0).fill(password);
+    await page.locator('input[type="password"]').nth(1).fill(password);
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByPlaceholder("Acme Corp").fill("Smoke Test Co");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: /Skip for now/i }).click();
+    await page.getByRole("button", { name: "Skip", exact: true }).click();
+  } else {
+    await page.getByLabel("email").fill(email);
+    await page.getByLabel("password").fill(password);
+    await page.getByRole("button", { name: /Sign in/i }).click();
+  }
+
+  await page.waitForURL(/\/$/, { timeout: 60_000 });
+}
+
+/** Configure the real Settings surfaces to use the installer-local mock provider. */
+export async function configureMockLlm(page: Page): Promise<void> {
+  const baseUrl = process.env.E2E_LLM_BASE_URL;
+  if (!baseUrl) throw new Error("E2E_LLM_BASE_URL is required for agentic E2E tests");
+  await page.goto("/settings/secrets");
+  await page.getByLabel("secret provider").selectOption("openai-compatible");
+  await page.getByLabel("openai-compatible api_key").fill("e2e-no-network-key");
+  await page.getByLabel("openai-compatible base_url").fill(baseUrl);
+  await page.getByRole("button", { name: "Save provider" }).click();
+  await expect(page.getByText(/openai-compatible/i).first()).toBeVisible();
+
+  await page.goto("/settings/llm");
+  for (const tier of ["quick", "standard", "complex"]) {
+    await page.getByLabel(`${tier} provider 1 provider`).selectOption("openai-compatible");
+    await page.getByLabel(`${tier} provider 1 model`).fill("e2e-mock");
+  }
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page.getByText(/Saved · LLM service reloaded/i)).toBeVisible();
+}

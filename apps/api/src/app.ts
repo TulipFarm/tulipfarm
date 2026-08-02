@@ -163,17 +163,34 @@ export async function buildApp(opts: AppOptions = {}) {
   // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
   // in native `pnpm dev` (Vite serves the SPA), so this whole layer is inert there.
   const webDist = process.env.WEB_DIST;
-  const serveSpa = !!webDist && existsSync(webDist);
+  const serveSpa = !!webDist;
+  if (serveSpa && webDist && !existsSync(webDist)) {
+    throw new Error(`WEB_DIST does not exist: ${webDist}`);
+  }
 
-  // Read the full CSP header value written by the Vite csp-hash plugin at build time.
-  // Falls back to unsafe-inline only when the file is absent (e.g. local dev builds that
-  // bypass the Vite build). In the shipped image the file is always present (SEC-V1-002).
+  // Read and validate the full CSP header value written after the complete production web build.
+  // A served production bundle without this artifact is a startup error (SEC-V1-002).
   const spaCspHeader = (() => {
     if (!serveSpa || !webDist) return null;
+    const cspPath = join(webDist, ".csp-header.txt");
     try {
-      return readFileSync(join(webDist, ".csp-header.txt"), "utf8").trim();
-    } catch {
-      return null;
+      const header = readFileSync(cspPath, "utf8").trim();
+      const scriptSrc = header.match(/(?:^|;)\s*script-src\s+([^;]+)/)?.[1] ?? "";
+      if (
+        !header ||
+        !scriptSrc.includes("'self'") ||
+        !scriptSrc.includes("'unsafe-eval'") ||
+        !/'sha256-[^']+'/.test(scriptSrc) ||
+        scriptSrc.includes("'unsafe-inline'")
+      ) {
+        throw new Error("CSP artifact is missing required hash-based script-src directives");
+      }
+      return header;
+    } catch (error) {
+      throw new Error(
+        `WEB_DIST is enabled but ${cspPath} is missing or invalid; run the production web build`,
+        { cause: error }
+      );
     }
   })();
   // Non-SPA surfaces keep their own handling: the API (JSON), the Scalar docs UI, the
@@ -240,15 +257,10 @@ export async function buildApp(opts: AppOptions = {}) {
     } else if (serveSpa && !isAppApiPath(req.url)) {
       // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
       // for the app shell + its assets to a same-origin policy (INST-003c posture).
-      // script-src uses build-time SHA-256 hashes (computed by the Vite csp-hash plugin)
+      // script-src uses build-time SHA-256 hashes from the completed web build
       // so only the exact inline scripts Remix bakes into index.html are allowed (SEC-V1-002).
-      reply.header(
-        "content-security-policy",
-        spaCspHeader ??
-          "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
-            "style-src 'self' 'unsafe-inline'; " +
-            "img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'"
-      );
+      if (!spaCspHeader) throw new Error("SPA CSP header is unavailable while serving WEB_DIST");
+      reply.header("content-security-policy", spaCspHeader);
     }
   });
 

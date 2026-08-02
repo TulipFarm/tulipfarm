@@ -1,10 +1,11 @@
 {
   "extends": "@tulipfarm/tsconfig/remix.json",
   "compilerOptions": {
+    "allowImportingTsExtensions": true,
     "noEmit": true,
     "paths": {
       "~/*": ["./app/*"]
     }
   },
-  "include": ["app", "vite.config.ts", "vitest.setup.ts"]
+  "include": ["app", "scripts", "vite.config.ts", "vitest.setup.ts"]
 }
