@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@noble/hashes": "^2.2.0",
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.52",
     "ajv": "^8.20.0",
     "yaml": "^2.9.0"
   },
@@ -23,6 +23,6 @@
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   }
 }
