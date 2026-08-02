@@ -97,6 +97,12 @@ the type's JSON Schema fetched from the API. The logic lives in `lib/schema.ts`:
 
 ## Conventions
 
+- Never call secure-context-only browser APIs directly. Production is served over plain HTTP from a
+  LAN IP, where APIs such as `crypto.randomUUID` and `navigator.clipboard` are unavailable. Use
+  `~/lib/uuid` and `~/lib/clipboard`, or add a guarded helper before introducing another API. The
+  repository guard runs as `pnpm check:secure-context`; neither localhost nor jsdom reproduces this
+  deployment context.
+
 - shadcn primitives live in `app/components/ui` (app-local). `@tulipfarm/ui` remains the home for
   **cross-app** shared components (not used here).
 - Reserve ruby (`--primary`) for brand/primary; coral/signal red (`--destructive`) for danger

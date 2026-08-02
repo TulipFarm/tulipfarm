@@ -25,9 +25,14 @@ RUN pnpm install --frozen-lockfile
 # VITE_API_URL="" makes the built SPA use relative URLs — correct when the API
 # serves the SPA from the same origin (single-image mode on port 8080).
 # The dev fallback in api.ts (localhost:4010) must NOT be baked into the image.
-# The csp-hash Vite plugin extracts inline-script SHA-256 hashes from index.html
+# The completed web build extracts inline-script SHA-256 hashes from index.html
 # and writes the full CSP header to build/client/.csp-header.txt (SEC-V1-002).
 RUN VITE_API_URL="" pnpm --filter @tulipfarm/web build
+# The runtime API fails closed when WEB_DIST is enabled; keep the image build equally strict so
+# packaging can never silently omit the hash-based CSP artifact.
+RUN test -s /app/apps/web/build/client/.csp-header.txt \
+  && grep -Eq "script-src[^;]*'sha256-" /app/apps/web/build/client/.csp-header.txt \
+  && ! grep -Eq "script-src[^;]*'unsafe-inline'" /app/apps/web/build/client/.csp-header.txt
 # Bundle the API + workspace packages into one file. Native modules and packages
 # that read their own files at runtime (scalar UI assets) stay external and are
 # supplied by the prod deploy closure below. The datastore driver (pg) and queue

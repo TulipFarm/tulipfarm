@@ -16,5 +16,7 @@ references
 .absolute-work
 .claude/logs
 .playwright-mcp
+.auth/
+playwright-report/
+test-results/
 .claude/worktrees
-browser-smoke-failure.png

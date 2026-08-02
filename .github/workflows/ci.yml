@@ -95,7 +95,7 @@ jobs:
       - name: Secure-context API guard
         run: |
           set -o pipefail
-          bash scripts/test/check-secure-context-apis.sh 2>&1 | tee -a lint.log
+          pnpm check:secure-context 2>&1 | tee -a lint.log
       - name: Job summary
         if: always()
         env:
@@ -138,6 +138,7 @@ jobs:
         run: |
           set -o pipefail
           pnpm exec turbo typecheck --filter='!@tulipfarm/docs' 2>&1 | tee typecheck.log
+          pnpm typecheck:e2e 2>&1 | tee -a typecheck.log
       - name: Job summary
         if: always()
         env:
