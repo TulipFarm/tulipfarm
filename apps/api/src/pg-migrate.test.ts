@@ -123,4 +123,29 @@ describe("runPgMigrations", () => {
       expect(column.rows[0]?.is_nullable).toBe("YES");
     });
   });
+
+  describe("migration 20", () => {
+    it("installs durable Soul publication and immutable bundle storage", async () => {
+      await runPgMigrations(db, undefined, () => {});
+
+      const tables = await db.query<{ table_name: string }>(`SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name IN (
+            'soul_publications',
+            'soul_publication_outbox',
+            'soul_definition_projections',
+            'soul_active_bundles',
+            'soul_execution_bundles'
+          )
+        ORDER BY table_name`);
+      expect(tables.rows.map((row) => row.table_name)).toEqual([
+        "soul_active_bundles",
+        "soul_definition_projections",
+        "soul_execution_bundles",
+        "soul_publication_outbox",
+        "soul_publications",
+      ]);
+    });
+  });
 });

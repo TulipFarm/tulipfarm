@@ -1,3 +1,4 @@
+import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
@@ -10,6 +11,7 @@ import {
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
+  SOUL_PUBLICATION_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
@@ -702,6 +704,18 @@ export const PG_MIGRATIONS: PgMigration[] = [
       // list can show an owner nobody can page — which is the truth about a process, and better
       // than attributing it to whichever human happened to run setup first.
       await q.query("ALTER TABLE api_clients ALTER COLUMN owner_user_id DROP NOT NULL");
+    },
+  },
+  {
+    version: 20,
+    description: "durable Soul publication and immutable execution bundles",
+    up: async (q) => {
+      for (const sql of [
+        ...SOUL_PUBLICATION_STORAGE_STATEMENTS,
+        ...SOUL_BUNDLE_STORAGE_STATEMENTS,
+      ]) {
+        await q.query(sql);
+      }
     },
   },
 ];

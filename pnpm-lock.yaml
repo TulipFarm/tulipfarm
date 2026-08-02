@@ -899,6 +899,9 @@ importers:
         specifier: ^2.9.0
         version: 2.9.0
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
