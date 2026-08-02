@@ -13,6 +13,8 @@ docs/plans
 docs/uat
 cookies.txt
 references
+!/.agents/skills/tulipfarm-design-system/references/
+!/.agents/skills/tulipfarm-design-system/references/design-system.md
 .absolute-work
 .claude/logs
 .playwright-mcp

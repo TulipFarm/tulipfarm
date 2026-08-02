@@ -24,6 +24,7 @@ export type ChecklistStep = { id: string; label: string; status: ChecklistStatus
 export type ChecklistRecommendation = { id: string; label: string; prompt: string };
 export type OnboardingChecklist = {
   dismissed: boolean;
+  businessName?: string;
   steps: ChecklistStep[];
   recommendations: ChecklistRecommendation[];
 };

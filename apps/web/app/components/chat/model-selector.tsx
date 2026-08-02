@@ -138,10 +138,7 @@ export function ModelSelector({
   }
 
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span aria-hidden className="select-none uppercase tracking-[0.15em]">
-        model
-      </span>
+    <div className="flex items-center text-xs text-muted-foreground">
       <button
         ref={triggerRef}
         type="button"
@@ -151,12 +148,12 @@ export function ModelSelector({
         disabled={disabled}
         onClick={toggle}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-sm border border-input bg-secondary px-1.5 py-1 text-foreground transition-colors",
+          "inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 font-medium text-foreground transition-colors",
           "outline-none focus-visible:border-primary disabled:opacity-50 hover:border-primary/60"
         )}
       >
         <SignalBars level={current.level} />
-        <span>{current.label}</span>
+        <span className="capitalize">{current.label}</span>
         <ChevronDown aria-hidden className="size-3 opacity-70" />
       </button>
 

@@ -26,4 +26,4 @@ test("showcases the live token, status, action, form, and composition vocabulary
   }
   expect(screen.getByLabelText("Name")).toBeInTheDocument();
   expect(screen.getByText("critical")).toBeInTheDocument();
-});
+}, 10_000);

@@ -1,6 +1,7 @@
 import type { MetaFunction } from "@remix-run/react";
 import { Check, Copy, Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
+import { Composer } from "~/components/chat/composer";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -266,6 +267,24 @@ export default function DesignGuideRoute() {
         title="Composition patterns"
         description="Panels, navigation, and feedback use the same spacing and hierarchy."
       >
+        <div className="mb-6 overflow-hidden rounded-md border border-border bg-background">
+          <Composer
+            onSend={() => undefined}
+            activeAgent={{ name: "InventoryPlanner", label: "Inventory planner" }}
+            suggestions={[
+              {
+                id: "clarify",
+                label: "Clarify the problem",
+                prompt: "Help me clarify the problem before we start.",
+              },
+              {
+                id: "plan",
+                label: "Create a plan",
+                prompt: "Create a practical plan with clear next steps.",
+              },
+            ]}
+          />
+        </div>
         <div className="grid gap-4 lg:grid-cols-3">
           <article className="rounded-md border border-border bg-card">
             <header className="flex items-center gap-2 border-b border-border px-4 py-3">

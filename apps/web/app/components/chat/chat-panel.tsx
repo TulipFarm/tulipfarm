@@ -1,7 +1,6 @@
 import { Link } from "@remix-run/react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
-import type { Autonomy } from "~/lib/agents";
 import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { useConversations } from "~/lib/conversations-context";
@@ -15,64 +14,35 @@ import { Transcript } from "./transcript";
 import { useMentionCatalog } from "./use-mention-catalog";
 
 function EmptyState({
+  businessName,
   agent,
   label,
-  domain,
-  autonomy,
-  suggestions = [],
   checklist,
   onDismissChecklist,
   onPick,
 }: {
-  agent: string;
+  businessName?: string;
+  agent?: string;
   label?: string;
-  domain?: string;
-  autonomy?: Autonomy;
-  suggestions?: Suggestion[];
   checklist?: OnboardingChecklist | null;
   onDismissChecklist?: () => void;
   onPick: (text: string) => void;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-7 overflow-y-auto px-6 py-12">
-      <div className="flex w-full max-w-5xl flex-col gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
-        <p className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
-          Your AI workspace
-        </p>
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          <span aria-hidden className="animate-cursor text-primary">
-            ▍
-          </span>
-          tulipfarm
+    <div className="flex flex-1 flex-col items-center justify-center gap-5 overflow-y-auto px-4 py-6 sm:px-6">
+      <div className="flex w-full max-w-6xl flex-col gap-1.5 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+          {agent
+            ? `Chat with ${label ?? agent}`
+            : businessName
+              ? `What can I help ${businessName} with?`
+              : "What can I help with?"}
         </h1>
-        <p className="text-muted-foreground">The business agent harness. Ask anything below.</p>
-        <p className="flex items-center gap-2 text-xs text-muted-foreground">
-          <AgentGlyph
-            name={agent}
-            domain={domain}
-            autonomy={autonomy}
-            size="xs"
-            active
-            decorative
-          />
-          <span>ready</span>
-          <span aria-hidden className="text-border">
-            ·
-          </span>
-          <span>{label ?? agent}</span>
+        <p className="text-sm text-muted-foreground sm:text-base">
+          {agent
+            ? "This Chat is using a user-created Agent."
+            : "Ask about your business, build your system, or start with a suggested prompt."}
         </p>
-      </div>
-      <div className="flex w-full max-w-5xl flex-wrap gap-2">
-        {suggestions.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => onPick(s.prompt)}
-            className="cursor-pointer rounded-sm border border-border bg-secondary px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
-          >
-            {s.label}
-          </button>
-        ))}
       </div>
       {checklist && !checklist.dismissed ? (
         <GettingStartedCard
@@ -92,6 +62,7 @@ export function ChatPanel({
   defaultModel = "standard",
   suggestions = [],
   checklist,
+  businessName,
   onDismissChecklist,
   initialConversationId,
   initialMessages,
@@ -103,6 +74,7 @@ export function ChatPanel({
   defaultModel?: ModelTier;
   suggestions?: Suggestion[];
   checklist?: OnboardingChecklist | null;
+  businessName?: string;
   onDismissChecklist?: () => void;
   initialConversationId?: string;
   initialMessages?: ChatMessage[];
@@ -128,13 +100,14 @@ export function ChatPanel({
   });
   const busy = status === "submitted" || status === "streaming";
   // Prefer the live agent from a handoff; fall back to the restored conversation's persisted agent.
-  const agent = currentAgent || agentId || "TulipFarm";
+  const routedAgentName = currentAgent || agentId;
+  const activeAgentName = routedAgentName === "TulipFarm" ? undefined : routedAgentName;
   // Resolve the active agent's domain/autonomy so its header glyph matches the agents list. Undefined
   // until the list loads (and for the two platform agents) → glyph uses its name-hashed fallback.
   // Mentionable entities: powers the active-agent header glyph AND highlights @/#// tags (with hover
   // cards) inside user messages.
   const { entries, agentByName } = useMentionCatalog();
-  const agentInfo = agentByName.get(agent);
+  const agentInfo = activeAgentName ? agentByName.get(activeAgentName) : undefined;
   // The composer's MODEL selector reflects the active agent's tier (and a mentioned agent's tier as
   // it's typed). asTier narrows each agent's raw frontmatter `model` to a pickable tier (or undefined,
   // for "auto"/raw ids → the selector then keeps its current value).
@@ -153,25 +126,31 @@ export function ChatPanel({
 
   return (
     <div className="flex h-[calc(100svh-3.25rem)] flex-col lg:h-full">
-      {hasMessages ? (
+      {hasMessages && (activeAgentName || displayTitle) ? (
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2.5">
-          <AgentGlyph
-            name={agent}
-            domain={agentInfo?.domain}
-            autonomy={agentInfo?.autonomy}
-            size="sm"
-            active
-            state={busy ? "thinking" : "idle"}
-            decorative
-          />
-          <span className="text-xs font-medium text-foreground">{agentInfo?.label ?? agent}</span>
-          {displayTitle ? (
+          {activeAgentName ? (
             <>
-              <span aria-hidden className="text-border">
-                ·
+              <AgentGlyph
+                name={activeAgentName}
+                domain={agentInfo?.domain}
+                autonomy={agentInfo?.autonomy}
+                size="sm"
+                active
+                state={busy ? "thinking" : "idle"}
+                decorative
+              />
+              <span className="text-xs font-medium text-foreground">
+                {agentInfo?.label ?? activeAgentName}
               </span>
-              <span className="min-w-0 truncate text-xs text-muted-foreground">{displayTitle}</span>
             </>
+          ) : null}
+          {activeAgentName && displayTitle ? (
+            <span aria-hidden className="text-border">
+              ·
+            </span>
+          ) : null}
+          {displayTitle ? (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">{displayTitle}</span>
           ) : null}
         </header>
       ) : null}
@@ -187,11 +166,9 @@ export function ChatPanel({
         />
       ) : (
         <EmptyState
-          agent={agent}
+          businessName={businessName}
+          agent={activeAgentName}
           label={agentInfo?.label}
-          domain={agentInfo?.domain}
-          autonomy={agentInfo?.autonomy}
-          suggestions={suggestions}
           checklist={checklist}
           onDismissChecklist={onDismissChecklist}
           onPick={(text) => send(text, { model: activeAgentTier ?? defaultModel, agentId })}
@@ -225,6 +202,17 @@ export function ChatPanel({
         // The MODEL selector follows the active agent's tier, and a mentioned agent's tier as typed.
         activeAgentTier={activeAgentTier}
         tierById={tierById}
+        activeAgent={
+          activeAgentName
+            ? {
+                name: activeAgentName,
+                label: agentInfo?.label,
+                domain: agentInfo?.domain,
+                autonomy: agentInfo?.autonomy,
+              }
+            : undefined
+        }
+        suggestions={hasMessages ? [] : suggestions}
         // A `@agent` mention in the composer overrides the panel's active agent for that turn.
         onSend={(text, opts) => send(text, { ...opts, agentId: opts.agentId ?? agentId })}
       />

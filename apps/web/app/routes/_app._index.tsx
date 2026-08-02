@@ -56,6 +56,7 @@ export default function ChatRoute() {
       agentId={agentId}
       defaultModel={defaultModel}
       suggestions={suggestions}
+      businessName={checklist?.businessName}
       checklist={checklistDismissed ? null : checklist}
       onDismissChecklist={() => {
         setChecklistDismissed(true); // optimistic — survives ChatPanel remount

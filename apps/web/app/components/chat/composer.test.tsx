@@ -11,13 +11,17 @@ import type { PMNode } from "~/components/chat/editor/serialize";
 // exhaustively by `editor/serialize.test.ts`.
 let doc: PMNode;
 const clearContent = vi.fn();
+const setContent = vi.fn();
+const selectTextblockEnd = vi.fn();
+const viewFocus = vi.fn();
 
 const fakeEditor = {
   isEmpty: false,
   getJSON: () => doc,
   isActive: () => false,
   getAttributes: () => ({}),
-  commands: { clearContent },
+  commands: { clearContent, setContent, selectTextblockEnd },
+  view: { focus: viewFocus },
   chain: () => ({ focus: () => ({ run: () => true }) }),
 };
 
@@ -53,6 +57,9 @@ const textDoc = (t: string): PMNode => ({
 beforeEach(() => {
   doc = textDoc("do it");
   clearContent.mockClear();
+  setContent.mockClear();
+  selectTextblockEnd.mockClear();
+  viewFocus.mockClear();
 });
 
 test("Model Selector sets the per-message model override on send", async () => {
@@ -62,7 +69,7 @@ test("Model Selector sets the per-message model override on send", async () => {
 
   await user.click(screen.getByRole("button", { name: /^Model:/ }));
   await user.click(screen.getByRole("button", { name: "complex" }));
-  await user.click(screen.getByRole("button", { name: "send" }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
     model: "complex",
@@ -79,7 +86,7 @@ test("the model defaults to the active agent's tier", async () => {
   const onSend = vi.fn();
   render(<Composer onSend={onSend} defaultModel="complex" />);
 
-  await user.click(screen.getByRole("button", { name: "send" }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
     model: "complex",
@@ -110,7 +117,7 @@ test("send serializes mentions into agentId + skills + resources", async () => {
   };
   render(<Composer onSend={onSend} />);
 
-  await user.click(screen.getByRole("button", { name: "send" }));
+  await user.click(screen.getByRole("button", { name: "Send message" }));
 
   expect(onSend).toHaveBeenCalledWith("@GithubTriage triage with /copywriting on #tickets", {
     model: "standard",
@@ -125,4 +132,22 @@ test("the composer exposes no file-attachment affordance", () => {
   const { container } = render(<Composer onSend={vi.fn()} />);
   expect(container.querySelector('input[type="file"]')).toBeNull();
   expect(screen.queryByLabelText(/attach|upload|file/i)).toBeNull();
+});
+
+test("a Suggested prompt drafts editable text without sending", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  render(
+    <Composer
+      onSend={onSend}
+      suggestions={[{ id: "plan", label: "Create a plan", prompt: "Create a practical plan." }]}
+    />
+  );
+
+  await user.click(screen.getByRole("button", { name: "Create a plan" }));
+
+  expect(setContent).toHaveBeenCalledWith("Create a practical plan.");
+  expect(selectTextblockEnd).toHaveBeenCalledOnce();
+  expect(viewFocus).toHaveBeenCalledOnce();
+  expect(onSend).not.toHaveBeenCalled();
 });

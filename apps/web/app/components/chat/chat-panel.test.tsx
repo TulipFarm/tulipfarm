@@ -37,20 +37,31 @@ test("renders one chip per adaptive suggestion using its label (ONB-V1-002)", ()
   expect(screen.getByRole("button", { name: "Track sales leads?" })).toBeInTheDocument();
 });
 
-test("tapping a chip seeds the chat with its prompt (not its label)", async () => {
+test("tapping a Suggested prompt does not immediately start a Turn", async () => {
   const user = userEvent.setup();
   render(<ChatPanel suggestions={SUGGESTIONS} />);
 
   await user.click(screen.getByRole("button", { name: "Set up ticket management?" }));
 
-  expect(send).toHaveBeenCalledWith("Help me set up ticket management.", {
-    model: "standard",
-    agentId: undefined,
-  });
+  expect(send).not.toHaveBeenCalled();
 });
 
 test("with no suggestions, renders no chips but the composer stays interactive (default = [])", () => {
   render(<ChatPanel />);
   expect(screen.queryByRole("button", { name: /set up|track|manage/i })).toBeNull();
   expect(screen.getByLabelText("Message")).toBeInTheDocument();
+});
+
+test("normal Chat does not present the default harness as a user-created Agent", () => {
+  render(<ChatPanel businessName="Acme Tulips" />);
+  expect(
+    screen.getByRole("heading", { name: "What can I help Acme Tulips with?" })
+  ).toBeInTheDocument();
+  expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
+});
+
+test("an explicitly selected Agent is identified above the Chat", () => {
+  render(<ChatPanel agentId="InventoryPlanner" />);
+  expect(screen.getByRole("heading", { name: "Chat with InventoryPlanner" })).toBeInTheDocument();
+  expect(screen.getByText("This Chat is using a user-created Agent.")).toBeInTheDocument();
 });
