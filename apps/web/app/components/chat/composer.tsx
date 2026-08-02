@@ -69,7 +69,7 @@ export function Composer({
     editorProps: {
       attributes: {
         class:
-          "tf-editor max-h-[180px] min-h-[1.5rem] overflow-y-auto px-3.5 py-3 text-sm leading-relaxed text-foreground outline-none",
+          "tf-editor max-h-[220px] min-h-[5.5rem] overflow-y-auto px-5 py-4 text-sm leading-relaxed text-foreground outline-none",
         "aria-label": "Message",
       },
       handleKeyDown: (view, event) => {
@@ -145,8 +145,8 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-border bg-background">
-      <div className="mx-auto w-full max-w-3xl px-6 py-3">
-        <div className="overflow-hidden rounded-sm border border-input bg-secondary transition-colors focus-within:border-primary">
+      <div className="mx-auto w-full max-w-5xl px-6 py-4">
+        <div className="overflow-hidden rounded-xl border border-input bg-card transition-colors focus-within:border-primary">
           {editor ? (
             <BubbleMenu
               editor={editor}
@@ -179,14 +179,14 @@ export function Composer({
             </BubbleMenu>
           ) : null}
           <EditorContent editor={editor} />
-          <div className="flex items-center gap-4 border-t border-border/60 px-3 py-2">
+          <div className="flex items-center gap-4 border-t border-border/60 px-4 py-3">
             <ModelSelector value={model} onChange={setModel} disabled={busy} />
             {busy ? (
               <button
                 type="button"
                 onClick={handleStop}
                 aria-label="Stop response"
-                className="ml-auto inline-flex items-center gap-1.5 rounded-sm border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
               >
                 <span aria-hidden className="size-2 rounded-[1px] bg-current" />
                 stop
@@ -196,7 +196,7 @@ export function Composer({
                 type="button"
                 onClick={() => submitRef.current()}
                 disabled={isEmpty}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-sm bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
               >
                 send
                 <span aria-hidden className="opacity-70">
@@ -206,7 +206,7 @@ export function Composer({
             )}
           </div>
         </div>
-        <p className="mt-1.5 px-1 text-[0.625rem] text-muted-foreground">
+        <p className="mt-2 px-1 text-[0.625rem] text-muted-foreground">
           enter to send · shift+enter for newline · <span className="text-primary">/</span>skills ·{" "}
           <span className="text-primary">@</span>agents · <span className="text-primary">#</span>
           resources · <span className="text-primary">~</span>knowledge

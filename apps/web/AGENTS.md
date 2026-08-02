@@ -8,12 +8,12 @@
 - **Remix 2.17 in SPA mode** (`remix({ ssr: false })`) — client-rendered, file-based routing,
   served as static files by nginx in prod. ESM (`"type": "module"`).
 - **React 19** (`react` + `react-dom`).
-- **Tailwind v4** (CSS-first `@theme`, no PostCSS/JS config) via `@tailwindcss/vite`; design
-  tokens (oklch) in `app/app.css`. `tailwind-merge` v3 + `tw-animate-css`.
-- **shadcn/ui** copied-in to `app/components/ui` (config in `components.json`). Strip shadcn's
-  default shadows — the design language is flat/hairline (OpenCode-style, ruby brand).
-- **Lucide** icons; **JetBrains Mono** is the only font (`@fontsource-variable/jetbrains-mono`,
-  imported as a side-effect in `root.tsx`).
+- **Tailwind v4** (CSS-first `@theme`, no PostCSS/JS config) via `@tailwindcss/vite`; semantic
+  design tokens (oklch) in `app/tokens.css`. `tailwind-merge` v3 + `tw-animate-css`.
+- **shadcn/ui** copied-in to `app/components/ui` (config in `components.json`). Keep the design
+  language neutral, flat, compact, and hairline; reserve shadows for overlays.
+- **Lucide** icons; **Inter Variable** is the interface/prose font and **JetBrains Mono** is for
+  code, identifiers, logs, and technical data. Both are imported in `root.tsx`.
 - **Dark mode** via `[data-theme="dark"]` on `<html>` (NOT shadcn's `.dark`), persisted to
   `localStorage`; a no-flash init script in `root.tsx` sets it pre-hydration. Toggle in Settings.
 - tsconfig extends `@tulipfarm/tsconfig/remix.json`; path alias `~/* → app/*` (tsconfig `paths`
@@ -105,8 +105,10 @@ the type's JSON Schema fetched from the API. The logic lives in `lib/schema.ts`:
 
 - shadcn primitives live in `app/components/ui` (app-local). `@tulipfarm/ui` remains the home for
   **cross-app** shared components (not used here).
-- Reserve ruby (`--primary`) for brand/primary; coral/signal red (`--destructive`) for danger
-  only — keep ruby on ≤10% of any screen. Containers `rounded-none`, interactive `rounded-sm/md`.
+- Follow the repository skill at `.agents/skills/tulipfarm-design-system` for component creation,
+  shell/layout, tokens, type, status/priority, and `/design-guide` conventions.
+- Reserve coral (`--primary`) for brand/primary and `--destructive` for danger only. Prefer
+  restrained `rounded-sm/md` surfaces and semantic status tokens.
 - Badge counts are **mocked** (`lib/badges.ts`) in the V1 shell — wire to the API downstream.
 - **Never call secure-context-only browser APIs directly.** Prod is served over plain http from a
   LAN IP, a NON-secure context where `crypto.randomUUID`, `crypto.subtle`, `navigator.clipboard`,

@@ -6,7 +6,7 @@ set -euo pipefail
 # Wipes local runtime state so you can start completely fresh:
 #   • the Postgres database (all users, secrets, encryption keys, chats, jobs)
 #   • the soul repo (~/.tulipfarm/soul)
-#   • .env.local (+ the apps/api symlink)
+#   • .env.local (+ the apps/api and apps/worker symlinks)
 #
 # This is DESTRUCTIVE and cannot be undone. It does NOT remove the bundled Postgres
 # container or its image — only the project's own data.
@@ -74,7 +74,7 @@ echo "🧹 TulipFarm local reset — this will DELETE:"
 echo "   • Postgres database: $DB_NAME  (users, secrets, encryption keys, chats, jobs — all gone)"
 if ! $DB_ONLY; then
   echo "   • Soul repo:         $SOUL_PATH"
-  $KEEP_ENV || echo "   • Env file:          $REPO_ROOT/.env.local  (+ apps/api/.env.local symlink)"
+  $KEEP_ENV || echo "   • Env file:          $REPO_ROOT/.env.local  (+ app symlinks)"
 fi
 echo ""
 echo "⚠ Stop the dev server first (Ctrl-C the 'pnpm dev' process)."
@@ -122,10 +122,11 @@ if [ -d "$SOUL_PATH" ]; then
   echo "✅ Soul repo removed"
 fi
 
-# 3) .env.local + the apps/api symlink (+ any web env override)
+# 3) .env.local + app symlinks (+ any web env override)
 if ! $KEEP_ENV; then
   [ -f "$REPO_ROOT/.env.local" ] && rm -f "$REPO_ROOT/.env.local" && echo "✅ Removed .env.local"
   [ -L "apps/api/.env.local" ] && rm -f "apps/api/.env.local" && echo "✅ Removed apps/api/.env.local symlink"
+  [ -L "apps/worker/.env.local" ] && rm -f "apps/worker/.env.local" && echo "✅ Removed apps/worker/.env.local symlink"
   [ -f "apps/web/.env.local" ] && rm -f "apps/web/.env.local" && echo "✅ Removed apps/web/.env.local"
 fi
 

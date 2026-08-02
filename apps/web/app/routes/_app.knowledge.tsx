@@ -1,6 +1,5 @@
 import { type MetaFunction, Outlet, useParams } from "@remix-run/react";
 import { CommandPalette } from "~/components/knowledge/command-palette";
-import { KnowledgeTree } from "~/components/knowledge/space-tree";
 
 export const meta: MetaFunction = () => [{ title: "Knowledge · tulipfarm" }];
 
@@ -17,13 +16,8 @@ export default function KnowledgeLayout() {
   // `pageId` instead, so the scope toggle defaults to all-spaces there.
   const params = useParams();
   return (
-    <div className="flex h-full min-h-0 flex-col md:flex-row">
-      <aside className="flex max-h-[45vh] shrink-0 flex-col border-b border-border bg-sidebar text-sidebar-foreground md:max-h-none md:w-64 md:border-b-0 md:border-r">
-        <KnowledgeTree />
-      </aside>
-      <div className="min-w-0 flex-1 overflow-y-auto">
-        <Outlet />
-      </div>
+    <div className="h-full min-h-0">
+      <Outlet />
       <CommandPalette spaceId={params.id} />
     </div>
   );

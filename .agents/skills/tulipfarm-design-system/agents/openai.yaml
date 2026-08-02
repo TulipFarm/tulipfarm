@@ -1,0 +1,4 @@
+interface:
+  display_name: "TulipFarm Design System"
+  short_description: "Build consistent TulipFarm frontend interfaces"
+  default_prompt: "Use $tulipfarm-design-system to create or update this TulipFarm interface."

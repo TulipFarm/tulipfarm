@@ -34,8 +34,11 @@ function EmptyState({
   onPick: (text: string) => void;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-8 overflow-y-auto px-6 py-16">
-      <div className="flex w-full max-w-3xl flex-col gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+    <div className="flex flex-1 flex-col items-center justify-center gap-7 overflow-y-auto px-6 py-12">
+      <div className="flex w-full max-w-5xl flex-col gap-3 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
+        <p className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
+          Your AI workspace
+        </p>
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
           <span aria-hidden className="animate-cursor text-primary">
             ▍
@@ -59,7 +62,7 @@ function EmptyState({
           <span>{label ?? agent}</span>
         </p>
       </div>
-      <div className="flex w-full max-w-3xl flex-wrap gap-2">
+      <div className="flex w-full max-w-5xl flex-wrap gap-2">
         {suggestions.map((s) => (
           <button
             key={s.id}
@@ -149,7 +152,7 @@ export function ChatPanel({
   const errorCta = status === "error" ? errorAction(error) : null;
 
   return (
-    <div className="flex h-[calc(100svh-3rem)] flex-col md:h-svh">
+    <div className="flex h-[calc(100svh-3.25rem)] flex-col lg:h-full">
       {hasMessages ? (
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2.5">
           <AgentGlyph

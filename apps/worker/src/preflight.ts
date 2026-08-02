@@ -46,3 +46,33 @@ export async function assertSchemaFloor(
   }
   return version;
 }
+
+interface WaitForSchemaOptions {
+  attempts: number;
+  delayMs: number;
+  sleep?: (delayMs: number) => Promise<void>;
+  onRetry?: (error: PreflightError, attempt: number) => void;
+}
+
+/**
+ * Waits for the API's bounded migration window without ever claiming work against an old schema.
+ * This primarily handles local `pnpm dev`, where Turbo starts API and Worker concurrently.
+ */
+export async function waitForSchemaFloor(
+  database: Queryable,
+  requiredVersion: number,
+  options: WaitForSchemaOptions
+): Promise<number> {
+  const sleep =
+    options.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    try {
+      return await assertSchemaFloor(database, requiredVersion);
+    } catch (error) {
+      if (!(error instanceof PreflightError) || attempt === options.attempts) throw error;
+      options.onRetry?.(error, attempt);
+      await sleep(options.delayMs);
+    }
+  }
+  throw new PreflightError("schema preflight exhausted without a result");
+}

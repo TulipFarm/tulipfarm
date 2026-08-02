@@ -1,105 +1,96 @@
-/*
- * Shared design-token contract — the single source of truth for theme tokens.
- *
- * Consumed by the shell and native TSP React components through app.css.
- * Plain CSS custom properties only — NO Tailwind at-rules. Dark mode swaps via
- * [data-theme="dark"] on <html> (AC-V1-005).
- *
- * OpenCode-terminal palette with ruby brand discipline (UI-V1-006 design direction):
- * warm cream canvas + warm near-black ink for body; ruby reserved for brand/primary;
- * coral/signal red reserved for destructive only. Values in oklch.
- */
+/* Shared semantic design tokens. Dark mode swaps on [data-theme="dark"] at the document root. */
 :root {
-  --radius: 0.375rem; /* interactive rounded-md derives to ~4px; containers use rounded-none */
+  --radius: 0.5rem;
 
-  /* warm cream canvas + warm near-black ink */
-  --background: oklch(0.992 0.003 60);
-  --foreground: oklch(0.255 0.008 40);
-  --card: oklch(0.992 0.003 60);
-  --card-foreground: oklch(0.255 0.008 40);
-  --popover: oklch(0.992 0.003 60);
-  --popover-foreground: oklch(0.255 0.008 40);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.18 0 0);
+  --card: oklch(0.995 0 0);
+  --card-foreground: oklch(0.18 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0 0);
 
-  /* ruby primary */
+  /* Existing TulipFarm coral brand values remain unchanged. */
   --primary: oklch(0.46 0.17 25);
-  --primary-foreground: oklch(0.992 0.003 60);
+  --primary-foreground: oklch(0.99 0 0);
 
-  --secondary: oklch(0.95 0.003 60);
-  --secondary-foreground: oklch(0.3 0.008 40);
-  --muted: oklch(0.95 0.003 60);
-  --muted-foreground: oklch(0.5 0.005 45);
-  --accent: oklch(0.95 0.004 50);
-  --accent-foreground: oklch(0.3 0.008 40);
+  --secondary: oklch(0.965 0 0);
+  --secondary-foreground: oklch(0.24 0 0);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.48 0 0);
+  --accent: oklch(0.945 0 0);
+  --accent-foreground: oklch(0.22 0 0);
 
-  /* coral / signal red — destructive only */
   --destructive: oklch(0.55 0.2 27);
-  --destructive-foreground: oklch(0.99 0.002 60);
+  --destructive-foreground: oklch(0.99 0 0);
 
-  --border: oklch(0.9 0.004 50);
-  --input: oklch(0.9 0.004 50);
+  --border: oklch(0.91 0 0);
+  --input: oklch(0.9 0 0);
   --ring: oklch(0.46 0.17 25);
 
-  --sidebar: oklch(0.975 0.003 60);
-  --sidebar-foreground: oklch(0.255 0.008 40);
+  --sidebar: oklch(0.98 0 0);
+  --sidebar-foreground: oklch(0.24 0 0);
   --sidebar-primary: oklch(0.46 0.17 25);
-  --sidebar-primary-foreground: oklch(0.992 0.003 60);
-  --sidebar-accent: oklch(0.93 0.004 50);
-  --sidebar-accent-foreground: oklch(0.3 0.008 40);
-  --sidebar-border: oklch(0.9 0.004 50);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.94 0 0);
+  --sidebar-accent-foreground: oklch(0.2 0 0);
+  --sidebar-border: oklch(0.91 0 0);
   --sidebar-ring: oklch(0.46 0.17 25);
 
-  /*
-   * Agent glyph palette — 7 muted, low-chroma hues (chroma ≤0.09) for agent avatars.
-   * Indexed 0–6; `deriveGlyph()` picks one by hashing the agent name. Hue angles are kept
-   * clear of ruby (~25°) and coral/destructive (~27°) so a glyph never reads as brand/danger;
-   * ruby stays reserved for the ACTIVE agent only. Light values for the cream canvas.
-   */
-  --glyph-hue-0: oklch(0.52 0.08 240); /* steel-blue */
-  --glyph-hue-1: oklch(0.52 0.08 150); /* sage */
-  --glyph-hue-2: oklch(0.52 0.08 300); /* mauve */
-  --glyph-hue-3: oklch(0.55 0.08 80); /* amber */
-  --glyph-hue-4: oklch(0.5 0.04 220); /* slate */
-  --glyph-hue-5: oklch(0.5 0.07 130); /* moss */
-  --glyph-hue-6: oklch(0.5 0.09 320); /* plum */
+  --status-neutral: oklch(0.5 0 0);
+  --status-info: oklch(0.52 0.14 250);
+  --status-success: oklch(0.5 0.13 150);
+  --status-warning: oklch(0.58 0.14 75);
+  --status-danger: var(--destructive);
+
+  --glyph-hue-0: oklch(0.52 0.08 240);
+  --glyph-hue-1: oklch(0.52 0.08 150);
+  --glyph-hue-2: oklch(0.52 0.08 300);
+  --glyph-hue-3: oklch(0.55 0.08 80);
+  --glyph-hue-4: oklch(0.5 0.04 220);
+  --glyph-hue-5: oklch(0.5 0.07 130);
+  --glyph-hue-6: oklch(0.5 0.09 320);
 }
 
 [data-theme="dark"] {
-  /* warm near-black canvas (OpenCode dark) */
-  --background: oklch(0.2 0.004 50);
-  --foreground: oklch(0.94 0.003 80);
-  --card: oklch(0.25 0.004 50);
-  --card-foreground: oklch(0.94 0.003 80);
-  --popover: oklch(0.25 0.004 50);
-  --popover-foreground: oklch(0.94 0.003 80);
+  --background: oklch(0.17 0 0);
+  --foreground: oklch(0.94 0 0);
+  --card: oklch(0.2 0 0);
+  --card-foreground: oklch(0.94 0 0);
+  --popover: oklch(0.2 0 0);
+  --popover-foreground: oklch(0.94 0 0);
 
-  /* lighter ruby for contrast on dark */
   --primary: oklch(0.7 0.15 25);
-  --primary-foreground: oklch(0.2 0.004 50);
+  --primary-foreground: oklch(0.17 0 0);
 
-  --secondary: oklch(0.29 0.004 50);
-  --secondary-foreground: oklch(0.94 0.003 80);
-  --muted: oklch(0.29 0.004 50);
-  --muted-foreground: oklch(0.7 0.005 60);
-  --accent: oklch(0.31 0.004 50);
-  --accent-foreground: oklch(0.94 0.003 80);
+  --secondary: oklch(0.23 0 0);
+  --secondary-foreground: oklch(0.94 0 0);
+  --muted: oklch(0.23 0 0);
+  --muted-foreground: oklch(0.7 0 0);
+  --accent: oklch(0.27 0 0);
+  --accent-foreground: oklch(0.96 0 0);
 
   --destructive: oklch(0.66 0.18 27);
-  --destructive-foreground: oklch(0.2 0.004 50);
+  --destructive-foreground: oklch(0.17 0 0);
 
-  --border: oklch(1 0 0 / 12%);
+  --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 14%);
   --ring: oklch(0.7 0.15 25);
 
-  --sidebar: oklch(0.25 0.004 50);
-  --sidebar-foreground: oklch(0.94 0.003 80);
+  --sidebar: oklch(0.19 0 0);
+  --sidebar-foreground: oklch(0.9 0 0);
   --sidebar-primary: oklch(0.7 0.15 25);
-  --sidebar-primary-foreground: oklch(0.2 0.004 50);
-  --sidebar-accent: oklch(0.31 0.004 50);
-  --sidebar-accent-foreground: oklch(0.94 0.003 80);
-  --sidebar-border: oklch(1 0 0 / 12%);
+  --sidebar-primary-foreground: oklch(0.17 0 0);
+  --sidebar-accent: oklch(0.25 0 0);
+  --sidebar-accent-foreground: oklch(0.96 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.7 0.15 25);
 
-  /* Glyph palette, lightened ~0.13 for contrast on the warm near-black canvas. */
+  --status-neutral: oklch(0.68 0 0);
+  --status-info: oklch(0.72 0.12 250);
+  --status-success: oklch(0.7 0.12 150);
+  --status-warning: oklch(0.78 0.12 75);
+  --status-danger: var(--destructive);
+
   --glyph-hue-0: oklch(0.65 0.08 240);
   --glyph-hue-1: oklch(0.65 0.08 150);
   --glyph-hue-2: oklch(0.65 0.08 300);
