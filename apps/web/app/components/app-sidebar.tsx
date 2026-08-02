@@ -8,6 +8,7 @@ import {
   Cpu,
   History,
   Inbox,
+  Info,
   KeyRound,
   LogOut,
   Menu,
@@ -60,6 +61,7 @@ const SETTINGS_LINKS = [
   { to: "/settings/soul", label: "Soul", icon: Sparkles },
   { to: "/settings/activities", label: "Activities", icon: History },
   { to: "/settings/memory", label: "Memory", icon: Brain },
+  { to: "/settings/about", label: "About", icon: Info },
 ] as const;
 
 function modeForPath(pathname: string): ProductMode {
@@ -290,15 +292,12 @@ function LinkList({ mode, onNavigate }: { mode: ProductMode; onNavigate: () => v
 function ContextPanel({ mode, onNavigate }: { mode: ProductMode; onNavigate: () => void }) {
   const title = mode.charAt(0).toUpperCase() + mode.slice(1);
   return (
-    <div className="flex min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
+    <div className="flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-[52px] shrink-0 items-center border-b border-sidebar-border px-4">
         <span className="flex size-7 items-center justify-center rounded-md border border-sidebar-border bg-background text-primary">
           <MessageSquare className="size-3.5" aria-hidden />
         </span>
         <span className="ml-2 text-sm font-semibold">{title}</span>
-        <span className="ml-auto font-mono text-[0.625rem] text-muted-foreground">
-          v{__APP_VERSION__}
-        </span>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto py-3">
         {mode === "chat" ? <ChatContext onNavigate={onNavigate} /> : null}
@@ -348,17 +347,23 @@ export function AppSidebar({
         aria-label="Application navigation"
         aria-hidden={hidden}
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex border-r border-sidebar-border transition-transform",
+          "fixed inset-y-0 left-0 z-50 flex h-full border-r border-sidebar-border transition-transform",
           "lg:static lg:z-auto lg:translate-x-0",
           open
             ? "w-[340px] translate-x-0"
             : "w-[340px] -translate-x-full md:static md:w-14 md:translate-x-0",
-          !collapsed && "lg:w-[400px]",
+          !collapsed && "lg:w-[312px]",
           collapsed && "lg:w-14"
         )}
       >
         <Rail mode={mode} />
-        <div className={cn("min-w-0 flex-1", !open && "hidden lg:block", collapsed && "lg:hidden")}>
+        <div
+          className={cn(
+            "h-full min-w-0 flex-1",
+            !open && "hidden lg:block",
+            collapsed && "lg:hidden"
+          )}
+        >
           <ContextPanel mode={mode} onNavigate={onClose} />
         </div>
       </aside>
@@ -457,16 +462,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           >
             <MoreHorizontal className="size-4" aria-hidden />
           </button>
-          <div className="ml-auto hidden items-center gap-2 lg:flex">
-            <span className="inline-flex items-center gap-1.5 border-r border-border pr-3 text-xs text-muted-foreground">
-              <Cpu className="size-3.5" aria-hidden />
-              Standard
-            </span>
-            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
-              <Bot className="size-3.5 text-primary" aria-hidden />
-              TulipFarm
-            </span>
-          </div>
           <div className="ml-auto flex items-center gap-1 lg:hidden">
             <ThemeToggle iconOnly />
           </div>

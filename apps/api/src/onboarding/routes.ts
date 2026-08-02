@@ -101,6 +101,7 @@ export function registerOnboardingRoutes(
             required: ["dismissed", "steps", "recommendations"],
             properties: {
               dismissed: { type: "boolean" },
+              businessName: { type: "string" },
               steps: {
                 type: "array",
                 items: {
@@ -150,6 +151,7 @@ export function registerOnboardingRoutes(
       });
       return {
         dismissed,
+        businessName,
         steps,
         recommendations: personalized?.recommendations ?? recommendations,
       };

@@ -13,10 +13,19 @@ POST /api/v1/chat ─SSE→ lib/chat/sse-client.ts (parse frames → ChatEvent)
                           → chat-panel.tsx → transcript.tsx → parts.tsx (+ approval-card)
 ```
 
-`chat-panel.tsx` owns the hook and switches the empty state (welcome + suggestion chips) to the live
+`chat-panel.tsx` owns the hook and switches the empty state (welcome + Suggested prompts) to the live
 transcript on first send. `composer.tsx` is a **Tiptap rich-text editor** (see below) + model selector,
 with **no attachment affordance** (no blob storage in V1). User messages render as markdown in their own
 bubble (`transcript.tsx` → `MarkdownView`), so formatting + the literal mention tokens show.
+
+The composer uses the design-system interaction language precisely: a **Suggested prompt** drafts
+editable text and never sends on selection; an **Action** is explicitly started by the person; an
+**Auto action** is Agent-started work operating within configured authority. Adaptive onboarding
+items are Suggested prompts and sit directly below the prompt surface.
+
+Normal Chat uses the default harness and does not label it as an Agent. The Agent indicator appears
+only when a user-created Agent is explicitly selected or takes over the Chat. Product identity,
+business identity, and Agent identity are separate UI layers and must not reuse the TulipFarm name.
 
 ## Composer editor (`composer.tsx` + `editor/`)
 

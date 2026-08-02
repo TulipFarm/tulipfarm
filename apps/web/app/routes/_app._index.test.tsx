@@ -50,10 +50,10 @@ test("default view is the live chat empty state with adaptive suggestions (AC-V1
   });
   render(<Stub initialEntries={["/"]} />);
 
-  // Signature welcome (blinking wordmark + ready status + active agent).
-  expect(screen.getByRole("heading", { name: /tulipfarm/i })).toBeInTheDocument();
-  expect(screen.getByText("ready")).toBeInTheDocument();
-  expect(screen.getByText("TulipFarm")).toBeInTheDocument();
+  // Normal Chat is the default harness, not a user-created Agent.
+  expect(screen.getByRole("heading", { name: "What can I help with?" })).toBeInTheDocument();
+  expect(screen.queryByText("ready")).not.toBeInTheDocument();
+  expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
 
   // Adaptive soul-derived suggestion chip (replaces the former hardcoded set).
   expect(screen.getByRole("button", { name: "Set up ticket management?" })).toBeInTheDocument();
@@ -85,6 +85,7 @@ test("the Getting-started card renders and route-level dismissal hides it (persi
     suggestions: [],
     checklist: {
       dismissed: false,
+      businessName: "Acme Tulips",
       steps: [
         { id: "resource", label: "Create a resource type", status: "todo", prompt: "Help me." },
       ],
@@ -96,6 +97,9 @@ test("the Getting-started card renders and route-level dismissal hides it (persi
 
   // Card visible (dismissal state lives in the route, above the newChatNonce-keyed ChatPanel).
   expect(screen.getByText(/Getting started/)).toBeInTheDocument();
+  expect(
+    screen.getByRole("heading", { name: "What can I help Acme Tulips with?" })
+  ).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText("Dismiss getting started"));
 
   // Optimistically hidden + the persistence call fired.

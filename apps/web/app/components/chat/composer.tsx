@@ -2,9 +2,25 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
-import { Bold, Code, Italic, Link as LinkIcon } from "lucide-react";
+import {
+  ArrowUp,
+  AtSign,
+  Bold,
+  BookOpen,
+  Code,
+  Database,
+  Italic,
+  Link as LinkIcon,
+  Slash,
+  Sparkles,
+  Square,
+} from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { AgentGlyph } from "~/components/agent-glyph";
+import { Tooltip } from "~/components/ui/tooltip";
+import type { Autonomy } from "~/lib/agents";
 import type { ModelTier } from "~/lib/chat/types";
+import type { Suggestion } from "~/lib/onboarding";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
@@ -19,9 +35,16 @@ export type ComposerSendOptions = {
   knowledgePages: string[];
 };
 
+export type ComposerAgent = {
+  name: string;
+  label?: string;
+  domain?: string;
+  autonomy?: Autonomy;
+};
+
 /**
  * Message composer: a Tiptap rich-text editor over a control row (model override + send). The editor
- * supports markdown formatting (bold/italic/code/link via shortcuts + a selection BubbleMenu) and three
+ * supports markdown formatting (bold/italic/code/link via shortcuts + a selection BubbleMenu) and four
  * mention triggers — `@agent` (routes the turn), `/skill` and `#resource` (eagerly injected into the
  * agent's context for the turn). On send the document is serialized (`serializeDoc`) to markdown text
  * plus the structured tags. Enter sends; Shift+Enter is a newline; Enter is deferred to the suggestion
@@ -34,6 +57,8 @@ export function Composer({
   defaultModel = "standard",
   activeAgentTier,
   tierById,
+  activeAgent,
+  suggestions = [],
 }: {
   onSend: (text: string, opts: ComposerSendOptions) => void;
   // Halt the in-flight reply (shown as a Stop button while `busy`); also restores the last sent
@@ -45,6 +70,12 @@ export function Composer({
   activeAgentTier?: ModelTier;
   // agentId → its pickable tier; used to reflect an `@`-mentioned agent's tier as it's typed.
   tierById?: (id: string) => ModelTier | undefined;
+  // Quiet context indicator above the prompt surface. The editor's `@agent` mention still owns
+  // per-Turn routing; this label describes the Agent currently attached to the Chat.
+  activeAgent?: ComposerAgent;
+  // Adaptive starter prompts. Selecting one drafts it in the editor so the person can review or
+  // refine it before sending; suggestions never run automatically.
+  suggestions?: Suggestion[];
 }) {
   const [model, setModel] = useState<ModelTier>(defaultModel);
   const getItems = useMentionData();
@@ -69,7 +100,7 @@ export function Composer({
     editorProps: {
       attributes: {
         class:
-          "tf-editor max-h-[220px] min-h-[5.5rem] overflow-y-auto px-5 py-4 text-sm leading-relaxed text-foreground outline-none",
+          "tf-editor max-h-[220px] min-h-[4.25rem] overflow-y-auto px-4 py-3 text-sm leading-relaxed text-foreground outline-none",
         "aria-label": "Message",
       },
       handleKeyDown: (view, event) => {
@@ -129,7 +160,8 @@ export function Composer({
     // began typing while the reply streamed.
     if (editor?.isEmpty && lastSentDocRef.current) {
       editor.commands.setContent(lastSentDocRef.current);
-      editor.commands.focus("end");
+      editor.commands.selectTextblockEnd();
+      editor.view.focus();
     }
   }
 
@@ -143,10 +175,45 @@ export function Composer({
     else chain.setLink({ href: url }).run();
   }
 
+  function insertContextTrigger(trigger: "@" | "/" | "#" | "~") {
+    if (!editor) return;
+    editor.commands.insertContent(trigger);
+    editor.view.focus();
+  }
+
+  function draftSuggestion(prompt: string) {
+    if (!editor || busy) return;
+    editor.commands.setContent(prompt);
+    editor.commands.selectTextblockEnd();
+    editor.view.focus();
+  }
+
   return (
-    <div className="shrink-0 border-t border-border bg-background">
-      <div className="mx-auto w-full max-w-5xl px-6 py-4">
-        <div className="overflow-hidden rounded-xl border border-input bg-card transition-colors focus-within:border-primary">
+    <div className="shrink-0 bg-background">
+      <div className="mx-auto w-full max-w-6xl px-4 pb-3 pt-2 sm:px-6">
+        <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
+          <ModelSelector value={model} onChange={setModel} disabled={busy} />
+          {activeAgent ? (
+            <>
+              <span aria-hidden className="h-4 w-px bg-border" />
+              <div className="flex min-w-0 items-center gap-1.5">
+                <AgentGlyph
+                  name={activeAgent.name}
+                  domain={activeAgent.domain}
+                  autonomy={activeAgent.autonomy}
+                  size="xs"
+                  active
+                  state={busy ? "thinking" : "idle"}
+                  decorative
+                />
+                <span className="truncate font-medium text-foreground">
+                  {activeAgent.label ?? activeAgent.name}
+                </span>
+              </div>
+            </>
+          ) : null}
+        </div>
+        <div className="overflow-hidden rounded-lg border border-input bg-card transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/15">
           {editor ? (
             <BubbleMenu
               editor={editor}
@@ -179,40 +246,110 @@ export function Composer({
             </BubbleMenu>
           ) : null}
           <EditorContent editor={editor} />
-          <div className="flex items-center gap-4 border-t border-border/60 px-4 py-3">
-            <ModelSelector value={model} onChange={setModel} disabled={busy} />
+          <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
+            <ContextTrigger
+              label="Mention Agent"
+              shortcut="@"
+              onClick={() => insertContextTrigger("@")}
+            >
+              <AtSign aria-hidden className="size-4" />
+            </ContextTrigger>
+            <ContextTrigger
+              label="Add Skill"
+              shortcut="/"
+              onClick={() => insertContextTrigger("/")}
+            >
+              <Slash aria-hidden className="size-4" />
+            </ContextTrigger>
+            <ContextTrigger
+              label="Add Resource type"
+              shortcut="#"
+              onClick={() => insertContextTrigger("#")}
+            >
+              <Database aria-hidden className="size-4" />
+            </ContextTrigger>
+            <ContextTrigger
+              label="Pin Knowledge page"
+              shortcut="~"
+              onClick={() => insertContextTrigger("~")}
+            >
+              <BookOpen aria-hidden className="size-4" />
+            </ContextTrigger>
             {busy ? (
-              <button
-                type="button"
-                onClick={handleStop}
-                aria-label="Stop response"
-                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:border-primary hover:text-primary"
-              >
-                <span aria-hidden className="size-2 rounded-[1px] bg-current" />
-                stop
-              </button>
+              <span className="ml-auto inline-flex">
+                <Tooltip content="Stop response">
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    aria-label="Stop response"
+                    className="inline-flex size-11 items-center justify-center rounded-full border border-input bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 sm:size-9"
+                  >
+                    <Square aria-hidden className="size-3.5 fill-current" />
+                  </button>
+                </Tooltip>
+              </span>
             ) : (
-              <button
-                type="button"
-                onClick={() => submitRef.current()}
-                disabled={isEmpty}
-                className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-40"
-              >
-                send
-                <span aria-hidden className="opacity-70">
-                  ↵
-                </span>
-              </button>
+              <span className="ml-auto inline-flex">
+                <Tooltip content="Send prompt">
+                  <button
+                    type="button"
+                    aria-label="Send prompt"
+                    onClick={() => submitRef.current()}
+                    disabled={isEmpty}
+                    className="inline-flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-35 sm:size-9"
+                  >
+                    <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
+                  </button>
+                </Tooltip>
+              </span>
             )}
           </div>
         </div>
-        <p className="mt-2 px-1 text-[0.625rem] text-muted-foreground">
-          enter to send · shift+enter for newline · <span className="text-primary">/</span>skills ·{" "}
-          <span className="text-primary">@</span>agents · <span className="text-primary">#</span>
-          resources · <span className="text-primary">~</span>knowledge
-        </p>
+        {suggestions.length > 0 ? (
+          <fieldset className="mt-2 flex w-full min-w-0 gap-2 overflow-x-auto px-0.5 pb-1">
+            <legend className="sr-only">Suggested prompts</legend>
+            {suggestions.map((suggestion) => (
+              <button
+                key={suggestion.id}
+                type="button"
+                disabled={busy}
+                onClick={() => draftSuggestion(suggestion.prompt)}
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:opacity-50"
+              >
+                <Sparkles aria-hidden className="size-3.5 text-primary" />
+                {suggestion.label}
+              </button>
+            ))}
+          </fieldset>
+        ) : null}
+        <p className="sr-only">Enter to send · Shift+Enter for a new line</p>
       </div>
     </div>
+  );
+}
+
+function ContextTrigger({
+  label,
+  shortcut,
+  onClick,
+  children,
+}: {
+  label: string;
+  shortcut: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip content={`${label} (${shortcut})`}>
+      <button
+        type="button"
+        aria-label={`${label} (${shortcut})`}
+        onClick={onClick}
+        className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 sm:size-9"
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 

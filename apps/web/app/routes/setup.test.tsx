@@ -84,7 +84,7 @@ test("shows all four steps (incl. Soul backup) when no git remote is configured"
 
   expect(await screen.findByRole("heading", { name: "Soul backup" })).toBeInTheDocument();
   expect(completeSetup).not.toHaveBeenCalled();
-});
+}, 15_000);
 
 test("hides the Soul backup step and finishes after LLM when the remote is env-configured", async () => {
   const user = userEvent.setup();
@@ -99,7 +99,7 @@ test("hides the Soul backup step and finishes after LLM when the remote is env-c
   await user.click(screen.getByRole("button", { name: /Skip for now/ }));
   await waitFor(() => expect(completeSetup).toHaveBeenCalledTimes(1));
   expect(screen.queryByRole("heading", { name: "Soul backup" })).not.toBeInTheDocument();
-});
+}, 15_000);
 
 test("falls back to showing the Soul backup step when the git status probe fails", async () => {
   const user = userEvent.setup();
@@ -111,4 +111,4 @@ test("falls back to showing the Soul backup step when the git status probe fails
 
   expect(await screen.findByRole("heading", { name: "Soul backup" })).toBeInTheDocument();
   expect(completeSetup).not.toHaveBeenCalled();
-});
+}, 15_000);

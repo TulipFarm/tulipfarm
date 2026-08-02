@@ -93,7 +93,15 @@ test("renders Operate destinations and the live Inbox badge", () => {
 
 test("renders Settings destinations and the development design guide", () => {
   render(<SidebarStub initialEntries={["/settings/llm"]} />);
-  for (const label of ["Secrets", "LLM", "Observability", "Soul", "Activities", "Memory"]) {
+  for (const label of [
+    "Secrets",
+    "LLM",
+    "Observability",
+    "Soul",
+    "Activities",
+    "Memory",
+    "About",
+  ]) {
     expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
   }
   expect(screen.getByRole("link", { name: "Design guide" })).toHaveAttribute(
@@ -154,6 +162,8 @@ test("renders the shared top bar and restores focus after Escape closes navigati
   render(<ShellStub initialEntries={["/resources"]} />);
   expect(screen.getAllByText("Resources")).toHaveLength(2);
   expect(screen.getByText("Page content")).toBeInTheDocument();
+  expect(screen.queryByText("Standard")).not.toBeInTheDocument();
+  expect(screen.queryByText("TulipFarm")).not.toBeInTheDocument();
 
   const opener = screen.getByRole("button", { name: "Open navigation" });
   await user.click(opener);

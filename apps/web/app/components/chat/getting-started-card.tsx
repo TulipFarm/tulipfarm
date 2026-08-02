@@ -10,7 +10,7 @@ import type { OnboardingChecklist } from "~/lib/onboarding";
  */
 
 const chip =
-  "flex items-center gap-2 rounded-sm border border-border bg-secondary px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground cursor-pointer";
+  "flex h-8 items-center gap-2 rounded-sm border border-border bg-background px-2.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-foreground cursor-pointer";
 
 export function GettingStartedCard({
   checklist,
@@ -26,8 +26,8 @@ export function GettingStartedCard({
   const total = steps.filter((s) => s.status !== "coming-soon").length;
 
   return (
-    <div className="w-full max-w-3xl rounded-sm border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-4 py-2">
+    <div className="w-full max-w-6xl rounded-md border border-border bg-card px-3 py-2.5 sm:px-4">
+      <div className="flex items-center justify-between">
         <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
           Getting started · {doneCount}/{total}
         </p>
@@ -41,11 +41,14 @@ export function GettingStartedCard({
         </button>
       </div>
 
-      <ul className="flex flex-col gap-1.5 px-4 py-3">
+      <ul className="mt-2 flex flex-wrap gap-1.5">
         {steps.map((step) => {
           if (step.status === "done") {
             return (
-              <li key={step.id} className="flex items-center gap-2 px-0.5 py-1 text-xs">
+              <li
+                key={step.id}
+                className="flex h-8 items-center gap-2 rounded-sm border border-border px-2.5 text-xs"
+              >
                 <Check className="size-3.5 text-primary" aria-hidden />
                 <span className="text-muted-foreground line-through">{step.label}</span>
               </li>
@@ -55,7 +58,7 @@ export function GettingStartedCard({
             return (
               <li
                 key={step.id}
-                className="flex items-center gap-2 px-0.5 py-1 text-xs text-muted-foreground/70"
+                className="flex h-8 items-center gap-2 rounded-sm border border-border px-2.5 text-xs text-muted-foreground/70"
               >
                 <Lock className="size-3.5" aria-hidden />
                 <span>{step.label}</span>
@@ -81,22 +84,15 @@ export function GettingStartedCard({
       </ul>
 
       {recommendations.length > 0 ? (
-        <div className="border-t border-border px-4 py-3">
-          <p className="mb-2 text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
+          <p className="mr-1 text-[0.625rem] font-medium uppercase tracking-[0.16em] text-muted-foreground">
             Recommended next
           </p>
-          <div className="flex flex-wrap gap-2">
-            {recommendations.map((rec) => (
-              <button
-                key={rec.id}
-                type="button"
-                onClick={() => onPick(rec.prompt)}
-                className={chip}
-              >
-                {rec.label}
-              </button>
-            ))}
-          </div>
+          {recommendations.map((rec) => (
+            <button key={rec.id} type="button" onClick={() => onPick(rec.prompt)} className={chip}>
+              {rec.label}
+            </button>
+          ))}
         </div>
       ) : null}
     </div>
