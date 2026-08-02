@@ -290,10 +290,10 @@ export function Composer({
               </span>
             ) : (
               <span className="ml-auto inline-flex">
-                <Tooltip content="Send message">
+                <Tooltip content="Send prompt">
                   <button
                     type="button"
-                    aria-label="Send message"
+                    aria-label="Send prompt"
                     onClick={() => submitRef.current()}
                     disabled={isEmpty}
                     className="inline-flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-35 sm:size-9"

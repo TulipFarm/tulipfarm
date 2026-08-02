@@ -69,7 +69,7 @@ test("Model Selector sets the per-message model override on send", async () => {
 
   await user.click(screen.getByRole("button", { name: /^Model:/ }));
   await user.click(screen.getByRole("button", { name: "complex" }));
-  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
     model: "complex",
@@ -86,7 +86,7 @@ test("the model defaults to the active agent's tier", async () => {
   const onSend = vi.fn();
   render(<Composer onSend={onSend} defaultModel="complex" />);
 
-  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
     model: "complex",
@@ -117,7 +117,7 @@ test("send serializes mentions into agentId + skills + resources", async () => {
   };
   render(<Composer onSend={onSend} />);
 
-  await user.click(screen.getByRole("button", { name: "Send message" }));
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("@GithubTriage triage with /copywriting on #tickets", {
     model: "standard",
