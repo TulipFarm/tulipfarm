@@ -22,7 +22,7 @@ export interface InvocationPrincipal {
   readonly id: string;
 }
 
-/** The single State every invocation starts on, and the Artifact producer it is recorded under. */
+/** Default first State for non-Routine invocations and its request Artifact producer. */
 export const INVOKE_STATE_KEY = "invoke";
 
 /** Principal the Run executor reads request Artifacts as; every request ACL must include it. */
@@ -69,7 +69,7 @@ export interface DurableInvocationRecord {
     readonly routineVersion: string;
   };
   readonly state: {
-    readonly key: typeof INVOKE_STATE_KEY;
+    readonly key: string;
     readonly definitionRef: string;
     readonly resolvedInput: { readonly payloadRef: string };
   };
@@ -85,6 +85,31 @@ export interface DurableInvocationStore {
   persist(
     record: DurableInvocationRecord
   ): Promise<{ readonly outcome: "started" | "duplicate"; readonly runId: string }>;
+}
+
+/** Exact active Routine identity and start State resolved before a Routine Run is minted. */
+export interface ResolvedRoutineInvocation {
+  readonly bundle: {
+    readonly digest: string;
+    readonly routineId: string;
+    readonly routineVersion: string;
+  };
+  readonly startState: {
+    readonly key: string;
+    readonly definitionRef: string;
+  };
+}
+
+/**
+ * Package-neutral port to the active Soul publication authority. `@tulipfarm/run-kernel` owns the
+ * invocation boundary but cannot import `@tulipfarm/soul`; the composing app supplies the verified
+ * active Routine resolution.
+ */
+export interface RoutineInvocationResolver {
+  resolve(input: {
+    readonly businessId: string;
+    readonly definitionRef: string;
+  }): Promise<ResolvedRoutineInvocation | undefined>;
 }
 
 export interface StartInvocationInput {
@@ -122,6 +147,8 @@ export interface DurableInvocationGatewayOptions {
   readonly store: DurableInvocationStore;
   /** Compiled over `INVOCATION_REQUEST_SCHEMAS`; the gateway accepts no unregistered schema. */
   readonly validator: TypedOutputValidator;
+  /** Required for Routine Runs. Its absence denies rather than manufacturing a nominal pin. */
+  readonly routineDefinitions?: RoutineInvocationResolver;
   readonly nextId?: () => string;
   readonly now?: () => string;
 }
@@ -176,6 +203,36 @@ export class DurableInvocationGateway {
       throw error;
     }
 
+    const routineDefinition =
+      input.runSource === "routine"
+        ? await this.options.routineDefinitions?.resolve({
+            businessId: input.businessId,
+            definitionRef: input.definitionRef,
+          })
+        : undefined;
+    if (input.runSource === "routine" && routineDefinition === undefined) {
+      throw new InvocationDeniedError("unpublished_definition");
+    }
+
+    const bundle = routineDefinition?.bundle ?? {
+      digest: input.definitionRef,
+      routineId: input.runSource,
+      routineVersion: input.definitionRef,
+    };
+    const initialState = routineDefinition?.startState ?? {
+      key: INVOKE_STATE_KEY,
+      definitionRef: input.definitionRef,
+    };
+    if (
+      bundle.digest.length === 0 ||
+      bundle.routineId.length === 0 ||
+      bundle.routineVersion.length === 0 ||
+      initialState.key.length === 0 ||
+      initialState.definitionRef.length === 0
+    ) {
+      throw new InvocationDeniedError("invalid_invocation");
+    }
+
     const runId = this.nextId();
     const createdAt = this.now();
     return this.options.store.persist({
@@ -190,14 +247,10 @@ export class DurableInvocationGateway {
         : { identityMappingEvidenceRef: input.identityMappingEvidenceRef }),
       idempotencyKey: input.idempotencyKey,
       createdAt,
-      bundle: {
-        digest: input.definitionRef,
-        routineId: input.runSource,
-        routineVersion: input.definitionRef,
-      },
+      bundle,
       state: {
-        key: INVOKE_STATE_KEY,
-        definitionRef: input.definitionRef,
+        key: initialState.key,
+        definitionRef: initialState.definitionRef,
         resolvedInput: { payloadRef: requestPayloadRef(runId) },
       },
       requestArtifact: {
@@ -222,7 +275,7 @@ export class DurableInvocationGateway {
         },
         retention: { policy: "standard", expiresAt: null },
         redaction: { redactedPaths: [] },
-        producer: { runId, stateKey: INVOKE_STATE_KEY, attempt: 0 },
+        producer: { runId, stateKey: initialState.key, attempt: 0 },
         createdAt,
       },
     });

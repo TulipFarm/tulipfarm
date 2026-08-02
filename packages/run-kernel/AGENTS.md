@@ -28,3 +28,6 @@ public port, not the reverse).
 `ArtifactService` inside the transaction that creates the Run, and PR 3's worker reads it back as
 `service:run-executor`. Artifact rows are append-only (a trigger rejects UPDATE/DELETE), so an ACL
 or classification must be correct on the first write — there is no correcting write.
+Routine Runs additionally require the package-neutral `RoutineInvocationResolver` port. The API
+implements it against the verified active Soul publication; the gateway fails closed when exact
+bundle identity and the canonical start State cannot be resolved, before allocating a Run id.
