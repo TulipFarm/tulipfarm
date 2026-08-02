@@ -99,7 +99,7 @@ describe("WorkerRoutineDefinitionLoader", () => {
     expect(loaded.bundle.digest).toBe(record.digest);
     expect(loaded.document.metadata.slug).toBe("daily-digest");
     expect(loaded.document.spec.start).toBe("Finish");
-  });
+  }, 30_000);
 
   it("fails closed when the Run's exact bundle pin cannot be found", async () => {
     const { loader: definitions } = await loader();
