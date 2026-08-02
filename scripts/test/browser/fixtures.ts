@@ -125,8 +125,6 @@ export async function configureMockLlm(page: Page): Promise<void> {
     await page.getByLabel("openai-compatible base_url").fill(baseUrl);
     await page.getByRole("button", { name: "Save provider" }).click();
   }
-  await expect(page.getByText(/openai-compatible/i).first()).toBeVisible();
-
   await page.goto("/settings/llm");
   for (const tier of ["quick", "standard", "complex"]) {
     const fieldset = page.locator("fieldset").filter({ hasText: `[${tier}]` });

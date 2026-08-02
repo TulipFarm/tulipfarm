@@ -19,7 +19,9 @@ test("sign-in survives a full reload", async ({ page }) => {
 
 test("renders TSP Artifacts under the production CSP", async ({ page }) => {
   await openProductionRoot(page);
-  const response = await page.goto("/dev/surfaces", { waitUntil: "domcontentloaded" });
+  const response = await page
+    .goto("/dev/surfaces", { waitUntil: "domcontentloaded" })
+    .catch(() => null);
   expect(response?.headers()["content-security-policy"] ?? "").toMatch(/script-src[^;]*'sha256-/);
   await expect(page.getByRole("heading", { name: "Tulip Surface Protocol" })).toBeVisible();
   await expect(page.getByText("Healthy")).toBeVisible();

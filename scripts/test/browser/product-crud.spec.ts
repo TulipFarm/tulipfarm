@@ -40,6 +40,7 @@ test.describe("product CRUD journeys", () => {
     await page.getByLabel("description").fill("browser CRUD fixture");
     await page.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("heading", { name })).toBeVisible();
+    const spaceUrl = page.url();
     await page.getByRole("link", { name: "New page", exact: true }).click();
     await page.getByLabel("path").fill(path);
     await page.getByRole("button", { name: "raw" }).click();
@@ -51,6 +52,7 @@ test.describe("product CRUD journeys", () => {
     await page.getByLabel("content").fill("---\ntitle: E2E page\n---\n\nupdated");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("updated")).toBeVisible();
+    await page.goto(spaceUrl);
     await page.getByRole("link", { name: "Space settings" }).click();
     await page.getByLabel("description").fill("edited fixture");
     await page.getByRole("button", { name: "Save" }).click();
