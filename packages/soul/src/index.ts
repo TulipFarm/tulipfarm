@@ -96,6 +96,8 @@ export type { BundleSigner } from "./signatures";
 export {
   buildBundleSigningPayload,
   createHmacBundleSigner,
+  SOUL_BUNDLE_SIGNING_KEY,
+  SOUL_BUNDLE_SIGNING_KEY_ID,
   signExecutionBundle,
   verifyExecutionBundle,
 } from "./signatures";

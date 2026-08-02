@@ -1,11 +1,12 @@
 import { randomBytes } from "node:crypto";
-import { type BundleSigner, createHmacBundleSigner } from "@tulipfarm/soul";
+import {
+  type BundleSigner,
+  createHmacBundleSigner,
+  SOUL_BUNDLE_SIGNING_KEY,
+  SOUL_BUNDLE_SIGNING_KEY_ID,
+} from "@tulipfarm/soul";
 
-/** Encrypted Secret holding the HMAC material shared by bundle publication and verification. */
-export const SOUL_BUNDLE_SIGNING_KEY = "soul-bundle.signing-key";
-
-/** Stable public key identity recorded beside every signed execution bundle. */
-export const SOUL_BUNDLE_SIGNING_KEY_ID = "soul-bundle-v1";
+export { SOUL_BUNDLE_SIGNING_KEY, SOUL_BUNDLE_SIGNING_KEY_ID } from "@tulipfarm/soul";
 
 export interface SoulBundleSigningKeyStore {
   list(): Promise<readonly { readonly key: string }[]>;

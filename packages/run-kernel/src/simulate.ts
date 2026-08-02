@@ -1,7 +1,7 @@
 import { canonicalHash } from "@tulipfarm/schema";
 import type { JsonObject } from "./outputs";
 import type { CompiledRoutine, CompiledState } from "./routine/compiler";
-import { ExpressionError } from "./routine/expressions";
+import { RoutineInputResolutionError, resolveRoutineStateInput } from "./routine/input";
 import { decideBranch } from "./routine/states/branch";
 import { type StepOutcome, stateOutcome } from "./routine/states/step";
 
@@ -150,29 +150,6 @@ function refLabel(state: CompiledState, key: string): string {
   return ref === null ? "" : `${String(ref.name)}@${String(ref.version)}`;
 }
 
-/** Resolve the State's authored input mappings against the Context built so far. */
-function resolveInput(
-  state: CompiledState,
-  scope: Readonly<Record<string, unknown>>
-): Record<string, unknown> {
-  const input: Record<string, unknown> = {};
-  for (const mapping of state.inputs) {
-    if (mapping.expression === null) {
-      input[mapping.name] = mapping.literal;
-      continue;
-    }
-    try {
-      input[mapping.name] = mapping.expression.evaluate(scope);
-    } catch (error) {
-      if (error instanceof ExpressionError) {
-        throw new SimulationError("fixture_missing", state.name);
-      }
-      throw error;
-    }
-  }
-  return input;
-}
-
 function fixtureValue(
   source: Readonly<Record<string, JsonObject>> | undefined,
   state: CompiledState
@@ -303,7 +280,15 @@ export function simulateRoutine(
       trigger: fixture.trigger ?? {},
       states: stateScope,
     };
-    const input = resolveInput(state, scope);
+    let input: Record<string, unknown>;
+    try {
+      input = resolveRoutineStateInput(state, scope);
+    } catch (error) {
+      if (error instanceof RoutineInputResolutionError) {
+        throw new SimulationError("fixture_missing", state.name);
+      }
+      throw error;
+    }
     const executed = execute(routine, state, fixture, scope, input);
 
     outputs[state.name] = executed.output;

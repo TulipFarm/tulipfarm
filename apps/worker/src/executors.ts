@@ -18,10 +18,9 @@ export class UnregisteredRunSourceError extends Error {
 /**
  * Maps a claimed Run to the executor that owns its source.
  *
- * Deliberately empty at composition today: no Run source has a worker-side executor until PR 3
- * moves Chat/Agent execution here. An unmatched Run therefore throws, which `RunDispatcher`
- * turns into `needs_reconciliation` — a Run parked for an operator with a named cause, never a
- * silent success and never a Run quietly marked failed for a reason nobody recorded.
+ * Composition registers each source the process owns. An unmatched Run throws, which
+ * `RunDispatcher` turns into `needs_reconciliation` — a Run parked for an operator, never a silent
+ * success and never a Run quietly marked failed for work this process does not understand.
  */
 export class RunExecutorRegistry {
   private readonly executors = new Map<string, RunExecutor>();

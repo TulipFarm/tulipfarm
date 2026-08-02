@@ -9,6 +9,12 @@ import {
   type SignedExecutionBundle,
 } from "./bundle";
 
+/** Encrypted Secret holding the HMAC material shared by bundle publication and verification. */
+export const SOUL_BUNDLE_SIGNING_KEY = "soul-bundle.signing-key";
+
+/** Stable public key identity recorded beside every signed execution bundle. */
+export const SOUL_BUNDLE_SIGNING_KEY_ID = "soul-bundle-v1";
+
 /**
  * Bundle signing and tamper verification (SPEC §8.2 step 9).
  *
