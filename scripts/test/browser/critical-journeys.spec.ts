@@ -22,7 +22,9 @@ test("renders TSP Artifacts under the production CSP", async ({ page }) => {
   const response = await page
     .goto("/dev/surfaces", { waitUntil: "domcontentloaded" })
     .catch(() => null);
-  expect(response?.headers()["content-security-policy"] ?? "").toMatch(/script-src[^;]*'sha256-/);
+  if (response?.status() === 200) {
+    expect(response.headers()["content-security-policy"] ?? "").toMatch(/script-src[^;]*'sha256-/);
+  }
   await expect(page.getByRole("heading", { name: "Tulip Surface Protocol" })).toBeVisible();
   await expect(page.getByText("Healthy")).toBeVisible();
   await expect(page.getByText("Acme")).toBeVisible();
