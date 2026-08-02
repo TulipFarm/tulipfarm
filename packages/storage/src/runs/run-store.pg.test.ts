@@ -120,6 +120,76 @@ describe("RunStore (PostgreSQL)", () => {
     expect(await store.findState("business-1", run().id, "ghost")).toBeNull();
   });
 
+  it("inserts a later State once and returns the original State on replay", async () => {
+    await store.start(run());
+    const scheduled = {
+      businessId: "business-1",
+      runId: run().id,
+      key: "notify:0",
+      definitionRef: "sha256:bundle-1#/states/notify",
+      resolvedInput: { recipient: "operator", artifactId: "artifact-output-1" },
+      createdAt: CREATED_AT,
+    };
+
+    const first = await store.ensureState(scheduled);
+    const replay = await store.ensureState({
+      ...scheduled,
+      resolvedInput: { artifactId: "artifact-output-1", recipient: "operator" },
+      createdAt: "2026-07-24T10:01:00.000Z",
+    });
+
+    expect(first).toMatchObject({
+      outcome: "inserted",
+      state: {
+        key: "notify:0",
+        definitionRef: "sha256:bundle-1#/states/notify",
+        status: "pending",
+        version: 0,
+        createdAt: CREATED_AT,
+      },
+    });
+    expect(replay).toEqual({ outcome: "existing", state: first.state });
+    expect(
+      (await store.listStates("business-1", run().id)).filter((state) => state.key === "notify:0")
+    ).toHaveLength(1);
+  });
+
+  it("rejects a later State replay that changes immutable execution identity", async () => {
+    await store.start(run());
+    const scheduled = {
+      businessId: "business-1",
+      runId: run().id,
+      key: "notify:0",
+      definitionRef: "sha256:bundle-1#/states/notify",
+      resolvedInput: { artifactId: "artifact-output-1" },
+      createdAt: CREATED_AT,
+    };
+    await store.ensureState(scheduled);
+
+    await expect(
+      store.ensureState({ ...scheduled, definitionRef: "sha256:bundle-2#/states/notify" })
+    ).rejects.toEqual(new RunPersistenceError("state_conflict"));
+    await expect(
+      store.ensureState({ ...scheduled, resolvedInput: { artifactId: "artifact-output-2" } })
+    ).rejects.toEqual(new RunPersistenceError("state_conflict"));
+  });
+
+  it("keeps later State scheduling scoped to an existing business Run", async () => {
+    await store.start(run());
+
+    await expect(
+      store.ensureState({
+        businessId: "business-2",
+        runId: run().id,
+        key: "notify:0",
+        definitionRef: "sha256:bundle-1#/states/notify",
+        resolvedInput: {},
+        createdAt: CREATED_AT,
+      })
+    ).rejects.toThrow();
+    expect(await store.findState("business-1", run().id, "notify:0")).toBeNull();
+  });
+
   it("rolls back the Run when a State violates a database constraint", async () => {
     await expect(
       store.start(

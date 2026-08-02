@@ -55,6 +55,17 @@ export interface StartStateInput {
   readonly resolvedInput: Record<string, unknown>;
 }
 
+export interface EnsureStateInput extends StartStateInput {
+  readonly businessId: string;
+  readonly runId: string;
+  readonly createdAt: string;
+}
+
+export interface EnsureStateResult {
+  readonly outcome: "inserted" | "existing";
+  readonly state: PersistedState;
+}
+
 export type RunLineageRelation = "child" | "replay";
 
 export interface StartRunInput {
@@ -198,7 +209,7 @@ export interface RunPage {
 
 export const MAX_RUN_PAGE_SIZE = 100;
 
-export type RunPersistenceErrorCode = "attempt_conflict" | "invalid_cursor";
+export type RunPersistenceErrorCode = "attempt_conflict" | "invalid_cursor" | "state_conflict";
 
 export class RunPersistenceError extends Error {
   readonly name = "RunPersistenceError";
@@ -556,6 +567,53 @@ export class RunStore {
       );
       const row = result.rows[0];
       return row ? persistedRun(row) : null;
+    });
+  }
+
+  /**
+   * Inserts one later State, or returns the identical State a previous attempt already inserted.
+   * The first scheduling timestamp wins; a retry may use a later clock value but cannot change the
+   * State definition or its resolved input under the same durable key.
+   */
+  async ensureState(input: EnsureStateInput): Promise<EnsureStateResult> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const inserted = await transaction.query<StateRow>(
+        `INSERT INTO run_states (
+           business_id, run_id, state_key, definition_ref, resolved_input, created_at
+         ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)
+         ON CONFLICT (business_id, run_id, state_key) DO NOTHING
+         RETURNING ${STATE_COLUMNS}`,
+        [
+          input.businessId,
+          input.runId,
+          input.key,
+          input.definitionRef,
+          JSON.stringify(input.resolvedInput),
+          input.createdAt,
+        ]
+      );
+      const created = inserted.rows[0];
+      if (created) return { outcome: "inserted", state: persistedState(created) };
+
+      const existing = await transaction.query<StateRow>(
+        `SELECT ${STATE_COLUMNS}
+           FROM run_states
+          WHERE business_id = $1
+            AND run_id = $2
+            AND state_key = $3
+            AND definition_ref = $4
+            AND resolved_input = $5::jsonb`,
+        [
+          input.businessId,
+          input.runId,
+          input.key,
+          input.definitionRef,
+          JSON.stringify(input.resolvedInput),
+        ]
+      );
+      const state = existing.rows[0];
+      if (!state) throw new RunPersistenceError("state_conflict");
+      return { outcome: "existing", state: persistedState(state) };
     });
   }
 

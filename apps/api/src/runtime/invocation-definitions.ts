@@ -1,4 +1,8 @@
-import type { ResolvedRoutineInvocation, RoutineInvocationResolver } from "@tulipfarm/run-kernel";
+import {
+  type ResolvedRoutineInvocation,
+  type RoutineInvocationResolver,
+  routineStateDefinitionRef,
+} from "@tulipfarm/run-kernel";
 import type { BundleSigner, SoulPublicationCoordinator } from "@tulipfarm/soul";
 
 const ROUTINE_DEFINITION_PREFIX = "published:routine:";
@@ -7,19 +11,6 @@ type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function bundledStateRef(
-  digest: string,
-  routineId: string,
-  routineVersion: string,
-  stateKey: string
-): string {
-  return [
-    `bundle:${encodeURIComponent(digest)}`,
-    `routines/${encodeURIComponent(routineId)}@${encodeURIComponent(routineVersion)}`,
-    `states/${encodeURIComponent(stateKey)}`,
-  ].join("/");
 }
 
 /**
@@ -69,7 +60,10 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
       },
       startState: {
         key: start,
-        definitionRef: bundledStateRef(bundle.digest, definition.id, routineVersion, start),
+        definitionRef: routineStateDefinitionRef(
+          { digest: bundle.digest, routineId: definition.id, routineVersion },
+          start
+        ),
       },
     };
   }
