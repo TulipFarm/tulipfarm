@@ -38,6 +38,9 @@ importers:
       lint-staged:
         specifier: ^17.0.8
         version: 17.0.8
+      playwright:
+        specifier: ^1.62.1
+        version: 1.62.1
       semver:
         specifier: ^7.7.4
         version: 7.8.5
