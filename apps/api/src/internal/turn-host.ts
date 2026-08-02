@@ -29,6 +29,7 @@ export interface HostedRunReader {
     runId: string
   ): Promise<{
     readonly status: string;
+    readonly source: string;
     readonly bundle: { readonly digest: string; readonly routineId: string };
     readonly identity: { readonly effectiveSubject: InvocationPrincipal };
   } | null>;
@@ -52,12 +53,13 @@ export interface TurnAuthority {
   /** Whom the turn acts as, as recorded when the Run was minted. */
   readonly subject: InvocationPrincipal;
   /**
-   * What minted the Run — `chat`, `integration`, and the rest of `INVOCATION_SOURCES`.
+   * Which Worker executor owns the Run — `chat`, `integration`, `routine`, and so on.
    *
    * It decides which Artifact holds the turn's parameters: a Chat Run's request *is* the Chat
    * request, while an Integration Run's request is a provider envelope that a classifier turned
    * into one. Taking it from the Run rather than from a caller-supplied hint is what keeps a
-   * delivery from claiming to be an interactive turn.
+   * delivery from claiming to be an interactive turn. The invocation source (for example,
+   * `manual` or `schedule`) remains separate audit/idempotency metadata.
    */
   readonly source: string;
   /** The Run's bundle digest, recorded on the Context manifest as what produced this Context. */
@@ -195,7 +197,7 @@ export class InternalTurnHost {
       runId,
       turn,
       subject: run.identity.effectiveSubject,
-      source: run.bundle.routineId,
+      source: run.source,
       bundleDigest: run.bundle.digest,
     };
   }

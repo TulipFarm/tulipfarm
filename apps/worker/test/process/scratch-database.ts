@@ -106,9 +106,10 @@ export async function insertQueuedRun(
   return scratch.runs.start({
     id: options.runId,
     businessId: options.businessId,
+    source: options.source ?? "chat",
     bundle: {
       digest: "published:agent:assistant",
-      routineId: options.source ?? "chat",
+      routineId: "routine-id",
       routineVersion: "1",
     },
     identity: {

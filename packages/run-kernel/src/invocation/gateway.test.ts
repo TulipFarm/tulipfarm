@@ -27,6 +27,14 @@ class FakeStore implements DurableInvocationStore {
 }
 
 const SOURCES = ["chat", "manual", "webhook", "schedule", "channel", "integration"] as const;
+const RUN_SOURCE = {
+  chat: "chat",
+  manual: "routine",
+  webhook: "routine",
+  schedule: "routine",
+  channel: "integration",
+  integration: "integration",
+} as const;
 
 const validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
 
@@ -43,6 +51,7 @@ describe("DurableInvocationGateway", () => {
     await expect(
       gateway.start({
         source,
+        runSource: RUN_SOURCE[source],
         businessId: "business-1",
         initiator: { kind: "user", id: "user-1" },
         effectiveSubject: { kind: "user", id: "user-1" },
@@ -57,6 +66,7 @@ describe("DurableInvocationGateway", () => {
       expect.objectContaining({
         runId: `run-${source}`,
         source,
+        runSource: RUN_SOURCE[source],
         state: {
           key: "invoke",
           definitionRef: `published:${source}:v1`,
@@ -64,6 +74,34 @@ describe("DurableInvocationGateway", () => {
         },
       }),
     ]);
+  });
+
+  it("keeps the invocation source separate from the Worker executor source", async () => {
+    const store = new FakeStore();
+    const gateway = new DurableInvocationGateway({
+      store,
+      validator,
+      nextId: () => "run-1",
+      now: () => "2026-07-26T00:00:00.000Z",
+    });
+
+    await gateway.start({
+      source: "manual",
+      runSource: "routine",
+      businessId: "business-1",
+      initiator: { kind: "user", id: "user-1" },
+      effectiveSubject: { kind: "user", id: "user-1" },
+      definitionRef: "published:routine:daily",
+      payload: { slug: "daily", inputs: {} },
+      payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      idempotencyKey: "delivery-1",
+    });
+
+    expect(store.records[0]).toMatchObject({
+      source: "manual",
+      runSource: "routine",
+      bundle: { routineId: "routine" },
+    });
   });
 
   it("hands the store a request Artifact the Run executor can read", async () => {
@@ -78,6 +116,7 @@ describe("DurableInvocationGateway", () => {
 
     await gateway.start({
       source: "chat",
+      runSource: "chat",
       businessId: "business-1",
       initiator: { kind: "user", id: "user-1" },
       effectiveSubject: { kind: "user", id: "user-1" },
@@ -114,6 +153,7 @@ describe("DurableInvocationGateway", () => {
 
     await gateway.start({
       source: "channel",
+      runSource: "integration",
       businessId: "business-1",
       initiator: { kind: "integration", id: "slack" },
       effectiveSubject: { kind: "user", id: "owner-1" },
@@ -142,6 +182,7 @@ describe("DurableInvocationGateway", () => {
     });
     const input = {
       source: "webhook" as const,
+      runSource: "routine" as const,
       businessId: "business-1",
       initiator: { kind: "service", id: "github" },
       effectiveSubject: { kind: "service", id: "github" },
@@ -163,6 +204,7 @@ describe("DurableInvocationGateway", () => {
     await expect(
       gateway.start({
         source: "channel",
+        runSource: "integration",
         businessId: "business-1",
         initiator: { kind: "external", id: "sender-1" },
         effectiveSubject: { kind: "user", id: "owner-1" },
@@ -186,6 +228,7 @@ describe("DurableInvocationGateway", () => {
     await expect(
       gateway.start({
         source: "manual",
+        runSource: "routine",
         businessId: "business-1",
         initiator: { kind: "user", id: "user-1" },
         effectiveSubject: { kind: "user", id: "user-1" },

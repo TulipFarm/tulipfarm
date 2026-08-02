@@ -10,6 +10,7 @@ function persistedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
   return {
     id: RUN_ID,
     businessId: BUSINESS_ID,
+    source: "routine",
     bundle: { digest: "sha256:bundle-1", routineId: "routine-1", routineVersion: "1" },
     identity: {
       initiator: { kind: "user", id: "user-1" },

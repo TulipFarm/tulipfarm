@@ -65,11 +65,12 @@ export class PgDurableInvocationStore implements DurableInvocationStore {
       await this.artifacts(transaction).publish(record.requestArtifact);
 
       await transaction.query(
-        `INSERT INTO runs (id, business_id, bundle, identity, bounds, created_at)
-         VALUES ($1, $2, $3::jsonb, $4::jsonb, $5::jsonb, $6::timestamptz)`,
+        `INSERT INTO runs (id, business_id, source, bundle, identity, bounds, created_at)
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6::jsonb, $7::timestamptz)`,
         [
           record.runId,
           record.businessId,
+          record.runSource,
           JSON.stringify(record.bundle),
           JSON.stringify({
             initiator: record.initiator,

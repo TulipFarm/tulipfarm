@@ -20,6 +20,7 @@ describe("runPgMigrations", () => {
     await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
+    await db.query("CREATE TABLE runs (id uuid PRIMARY KEY, bundle jsonb NOT NULL)");
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
     await db.query(`CREATE TABLE api_clients (
       id            uuid PRIMARY KEY,
@@ -146,6 +147,34 @@ describe("runPgMigrations", () => {
         "soul_publication_outbox",
         "soul_publications",
       ]);
+    });
+  });
+
+  describe("migration 21", () => {
+    it("backfills the Run source from the formerly overloaded Routine id", async () => {
+      await db.query(`CREATE TABLE runs (
+        id uuid PRIMARY KEY,
+        bundle jsonb NOT NULL
+      )`);
+      await db.query(`INSERT INTO runs (id, bundle)
+        VALUES ('00000000-0000-4000-8000-000000000001', '{"routineId":"chat"}'::jsonb)`);
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
+
+      await runPgMigrations(db, undefined, () => {});
+
+      const source = await db.query<{ source: string }>("SELECT source FROM runs");
+      expect(source.rows[0]?.source).toBe("chat");
+      await expect(
+        db.query(
+          `INSERT INTO runs (id, source, bundle)
+           VALUES ('00000000-0000-4000-8000-000000000002', '', '{"routineId":"ignored"}'::jsonb)`
+        )
+      ).rejects.toThrow();
     });
   });
 });

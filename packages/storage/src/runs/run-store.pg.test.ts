@@ -22,6 +22,7 @@ function run(overrides: Partial<StartRunInput> = {}): StartRunInput {
   return {
     id: "00000000-0000-4000-8000-000000000001",
     businessId: "business-1",
+    source: "routine",
     bundle: {
       digest: "sha256:bundle-1",
       routineId: "routine-1",
@@ -80,6 +81,7 @@ describe("RunStore (PostgreSQL)", () => {
 
     expect(persisted).toMatchObject({
       businessId: "business-1",
+      source: "routine",
       status: "queued",
       version: 0,
       bundle: run().bundle,

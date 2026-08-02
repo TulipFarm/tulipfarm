@@ -10,8 +10,9 @@ append-only `artifacts`, `state_output_bindings`, and `artifact_lineage` tables 
 plus `MemoryArtifactStore`) that `@tulipfarm/run-kernel` drives. `src/runs/` owns the `runs`,
 `run_states`, `run_attempts`, `run_lineage`, `run_waits`, and `run_wait_signals` tables
 (`RunStore`, `WaitStore`, plus `MemoryWaitStore`), including resume-token digests and
-lock-guarded wait resolution, plus the write-once `run_budgets` ledger (`BudgetStore`) and the
-lock-guarded `run_concurrency_keys`/`run_concurrency_slots` tables (`ConcurrencyStore`), plus the
+lock-guarded wait resolution. A Run's `source` selects its Worker executor independently from the
+canonical Routine identity pinned in `bundle`. The write-once `run_budgets` ledger (`BudgetStore`)
+and lock-guarded `run_concurrency_keys`/`run_concurrency_slots` tables (`ConcurrencyStore`), plus the
 authority-immutable, detach-final `run_child_links` table (`ChildLinkStore`), plus the append-only,
 audience-scoped `run_events` stream with a gapless per-Run sequence (`RunEventStore`). tsconfig extends
 `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.

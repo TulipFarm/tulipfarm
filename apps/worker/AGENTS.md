@@ -33,8 +33,10 @@ a deliberate local copy, since an app may not import another app), `preflight.ts
 `loop.ts` (abortable, backing-off loop), `executors.ts` / `delivery.ts` (registries),
 `probe-server.ts` (`/livez`, `/readyz`), `shutdown.ts` (drain).
 
-Two Run sources are registered, keyed by `RunExecutorRegistry.sourceOf` (`bundle.routineId`):
-`chat` (`turn/chat-executor.ts`) and `integration` (`turn/integration-executor.ts`). The
+Two Run sources are registered, keyed by the Run's dedicated `source` column through
+`RunExecutorRegistry.sourceOf`: `chat` (`turn/chat-executor.ts`) and `integration`
+(`turn/integration-executor.ts`). Source is independent of the Routine id in the pinned bundle, so
+a published Routine can carry its canonical identity without changing which executor owns it. The
 Integration executor classifies its delivery and then hands the Run to **the same** chat executor
 instance, so a Slack turn and a web turn are answered by one code path.
 
