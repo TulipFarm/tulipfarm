@@ -8,12 +8,20 @@ import {
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
 import { INTEGRATION_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
-import { ArtifactStore } from "@tulipfarm/storage";
+import {
+  compileExecutionBundle,
+  createHmacBundleSigner,
+  PgBundleStore,
+  SoulPublicationCoordinator,
+  signExecutionBundle,
+} from "@tulipfarm/soul";
+import { ArtifactStore, PgSoulPublicationStore } from "@tulipfarm/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
 import { integrationInvoker, manualRoutineTrigger } from "./invocation-callers";
+import { ActiveRoutineInvocationResolver } from "./invocation-definitions";
 
 /** A verified Slack delivery as the ingress route hands it over, after signature + accept checks. */
 const SLACK_JOB = {
@@ -40,13 +48,52 @@ describe("non-chat invocation callers", () => {
     db = await makePglite();
     await runPgMigrations(db as unknown as Queryable);
     validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
+    const transactions = transactionPort(db as unknown as Queryable);
+    const signer = createHmacBundleSigner("bundle-key-1", "secret");
+    const publications = new SoulPublicationCoordinator(
+      new PgSoulPublicationStore(transactions),
+      new PgBundleStore(transactions),
+      console
+    );
+    const bundle = compileExecutionBundle({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      changesetId: "changeset-routine-1",
+      commitSha: "c0ffee",
+      documents: [
+        {
+          apiVersion: "tulipfarm.ai/v1",
+          kind: "Routine",
+          metadata: {
+            id: "11111111-1111-4111-8111-111111111111",
+            slug: "daily-digest",
+            schemaVersion: 1,
+            authoredVersion: 7,
+            lifecycle: "published",
+          },
+          spec: {
+            owner: "platform",
+            start: "Collect",
+            states: [
+              {
+                type: "wait",
+                name: "Collect",
+                waitFor: { kind: "timer", durationMs: 1 },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+    await publications.drain("test");
     invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
-        transactionPort(db as unknown as Queryable),
+        transactions,
         (transaction) =>
           new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
       ),
       validator,
+      routineDefinitions: new ActiveRoutineInvocationResolver(publications, signer),
     });
   });
 
@@ -118,16 +165,31 @@ describe("non-chat invocation callers", () => {
     const runs = await db.query<{
       source: string;
       run_source: string;
+      bundle: { digest: string; routineId: string; routineVersion: string };
       identity: { initiator: { id: string } };
+      state_key: string;
+      definition_ref: string;
     }>(
-      `SELECT runs.identity, runs.source AS run_source, invocation.source
+      `SELECT runs.identity, runs.source AS run_source, runs.bundle, invocation.source,
+              state.state_key, state.definition_ref
          FROM runs
          JOIN durable_invocations invocation
-           ON invocation.business_id = runs.business_id AND invocation.run_id = runs.id`
+           ON invocation.business_id = runs.business_id AND invocation.run_id = runs.id
+         JOIN run_states state
+           ON state.business_id = runs.business_id AND state.run_id = runs.id`
     );
     expect(runs.rows[0]?.source).toBe("manual");
     expect(runs.rows[0]?.run_source).toBe("routine");
     expect(runs.rows[0]?.identity.initiator.id).toBe("assistant");
+    expect(runs.rows[0]?.bundle).toEqual({
+      digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+      routineId: "11111111-1111-4111-8111-111111111111",
+      routineVersion: "7",
+    });
+    expect(runs.rows[0]?.state_key).toBe("Collect");
+    expect(runs.rows[0]?.definition_ref).toMatch(
+      /^bundle:[0-9a-f]{64}\/routines\/11111111-1111-4111-8111-111111111111@7\/states\/Collect$/
+    );
     await expect(
       reader().read({
         businessId: DEPLOYMENT_BUSINESS_ID,
@@ -137,6 +199,19 @@ describe("non-chat invocation callers", () => {
         now: new Date(),
       })
     ).resolves.toMatchObject({ content: { slug: "daily-digest", inputs: { limit: 5 } } });
+  });
+
+  it("mints no Run when a Routine has no active publication", async () => {
+    await db.query("DELETE FROM soul_active_bundles");
+
+    await expect(manualRoutineTrigger(invocations)("daily-digest", { limit: 5 })).rejects.toEqual(
+      expect.objectContaining({ code: "unpublished_definition" })
+    );
+
+    const counts = await db.query<{ runs: number; artifacts: number }>(
+      "SELECT (SELECT count(*) FROM runs)::int AS runs, (SELECT count(*) FROM artifacts)::int AS artifacts"
+    );
+    expect(counts.rows[0]).toEqual({ runs: 0, artifacts: 0 });
   });
 
   it("stores a delivery from an Integration that declares no context headers", async () => {

@@ -145,6 +145,13 @@ request. The Run source (`chat`, `integration`, `routine`) selects the Worker ex
 separately from the pinned bundle's canonical Routine id. Do not route work through
 `bundle.routineId`.
 
+Routine invocations resolve only through `runtime/invocation-definitions.ts`: it verifies the
+business's active signed Soul bundle, selects the published canonical Routine, and pins the exact
+bundle digest, stable Routine id/version, and authored start State before the Run is created. Never
+fall back to the live Soul checkout or the legacy Routine registry. Missing or invalid active
+publication means no Run. The HMAC verification material is the durable auto-generated Secret
+`soul-bundle.signing-key`, resolved during API boot.
+
 A chat turn is persisted by exactly one `ChatTurnSubmitter` (declared and implemented in
 `chat/turn-submit.ts`): no turn machinery in this app writes a user Message, so a new entrypoint
 must submit through this port rather than writing its own. `durableTurnSubmitter` writes the Turn,
