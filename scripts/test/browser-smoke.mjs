@@ -134,7 +134,7 @@ try {
   await composer.waitFor({ state: "visible", timeout: 30_000 });
   await composer.click();
   await page.keyboard.type(MESSAGE);
-  await page.getByRole("button", { name: "send", exact: true }).click();
+  await page.getByRole("button", { name: /send/i }).click();
 
   // The user message only renders if `appendUserMessage` → `newId()` → randomUUID() survived.
   // This is the assertion that makes the test non-vacuous.
