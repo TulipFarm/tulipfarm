@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { PgBoss } from "pg-boss";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { REQUIRED_SCHEMA_VERSION } from "../../src/config";
+import { OBS_PRUNE_QUEUE } from "../../src/job-consumers";
 import {
   abandonRunWithExpiredLease,
   insertQueuedRun,
@@ -129,6 +131,47 @@ describe("worker process", () => {
 
       await expect(handle.exited).resolves.toBe(0);
       expect(handle.output()).toContain("worker draining (SIGTERM)");
+      expect(handle.output()).toContain("worker drained cleanly");
+    },
+    TIMEOUT
+  );
+
+  it(
+    "attaches maintenance consumers without migrating and prunes expired observability events",
+    async () => {
+      const handle = await bootWorker({ env: { WORKER_MAINTENANCE: "true" } });
+      await handle.waitForReady();
+      const scratchDb = scratch as ScratchDatabase;
+      const expiredId = randomUUID();
+      const currentId = randomUUID();
+      await scratchDb.query(
+        `INSERT INTO obs_event (id, ts)
+         VALUES ($1, now() - interval '2 days'), ($2, now())`,
+        [expiredId, currentId]
+      );
+
+      const producer = new PgBoss({
+        connectionString: scratchDb.url,
+        migrate: false,
+        schedule: false,
+        supervise: false,
+      });
+      await producer.start();
+      try {
+        await producer.send(OBS_PRUNE_QUEUE, { retentionMs: 24 * 60 * 60 * 1000 });
+        const remaining = await waitFor(
+          () => scratchDb.query("SELECT id FROM obs_event ORDER BY id"),
+          (result) => result.rows.length === 1,
+          { describe: "the observability prune consumer to delete the expired event" }
+        );
+        expect(remaining.rows).toEqual([{ id: currentId }]);
+      } finally {
+        await producer.stop({ graceful: true });
+      }
+
+      handle.signal("SIGTERM");
+      await expect(handle.exited).resolves.toBe(0);
+      expect(handle.output()).toContain("maintenance=true");
       expect(handle.output()).toContain("worker drained cleanly");
     },
     TIMEOUT

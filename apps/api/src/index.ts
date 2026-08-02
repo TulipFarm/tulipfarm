@@ -81,7 +81,7 @@ import { PgWorkingMemoryRepo } from "./memory/working-memory";
 import { parseObservabilityConfig } from "./observability/config";
 import { subscribeObservability } from "./observability/events";
 import { OtlpMetricsExporter } from "./observability/metrics";
-import { registerObsPrune } from "./observability/prune";
+import { registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
 import { ObservabilityService } from "./observability/service";
 import { OtlpTracesExporter } from "./observability/traces";
@@ -500,14 +500,12 @@ async function boot() {
       log: app.log,
     });
 
-    await registerSoulSync(boss, gitSync, gitRemoteUrl, {
+    const soulSyncInterval = registerSoulSync(gitSync, gitRemoteUrl, {
       activity: activityService,
       soulLoader,
+      log: app.log,
     });
-    await registerObsPrune(boss, new PgObsRepo(pool), activityService, {
-      obs: observabilityService,
-      retentionMs: obsConfig.retentionDays * 24 * 60 * 60 * 1000,
-    });
+    await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
       loadConversationText: async (conversationId) => {
@@ -583,6 +581,7 @@ async function boot() {
       }, 5000);
       force.unref();
       try {
+        if (soulSyncInterval) clearInterval(soulSyncInterval);
         await app.close();
         await boss.stop({ graceful: false });
         // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.

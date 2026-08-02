@@ -26,7 +26,7 @@ export async function buildWorkerBundle(): Promise<string> {
       target: "node26",
       format: "cjs",
       outfile: BUNDLE,
-      external: ["pg", "isolated-vm"],
+      external: ["pg", "pg-boss", "isolated-vm"],
       logLevel: "silent",
     }),
     build({

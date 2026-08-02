@@ -9,6 +9,7 @@ import {
   type TransactionPort,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
+import { fromPglite, PgBoss } from "pg-boss";
 import { freePort } from "./free-port";
 
 /**
@@ -53,6 +54,10 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
   ]) {
     await database.exec(statement);
   }
+  await database.exec(`CREATE TABLE obs_event (
+    id uuid PRIMARY KEY,
+    ts timestamptz NOT NULL
+  )`);
   await database.exec(`CREATE TABLE schema_version (
     id      boolean PRIMARY KEY DEFAULT true,
     version integer NOT NULL,
@@ -61,6 +66,12 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
   await database.query("INSERT INTO schema_version (id, version) VALUES (true, $1)", [
     schemaVersion,
   ]);
+
+  // The API starts pg-boss with migrations before the Worker is allowed to attach. Reproduce that
+  // ownership here, then prove the bundled Worker can attach with `migrate: false` over the wire.
+  const migrator = new PgBoss({ db: fromPglite(database), backend: "pglite" });
+  await migrator.start();
+  await migrator.stop({ close: false });
 
   // `PGLiteSocketServer` keeps its bound port private, so pick one up front rather than
   // asking the server which one it got.

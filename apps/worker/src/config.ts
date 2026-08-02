@@ -31,6 +31,8 @@ export interface WorkerConfig {
   readonly batchSize: number;
   readonly leaseDurationMs: number;
   readonly drainTimeoutMs: number;
+  /** Only one replica enables scheduled maintenance consumers. */
+  readonly maintenance: boolean;
 }
 
 export class WorkerConfigError extends Error {
@@ -69,6 +71,14 @@ function positiveInt(env: Env, key: string, fallback: number): number {
   return value;
 }
 
+function booleanValue(env: Env, key: string, fallback: boolean): boolean {
+  const raw = env[key];
+  if (raw === undefined || raw.trim().length === 0) return fallback;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  throw new WorkerConfigError(`${key} must be "true" or "false", got "${raw}"`);
+}
+
 /**
  * Reads and validates the worker's configuration. Called before any connection is opened, so a
  * misconfigured deployment fails at once with a named cause instead of half-starting and then
@@ -88,6 +98,7 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
     batchSize: positiveInt(env, "WORKER_BATCH_SIZE", 25),
     leaseDurationMs: positiveInt(env, "WORKER_LEASE_MS", 60_000),
     drainTimeoutMs: positiveInt(env, "WORKER_DRAIN_TIMEOUT_MS", 15_000),
+    maintenance: booleanValue(env, "WORKER_MAINTENANCE", false),
   };
   if (config.owner.trim().length === 0) {
     throw new WorkerConfigError("WORKER_OWNER must not be blank");

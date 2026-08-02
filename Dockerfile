@@ -45,7 +45,7 @@ RUN TF_VERSION=$(node -p "require('./package.json').version") \
 # always pairs an API with a worker that speaks the same schema.
 RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/worker.cjs \
-  --external:pg --external:isolated-vm \
+  --external:pg --external:pg-boss --external:isolated-vm \
   && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
   --external:isolated-vm

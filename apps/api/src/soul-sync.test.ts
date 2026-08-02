@@ -1,54 +1,54 @@
-import type { PgBoss } from "pg-boss";
-import { describe, expect, it, vi } from "vitest";
-import { registerSoulSync, SOUL_SYNC_CRON, SOUL_SYNC_QUEUE } from "./soul-sync";
-
-function makeFakeBoss() {
-  let workHandler: (() => Promise<void>) | undefined;
-  const createQueue = vi.fn(async () => {});
-  const schedule = vi.fn(async () => {});
-  const work = vi.fn(async (_name: string, handler: () => Promise<void>) => {
-    workHandler = handler;
-    return "soul-sync-job";
-  });
-  const boss = { createQueue, schedule, work } as unknown as PgBoss;
-  return { boss, createQueue, schedule, work, getWorkHandler: () => workHandler };
-}
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { registerSoulSync, SOUL_SYNC_INTERVAL_MS } from "./soul-sync";
 
 const REMOTE = "https://github.com/example/soul.git";
 
 describe("registerSoulSync", () => {
-  it("creates the queue, worker, and 5-minute schedule when a remote is configured", async () => {
-    const { boss, createQueue, schedule, work } = makeFakeBoss();
-    const syncer = { syncOnce: vi.fn(async () => {}) };
-
-    const registered = await registerSoulSync(boss, syncer, REMOTE);
-
-    expect(registered).toBe(true);
-    expect(createQueue).toHaveBeenCalledWith(SOUL_SYNC_QUEUE);
-    expect(work).toHaveBeenCalledWith(SOUL_SYNC_QUEUE, expect.any(Function));
-    expect(schedule).toHaveBeenCalledWith(SOUL_SYNC_QUEUE, SOUL_SYNC_CRON);
-    expect(SOUL_SYNC_CRON).toBe("*/5 * * * *");
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
-  it("registers a worker that delegates to syncer.syncOnce", async () => {
-    const { boss, getWorkHandler } = makeFakeBoss();
+  it("runs every five minutes when a remote is configured", async () => {
+    vi.useFakeTimers();
     const syncer = { syncOnce: vi.fn(async () => {}) };
 
-    await registerSoulSync(boss, syncer, REMOTE);
-    await getWorkHandler()?.();
+    const interval = registerSoulSync(syncer, REMOTE);
+    await vi.advanceTimersByTimeAsync(SOUL_SYNC_INTERVAL_MS);
+
+    expect(interval).toBeDefined();
+    expect(syncer.syncOnce).toHaveBeenCalledOnce();
+    clearInterval(interval);
+  });
+
+  it("does not overlap pulls when one interval is still running", async () => {
+    vi.useFakeTimers();
+    let finish: (() => void) | undefined;
+    const syncer = {
+      syncOnce: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          })
+      ),
+    };
+
+    const interval = registerSoulSync(syncer, REMOTE);
+    await vi.advanceTimersByTimeAsync(SOUL_SYNC_INTERVAL_MS * 2);
 
     expect(syncer.syncOnce).toHaveBeenCalledOnce();
+    finish?.();
+    await Promise.resolve();
+    clearInterval(interval);
   });
 
   it("registers nothing when no git remote is configured", async () => {
-    const { boss, createQueue, schedule, work } = makeFakeBoss();
+    vi.useFakeTimers();
     const syncer = { syncOnce: vi.fn(async () => {}) };
 
-    const registered = await registerSoulSync(boss, syncer, undefined);
+    const interval = registerSoulSync(syncer, undefined);
+    await vi.advanceTimersByTimeAsync(SOUL_SYNC_INTERVAL_MS);
 
-    expect(registered).toBe(false);
-    expect(createQueue).not.toHaveBeenCalled();
-    expect(work).not.toHaveBeenCalled();
-    expect(schedule).not.toHaveBeenCalled();
+    expect(interval).toBeUndefined();
+    expect(syncer.syncOnce).not.toHaveBeenCalled();
   });
 });
