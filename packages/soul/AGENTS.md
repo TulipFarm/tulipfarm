@@ -18,6 +18,9 @@ git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
   immutable execution bundles: exact-version resolution, canonical digest, signature, and the
   Git-free `RuntimeBundle` workers execute against. `InMemoryBundleStore` implements the
   content-addressed `BundleStore` port.
+- **`PinnedDefinitionLoader`** — opens the exact bundle digest and definition identity a durable
+  Run recorded. It never consults Git or the active publication alias, so a waiting Run cannot
+  change behavior when a newer bundle becomes active.
 - **`SoulPublicationCoordinator`** — projects a signed bundle through the outbox and activates one
   digest only after every stage (`committed → projected → stored → active`) committed. `publish()`
   records + enqueues, `drain()` is the durable job (resumes at the recorded stage after a crash),

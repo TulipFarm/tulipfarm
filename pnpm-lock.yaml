@@ -465,6 +465,9 @@ importers:
       '@tulipfarm/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@tulipfarm/soul':
+        specifier: workspace:*
+        version: link:../../packages/soul
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage
