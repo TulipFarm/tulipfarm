@@ -44,6 +44,7 @@ import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
 import { buildApp } from "./app";
+import { RoutineApprovalService } from "./approvals/routine-approvals";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
 import { ToolApprovalService } from "./approvals/tool-approvals";
 import { PgTokenRepo } from "./auth/api-tokens";
@@ -52,7 +53,7 @@ import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgConversationStore } from "./conversations/store.pg";
-import { ambientTransactionPort, connectPg, transactionPort } from "./db";
+import { ambientTransactionPort, connectPg, transactionPort, withTransaction } from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
 import { registerGuardrailsReload } from "./guardrails/reload";
@@ -68,6 +69,7 @@ import {
 } from "./ingress/repo";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { IngressDeliveryHost } from "./internal/delivery-host";
+import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
 import { RegistryToolDispatcher } from "./internal/tool-dispatch";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
@@ -272,10 +274,12 @@ async function boot() {
     // A Worker-executed turn asks for approval by parking its Run on a durable wait. The wait is
     // registered here rather than in the Worker because its one-use resume token must never leave
     // the process that will redeem it — the Worker only ever learns the wait's id.
-    const toolApprovals = new ToolApprovalService({
-      repo: approvalsRepo,
-      waits: new DurableWaitManager(new WaitStore(runTransactions), new RunResumeGateway(runStore)),
-    });
+    const runResume = new RunResumeGateway(runStore);
+    const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
+    const toolApprovals = new ToolApprovalService({ repo: approvalsRepo, waits: runWaits });
+    // The Routine side of the same surface: a State names approver roles rather than a person, so
+    // the decision is authorized by the roles the deciding principal holds.
+    const routineApprovals = new RoutineApprovalService({ repo: approvalsRepo, waits: runWaits });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
     const integrationEvents = new IntegrationEventsRepo(pool);
@@ -398,6 +402,14 @@ async function boot() {
       // Read through the loader on every call, so a `soul.synced` reload reaches the Worker
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
+      // A Routine State that needs a human parks on a durable wait registered here, for the same
+      // reason: the resume token stays in the process that redeems it.
+      routineApprovals: new InternalRoutineApprovalHost({
+        runs: runStore,
+        db: pool,
+        withTransaction: (operation) => withTransaction(pool, operation),
+        resume: runResume,
+      }),
     };
 
     const app = await buildApp({
@@ -441,6 +453,7 @@ async function boot() {
       runCancel,
       internalTurns,
       approvalsRepo,
+      routineApprovals,
       toolApprovals,
       runEvents: {
         events: runEventStore,

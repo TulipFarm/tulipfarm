@@ -2,6 +2,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { listPendingToolApprovals } from "./pending";
+import type { RoutineApprovalService } from "./routine-approvals";
 import type { ApprovalsRepo } from "./runtime-repo";
 import type { ToolApprovalService } from "./tool-approvals";
 
@@ -22,6 +23,8 @@ export interface ApprovalRoutesDeps {
   readonly approvals: ApprovalsRepo;
   /** Settles a `tool_call` approval and resumes the Run parked on it. */
   readonly toolApprovals?: ToolApprovalService;
+  /** Settles a `routine_state` approval a Worker-executed Routine parked on. */
+  readonly routineApprovals?: RoutineApprovalService;
   readonly routines?: RoutineApprovalDeps;
 }
 
@@ -155,6 +158,25 @@ export function registerApprovalRoutes(
           approvalId,
           decision: settled,
           principal: `${req.principal.kind}:${req.principal.id}`,
+        });
+        if (outcome === "resumed") return reply.send({ status: decision });
+        if (outcome === "forbidden") {
+          return reply.code(403).send({ error: "this approval is not yours to decide" });
+        }
+        if (outcome === "already_settled") {
+          return reply.code(404).send({ error: "approval not found or already resolved" });
+        }
+      }
+
+      // A Routine State parks the same way, but names roles rather than a person: authority comes
+      // from the roles this principal holds against the ones the State authored.
+      if (deps.routineApprovals && req.principal) {
+        const outcome = await deps.routineApprovals.signal({
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          approvalId,
+          decision: settled,
+          principal: `${req.principal.kind}:${req.principal.id}`,
+          roles: req.principal.role ? [req.principal.role] : [],
         });
         if (outcome === "resumed") return reply.send({ status: decision });
         if (outcome === "forbidden") {

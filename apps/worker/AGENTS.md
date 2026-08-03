@@ -73,8 +73,25 @@ confirmed effect succeeds; a definitive refusal takes the State's authored `onEr
 are absent in production and both park rather than improvise:** no source supplies the Run's
 `authorityLayers` (so the broker denies), and the adapter map is empty until installed-Integration
 context has an owner in this process (so an authorized dispatch parks on `adapter_not_found`).
-Routine Approvals are not composed either — an intent policy sends to a human parks with
-`routine:approval_required`.
+An intent the broker sends to a human still parks with `routine:approval_required`: that approval
+is bound to the *effect*, and nothing persists one yet.
+
+An `approval` State is the approval that does exist. The wait is planned here, by the run-kernel
+(`planApprovalWait` — the authored deadline and `approverRoles` become a bounded wait allowing
+`role:<role>` principals), and registered on the other side of `routine/approval-port.ts`: the API
+opens the wait and the approval row in one transaction, so a decision surface and a parked Run are
+never half-created. The **resume token never crosses that hop** — it is the capability to resume
+this Run once, and it stays with the process that redeems it, so this side learns only the wait's
+id. Idempotent by State occurrence at both ends (the wait id is `routineWaitId(runId, stateKey)`),
+so a worker that died between opening the approval and parking the State replays into its own
+approval instead of asking a second human. On replay the executor reads the decision back:
+`approved` continues through the authored transition, `denied` takes the authored
+`approval_rejected` path and fails the Run when nothing claims it, and an expiry is nobody's
+decision — it parks as `routine:wait_expired` rather than being read as either answer.
+
+**Who may decide is fail-closed and narrower than authoring allows.** The deployment's only role
+authority today is a user's own recorded role (`admin`/`member`), so a State naming any other
+`approverRoles` has no members and every decision on it is refused until a role store exists.
 
 Other State types with effects and Context roots the request Artifact cannot reconstruct are
 claimed and parked as `needs_reconciliation`; they are never interpreted as successful or

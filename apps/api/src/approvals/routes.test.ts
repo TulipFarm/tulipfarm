@@ -11,10 +11,12 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/routes";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
-import { type Queryable, transactionPort } from "../db";
+import { type Queryable, transactionPort, withTransaction } from "../db";
+import { InternalRoutineApprovalHost } from "../internal/routine-approval-host";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
+import { RoutineApprovalService } from "./routine-approvals";
 import { ApprovalsRepo } from "./runtime-repo";
 import { ToolApprovalService } from "./tool-approvals";
 
@@ -365,5 +367,152 @@ describe("approval routes — durable tool_call kind", () => {
 
     expect((await decide()).statusCode).toBe(404);
     expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "claimed" });
+  });
+});
+
+describe("approval routes — routine_state kind, decided by role", () => {
+  let app: FastifyInstance;
+  let db: PGlite;
+  let approvals: ApprovalsRepo;
+  let runs: RunStore;
+  let host: InternalRoutineApprovalHost;
+
+  /** Signs in a user carrying `role`, so the decide route derives that role from the session. */
+  async function signIn(role: "admin" | "member"): Promise<{ app: FastifyInstance; sid: string }> {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, `${role}@example.com`, "pass", role);
+    const sid = await store.create(user._id);
+
+    const queryable = db as unknown as Queryable;
+    const transactions = transactionPort(queryable);
+    const built = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      approvalsRepo: approvals,
+      routineApprovals: new RoutineApprovalService({
+        repo: approvals,
+        waits: new DurableWaitManager(new WaitStore(transactions), new RunResumeGateway(runs)),
+      }),
+      llmService: { getModel: vi.fn() } as never,
+      conversationRepo: {} as never,
+      messageRepo: {} as never,
+    });
+    return { app: built, sid };
+  }
+
+  beforeEach(async () => {
+    db = await makePglite();
+    await runPgMigrations(db);
+    approvals = new ApprovalsRepo(db);
+
+    const queryable = db as unknown as Queryable;
+    const transactions = transactionPort(queryable);
+    runs = new RunStore(transactions);
+    host = new InternalRoutineApprovalHost({
+      runs,
+      db: queryable,
+      withTransaction: (operation) => withTransaction(queryable, operation),
+      resume: new RunResumeGateway(runs),
+    });
+  });
+
+  afterEach(async () => {
+    await app?.close();
+    await db.close();
+  });
+
+  /** A Routine Run parked on an approval its State authored for `role`. */
+  async function parkedRun(role: string): Promise<{ runId: string; approvalId: string }> {
+    const runId = randomUUID();
+    const now = new Date();
+    await runs.start({
+      id: runId,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      source: "routine",
+      createdAt: now.toISOString(),
+      bundle: { digest: "bundle-digest", routineId: "routine-1", routineVersion: "1" },
+      identity: {
+        initiator: { kind: "user", id: "author" },
+        effectiveSubject: { kind: "user", id: "author" },
+        guardrailContextRef: "guardrails:1",
+      },
+      bounds: { wallTimeMs: 60_000, activeTimeMs: 60_000, attempts: 1, sideEffects: 8 },
+      states: [
+        {
+          key: "Approve",
+          definitionRef: "published:routine:invoice#1",
+          resolvedInput: { payloadRef: `artifact:${runId}:request` },
+        },
+      ],
+    });
+    for (const step of [
+      { expectedVersion: 0, expectedStatus: "queued" as const, status: "claimed" as const },
+      { expectedVersion: 1, expectedStatus: "claimed" as const, status: "running" as const },
+    ]) {
+      await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, runId, {
+        ...step,
+        leaseOwner: "worker-1",
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+    }
+
+    const opened = await host.open(DEPLOYMENT_BUSINESS_ID, runId, {
+      stateKey: "Approve",
+      stateName: "Approve",
+      wait: {
+        id: randomUUID(),
+        stateKey: "Approve",
+        kind: "approval",
+        aggregation: "first",
+        schemaRef: "wait:approval:Approve",
+        allowedPrincipals: [`role:${role}`],
+        expectedSignals: 1,
+        quorum: null,
+        deadlineAt: new Date(now.getTime() + 60_000).toISOString(),
+        createdAt: now.toISOString(),
+      },
+    });
+
+    await runs.transitionRun(DEPLOYMENT_BUSINESS_ID, runId, {
+      expectedVersion: 2,
+      expectedStatus: "running",
+      status: "waiting",
+      leaseOwner: null,
+      leaseExpiresAt: null,
+    });
+    return { runId, approvalId: opened.approvalId };
+  }
+
+  async function decide(sid: string, approvalId: string): Promise<number> {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/approvals/${approvalId}/decide`,
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+      payload: { decision: "approve" },
+    });
+    return res.statusCode;
+  }
+
+  it("requeues the parked Run for a decider holding the role the State authored", async () => {
+    const { runId, approvalId } = await parkedRun("admin");
+    const session = await signIn("admin");
+    app = session.app;
+
+    expect(await decide(session.sid, approvalId)).toBe(200);
+    expect((await approvals.findById(approvalId))?.status).toBe("approved");
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "queued" });
+  });
+
+  it("refuses a decider holding no role the State named, leaving the Run parked", async () => {
+    const { runId, approvalId } = await parkedRun("admin");
+    const session = await signIn("member");
+    app = session.app;
+
+    expect(await decide(session.sid, approvalId)).toBe(403);
+    expect((await approvals.findById(approvalId))?.status).toBe("pending");
+    expect(await runs.find(DEPLOYMENT_BUSINESS_ID, runId)).toMatchObject({ status: "waiting" });
   });
 });

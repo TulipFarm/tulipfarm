@@ -15,6 +15,7 @@ import {
   joinParallel,
   type ParallelProgress,
   type PersistedWait,
+  planApprovalWait,
   planForeach,
   planParallel,
   planTimerWait,
@@ -24,6 +25,7 @@ import {
   type RoutineStateScheduler,
   RoutineStepError,
   RUN_EXECUTOR_PRINCIPAL_REF,
+  resolveApproval,
   resolveErrorPath,
   resolveForeachItems,
   resolveRoutineStateInput,
@@ -41,6 +43,7 @@ import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "../agent-state";
 import type { RunExecutor } from "../executors";
+import type { RoutineApprovalPort } from "./approval-port";
 import type { WorkerRoutineDefinitionLoader } from "./definition-loader";
 import type { RoutineToolPort } from "./tool-port";
 
@@ -95,6 +98,11 @@ interface RoutineExecutorOptions {
    */
   readonly tools?: RoutineToolPort;
   /**
+   * Where an `approval` State's durable wait is opened and its decision read back. Absent, an
+   * `approval` State is parked: a Run may not proceed past a question nobody was asked.
+   */
+  readonly approvals?: RoutineApprovalPort;
+  /**
    * The authority a Routine Run acts under. Fail-closed by default — with no layers the Tool
    * Broker denies every intent — because nothing in this process may mint authority of its own.
    */
@@ -120,6 +128,7 @@ const SUPPORTED_ROOTS: ReadonlySet<string> = new Set(["input", "states", "item",
 
 /** Deterministic State types with no external effect and no Context this executor cannot build. */
 const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
+  "approval",
   "branch",
   "tool",
   "wait",
@@ -363,7 +372,10 @@ class RoutineExecution {
 
     // A `waiting` State is resolved by its wait, not by re-running it.
     if (row.status === "waiting") {
-      const resumed = await this.resumeWait(state, key, row);
+      const resumed =
+        state.type === "approval"
+          ? await this.resumeApproval(state, key, row)
+          : await this.resumeWait(state, key, row);
       if (resumed.kind !== "outcome") return { kind: resumed.kind };
       outcome = resumed.outcome;
     } else {
@@ -373,6 +385,7 @@ class RoutineExecution {
       assertSupportedState(state);
 
       if (state.type === "wait") return this.openWait(state, key);
+      if (state.type === "approval") return this.openApproval(state, key);
 
       outcome =
         state.type === "branch"
@@ -623,6 +636,84 @@ class RoutineExecution {
     }
     await this.transition(key, "running", "waiting");
     return { kind: "waiting" };
+  }
+
+  /**
+   * Open the durable Approval wait for an `approval` State and park on it.
+   *
+   * The wait is planned here and registered by the host, which persists it beside the approval a
+   * human will see, in one transaction. This side never sees the resume token — the decision comes
+   * back as a decision, and the kernel's own resume requeues the Run.
+   */
+  private async openApproval(
+    state: CompiledState,
+    key: string
+  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+    const port = this.ctx.options.approvals;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    await port.open({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      stateName: state.name,
+      wait: planApprovalWait(state, {
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        // Derived from `(runId, occurrence key)`, so a worker that died between opening the
+        // approval and parking the State replays into the approval it already opened.
+        waitId: routineWaitId(this.ctx.run.id, key),
+        stateKey: key,
+        now: this.ctx.now().toISOString(),
+      }),
+    });
+    await this.transition(key, "running", "waiting");
+    return { kind: "waiting" };
+  }
+
+  /**
+   * Continue a State whose approval was decided.
+   *
+   * A rejection is a decided negative and takes the authored `approval_rejected` path, failing the
+   * Run when nothing claims it. An expiry is nobody's decision, so it parks for attention rather
+   * than being read as either answer.
+   */
+  private async resumeApproval(
+    state: CompiledState,
+    key: string,
+    row: PersistedState
+  ): Promise<{ kind: "outcome"; outcome: StepOutcome } | { kind: ChainOutcome }> {
+    const port = this.ctx.options.approvals;
+    if (port === undefined) return { kind: "needs_reconciliation" };
+
+    const record = await port.find({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+    });
+    // A parked State whose approval does not exist is a Run nobody can answer; only reconciliation
+    // may decide what became of it.
+    if (record === undefined) return { kind: "needs_reconciliation" };
+    if (record.decision === "pending") return { kind: "waiting" };
+
+    await this.claim(key, row.status as StateStatus, CLAIM_PATH);
+    const decision = resolveApproval(
+      state,
+      record.decision === "approved"
+        ? "approved"
+        : record.decision === "denied"
+          ? "rejected"
+          : "expired"
+    );
+    if (decision.kind === "continue" || decision.kind === "handled") {
+      return { kind: "outcome", outcome: decision.outcome };
+    }
+    if (decision.kind === "failed") {
+      await this.transition(key, "running", "failed", `routine:${decision.errorRef}`);
+      return { kind: "failed" };
+    }
+    await this.park(key, `routine:${decision.errorRef}`);
+    return { kind: "needs_reconciliation" };
   }
 
   /**

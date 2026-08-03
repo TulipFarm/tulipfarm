@@ -9,6 +9,7 @@ const ctx = {
   businessId: "biz",
   runId: "run-1",
   waitId: "wait-1",
+  stateKey: "Fanout#0/Gate",
   now: "2026-07-25T10:00:00.000Z",
 };
 

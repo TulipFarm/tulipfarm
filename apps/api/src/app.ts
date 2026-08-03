@@ -19,6 +19,7 @@ import type { ActivityService } from "./activity/service";
 import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/health";
 import { type OperationalApiDeps, registerOperationalRoutes } from "./admin/routes";
 import { registerApprovalRoutes } from "./approvals/routes";
+import type { RoutineApprovalService } from "./approvals/routine-approvals";
 import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { TokenRepo } from "./auth/api-tokens";
@@ -118,6 +119,7 @@ export interface AppOptions {
   routineAuthoring?: CanonicalRoutineAuthoringService;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
+  routineApprovals?: RoutineApprovalService;
   /** Tool approvals as durable kernel waits — a decision signals the wait its Run parked on. */
   toolApprovals?: ToolApprovalService;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
@@ -535,6 +537,7 @@ export async function buildApp(opts: AppOptions = {}) {
         {
           approvals: opts.approvalsRepo,
           ...(opts.toolApprovals ? { toolApprovals: opts.toolApprovals } : {}),
+          ...(opts.routineApprovals ? { routineApprovals: opts.routineApprovals } : {}),
           ...(opts.routines
             ? {
                 routines: {

@@ -14,6 +14,8 @@ export interface StateWaitContext {
   readonly businessId: string;
   readonly runId: string;
   readonly waitId: string;
+  /** Durable State occurrence key; it may differ from the authored name inside a fan-out. */
+  readonly stateKey: string;
   /** ISO-8601 instant the wait is opened at. */
   readonly now: string;
 }
@@ -53,7 +55,7 @@ export function planStateWait(
     id: ctx.waitId,
     businessId: ctx.businessId,
     runId: ctx.runId,
-    stateKey: state.name,
+    stateKey: ctx.stateKey,
     kind: options.kind,
     aggregation: options.aggregation ?? "first",
     schemaRef: waitSchemaRef(state, options.kind),
