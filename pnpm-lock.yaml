@@ -259,13 +259,34 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
+      '@tulipfarm/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.3
+        version: 0.5.3
+      '@electric-sql/pglite-socket':
+        specifier: ^0.2.7
+        version: 0.2.7(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -10409,7 +10430,7 @@ snapshots:
       obug: 2.1.2
       std-env: 4.1.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.17.6)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+      vitest: 4.1.9(@opentelemetry/api@1.9.1)(@types/node@26.1.1)(@vitest/coverage-v8@4.1.9)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.0(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   '@vitest/expect@4.1.9':
     dependencies:

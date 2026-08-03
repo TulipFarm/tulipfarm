@@ -54,6 +54,12 @@ RUN pnpm --filter @tulipfarm/worker exec esbuild src/main.ts \
   && pnpm --filter @tulipfarm/worker exec esbuild src/hooks/ingress-hook-worker.ts \
   --bundle --platform=node --target=node26 --format=cjs --outfile=dist/ingress-hook-worker.cjs \
   --external:isolated-vm
+# The integration worker: a third long-running entrypoint off the same image. Boot skeleton only
+# today — no consumer loop is registered yet — but ships alongside the API and worker so schema
+# agreement is never a deploy-ordering problem.
+RUN pnpm --filter @tulipfarm/integration-worker exec esbuild src/main.ts \
+  --bundle --platform=node --target=node26 --format=cjs --outfile=dist/integration-worker.cjs \
+  --external:pg
 # Prod-only dependency closure (drops dev deps, resolves transitive deps flat).
 RUN pnpm --filter @tulipfarm/api deploy --prod --legacy /deploy
 
@@ -79,6 +85,9 @@ COPY --from=builder /app/apps/worker/dist/worker.cjs ./worker.cjs
 # The worker's own hook sandbox entrypoint. Deliberately a different basename from the API's: both
 # land in this directory, and sharing one would hand an Integration's classifier the API's grant.
 COPY --from=builder /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook-worker.cjs
+# Integration worker entrypoint. Not the image CMD — compose runs it as its own service off this
+# same image, mirroring how `worker.cjs` is run.
+COPY --from=builder /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 COPY --from=builder /app/skills ./skills
 # /data holds the bootstrap secrets generated on first boot when the operator supplies none
