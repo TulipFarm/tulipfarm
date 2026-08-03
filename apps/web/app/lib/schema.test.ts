@@ -278,9 +278,9 @@ test("filterRecords returns all records for a blank/whitespace query", () => {
   expect(filterRecords(ROWS, [f.name], "   ")).toHaveLength(3);
 });
 
-// AC-V1-002 (read subset): a valid schema.yml yields a working list + detail with ZERO per-resource
+// Read subset: a valid schema.yml yields a working list + detail with ZERO per-resource
 // code — the same generic pipeline produces both projections for an arbitrary record.
-test("AC-V1-002: schema alone drives a complete list + detail for a record", () => {
+test("schema alone drives a complete list + detail for a record", () => {
   const schema = ticketSchema();
   const record = {
     id: "TICK-1042",

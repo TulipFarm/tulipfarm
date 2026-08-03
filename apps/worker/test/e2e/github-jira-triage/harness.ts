@@ -58,7 +58,7 @@ import {
 } from "./providers";
 
 /**
- * Composition harness for the GitHub → Jira triage vertical slice (AW-064, AW-065).
+ * Composition harness for the GitHub → Jira triage vertical slice.
  *
  * This is deliberately *not* a mock of the flow. Every governed component is the real one — the
  * compiled Routine, the Tool Broker, the effect ledger, the Secret Broker, the Approval store, the

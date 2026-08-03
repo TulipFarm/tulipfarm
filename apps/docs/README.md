@@ -1,6 +1,6 @@
 # @tulipfarm/docs
 
-TulipFarm documentation site (specs/DOCS.md DOC-V1-001). Built with
+TulipFarm documentation site. Built with
 [Fumadocs](https://fumadocs.dev) on Next.js with
 [static export](https://nextjs.org/docs/app/guides/static-exports) — `next build`
 emits a fully static site to `out/`, deployed separately from the app.

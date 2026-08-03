@@ -26,7 +26,7 @@ export type NavItem = {
 
 /*
  * Sidebar sections for V1 (UI-V1-003). Order is canonical, split into two quiet groups for
- * scannability. There is deliberately NO "Apps" section — micro apps are deferred (AC-V1-003).
+ * scannability. There is deliberately NO "Apps" section — micro apps are deferred.
  */
 export const navItems: NavItem[] = [
   { to: "/resources", label: "Resources", icon: Boxes, group: "Workspace" },

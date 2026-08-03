@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { resolveTier } from "./selection";
 
 describe("resolveTier", () => {
-  it("auto + supervised → standard (AC-V1-001)", () => {
+  it("auto + supervised → standard", () => {
     expect(resolveTier({ autonomy: "supervised" })).toBe("standard");
   });
 

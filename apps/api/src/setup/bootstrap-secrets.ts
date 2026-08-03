@@ -1,4 +1,4 @@
-// Zero-required-env boot (INST-002): resolve the three bootstrap secrets from, in order,
+// Zero-required-env boot: resolve the three bootstrap secrets from, in order,
 // the environment → a persisted file on the data volume → freshly generated randomness.
 //
 // This is what lets `docker-compose.yml` ship with no `.env` at all, so a user can paste it

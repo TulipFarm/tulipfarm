@@ -45,7 +45,7 @@ export interface SoulCatalogue {
  * Resolved inputs for one turn's system prompt. `assembleSystemPrompt` is pure — the caller
  * fetches everything from durable stores and passes it here; assembly performs no IO. Keeping
  * the inputs resolved (not lazily fetched) is what makes the rendered prefix deterministic and
- * therefore prompt-cacheable (AC-V1-001).
+ * therefore prompt-cacheable.
  */
 export interface AssembleContext {
   /** Omit the `<platform-instructions>` block for this turn even if text is supplied. */
@@ -53,7 +53,7 @@ export interface AssembleContext {
   /** Platform base prompt text. Unset in V1 → block omitted. */
   platformInstructions?: string;
   agentId?: string;
-  /** AGENT.md frontmatter domain — display-only (AGT-V1-007); renders in <agent-identity> only. */
+  /** AGENT.md frontmatter domain — display-only; renders in <agent-identity> only. */
   domain?: string | null;
   /** Single-tenant V1: "default". */
   tenantId?: string;
@@ -432,12 +432,12 @@ function renderKnowledgeGrounding(ctx: AssembleContext): string {
 }
 
 /**
- * Assemble the agent system prompt from the 11 ordered blocks (specs/CONTEXT-ENGINE.md §1). Pure
+ * Assemble the agent system prompt from the 11 ordered blocks. Pure
  * and synchronous. Each block renders to a string or "" (when empty or over budget); empty blocks
  * are omitted entirely so the prefix stays byte-stable across turns. `<skills>` renders eager skill
  * bodies and `<available-skills>` the lazy skill L1 index; `<soul-context>` renders the repo
  * catalogue (agents/skills/resource types/routines/integrations) and `<available-tools>` the agent's
- * tool L1 index. No `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005, AC-V1-003).
+ * tool L1 index. No `<harness-typed-state>` block is ever emitted (deferred MEM-V1-005).
  */
 export function assembleSystemPrompt(ctx: AssembleContext): string {
   const blocks = [
@@ -447,7 +447,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderAgentPersonality(ctx),
     renderMemoryInstructions(ctx),
     renderMemory(ctx),
-    // V1: governance is tenant-wide. `domain` is display-only on the agent (AGT-V1-007), so it
+    // V1: governance is tenant-wide. `domain` is display-only on the agent, so it
     // feeds <agent-identity> but does NOT scope governance — preserving prior behavior.
     buildGovernanceBlock(ctx.governancePages, null),
     renderEagerSkills(ctx),

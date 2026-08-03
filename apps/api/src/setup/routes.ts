@@ -99,7 +99,7 @@ export function registerSetupStatusRoute(
   );
 }
 
-// First-run setup wizard (INST-003). Routes are only registered when NOT in headless
+// First-run setup wizard. Routes are only registered when NOT in headless
 // boot mode (isHeadlessBoot() === false, checked by caller in app.ts).
 //
 // Guard hierarchy:

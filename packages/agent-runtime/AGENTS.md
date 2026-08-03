@@ -34,7 +34,7 @@ carries ids, versions, and timestamps that must never reach a prompt. A richer r
 to these shapes unchanged, so the caller converts nothing — it just cannot over-share.
 
 Each block owns its own char budget and is dropped **whole** when over it, never half-rendered, so
-the cacheable prefix cannot drift mid-block (AC-V1-001).
+the cacheable prefix cannot drift mid-block.
 
 ## Guardrails compile a policy; they never fetch one
 

@@ -3,12 +3,11 @@ import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Machine verification of the legacy-bypass inventory (AW-006).
+ * Machine verification of the legacy-bypass inventory.
  *
- * The inventory at `docs/architecture/legacy-inventory.md` is the cutover contract that AW-096
- * consumes to prove no listed bypass remains. AW-096 has completed the cutover, so every listed
- * path must now be absent while each row remains as historical evidence with its replacement,
- * cutover test, and removal owner.
+ * The inventory at `docs/architecture/legacy-inventory.md` is the historical record of every
+ * removed bypass. Cutover has completed, so every listed path must now be absent while each row
+ * remains as historical evidence.
  */
 
 /** Walk up from this file to the pnpm workspace root (worktree-safe). */
@@ -31,23 +30,10 @@ interface Row {
   legacyPath: string;
   bypass: string;
   invariant: string;
-  replacement: string;
-  cutover: string;
-  removal: string;
   risk: string;
 }
 
-const COLUMNS = [
-  "id",
-  "category",
-  "legacyPath",
-  "bypass",
-  "invariant",
-  "replacement",
-  "cutover",
-  "removal",
-  "risk",
-] as const;
+const COLUMNS = ["id", "category", "legacyPath", "bypass", "invariant", "risk"] as const;
 
 /** Parse the canonical inventory table: every row whose first cell is an `LB-NN` id. */
 function parseRows(md: string): Row[] {
@@ -73,11 +59,6 @@ function backticked(cell: string): string[] {
   return [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
 }
 
-/** Extract every AW-NNN task id referenced in a cell. */
-function taskIds(cell: string): string[] {
-  return [...cell.matchAll(/AW-\d{3}/g)].map((m) => m[0]);
-}
-
 /** The five high-risk categories the acceptance criteria require to be explicit. */
 const MANDATORY_HIGH_RISK = [
   "identity-substitution",
@@ -87,7 +68,7 @@ const MANDATORY_HIGH_RISK = [
   "all-tools",
 ] as const;
 
-describe("legacy bypass inventory (AW-006)", () => {
+describe("legacy bypass inventory", () => {
   it("exists and is a readable document", () => {
     expect(existsSync(INVENTORY_PATH), `${INVENTORY_PATH} must exist`).toBe(true);
   });
@@ -114,14 +95,6 @@ describe("legacy bypass inventory (AW-006)", () => {
           false
         );
       }
-    }
-  });
-
-  it("maps every row to a replacement task, a cutover test, and a removal owner", () => {
-    for (const r of rows) {
-      expect(taskIds(r.replacement).length, `row ${r.id}: replacement task`).toBeGreaterThan(0);
-      expect(taskIds(r.cutover).length, `row ${r.id}: cutover test`).toBeGreaterThan(0);
-      expect(taskIds(r.removal).length, `row ${r.id}: removal owner`).toBeGreaterThan(0);
     }
   });
 

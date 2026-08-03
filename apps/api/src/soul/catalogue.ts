@@ -3,7 +3,7 @@ import { listAgents } from "./agents/registry";
 
 /**
  * One soul artifact projected to its L1 surface — `name` + `description` — for the
- * `<soul-context>` repo catalogue (specs/CONTEXT-ENGINE.md §1). Full bodies / schemas stay L2,
+ * `<soul-context>` repo catalogue. Full bodies / schemas stay L2,
  * pulled on demand via `agent_get` / `load_skill` / `resource_type_schema`.
  */
 export interface SoulCatalogueEntry {
@@ -15,7 +15,7 @@ export interface SoulCatalogueEntry {
  * The repo catalogue for `<soul-context>`: every soul artifact type the loader exposes, each
  * projected to its L1 surface. Gives an agent ambient awareness of what already exists without a
  * tool round-trip (e.g. the built-in assistant can reference an existing agent or resource
- * type by name). Sorted by name within each section for a byte-stable prompt prefix (AC-V1-001).
+ * type by name). Sorted by name within each section for a byte-stable prompt prefix.
  */
 export interface SoulCatalogue {
   agents: SoulCatalogueEntry[];

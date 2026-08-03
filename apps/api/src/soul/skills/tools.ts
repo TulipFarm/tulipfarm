@@ -111,7 +111,7 @@ const skillCreate: SkillTool = {
       return err("validation_error", "skill already exists");
     }
 
-    // Fail fast before writing: SkillAudit requires a working LLM (AC-V1-002).
+    // Fail fast before writing: SkillAudit requires a working LLM.
     if (!ctx.llmService) {
       return err(
         "audit_required",

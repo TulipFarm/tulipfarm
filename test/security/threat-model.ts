@@ -93,7 +93,7 @@ export interface SecurityFinding {
   readonly suppressed: boolean;
 }
 
-/** AW-092 completed with no known release finding; new findings must be recorded here. */
+/** No known release finding; new findings must be recorded here. */
 export const RELEASE_FINDINGS: readonly SecurityFinding[] = [];
 
 export function assertThreatModelReleaseGate(findings: readonly SecurityFinding[]): void {

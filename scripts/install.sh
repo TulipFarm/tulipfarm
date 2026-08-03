@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # TulipFarm one-line installer — OCI lane (Docker/Podman + Compose v2).
-# Spec: specs/INSTALLATION.md INST-002/003, AC-001. Native lane is deferred.
+# Native lane is deferred.
 #
 #   curl -fsSL https://tulipfarm.site/install.sh | sudo bash
 #

@@ -26,8 +26,8 @@ function rowToApproval(row: Record<string, unknown>): ApprovalRow {
 }
 
 /**
- * Authoritative DB-backed store for Tool Approval and Routine human-approval rows
- * (AGT-V1-002). Atomic pending-state settlement prevents replayed decisions.
+ * Authoritative DB-backed store for Tool Approval and Routine human-approval rows.
+ * Atomic pending-state settlement prevents replayed decisions.
  */
 export class ApprovalsRepo {
   constructor(private readonly db: Queryable) {}

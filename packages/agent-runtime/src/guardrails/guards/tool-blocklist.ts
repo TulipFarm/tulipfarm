@@ -24,7 +24,7 @@ function globToRegExp(pattern: string): RegExp {
 }
 
 /**
- * Tool-call guard (AC-V1-002). Blocks a call when its `toolName` matches any
+ * Tool-call guard. Blocks a call when its `toolName` matches any
  * `block` entry (exact name or wildcard glob) or its `tier` is in `category`.
  * Both fields are optional and treated as empty when absent.
  */

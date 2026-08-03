@@ -1,7 +1,7 @@
 # context
 
 System-prompt assembly for the chat turn. One pure function builds the agent system prompt from
-durable stores every turn (specs/CONTEXT-ENGINE.md §1).
+durable stores every turn.
 
 ## `assembleSystemPrompt(ctx)` — `assemble.ts`
 
@@ -52,8 +52,8 @@ drop **whole** on overflow (never half-rendered) so the prefix can't drift mid-b
 
 ## Acceptance criteria
 
-- **AC-V1-001** two consecutive turns with no soul/memory change → byte-identical cacheable prefix.
-- **AC-V1-003** no typed-state block in the assembled prompt.
+- Two consecutive turns with no soul/memory change → byte-identical cacheable prefix.
+- No typed-state block in the assembled prompt.
 
 ## Tests
 

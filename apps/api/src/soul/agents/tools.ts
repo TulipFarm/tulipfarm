@@ -36,7 +36,7 @@ function serializeAgent(frontmatter: Record<string, unknown>, body: string): str
   return `---\n${stringify(frontmatter)}---\n${body}`;
 }
 
-// Write-time meta-schema gate (AGT-V1-005 / VAL-V1-010). Returns a validation_error
+// Write-time meta-schema gate (VAL-V1-010). Returns a validation_error
 // result on invalid frontmatter, or null when it passes.
 function frontmatterError(frontmatter: Record<string, unknown>): ToolCallResult | null {
   try {

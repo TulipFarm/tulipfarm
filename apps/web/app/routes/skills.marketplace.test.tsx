@@ -64,7 +64,7 @@ test("scan → audit → advisory + operator confirm → install", async () => {
 
   await user.click(screen.getByRole("button", { name: /Run SkillAudit/ }));
 
-  // Advisory framing is shown (AC-V1-004) and install installs nothing until confirmed.
+  // Advisory framing is shown and install installs nothing until confirmed.
   expect(await screen.findByText(/advisory, not a guarantee/i)).toBeInTheDocument();
   expect(screen.getByText(/medium risk/i)).toBeInTheDocument();
   expect(screen.getByText(/reads ~\/.ssh/)).toBeInTheDocument();

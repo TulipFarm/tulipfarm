@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createTriageHarness, type TriageHarness } from "./harness";
 
 /**
- * AW-064 — GitHub issue triage vertical slice.
+ * GitHub issue triage vertical slice.
  *
  * One flow end to end: a signed GitHub delivery becomes a persisted event, the Agent reasons over
  * the issue and its duplicate candidates, and the Routine performs every external mutation through

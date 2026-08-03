@@ -2,7 +2,7 @@
 
 `@tulipfarm/schema` — single source of truth for all config data shapes: TypeBox schemas +
 inferred types + thin `validate*` wrappers, plus declarative resource transforms.
-Implements `specs/VALIDATION.md`. See root `AGENTS.md` for commands/lint.
+See root `AGENTS.md` for commands/lint.
 
 ## Public API (`src/index.ts`)
 

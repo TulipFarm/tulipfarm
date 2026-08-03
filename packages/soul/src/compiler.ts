@@ -20,7 +20,7 @@ import {
  * Bundle compilation (SPEC §8.2 step 9): resolve every reference to an exact authored version,
  * canonicalize, and hash the complete immutable runtime bundle.
  *
- * Compilation runs after strict AJV validation (AW-011) and semantic validation (AW-012), and
+ * Compilation runs after strict AJV validation and semantic validation, and
  * before signing. It is synchronous, side-effect free, and fail-closed: a reference that does not
  * resolve, a version constraint the tree cannot satisfy, or any secret value found in the tree
  * rejects the whole bundle rather than compiling a partial one.

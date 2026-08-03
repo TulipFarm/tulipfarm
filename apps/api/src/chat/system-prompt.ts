@@ -10,7 +10,7 @@ import type { AvailableSkill } from "../soul/skills/registry";
  * of truth for the per-agent prompt: the chat turn (`registerChatRoutes`) wraps it in a closure that
  * is reused for the front desk and each handoff target, and the dev-only debug-context route calls it
  * to surface the exact prompt the LLM receives. The caller fetches memory / governance / skills once
- * and passes them in — assembly itself performs no IO, mirroring `assembleSystemPrompt` (AC-V1-001).
+ * and passes them in — assembly itself performs no IO, mirroring `assembleSystemPrompt`.
  */
 export function assembleAgentSystemPrompt(args: {
   agent: SoulAgent;

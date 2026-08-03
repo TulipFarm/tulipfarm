@@ -14,7 +14,7 @@ function fireAndForget(p: Promise<unknown>): void {
 
 /**
  * Wire the knowledge source adapters (KN-V1-003) to the domain-event bus: resource
- * writes and completed conversations enqueue idempotent indexing jobs (AC-V1-002).
+ * writes and completed conversations enqueue idempotent indexing jobs.
  */
 export function subscribeKnowledgeIndexing(emitter: EventEmitter, boss: Enqueuer): void {
   const onResource = (p: ResourceEventPayload): void => {

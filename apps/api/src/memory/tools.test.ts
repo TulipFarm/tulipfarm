@@ -60,7 +60,7 @@ describe("updateMemoryTool", () => {
     });
   });
 
-  it("documents the appropriate-use guidance in its description (AC-V1-004 #4)", () => {
+  it("documents the appropriate-use guidance in its description", () => {
     expect(updateMemoryTool.description).toContain("small, stable, personal facts");
     expect(updateMemoryTool.description).toContain("create_knowledge_page");
     expect(updateMemoryTool.mutating).toBe(true);

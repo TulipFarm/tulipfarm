@@ -98,7 +98,7 @@ export function buildToolRegistry(services: {
         name: t.name,
         tier: "system",
         mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated (AGT-V1-001)
+        requiresApproval: false, // soul write — never gated
         description: t.description,
         inputSchema: t.inputSchema,
         execute: (args, _ctx) => t.handler(args, ctx),
@@ -113,7 +113,7 @@ export function buildToolRegistry(services: {
         name: t.name,
         tier: "system",
         mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated (AGT-V1-001)
+        requiresApproval: false, // soul write — never gated
         description: t.description,
         inputSchema: t.inputSchema,
         execute: (args, _ctx) => t.handler(args, ctx),
@@ -128,7 +128,7 @@ export function buildToolRegistry(services: {
         name: t.name,
         tier: "system",
         mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated (AGT-V1-001)
+        requiresApproval: false, // soul write — never gated
         description: t.description,
         inputSchema: t.inputSchema,
         execute: (args, _ctx) => t.handler(args, ctx),

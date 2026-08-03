@@ -40,7 +40,7 @@ export interface KnowledgeIndexPort {
   search(query: KnowledgeIndexQuery): Promise<readonly KnowledgeCandidate[]>;
 }
 
-/** Write side. Invalidation (AW-078) removes entries through the same port. */
+/** Write side. Invalidation removes entries through the same port. */
 export interface MutableKnowledgeIndexPort extends KnowledgeIndexPort {
   upsert(entry: KnowledgeIndexEntry): Promise<void>;
   removeSource(businessId: string, sourceId: string): Promise<number>;

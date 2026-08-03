@@ -30,7 +30,7 @@ export interface RoutineApprovalPayload {
 }
 
 /**
- * ApprovalRequester for human_approval states (ROUT-V1-006, AC-V1-003): inserts the
+ * ApprovalRequester for human_approval states (ROUT-V1-006): inserts the
  * `routine_state` approvals row (`ui` channel — always available), then best-effort
  * delivers to declared extra channels. Slack "present" ⇔ an installed integration
  * exposes an integration-tier send-message tool whose name mentions slack + send

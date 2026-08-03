@@ -13,7 +13,7 @@ import {
 
 /**
  * Semantic graph validation (SPEC §8.2 step 6) plus the public tree-level entrypoint that
- * orchestrates identifier uniqueness (AW-011 → {@link DefinitionIndex}), reference resolution
+ * orchestrates identifier uniqueness ({@link DefinitionIndex}), reference resolution
  * ({@link resolveReferences}), and non-amplification ({@link analyzeCapabilities}).
  *
  * This runs after strict per-file AJV validation and before signing/compilation. It is

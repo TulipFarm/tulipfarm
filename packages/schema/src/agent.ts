@@ -3,10 +3,10 @@ import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 
 /**
- * AGENT.md frontmatter meta-schema (AGT-V1-005). Validated at the soul write boundary
+ * AGENT.md frontmatter meta-schema. Validated at the soul write boundary
  * (`agent_create` / `agent_update`) per VAL-V1-010 — there is no load-time validation
  * (VAL-V1-011). `name` is the directory (validated by the tool's NAME_RE), not a
- * frontmatter field; `domain` is display-only (AGT-V1-007). Strict: unknown keys are
+ * frontmatter field; `domain` is display-only. Strict: unknown keys are
  * rejected so typos surface at write-time.
  */
 

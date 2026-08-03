@@ -3,7 +3,7 @@ import type { BundledSkill } from "./bundled";
 
 /**
  * One skill projected to its L1 surface — `name` + `description` — for the `<available-skills>`
- * prompt block (specs/CONTEXT-ENGINE.md §1, SKILLS.md). The body (L2) and reference files (L3) are
+ * prompt block. The body (L2) and reference files (L3) are
  * NOT included here; the agent pulls them on demand via the `load_skill` / `load_skill_reference`
  * platform tools. Skills with `eager: true` in frontmatter are excluded — they appear in `<skills>`
  * instead.
@@ -27,7 +27,7 @@ export interface EagerSkill {
 
 /**
  * Projects skills with `eager: true` frontmatter into the eager surface. Sorted by name for a
- * byte-stable prompt prefix (AC-V1-001).
+ * byte-stable prompt prefix.
  */
 export function mergedSkills(
   soulLoader: SoulLoader | undefined,
@@ -69,8 +69,8 @@ export function listEagerSkills(
 
 /**
  * Projects non-eager skills into their lazy L1 surface for `<available-skills>`. Skills with
- * `eager: true` are excluded because they already appear in `<skills>`. Sorted by name
- * (AC-V1-001). `description` comes from frontmatter; missing or non-string renders as "".
+ * `eager: true` are excluded because they already appear in `<skills>`. Sorted by name.
+ * `description` comes from frontmatter; missing or non-string renders as "".
  */
 export function listAvailableSkills(
   soulLoader: SoulLoader | undefined,

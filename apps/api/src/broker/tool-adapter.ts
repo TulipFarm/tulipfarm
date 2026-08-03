@@ -12,7 +12,7 @@ import {
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
-/** Outcome of the tool-call guard hook (GR-V1-001). AW-014 routes import these. */
+/** Outcome of the tool-call guard hook. */
 export type ToolGuardOutcome =
   | { blocked: true; reason: string }
   | { blocked: false; args: unknown };
@@ -127,7 +127,7 @@ export class ToolRegistry {
               );
             }
             // Tool-call guard (GR-V1-001): runs after arg-validate, before the approval gate. A `block`
-            // returns a denial the LLM sees (AC-V1-002). A `pass`/transform yields effectiveArgs — the
+            // returns a denial the LLM sees. A `pass`/transform yields effectiveArgs — the
             // transform path is plumbed but unused by V1 guards, so effectiveArgs is NOT re-validated
             // against the tool schema (no V1 guard mutates tool args). Undefined → byte-identical to before.
             let effectiveArgs = args;

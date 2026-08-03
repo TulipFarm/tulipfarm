@@ -736,7 +736,7 @@ describe("x-links validate-on-write", () => {
     await app.close();
   });
 
-  it("rejects POST when linked record does not exist (AC-V1-001a)", async () => {
+  it("rejects POST when linked record does not exist", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/resources/ticket",
@@ -749,7 +749,7 @@ describe("x-links validate-on-write", () => {
     expect(res.json<{ path: string }>().path).toBe("/customerId");
   });
 
-  it("accepts POST when linked record exists (AC-V1-001b)", async () => {
+  it("accepts POST when linked record exists", async () => {
     const custId = randomUUID();
     customerRepo.docs.set(custId, {
       _id: custId,
@@ -781,7 +781,7 @@ describe("x-links validate-on-write", () => {
     expect(res.statusCode).toBe(201);
   });
 
-  it("soft-deleting linked customer succeeds; ticket customerId unchanged (AC-V1-002)", async () => {
+  it("soft-deleting linked customer succeeds; ticket customerId unchanged", async () => {
     const custId = randomUUID();
     customerRepo.docs.set(custId, {
       _id: custId,

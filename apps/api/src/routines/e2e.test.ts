@@ -13,7 +13,7 @@ import { RoutineRunsRepo } from "./run-store-adapter";
 import { RoutineTriggerService, subscribeRoutineEventTriggers } from "./trigger-service";
 
 /**
- * AC-V1-001: a routine using ALL FIVE V1 state types (operation/switch/foreach/sleep/
+ * A routine using ALL FIVE V1 state types (operation/switch/foreach/sleep/
  * inject) and declaring ALL FIVE V1 trigger types (event/manual/cron/webhook/agent)
  * runs end-to-end. This wires the real trigger service → runs repo → driver → engine
  * with an in-memory queue standing in for pg-boss (same at-least-once contract).
@@ -73,7 +73,7 @@ function realJsSandbox(): RoutineSandbox {
   };
 }
 
-describe("AC-V1-001 end-to-end (all 5 states + all 5 triggers)", () => {
+describe("end-to-end (all 5 states + all 5 triggers)", () => {
   let db: PGlite;
   let runs: RoutineRunsRepo;
   let registry: RoutineRegistry;

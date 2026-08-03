@@ -16,7 +16,7 @@ describe("deriveSuggestions", () => {
     expect(out.map((s) => s.id)).toEqual(CATALOG.map((e) => e.id));
   });
 
-  it("hides an entry whose resource already exists (AC-V1-002)", () => {
+  it("hides an entry whose resource already exists", () => {
     const out = deriveSuggestions(soul(["tickets"]));
     expect(out.map((s) => s.id)).not.toContain("tickets");
     expect(out).toHaveLength(CATALOG.length - 1);

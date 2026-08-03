@@ -11,7 +11,7 @@ const skipNoIsovm = nodeMajor === 25;
 import { HookError, HookExecutor, resolveHookWorkerPath } from "./executor";
 
 // HookExecutor needs a worker thread; the capability-free entrypoint is enough here, since
-// AC-V1-003 (timeout) and AC-V1-004 (isolation) never reach back out of the isolate.
+// timeout and isolation behavior never reach back out of the isolate.
 const WORKER_PATH = resolveHookWorkerPath(__dirname, "worker");
 
 describe("HookExecutor", () => {
@@ -27,7 +27,7 @@ describe("HookExecutor", () => {
     await executor.close();
   });
 
-  describe("AC-V1-003: timeout", () => {
+  describe("timeout", () => {
     it("kills hook with infinite loop at ~2s", { timeout: 10_000 }, async () => {
       const hookSource = `({
         async before() { while (true) {} }
@@ -58,7 +58,7 @@ describe("HookExecutor", () => {
     );
   });
 
-  describe("AC-V1-004: sandbox isolation", () => {
+  describe("sandbox isolation", () => {
     it("blocks require('fs')", async () => {
       const hookSource = `({
         async before() { require('fs'); }

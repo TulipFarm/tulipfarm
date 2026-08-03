@@ -3,7 +3,7 @@ import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 
 /**
- * routine.yaml meta-schema (ROUT-V1-004/005, AC-V1-002). CNCF Serverless Workflow 0.8
+ * routine.yaml meta-schema (ROUT-V1-004/005). CNCF Serverless Workflow 0.8
  * subset + `x-` extensions. Deferred constructs (`parallel`/`event` states, `subFlowRef`,
  * `datetime`/`integration` triggers) are detected in a pre-pass and rejected with an
  * explicit "deferred in V1" error before AJV runs, so authors see the real reason instead
@@ -272,7 +272,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 /**
  * Pre-pass: find deferred CNCF SW constructs and throw a "deferred in V1" error with a
- * JSON pointer, before AJV turns them into opaque union-mismatch messages (AC-V1-002).
+ * JSON pointer, before AJV turns them into opaque union-mismatch messages.
  */
 function rejectDeferredConstructs(data: unknown): void {
   if (!isRecord(data)) return;

@@ -2,7 +2,7 @@ import type { SchemaRegistration } from "../registry";
 
 /**
  * Shared building blocks for the canonical authored-definition schemas (Agent, Skill,
- * ToolContract, ModelProfile) registered in the AW-007 {@link SchemaRegistry}. Each schema
+ * ToolContract, ModelProfile) registered in the {@link SchemaRegistry}. Each schema
  * is a plain JSON Schema (draft 2020-12) that satisfies the registry's strict-object and
  * discriminator contracts: every object declares explicit unknown-property behaviour, and the
  * root pins `apiVersion`/`kind` with `const`.

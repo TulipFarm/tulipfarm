@@ -22,7 +22,7 @@ const VALID_DEFINITION: Record<string, unknown> = {
   ],
 };
 
-describe("routine_forge (AC-V1-004)", () => {
+describe("routine_forge", () => {
   let soulPath: string;
   let gitSync: GitSyncService;
   let withSync: ReturnType<typeof vi.fn>;
