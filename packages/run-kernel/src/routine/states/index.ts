@@ -8,5 +8,6 @@ export * from "./human";
 export * from "./parallel";
 export * from "./repeat";
 export * from "./step";
+export * from "./tool";
 export * from "./wait";
 export * from "./wait-plan";

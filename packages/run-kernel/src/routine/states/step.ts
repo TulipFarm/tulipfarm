@@ -29,6 +29,7 @@ export type RoutineStepErrorCode =
   | "missing_body"
   | "missing_routine_ref"
   | "missing_target_ref"
+  | "missing_tool_ref"
   | "output_schema_not_declared"
   | "principals_not_declared"
   | "missing_iterator"

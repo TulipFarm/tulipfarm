@@ -60,9 +60,25 @@ State's authored `onError` path for `wait_timed_out`, or parks. An `event` wait 
 (`unsupported_wait`): nothing in this process delivers that signal, and opening it would strand the
 Run.
 
-State types with effects and Context roots the request Artifact cannot reconstruct are claimed and
-parked as `needs_reconciliation`; they are never interpreted as successful or dispatched through a
-second authority. A satisfied `any`/`quorum` join that still names units to cancel is refused for
+A `tool` State is planned in the run-kernel (`planToolDispatch` — arguments, idempotency key, and
+effect id all derived from the Run and the durable occurrence key) and then decided by
+`routine/tool-port.ts`, this app's only Tool authority for Routines. Everything that decides the
+call is read from the Run's own pinned bundle: the ToolContract it names, and the Guardrails
+compiled into engine rules by `compileGuardrailPolicy`. The bundle digest is recorded as the
+effect's `guardrailRevision`, so the evidence names the exact policy the Run is bound to. Order is
+fail-closed: authorize, then reserve in the effect ledger, then dispatch — a denial never reaches
+an adapter, and a replayed Run finds its own reserved effect instead of writing a second one. A
+confirmed effect succeeds; a definitive refusal takes the State's authored `onError` path for
+`tool_<reason>` and fails the Run when no handler claims it; everything else parks. **Two pieces
+are absent in production and both park rather than improvise:** no source supplies the Run's
+`authorityLayers` (so the broker denies), and the adapter map is empty until installed-Integration
+context has an owner in this process (so an authorized dispatch parks on `adapter_not_found`).
+Routine Approvals are not composed either — an intent policy sends to a human parks with
+`routine:approval_required`.
+
+Other State types with effects and Context roots the request Artifact cannot reconstruct are
+claimed and parked as `needs_reconciliation`; they are never interpreted as successful or
+dispatched through a second authority. A satisfied `any`/`quorum` join that still names units to cancel is refused for
 the same reason — this executor can settle a unit but cannot cancel one parked on a live timer.
 
 ## Executing a turn (`src/turn/`)
@@ -141,7 +157,9 @@ Broker's reconciliation story, not a second ledger here.
   expectedStatus)`; a worker that dies without releasing is recovered by `reclaimExpired`, not by
   anyone forcing a status.
 - `RunExecutorRegistry` holds `chat`, `integration`, and `routine`; `DeliveryTargetRegistry` is empty
-  (delivery targets land in PR 6).
+  (delivery targets land in PR 6), and the Routine Tool port's adapter map is empty for the same
+  reason — never register an adapter here that reaches a provider by a route other than an
+  installed Integration.
 
 `TurnContextPort`, `TurnCompletionStore`, and the delivery host are all backed over HTTP by the
 API's `/api/v1/internal/*` routes (`internal/turn-host.ts`, `internal/delivery-host.ts`). The
