@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { GuardrailsService } from "@tulipfarm/agent-runtime";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import {
   ArtifactService,
@@ -28,6 +30,7 @@ import {
 import {
   ArtifactStore,
   ChildLinkStore,
+  EventStore,
   PgSoulPublicationStore,
   RunEventStore,
   RunStore,
@@ -101,8 +104,15 @@ import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { runCanceller } from "./runs/cancel";
-import { integrationInvoker, manualRoutineTrigger } from "./runtime/invocation-callers";
-import { ActiveRoutineInvocationResolver } from "./runtime/invocation-definitions";
+import {
+  integrationInvoker,
+  manualRoutineTrigger,
+  triggerRunStarter,
+} from "./runtime/invocation-callers";
+import {
+  ActiveRoutineInvocationResolver,
+  ActiveTriggerInvocationResolver,
+} from "./runtime/invocation-definitions";
 import { resolveSoulBundleSigner } from "./runtime/soul-bundle-signer";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import {
@@ -222,6 +232,14 @@ async function boot() {
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleSigner),
     });
+    // Canonical event intake/outbox for Trigger invocation, shared in shape (not process) with the
+    // Worker's own `EventStore` — this is the first API-side instantiation of it.
+    const events = new EventStore(runTransactions, randomUUID);
+    const triggerDefinitions = new ActiveTriggerInvocationResolver(
+      soulPublications,
+      soulBundleSigner,
+      DEPLOYMENT_BUSINESS_ID
+    );
     // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
@@ -500,6 +518,12 @@ async function boot() {
         deliveries: ingressDeliveries,
         invoke: integrationInvoker(invocations),
         resolveSecret: (value) => resolveSecretRef(value, secretsService),
+      },
+      triggerInvoke: {
+        resolveTrigger: (slug) => triggerDefinitions.resolveTrigger(slug),
+        sink: events,
+        startRun: triggerRunStarter(invocations),
+        nextEventId: randomUUID,
       },
     });
 

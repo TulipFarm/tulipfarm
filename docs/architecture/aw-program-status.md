@@ -51,7 +51,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | `operationalApi` | yes | `/api/v1/runs`, `/admin/operations`, `/inbox`, `/roles`, `/guardrails` |
 | `runEvents` | yes | `/api/v1/runs/:id/events`, and the same reader behind `POST /api/v1/chat` — the worker writes the events as of PR 3 |
 | `internalTurns` | yes | `/api/v1/internal/*` — Context, Tool dispatch, delivery classification, and Turn completion for the Worker (service principals only) |
-| `triggerInvoke` | no | Chat and Integration have executors as of PR 3, but Trigger/Routine Run sources do not, so a trigger would only mint Runs to be parked — PR 4 |
+| `triggerInvoke` | yes | `POST /api/v1/triggers/:slug/invoke` — resolves `manual`/`internal_api` Triggers from the active signed Soul bundle, persists the canonical event through `EventStore`, and starts the bound Routine through the same `DurableInvocationGateway` Chat and Integration use; the Worker's Routine executor (PR 4) runs it rather than parking it |
 | `hookIngress` | no | same: signed webhook ingress is inert until its Run source has an executor — PR 4 |
 | `runReplay` | no | replay recompiles the recorded Routine; the run-event stream it reads is only half of what it needs — PR 4 |
 | `routines` / `routineAuthoring` | no | `@tulipfarm/routine-engine` is being retired, not revived — PR 4 |
