@@ -46,7 +46,12 @@ describe("Trigger schema", () => {
 
   it("accepts a webhook trigger only when signature verification is declared", () => {
     const ok = base("webhook", {
-      verification: { method: "hmac_sha256", secretRef: "webhook.github.secret" },
+      provider: "github",
+      verification: {
+        method: "hmac_sha256",
+        secretRef: "webhook.github.secret",
+        signatureHeader: "x-hub-signature-256",
+      },
     });
     expect(() => validateTriggerDefinition(ok)).not.toThrow();
   });

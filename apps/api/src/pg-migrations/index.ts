@@ -424,6 +424,25 @@ const IDENTITY_STATEMENTS: string[] = [
   )`,
 ];
 
+/**
+ * Raw webhook delivery bytes, stored encrypted before the canonical event is derived. This
+ * predates any Run — `ArtifactService` requires a `{runId, stateKey, attempt}` producer, which
+ * does not exist yet at ingestion time — so it is its own table rather than an Artifact.
+ */
+const WEBHOOK_VAULT_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS webhook_raw_payloads (
+    id             uuid PRIMARY KEY,
+    business_id    text NOT NULL,
+    provider       text NOT NULL,
+    trigger_slug   text NOT NULL,
+    encrypted_body text NOT NULL,
+    iv             text NOT NULL,
+    auth_tag       text NOT NULL,
+    received_at    timestamptz NOT NULL
+  )`,
+  "CREATE INDEX IF NOT EXISTS webhook_raw_payloads_business_idx ON webhook_raw_payloads (business_id)",
+];
+
 async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
     handle              text PRIMARY KEY,
@@ -731,6 +750,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query(
         "ALTER TABLE runs ADD CONSTRAINT runs_source_nonempty CHECK (length(source) > 0)"
       );
+    },
+  },
+  {
+    version: 22,
+    description: "encrypted raw webhook payload vault",
+    up: async (q) => {
+      for (const sql of WEBHOOK_VAULT_STATEMENTS) {
+        await q.query(sql);
+      }
     },
   },
 ];
