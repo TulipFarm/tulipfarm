@@ -44,6 +44,7 @@ import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
+import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
@@ -214,6 +215,10 @@ export async function main(): Promise<void> {
         effects: new PgEffectStore(transactions),
         adapters: new Map(),
       }),
+      // An `approval` State parks on a durable wait registered by the API, in the same transaction
+      // as the approval a human will see. The resume token stays there; this process learns the
+      // wait's id, and later the decision.
+      approvals: new HttpRoutineApprovalPort(internalApi),
     })
   );
 

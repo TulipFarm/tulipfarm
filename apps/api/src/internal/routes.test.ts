@@ -19,6 +19,13 @@ import {
   TURN_ID,
   turn,
 } from "../test/turn-host-fixtures";
+import type {
+  InternalRoutineApprovalHost,
+  OpenRoutineApprovalInput,
+  RoutineApprovalDecision,
+  RoutineApprovalDenial,
+} from "./routine-approval-host";
+import { RoutineApprovalDeniedError } from "./routine-approval-host";
 import {
   type HostedRunReader,
   type HostedToolCall,
@@ -307,5 +314,182 @@ describe("/api/v1/internal/turns", () => {
       cursor: 12,
     });
     expect(store.turns[0]).toMatchObject({ businessId: BUSINESS_ID, status: "succeeded" });
+  });
+});
+
+describe("/api/v1/internal/runs/:runId/routine-approvals", () => {
+  let app: FastifyInstance;
+  let sessionCookie: string;
+  let workerCredential: string;
+  let opened: { runId: string; input: OpenRoutineApprovalInput }[];
+  let decision: RoutineApprovalDecision | "absent";
+  let denial: RoutineApprovalDenial | null;
+
+  const wait = {
+    id: "wait-1",
+    stateKey: "Fanout#0/Approve",
+    kind: "approval",
+    aggregation: "first",
+    schemaRef: "wait:approval:Approve",
+    allowedPrincipals: ["role:finance"],
+    expectedSignals: 1,
+    quorum: null,
+    deadlineAt: "2026-08-02T00:01:00.000Z",
+    createdAt: "2026-08-02T00:00:00.000Z",
+  };
+
+  beforeEach(async () => {
+    const sessions = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
+    sessionCookie = await sessions.create(user._id);
+
+    const apiClientRepo = new MemoryApiClientRepo();
+    const { doc, secret } = await createApiClient(apiClientRepo, {
+      name: "worker",
+      ownerUserId: user._id,
+    });
+    workerCredential = formatApiClientCredential(doc.clientId, secret);
+
+    opened = [];
+    decision = "pending";
+    denial = null;
+
+    const refuse = () => {
+      if (denial !== null) throw new RoutineApprovalDeniedError(denial);
+    };
+    const routineApprovals = {
+      async open(_businessId: string, runId: string, input: OpenRoutineApprovalInput) {
+        refuse();
+        opened.push({ runId, input });
+        return { approvalId: "wait-1", waitId: "wait-1", decision: "pending" as const };
+      },
+      async find() {
+        refuse();
+        if (decision === "absent") return undefined;
+        return { approvalId: "wait-1", waitId: "wait-1", decision };
+      },
+    } as unknown as InternalRoutineApprovalHost;
+
+    app = await buildApp({
+      sessionStore: sessions,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      identity: { apiClientRepo },
+      internalTurns: {
+        // The turn host is required to register the area; nothing here reaches it.
+        host: new InternalTurnHost({
+          runs: fakeRuns({ subject: { kind: "user", id: "user-1" } }),
+          store: new FakeConversationStore(),
+          context: {
+            async resolve() {
+              throw new Error("not used");
+            },
+          },
+          tools: {
+            async dispatch() {
+              throw new Error("not used");
+            },
+          },
+        }),
+        llmConfig: () => undefined,
+        routineApprovals,
+      },
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  const asWorker = () => ({ authorization: `Bearer ${workerCredential}` });
+
+  it("opens the approval from the planned wait, taking the Run from the path", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals`,
+      headers: asWorker(),
+      payload: { stateKey: "Fanout#0/Approve", stateName: "Approve", wait },
+    });
+
+    expect(res.statusCode).toBe(200);
+    // The resume token stays here: what comes back names the wait but cannot redeem it.
+    expect(res.json()).toEqual({ approvalId: "wait-1", waitId: "wait-1", decision: "pending" });
+    expect(opened[0]?.runId).toBe(RUN_ID);
+    expect(opened[0]?.input.wait).toEqual(wait);
+  });
+
+  it("drops a body claiming which business or Run the wait belongs to", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals`,
+      headers: asWorker(),
+      payload: {
+        stateKey: "Fanout#0/Approve",
+        stateName: "Approve",
+        wait: { ...wait, businessId: "someone-else", runId: "another-run" },
+      },
+    });
+
+    // Which Run a wait belongs to is the Run's to state, so a body claiming it reaches nothing:
+    // the schema strips both fields and the host registers the wait against the path's Run.
+    expect(res.statusCode).toBe(200);
+    expect(opened[0]?.runId).toBe(RUN_ID);
+    expect(opened[0]?.input.wait).toEqual(wait);
+  });
+
+  it("serves the decision, and 204 when this State occurrence has no approval open", async () => {
+    decision = "approved";
+    const decided = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Fanout%230%2FApprove`,
+      headers: asWorker(),
+    });
+    expect(decided.statusCode).toBe(200);
+    expect(decided.json()).toMatchObject({ decision: "approved" });
+
+    decision = "absent";
+    const absent = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Fanout%230%2FApprove`,
+      headers: asWorker(),
+    });
+    expect(absent.statusCode).toBe(204);
+  });
+
+  it("separates a Run that is gone from one no executor is holding", async () => {
+    denial = "run_not_found";
+    const missing = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Approve`,
+      headers: asWorker(),
+    });
+    expect(missing.statusCode).toBe(404);
+
+    denial = "run_not_running";
+    const parked = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Approve`,
+      headers: asWorker(),
+    });
+    expect(parked.statusCode).toBe(409);
+
+    denial = "not_a_routine";
+    const other = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Approve`,
+      headers: asWorker(),
+    });
+    expect(other.statusCode).toBe(400);
+  });
+
+  it("refuses a signed-in person, so a browser cannot open or read a Run's approval", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/v1/internal/runs/${RUN_ID}/routine-approvals?stateKey=Approve`,
+      headers: { cookie: `${SESSION_COOKIE}=${sessionCookie}; ${CSRF_COOKIE}=${TEST_CSRF}` },
+    });
+
+    expect(res.statusCode).toBe(403);
   });
 });

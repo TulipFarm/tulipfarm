@@ -7,6 +7,12 @@ import {
   type IngressDeliveryHost,
   type ReplyOutcome,
 } from "./delivery-host";
+import type {
+  InternalRoutineApprovalHost,
+  OpenRoutineApprovalInput,
+  RoutineApprovalDenial,
+} from "./routine-approval-host";
+import { RoutineApprovalDeniedError } from "./routine-approval-host";
 import {
   type HostedToolCall,
   type InternalTurnHost,
@@ -49,6 +55,63 @@ const DELIVERY_DENIAL_STATUS: Readonly<Record<DeliveryDenial, number>> = {
   integration_unavailable: 409,
 };
 
+const ROUTINE_APPROVAL_DENIAL_STATUS: Readonly<Record<RoutineApprovalDenial, number>> = {
+  run_not_found: 404,
+  run_not_running: 409,
+  // The Run is live but was not minted as a Routine, so it has no authored State to approve.
+  // Nothing about retrying changes that.
+  not_a_routine: 400,
+};
+
+/** Maps a host denial onto a status, or rethrows anything the caller did not cause. */
+type DenialGuard = <T>(reply: FastifyReply, run: () => Promise<T>) => Promise<T | undefined>;
+
+/**
+ * A durable wait exactly as the run-kernel planned it, minus the identity the route states.
+ *
+ * The Worker sends a plan rather than a registered wait because the plan is authored data — the
+ * State's deadline, its approver roles, its schema — while the resume token the registration mints
+ * is a capability, and that must never travel back over this hop.
+ */
+const WaitPlanSchema = {
+  type: "object",
+  required: [
+    "id",
+    "stateKey",
+    "kind",
+    "aggregation",
+    "schemaRef",
+    "allowedPrincipals",
+    "expectedSignals",
+    "quorum",
+    "deadlineAt",
+    "createdAt",
+  ],
+  additionalProperties: false,
+  properties: {
+    id: { type: "string", minLength: 1 },
+    stateKey: { type: "string", minLength: 1 },
+    kind: { type: "string", enum: ["approval"] },
+    aggregation: { type: "string", enum: ["first", "all", "quorum", "window"] },
+    schemaRef: { type: "string", minLength: 1 },
+    allowedPrincipals: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+    expectedSignals: { type: "integer", minimum: 1 },
+    quorum: { type: ["integer", "null"], minimum: 1 },
+    deadlineAt: { type: "string", minLength: 1 },
+    createdAt: { type: "string", minLength: 1 },
+  },
+} as const;
+
+const RoutineApprovalSchema = {
+  type: "object",
+  required: ["approvalId", "waitId", "decision"],
+  properties: {
+    approvalId: { type: "string" },
+    waitId: { type: "string" },
+    decision: { type: "string", enum: ["pending", "approved", "denied", "expired"] },
+  },
+} as const;
+
 const ToolCallSchema = {
   type: "object",
   required: ["callId", "name"],
@@ -83,6 +146,11 @@ export interface InternalTurnRouteDeps {
    * refs against the encrypted secret store itself, so the key material never crosses this hop.
    */
   llmConfig(): unknown;
+  /**
+   * The approval side of a Routine Run. Absent in a deployment that composes no Routine execution,
+   * in which case the routine-approval routes are simply not registered.
+   */
+  readonly routineApprovals?: InternalRoutineApprovalHost;
 }
 
 export function registerInternalTurnRoutes(
@@ -104,6 +172,10 @@ export function registerInternalTurnRoutes(
     } catch (error) {
       if (error instanceof TurnAuthorityError) {
         await reply.code(DENIAL_STATUS[error.code]).send({ error: error.code });
+        return undefined;
+      }
+      if (error instanceof RoutineApprovalDeniedError) {
+        await reply.code(ROUTINE_APPROVAL_DENIAL_STATUS[error.code]).send({ error: error.code });
         return undefined;
       }
       if (error instanceof DeliveryDeniedError) {
@@ -522,6 +594,8 @@ export function registerInternalTurnRoutes(
     }
   );
 
+  registerRoutineApprovalRoutes(app, deps.routineApprovals, preHandler, guard);
+
   const deliveries = deps.deliveries?.(app.log);
   if (deliveries === undefined) return;
 
@@ -737,6 +811,108 @@ export function registerInternalTurnRoutes(
       );
       if (posted === undefined) return;
       return reply.send(posted);
+    }
+  );
+}
+
+/**
+ * The Routine-approval hop: a Routine State that needs a human parks on a durable kernel wait, and
+ * the wait is registered **here**, in the process that will redeem its resume token.
+ *
+ * Both routes are idempotent by State occurrence. A worker that died between opening the approval
+ * and parking the State replays into the approval it already opened, so a crash never costs a
+ * second human decision.
+ */
+function registerRoutineApprovalRoutes(
+  app: FastifyInstance,
+  host: InternalRoutineApprovalHost | undefined,
+  preHandler: PreHandler[],
+  guard: DenialGuard
+): void {
+  if (host === undefined) return;
+
+  app.post(
+    "/api/v1/internal/runs/:runId/routine-approvals",
+    {
+      preHandler,
+      schema: {
+        description:
+          "Open the approval a Routine State parks on, registering its durable wait in the same " +
+          "transaction. The caller supplies the wait the run-kernel planned from the authored " +
+          "State; which business and which Run it belongs to are taken from the Run, not the body. " +
+          "The resume token stays here. Idempotent: an approval already open for this State " +
+          "occurrence is returned as it stands.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        body: {
+          type: "object",
+          required: ["stateKey", "stateName", "wait"],
+          additionalProperties: false,
+          properties: {
+            stateKey: { type: "string", minLength: 1 },
+            stateName: { type: "string", minLength: 1 },
+            wait: WaitPlanSchema,
+          },
+        },
+        response: {
+          200: RoutineApprovalSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const body = req.body as OpenRoutineApprovalInput;
+      const opened = await guard(reply, () => host.open(DEPLOYMENT_BUSINESS_ID, runId, body));
+      if (opened === undefined) return;
+      return reply.send(opened);
+    }
+  );
+
+  app.get(
+    "/api/v1/internal/runs/:runId/routine-approvals",
+    {
+      preHandler,
+      schema: {
+        description:
+          "What a Routine State's approval was decided, so a resumed Run reads the answer instead " +
+          "of asking again. 204 when this State occurrence has no approval open.",
+        tags: ["internal"],
+        security: [{ bearerToken: [] }],
+        params: RunParamsSchema,
+        querystring: {
+          type: "object",
+          required: ["stateKey"],
+          additionalProperties: false,
+          properties: { stateKey: { type: "string", minLength: 1 } },
+        },
+        response: {
+          200: RoutineApprovalSchema,
+          204: { type: "null", description: "No approval is open for this State occurrence." },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { runId } = req.params as { runId: string };
+      const { stateKey } = req.query as { stateKey: string };
+      const found = await guard(reply, () =>
+        host.find(DEPLOYMENT_BUSINESS_ID, runId, stateKey).then((record) => record ?? null)
+      );
+      // `undefined` is the guard's — it already answered with the denial. `null` is this route's:
+      // the Run is one the Worker may read, and this State occurrence has no approval open.
+      if (found === undefined) return;
+      if (found === null) return reply.code(204).send();
+      return reply.send(found);
     }
   );
 }

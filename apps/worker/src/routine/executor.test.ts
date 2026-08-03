@@ -9,6 +9,11 @@ import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import type { StateTransitionPort } from "../agent-state";
+import type {
+  RoutineApprovalDecision,
+  RoutineApprovalPort,
+  RoutineApprovalRecord,
+} from "./approval-port";
 import type { LoadedRoutineDefinition } from "./definition-loader";
 import { createRoutineExecutor } from "./executor";
 import type { RoutineToolOutcome, RoutineToolRequest } from "./tool-port";
@@ -674,5 +679,183 @@ describe("createRoutineExecutor — tool States", () => {
 
     await expect(execute(run())).resolves.toBe("failed");
     expect(harness.transitions).toContain("Start:running->failed");
+  });
+});
+
+describe("createRoutineExecutor — approval States", () => {
+  /** The decision surface, as this process sees it: one approval per State occurrence. */
+  class ApprovalHarness {
+    readonly opened: { stateKey: string; stateName: string; wait: RegisterWaitInput }[] = [];
+    private readonly records = new Map<string, RoutineApprovalRecord>();
+
+    readonly port: RoutineApprovalPort = {
+      open: async (input) => {
+        const existing = this.records.get(input.stateKey);
+        if (existing !== undefined) return existing;
+        this.opened.push({
+          stateKey: input.stateKey,
+          stateName: input.stateName,
+          wait: input.wait,
+        });
+        const record: RoutineApprovalRecord = {
+          approvalId: input.wait.id,
+          waitId: input.wait.id,
+          decision: "pending",
+        };
+        this.records.set(input.stateKey, record);
+        return record;
+      },
+      find: async (input) => this.records.get(input.stateKey),
+    };
+
+    /** Stands in for a human deciding, or for the deadline passing with nobody deciding. */
+    decide(stateKey: string, decision: RoutineApprovalDecision): void {
+      const record = this.records.get(stateKey);
+      if (record === undefined) throw new Error(`no approval for ${stateKey}`);
+      this.records.set(stateKey, { ...record, decision });
+    }
+  }
+
+  function approvalExecutor(
+    document: routine.RoutineDefinition,
+    harness: StateHarness,
+    approvals?: RoutineApprovalPort
+  ) {
+    return createRoutineExecutor({
+      definitions: { load: async () => ({ document }) as LoadedRoutineDefinition },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      approvals,
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  function approvalDefinition(
+    overrides: Record<string, unknown> = {},
+    rest: readonly routine.RoutineState[] = []
+  ): routine.RoutineDefinition {
+    return definition([
+      {
+        type: "approval",
+        name: "Start",
+        approverRoles: ["finance"],
+        deadlineMs: 60_000,
+        end: true,
+        ...overrides,
+      } as routine.RoutineState,
+      ...rest,
+    ]);
+  }
+
+  const deniedState: routine.RoutineState = {
+    type: "branch",
+    name: "Denied",
+    conditions: [{ condition: "true", end: true }],
+    default: { end: true },
+  };
+
+  it("opens the approval on the authored roles and parks the Run on it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+
+    await expect(
+      approvalExecutor(approvalDefinition(), harness, approvals.port)(run())
+    ).resolves.toBe("waiting");
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->waiting",
+    ]);
+    expect(approvals.opened).toHaveLength(1);
+    expect(approvals.opened[0]).toMatchObject({ stateKey: "Start", stateName: "Start" });
+    expect(approvals.opened[0]?.wait).toMatchObject({
+      id: routineWaitId(run().id, "Start"),
+      kind: "approval",
+      stateKey: "Start",
+      allowedPrincipals: ["role:finance"],
+      deadlineAt: "2026-08-02T00:01:00.000Z",
+    });
+  });
+
+  it("replays into the approval it already opened rather than asking a second human", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+    const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toBe("waiting");
+    expect(approvals.opened).toHaveLength(1);
+  });
+
+  it("continues through the authored transition once approved", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+    const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    approvals.decide("Start", "approved");
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.transitions.slice(4)).toEqual([
+      "Start:waiting->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+  });
+
+  it("fails a denied approval no handler claims", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+    const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    approvals.decide("Start", "denied");
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_rejected");
+  });
+
+  it("lets an authored handler claim a rejection", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+    const execute = approvalExecutor(
+      approvalDefinition(
+        {
+          end: undefined,
+          onError: [{ errorRef: "approval_rejected", transition: "Denied" }],
+        },
+        [deniedState]
+      ),
+      harness,
+      approvals.port
+    );
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    approvals.decide("Start", "denied");
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.events).toContain("Denied:scheduled");
+  });
+
+  it("parks an expired approval rather than reading it as either decision", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const approvals = new ApprovalHarness();
+    const execute = approvalExecutor(approvalDefinition(), harness, approvals.port);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    approvals.decide("Start", "expired");
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_expired");
+  });
+
+  it("parks an approval State when no decision surface is composed", async () => {
+    const harness = new StateHarness([state("Start")]);
+
+    await expect(approvalExecutor(approvalDefinition(), harness)(run())).resolves.toBe(
+      "needs_reconciliation"
+    );
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
   });
 });

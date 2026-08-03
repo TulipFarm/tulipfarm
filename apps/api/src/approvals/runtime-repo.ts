@@ -96,6 +96,26 @@ export class ApprovalsRepo {
     return rows.length > 0 ? rowToApproval(rows[0]) : null;
   }
 
+  /**
+   * The approval opened for one Routine State occurrence, whatever it was decided.
+   *
+   * Keyed by the durable occurrence key rather than the State name, so a fan-out unit gets its own
+   * question. Settled rows count: a replayed Run must read the decision back, not ask again.
+   */
+  async findByRunState(runId: string, stateKey: string): Promise<ApprovalRow | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
+       FROM approvals
+       WHERE kind = 'routine_state'
+         AND payload->>'runId' = $1
+         AND payload->>'stateKey' = $2
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [runId, stateKey]
+    );
+    return rows.length > 0 ? rowToApproval(rows[0]) : null;
+  }
+
   async findById(id: string): Promise<ApprovalRow | null> {
     const { rows } = await this.db.query(
       `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
