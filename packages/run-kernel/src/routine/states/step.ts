@@ -34,7 +34,8 @@ export type RoutineStepErrorCode =
   | "missing_iterator"
   | "state_cannot_progress"
   | "unknown_branch"
-  | "unknown_item";
+  | "unknown_item"
+  | "wait_kind_not_supported";
 
 export class RoutineStepError extends Error {
   constructor(

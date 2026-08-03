@@ -1,6 +1,11 @@
-import { type ArtifactContent, RoutineStateScheduler } from "@tulipfarm/run-kernel";
+import {
+  type ArtifactContent,
+  type RegisterWaitInput,
+  RoutineStateScheduler,
+  routineWaitId,
+} from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
-import type { PersistedRun, PersistedState } from "@tulipfarm/storage";
+import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import type { StateTransitionPort } from "../agent-state";
 import type { LoadedRoutineDefinition } from "./definition-loader";
@@ -76,7 +81,7 @@ function state(key: string, status: PersistedState["status"] = "pending"): Persi
 
 const requestArtifact: ArtifactContent = {
   schemaRef: MANUAL_REQUEST_SCHEMA_REF,
-  content: { slug: "daily-digest", inputs: { score: 7, region: "west" } },
+  content: { slug: "daily-digest", inputs: { score: 7, region: "west", tags: ["a", "b"] } },
   contentHash: "request-hash",
 };
 
@@ -107,6 +112,31 @@ class StateHarness implements StateTransitionPort {
       return { outcome: "inserted", state: inserted };
     },
   });
+
+  readonly waits = new Map<string, PersistedWait>();
+
+  readonly waitPort = {
+    register: async (input: RegisterWaitInput) => {
+      this.events.push(`${input.stateKey}:wait-opened`);
+      const wait = {
+        ...input,
+        status: "pending" as const,
+        resolvedAt: null,
+        version: 0,
+      } satisfies PersistedWait;
+      this.waits.set(input.id, wait);
+      return { wait };
+    },
+    find: async (_businessId: string, waitId: string) => this.waits.get(waitId) ?? null,
+  };
+
+  /** Stands in for the deadline sweep: resolves a registered timer the way `resolveDueWait` does. */
+  resolveWait(stateKey: string, status: "satisfied" | "timed_out"): void {
+    const id = routineWaitId(run().id, stateKey);
+    const wait = this.waits.get(id);
+    if (wait === undefined) throw new Error(`no wait for ${stateKey}`);
+    this.waits.set(id, { ...wait, status, resolvedAt: STARTED_AT });
+  }
 
   async transition(input: Parameters<StateTransitionPort["transition"]>[0]): Promise<void> {
     const persisted = this.states.get(input.stateKey);
@@ -142,6 +172,7 @@ function executor(document: routine.RoutineDefinition, harness: StateHarness) {
     runs: { listStates: async () => [...harness.states.values()] },
     scheduler: harness.scheduler,
     transitions: harness,
+    waits: harness.waitPort,
     now: () => new Date(STARTED_AT),
   });
 }
@@ -265,5 +296,247 @@ describe("createRoutineExecutor", () => {
 
     await expect(execute(run())).resolves.toBe("needs_reconciliation");
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_context");
+  });
+});
+
+describe("createRoutineExecutor — durable waits", () => {
+  function waitDefinition(overrides: Record<string, unknown> = {}): routine.RoutineDefinition {
+    return definition([
+      {
+        type: "wait",
+        name: "Start",
+        waitFor: { kind: "timer", durationMs: 60_000 },
+        end: true,
+        ...overrides,
+      },
+    ]);
+  }
+
+  it("opens a timer and parks the Run on it", async () => {
+    const harness = new StateHarness([state("Start")]);
+
+    await expect(executor(waitDefinition(), harness)(run())).resolves.toBe("waiting");
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->waiting",
+    ]);
+    const wait = harness.waits.get(routineWaitId(run().id, "Start"));
+    expect(wait).toMatchObject({ kind: "timer", stateKey: "Start", status: "pending" });
+    expect(wait?.deadlineAt).toBe("2026-08-02T00:01:00.000Z");
+  });
+
+  it("re-parks a replay whose timer has not resolved without opening a second wait", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(waitDefinition(), harness);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    await expect(execute(run())).resolves.toBe("waiting");
+    expect(harness.waits.size).toBe(1);
+    expect(harness.events.filter((event) => event === "Start:wait-opened")).toHaveLength(1);
+  });
+
+  it("resumes the chain once the deadline sweep satisfies the timer", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const withSuccessor = executor(
+      definition([
+        {
+          type: "wait",
+          name: "Start",
+          waitFor: { kind: "timer", durationMs: 60_000 },
+          transition: "Finish",
+        },
+        {
+          type: "branch",
+          name: "Finish",
+          conditions: [{ condition: "true", end: true }],
+          default: { end: true },
+        },
+      ]),
+      harness
+    );
+
+    await expect(withSuccessor(run())).resolves.toBe("waiting");
+    harness.resolveWait("Start", "satisfied");
+    await expect(withSuccessor(run())).resolves.toBe("succeeded");
+    expect(harness.transitions.slice(4)).toEqual([
+      "Start:waiting->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+      "Finish:pending->ready",
+      "Finish:ready->claimed",
+      "Finish:claimed->running",
+      "Finish:running->succeeded",
+    ]);
+  });
+
+  it("takes the authored error path when the timer expires unsatisfied", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      waitDefinition({ end: undefined, onError: [{ errorRef: "wait_timed_out", end: true }] }),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    harness.resolveWait("Start", "timed_out");
+    await expect(execute(run())).resolves.toBe("succeeded");
+  });
+
+  it("parks an expired timer the Routine declared no handler for", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(waitDefinition(), harness);
+
+    await expect(execute(run())).resolves.toBe("waiting");
+    harness.resolveWait("Start", "timed_out");
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:wait_timed_out");
+  });
+
+  it("parks an event wait nothing in this process can signal", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      waitDefinition({ waitFor: { kind: "event", eventType: "invoice.paid" } }),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_wait");
+    expect(harness.waits.size).toBe(0);
+  });
+});
+
+describe("createRoutineExecutor — bounded fan-out", () => {
+  function leaf(name: string): routine.RoutineState {
+    return {
+      type: "branch",
+      name,
+      conditions: [{ condition: "true", end: true }],
+      default: { end: true },
+    };
+  }
+
+  function parallelDefinition(overrides: Record<string, unknown> = {}) {
+    return definition([
+      {
+        type: "parallel",
+        name: "Start",
+        branches: ["Left", "Right"],
+        maxConcurrency: 2,
+        join: "all",
+        end: true,
+        ...overrides,
+      },
+      leaf("Left"),
+      leaf("Right"),
+    ]);
+  }
+
+  it("executes every branch under its own occurrence key", async () => {
+    const harness = new StateHarness([state("Start")]);
+
+    await expect(executor(parallelDefinition(), harness)(run())).resolves.toBe("succeeded");
+    expect(harness.states.get("Start#Left/Left")?.status).toBe("succeeded");
+    expect(harness.states.get("Start#Right/Right")?.status).toBe("succeeded");
+    expect(harness.inserted).toBe(2);
+    expect(harness.events.indexOf("Start#Right/Right:running->succeeded")).toBeLessThan(
+      harness.events.indexOf("Start:running->succeeded")
+    );
+  });
+
+  it("dispatches in batches no larger than the authored concurrency bound", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(parallelDefinition({ maxConcurrency: 1 }), harness);
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.events.indexOf("Start#Left/Left:running->succeeded")).toBeLessThan(
+      harness.events.indexOf("Start#Right/Right:scheduled")
+    );
+  });
+
+  it("replays a crashed fan-out against its durable rows without repeating settled work", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(parallelDefinition(), harness);
+    harness.failAfterSchedule = true;
+
+    await expect(execute(run())).rejects.toThrow("injected crash");
+    expect(harness.states.get("Start#Left/Left")?.status).toBe("succeeded");
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.inserted).toBe(2);
+  });
+
+  it("fans a foreach out over the pinned collection with per-item Context", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        {
+          type: "foreach",
+          name: "Start",
+          items: "input.tags",
+          body: "Body",
+          maxItems: 10,
+          maxConcurrency: 2,
+          end: true,
+        },
+        {
+          type: "branch",
+          name: "Body",
+          input: { tag: "${ item }" },
+          conditions: [{ condition: "true", end: true }],
+          default: { end: true },
+        },
+      ]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.states.get("Start#0/Body")?.resolvedInput).toEqual({ tag: "a" });
+    expect(harness.states.get("Start#1/Body")?.resolvedInput).toEqual({ tag: "b" });
+    expect(harness.inserted).toBe(2);
+  });
+
+  it("repeats a bounded loop until its authored condition holds", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        {
+          type: "repeat_until",
+          name: "Start",
+          condition: "loop.iteration >= 2",
+          body: "Body",
+          maxIterations: 5,
+          maxDurationMs: 60_000,
+          end: true,
+        },
+        leaf("Body"),
+      ]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect([...harness.states.keys()]).toEqual(["Start", "Start#0/Body", "Start#1/Body"]);
+  });
+
+  it("parks a loop that exhausts its iteration bound rather than exiting silently", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = executor(
+      definition([
+        {
+          type: "repeat_until",
+          name: "Start",
+          condition: "loop.iteration >= 5",
+          body: "Body",
+          maxIterations: 1,
+          maxDurationMs: 60_000,
+          end: true,
+        },
+        leaf("Body"),
+      ]),
+      harness
+    );
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:iteration_cap_exceeded");
   });
 });

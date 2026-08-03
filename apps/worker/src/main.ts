@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   ArtifactService,
+  DurableWaitManager,
   RoutineStateScheduler,
   RunLeaseManager,
   RunResumeGateway,
@@ -137,6 +138,9 @@ export async function main(): Promise<void> {
   const leases = new RunLeaseManager(runStore);
   const resume = new RunResumeGateway(runStore);
   const sweeper = new WaitTimerSweeper(waitStore, resume);
+  // Routine `wait` States open their timers here rather than over the internal API: nothing on the
+  // far side decides a timer, and the same sweeper above is what resolves it.
+  const waits = new DurableWaitManager(waitStore, resume);
 
   // The turn host answers every question a turn has that this process cannot answer itself: which
   // Turn a Run answers, the assembled Context, Tool dispatch, and the durable completion.
@@ -198,6 +202,7 @@ export async function main(): Promise<void> {
       runs: runStore,
       scheduler: new RoutineStateScheduler(runStore),
       transitions: new RunStoreStateTransitions(runStore),
+      waits,
     })
   );
 

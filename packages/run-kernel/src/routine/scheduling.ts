@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   EnsureStateInput,
   EnsureStateResult,
@@ -26,6 +27,39 @@ export function routineStateDefinitionRef(bundle: RunBundle, stateKey: string): 
     `routines/${encodeURIComponent(bundle.routineId)}@${encodeURIComponent(bundle.routineVersion)}`,
     `states/${encodeURIComponent(stateKey)}`,
   ].join("/");
+}
+
+/**
+ * Durable key for one occurrence of an authored State inside a bounded fan-out or loop.
+ *
+ * A `foreach` item, a `parallel` branch, and a `repeat_until` iteration each execute the same
+ * authored States more than once, so the authored name cannot be the durable key. The unit label
+ * is part of the key and derived from the pinned collection or the authored branch list, never
+ * from a counter this process holds: replaying the same fan-out therefore addresses the same rows
+ * instead of scheduling a second copy of work already done.
+ */
+export function routineOccurrenceKey(parentKey: string, unit: string, stateKey: string): string {
+  return `${parentKey}#${unit}/${stateKey}`;
+}
+
+/**
+ * Deterministic wait id for one State occurrence. `run_waits.id` is a primary key, so deriving it
+ * from the Run and the occurrence key is what makes registering a wait replay-safe: a worker that
+ * died between creating the wait and parking the State finds the wait it already created rather
+ * than opening a second timer against the same State.
+ */
+export function routineWaitId(runId: string, stateKey: string): string {
+  const digest = createHash("sha256").update(`routine-wait:${runId}:${stateKey}`).digest("hex");
+  // RFC 4122 version 4 / variant 10 bits, so the value is a legal uuid for the `uuid` column.
+  const version = `4${digest.slice(13, 16)}`;
+  const variant = ((Number.parseInt(digest.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
+  return [
+    digest.slice(0, 8),
+    digest.slice(8, 12),
+    version,
+    `${variant}${digest.slice(17, 20)}`,
+    digest.slice(20, 32),
+  ].join("-");
 }
 
 /** Narrow surface the scheduler needs; `@tulipfarm/storage`'s `RunStore` satisfies it. */

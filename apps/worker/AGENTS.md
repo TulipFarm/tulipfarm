@@ -42,12 +42,28 @@ hands the Run to **the same** chat executor instance, so a Slack turn and a web 
 one code path.
 
 The Routine executor opens only the Run's exact signed bundle and reconstructs manual input from
-its immutable request Artifact. Its first bounded capability is deterministic `branch` State
-execution: each successor is persisted before its predecessor succeeds, making a crash between the
-two writes replay through `ensureState` without duplicate work. State types with effects and
-Context roots the request Artifact cannot reconstruct are claimed and parked as
-`needs_reconciliation`; they are never interpreted as successful or dispatched through a second
-authority.
+its immutable request Artifact. It owns the deterministic capabilities: `branch` graphs, durable
+`wait` timers, and the bounded fan-out and loop constructs (`parallel`, `foreach`, `repeat_until`).
+Two rules make it replay-safe. Each successor is persisted before its predecessor succeeds, so a
+crash between the two writes replays through `ensureState` without duplicate work. And a fan-out
+unit is addressed by a durable occurrence key (`routineOccurrenceKey` — `${parent}#${unit}/${state}`)
+derived from the pinned collection, never from a counter this process holds, so progress is
+*replayed* off the durable State rows rather than tracked in memory: there is no second progress
+ledger to fall out of step with them.
+
+A `wait` opens its timer through `DurableWaitManager` in this process — the wait id is derived from
+`(runId, occurrence key)`, so a worker that died between creating the wait and parking the State
+finds its own wait instead of opening a second one — and returns `waiting`, which parks the Run
+holding no lease. The `wait-sweep` loop above resolves the deadline and requeues the Run; the
+executor then replays the chain from the top against the durable rows. An expired timer takes the
+State's authored `onError` path for `wait_timed_out`, or parks. An `event` wait is refused
+(`unsupported_wait`): nothing in this process delivers that signal, and opening it would strand the
+Run.
+
+State types with effects and Context roots the request Artifact cannot reconstruct are claimed and
+parked as `needs_reconciliation`; they are never interpreted as successful or dispatched through a
+second authority. A satisfied `any`/`quorum` join that still names units to cancel is refused for
+the same reason — this executor can settle a unit but cannot cancel one parked on a live timer.
 
 ## Executing a turn (`src/turn/`)
 
