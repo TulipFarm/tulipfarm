@@ -168,17 +168,23 @@ const specVariants = [
   variant(
     "webhook",
     {
+      provider: nonEmptyString,
       verification: {
         type: "object",
         additionalProperties: false,
-        required: ["method", "secretRef"],
+        required: ["method", "secretRef", "signatureHeader"],
         properties: {
           method: { type: "string", enum: [...WEBHOOK_VERIFICATION_METHODS] },
           secretRef: nonEmptyString,
+          signatureHeader: nonEmptyString,
+          signingTemplate: nonEmptyString,
+          signatureFormat: nonEmptyString,
+          timestampHeader: nonEmptyString,
+          toleranceMs: positiveInteger,
         },
       },
     },
-    ["verification"]
+    ["provider", "verification"]
   ),
   variant(
     "integration_event",

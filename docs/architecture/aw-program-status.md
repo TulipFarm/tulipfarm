@@ -52,7 +52,7 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | `runEvents` | yes | `/api/v1/runs/:id/events`, and the same reader behind `POST /api/v1/chat` — the worker writes the events as of PR 3 |
 | `internalTurns` | yes | `/api/v1/internal/*` — Context, Tool dispatch, delivery classification, and Turn completion for the Worker (service principals only) |
 | `triggerInvoke` | yes | `POST /api/v1/triggers/:slug/invoke` — resolves `manual`/`internal_api` Triggers from the active signed Soul bundle, persists the canonical event through `EventStore`, and starts the bound Routine through the same `DurableInvocationGateway` Chat and Integration use; the Worker's Routine executor (PR 4) runs it rather than parking it |
-| `hookIngress` | no | same: signed webhook ingress is inert until its Run source has an executor — PR 4 |
+| `hookIngress` | yes | `POST /api/v1/hooks/:provider/:trigger` — resolves published `webhook` Triggers from the active signed Soul bundle by `(provider, slug)`, verifies the delivery signature and stores the raw bytes encrypted (`webhook_raw_payloads`, ahead of any Run), then persists the canonical event through the same `EventStore` `triggerInvoke` uses |
 | `runReplay` | no | replay recompiles the recorded Routine; the run-event stream it reads is only half of what it needs — PR 4 |
 | `routines` / `routineAuthoring` | no | `@tulipfarm/routine-engine` is being retired, not revived — PR 4 |
 | `forms` | no | no form storage; `GovernedFormView` is rendered by no route — PR 6 |
@@ -214,9 +214,9 @@ data is withheld. They fill in when PR 1/3/4 land their writers.
   is served over HTTP by `/api/v1/internal/tools`, which runs the API's existing `ToolRegistry`.
   The port is the contract, so PR 4 can swap the implementation, but the broker's approval and
   reconciliation logic is still uncomposed today.
-- **`triggerInvoke`, `hookIngress`, and `runReplay` are still deferred.** Chat and Integration have
-  executors; Trigger/Routine Runs do not, so composing those opts would mint Runs nothing executes.
-  They move with the Routine work in PR 4.
+- **`runReplay` is still deferred.** Chat and Integration have executors; Trigger/Routine Runs do
+  not, so composing that opt would mint Runs nothing executes. It moves with the Routine work in
+  PR 4. `triggerInvoke` and `hookIngress` are composed (PR #305 and this PR).
 - **NOTIFY is installed but nothing listens.** Migration `17` creates the `run_events` trigger;
   the API has no `LISTEN` connection yet, so streams still wake on the 500ms poll. This was always
   a latency hint, never correctness — the reader re-reads by cursor regardless.

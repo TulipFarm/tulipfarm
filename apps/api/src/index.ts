@@ -61,6 +61,8 @@ import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
 import { registerGuardrailsReload } from "./guardrails/reload";
 import { createHookExecutor } from "./hooks/executor";
+import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
+import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
@@ -112,6 +114,7 @@ import {
 import {
   ActiveRoutineInvocationResolver,
   ActiveTriggerInvocationResolver,
+  ActiveWebhookTriggerResolver,
 } from "./runtime/invocation-definitions";
 import { resolveSoulBundleSigner } from "./runtime/soul-bundle-signer";
 import { bootstrapFromEnv } from "./setup/bootstrap";
@@ -240,6 +243,13 @@ async function boot() {
       soulBundleSigner,
       DEPLOYMENT_BUSINESS_ID
     );
+    const webhookTriggerDefinitions = new ActiveWebhookTriggerResolver(
+      soulPublications,
+      soulBundleSigner,
+      DEPLOYMENT_BUSINESS_ID
+    );
+    // Same DEK `SecretsService` encrypts stored secrets with — no separate key material.
+    const webhookRawPayloadVault = new PgRawPayloadVault(pool, activeDek.key);
     // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
@@ -524,6 +534,16 @@ async function boot() {
         sink: events,
         startRun: triggerRunStarter(invocations),
         nextEventId: randomUUID,
+      },
+      hookIngress: {
+        resolveTrigger: (provider, trigger) =>
+          webhookTriggerDefinitions.resolveTrigger(provider, trigger),
+        ingress: {
+          secrets: webhookSecretPort(secretsService),
+          vault: webhookRawPayloadVault,
+          sink: events,
+          nextEventId: randomUUID,
+        },
       },
     });
 

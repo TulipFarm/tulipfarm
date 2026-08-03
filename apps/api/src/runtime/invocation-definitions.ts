@@ -4,6 +4,8 @@ import {
   type RoutineInvocationResolver,
   routineStateDefinitionRef,
   type TriggerKind,
+  type WebhookTrigger,
+  type WebhookVerificationMethod,
 } from "@tulipfarm/run-kernel";
 import { definitions } from "@tulipfarm/schema";
 import type { BundleSigner, SoulPublicationCoordinator } from "@tulipfarm/soul";
@@ -13,6 +15,8 @@ const ROUTINE_DEFINITION_PREFIX = "published:routine:";
 // Widened so `.includes` accepts a raw `string` read off an authored document rather than only a
 // value already known to be a `TriggerType`.
 const TRIGGER_TYPES: readonly string[] = definitions.trigger.TRIGGER_TYPES;
+const WEBHOOK_VERIFICATION_METHODS: readonly string[] =
+  definitions.trigger.WEBHOOK_VERIFICATION_METHODS;
 
 type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
 
@@ -165,6 +169,96 @@ export class ActiveTriggerInvocationResolver {
         principalId: backgroundIdentity.principalId,
       },
       ...(inputMappings === undefined ? {} : { inputMappings }),
+    };
+  }
+}
+
+/**
+ * Resolves a webhook Trigger only from the verified active Soul bundle, for the same reason as
+ * {@link ActiveTriggerInvocationResolver}. Never populates `filter`: the authored `filter` is a
+ * plain dot-path string, structurally incompatible with `WebhookTrigger`'s `{path, equals}` shape.
+ */
+export class ActiveWebhookTriggerResolver {
+  constructor(
+    private readonly publications: ActiveBundleReader,
+    private readonly signer: BundleSigner,
+    private readonly businessId: string
+  ) {}
+
+  async resolveTrigger(provider: string, triggerSlug: string): Promise<WebhookTrigger | null> {
+    if (provider.length === 0 || triggerSlug.length === 0) return null;
+
+    const bundle = await this.publications.activeBundle(this.businessId, this.signer);
+    const definition = bundle?.get("Trigger", triggerSlug);
+    if (!bundle || !definition) return null;
+
+    const document = definition.document;
+    const metadata = isRecord(document.metadata) ? document.metadata : undefined;
+    const spec = isRecord(document.spec) ? document.spec : undefined;
+    if (metadata?.lifecycle !== "published" || spec?.type !== "webhook") return null;
+
+    if (spec.provider !== provider) return null;
+
+    const eventType = spec.eventType;
+    const eventVersion = spec.eventVersion;
+    if (
+      typeof eventType !== "string" ||
+      eventType.length === 0 ||
+      typeof eventVersion !== "number"
+    ) {
+      return null;
+    }
+
+    const verification = spec.verification;
+    if (
+      !isRecord(verification) ||
+      typeof verification.method !== "string" ||
+      !WEBHOOK_VERIFICATION_METHODS.includes(verification.method) ||
+      typeof verification.secretRef !== "string" ||
+      verification.secretRef.length === 0 ||
+      typeof verification.signatureHeader !== "string" ||
+      verification.signatureHeader.length === 0
+    ) {
+      return null;
+    }
+    const optionalStringField = (value: unknown): string | undefined =>
+      typeof value === "string" && value.length > 0 ? value : undefined;
+    const signingTemplate = optionalStringField(verification.signingTemplate);
+    const signatureFormat = optionalStringField(verification.signatureFormat);
+    const timestampHeader = optionalStringField(verification.timestampHeader);
+    const toleranceMs =
+      typeof verification.toleranceMs === "number" ? verification.toleranceMs : undefined;
+
+    const backgroundIdentity = spec.backgroundIdentity;
+    if (
+      !isRecord(backgroundIdentity) ||
+      typeof backgroundIdentity.principalKind !== "string" ||
+      backgroundIdentity.principalKind.length === 0 ||
+      typeof backgroundIdentity.principalId !== "string" ||
+      backgroundIdentity.principalId.length === 0
+    ) {
+      return null;
+    }
+
+    return {
+      triggerSlug,
+      businessId: this.businessId,
+      provider,
+      eventType,
+      eventVersion,
+      verification: {
+        method: verification.method as WebhookVerificationMethod,
+        secretRef: verification.secretRef,
+        signatureHeader: verification.signatureHeader,
+        ...(signingTemplate === undefined ? {} : { signingTemplate }),
+        ...(signatureFormat === undefined ? {} : { signatureFormat }),
+        ...(timestampHeader === undefined ? {} : { timestampHeader }),
+        ...(toleranceMs === undefined ? {} : { toleranceMs }),
+      },
+      backgroundIdentity: {
+        principalKind: backgroundIdentity.principalKind,
+        principalId: backgroundIdentity.principalId,
+      },
     };
   }
 }

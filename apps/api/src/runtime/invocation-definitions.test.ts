@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   ActiveRoutineInvocationResolver,
   ActiveTriggerInvocationResolver,
+  ActiveWebhookTriggerResolver,
 } from "./invocation-definitions";
 
 const BUSINESS_ID = "business-1";
@@ -95,6 +96,58 @@ async function activeTriggerResolver(document: VersionedSchemaDocument) {
   await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
   await publications.drain("test");
   return new ActiveTriggerInvocationResolver(publications, signer, BUSINESS_ID);
+}
+
+function webhookTrigger(
+  overrides: {
+    lifecycle?: "draft" | "published";
+    type?: unknown;
+    provider?: unknown;
+    verification?: unknown;
+  } = {}
+): VersionedSchemaDocument {
+  return {
+    apiVersion: "tulipfarm.ai/v1",
+    kind: "Trigger",
+    metadata: {
+      id: "33333333-3333-4333-8333-333333333333",
+      slug: "github-push",
+      schemaVersion: 1,
+      authoredVersion: 2,
+      lifecycle: overrides.lifecycle ?? "published",
+    },
+    spec: {
+      type: overrides.type ?? "webhook",
+      routineRef: { name: "daily-digest", version: "7" },
+      eventType: "github.push",
+      eventVersion: 1,
+      backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+      deduplication: { key: "github-push" },
+      provider: overrides.provider ?? "github",
+      verification: overrides.verification ?? {
+        method: "hmac_sha256",
+        secretRef: "webhook.github.secret",
+        signatureHeader: "x-hub-signature-256",
+      },
+    },
+  } as VersionedSchemaDocument;
+}
+
+async function activeWebhookTriggerResolver(document: VersionedSchemaDocument) {
+  const publications = new SoulPublicationCoordinator(
+    new InMemorySoulPublicationStore(),
+    new InMemoryBundleStore(),
+    { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  );
+  const bundle = compileExecutionBundle({
+    businessId: BUSINESS_ID,
+    changesetId: "changeset-1",
+    commitSha: "c0ffee",
+    documents: [document, routine()],
+  });
+  await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+  await publications.drain("test");
+  return new ActiveWebhookTriggerResolver(publications, signer, BUSINESS_ID);
 }
 
 describe("ActiveRoutineInvocationResolver", () => {
@@ -216,5 +269,81 @@ describe("ActiveTriggerInvocationResolver", () => {
   it("refuses an unknown slug", async () => {
     const resolver = await activeTriggerResolver(trigger());
     await expect(resolver.resolveTrigger("missing")).resolves.toBeNull();
+  });
+});
+
+describe("ActiveWebhookTriggerResolver", () => {
+  it("maps the verified active webhook Trigger to a WebhookTrigger", async () => {
+    const resolver = await activeWebhookTriggerResolver(webhookTrigger());
+
+    await expect(resolver.resolveTrigger("github", "github-push")).resolves.toEqual({
+      triggerSlug: "github-push",
+      businessId: BUSINESS_ID,
+      provider: "github",
+      eventType: "github.push",
+      eventVersion: 1,
+      verification: {
+        method: "hmac_sha256",
+        secretRef: "webhook.github.secret",
+        signatureHeader: "x-hub-signature-256",
+      },
+      backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+    });
+  });
+
+  it("maps optional verification fields when authored", async () => {
+    const resolver = await activeWebhookTriggerResolver(
+      webhookTrigger({
+        verification: {
+          method: "hmac_sha256",
+          secretRef: "webhook.github.secret",
+          signatureHeader: "x-hub-signature-256",
+          signingTemplate: "{timestamp}.{body}",
+          signatureFormat: "sha256={signature}",
+          timestampHeader: "x-hub-timestamp",
+          toleranceMs: 300_000,
+        },
+      })
+    );
+
+    await expect(resolver.resolveTrigger("github", "github-push")).resolves.toMatchObject({
+      verification: {
+        signingTemplate: "{timestamp}.{body}",
+        signatureFormat: "sha256={signature}",
+        timestampHeader: "x-hub-timestamp",
+        toleranceMs: 300_000,
+      },
+    });
+  });
+
+  it("does not consult another source when no bundle is active", async () => {
+    const publications = new SoulPublicationCoordinator(
+      new InMemorySoulPublicationStore(),
+      new InMemoryBundleStore(),
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    );
+    const resolver = new ActiveWebhookTriggerResolver(publications, signer, BUSINESS_ID);
+
+    await expect(resolver.resolveTrigger("github", "github-push")).resolves.toBeNull();
+  });
+
+  it("refuses a draft webhook Trigger even when its bundle was activated", async () => {
+    const resolver = await activeWebhookTriggerResolver(webhookTrigger({ lifecycle: "draft" }));
+    await expect(resolver.resolveTrigger("github", "github-push")).resolves.toBeNull();
+  });
+
+  it("refuses a mismatched provider", async () => {
+    const resolver = await activeWebhookTriggerResolver(webhookTrigger({ provider: "github" }));
+    await expect(resolver.resolveTrigger("stripe", "github-push")).resolves.toBeNull();
+  });
+
+  it("refuses a non-webhook Trigger type", async () => {
+    const resolver = await activeWebhookTriggerResolver(trigger());
+    await expect(resolver.resolveTrigger("github", "start-digest")).resolves.toBeNull();
+  });
+
+  it("refuses an unknown slug", async () => {
+    const resolver = await activeWebhookTriggerResolver(webhookTrigger());
+    await expect(resolver.resolveTrigger("github", "missing")).resolves.toBeNull();
   });
 });
