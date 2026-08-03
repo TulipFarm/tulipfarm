@@ -26,6 +26,7 @@ export type RoutineStepErrorCode =
   | "items_not_bounded"
   | "iteration_cap_exceeded"
   | "iterations_not_bounded"
+  | "missing_agent_ref"
   | "missing_body"
   | "missing_routine_ref"
   | "missing_target_ref"
