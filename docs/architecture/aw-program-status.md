@@ -67,9 +67,9 @@ and fails unless a missing option is listed in `DEFERRED_OPTIONS` with the PR th
 | `agent-runtime` | 15 | composed — the turn engine the Worker executes: context assembly, the bounded loop, and all three guardrail stages (PR 3) |
 | `surface` | 11 | composed — Artifacts are created by the `surface_*` Tools the Worker dispatches through the internal host |
 | `sandbox` | 11 | composed — one isolated-vm implementation, used by the API's resource hooks and by the Worker's Integration classifier (PR 3) |
-| `authz` | 5 | partly composed — principal/identity types plus the deployment role catalog (`apps/api/src/identity/roles.ts`); the policy engine (`decideEffectivePermission`, `evaluateGuardrail`, `checkDlpBoundary`) still has no production caller |
+| `authz` | 6 | partly composed — principal/identity types plus the deployment role catalog (`apps/api/src/identity/roles.ts`); the policy engine (`decideEffectivePermission`, `evaluateGuardrail`, `checkDlpBoundary`) now decides Routine Tool intents through `compileGuardrailPolicy` over the Run's pinned Guardrails, but no production caller supplies authority layers yet, so it denies fail-closed |
 | `integrations` | 5 | partly composed — the Worker's Integration executor runs the manifest classifier and reply binding (PR 3); the four `apps/integration-worker` importers still never start (D2) |
-| `tool-broker` | 1 | not composed — SQL DDL constant only. The Worker's `ToolDispatchPort` is served over HTTP by `/api/v1/internal/tools`, so PR 3's dispatch path does **not** go through the broker as planned; PR 4 owns that move |
+| `tool-broker` | 2 | partly composed — Routine `tool` States authorize, reserve, and dispatch through the broker in the Worker (`apps/worker/src/routine/tool-port.ts`, PR 4), but with an empty adapter map and no Routine authority source, so an authorized dispatch parks instead of reaching a provider. Chat turns still dispatch over HTTP through `/api/v1/internal/tools` |
 | `routine-engine` | 2 | orphan subtree, scheduled for retirement |
 | `validation`, `testkit`, `audit`, `observability`, `knowledge`, `memory` | 0 | not composed |
 

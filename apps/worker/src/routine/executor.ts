@@ -1,3 +1,4 @@
+import type { AuthorityLayer } from "@tulipfarm/authz";
 import {
   type ArtifactService,
   type CompiledExpression,
@@ -17,6 +18,7 @@ import {
   planForeach,
   planParallel,
   planTimerWait,
+  planToolDispatch,
   type RegisterWaitInput,
   RoutineInputResolutionError,
   type RoutineStateScheduler,
@@ -35,10 +37,12 @@ import {
   stepRepeat,
 } from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
+import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "../agent-state";
 import type { RunExecutor } from "../executors";
 import type { WorkerRoutineDefinitionLoader } from "./definition-loader";
+import type { RoutineToolPort } from "./tool-port";
 
 export type RoutineExecutionRefusalCode =
   | "invalid_request_artifact"
@@ -85,6 +89,16 @@ interface RoutineExecutorOptions {
   readonly scheduler: Pick<RoutineStateScheduler, "schedule">;
   readonly transitions: StateTransitionPort;
   readonly waits: RoutineWaitPort;
+  /**
+   * Tool authority for `tool` States. Absent, a Tool State is parked rather than dispatched: this
+   * executor holds no second path to an external effect.
+   */
+  readonly tools?: RoutineToolPort;
+  /**
+   * The authority a Routine Run acts under. Fail-closed by default — with no layers the Tool
+   * Broker denies every intent — because nothing in this process may mint authority of its own.
+   */
+  readonly authority?: (run: PersistedRun, state: CompiledState) => readonly AuthorityLayer[];
   readonly now?: () => Date;
   readonly identityCeiling?: (run: PersistedRun) => IdentityCeiling;
 }
@@ -107,6 +121,7 @@ const SUPPORTED_ROOTS: ReadonlySet<string> = new Set(["input", "states", "item",
 /** Deterministic State types with no external effect and no Context this executor cannot build. */
 const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
   "branch",
+  "tool",
   "wait",
   "parallel",
   "foreach",
@@ -115,6 +130,9 @@ const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
 
 /** Error reference an expired `wait` raises, so an authored `onError` handler can claim it. */
 const WAIT_TIMED_OUT = "wait_timed_out";
+
+/** Prefix an authored `onError` handler claims a refused or failed Tool dispatch by. */
+const TOOL_ERROR_PREFIX = "tool_";
 
 function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
   return {
@@ -231,6 +249,7 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
     const execution = new RoutineExecution({
       run,
       routine,
+      bundle: loaded.bundle,
       request,
       persisted,
       options,
@@ -245,6 +264,8 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
 interface ExecutionContext {
   readonly run: PersistedRun;
   readonly routine: CompiledRoutine;
+  /** The Run's exact pinned bundle — the only source of Tool contracts and Guardrail policy. */
+  readonly bundle: RuntimeBundle;
   readonly request: ManualRoutineRequest;
   readonly persisted: Map<string, PersistedState>;
   readonly options: RoutineExecutorOptions;
@@ -356,7 +377,9 @@ class RoutineExecution {
       outcome =
         state.type === "branch"
           ? decideBranch(state, scope).outcome
-          : await this.runComposite(state, key, scope, outputs, depth);
+          : state.type === "tool"
+            ? await this.runTool(state, key, scope)
+            : await this.runComposite(state, key, scope, outputs, depth);
     }
     if (outcome === null) return { kind: "waiting" };
     if (outcome === "failed") {
@@ -376,6 +399,49 @@ class RoutineExecution {
     }
     await this.transition(key, "running", "succeeded");
     return { kind: "outcome", outcome };
+  }
+
+  /**
+   * One `tool` State: planned here, decided and dispatched by the Tool Broker.
+   *
+   * A confirmed effect succeeds. A definitive refusal — denied by policy, or failed at the
+   * provider — takes the State's authored `onError` path so an author can handle a denial the way
+   * they handle any other failure, and fails the Run when no handler claims it. Everything else
+   * parks: an intent awaiting a human has no Approval to wait on in this process yet, and an
+   * ambiguous or undispatchable effect is a question only reconciliation may answer.
+   */
+  private async runTool(
+    state: CompiledState,
+    key: string,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<StepOutcome | ChainOutcome | null> {
+    const port = this.ctx.options.tools;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    const result = await port.execute({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      plan: planToolDispatch(state, scope, {
+        businessId: this.ctx.run.businessId,
+        runId: this.ctx.run.id,
+        stateKey: key,
+      }),
+      bundle: this.ctx.bundle,
+      authorityLayers: this.ctx.options.authority?.(this.ctx.run, state) ?? [],
+    });
+
+    if (result.kind === "succeeded") return stateOutcome(state);
+    if (result.kind !== "failed") {
+      await this.park(key, `routine:${result.reason}`);
+      return "needs_reconciliation";
+    }
+
+    const decision = resolveErrorPath(state, `${TOOL_ERROR_PREFIX}${result.reason}`, "failed");
+    if (decision.kind === "handled") return decision.outcome;
+    if (decision.kind === "failed") return "failed";
+    await this.park(key, `routine:${TOOL_ERROR_PREFIX}${result.reason}`);
+    return "needs_reconciliation";
   }
 
   /**

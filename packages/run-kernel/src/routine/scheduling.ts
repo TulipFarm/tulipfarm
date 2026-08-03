@@ -49,8 +49,22 @@ export function routineOccurrenceKey(parentKey: string, unit: string, stateKey: 
  * than opening a second timer against the same State.
  */
 export function routineWaitId(runId: string, stateKey: string): string {
-  const digest = createHash("sha256").update(`routine-wait:${runId}:${stateKey}`).digest("hex");
-  // RFC 4122 version 4 / variant 10 bits, so the value is a legal uuid for the `uuid` column.
+  return derivedId("routine-wait", runId, stateKey);
+}
+
+/**
+ * Deterministic effect id for one Tool State occurrence. `effect_records.effect_id` is a primary
+ * key, so deriving it the same way makes reserving an effect replay-safe: a worker that died
+ * between reserving and recording the reservation finds its own row instead of writing a second
+ * one against the same State.
+ */
+export function routineEffectId(runId: string, stateKey: string): string {
+  return derivedId("routine-effect", runId, stateKey);
+}
+
+/** A `uuid` column needs a legal uuid, so the digest is dressed as an RFC 4122 version 4 value. */
+function derivedId(purpose: string, runId: string, stateKey: string): string {
+  const digest = createHash("sha256").update(`${purpose}:${runId}:${stateKey}`).digest("hex");
   const version = `4${digest.slice(13, 16)}`;
   const variant = ((Number.parseInt(digest.slice(16, 17), 16) & 0x3) | 0x8).toString(16);
   return [

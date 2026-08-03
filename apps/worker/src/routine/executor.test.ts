@@ -2,6 +2,7 @@ import {
   type ArtifactContent,
   type RegisterWaitInput,
   RoutineStateScheduler,
+  routineEffectId,
   routineWaitId,
 } from "@tulipfarm/run-kernel";
 import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
@@ -10,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import type { StateTransitionPort } from "../agent-state";
 import type { LoadedRoutineDefinition } from "./definition-loader";
 import { createRoutineExecutor } from "./executor";
+import type { RoutineToolOutcome, RoutineToolRequest } from "./tool-port";
 
 const STARTED_AT = "2026-08-02T00:00:00.000Z";
 const INPUT_REGION_EXPRESSION = `\${ input.region }`;
@@ -538,5 +540,139 @@ describe("createRoutineExecutor — bounded fan-out", () => {
 
     await expect(execute(run())).resolves.toBe("needs_reconciliation");
     expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:iteration_cap_exceeded");
+  });
+});
+
+describe("createRoutineExecutor — tool States", () => {
+  const bundle = { digest: "bundle-digest" } as unknown as LoadedRoutineDefinition["bundle"];
+
+  function toolExecutor(
+    document: routine.RoutineDefinition,
+    harness: StateHarness,
+    outcome: RoutineToolOutcome,
+    calls: RoutineToolRequest[] = []
+  ) {
+    return createRoutineExecutor({
+      definitions: {
+        load: async () => ({ document, bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      tools: {
+        execute: async (request) => {
+          calls.push(request);
+          return outcome;
+        },
+      },
+      authority: () => [{ name: "routine", grants: [] }],
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  const commentState: routine.RoutineState = {
+    type: "tool",
+    name: "Start",
+    toolRef: { name: "github.issue.comment", version: "1.0.0" },
+    action: "issue.comment",
+    destination: "github",
+    input: { body: INPUT_REGION_EXPRESSION },
+    end: true,
+  } as routine.RoutineState;
+
+  it("dispatches a Tool State through the broker port and settles it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const calls: RoutineToolRequest[] = [];
+    const execute = toolExecutor(definition([commentState]), harness, { kind: "succeeded" }, calls);
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.plan.arguments).toEqual({ body: "west" });
+    expect(calls[0]?.plan.effectId).toBe(routineEffectId(run().id, "Start"));
+    expect(calls[0]?.authorityLayers).toEqual([{ name: "routine", grants: [] }]);
+  });
+
+  it("parks a Tool State when no Tool authority is composed", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([commentState]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
+  });
+
+  it("parks an intent awaiting a human rather than dispatching or failing it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = toolExecutor(definition([commentState]), harness, {
+      kind: "awaiting_approval",
+      reason: "approval_required",
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
+  });
+
+  it("parks an effect only reconciliation can resolve, naming what stopped it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = toolExecutor(definition([commentState]), harness, {
+      kind: "unavailable",
+      reason: "effect_ambiguous",
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:effect_ambiguous");
+  });
+
+  it("lets an authored handler claim a denied dispatch", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = toolExecutor(
+      definition([
+        {
+          ...commentState,
+          end: undefined,
+          onError: [{ errorRef: "tool_guardrail_denied", transition: "Fallback" }],
+        } as routine.RoutineState,
+        {
+          type: "branch",
+          name: "Fallback",
+          conditions: [{ condition: "input.score > 0", end: true }],
+          default: { end: true },
+        },
+      ]),
+      harness,
+      { kind: "failed", reason: "guardrail_denied" }
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.events).toContain("Fallback:scheduled");
+  });
+
+  it("fails a Tool State whose refusal no handler claims", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = toolExecutor(definition([commentState]), harness, {
+      kind: "failed",
+      reason: "dispatch_failed",
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(harness.transitions).toContain("Start:running->failed");
   });
 });

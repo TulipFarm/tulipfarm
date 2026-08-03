@@ -26,6 +26,7 @@ import {
   RunStore,
   WaitStore,
 } from "@tulipfarm/storage";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
 import { loadDataDirEnv } from "./data-dir";
@@ -46,6 +47,7 @@ import { startProbeServer } from "./probe-server";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
+import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
 import { createChatExecutor } from "./turn/chat-executor";
@@ -203,6 +205,15 @@ export async function main(): Promise<void> {
       scheduler: new RoutineStateScheduler(runStore),
       transitions: new RunStoreStateTransitions(runStore),
       waits,
+      // Every Tool a Routine dispatches goes through the Broker: it authorizes against the Run's
+      // own pinned Guardrails, reserves the effect in the ledger, and only then calls an adapter.
+      // The adapter map is empty until installed-Integration context has an owner in this process,
+      // so an authorized dispatch parks for reconciliation instead of reaching a provider by some
+      // other route — there is no second path to an external effect here.
+      tools: new BrokerRoutineToolPort({
+        effects: new PgEffectStore(transactions),
+        adapters: new Map(),
+      }),
     })
   );
 

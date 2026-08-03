@@ -45,6 +45,8 @@ export type { DlpCrossing, DlpRule } from "./guardrails/dlp";
 export { checkDlpBoundary } from "./guardrails/dlp";
 export type { GuardrailContext, GuardrailRule } from "./guardrails/engine";
 export { evaluateGuardrail } from "./guardrails/engine";
+export type { GuardrailPolicy, GuardrailPolicyRefusalCode } from "./guardrails/policy";
+export { compileGuardrailPolicy, GuardrailPolicyError } from "./guardrails/policy";
 export type { AutonomyLevel, TaintLevel } from "./guardrails/risk";
 export { autonomyWithin, taintWithin } from "./guardrails/risk";
 export type { Guest, GuestDenialReason, GuestStatus } from "./guests";
