@@ -3,18 +3,26 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
-    "@tulipfarm/integrations": "workspace:*"
+    "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/storage": "workspace:*",
+    "dotenv": "^17.4.2",
+    "pg": "^8.22.0"
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.3",
+    "@electric-sql/pglite-socket": "^0.2.7",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
+    "esbuild": "^0.28.1",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
