@@ -9,6 +9,8 @@ import {
   RoutineStateScheduleError,
   RoutineStateScheduler,
   type RoutineStateScheduleStore,
+  routineOccurrenceKey,
+  routineWaitId,
 } from "./scheduling";
 
 const RUN: PersistedRun = {
@@ -128,5 +130,31 @@ describe("RoutineStateScheduler", () => {
       })
     ).rejects.toEqual(new RoutineStateScheduleError("invalid_state_identity", RUN.id));
     expect(store.inputs).toEqual([]);
+  });
+});
+
+describe("routineOccurrenceKey", () => {
+  it("addresses one occurrence of an authored State inside a fan-out", () => {
+    expect(routineOccurrenceKey("Fan", "0", "Notify")).toBe("Fan#0/Notify");
+  });
+
+  it("nests, so a fan-out inside a fan-out keeps distinct rows", () => {
+    const outer = routineOccurrenceKey("Fan", "0", "Inner");
+    expect(routineOccurrenceKey(outer, "1", "Notify")).toBe("Fan#0/Inner#1/Notify");
+  });
+});
+
+describe("routineWaitId", () => {
+  it("derives a stable uuid, so a replay finds the wait it already opened", () => {
+    const first = routineWaitId(RUN.id, "Fan#0/Notify");
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(routineWaitId(RUN.id, "Fan#0/Notify")).toBe(first);
+  });
+
+  it("separates occurrences and Runs", () => {
+    expect(routineWaitId(RUN.id, "Fan#0/Notify")).not.toBe(routineWaitId(RUN.id, "Fan#1/Notify"));
+    expect(routineWaitId(RUN.id, "Notify")).not.toBe(
+      routineWaitId("00000000-0000-4000-8000-000000000002", "Notify")
+    );
   });
 });
