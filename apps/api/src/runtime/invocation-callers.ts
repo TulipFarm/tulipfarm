@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
-import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
+import type { DurableInvocationGateway, RunInvocation } from "@tulipfarm/run-kernel";
 import { INTEGRATION_REQUEST_SCHEMA_REF, MANUAL_REQUEST_SCHEMA_REF } from "@tulipfarm/schema";
 import type { IngressJobPayload } from "../ingress/routes";
 
@@ -67,5 +67,38 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
       payloadSchemaRef: INTEGRATION_REQUEST_SCHEMA_REF,
       idempotencyKey: digest(payload),
     });
+  };
+}
+
+/**
+ * Starts a Routine from a bound Trigger invocation. Reuses `MANUAL_REQUEST_SCHEMA_REF` rather than
+ * a Trigger-specific schema: the Worker's Routine executor only reconstructs a manual request
+ * (`{slug, inputs}`) from the request Artifact, so a Trigger-invoked Run must publish the same shape
+ * or the Worker parks it for reconciliation instead of executing it.
+ *
+ * `initiator` and `effectiveSubject` are both the Trigger's authored background identity — never the
+ * event's principal, so a caller cannot borrow authority beyond what the Trigger declared.
+ */
+export function triggerRunStarter(invocations: DurableInvocationGateway) {
+  return async (
+    invocation: RunInvocation
+  ): Promise<{ runId: string; outcome: "started" | "duplicate" }> => {
+    const identity = {
+      kind: invocation.backgroundIdentity.principalKind,
+      id: invocation.backgroundIdentity.principalId,
+    };
+    const payload = { slug: invocation.routineRef.name, inputs: invocation.input };
+    const result = await invocations.start({
+      source: "manual",
+      runSource: "routine",
+      businessId: invocation.businessId,
+      initiator: identity,
+      effectiveSubject: identity,
+      definitionRef: `published:routine:${invocation.routineRef.name}`,
+      payload,
+      payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      idempotencyKey: invocation.idempotencyKey,
+    });
+    return { runId: result.runId, outcome: result.outcome };
   };
 }

@@ -19,12 +19,10 @@ const indexSource = readFileSync(join(__dirname, "index.ts"), "utf8");
  * decision with an owner, never a silent omission.
  */
 const DEFERRED_OPTIONS: Readonly<Record<string, string>> = {
-  // PR 4: PR 3 gave the worker executors for `chat` and `integration`, so Chat and every channel
-  // execute — but all three of these options resolve *Triggers* and *Routines*, whose Run sources
-  // still have no executor. Composing them would mint Runs the worker can only park for
-  // reconciliation, which is the same reason they were deferred before, now naming the PR that
-  // actually lands the consumers.
-  triggerInvoke: "PR 4 — Routine/Trigger consumers on the worker",
+  // PR 4: PR 3 gave the worker executors for `chat` and `integration`, and the Routine executor
+  // landed across PR 4's own worker slices — `triggerInvoke` is now composed. `hookIngress` still
+  // resolves *webhook* Triggers, which need signature-verification/secret plumbing that does not
+  // exist yet.
   hookIngress: "PR 4 — Routine/Trigger consumers on the worker",
   // Replay recompiles the recorded Routine and re-executes it; the run-event stream it reads is
   // only half of what it needs.

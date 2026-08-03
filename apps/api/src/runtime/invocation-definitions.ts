@@ -1,16 +1,35 @@
 import {
+  type RegisteredTrigger,
   type ResolvedRoutineInvocation,
   type RoutineInvocationResolver,
   routineStateDefinitionRef,
+  type TriggerKind,
 } from "@tulipfarm/run-kernel";
+import { definitions } from "@tulipfarm/schema";
 import type { BundleSigner, SoulPublicationCoordinator } from "@tulipfarm/soul";
 
 const ROUTINE_DEFINITION_PREFIX = "published:routine:";
+
+// Widened so `.includes` accepts a raw `string` read off an authored document rather than only a
+// value already known to be a `TriggerType`.
+const TRIGGER_TYPES: readonly string[] = definitions.trigger.TRIGGER_TYPES;
 
 type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `undefined`: no mapping authored. `null`: authored but malformed — the caller must fail closed. */
+function mapInputMappings(raw: unknown): Record<string, string> | undefined | null {
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw)) return null;
+  const mapped: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (typeof value !== "string") return null;
+    mapped[key] = value;
+  }
+  return mapped;
 }
 
 /**
@@ -65,6 +84,87 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
           start
         ),
       },
+    };
+  }
+}
+
+/**
+ * Resolves a Trigger only from the verified active Soul bundle, for the same reason as
+ * {@link ActiveRoutineInvocationResolver}: a missing, draft, or malformed active definition denies
+ * the invocation before it can mint a Run. `semanticIntakeAgent` is never set — no authored Trigger
+ * can declare it today — and `requireVerified` is never set, since the manual/internal_api envelopes
+ * this resolver serves are always constructed `unverified` by the invoking route.
+ */
+export class ActiveTriggerInvocationResolver {
+  constructor(
+    private readonly publications: ActiveBundleReader,
+    private readonly signer: BundleSigner,
+    private readonly businessId: string
+  ) {}
+
+  async resolveTrigger(slug: string): Promise<RegisteredTrigger | null> {
+    if (slug.length === 0) return null;
+
+    const bundle = await this.publications.activeBundle(this.businessId, this.signer);
+    const definition = bundle?.get("Trigger", slug);
+    if (!bundle || !definition) return null;
+
+    const document = definition.document;
+    const metadata = isRecord(document.metadata) ? document.metadata : undefined;
+    const spec = isRecord(document.spec) ? document.spec : undefined;
+    if (metadata?.lifecycle !== "published" || spec === undefined) return null;
+
+    const type = spec.type;
+    if (typeof type !== "string" || !TRIGGER_TYPES.includes(type)) return null;
+
+    const routineRef = spec.routineRef;
+    if (
+      !isRecord(routineRef) ||
+      typeof routineRef.name !== "string" ||
+      routineRef.name.length === 0 ||
+      typeof routineRef.version !== "string" ||
+      routineRef.version.length === 0
+    ) {
+      return null;
+    }
+
+    const eventType = spec.eventType;
+    const eventVersion = spec.eventVersion;
+    if (
+      typeof eventType !== "string" ||
+      eventType.length === 0 ||
+      typeof eventVersion !== "number"
+    ) {
+      return null;
+    }
+
+    const backgroundIdentity = spec.backgroundIdentity;
+    if (
+      !isRecord(backgroundIdentity) ||
+      typeof backgroundIdentity.principalKind !== "string" ||
+      backgroundIdentity.principalKind.length === 0 ||
+      typeof backgroundIdentity.principalId !== "string" ||
+      backgroundIdentity.principalId.length === 0
+    ) {
+      return null;
+    }
+
+    const inputMappings = mapInputMappings(spec.inputMapping);
+    if (inputMappings === null) return null;
+
+    return {
+      triggerSlug: slug,
+      authoredVersion: definition.authoredVersion,
+      lifecycle: "published",
+      type: type as TriggerKind,
+      eventType,
+      eventVersion,
+      routineRef: { name: routineRef.name, version: routineRef.version },
+      backgroundIdentity: {
+        principalKind: backgroundIdentity.principalKind,
+        principalId: backgroundIdentity.principalId,
+      },
+      ...(inputMappings === undefined ? {} : { inputMappings }),
     };
   }
 }

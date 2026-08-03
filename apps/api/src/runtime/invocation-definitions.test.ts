@@ -8,7 +8,10 @@ import {
 } from "@tulipfarm/soul";
 import { InMemorySoulPublicationStore } from "@tulipfarm/storage";
 import { describe, expect, it, vi } from "vitest";
-import { ActiveRoutineInvocationResolver } from "./invocation-definitions";
+import {
+  ActiveRoutineInvocationResolver,
+  ActiveTriggerInvocationResolver,
+} from "./invocation-definitions";
 
 const BUSINESS_ID = "business-1";
 const signer = createHmacBundleSigner("bundle-key-1", "secret");
@@ -50,6 +53,48 @@ async function activeResolver(document: VersionedSchemaDocument) {
   await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
   await publications.drain("test");
   return new ActiveRoutineInvocationResolver(publications, signer);
+}
+
+function trigger(
+  overrides: { lifecycle?: "draft" | "published"; type?: unknown; inputMapping?: unknown } = {}
+): VersionedSchemaDocument {
+  return {
+    apiVersion: "tulipfarm.ai/v1",
+    kind: "Trigger",
+    metadata: {
+      id: "22222222-2222-4222-8222-222222222222",
+      slug: "start-digest",
+      schemaVersion: 1,
+      authoredVersion: 3,
+      lifecycle: overrides.lifecycle ?? "published",
+    },
+    spec: {
+      type: overrides.type ?? "manual",
+      routineRef: { name: "daily-digest", version: "7" },
+      eventType: "digest.requested",
+      eventVersion: 1,
+      backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+      deduplication: { key: "digest" },
+      ...(overrides.inputMapping === undefined ? {} : { inputMapping: overrides.inputMapping }),
+    },
+  } as VersionedSchemaDocument;
+}
+
+async function activeTriggerResolver(document: VersionedSchemaDocument) {
+  const publications = new SoulPublicationCoordinator(
+    new InMemorySoulPublicationStore(),
+    new InMemoryBundleStore(),
+    { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+  );
+  const bundle = compileExecutionBundle({
+    businessId: BUSINESS_ID,
+    changesetId: "changeset-1",
+    commitSha: "c0ffee",
+    documents: [document, routine()],
+  });
+  await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+  await publications.drain("test");
+  return new ActiveTriggerInvocationResolver(publications, signer, BUSINESS_ID);
 }
 
 describe("ActiveRoutineInvocationResolver", () => {
@@ -113,5 +158,63 @@ describe("ActiveRoutineInvocationResolver", () => {
         definitionRef: "published:agent:daily-digest",
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("ActiveTriggerInvocationResolver", () => {
+  it("maps the verified active Trigger to a RegisteredTrigger", async () => {
+    const resolver = await activeTriggerResolver(trigger());
+
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toEqual({
+      triggerSlug: "start-digest",
+      authoredVersion: 3,
+      lifecycle: "published",
+      type: "manual",
+      eventType: "digest.requested",
+      eventVersion: 1,
+      routineRef: { name: "daily-digest", version: "7" },
+      backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+    });
+  });
+
+  it("maps an authored inputMapping to string-keyed inputMappings", async () => {
+    const resolver = await activeTriggerResolver(
+      trigger({ inputMapping: { subject: "record.id" } })
+    );
+
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toMatchObject({
+      inputMappings: { subject: "record.id" },
+    });
+  });
+
+  it("does not consult another source when no bundle is active", async () => {
+    const publications = new SoulPublicationCoordinator(
+      new InMemorySoulPublicationStore(),
+      new InMemoryBundleStore(),
+      { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
+    );
+    const resolver = new ActiveTriggerInvocationResolver(publications, signer, BUSINESS_ID);
+
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toBeNull();
+  });
+
+  it("refuses a draft Trigger even when its bundle was activated", async () => {
+    const resolver = await activeTriggerResolver(trigger({ lifecycle: "draft" }));
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toBeNull();
+  });
+
+  it("refuses an unknown Trigger type", async () => {
+    const resolver = await activeTriggerResolver(trigger({ type: "unsupported" }));
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toBeNull();
+  });
+
+  it("refuses a malformed inputMapping value", async () => {
+    const resolver = await activeTriggerResolver(trigger({ inputMapping: { subject: 42 } }));
+    await expect(resolver.resolveTrigger("start-digest")).resolves.toBeNull();
+  });
+
+  it("refuses an unknown slug", async () => {
+    const resolver = await activeTriggerResolver(trigger());
+    await expect(resolver.resolveTrigger("missing")).resolves.toBeNull();
   });
 });

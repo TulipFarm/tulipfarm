@@ -5,9 +5,14 @@ import {
   DurableInvocationGateway,
   InvocationDeniedError,
   PgDurableInvocationStore,
+  type RunInvocation,
   TypedOutputValidator,
 } from "@tulipfarm/run-kernel";
-import { INTEGRATION_REQUEST_SCHEMA_REF, INVOCATION_REQUEST_SCHEMAS } from "@tulipfarm/schema";
+import {
+  INTEGRATION_REQUEST_SCHEMA_REF,
+  INVOCATION_REQUEST_SCHEMAS,
+  MANUAL_REQUEST_SCHEMA_REF,
+} from "@tulipfarm/schema";
 import {
   compileExecutionBundle,
   createHmacBundleSigner,
@@ -20,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { integrationInvoker, manualRoutineTrigger } from "./invocation-callers";
+import { integrationInvoker, manualRoutineTrigger, triggerRunStarter } from "./invocation-callers";
 import { ActiveRoutineInvocationResolver } from "./invocation-definitions";
 
 /** A verified Slack delivery as the ingress route hands it over, after signature + accept checks. */
@@ -33,6 +38,24 @@ const SLACK_JOB = {
   },
   headers: { "x-slack-request-timestamp": "1785400000" },
 };
+
+/** A bound Trigger invocation as `buildInvocation` would produce it. */
+function runInvocation(overrides: Partial<RunInvocation> = {}): RunInvocation {
+  return {
+    businessId: DEPLOYMENT_BUSINESS_ID,
+    routineRef: { name: "daily-digest", version: "7" },
+    triggerSlug: "start-digest",
+    triggerVersion: 3,
+    eventId: "event-1",
+    idempotencyKey: "start-digest:3:start-digest:event-1",
+    backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
+    mode: "routine",
+    input: { limit: 5 },
+    classification: [],
+    causationId: "event-1",
+    ...overrides,
+  };
+}
 
 /**
  * The non-chat entrypoints over real SQL. A channel delivery and a Routine trigger get the same
@@ -199,6 +222,58 @@ describe("non-chat invocation callers", () => {
         now: new Date(),
       })
     ).resolves.toMatchObject({ content: { slug: "daily-digest", inputs: { limit: 5 } } });
+  });
+
+  it("starts a Routine from a bound Trigger invocation, under the Trigger's background identity", async () => {
+    const { runId, outcome } = await triggerRunStarter(invocations)(runInvocation());
+    expect(outcome).toBe("started");
+
+    const runs = await db.query<{
+      source: string;
+      run_source: string;
+      identity: { initiator: { kind: string; id: string } };
+    }>(
+      `SELECT runs.source AS run_source, runs.identity, invocation.source
+         FROM runs
+         JOIN durable_invocations invocation
+           ON invocation.business_id = runs.business_id AND invocation.run_id = runs.id
+        WHERE runs.id = $1`,
+      [runId]
+    );
+    expect(runs.rows[0]?.run_source).toBe("routine");
+    expect(runs.rows[0]?.source).toBe("manual");
+    expect(runs.rows[0]?.identity.initiator).toEqual({
+      kind: "system",
+      id: "trigger-runner",
+    });
+
+    // Reused as-is: the Worker's Routine executor only reconstructs a manual request shape from
+    // the request Artifact, regardless of what minted the Run.
+    await expect(
+      reader().read({
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        artifactId: `${runId}:request`,
+        reader: "service:run-executor",
+        allowedClassifications: [],
+        now: new Date(),
+      })
+    ).resolves.toMatchObject({
+      schemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      content: { slug: "daily-digest", inputs: { limit: 5 } },
+    });
+  });
+
+  it("resolves a redelivered Trigger invocation to the Run its first delivery minted", async () => {
+    const start = triggerRunStarter(invocations);
+    const first = await start(runInvocation());
+    const second = await start(runInvocation());
+
+    expect(first.outcome).toBe("started");
+    expect(second.outcome).toBe("duplicate");
+    expect(second.runId).toBe(first.runId);
+
+    const counts = await db.query<{ runs: number }>("SELECT count(*)::int AS runs FROM runs");
+    expect(counts.rows[0]?.runs).toBe(1);
   });
 
   it("mints no Run when a Routine has no active publication", async () => {
