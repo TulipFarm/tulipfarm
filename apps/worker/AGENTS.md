@@ -76,6 +76,30 @@ context has an owner in this process (so an authorized dispatch parks on `adapte
 An intent the broker sends to a human still parks with `routine:approval_required`: that approval
 is bound to the *effect*, and nothing persists one yet.
 
+An `agent` State is where a Routine asks an Agent something. It is planned in the run-kernel
+(`planAgentInvocation` — which Agent, at which authored version, over the input resolved from the
+Context by the same rules every other State uses, against the output schema the State declared) and
+answered by `routine/agent-port.ts`. Everything that decides the question is read from the Run's own
+pinned bundle: the Agent at exactly the authored version (a bundle carrying another parks as
+`agent_version_mismatch` rather than answering with a different Agent), its personality, and the
+ModelProfile it names — so a Run that waited through three publications still asks the Agent it was
+minted against. It then runs the **same** `AgentLoop` a chat turn runs, over the same Context
+manifest and the same guardrail stages. A definitive failure takes the State's authored `onError`
+path under `agent_<reason>` and fails the Run when nothing claims it; a cancelling Run is left to
+`RunCancellationManager`; everything else parks.
+
+**Four limits are real and none is papered over.** The State exposes **no Tools** — a Routine's
+effects belong to its `tool` States, where the Broker authorizes and the effect ledger reserves them,
+and a second dispatch path beside the one the author declared is exactly what this executor must not
+grow; the loop's dispatch port denies every call. The guardrail policy is the deployment default
+(`DEFAULT_GUARDRAILS`), because no Soul publishes a prompt policy into the bundle yet — the recorded
+`guardrailDigest` is the policy that actually ran, never one that did not. The Agent's
+`instructions.md` body is a Soul **companion** file (hash only, not carried in the bundle), so the
+prompt is built from `spec.personality`. And State outputs are still not plumbed: every settled
+State records `{ output: null }`, so `${states.X.output}` resolves null for an `agent` State exactly
+as it does for every other type — threading only this one would make a replayed, already-succeeded
+State fail to re-derive it.
+
 An `approval` State is the approval that does exist. The wait is planned here, by the run-kernel
 (`planApprovalWait` — the authored deadline and `approverRoles` become a bounded wait allowing
 `role:<role>` principals), and registered on the other side of `routine/approval-port.ts`: the API

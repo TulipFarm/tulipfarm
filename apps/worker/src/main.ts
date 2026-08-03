@@ -44,6 +44,7 @@ import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
+import { BundleRoutineAgentPort } from "./routine/agent-port";
 import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
 import { createRoutineExecutor } from "./routine/executor";
@@ -219,6 +220,16 @@ export async function main(): Promise<void> {
       // as the approval a human will see. The resume token stays there; this process learns the
       // wait's id, and later the decision.
       approvals: new HttpRoutineApprovalPort(internalApi),
+      // An `agent` State runs the same bounded loop a chat turn runs, against the Agent and
+      // ModelProfile the Run's own bundle names. It exposes no Tools: a Routine's effects belong to
+      // its `tool` States, where the Broker authorizes and the ledger reserves them.
+      agents: new BundleRoutineAgentPort({
+        model: new LlmModelPort({ model: (id) => llm.model(id) }),
+        events: runEventStore,
+        budgets: budgetStore,
+        runs: runStore,
+        log: logger,
+      }),
     })
   );
 

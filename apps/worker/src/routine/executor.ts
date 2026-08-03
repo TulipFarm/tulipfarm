@@ -1,6 +1,7 @@
 import type { AuthorityLayer } from "@tulipfarm/authz";
 import {
   type ArtifactService,
+  agentOutputSchema,
   type CompiledExpression,
   type CompiledRoutine,
   type CompiledState,
@@ -15,6 +16,7 @@ import {
   joinParallel,
   type ParallelProgress,
   type PersistedWait,
+  planAgentInvocation,
   planApprovalWait,
   planForeach,
   planParallel,
@@ -43,6 +45,7 @@ import type { RuntimeBundle } from "@tulipfarm/soul";
 import type { PersistedRun, PersistedState, RunStore } from "@tulipfarm/storage";
 import type { StateTransitionPort } from "../agent-state";
 import type { RunExecutor } from "../executors";
+import type { RoutineAgentPort } from "./agent-port";
 import type { RoutineApprovalPort } from "./approval-port";
 import type { WorkerRoutineDefinitionLoader } from "./definition-loader";
 import type { RoutineToolPort } from "./tool-port";
@@ -98,6 +101,11 @@ interface RoutineExecutorOptions {
    */
   readonly tools?: RoutineToolPort;
   /**
+   * Agent authority for `agent` States. Absent, an `agent` State is parked rather than answered:
+   * this executor holds no model of its own and will not invent an answer for a Routine.
+   */
+  readonly agents?: RoutineAgentPort;
+  /**
    * Where an `approval` State's durable wait is opened and its decision read back. Absent, an
    * `approval` State is parked: a Run may not proceed past a question nobody was asked.
    */
@@ -128,6 +136,7 @@ const SUPPORTED_ROOTS: ReadonlySet<string> = new Set(["input", "states", "item",
 
 /** Deterministic State types with no external effect and no Context this executor cannot build. */
 const SUPPORTED_TYPES: ReadonlySet<string> = new Set([
+  "agent",
   "approval",
   "branch",
   "tool",
@@ -142,6 +151,9 @@ const WAIT_TIMED_OUT = "wait_timed_out";
 
 /** Prefix an authored `onError` handler claims a refused or failed Tool dispatch by. */
 const TOOL_ERROR_PREFIX = "tool_";
+
+/** Prefix an authored `onError` handler claims a refused or failed Agent answer by. */
+const AGENT_ERROR_PREFIX = "agent_";
 
 function defaultIdentityCeiling(run: PersistedRun): IdentityCeiling {
   return {
@@ -392,7 +404,9 @@ class RoutineExecution {
           ? decideBranch(state, scope).outcome
           : state.type === "tool"
             ? await this.runTool(state, key, scope)
-            : await this.runComposite(state, key, scope, outputs, depth);
+            : state.type === "agent"
+              ? await this.runAgent(state, key, row, scope)
+              : await this.runComposite(state, key, scope, outputs, depth);
     }
     if (outcome === null) return { kind: "waiting" };
     if (outcome === "failed") {
@@ -454,6 +468,54 @@ class RoutineExecution {
     if (decision.kind === "handled") return decision.outcome;
     if (decision.kind === "failed") return "failed";
     await this.park(key, `routine:${TOOL_ERROR_PREFIX}${result.reason}`);
+    return "needs_reconciliation";
+  }
+
+  /**
+   * One `agent` State: planned in the kernel, answered by the Agent authority.
+   *
+   * The Run's own pinned bundle decides which Agent answers and under which model, so a Run that
+   * waited through a publication still asks the Agent it was minted against. A definitive failure —
+   * a guardrail refusal, an exhausted budget, a model error — takes the State's authored `onError`
+   * path under `agent_<reason>`, so an author handles it exactly as they handle a Tool failure.
+   * A cancellation is left to the cancellation manager, and everything else parks: an answer this
+   * process could not obtain is never invented, and a Tool call the loop sent to a human has no
+   * Approval here to wait on.
+   */
+  private async runAgent(
+    state: CompiledState,
+    key: string,
+    row: PersistedState,
+    scope: Readonly<Record<string, unknown>>
+  ): Promise<StepOutcome | ChainOutcome | null> {
+    const port = this.ctx.options.agents;
+    if (port === undefined) throw new RoutineExecutionRefusal("unsupported_state", state.name);
+
+    const plan = planAgentInvocation(state, scope);
+    const schema = agentOutputSchema(this.ctx.routine.outputSchemas, plan.outputSchemaRef);
+    const result = await port.execute({
+      businessId: this.ctx.run.businessId,
+      runId: this.ctx.run.id,
+      stateKey: key,
+      // The row version this attempt claimed the State at, so a retried State's loop events cannot
+      // collide with the events the previous attempt already appended.
+      attempt: row.version,
+      plan,
+      ...(schema === undefined ? {} : { outputSchema: schema }),
+      bundle: this.ctx.bundle,
+    });
+
+    if (result.kind === "succeeded") return stateOutcome(state);
+    if (result.kind === "cancelled") return "cancelled";
+    if (result.kind !== "failed") {
+      await this.park(key, `routine:${result.reason}`);
+      return "needs_reconciliation";
+    }
+
+    const decision = resolveErrorPath(state, `${AGENT_ERROR_PREFIX}${result.reason}`, "failed");
+    if (decision.kind === "handled") return decision.outcome;
+    if (decision.kind === "failed") return "failed";
+    await this.park(key, `routine:${AGENT_ERROR_PREFIX}${result.reason}`);
     return "needs_reconciliation";
   }
 

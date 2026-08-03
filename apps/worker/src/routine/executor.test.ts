@@ -9,6 +9,7 @@ import { MANUAL_REQUEST_SCHEMA_REF, type routine } from "@tulipfarm/schema";
 import type { PersistedRun, PersistedState, PersistedWait } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import type { StateTransitionPort } from "../agent-state";
+import type { RoutineAgentOutcome, RoutineAgentRequest } from "./agent-port";
 import type {
   RoutineApprovalDecision,
   RoutineApprovalPort,
@@ -675,6 +676,161 @@ describe("createRoutineExecutor — tool States", () => {
     const execute = toolExecutor(definition([commentState]), harness, {
       kind: "failed",
       reason: "dispatch_failed",
+    });
+
+    await expect(execute(run())).resolves.toBe("failed");
+    expect(harness.transitions).toContain("Start:running->failed");
+  });
+});
+
+describe("createRoutineExecutor — agent States", () => {
+  const bundle = { digest: "bundle-digest" } as unknown as LoadedRoutineDefinition["bundle"];
+
+  function agentExecutor(
+    document: routine.RoutineDefinition,
+    harness: StateHarness,
+    outcome: RoutineAgentOutcome,
+    calls: RoutineAgentRequest[] = []
+  ) {
+    return createRoutineExecutor({
+      definitions: {
+        load: async () => ({ document, bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      agents: {
+        execute: async (request) => {
+          calls.push(request);
+          return outcome;
+        },
+      },
+      now: () => new Date(STARTED_AT),
+    });
+  }
+
+  const classifyState: routine.RoutineState = {
+    type: "agent",
+    name: "Start",
+    agentRef: { name: "triage", version: "1" },
+    input: { region: INPUT_REGION_EXPRESSION },
+    output: {
+      type: "object",
+      required: ["category"],
+      properties: { category: { type: "string" } },
+    },
+    end: true,
+  } as routine.RoutineState;
+
+  it("asks the Agent the question the Context resolved and settles the State", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const calls: RoutineAgentRequest[] = [];
+    const execute = agentExecutor(
+      definition([classifyState]),
+      harness,
+      { kind: "succeeded", output: { category: "billing" } },
+      calls
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.transitions).toEqual([
+      "Start:pending->ready",
+      "Start:ready->claimed",
+      "Start:claimed->running",
+      "Start:running->succeeded",
+    ]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.plan.agentRef).toEqual({ name: "triage", version: "1" });
+    expect(calls[0]?.plan.input).toEqual({ region: "west" });
+    // The declared output schema travels with the question, so the answer is validated in the loop.
+    expect(calls[0]?.outputSchema).toEqual({
+      type: "object",
+      required: ["category"],
+      properties: { category: { type: "string" } },
+    });
+    expect(calls[0]?.bundle.digest).toBe("bundle-digest");
+  });
+
+  it("parks an Agent State when no Agent authority is composed", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = createRoutineExecutor({
+      definitions: {
+        load: async () =>
+          ({ document: definition([classifyState]), bundle }) as LoadedRoutineDefinition,
+      },
+      artifacts: { read: async () => requestArtifact },
+      runs: { listStates: async () => [...harness.states.values()] },
+      scheduler: harness.scheduler,
+      transitions: harness,
+      waits: harness.waitPort,
+      now: () => new Date(STARTED_AT),
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:unsupported_state");
+  });
+
+  it("parks an answer nothing here could obtain, naming what stopped it", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, {
+      kind: "unavailable",
+      reason: "agent_not_in_bundle",
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:agent_not_in_bundle");
+  });
+
+  it("parks a Tool call the loop sent to a human, since no Approval exists here", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, {
+      kind: "awaiting_approval",
+      reason: "approval_required",
+    });
+
+    await expect(execute(run())).resolves.toBe("needs_reconciliation");
+    expect(harness.states.get("Start")?.errorEvidenceRef).toBe("routine:approval_required");
+  });
+
+  it("leaves a cancelled Run's status to the cancellation manager", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, { kind: "cancelled" });
+
+    await expect(execute(run())).resolves.toBe("cancelled");
+    expect(harness.transitions).not.toContain("Start:running->failed");
+  });
+
+  it("lets an authored handler claim a guardrail refusal", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(
+      definition([
+        {
+          ...classifyState,
+          end: undefined,
+          onError: [{ errorRef: "agent_guardrail_output_blocked", transition: "Fallback" }],
+        } as routine.RoutineState,
+        {
+          type: "branch",
+          name: "Fallback",
+          conditions: [{ condition: "input.score > 0", end: true }],
+          default: { end: true },
+        },
+      ]),
+      harness,
+      { kind: "failed", reason: "guardrail_output_blocked" }
+    );
+
+    await expect(execute(run())).resolves.toBe("succeeded");
+    expect(harness.events).toContain("Fallback:scheduled");
+  });
+
+  it("fails an Agent State whose failure no handler claims", async () => {
+    const harness = new StateHarness([state("Start")]);
+    const execute = agentExecutor(definition([classifyState]), harness, {
+      kind: "failed",
+      reason: "model_error",
     });
 
     await expect(execute(run())).resolves.toBe("failed");
