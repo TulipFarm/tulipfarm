@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the OCI installer (scripts/install.sh) — the real AC-001 path,
+# Smoke test for the OCI installer (scripts/install.sh) — the real install path,
 # exercised hermetically: build the app image locally as :ci, run the installer against
 # this repo (TF_LOCAL_SRC) into a throwaway dir on a throwaway port, and assert /health.
 #
@@ -36,7 +36,7 @@ trap cleanup EXIT
 
 # Fail fast (and meaningfully) before the slow image build when the script is absent.
 [ -f "${REPO_ROOT}/scripts/install.sh" ] \
-  || fail "scripts/install.sh not found — implement the installer (AW-002)"
+  || fail "scripts/install.sh not found — implement the installer"
 command -v docker >/dev/null 2>&1 || fail "docker not on PATH"
 docker compose version >/dev/null 2>&1 || fail "docker compose v2 plugin required"
 

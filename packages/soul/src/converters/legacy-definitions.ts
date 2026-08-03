@@ -7,7 +7,7 @@ export { convertLegacyAgent } from "./agent";
 export type { ConversionResult, ConversionWarning, ConversionWarningCode } from "./shared";
 export { convertLegacySkill } from "./skill";
 
-/** Legacy artifacts to convert in one batch. Resources/Routines/Integrations are out of scope (AW-016). */
+/** Legacy artifacts to convert in one batch. Resources/Routines/Integrations are out of scope. */
 export interface LegacyDefinitionBatch {
   readonly agents?: readonly SoulAgent[];
   readonly skills?: readonly SoulSkill[];

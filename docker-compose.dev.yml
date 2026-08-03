@@ -1,6 +1,6 @@
 name: tulipfarm
 
-# Dev-only override (INST-007 / AC-006): expose the bundled Postgres to a natively
+# Dev-only override: expose the bundled Postgres to a natively
 # running `pnpm dev`. The production compose keeps Postgres internal-only; this host
 # port appears only when you explicitly pass `-f docker-compose.dev.yml`.
 #

@@ -35,7 +35,7 @@ Element.prototype.scrollIntoView = vi.fn();
 
 const Stub = createRemixStub([{ path: "/", Component: ChatRoute }]);
 
-test("default view is the live chat empty state with adaptive suggestions (AC-V1-001/002)", () => {
+test("default view is the live chat empty state with adaptive suggestions", () => {
   vi.mocked(remix.useLoaderData).mockReturnValue({
     agentId: undefined,
     defaultModel: "standard",
@@ -63,7 +63,7 @@ test("default view is the live chat empty state with adaptive suggestions (AC-V1
   expect(document.querySelector('input[type="file"]')).toBeNull();
 });
 
-test("clientLoader never blocks chat: a failed suggestions fetch yields [] (AC-V1-001)", async () => {
+test("clientLoader never blocks chat: a failed suggestions fetch yields []", async () => {
   vi.mocked(getAgent).mockRejectedValue(new Error("api down"));
   vi.mocked(listOnboardingSuggestions).mockRejectedValue(new Error("api down"));
   vi.mocked(getOnboardingChecklist).mockRejectedValue(new Error("api down"));

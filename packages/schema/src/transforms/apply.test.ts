@@ -20,7 +20,7 @@ describe("applyTransforms", () => {
       expect(result.id).toBe("TICK-1");
     });
 
-    it("increments counter sequentially (AC-V1-001)", async () => {
+    it("increments counter sequentially", async () => {
       const schema = {
         type: "object",
         "x-id-strategy": { prefix: "TICK-", sequence: true },
@@ -55,7 +55,7 @@ describe("applyTransforms", () => {
   });
 
   describe("x-normalize", () => {
-    it("phone-e164: (415) 555-0100 → +14155550100 (AC-V1-002)", async () => {
+    it("phone-e164: (415) 555-0100 → +14155550100", async () => {
       const schema = {
         type: "object",
         properties: { phone: { type: "string", "x-normalize": ["phone-e164"] } },

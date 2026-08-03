@@ -14,7 +14,7 @@ real content (chat streaming, resource CRUD, approvals, etc.) is wired in downst
 root.tsx → routes/_app.tsx (sidebar + <Outlet/>) → routes/_app.<section>.tsx
 ```
 
-Sidebar sections (canonical order, **no Apps** — micro apps deferred, AC-V1-003):
+Sidebar sections (canonical order, **no Apps** — micro apps deferred):
 Chat · Resources · Agents · Routines · Approvals · Knowledge · Integrations · Settings.
 
 ## Design tokens
@@ -31,9 +31,9 @@ native Surface components swap together.
 
 ## Acceptance criteria (tested in `*.test.tsx`)
 
-- **AC-V1-001** — `/` shows a welcome + guided first steps (`routes/_app._index.test.tsx`).
-- **AC-V1-003** — sidebar shows the 8 sections, no Apps (`components/app-sidebar.test.tsx`).
-- **AC-V1-005** — Settings toggle swaps `[data-theme]` + persists (`components/theme-toggle.test.tsx`).
+- `/` shows a welcome + guided first steps (`routes/_app._index.test.tsx`).
+- Sidebar shows the 8 sections, no Apps (`components/app-sidebar.test.tsx`).
+- Settings toggle swaps `[data-theme]` + persists (`components/theme-toggle.test.tsx`).
 
 ## Mocked in V1
 

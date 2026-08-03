@@ -6,7 +6,7 @@ import type {
 } from "@tulipfarm/integrations";
 
 /**
- * In-memory GitHub and Jira providers for the AW-064/AW-065 vertical slice.
+ * In-memory GitHub and Jira providers for the GitHub → Jira triage vertical slice.
  *
  * These are fakes of the *provider*, not of the adapters: they answer the exact paths, bodies, and
  * status codes the maintained adapters send, so the adapters, the Tool Broker, the effect ledger,

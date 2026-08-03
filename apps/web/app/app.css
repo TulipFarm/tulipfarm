@@ -6,7 +6,7 @@
 
 /*
  * Dark mode is driven by [data-theme="dark"] on <html> (NOT shadcn's default .dark class),
- * so every trusted React component reads one attribute. See AC-V1-005.
+ * so every trusted React component reads one attribute.
  */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 

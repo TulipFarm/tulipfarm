@@ -72,7 +72,7 @@ export const DEFINITION_REGISTRATIONS: readonly SchemaRegistration[] = [
   FORM_DEFINITION,
 ];
 
-/** Canonical `kind` discriminators owned by AW-008. */
+/** Canonical `kind` discriminators. */
 export const DEFINITION_KINDS = [
   "Agent",
   "Skill",

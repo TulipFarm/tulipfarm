@@ -6,7 +6,7 @@ import { ApiError } from "~/lib/api";
 import type { FieldDescriptor } from "~/lib/schema";
 
 /*
- * Generic schema-driven create/edit form (AC-V1-002 write subset). Renders one control per editable
+ * Generic schema-driven create/edit form (write subset). Renders one control per editable
  * field (from `formFields`) following the Tulip Surface Protocol type→input mapping: string→text, number→numeric,
  * boolean→checkbox, enum→select, date→date input, array/object→JSON textarea, x-links→combobox.
  * `x-immutable` fields are read-only on edit. Validation is server-authoritative: the parent passes

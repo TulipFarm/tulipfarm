@@ -1,7 +1,7 @@
 # Soul — Agent Conventions
 
 `@tulipfarm/soul` — loads "soul" artifacts from a local directory and keeps them synced with a
-git remote. Implements `specs/SOUL.md`. See root `AGENTS.md` for commands/lint.
+git remote. See root `AGENTS.md` for commands/lint.
 
 > The runtime `soul/` directory at the repo root is a **separate git repo** (created by
 > `scripts/setup-dev.sh`). This package is the loader/sync *engine* — don't write package code
@@ -72,7 +72,7 @@ pull/commit/push divergence cases. In route tests that touch soul git config, sp
 
 - Remote/credential env vars are `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL` (soul-scoped,
   matches `SOUL_PATH`) — not `GIT_REMOTE_URL`/`GIT_CREDENTIALS`. Watch for stale references when
-  touching `.env.local.example`, `specs/SOUL.md`, `specs/INSTALLATION.md`, docs mdx, or secret keys.
+  touching `.env.local.example`, docs mdx, or secret keys.
 - `GitSyncService` reads its remote from env at boot; a remote set later via Settings → Soul UI
   persists to `soul.yaml` + a secret — boot must also read that persisted config, or the UI-set
   remote is silently dropped on restart.

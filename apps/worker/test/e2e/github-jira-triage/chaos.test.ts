@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createTriageHarness, type TriageHarness } from "./harness";
 
 /**
- * AW-065 — duplicate and ambiguous triage effects.
+ * Duplicate and ambiguous triage effects.
  *
- * Each case injects one real failure mode into the AW-064 flow and asserts the two properties the
+ * Each case injects one real failure mode into the triage flow and asserts the two properties the
  * phase exists to prove: exactly one logical effect per idempotency key, and an ambiguous write
  * resolved against provider state rather than repeated or assumed away. No case may end with an
  * unauthorized close or assignment.

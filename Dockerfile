@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Single TulipFarm app image (ARCH-V1-006): Fastify serves the API + the built
+# Single TulipFarm app image: Fastify serves the API + the built
 # web SPA + in-process pg-boss workers. Multi-arch (amd64/arm64). Postgres-only.
 #
 # Slim runtime: the API + workspace TS packages are esbuild-bundled into one

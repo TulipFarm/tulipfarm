@@ -93,7 +93,7 @@ function expectInvalidRequired(document: unknown, field: string): void {
   }
 }
 
-describe("AW-010 authored definition schemas", () => {
+describe("authored definition schemas", () => {
   it("does not register runtime Knowledge capture evidence as an authored definition", () => {
     expect(knowledgeContracts).not.toHaveProperty("KNOWLEDGE_CAPTURE_DEFINITION");
   });

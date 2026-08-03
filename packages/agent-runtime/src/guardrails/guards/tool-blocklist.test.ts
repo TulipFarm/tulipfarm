@@ -10,7 +10,7 @@ const ctx: GuardContext = {
 };
 
 describe("makeToolBlocklistGuard", () => {
-  it("blocks an exact-named tool in the block list (AC-V1-002)", async () => {
+  it("blocks an exact-named tool in the block list", async () => {
     const guard = makeToolBlocklistGuard({ guard: "tool_blocklist", block: ["run_command"] });
     const verdict = await guard.run({ toolName: "run_command", tier: "system", args: {} }, ctx);
     expect(verdict).toEqual({
@@ -20,7 +20,7 @@ describe("makeToolBlocklistGuard", () => {
     });
   });
 
-  it("blocks a wildcard match but not a non-matching name (AC-V1-002)", async () => {
+  it("blocks a wildcard match but not a non-matching name", async () => {
     const guard = makeToolBlocklistGuard({ guard: "tool_blocklist", block: ["fs_*"] });
     expect((await guard.run({ toolName: "fs_read", tier: "platform", args: {} }, ctx)).action).toBe(
       "block"

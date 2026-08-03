@@ -3,7 +3,7 @@
 .SYNOPSIS
   TulipFarm installer for Windows — thin WSL2 bootstrap.
 .DESCRIPTION
-  Per spec INSTALLATION.md INST-002, Windows runs the Linux install path inside WSL2.
+  Per spec INSTALLATION.md, Windows runs the Linux install path inside WSL2.
   This script verifies WSL2 (+ a distro) is present and then runs the bash one-liner
   (scripts/install.sh) inside WSL, forwarding version/host overrides.
 

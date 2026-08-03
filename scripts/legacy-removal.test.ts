@@ -25,8 +25,8 @@ function legacyPaths(): string[] {
   return paths;
 }
 
-describe("AW-096 legacy removal gate", () => {
-  it("removes every path in the accepted AW-006 inventory", () => {
+describe("legacy removal gate", () => {
+  it("removes every path in the accepted legacy inventory", () => {
     const remaining = legacyPaths().filter((path) => existsSync(resolve(ROOT, path)));
     expect(remaining).toEqual([]);
   });

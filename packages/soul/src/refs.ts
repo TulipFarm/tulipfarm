@@ -3,8 +3,8 @@ import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 /**
  * Semantic-graph and reference validation over a proposed Soul tree (SPEC §8.2 steps 6–8).
  *
- * AW-011 validates each changeset file in isolation (shape → strict AJV → canonical hash).
- * This layer runs *after* those per-file checks, across the whole proposed tree: it proves
+ * A separate per-file pass validates each changeset file in isolation (shape → strict AJV →
+ * canonical hash). This layer runs *after* those per-file checks, across the whole proposed tree: it proves
  * stable-identifier uniqueness, resolves every cross-definition reference and version
  * constraint against the proposed tree, checks the Routine State graph and role/fallback
  * cycles, and enforces non-amplification (a dependency or generated plan can never widen
@@ -80,7 +80,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Narrow a validated document to the fields the semantic layer reads. Inputs are already
- * schema-validated (AW-008–010), so a malformed shape here is not an expected path; such a
+ * schema-validated, so a malformed shape here is not an expected path; such a
  * document is skipped rather than crashing the whole proposal.
  */
 export function asAuthored(doc: VersionedSchemaDocument): AuthoredDefinition | undefined {

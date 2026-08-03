@@ -2,7 +2,7 @@
 
 Three-stage safety framework wrapping the chat orchestrator: **input**, **tool-call**,
 **output**. Pattern-only guards (no LLM call) → fits the hot path. Spec:
-`docs/plans/2026-06-11-guardrails-framework-design.md` · requirements: `specs/GUARDRAILS.md`.
+`docs/plans/2026-06-11-guardrails-framework-design.md`.
 
 ## Pieces
 - `pipeline.ts` — `runStage(guards, input, ctx, log)`. Guards run in array order and return
@@ -44,4 +44,4 @@ On an **output** block the text is suppressed from the SSE/UI, but `onStepFinish
 `onFinish` knowledge-indexing run independently — so the blocked text may still be stored/indexed
 unscrubbed. A timed-out guard's promise is abandoned (fine for sync regex guards). No settings
 UI / config route (hand-edit `soul/guardrails.yaml`). No `ai_disclosure`/`high_risk_domain`/LLM
-moderation (AC-V1-005, post-V1).
+moderation (post-V1).

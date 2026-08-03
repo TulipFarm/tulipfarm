@@ -1,5 +1,5 @@
 /**
- * Zero-unauthorized-disclosure proof for Knowledge (SPEC §14.1, AW-080).
+ * Zero-unauthorized-disclosure proof for Knowledge (SPEC §14.1).
  *
  * The unit tests next to each module prove that each decision is correct. This suite proves the
  * property that matters end to end: across the full matrix of source status, access-control mode,

@@ -5,7 +5,7 @@ import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
 
-// AC-010 / ARCH-V1-006: the single `app` image serves the built SPA at `/` and the
+// The single `app` image serves the built SPA at `/` and the
 // API at `/api/v1/*` from one process. Serving is opt-in via WEB_DIST (set in the
 // Dockerfile runtime stage; unset in native `pnpm dev`, where Vite serves the SPA).
 

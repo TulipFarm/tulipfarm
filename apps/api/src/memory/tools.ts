@@ -32,7 +32,7 @@ const MEMORY_GUIDANCE =
 
 // Plain JSON Schema literals, matching the codebase's inline-schema convention (see ChatBodySchema).
 // `value` deliberately carries NO maxLength: an oversized write must reach the service so the tool
-// can return the create_knowledge_page suggestion (AC-V1-004), not a generic schema rejection.
+// can return the create_knowledge_page suggestion, not a generic schema rejection.
 const UPDATE_MEMORY_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,

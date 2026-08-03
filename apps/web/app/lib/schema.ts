@@ -1,5 +1,5 @@
 /*
- * The schema→UI mapping. Pure and React-free — this is the AC-V1-002 core: a valid `schema.yml`
+ * The schema→UI mapping. Pure and React-free — this is the core: a valid `schema.yml`
  * yields a working list + detail with zero per-resource code. Parses the YAML JSON-Schema a resource
  * type ships, derives ordered field descriptors, then projects them into list columns / detail fields
  * and turns raw values into presentational primitives. Server-side transforms (x-id-strategy,
@@ -140,7 +140,7 @@ export function deriveFields(schema: ResourceSchema): FieldDescriptor[] {
 
 // Editable inputs for create/edit forms: declared properties minus the system block and minus any
 // `x-readOnly` field, and minus the id field when it's server-generated (x-id-strategy.sequence).
-// This is the write-side mirror of listColumns/detailFields — the AC-V1-002 zero-per-resource-code
+// This is the write-side mirror of listColumns/detailFields — the zero-per-resource-code
 // pipeline for forms. `x-immutable` fields are kept (read-only on edit, editable on create).
 export function formFields(schema: ResourceSchema): FieldDescriptor[] {
   const autoId = schema["x-id-strategy"]?.sequence === true ? idFieldName(schema) : null;

@@ -128,7 +128,7 @@ describe("assembleSystemPrompt — knowledge grounding block", () => {
   });
 });
 
-describe("assembleSystemPrompt — determinism (AC-V1-001)", () => {
+describe("assembleSystemPrompt — determinism", () => {
   it("is byte-identical across calls with unchanged input", () => {
     const ctx = baseCtx({
       agentId: "sales",
@@ -286,7 +286,7 @@ describe("assembleSystemPrompt — governance", () => {
     expect(assembleSystemPrompt(baseCtx())).not.toContain("<governance-knowledge>");
   });
 
-  it("stays tenant-wide regardless of the agent domain (display-only, AGT-V1-007)", () => {
+  it("stays tenant-wide regardless of the agent domain (display-only)", () => {
     const tenantWide = govDoc("Tenant Policy", "Applies to all.");
     const crmScoped: GovernancePage = { ...govDoc("CRM Policy", "CRM only."), domain: "crm" };
     const out = assembleSystemPrompt(
@@ -481,7 +481,7 @@ describe("assembleSystemPrompt — eager-resources (#resource)", () => {
   });
 });
 
-describe("assembleSystemPrompt — typed-state (AC-V1-003)", () => {
+describe("assembleSystemPrompt — typed-state", () => {
   it("omits the soul-context and available-tools blocks when their inputs are unset", () => {
     const out = assembleSystemPrompt(
       baseCtx({ agentId: "sales", memory: [mem("plan", "enterprise")] })

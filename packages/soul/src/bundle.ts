@@ -6,7 +6,7 @@ import { canonicalHash, type VersionedSchemaDocument } from "@tulipfarm/schema";
  * A bundle is the content-addressed, exact-version snapshot a Run pins its behaviour to. It holds
  * only authored definitions that already passed strict AJV and semantic validation, every
  * reference resolved to a concrete `{id, slug, authoredVersion}`, and never any secret value —
- * Soul carries opaque secret references only, and the compiler enforces that (AW-014).
+ * Soul carries opaque secret references only, and the compiler enforces that.
  *
  * The bundle is deliberately free of Git: a worker loads it from the store by digest, verifies the
  * signature, and executes. No live repository, checkout, or network fetch is involved.

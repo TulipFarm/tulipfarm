@@ -1,10 +1,9 @@
 # TulipFarm architecture boundaries
 
 Status: Accepted architecture contract
-Scope: AW-001 architecture guardrails
-Authority: `metadata/terminologies.md`, then the approved architecture SPEC
+Authority: `metadata/terminologies.md`
 
-This document freezes ownership and enforcement boundaries for TulipFarm. Later tasks may
+This document freezes ownership and enforcement boundaries for TulipFarm. Later work may
 choose libraries and adapters behind these boundaries, but may not add a second authority path or
 weaken an invariant without a reviewed architecture decision.
 

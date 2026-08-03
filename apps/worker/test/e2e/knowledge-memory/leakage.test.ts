@@ -1,5 +1,5 @@
 /**
- * Cross-package proof that Knowledge and Memory compose without a disclosure path (AW-080).
+ * Cross-package proof that Knowledge and Memory compose without a disclosure path.
  *
  * `@tulipfarm/integrations` and `@tulipfarm/memory` may not import `@tulipfarm/knowledge`
  * (`docs/architecture/dependency-rules.md`), so the seams between them are structural contracts and

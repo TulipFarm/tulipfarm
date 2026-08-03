@@ -1,7 +1,7 @@
 # LLM — Agent Conventions
 
 `@tulipfarm/llm` — provider-agnostic LLM access with tiered fallback chains, wrapping the
-Vercel AI SDK (`ai` + `@ai-sdk/*`). Implements `specs/LLM-STRATEGY.md`. See root `AGENTS.md`
+Vercel AI SDK (`ai` + `@ai-sdk/*`). See root `AGENTS.md`
 for commands/lint.
 
 ## Public API (`src/index.ts`)

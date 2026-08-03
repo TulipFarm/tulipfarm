@@ -20,7 +20,7 @@ function makeToolRegistry(tools: ToolDef[]): ToolRegistry {
   return { getAll: () => tools } as unknown as ToolRegistry;
 }
 
-describe("makeApprovalRequester (AC-V1-003)", () => {
+describe("makeApprovalRequester", () => {
   let db: PGlite;
   let approvals: ApprovalsRepo;
   const log = { warn: vi.fn() };
@@ -98,7 +98,7 @@ describe("makeApprovalRequester (AC-V1-003)", () => {
     );
   });
 
-  it("email/sms declarations fall back to ui with a warning (AC-V1-003)", async () => {
+  it("email/sms declarations fall back to ui with a warning", async () => {
     const requester = makeApprovalRequester({ approvals, log });
     const approvalId = await requester(makeRun(), {
       stateName: "Gate",

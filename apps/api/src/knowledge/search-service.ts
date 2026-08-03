@@ -9,7 +9,7 @@ export interface SearchDeps {
 }
 
 /**
- * Vector-primary search with a lexical fallback (KN-V1-002 / AC-V1-003). When an
+ * Vector-primary search with a lexical fallback (KN-V1-002). When an
  * embedding provider is available the query is embedded and ranked by cosine
  * exact-scan; otherwise (or if the provider fails) it falls back to Postgres
  * full-text and surfaces `warnings: ['embedding-unavailable']`.

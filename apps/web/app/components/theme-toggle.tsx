@@ -7,7 +7,7 @@ type Theme = "light" | "dark";
 /*
  * Toggles [data-theme] on <html> and persists to localStorage. The pre-hydration script in
  * root.tsx sets the initial value; here we read it back on mount and on a "themechange" event so
- * multiple instances (sidebar footer + Settings) stay in sync. AC-V1-005.
+ * multiple instances (sidebar footer + Settings) stay in sync.
  */
 export function ThemeToggle({ iconOnly = false }: { iconOnly?: boolean }) {
   const [theme, setTheme] = useState<Theme>("light");

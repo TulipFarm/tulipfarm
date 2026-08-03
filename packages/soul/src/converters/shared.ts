@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { SoulFileChange } from "../changeset";
 
 /**
- * Shared building blocks for legacy Soul -> authored-definition conversion (AW-016).
+ * Shared building blocks for legacy Soul -> authored-definition conversion.
  *
  * Conversion is a pure, read-only transform: it never writes to disk, never calls the changeset
  * gateway, and never publishes. Callers get back proposed `SoulFileChange`s plus warnings and
@@ -29,7 +29,7 @@ export interface ConversionResult {
 /** Field-name pattern that always excludes a legacy value, even if it collides with an allowlisted name. */
 const SECRET_FIELD_PATTERN = /secret|token|password|credential|apikey|api_key/i;
 
-/** Fixed namespace so the same (kind, name) always derives the same id (SOUL-AW-016 stable id). */
+/** Fixed namespace so the same (kind, name) always derives the same id. */
 const ID_NAMESPACE = "tulipfarm.ai/soul/legacy-definition/v1";
 
 /**

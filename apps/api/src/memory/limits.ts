@@ -7,7 +7,7 @@
 export const MAX_ENTRIES = 100;
 /**
  * Per-entry value cap. A memory is one short, stable fact (a sentence, not a paragraph); a single
- * value larger than this is "long-form" → rejected toward create_knowledge_page (AC-V1-004).
+ * value larger than this is "long-form" → rejected toward create_knowledge_page.
  */
 export const MAX_VALUE_CHARS = 256;
 export const MAX_KEY_CHARS = 128;

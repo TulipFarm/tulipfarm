@@ -120,7 +120,7 @@ export function canGroundKnowledge(
 }
 
 // The same allowed set projected to the `<available-tools>` L1 index — name + description, sorted
-// for a byte-stable prompt prefix (AC-V1-001). `[]` when no registry → the block is omitted.
+// for a byte-stable prompt prefix. `[]` when no registry → the block is omitted.
 export function availableToolsFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined,

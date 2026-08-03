@@ -161,7 +161,7 @@ export async function buildApp(opts: AppOptions = {}) {
   // MAX_KEY_CHARS=128) route instead of 404ing.
   const app = Fastify({ logger: true, forceCloseConnections: true, maxParamLength: 512 });
 
-  // Single-image SPA serving (AC-010 / ARCH-V1-006): when the built web client is
+  // Single-image SPA serving: when the built web client is
   // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
   // in native `pnpm dev` (Vite serves the SPA), so this whole layer is inert there.
   const webDist = process.env.WEB_DIST;
@@ -258,7 +258,7 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     } else if (serveSpa && !isAppApiPath(req.url)) {
       // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
-      // for the app shell + its assets to a same-origin policy (INST-003c posture).
+      // for the app shell + its assets to a same-origin policy.
       // script-src uses build-time SHA-256 hashes from the completed web build
       // so only the exact inline scripts Remix bakes into index.html are allowed (SEC-V1-002).
       if (!spaCspHeader) throw new Error("SPA CSP header is unavailable while serving WEB_DIST");
@@ -369,7 +369,7 @@ export async function buildApp(opts: AppOptions = {}) {
         rateLimiter: opts.rateLimiter,
       });
     }
-    // Wizard step routes: only registered when NOT in headless boot (AC-005).
+    // Wizard step routes: only registered when NOT in headless boot.
     if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
         userRepo: opts.userRepo,

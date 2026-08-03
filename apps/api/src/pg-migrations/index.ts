@@ -373,7 +373,7 @@ const BASELINE_STATEMENTS: string[] = [
 ];
 
 /**
- * Hardened authentication and identity (AW-025): user lifecycle status, typed session
+ * Hardened authentication and identity: user lifecycle status, typed session
  * authentication evidence, API clients as first-class service identities, one-use OIDC
  * authorization requests, and verified external identity mappings with one-use link tokens.
  */

@@ -30,7 +30,7 @@ export const links = (): HtmlLinkDescriptor[] => [
 
 /*
  * Runs before hydration: reads the persisted theme (or system preference) and sets
- * [data-theme] on <html> so there is no flash of the wrong palette. AC-V1-005.
+ * [data-theme] on <html> so there is no flash of the wrong palette.
  */
 const themeInit = `(function(){try{var t=localStorage.getItem("theme");if(!t){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
 
@@ -58,7 +58,7 @@ function Document({ children }: { children: ReactNode }) {
 
 export default function App() {
   // Re-assert the persisted theme after hydration: in SPA mode React reconciles <html> and can drop
-  // the [data-theme] the pre-hydration script set, silently reverting dark mode on reload. AC-V1-005.
+  // the [data-theme] the pre-hydration script set, silently reverting dark mode on reload.
   useEffect(() => {
     const stored = localStorage.getItem("theme");
     const theme =

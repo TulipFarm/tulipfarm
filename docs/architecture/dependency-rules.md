@@ -1,7 +1,6 @@
 # TulipFarm architecture dependency rules
 
 Status: Accepted architecture contract
-Scope: AW-001 package and application import boundaries
 
 These rules define compile-time direction. In every arrow below, `consumer -> provider` means the
 consumer may import only the provider's documented public exports. Runtime calls remain subject to

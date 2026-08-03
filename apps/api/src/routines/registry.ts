@@ -30,7 +30,7 @@ export type RegistryEntry = ({ ok: true } & LoadedRoutine) | ({ ok: false } & In
  * Validated view over `SoulLoader.routines` (ROUT-V1-001). The loader stays lenient —
  * it parses YAML and never validates — so this registry is the single place a
  * routine.yaml is checked against the V1 meta-schema (deferred-construct rejection
- * included, AC-V1-002). Invalid routines are kept as error entries: they surface in
+ * included). Invalid routines are kept as error entries: they surface in
  * `GET /api/v1/routines` instead of crashing boot or vanishing silently.
  */
 export class RoutineRegistry {

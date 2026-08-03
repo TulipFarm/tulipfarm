@@ -1,5 +1,5 @@
 /**
- * Zero-unauthorized-disclosure proof for Memory (SPEC §14.2, AW-080).
+ * Zero-unauthorized-disclosure proof for Memory (SPEC §14.2).
  *
  * The matrix here is scope × requester identity × lifecycle state (superseded, forgotten, expired,
  * unconfirmed) × evidence-provider behavior. Every case asserts the decision *and* that the planted

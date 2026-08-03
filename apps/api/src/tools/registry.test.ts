@@ -201,7 +201,7 @@ describe("ToolRegistry", () => {
     });
   });
 
-  describe("validation (TOOL-V1-009 / AC-V1-001)", () => {
+  describe("validation (TOOL-V1-009)", () => {
     const schemaedTool = (overrides: Partial<ToolDef> = {}): ToolDef =>
       makeTool({
         inputSchema: {
@@ -527,7 +527,7 @@ describe("ToolRegistry", () => {
       });
     });
 
-    it("soul mutation (requiresApproval:false) under approval-required: no gate, runs directly (AGT-V1-001)", async () => {
+    it("soul mutation (requiresApproval:false) under approval-required: no gate, runs directly", async () => {
       const execute = vi.fn(async () => ({ success: true as const, data: "soul-ran" }));
       const reg = new ToolRegistry();
       reg.register(
@@ -570,7 +570,7 @@ describe("ToolRegistry", () => {
     });
   });
 
-  describe("tool-call guard (AC-V1-002 denial path)", () => {
+  describe("tool-call guard (denial path)", () => {
     it("blocked guard returns denial result, caches it, never runs the tool", async () => {
       const execute = vi.fn(async () => ({ success: true as const, data: "should not reach" }));
       const reg = new ToolRegistry();

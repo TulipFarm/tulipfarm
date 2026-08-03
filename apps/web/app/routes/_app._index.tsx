@@ -11,13 +11,13 @@ import {
 
 export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 
-// Default surface (AC-V1-001): the live Layer-1 chat. The Agents "Chat with" shortcut routes here with
+// Default surface: the live Layer-1 chat. The Agents "Chat with" shortcut routes here with
 // `?agent=<name>` selects a user-created Agent. Without it, Chat uses the normal harness.
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const agentId = new URL(request.url).searchParams.get("agent") || undefined;
   const defaultModel: ModelTier = "standard";
   // Adaptive onboarding suggestions (ONB-V1-002/003) + the Getting-started checklist (ONB-V1).
-  // Both non-blocking (AC-V1-001): a failed fetch resolves to a benign default so chat always
+  // Both non-blocking: a failed fetch resolves to a benign default so chat always
   // renders (mirrors the agent lookup above — no hard dependency).
   const [suggestions, checklist] = await Promise.all([
     listOnboardingSuggestions().catch(() => []),

@@ -26,8 +26,8 @@ export interface SystemRoutesDeps {
 
 /**
  * System/version surface: GET /api/v1/system/update-check reports the running version and
- * whether a newer stable GitHub release exists. The update itself stays manual (INST-012 —
- * no auto-update); the web Settings page renders the notice with a link to the runbook.
+ * whether a newer stable GitHub release exists. The update itself stays manual (no
+ * auto-update); the web Settings page renders the notice with a link to the runbook.
  */
 export function registerSystemRoutes(
   app: FastifyInstance,

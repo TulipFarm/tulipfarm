@@ -5,8 +5,8 @@ echo "🚀 TulipFarm Local Development Setup"
 echo ""
 
 # --- Datastore: bundled Postgres container ----------------------------------
-# Local Postgres runs as the same pgvector/pgvector:pg17 container CI and production use
-# (AC-006), exposed on localhost:5432 via docker-compose.dev.yml. There is no native lane:
+# Local Postgres runs as the same pgvector/pgvector:pg17 container CI and production use,
+# exposed on localhost:5432 via docker-compose.dev.yml. There is no native lane:
 # the container IS the tested path, so dev and prod cannot drift.
 
 if ! command -v docker &> /dev/null; then

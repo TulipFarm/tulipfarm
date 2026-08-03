@@ -29,7 +29,7 @@ export interface ApprovalRoutesDeps {
 }
 
 /**
- * Standalone approval routes (AGT-V1-002). Serves BOTH approval kinds behind one
+ * Standalone approval routes. Serves BOTH approval kinds behind one
  * discriminated list/decide surface. Both kinds are PostgreSQL-authoritative.
  */
 export function registerApprovalRoutes(

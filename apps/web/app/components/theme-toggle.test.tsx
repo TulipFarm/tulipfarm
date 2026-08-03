@@ -8,7 +8,7 @@ beforeEach(() => {
   localStorage.clear();
 });
 
-test("toggles [data-theme] across the shell and persists it (AC-V1-005)", async () => {
+test("toggles [data-theme] across the shell and persists it", async () => {
   const user = userEvent.setup();
   render(<ThemeToggle />);
   const button = screen.getByRole("button", { name: /toggle dark mode/i });

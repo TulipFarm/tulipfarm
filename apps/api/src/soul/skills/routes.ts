@@ -66,7 +66,7 @@ interface ScanEntry {
   // HEAD commit sha of the cloned repo at scan time — recorded as `ref` in skills-lock.json.
   ref: string;
   skills: DiscoveredSkill[];
-  // Names that have been through SkillAudit — install is gated on this (AC-V1-003).
+  // Names that have been through SkillAudit — install is gated on this.
   audited: Set<string>;
   expires: number;
 }
@@ -829,7 +829,7 @@ export function registerSkillRoutes(
       if (missing.length > 0)
         return reply.code(400).send({ error: `not in scan: ${missing.join(", ")}` });
 
-      // Operator must have run SkillAudit on each skill before it can be installed (AC-V1-003). The
+      // Operator must have run SkillAudit on each skill before it can be installed. The
       // rating itself never blocks — only the act of auditing is required.
       const unaudited = unique.filter((n) => !entry.audited.has(n));
       if (unaudited.length > 0)

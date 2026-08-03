@@ -19,7 +19,7 @@ describe("makeContentFilterGuard", () => {
     expect(makeContentFilterGuard(cfg("email")).name).toBe("content_filter");
   });
 
-  it("blocks a Luhn-valid credit card number (AC-V1-003)", () => {
+  it("blocks a Luhn-valid credit card number", () => {
     const guard = makeContentFilterGuard(cfg("credit_card"));
     const verdict = guard.run("Charge it to 4111 1111 1111 1111 please.", ctx);
     expect(verdict).toEqual({

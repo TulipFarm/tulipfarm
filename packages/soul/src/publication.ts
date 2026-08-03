@@ -19,7 +19,7 @@ import type { Logger } from "./types";
 /**
  * Publication projection and reconciliation (SPEC §8.2 steps 13–15).
  *
- * A signed bundle (AW-014) becomes the version the runtime executes only after every stage
+ * A signed bundle becomes the version the runtime executes only after every stage
  * committed, in this order:
  *
  * 1. `committed` — the immutable bundle is written to content-addressed storage (inert: addressed

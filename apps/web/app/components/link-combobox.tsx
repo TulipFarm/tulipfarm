@@ -3,7 +3,7 @@ import { listRecords } from "~/lib/api";
 import { recordLabel } from "~/lib/schema";
 
 /*
- * Searchable combobox for an `x-links` field (AC-V1-002). Loads the first page of the target type's
+ * Searchable combobox for an `x-links` field. Loads the first page of the target type's
  * records and filters client-side by label as the user types. The stored value is the target
  * `record.id` — exactly what the API's link validation (findById) consumes and what the read-side
  * detail link points at. Large target sets are truncated to one page (server-side search deferred).

@@ -218,7 +218,7 @@ describe("LlmService.select", () => {
     return svc;
   };
 
-  it("model auto + supervised resolves to standard (AC-V1-001)", async () => {
+  it("model auto + supervised resolves to standard", async () => {
     const svc = await init();
     expect((svc.select({ model: "auto", autonomy: "supervised" }) as LanguageModelV4).modelId).toBe(
       "claude-sonnet-4-6"

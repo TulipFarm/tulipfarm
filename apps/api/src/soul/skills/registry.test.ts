@@ -68,7 +68,7 @@ describe("listAvailableSkills", () => {
     expect(out).toEqual<AvailableSkill[]>([{ name: "active-skill", description: "Active." }]);
   });
 
-  it("sorts by name for a deterministic prompt-cache prefix (AC-V1-001)", () => {
+  it("sorts by name for a deterministic prompt-cache prefix", () => {
     const out = listAvailableSkills(
       makeSoulLoader([skill("zebra"), skill("alpha"), skill("mango")])
     );
@@ -154,7 +154,7 @@ describe("listEagerSkills", () => {
     expect(out).toEqual<EagerSkill[]>([{ name: "alpha-eager", body: "eager body" }]);
   });
 
-  it("sorts by name for a deterministic prompt-cache prefix (AC-V1-001)", () => {
+  it("sorts by name for a deterministic prompt-cache prefix", () => {
     const out = listEagerSkills(
       makeSoulLoader([
         skill("zebra", { eager: true }, "z"),

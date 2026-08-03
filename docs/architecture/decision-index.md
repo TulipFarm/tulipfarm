@@ -1,10 +1,9 @@
 # TulipFarm architecture decision index
 
 Status: Accepted architecture contract
-Scope: AW-001 decision freeze
 
-This index records architecture decisions authorized by the approved SPEC and the binding repository
-terminology. `metadata/terminologies.md` controls names at every layer; where the SPEC uses a retired
+This index records accepted architecture decisions and the binding repository terminology.
+`metadata/terminologies.md` controls names at every layer; where an earlier design used a retired
 spelling, only the spelling is corrected here and the approved behavior remains unchanged.
 
 Detailed contracts:
@@ -39,14 +38,14 @@ Detailed contracts:
 
 ## Terminology decisions
 
-These spellings supersede conflicting names in the planning SPEC without changing its behavior.
+These spellings supersede earlier conflicting names without changing behavior.
 
 | ID | Accepted spelling | Replaces | Boundary effect |
 | --- | --- | --- | --- |
 | ADR-021 | Integration | Retired third-party synonyms | Domain, code, DB, REST, UI, and docs use Integration vocabulary |
-| ADR-022 | `packages/integrations` | Retired package spelling in SPEC | Owns Integration adapter contracts, normalization, delivery, and mappings |
-| ADR-023 | `apps/integration-worker` | Retired worker spelling in SPEC | Runs Integration ingress, sync, delivery, retries, and reconciliation |
-| ADR-024 | Integration installation and `IntegrationCheckpoint` | Retired SPEC domain/checkpoint names | Preserves provider/app/install hierarchy without retired synonyms |
+| ADR-022 | `packages/integrations` | Retired package spelling | Owns Integration adapter contracts, normalization, delivery, and mappings |
+| ADR-023 | `apps/integration-worker` | Retired worker spelling | Runs Integration ingress, sync, delivery, retries, and reconciliation |
+| ADR-024 | Integration installation and `IntegrationCheckpoint` | Retired domain/checkpoint names | Preserves provider/app/install hierarchy without retired synonyms |
 | ADR-025 | `/api/v1/chats/:id/turns` | Retired Conversation wire route | Chat stays external/wire; Conversation remains internal/persistence |
 
 ## Rejected alternatives

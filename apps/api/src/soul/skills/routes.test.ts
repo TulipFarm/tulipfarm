@@ -646,7 +646,7 @@ describe("skills routes", () => {
       });
       const { scanId } = scanRes.json();
 
-      // Skip audit → install must be rejected (AC-V1-003: confirm only after seeing the report).
+      // Skip audit → install must be rejected (confirm only after seeing the report).
       const installRes = await app.inject({
         method: "POST",
         url: "/api/v1/skills/install",

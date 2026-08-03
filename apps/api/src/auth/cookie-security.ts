@@ -1,4 +1,4 @@
-// Single source of truth for the `Secure` cookie attribute (INST-003c).
+// Single source of truth for the `Secure` cookie attribute.
 //
 // This was previously `NODE_ENV === "production"`, duplicated at four call sites. That is
 // wrong for the shipped image: it always sets NODE_ENV=production but serves plain HTTP on

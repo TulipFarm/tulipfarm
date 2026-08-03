@@ -1,7 +1,7 @@
 # Secrets — Agent Conventions
 
-`@tulipfarm/secrets` — encrypted secret storage with zero-downtime key rotation. Implements
-`specs/SECRETS.md`. See root `AGENTS.md` for commands/lint.
+`@tulipfarm/secrets` — encrypted secret storage with zero-downtime key rotation. See root
+`AGENTS.md` for commands/lint.
 
 ## Public API (`src/index.ts`)
 
