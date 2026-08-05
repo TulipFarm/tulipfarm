@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sessionCookieOptions } from "../cookie-security";
 import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
 import { SESSION_COOKIE } from "../middleware";
-import { hashPassword, verifyPassword } from "../passwords";
+import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
 import { toPublicUser, type UserRepo } from "../users";
@@ -44,7 +44,7 @@ export function registerSessionRoutes(
           required: ["email", "password"],
           properties: {
             email: { type: "string", format: "email" },
-            password: { type: "string" },
+            password: { type: "string", maxLength: MAX_PASSWORD_LENGTH },
           },
         },
         response: {

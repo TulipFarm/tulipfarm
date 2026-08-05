@@ -278,11 +278,21 @@ export async function buildApp(opts: AppOptions = {}) {
   await app.register(cookie);
 
   // Relax CSP for the Scalar UI page so it can load its scripts and styles.
+  // Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot
+  // load arbitrary external scripts (SEC-AUDIT H-1).
   app.addHook("onSend", async (req, reply) => {
     if (req.url.startsWith("/docs")) {
       reply.header(
         "content-security-policy",
-        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:"
+        [
+          "default-src 'self'",
+          "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+          "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+          "img-src 'self' data: https://cdn.jsdelivr.net",
+          "font-src 'self' data: https://cdn.jsdelivr.net",
+          "connect-src 'self'",
+          "frame-ancestors 'none'",
+        ].join("; ")
       );
     } else if (serveSpa && !isAppApiPath(req.url)) {
       // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP

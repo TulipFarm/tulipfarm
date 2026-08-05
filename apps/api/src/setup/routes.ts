@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sessionCookieOptions } from "../auth/cookie-security";
 import { setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, validatePassword } from "../auth/passwords";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
@@ -150,7 +151,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           required: ["email", "password"],
           properties: {
             email: { type: "string", format: "email" },
-            password: { type: "string", minLength: 8 },
+            password: {
+              type: "string",
+              minLength: MIN_PASSWORD_LENGTH,
+              maxLength: MAX_PASSWORD_LENGTH,
+            },
           },
         },
         response: {
@@ -164,10 +169,12 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
       const email = typeof body.email === "string" ? body.email : "";
       const password = typeof body.password === "string" ? body.password : "";
-      if (!email || password.length < 8) {
-        return reply
-          .code(400)
-          .send({ error: "email and a password of at least 8 characters are required" });
+      if (!email) {
+        return reply.code(400).send({ error: "email is required" });
+      }
+      const pwErr = validatePassword(password);
+      if (pwErr) {
+        return reply.code(400).send({ error: pwErr.message });
       }
       // requireSetupOpen's count() check is a fast-path only — it cannot prevent two
       // concurrent requests both observing zero users. The database's single-admin

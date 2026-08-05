@@ -26,7 +26,9 @@ export default function Login() {
     try {
       await login(email.trim(), password);
       const to = params.get("redirectTo") ?? "/";
-      navigate(to.startsWith("/") ? to : "/", { replace: true });
+      // Block protocol-relative (//evil.com) and backslash-relative (/\evil.com) open redirects.
+      const safe = to.startsWith("/") && !to.startsWith("//") && !to.startsWith("/\\");
+      navigate(safe ? to : "/", { replace: true });
     } catch (err) {
       setError(
         err instanceof ApiError ? err.message : "could not reach the API — is it running on :4010?"
