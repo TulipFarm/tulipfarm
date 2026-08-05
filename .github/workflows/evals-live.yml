@@ -1,0 +1,47 @@
+name: Evals (live)
+
+# Live agent/model quality evals against REAL providers. Not a PR gate: they cost tokens, are
+# nondeterministic, and need provider credentials. They run nightly and on demand; the run is
+# smoothed by the harness's multi-run pass-rate threshold, and the JSON/Markdown report is uploaded
+# as an artifact. Configure `LLM_API_KEY` (secret) and optionally `EVAL_PROVIDER` / `EVAL_MODEL`
+# (repo variables) for this workflow.
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Samples per case (multi-run threshold smoothing)"
+        required: false
+        default: "3"
+
+concurrency:
+  group: evals-live-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  evals:
+    name: Live evals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Run live evals
+        env:
+          EVAL_LIVE: "1"
+          EVAL_RUNS: ${{ github.event.inputs.runs || '3' }}
+          EVAL_PROVIDER: ${{ vars.EVAL_PROVIDER }}
+          EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: pnpm evals
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: eval-results
+          path: eval-results/
+          if-no-files-found: warn

@@ -32,6 +32,7 @@ TulipFarm — AI-native business operating system. pnpm + Turborepo monorepo.
 | [`packages/run-kernel`](packages/run-kernel/AGENTS.md) | Run/State state machines, waits, retries, child Runs (`@tulipfarm/run-kernel`). |
 | [`packages/tool-broker`](packages/tool-broker/AGENTS.md) | Tool catalog, intent/effect orchestration, approvals, reconciliation (`@tulipfarm/tool-broker`). |
 | [`packages/agent-runtime`](packages/agent-runtime/AGENTS.md) | Context assembly, bounded Tool loop, model profiles, delegation (`@tulipfarm/agent-runtime`). |
+| [`packages/evals`](packages/evals/AGENTS.md) | AI evals harness: datasets, code + LLM-judge scorers, multi-run runner, activation-gate reducer (`@tulipfarm/evals`). |
 | [`packages/knowledge`](packages/knowledge/AGENTS.md) | ACL-preserving source ingestion, retrieval, provenance (`@tulipfarm/knowledge`). |
 | [`packages/memory`](packages/memory/AGENTS.md) | Scoped, versioned memory assertions and supersession (`@tulipfarm/memory`). |
 | [`packages/surface`](packages/surface/AGENTS.md) | Tulip Surface Protocol contracts, catalog, Artifacts, interactions, linting, and renderer interfaces (`@tulipfarm/surface`). |

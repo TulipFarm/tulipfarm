@@ -5,6 +5,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
+    "evals": "tsx src/evals/run-evals.ts",
     "keys": "tsx src/cli/keys.ts",
     "lint": "biome check --no-errors-on-unmatched .",
     "test": "vitest run --passWithNoTests",
@@ -22,6 +23,7 @@
     "@tulipfarm/agent-runtime": "workspace:*",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
+    "@tulipfarm/evals": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",

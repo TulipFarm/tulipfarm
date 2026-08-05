@@ -151,6 +151,10 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "memory",
       "observability",
     ],
+    // The evals harness builds on the agent-runtime gate primitives (EvalReport, evaluateActivation,
+    // AgentLoop, ModelPort) and hashes with schema. It defines provider-neutral ports; real models
+    // and the LLM-judge are wired in the app layer, so it never imports `llm`.
+    evals: ["schema", "agent-runtime"],
     // Applications compose packages; they never import another application. `constants` holds the
     // shared, non-sensitive deployment defaults (e.g. the business scope) that the API and the
     // worker must agree on and cannot share any other way.
@@ -168,6 +172,9 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       // classification, and `agent-runtime` owns system-prompt assembly, so the API's debug-context
       // route renders the prompt the Worker actually sent. Neither licenses running a turn here.
       "agent-runtime",
+      // The API is the live-wiring seam for the evals harness (LLM-judge, real targets, the
+      // `pnpm evals` entrypoint). It composes `evals` the same way it composes `agent-runtime`.
+      "evals",
       "sandbox",
       "knowledge",
       "memory",

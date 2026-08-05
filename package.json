@@ -26,6 +26,7 @@
     "typecheck": "turbo typecheck && pnpm typecheck:e2e",
     "typecheck:e2e": "tsc -p scripts/test/tsconfig.json",
     "test": "turbo test",
+    "evals": "pnpm --filter @tulipfarm/api evals",
     "release": "node scripts/request-release.ts",
     "release:canary": "node scripts/request-release.ts",
     "prepare": "lefthook install"

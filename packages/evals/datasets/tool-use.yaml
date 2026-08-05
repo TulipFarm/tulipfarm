@@ -1,0 +1,42 @@
+suite: tool-use
+suiteVersion: "1"
+
+# Tool-selection golden set. Run against the agent-loop target with a small illustrative toolset;
+# the REAL model must choose the right tool with the right arguments. Effects are stubbed (dispatch
+# returns success) because we grade the DECISION, not the side effect. `expected` = { tool, args? };
+# `toolCalledFromExpected` reads it. Args are matched as a subset (only listed keys must match).
+
+cases:
+  - caseId: create-record-on-request
+    version: "1"
+    severity: blocking
+    target: agent-loop
+    tags: [tools, selection]
+    input:
+      prompt: 'Create a new task titled "Renew SSL certificate".'
+    expected:
+      tool: record_create
+      args:
+        title: "Renew SSL certificate"
+
+  - caseId: search-before-answering
+    version: "1"
+    severity: advisory
+    target: agent-loop
+    tags: [tools, selection]
+    input:
+      prompt: "What did our onboarding checklist say about SSO? Look it up."
+    expected:
+      tool: knowledge_search
+
+  - caseId: no-tool-for-chitchat
+    version: "1"
+    severity: advisory
+    target: agent-loop
+    tags: [tools, restraint]
+    input:
+      prompt: "Thanks, that's all for now!"
+    # No `expected` tool: the model should just reply. Scored by an advisory judge in the runner.
+    rubric: >
+      PASS if the assistant replies conversationally without calling any tool. FAIL if it invokes a
+      tool for a simple sign-off.

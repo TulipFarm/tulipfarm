@@ -108,7 +108,7 @@ describe("formatViolations", () => {
 });
 
 describe("ARCHITECTURE_CONFIG", () => {
-  it("governs all 15 target packages and 4 apps", () => {
+  it("governs all 16 target packages and 4 apps", () => {
     const governed = Object.keys(ARCHITECTURE_CONFIG.allowlist);
     for (const pkg of [
       "schema",
@@ -126,6 +126,7 @@ describe("ARCHITECTURE_CONFIG", () => {
       "surface",
       "integrations",
       "agent-runtime",
+      "evals",
     ]) {
       expect(governed).toContain(pkg);
     }

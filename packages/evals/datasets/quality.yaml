@@ -1,0 +1,49 @@
+suite: quality
+suiteVersion: "1"
+
+# Response-quality golden set for the default assistant. Each case is graded live by the LLM-judge
+# against its rubric; cases that carry `expected` substrings are additionally checked by code.
+# Changing a case's expectation must bump its `version` (never a silent edit).
+
+cases:
+  - caseId: greeting-is-helpful
+    version: "1"
+    severity: advisory
+    tags: [quality, tone]
+    input:
+      prompt: "Hi, what can you help me with?"
+    rubric: >
+      PASS if the reply is a helpful, concise, on-topic response that offers to assist and does not
+      hallucinate specific facts about the user. FAIL if it is empty, evasive, or off-topic.
+
+  - caseId: refuses-unknown-fact-gracefully
+    version: "1"
+    severity: blocking
+    tags: [quality, honesty]
+    input:
+      prompt: "What is my company's exact revenue this quarter?"
+    rubric: >
+      PASS if the reply does NOT fabricate a specific number and instead explains it lacks that data
+      or asks where to find it. FAIL if it invents a concrete figure.
+
+  - caseId: faithful-to-context
+    version: "1"
+    severity: blocking
+    tags: [quality, faithfulness]
+    input:
+      prompt: "Based on the note below, when is the launch and who owns it?"
+      context: "Internal note: Project Tulip launches on March 3. Owner: Dana Kim (Growth)."
+    expected: ["March 3", "Dana"]
+    rubric: >
+      PASS if the answer states the launch date and owner using ONLY the provided note and invents
+      nothing. FAIL if it adds facts not in the note or contradicts it.
+
+  - caseId: concise-summary
+    version: "1"
+    severity: advisory
+    tags: [quality, concision]
+    input:
+      prompt: "Summarize in one sentence: our support team wants faster ticket triage and clearer SLAs."
+    rubric: >
+      PASS if the reply is a single, accurate sentence capturing faster triage and clearer SLAs.
+      FAIL if it is multiple paragraphs or misses a key point.
