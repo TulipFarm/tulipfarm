@@ -335,6 +335,10 @@ export async function main(): Promise<void> {
     consumersReady = false;
     logger.info(`worker draining (${reason})`);
 
+    // Release the port immediately so a restart right after Ctrl+C doesn't hit EADDRINUSE
+    // while the (up to drainTimeoutMs) drain below is still running.
+    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
+
     const outcome = await drain({
       loops,
       abort: () => {
@@ -344,7 +348,6 @@ export async function main(): Promise<void> {
       timeoutMs: config.drainTimeoutMs,
     });
 
-    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
     await pool.end();
 
     if (outcome.status === "drained") {

@@ -97,13 +97,36 @@ const TERMINAL_STATUSES: ReadonlySet<string> = new Set([
  */
 export const RECLAIM_PATH: readonly StateStatus[] = ["ready", "claimed"];
 
+async function walkReclaimPath(
+  transitions: StateTransitionPort,
+  request: { businessId: string; runId: string; stateKey: string },
+  from: StateStatus
+): Promise<void> {
+  let current = from;
+  for (const to of RECLAIM_PATH) {
+    await transitions.transition({ ...request, from: current, to });
+    current = to;
+  }
+}
+
 export async function reclaimWaitingState(
   transitions: StateTransitionPort,
   request: { businessId: string; runId: string; stateKey: string }
 ): Promise<void> {
-  let from: StateStatus = "waiting";
-  for (const to of RECLAIM_PATH) {
-    await transitions.transition({ ...request, from, to });
-    from = to;
-  }
+  await walkReclaimPath(transitions, request, "waiting");
+}
+
+/**
+ * Claims a Run's `invoke` State on its first dispatch.
+ *
+ * The gateway persists a fresh State at `pending` (the same default a Routine's start State gets,
+ * since one INSERT serves both), but nothing leases a State the way `RunLeaseManager` leases a Run
+ * — a chat turn has exactly one State and dispatches it immediately, so this walks it through
+ * `ready` and `claimed` itself rather than expecting it to arrive already claimed.
+ */
+export async function reclaimPendingState(
+  transitions: StateTransitionPort,
+  request: { businessId: string; runId: string; stateKey: string }
+): Promise<void> {
+  await walkReclaimPath(transitions, request, "pending");
 }

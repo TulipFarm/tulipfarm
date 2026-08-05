@@ -1,3 +1,4 @@
+import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
@@ -5,8 +6,19 @@ import type { ToolApprovalService } from "../approvals/tool-approvals";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { availableToolsFor } from "../chat/turn-helpers";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
+import type { SurfaceActionStore } from "../surfaces/action-store";
+import type { SurfaceArtifactStore } from "../surfaces/artifact-store";
+import {
+  surfaceCatalogFor,
+  surfaceCatalogRevisionFor,
+  surfaceRendererRegistry,
+} from "../surfaces/renderer-registry";
 import type { RequestContext, ToolDef } from "../tools/types";
-import { readChatRequest } from "./turn-context";
+import {
+  type ChannelDeliveryReader,
+  presentationContextForAuthority,
+  readChatRequest,
+} from "./turn-context";
 import type {
   HostedToolCall,
   HostedToolResult,
@@ -38,6 +50,13 @@ export interface RegistryToolDispatcherOptions {
   readonly soulLoader?: SoulLoader;
   /** Durable Tool approvals. Absent only where a deployment runs no gated Tools at all. */
   readonly approvals?: ToolApprovalService;
+  /** Where a Channel-originated Run's answer is rendered — see `presentationContextForAuthority`. */
+  readonly channelDeliveries?: ChannelDeliveryReader;
+  /** Backs `present`/`update_presentation`/`request_input` — absent only where no Surface Tool is registered. */
+  readonly surfaceStore?: SurfaceArtifactStore;
+  readonly surfaceActionStore?: SurfaceActionStore;
+  /** Same revision `surfaces-routes.ts` checks a handle against at resolve time. */
+  readonly guardrails?: GuardrailsService;
   now?(): Date;
 }
 
@@ -65,10 +84,16 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
   async dispatch(authority: TurnAuthority, call: HostedToolCall): Promise<HostedToolResult> {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
+    const presentationContext = await presentationContextForAuthority(
+      authority,
+      this.options.channelDeliveries
+    );
     const allowed = new Set(
-      availableToolsFor(this.options.registry, getDefaultAssistant(agent.name)).map(
-        (tool) => tool.name
-      )
+      availableToolsFor(
+        this.options.registry,
+        getDefaultAssistant(agent.name),
+        presentationContext
+      ).map((tool) => tool.name)
     );
     const definition = this.options.registry
       .getAll()
@@ -100,11 +125,24 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       }
     }
 
+    const surfaceComponents = [...(this.options.soulLoader?.surfaceComponents.values() ?? [])];
     const context: RequestContext = {
       userId: authority.subject.id,
       conversationId: authority.turn.conversationId,
       runId: authority.runId,
       agentId: agent.name,
+      autonomy: request.autonomy as RequestContext["autonomy"],
+      guardrailRevision: this.options.guardrails?.revision ?? "none",
+      presentationContext,
+      surfaceStore: this.options.surfaceStore,
+      surfaceActionStore: this.options.surfaceActionStore,
+      surfaceComponents,
+      surfaceCatalog: surfaceCatalogFor(presentationContext.target, surfaceComponents),
+      surfaceCatalogRevision: surfaceCatalogRevisionFor(
+        presentationContext.target,
+        surfaceComponents
+      ),
+      surfaceRendererManifest: surfaceRendererRegistry.manifestFor(presentationContext.target),
     };
     let result: Awaited<ReturnType<ToolDef["execute"]>>;
     try {
@@ -114,8 +152,14 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       // the difference is what reconciliation is later allowed to assume.
       return { status: "failed", reason: `tool "${call.name}" raised an internal error` };
     }
-    return result.success
-      ? { status: "succeeded", output: result.data }
+    if (result.success) {
+      return { status: "succeeded", output: result.data };
+    }
+    // A schema-shaped rejection (e.g. a resource-type's own required fields) is a repair signal
+    // like the outer AJV check above, not an execution failure — the model must see it count
+    // against the repair budget or it will resubmit the same invalid arguments forever.
+    return result.error.code === "validation_error"
+      ? { status: "invalid_arguments", reason: result.error.message }
       : { status: "failed", reason: result.error.message };
   }
 }

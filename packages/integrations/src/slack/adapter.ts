@@ -12,6 +12,7 @@ import type {
 } from "../channels";
 import { classifyHttpFailure, type IntegrationHttpPort } from "../http";
 import { ChannelRouteDeniedError, resolveChannelRoute } from "../model";
+import { toSlackMrkdwn } from "./markdown";
 
 export interface SlackFile {
   id?: unknown;
@@ -131,9 +132,7 @@ function normalizeSlackEvent(
     data: {
       externalAppId: requiredString(envelope.api_app_id),
       channelId: requiredString(event.channel),
-      ...(optionalString(event.thread_ts) === undefined
-        ? {}
-        : { threadId: optionalString(event.thread_ts) }),
+      threadId: optionalString(event.thread_ts) ?? messageId,
       text: typeof event.text === "string" ? event.text : "",
       media: normalizeFiles(event.files),
     },
@@ -205,6 +204,17 @@ export interface SlackDeliveryRequest extends ChannelDeliveryAttempt {
   text: string;
   agentDisplayName: string;
   threadId?: string;
+  /**
+   * When present, the final answer overwrites this placeholder message (`chat.update`) instead of
+   * posting a new one — the "thinking" status indicator's message `ts`, captured at Run-mint time.
+   */
+  updateTs?: string;
+  /**
+   * Rendered Slack Block Kit blocks for a Surface Artifact presented during the Turn, if any.
+   * Provider-shape-agnostic here by design (this package stays free of `@tulipfarm/surface-slack`)
+   * — the caller renders, this adapter only forwards.
+   */
+  blocks?: readonly Record<string, unknown>[];
 }
 
 export interface SlackDeliveryAdapterDeps {
@@ -268,17 +278,30 @@ export class SlackDeliveryAdapter {
       throw new SlackDeliveryError("credential_missing");
     }
 
+    const text = toSlackMrkdwn(request.text);
     const response = await this.deps.http.send(
-      {
-        method: "POST",
-        path: "/chat.postMessage",
-        body: {
-          channel: request.destination,
-          text: `*${request.agentDisplayName}*\n${request.text}`,
-          ...(request.threadId === undefined ? {} : { thread_ts: request.threadId }),
-          client_msg_id: request.idempotencyKey,
-        },
-      },
+      request.updateTs === undefined
+        ? {
+            method: "POST",
+            path: "/chat.postMessage",
+            body: {
+              channel: request.destination,
+              text,
+              ...(request.threadId === undefined ? {} : { thread_ts: request.threadId }),
+              ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
+              client_msg_id: request.idempotencyKey,
+            },
+          }
+        : {
+            method: "POST",
+            path: "/chat.update",
+            body: {
+              channel: request.destination,
+              ts: request.updateTs,
+              text,
+              ...(request.blocks === undefined ? {} : { blocks: request.blocks }),
+            },
+          },
       credential
     );
     const failure = classifyHttpFailure(response, true);
@@ -306,5 +329,44 @@ export class SlackDeliveryAdapter {
       throw new SlackDeliveryError("provider_response_malformed");
     }
     return this.deps.ledger.complete(attempt, providerMessageId);
+  }
+
+  /**
+   * Cosmetic status-rotation `chat.update` for a still-pending placeholder (plan §10). Unlike
+   * `deliver()`, this never touches the delivery ledger — it is not the durable answer, just a
+   * rotating "thinking…" phrase, so a dropped update is never worth retrying or failing a Run
+   * over.
+   */
+  async update(
+    input: { destination: string; ts: string; text: string },
+    credential: string
+  ): Promise<void> {
+    await this.deps.http.send(
+      {
+        method: "POST",
+        path: "/chat.update",
+        body: { channel: input.destination, ts: input.ts, text: input.text },
+      },
+      credential
+    );
+  }
+
+  /**
+   * Native Agents & AI Apps status indicator (gradient name + animated status line) — replaces
+   * the `update()` cosmetic-message-rotation hack for apps with `assistant_view` enabled. Same
+   * best-effort contract: no ledger interaction, a dropped call is never worth retrying.
+   */
+  async setStatus(
+    input: { destination: string; threadId: string; status: string },
+    credential: string
+  ): Promise<void> {
+    await this.deps.http.send(
+      {
+        method: "POST",
+        path: "/assistant.threads.setStatus",
+        body: { channel_id: input.destination, thread_ts: input.threadId, status: input.status },
+      },
+      credential
+    );
   }
 }

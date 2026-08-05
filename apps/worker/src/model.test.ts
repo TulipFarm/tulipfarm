@@ -146,4 +146,66 @@ describe("LlmModelPort", () => {
       { role: "user", content: [{ type: "text", text: "3 tasks" }] },
     ]);
   });
+
+  it("renders the loop's tool-call record as a real tool-call/tool-result pair, linked by callId", async () => {
+    // Without this linkage a rejected call's error arrives as an unattributed user message and the
+    // model has no way to tell it is feedback on its own last action — it just repeats the call.
+    const { port, calls } = model([...textParts("t1", ["ok"]), FINISH]);
+
+    await port.invoke(
+      request({
+        messages: [
+          { role: "user", content: "create a ticket called first ticket" },
+          {
+            role: "assistant",
+            content: JSON.stringify({
+              toolCalls: [
+                { callId: "call-1", name: "record_create", arguments: { type: "ticket" } },
+              ],
+            }),
+          },
+          {
+            role: "tool",
+            content: JSON.stringify({
+              callId: "call-1",
+              error: "invalid_arguments",
+              detail: "must have required property 'status'",
+            }),
+          },
+        ],
+      })
+    );
+
+    expect(calls()[0]?.prompt).toEqual([
+      { role: "user", content: [{ type: "text", text: "create a ticket called first ticket" }] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "record_create",
+            input: { type: "ticket" },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "record_create",
+            output: {
+              type: "text",
+              value: JSON.stringify({
+                error: "invalid_arguments",
+                detail: "must have required property 'status'",
+              }),
+            },
+          },
+        ],
+      },
+    ]);
+  });
 });

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ToolApprovalDecision, ToolApprovalService } from "../approvals/tool-approvals";
 import { ToolRegistry } from "../broker/tool-adapter";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
+import { presentationContextFor } from "../surfaces/renderer-registry";
 import { BUSINESS_ID, CONVERSATION_ID, RUN_ID, turn } from "../test/turn-host-fixtures";
 import { err, ok, type RequestContext, type ToolDef } from "../tools/types";
 import { RegistryToolDispatcher } from "./tool-dispatch";
@@ -59,6 +60,12 @@ function makeDispatcher(
   };
 }
 
+/** The web chat fallback target every Run with no Channel delivery resolves to. */
+const WEB_PRESENTATION_CONTEXT = presentationContextFor(
+  { channel: "web", surface: "chat" },
+  `conversation:${CONVERSATION_ID}`
+);
+
 /** A standing decision, as the durable service would report it. */
 function fakeApprovals(decision: ToolApprovalDecision) {
   const decide = vi.fn(async () => decision);
@@ -86,6 +93,15 @@ describe("RegistryToolDispatcher", () => {
         conversationId: CONVERSATION_ID,
         runId: RUN_ID,
         agentId: DEFAULT_ASSISTANT_NAME,
+        autonomy: undefined,
+        guardrailRevision: "none",
+        presentationContext: WEB_PRESENTATION_CONTEXT,
+        surfaceStore: undefined,
+        surfaceActionStore: undefined,
+        surfaceComponents: [],
+        surfaceCatalog: expect.any(Array),
+        surfaceCatalogRevision: expect.any(String),
+        surfaceRendererManifest: expect.anything(),
       },
     ]);
     // Which Agent this turn is comes from the immutable request, read as the Run executor.
@@ -97,15 +113,12 @@ describe("RegistryToolDispatcher", () => {
     );
   });
 
-  it("denies a Tool this turn's Agent may not call, without running it", async () => {
+  it("denies a Tool never registered, without running it", async () => {
     const execute = vi.fn(async () => ok({}));
     const { dispatcher } = makeDispatcher([toolDef({ name: "present", execute })]);
 
-    // No presentation context on a Worker turn, so the presentation Tools are withheld.
-    await expect(
-      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "present", arguments: {} })
-    ).resolves.toMatchObject({ status: "denied" });
-    // An unregistered name is denied the same way — the model learns nothing about what exists.
+    // Every Run resolves a presentation target (Channel destination, or the web chat fallback),
+    // so "present" is offered here — only a genuinely unregistered name is denied.
     await expect(
       dispatcher.dispatch(AUTHORITY, { callId: "c2", name: "nope", arguments: {} })
     ).resolves.toMatchObject({ status: "denied" });
@@ -231,5 +244,26 @@ describe("RegistryToolDispatcher", () => {
     await expect(
       dispatcher.dispatch(AUTHORITY, { callId: "c2", name: "declined", arguments: {} })
     ).resolves.toEqual({ status: "failed", reason: "no such record" });
+  });
+
+  it("classifies a handler's schema rejection as invalid_arguments, not a generic failure", async () => {
+    // A validation_error from inside execute() (e.g. a resource-type's own required fields, which
+    // the outer AJV check on the generic tool schema cannot know about) must count against the
+    // loop's repair budget the same as an outer schema failure — otherwise the model can retry the
+    // same invalid arguments forever without the budget ever tripping.
+    const { dispatcher } = makeDispatcher([
+      toolDef({
+        name: "record_create",
+        inputSchema: { type: "object" },
+        execute: async () => err("validation_error", "must have required property 'status'"),
+      }),
+    ]);
+
+    await expect(
+      dispatcher.dispatch(AUTHORITY, { callId: "c1", name: "record_create", arguments: {} })
+    ).resolves.toEqual({
+      status: "invalid_arguments",
+      reason: "must have required property 'status'",
+    });
   });
 });

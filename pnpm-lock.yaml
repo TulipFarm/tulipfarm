@@ -259,6 +259,9 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
+      '@tulipfarm/schema':
+        specifier: workspace:*
+        version: link:../../packages/schema
       '@tulipfarm/storage':
         specifier: workspace:*
         version: link:../../packages/storage

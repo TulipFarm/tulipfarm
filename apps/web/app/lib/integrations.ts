@@ -42,6 +42,7 @@ export type IntegrationDetail = IntegrationSummary & {
     egress?: { type?: string; entry?: Record<string, unknown> };
     setup_guide_path?: string;
     oauth?: OAuthConfig;
+    install_manifest?: string;
   };
   connected: boolean;
   setupGuide?: string;
@@ -122,6 +123,39 @@ export async function deleteIntegration(name: string): Promise<void> {
 
 export async function marketplaceIntegrations(): Promise<MarketplaceCatalog> {
   return apiGet<MarketplaceCatalog>("/api/v1/integrations/marketplace");
+}
+
+export type SlackRoute = {
+  id: string;
+  agentId: string;
+  channelId: string | null;
+  priority: number;
+};
+
+export async function bindSlackAgent(
+  agentId: string,
+  channelId?: string
+): Promise<{
+  status: string;
+  teamId: string;
+  appId: string;
+  routeId: string;
+  channelId: string | null;
+}> {
+  return apiWrite(
+    "POST",
+    "/api/v1/integrations/slack/bind",
+    channelId === undefined ? { agentId } : { agentId, channelId }
+  );
+}
+
+export async function listSlackRoutes(): Promise<SlackRoute[]> {
+  const body = await apiGet<{ routes: SlackRoute[] }>("/api/v1/integrations/slack/routes");
+  return body.routes;
+}
+
+export async function unbindSlackRoute(routeId: string): Promise<void> {
+  await apiDelete(`/api/v1/integrations/slack/routes/${encodeURIComponent(routeId)}`);
 }
 
 export async function startOAuth(

@@ -8,6 +8,7 @@ function signals(overrides: Partial<ChecklistSignals> = {}): ChecklistSignals {
     hasSkill: false,
     hasAgent: false,
     hasKnowledge: false,
+    hasIntegration: false,
     ...overrides,
   };
 }

@@ -13,7 +13,8 @@ import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import type { IntegrationStore } from "@tulipfarm/storage";
+import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
 import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/health";
@@ -40,7 +41,18 @@ import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import { registerIntegrationRoutes } from "./integrations/routes";
+import {
+  ensureDefaultSlackRoute,
+  registerSlackBindRoute,
+  type SlackBindDeps,
+} from "./integrations/slack-binding";
+import {
+  type ChannelInternalRouteDeps,
+  registerChannelInternalRoutes,
+} from "./internal/channel-routes";
 import { type InternalTurnRouteDeps, registerInternalTurnRoutes } from "./internal/routes";
+import { registerSurfaceInternalRoutes } from "./internal/surfaces-routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -64,6 +76,7 @@ import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
+import type { BundledIntegration } from "./soul/integrations/bundled";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
@@ -88,6 +101,14 @@ export interface AppOptions {
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
+  bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
+  /** Slack -> Agent routing-table bind route. Requires the Channel integration store + business id. */
+  slackBind?: {
+    integrations: IntegrationStore;
+    businessId: string;
+    /** Test-only override for the live Slack auth.test call. */
+    verifyBotToken?: SlackBindDeps["verifyBotToken"];
+  };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -122,6 +143,13 @@ export interface AppOptions {
   routineApprovals?: RoutineApprovalService;
   /** Tool approvals as durable kernel waits — a decision signals the wait its Run parked on. */
   toolApprovals?: ToolApprovalService;
+  /**
+   * What `apps/integration-worker` calls back into for the Channel ports it cannot implement
+   * locally (identity resolution, Run minting, reply reading, approval decisions). Built per-app
+   * rather than eagerly because identity resolution logs through Fastify's logger, which does not
+   * exist until `buildApp` has run.
+   */
+  channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
   ingress?: IngressRoutesDeps;
   /** Trigger ingress: the canonical signed /hooks/:provider/:trigger webhook receiver. */
@@ -434,6 +462,34 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.rateLimiter
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
+        if (opts.secretsService) {
+          const slackBindDeps: SlackBindDeps | undefined = opts.slackBind
+            ? {
+                soulLoader: opts.soulLoader,
+                secretsService: opts.secretsService,
+                integrations: opts.slackBind.integrations,
+                businessId: opts.slackBind.businessId,
+                verifyBotToken: opts.slackBind.verifyBotToken,
+                requireAuth,
+              }
+            : undefined;
+          registerIntegrationRoutes(
+            app,
+            opts.soulLoader,
+            opts.gitSync,
+            opts.secretsService,
+            opts.bundledIntegrations ?? new Map(),
+            requireAuth,
+            async (name) => {
+              if (name === "slack" && slackBindDeps) {
+                await ensureDefaultSlackRoute(slackBindDeps);
+              }
+            }
+          );
+          if (slackBindDeps) {
+            registerSlackBindRoute(app, slackBindDeps);
+          }
+        }
         const knowledgeService = opts.knowledgeService;
         registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
           kvService: opts.kvService,
@@ -557,6 +613,21 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.internalTurns) {
       registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
+    }
+    if (opts.channels) {
+      const channelDeps = opts.channels(app.log);
+      registerChannelInternalRoutes(app, channelDeps, requireAuth);
+      if (channelDeps.surfaceActionStore) {
+        registerSurfaceInternalRoutes(
+          app,
+          {
+            identity: channelDeps.identity,
+            actions: channelDeps.surfaceActionStore,
+            ...(opts.guardrailsService ? { guardrails: opts.guardrailsService } : {}),
+          },
+          requireAuth
+        );
+      }
     }
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);

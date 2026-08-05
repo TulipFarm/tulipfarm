@@ -5,7 +5,8 @@ import { evaluateRules } from "./rules";
  * Pure derivation for the "Getting started" onboarding checklist (ONBOARDING ONB-V1). The checklist
  * surface shows the core build blocks a fresh instance should create, with each step's done-state
  * derived from REAL soul/knowledge state (never a stored checkmark) so it can never desync. Routines
- * and integrations have no build flow yet, so they render "coming-soon" (non-actionable). The
+ * have no build flow yet, so that step renders "coming-soon" (non-actionable); integration is
+ * actionable (`done` once any Soul integration is connected). The
  * contextual "recommended next" items come from the deterministic rule set in ./rules.
  *
  * Typed against a minimal soul slice (resources/skills/agents maps) so it is trivially testable with
@@ -37,13 +38,14 @@ export interface ChecklistState {
 }
 
 /** The minimal soul slice this module reads — keeps it stub-testable. */
-export type SoulSlice = Pick<SoulLoader, "resources" | "skills" | "agents">;
+export type SoulSlice = Pick<SoulLoader, "resources" | "skills" | "agents" | "integrations">;
 
 export interface ChecklistSignals {
   hasResource: boolean;
   hasSkill: boolean;
   hasAgent: boolean;
   hasKnowledge: boolean;
+  hasIntegration: boolean;
   /** First resource type name (sorted, for byte-stable recommendation text). */
   firstResourceName?: string;
   /** Business name from soul.yaml; interpolated into `todo` prompts when set. */
@@ -61,6 +63,7 @@ export function deriveSignals(
     hasSkill: soul.skills.size > 0,
     hasAgent: soul.agents.size > 0,
     hasKnowledge,
+    hasIntegration: [...soul.integrations.values()].some((i) => i.connection?.enabled === true),
     firstResourceName: resourceNames[0],
     businessName,
   };
@@ -94,7 +97,12 @@ export function buildSteps(sig: ChecklistSignals): ChecklistStep[] {
     actionable("agent", "Create an agent", sig.hasAgent, "Help me create an agent"),
     actionable("knowledge", "Add knowledge", sig.hasKnowledge, "Help me add a knowledge page"),
     { id: "routine", label: "Set up a routine", status: "coming-soon" },
-    { id: "integration", label: "Connect an integration", status: "coming-soon" },
+    actionable(
+      "integration",
+      "Connect an integration",
+      sig.hasIntegration,
+      "Help me connect an integration"
+    ),
   ];
 }
 

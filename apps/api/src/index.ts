@@ -29,8 +29,10 @@ import {
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
+  ChannelRunDeliveryStore,
   ChildLinkStore,
   EventStore,
+  IntegrationStore,
   PgSoulPublicationStore,
   RunEventStore,
   RunStore,
@@ -124,7 +126,11 @@ import {
   bootstrapSecrets,
 } from "./setup/bootstrap-secrets";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
-import { provisionWorkerCredential } from "./setup/worker-credential";
+import {
+  provisionIntegrationWorkerCredential,
+  provisionWorkerCredential,
+} from "./setup/worker-credential";
+import { loadBundledIntegrations } from "./soul/integrations/bundled";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
@@ -198,6 +204,7 @@ async function boot() {
     await soulLoader.load();
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
+    const bundledIntegrations = await loadBundledIntegrations(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
     // materialise them for every loaded soul type before serving.
@@ -311,6 +318,10 @@ async function boot() {
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
     const integrationEvents = new IntegrationEventsRepo(pool);
+    const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
+      new Date().toISOString()
+    );
+    const channelIntegrations = new IntegrationStore(runTransactions);
     // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
     // constant in the image, which every deployment would share.
     const channelBind = {
@@ -380,12 +391,17 @@ async function boot() {
           guardrails: guardrailsService,
           bundledSkills,
           disabledBundledSkills,
+          channelDeliveries: channelRunDeliveries,
         }),
         tools: new RegistryToolDispatcher({
           registry: toolRegistry,
           artifacts: runArtifacts,
           soulLoader,
           approvals: toolApprovals,
+          channelDeliveries: channelRunDeliveries,
+          surfaceStore: surfaceArtifactStore,
+          surfaceActionStore,
+          guardrails: guardrailsService,
         }),
         approvals: {
           // The subject comes from the Run, so the principal allowed to decide is the one the Run
@@ -457,6 +473,8 @@ async function boot() {
       soulLoader,
       bundledSkills,
       disabledBundledSkills,
+      bundledIntegrations,
+      slackBind: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
       hookExecutor,
       resourceRepoFactory,
       counterStore,
@@ -483,6 +501,29 @@ async function boot() {
       approvalsRepo,
       routineApprovals,
       toolApprovals,
+      channels: (log: FastifyBaseLogger) => ({
+        store: conversationStore,
+        invocations,
+        conversations: conversationRepo,
+        threads: integrationThreads,
+        identity: new IngressIdentityResolver({
+          users: userRepo,
+          log,
+          mappings: externalIdentityRepo,
+          bind: channelBind,
+        }),
+        runDeliveries: channelRunDeliveries,
+        toolApprovals,
+        surfaceStore: surfaceArtifactStore,
+        surfaceActionStore,
+        secrets: secretsService,
+        soulLoader,
+        // Same construction as the webhook-ingress `deliveries` factory above — the link is
+        // redeemed inside an authenticated web session, so it must point at the origin users
+        // actually reach, not this API's own host.
+        bindLinkUrl: (token) =>
+          `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
+      }),
       runEvents: {
         events: runEventStore,
         runs: runStore,
@@ -564,8 +605,10 @@ async function boot() {
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
     // Before the wizard, and independent of it: a deployment that never opens the wizard still
-    // accepts Runs, so the Worker's credential cannot wait on a human creating the first account.
+    // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
+    // creating the first account.
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
+    await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
     await bootstrapFromEnv({
       userRepo,
       secretsService,

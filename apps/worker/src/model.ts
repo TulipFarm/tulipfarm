@@ -11,6 +11,8 @@ import {
   type ModelMessage as SdkMessage,
   type SystemModelMessage,
   streamText,
+  type ToolCallPart,
+  type ToolResultPart,
   type ToolSet,
   tool,
 } from "ai";
@@ -115,9 +117,12 @@ function toOutput(
  * `instructions`, which is also the honest shape — an instruction is not a turn in the
  * conversation, and their order relative to the transcript carries no meaning.
  *
- * A `tool` message arrives here already rendered to text by the loop, and the call it answered is
- * no longer identifiable — so it is carried as a user message rather than as a tool result the
- * provider would reject for naming no call.
+ * An `assistant` message that records the loop's own proposed tool calls (see
+ * `assistantToolCallMessage` in the loop) is rendered as real `tool-call` parts, and the `tool`
+ * messages answering them are rendered as `tool-result` parts on the toolCallId they name. Without
+ * this the result would arrive as an unattributed user message and the provider — and the model
+ * reading it — would have no way to tell it is feedback on the model's own last action, which is
+ * why a rejected call used to repeat forever instead of being corrected.
  */
 function splitPrompt(transcript: readonly { role: string; content: string }[]): {
   instructions: SystemModelMessage[];
@@ -125,16 +130,113 @@ function splitPrompt(transcript: readonly { role: string; content: string }[]): 
 } {
   const instructions: SystemModelMessage[] = [];
   const messages: SdkMessage[] = [];
+  const toolNamesByCallId = new Map<string, string>();
+  let pendingResults: ToolResultPart[] = [];
+
+  const flushResults = () => {
+    if (pendingResults.length > 0) {
+      messages.push({ role: "tool", content: pendingResults });
+      pendingResults = [];
+    }
+  };
+
   for (const message of transcript) {
     if (message.role === "system") {
+      flushResults();
       instructions.push({ role: "system", content: message.content });
-    } else if (message.role === "assistant") {
-      messages.push({ role: "assistant", content: message.content });
-    } else {
-      messages.push({ role: "user", content: message.content });
+      continue;
     }
+
+    if (message.role === "assistant") {
+      const calls = parseToolCalls(message.content);
+      if (calls === undefined) {
+        flushResults();
+        messages.push({ role: "assistant", content: message.content });
+        continue;
+      }
+      flushResults();
+      for (const call of calls) toolNamesByCallId.set(call.callId, call.name);
+      const parts: ToolCallPart[] = calls.map((call) => ({
+        type: "tool-call",
+        toolCallId: call.callId,
+        toolName: call.name,
+        input: call.arguments,
+      }));
+      messages.push({ role: "assistant", content: parts });
+      continue;
+    }
+
+    if (message.role === "tool") {
+      const result = parseToolResult(message.content);
+      if (result !== undefined) {
+        pendingResults.push({
+          type: "tool-result",
+          toolCallId: result.callId,
+          toolName: toolNamesByCallId.get(result.callId) ?? "unknown",
+          output: { type: "text", value: JSON.stringify(result.payload) },
+        });
+        continue;
+      }
+    }
+
+    flushResults();
+    messages.push({ role: "user", content: message.content });
   }
+  flushResults();
   return { instructions, messages };
+}
+
+/** Recognizes the loop's `assistantToolCallMessage` encoding; any other assistant text passes through. */
+function parseToolCalls(
+  content: string
+): readonly { callId: string; name: string; arguments: unknown }[] | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("toolCalls" in parsed) ||
+    !Array.isArray((parsed as { toolCalls: unknown }).toolCalls)
+  ) {
+    return undefined;
+  }
+  return (parsed as { toolCalls: unknown[] }).toolCalls.flatMap((entry) => {
+    if (
+      typeof entry !== "object" ||
+      entry === null ||
+      typeof (entry as { callId?: unknown }).callId !== "string" ||
+      typeof (entry as { name?: unknown }).name !== "string"
+    ) {
+      return [];
+    }
+    const call = entry as { callId: string; name: string; arguments: unknown };
+    return [{ callId: call.callId, name: call.name, arguments: call.arguments }];
+  });
+}
+
+/** Recognizes the loop's `toolMessage` encoding: `{ callId, ...payload }`. */
+function parseToolResult(
+  content: string
+): { callId: string; payload: Record<string, unknown> } | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return undefined;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    typeof (parsed as { callId?: unknown }).callId !== "string"
+  ) {
+    return undefined;
+  }
+  const { callId, ...payload } = parsed as { callId: string } & Record<string, unknown>;
+  return { callId, payload };
 }
 
 function toToolSet(
