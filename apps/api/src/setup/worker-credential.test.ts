@@ -11,6 +11,8 @@ import {
   formatApiClientCredential,
 } from "../identity/api-clients";
 import {
+  INTEGRATION_WORKER_CLIENT_NAME,
+  provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
   WORKER_CLIENT_NAME,
   WorkerCredentialError,
@@ -163,5 +165,68 @@ describe("provisionWorkerCredential", () => {
     await expect(
       provisionWorkerCredential(repo, { TF_DATA_DIR: join(blocked, "data") }, silent)
     ).rejects.toBeInstanceOf(WorkerCredentialError);
+  });
+});
+
+/** The credential the file lane hands the Integration Worker, as it appears in the file. */
+function integrationCredentialIn(dir: string): string {
+  const contents = readFileSync(join(dir, "integration-worker.env"), "utf8");
+  const line = contents.split("\n").find((l) => l.startsWith("INTEGRATION_WORKER_API_CREDENTIAL="));
+  return (line as string).slice("INTEGRATION_WORKER_API_CREDENTIAL=".length);
+}
+
+describe("provisionIntegrationWorkerCredential", () => {
+  it("does nothing when the environment already supplies a credential", async () => {
+    const repo = new FakeApiClientRepo();
+    const dir = tempDataDir();
+
+    const result = await provisionIntegrationWorkerCredential(
+      repo,
+      { TF_DATA_DIR: dir, INTEGRATION_WORKER_API_CREDENTIAL: "tfc_managed.secret" },
+      silent
+    );
+
+    expect(result.outcome).toBe("env");
+    expect(repo.clients).toEqual([]);
+  });
+
+  it("mints a deployment-owned client, distinct from the Worker's, and persists it 0600", async () => {
+    const repo = new FakeApiClientRepo();
+    const dir = tempDataDir();
+
+    const result = await provisionIntegrationWorkerCredential(repo, { TF_DATA_DIR: dir }, silent);
+
+    expect(result.outcome).toBe("minted");
+    expect(result.file).toBe(join(dir, "integration-worker.env"));
+    expect(repo.clients).toHaveLength(1);
+    expect(repo.clients[0].name).toBe(INTEGRATION_WORKER_CLIENT_NAME);
+    expect(statSync(join(dir, "integration-worker.env")).mode & 0o777).toBe(0o600);
+    await expect(authenticateApiClient(repo, integrationCredentialIn(dir))).resolves.toMatchObject({
+      name: INTEGRATION_WORKER_CLIENT_NAME,
+    });
+  });
+
+  it("reuses the persisted credential on the next boot", async () => {
+    const repo = new FakeApiClientRepo();
+    const dir = tempDataDir();
+
+    await provisionIntegrationWorkerCredential(repo, { TF_DATA_DIR: dir }, silent);
+    const first = integrationCredentialIn(dir);
+    const result = await provisionIntegrationWorkerCredential(repo, { TF_DATA_DIR: dir }, silent);
+
+    expect(result.outcome).toBe("reused");
+    expect(repo.clients).toHaveLength(1);
+    expect(integrationCredentialIn(dir)).toBe(first);
+  });
+
+  it("does not share a file or client with the Worker's own credential", async () => {
+    const repo = new FakeApiClientRepo();
+    const dir = tempDataDir();
+
+    await provisionWorkerCredential(repo, { TF_DATA_DIR: dir }, silent);
+    await provisionIntegrationWorkerCredential(repo, { TF_DATA_DIR: dir }, silent);
+
+    expect(repo.clients).toHaveLength(2);
+    expect(credentialIn(dir)).not.toBe(integrationCredentialIn(dir));
   });
 });

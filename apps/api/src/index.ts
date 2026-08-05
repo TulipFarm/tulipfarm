@@ -126,7 +126,10 @@ import {
   bootstrapSecrets,
 } from "./setup/bootstrap-secrets";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
-import { provisionWorkerCredential } from "./setup/worker-credential";
+import {
+  provisionIntegrationWorkerCredential,
+  provisionWorkerCredential,
+} from "./setup/worker-credential";
 import { loadBundledIntegrations } from "./soul/integrations/bundled";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
@@ -602,8 +605,10 @@ async function boot() {
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
     logEnvironmentStatus(app.log);
     // Before the wizard, and independent of it: a deployment that never opens the wizard still
-    // accepts Runs, so the Worker's credential cannot wait on a human creating the first account.
+    // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
+    // creating the first account.
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
+    await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
     await bootstrapFromEnv({
       userRepo,
       secretsService,

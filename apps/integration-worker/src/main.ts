@@ -1,6 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import { createSlackChannelLoops, watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
+import { loadDataDirEnv } from "./data-dir";
 import { connectPg } from "./db";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
@@ -23,6 +24,10 @@ const logger = {
  */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
+  const fromVolume = loadDataDirEnv();
+  if (fromVolume.length > 0) {
+    logger.info(`Read ${fromVolume.join(", ")} from the data volume.`);
+  }
 
   const config = loadConfig();
   const pool = await connectPg(config.databaseUrl);
