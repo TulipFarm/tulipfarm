@@ -13,6 +13,7 @@ function makeUser(overrides: Partial<UserDoc> = {}): UserDoc {
     role: "member",
     status: "active" as const,
     createdAt: new Date(),
+    mustResetPassword: false,
     ...overrides,
   };
 }

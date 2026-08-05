@@ -21,6 +21,7 @@ import {
   Settings,
   ShieldAlert,
   Sparkles,
+  Users,
   Workflow,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
@@ -62,6 +63,7 @@ const SETTINGS_LINKS = [
   { to: "/settings/activities", label: "Activities", icon: History },
   { to: "/settings/memory", label: "Memory", icon: Brain },
   { to: "/settings/about", label: "About", icon: Info },
+  { to: "/admin/users", label: "Users", icon: Users },
 ] as const;
 
 function modeForPath(pathname: string): ProductMode {
@@ -263,13 +265,22 @@ function ChatContext({ onNavigate }: { onNavigate: () => void }) {
   );
 }
 
-function LinkList({ mode, onNavigate }: { mode: ProductMode; onNavigate: () => void }) {
+function LinkList({
+  mode,
+  onNavigate,
+  isAdmin,
+}: {
+  mode: ProductMode;
+  onNavigate: () => void;
+  isAdmin: boolean;
+}) {
   const { count } = useApprovals();
   const links =
     mode === "build" ? BUILD_LINKS : mode === "operate" ? OPERATE_LINKS : SETTINGS_LINKS;
+  const visibleLinks = links.filter((item) => item.to !== "/admin/users" || isAdmin);
   return (
     <nav aria-label={`${mode} navigation`} className="flex flex-col gap-1 px-2">
-      {links.map((item) => (
+      {visibleLinks.map((item) => (
         <ContextLink
           key={item.to}
           {...item}
@@ -289,7 +300,15 @@ function LinkList({ mode, onNavigate }: { mode: ProductMode; onNavigate: () => v
   );
 }
 
-function ContextPanel({ mode, onNavigate }: { mode: ProductMode; onNavigate: () => void }) {
+function ContextPanel({
+  mode,
+  onNavigate,
+  isAdmin,
+}: {
+  mode: ProductMode;
+  onNavigate: () => void;
+  isAdmin: boolean;
+}) {
   const title = mode.charAt(0).toUpperCase() + mode.slice(1);
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col bg-sidebar text-sidebar-foreground">
@@ -303,7 +322,7 @@ function ContextPanel({ mode, onNavigate }: { mode: ProductMode; onNavigate: () 
         {mode === "chat" ? <ChatContext onNavigate={onNavigate} /> : null}
         {mode === "knowledge" ? <KnowledgeTree /> : null}
         {mode === "build" || mode === "operate" || mode === "settings" ? (
-          <LinkList mode={mode} onNavigate={onNavigate} />
+          <LinkList mode={mode} onNavigate={onNavigate} isAdmin={isAdmin} />
         ) : null}
       </div>
     </div>
@@ -314,11 +333,13 @@ export function AppSidebar({
   open = false,
   onClose = () => {},
   collapsed = false,
+  isAdmin = false,
 }: {
   forceCollapsed?: boolean;
   open?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
+  isAdmin?: boolean;
 } = {}) {
   const { pathname } = useLocation();
   const mode = modeForPath(pathname);
@@ -364,7 +385,7 @@ export function AppSidebar({
             collapsed && "lg:hidden"
           )}
         >
-          <ContextPanel mode={mode} onNavigate={onClose} />
+          <ContextPanel mode={mode} onNavigate={onClose} isAdmin={isAdmin} />
         </div>
       </aside>
     </>
@@ -392,7 +413,13 @@ function titleForPath(pathname: string): string {
   return TITLES.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? "Chat";
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  isAdmin = false,
+}: {
+  children: ReactNode;
+  isAdmin?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const { pathname } = useLocation();
@@ -425,7 +452,12 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
-      <AppSidebar open={open} onClose={() => setOpen(false)} collapsed={collapsed} />
+      <AppSidebar
+        open={open}
+        onClose={() => setOpen(false)}
+        collapsed={collapsed}
+        isAdmin={isAdmin}
+      />
       <div className="flex min-w-0 flex-1 flex-col lg:h-svh">
         <header className="flex h-[52px] shrink-0 items-center gap-3 border-b border-border bg-background px-3 sm:px-4">
           <button

@@ -152,6 +152,17 @@ If a rule genuinely must be broken, add a scoped suppression on the line — nev
 - Isolated automated unit/integration fixtures outside the runtime `soul/` repository remain
   allowed; this rule governs product-flow setup against the real Soul repository.
 
+### Manual QA against the real dev environment must use the UI, not curl
+
+- When manually verifying a feature against the running dev API/web servers (real dev DB, not a
+  test fixture), drive it through the actual product surface — the web UI (use the Chrome browser
+  tools if the user is signed in there) — not `curl`/raw HTTP calls.
+- This matches the product-testing rule above: exercise the same path a real user would take.
+  Automated tests (Vitest, Fastify `inject`) may still call routes directly — this rule is about
+  manual/exploratory QA against the live dev environment specifically.
+- Reserve `curl` against the dev API for documented credential/setup flows already spelled out
+  above (e.g. the login example under "Test with curl"), not for feature QA.
+
 ## API route schemas (OpenAPI)
 
 Every Fastify route **must** have a `schema` option. The spec at `/api/v1/openapi.json` is auto-generated from these schemas — no schema means the endpoint is invisible in docs.

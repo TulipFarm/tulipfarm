@@ -5,7 +5,7 @@ import { SESSION_COOKIE } from "../middleware";
 import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
-import { toPublicUser, type UserRepo } from "../users";
+import { type PasswordResetRepo, toPublicUser, type UserRepo } from "../users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -26,7 +26,8 @@ export function registerSessionRoutes(
   requireAuth: PreHandler,
   ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   rateLimitHook?: PreHandler,
-  loginRateLimitHook?: PreHandler
+  loginRateLimitHook?: PreHandler,
+  passwordResetRepo?: PasswordResetRepo
 ): void {
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined
@@ -138,4 +139,61 @@ export function registerSessionRoutes(
       return reply.send({ user: toPublicUser(req.user) });
     }
   );
+
+  if (passwordResetRepo) {
+    app.post(
+      "/api/v1/auth/change-password",
+      {
+        preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
+        schema: {
+          description:
+            "Set a new password for the current user. Required to clear a forced password reset " +
+            "on an admin-created account; every other route 403s with password_reset_required " +
+            "until this is called.",
+          tags: ["auth"],
+          security: [{ sessionCookie: [] }, { bearerToken: [] }],
+          body: {
+            type: "object",
+            required: ["newPassword"],
+            properties: {
+              newPassword: { type: "string", minLength: 8 },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: { user: PublicUserSchema },
+              required: ["user"],
+            },
+            400: ErrorSchema,
+            401: ErrorSchema,
+          },
+        },
+      },
+      async (req, reply) => {
+        if (!req.user) {
+          return reply.code(401).send({ error: "unauthorized" });
+        }
+        const body = (req.body ?? {}) as { newPassword?: unknown };
+        const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+        if (newPassword.length < 8) {
+          return reply.code(400).send({ error: "password must be at least 8 characters" });
+        }
+
+        const passwordHash = await hashPassword(newPassword);
+        await passwordResetRepo.updatePassword(req.user._id, passwordHash, false);
+
+        // Rotate: a session minted under the temporary password shouldn't outlive the reset.
+        const session = await rotateSession(store, req.cookies[SESSION_COOKIE], {
+          userId: req.user._id,
+          authMethods: ["password"],
+        });
+        reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
+        setCsrfCookie(reply, session.csrfToken, ttlSeconds);
+        return reply.send({
+          user: toPublicUser({ ...req.user, mustResetPassword: false }),
+        });
+      }
+    );
+  }
 }

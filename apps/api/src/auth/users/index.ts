@@ -18,6 +18,8 @@ export interface UserDoc {
   role: Role;
   status: UserStatus;
   createdAt: Date;
+  /** True until the user sets their own password — forced on admin-created accounts. */
+  mustResetPassword: boolean;
 }
 
 // Shape returned to clients — never includes the password hash.
@@ -26,10 +28,17 @@ export interface PublicUser {
   email: string;
   role: Role;
   status: UserStatus;
+  mustResetPassword: boolean;
 }
 
 export function toPublicUser(user: UserDoc): PublicUser {
-  return { id: user._id, email: user.email, role: user.role, status: user.status };
+  return {
+    id: user._id,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+    mustResetPassword: user.mustResetPassword,
+  };
 }
 
 export function normalizeEmail(email: string): string {
@@ -41,6 +50,32 @@ export interface UserRepo {
   findById(id: string): Promise<UserDoc | null>;
   count(): Promise<number>;
   insert(user: UserDoc): Promise<void>;
+}
+
+/**
+ * The narrow surface the admin Users page needs (list + enable/disable). Kept separate from
+ * UserRepo so test fakes that don't exercise user administration don't have to implement it —
+ * same rationale as {@link IngressUserLookup}. PgUserRepo satisfies it.
+ */
+export interface UserAdminRepo {
+  listAll(): Promise<UserDoc[]>;
+  setStatus(id: string, status: UserStatus): Promise<void>;
+}
+
+/**
+ * The narrow surface the change-password flow needs. Kept separate from UserRepo for the same
+ * reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
+ */
+export interface PasswordResetRepo {
+  updatePassword(id: string, passwordHash: string, mustResetPassword: boolean): Promise<void>;
+}
+
+/** Thrown by `insert()` on a duplicate email — the caller maps this to `409`. */
+export class EmailAlreadyExistsError extends Error {
+  constructor() {
+    super("a user with this email already exists");
+    this.name = "EmailAlreadyExistsError";
+  }
 }
 
 /**
@@ -86,6 +121,7 @@ function rowToUser(row: Record<string, unknown>): UserDoc {
     role: row.role as Role,
     status: row.status as UserStatus,
     createdAt: row.created_at as Date,
+    mustResetPassword: row.must_reset_password as boolean,
   };
 }
 
@@ -112,12 +148,24 @@ export class PgUserRepo implements UserRepo {
   async insert(user: UserDoc): Promise<void> {
     try {
       await this.q.query(
-        "INSERT INTO users (id, email, password_hash, role, status, created_at) VALUES ($1, $2, $3, $4, $5, $6)",
-        [user._id, user.email, user.passwordHash, user.role, user.status, user.createdAt]
+        `INSERT INTO users (id, email, password_hash, role, status, created_at, must_reset_password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          user._id,
+          user.email,
+          user.passwordHash,
+          user.role,
+          user.status,
+          user.createdAt,
+          user.mustResetPassword,
+        ]
       );
     } catch (err) {
       if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
         throw new AdminAlreadyExistsError();
+      }
+      if (isUniqueViolation(err, "users_email_key")) {
+        throw new EmailAlreadyExistsError();
       }
       throw err;
     }
@@ -130,8 +178,24 @@ export class PgUserRepo implements UserRepo {
     return rows.length > 0 ? rowToUser(rows[0]) : null;
   }
 
+  async listAll(): Promise<UserDoc[]> {
+    const { rows } = await this.q.query("SELECT * FROM users ORDER BY created_at, id");
+    return rows.map(rowToUser);
+  }
+
   async setStatus(id: string, status: UserStatus): Promise<void> {
     await this.q.query("UPDATE users SET status = $2 WHERE id = $1", [id, status]);
+  }
+
+  async updatePassword(
+    id: string,
+    passwordHash: string,
+    mustResetPassword: boolean
+  ): Promise<void> {
+    await this.q.query(
+      "UPDATE users SET password_hash = $2, must_reset_password = $3 WHERE id = $1",
+      [id, passwordHash, mustResetPassword]
+    );
   }
 }
 
@@ -139,7 +203,8 @@ export async function createUser(
   repo: UserRepo,
   email: string,
   password: string,
-  role: Role
+  role: Role,
+  mustResetPassword = false
 ): Promise<UserDoc> {
   const user: UserDoc = {
     _id: randomUUID(),
@@ -148,6 +213,7 @@ export async function createUser(
     role,
     status: "active",
     createdAt: new Date(),
+    mustResetPassword,
   };
   await repo.insert(user);
   return user;

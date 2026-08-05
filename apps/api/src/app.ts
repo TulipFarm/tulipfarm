@@ -28,7 +28,7 @@ import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
-import type { UserRepo } from "./auth/users";
+import type { PasswordResetRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
@@ -93,6 +93,8 @@ import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes
 export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
+  userAdminRepo?: UserAdminRepo;
+  passwordResetRepo?: PasswordResetRepo;
   tokenRepo?: TokenRepo;
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   rateLimiter?: RateLimiter;
@@ -256,7 +258,7 @@ export async function buildApp(opts: AppOptions = {}) {
     credentials: true,
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
-    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -390,6 +392,8 @@ export async function buildApp(opts: AppOptions = {}) {
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
+      ...(opts.userAdminRepo && { userAdminRepo: opts.userAdminRepo }),
+      ...(opts.passwordResetRepo && { passwordResetRepo: opts.passwordResetRepo }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,

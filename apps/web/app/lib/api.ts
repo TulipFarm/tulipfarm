@@ -53,7 +53,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 // Write client (POST/PUT). Mirrors apiGet's cookie-first auth, adds a JSON body, the optional
 // `If-Match` concurrency header, and the CSRF echo header (no-op when authed by Bearer token).
 export async function apiWrite<T>(
-  method: "POST" | "PUT",
+  method: "POST" | "PUT" | "PATCH",
   path: string,
   body: unknown,
   ifMatch?: number
@@ -185,7 +185,12 @@ export async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, path);
 }
 
-export type SessionUser = { id: string; email: string; role: string };
+export type SessionUser = {
+  id: string;
+  email: string;
+  role: string;
+  mustResetPassword: boolean;
+};
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the
 // CSRF cookie. No Bearer/CSRF headers needed — pre-login there is no session, so the CSRF hook is a
@@ -205,6 +210,14 @@ export async function login(email: string, password: string): Promise<SessionUse
 // unauthenticated — the _app gate uses that to redirect to /login.
 export async function getSession(): Promise<SessionUser> {
   return (await apiGet<{ user: SessionUser }>("/api/v1/auth/session")).user;
+}
+
+// Set a new password for the current user, clearing a forced reset. Rotates the session, so the
+// caller should treat the response as a fresh sign-in (no separate re-login needed).
+export async function changePassword(newPassword: string): Promise<SessionUser> {
+  return (
+    await apiWrite<{ user: SessionUser }>("POST", "/api/v1/auth/change-password", { newPassword })
+  ).user;
 }
 
 // Destroy the session + clear the cookie. Best-effort: ignores the response (logout is idempotent).

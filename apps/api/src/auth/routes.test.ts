@@ -7,7 +7,14 @@ import type { TokenDoc, TokenRepo } from "./api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "./csrf";
 import { SESSION_COOKIE } from "./routes";
 import { MemorySessionStore } from "./session-store";
-import { createUser, type UserDoc, type UserRepo } from "./users";
+import {
+  createUser,
+  EmailAlreadyExistsError,
+  type PasswordResetRepo,
+  type UserAdminRepo,
+  type UserDoc,
+  type UserRepo,
+} from "./users";
 
 // A session binds its own CSRF token (see makeCsrfHook); tests look it up by session id.
 const csrfBySid = new Map<string, string>();
@@ -23,7 +30,7 @@ function csrfOf(sid: string): string {
   return csrfBySid.get(sid) ?? WRONG_CSRF;
 }
 
-class FakeUserRepo implements UserRepo {
+class FakeUserRepo implements UserRepo, UserAdminRepo, PasswordResetRepo {
   constructor(private readonly users: UserDoc[] = []) {}
   async findByEmail(email: string): Promise<UserDoc | null> {
     const normalized = email.trim().toLowerCase();
@@ -36,7 +43,28 @@ class FakeUserRepo implements UserRepo {
     return this.users.length;
   }
   async insert(user: UserDoc): Promise<void> {
+    if (this.users.some((u) => u.email === user.email)) {
+      throw new EmailAlreadyExistsError();
+    }
     this.users.push(user);
+  }
+  async listAll(): Promise<UserDoc[]> {
+    return [...this.users];
+  }
+  async setStatus(id: string, status: UserDoc["status"]): Promise<void> {
+    const user = this.users.find((u) => u._id === id);
+    if (user) user.status = status;
+  }
+  async updatePassword(
+    id: string,
+    passwordHash: string,
+    mustResetPassword: boolean
+  ): Promise<void> {
+    const user = this.users.find((u) => u._id === id);
+    if (user) {
+      user.passwordHash = passwordHash;
+      user.mustResetPassword = mustResetPassword;
+    }
   }
 }
 
@@ -794,5 +822,212 @@ describe("rate limiting", () => {
     expect(res.headers["x-ratelimit-limit"]).toBe("100");
     expect(res.headers["x-ratelimit-remaining"]).toBe("0");
     expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
+  });
+});
+
+describe("admin user management routes", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let adminSid: string;
+  let memberSid: string;
+  let memberId: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    const member = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberId = member._id;
+    adminSid = await issueSession(store, admin._id);
+    memberSid = await issueSession(store, memberId);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordResetRepo: userRepo,
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("POST /users creates a member with a temp password", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email: "new@example.com" },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.user).toMatchObject({
+      email: "new@example.com",
+      role: "member",
+      mustResetPassword: true,
+    });
+    expect(typeof body.temporaryPassword).toBe("string");
+    expect(body.temporaryPassword.length).toBeGreaterThanOrEqual(16);
+  });
+
+  it("POST /users returns 409 on duplicate email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email: "member@example.com" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("POST /users returns 403 for a non-admin", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
+      payload: { email: "new@example.com" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /users lists all users for an admin", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(2);
+  });
+
+  it("GET /users returns 403 for a non-admin", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: memberSid },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("PATCH /users/:id/status disables a member", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/users/${memberId}/status`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.status).toBe("disabled");
+    expect((await userRepo.findById(memberId))?.status).toBe("disabled");
+  });
+
+  it("PATCH /users/:id/status returns 400 for self", async () => {
+    const admin = await userRepo.findByEmail("admin@example.com");
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/users/${admin?._id}/status`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PATCH /users/:id/status returns 404 for unknown id", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/users/no-such-id/status",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("forced password reset", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let memberSid: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    const member = await createUser(userRepo, "member@example.com", "pass", "member", true);
+    memberSid = await issueSession(store, member._id);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordResetRepo: userRepo,
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("blocks an unrelated route with 403 while a reset is pending", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/tokens",
+      cookies: { [SESSION_COOKIE]: memberSid },
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe("password_reset_required");
+  });
+
+  it("allows GET /session while a reset is pending", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/session",
+      cookies: { [SESSION_COOKIE]: memberSid },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.mustResetPassword).toBe(true);
+  });
+
+  it("POST /change-password clears the flag and rotates the session", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
+      payload: { newPassword: "new-strong-password" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.mustResetPassword).toBe(false);
+    const newSid = cookieValue(res);
+    expect(newSid).toBeTruthy();
+    expect(newSid).not.toBe(memberSid);
+
+    const followUp = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/tokens",
+      cookies: { [SESSION_COOKIE]: newSid as string },
+    });
+    expect(followUp.statusCode).not.toBe(403);
+  });
+
+  it("POST /change-password returns 400 for a short password", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
+      payload: { newPassword: "short" },
+    });
+    expect(res.statusCode).toBe(400);
   });
 });

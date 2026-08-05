@@ -460,6 +460,8 @@ async function boot() {
       readiness: pool,
       sessionStore,
       userRepo,
+      userAdminRepo: userRepo,
+      passwordResetRepo: userRepo,
       tokenRepo,
       // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.
       identity: {
