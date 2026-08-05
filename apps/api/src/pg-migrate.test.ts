@@ -164,6 +164,12 @@ describe("runPgMigrations", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
+      // Minimal stand-in for the real `users` table (created well before v20): later migrations
+      // past 21 (e.g. v25's `ALTER TABLE users ADD COLUMN`) run in the same sweep and need it to
+      // exist, even though this test only exercises migration 21's behavior.
+      await db.query(`CREATE TABLE users (
+        id uuid PRIMARY KEY
+      )`);
 
       await runPgMigrations(db, undefined, () => {});
 
