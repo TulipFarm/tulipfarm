@@ -24,7 +24,11 @@ export default function Login() {
     setBusy(true);
     setError(null);
     try {
-      await login(email.trim(), password);
+      const user = await login(email.trim(), password);
+      if (user.mustResetPassword) {
+        navigate("/reset-password", { replace: true });
+        return;
+      }
       const to = params.get("redirectTo") ?? "/";
       navigate(to.startsWith("/") ? to : "/", { replace: true });
     } catch (err) {

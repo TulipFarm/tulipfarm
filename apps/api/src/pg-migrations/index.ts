@@ -787,4 +787,13 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 25,
+    description: "forced password reset on admin-created accounts",
+    up: async (q) => {
+      await q.query(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_reset_password boolean NOT NULL DEFAULT false"
+      );
+    },
+  },
 ];

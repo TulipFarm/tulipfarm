@@ -24,6 +24,18 @@ declare module "fastify" {
 export const SESSION_COOKIE = "tf_sid";
 
 /**
+ * Routes reachable while `user.mustResetPassword` is true — just enough to check who's signed in
+ * and reset the password. Everything else 403s until the reset is done (enforced here, not just as
+ * a client redirect, so a forced-reset account can't reach any other route by hitting the API
+ * directly). Logout doesn't need an entry: it never runs requireAuth, so it's unauthenticated-
+ * reachable regardless of this set.
+ */
+const PASSWORD_RESET_ALLOWED_PATHS = new Set([
+  "/api/v1/auth/session",
+  "/api/v1/auth/change-password",
+]);
+
+/**
  * Why a credential was rejected. Recorded as audit evidence on the server; the client always
  * sees the same opaque 401, so probing cannot distinguish "unknown" from "disabled" from
  * "expired" (SPEC §24 non-amplification).
@@ -47,6 +59,12 @@ export interface RequireAuthDeps {
 function denialFromPrincipalError(error: unknown): AuthDenialReason | null {
   if (!(error instanceof PrincipalDeniedError)) return null;
   return error.reason === "disabled" ? "principal_disabled" : "principal_expired";
+}
+
+function blockedByPasswordReset(req: FastifyRequest, user: UserDoc): boolean {
+  if (!user.mustResetPassword) return false;
+  const path = req.routeOptions?.url ?? req.url;
+  return !PASSWORD_RESET_ALLOWED_PATHS.has(path);
 }
 
 /**
@@ -82,6 +100,9 @@ export function makeRequireAuth(deps: RequireAuthDeps) {
         if (!reason) throw error;
         return deny(reason);
       }
+      if (blockedByPasswordReset(req, user)) {
+        return reply.code(403).send({ error: "password_reset_required" });
+      }
       req.user = user;
       req.principal = userPrincipal(user, "session", session);
       return;
@@ -116,6 +137,9 @@ export function makeRequireAuth(deps: RequireAuthDeps) {
         const reason = denialFromPrincipalError(error);
         if (!reason) throw error;
         return deny(reason);
+      }
+      if (blockedByPasswordReset(req, user)) {
+        return reply.code(403).send({ error: "password_reset_required" });
       }
       req.user = user;
       req.principal = userPrincipal(user, "api_token");

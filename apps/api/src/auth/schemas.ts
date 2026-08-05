@@ -13,8 +13,9 @@ export const PublicUserSchema = {
     email: { type: "string", format: "email" },
     role: { type: "string", enum: ["admin", "member"] },
     status: { type: "string", enum: ["active", "disabled"] },
+    mustResetPassword: { type: "boolean" },
   },
-  required: ["id", "email", "role", "status"],
+  required: ["id", "email", "role", "status", "mustResetPassword"],
 } as const;
 
 export const PublicApiClientSchema = {

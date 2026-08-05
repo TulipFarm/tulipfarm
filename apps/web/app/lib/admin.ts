@@ -47,15 +47,3 @@ export type RolesModel = {
 export function getRoles(): Promise<RolesModel> {
   return apiGet<RolesModel>("/api/v1/roles");
 }
-
-export function proposeRole(
-  model: RolesModel,
-  role: Record<string, unknown>
-): Promise<{ changesetId: string; status: string }> {
-  const id = typeof role.id === "string" ? role.id : "new";
-  return apiCommand(
-    "/api/v1/roles/changesets",
-    { baseRevision: model.revision, role },
-    `role-${model.revision}-${id}`
-  );
-}
