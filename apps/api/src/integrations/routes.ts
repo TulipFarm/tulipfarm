@@ -210,9 +210,12 @@ export function registerIntegrationRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
+      if (!NAME_RE.test(name)) {
+        return reply.code(404).send({ error: `integration not found: ${name}` });
+      }
       const { env } = req.body as { env: Record<string, string> };
       const entry = resolve(name);
-      if (!entry || !NAME_RE.test(name)) {
+      if (!entry) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
       }
 
@@ -261,6 +264,9 @@ export function registerIntegrationRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
+      if (!NAME_RE.test(name)) {
+        return reply.code(404).send({ error: `integration not connected: ${name}` });
+      }
       const soulEntry: SoulIntegration | undefined = soulLoader.integrations.get(name);
       if (!soulEntry) return reply.code(404).send({ error: `integration not connected: ${name}` });
 

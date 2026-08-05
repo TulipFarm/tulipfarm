@@ -123,8 +123,6 @@ services:
   integration-worker:
     # Same image as `app` and `worker` — one tag always pairs them against the same schema. This
     # process never migrates either; it waits for `app` (the migrator) to be healthy first.
-    # Boot skeleton only today: no consumer loop is registered yet, so there is nothing here to
-    # configure beyond the database and its own probe port.
     image: ghcr.io/tulipfarm/tulipfarm:${TULIPFARM_VERSION:-latest}
     restart: unless-stopped
     extra_hosts:
@@ -137,6 +135,10 @@ services:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:-postgresql://tulipfarm:${POSTGRES_PASSWORD:-tulipfarm}@postgres:5432/tulipfarm}
       INTEGRATION_WORKER_PORT: "4030"
+      # Same pattern as `worker`: this process calls back into the API for identity/delivery
+      # lookups, so it needs a URL and a service credential of its own.
+      INTERNAL_API_URL: http://app:8080
+      INTEGRATION_WORKER_API_CREDENTIAL: ${INTEGRATION_WORKER_API_CREDENTIAL:-}
     # No published port: the probes are for the orchestrator, not for users.
     healthcheck:
       test:
