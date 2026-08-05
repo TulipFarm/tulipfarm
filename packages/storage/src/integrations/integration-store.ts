@@ -336,4 +336,56 @@ export class IntegrationStore {
       };
     });
   }
+
+  /** Active + revoked routes for one Integration, highest priority first — drives route-management UI. */
+  async listRoutes(businessId: string, integrationId: string): Promise<PersistedChannelRoute[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const routes = await transaction.query<RouteRow>(
+        `SELECT id, business_id, integration_id, agent_id, channel_id, thread_id,
+                event_types, priority, status
+           FROM integration_routes
+          WHERE business_id = $1 AND integration_id = $2
+          ORDER BY priority DESC, id`,
+        [businessId, integrationId]
+      );
+      return routes.rows.map(persistedRoute);
+    });
+  }
+
+  /** Marks one Route revoked without needing its full definition re-supplied. */
+  async revokeRoute(businessId: string, id: string): Promise<void> {
+    await this.transactions.withTransaction(async (transaction) => {
+      await transaction.query(
+        `UPDATE integration_routes SET status = 'revoked' WHERE business_id = $1 AND id = $2`,
+        [businessId, id]
+      );
+    });
+  }
+
+  /** Current status of one Integration/Route pair, for re-checking authorization at delivery time. */
+  async loadDeliveryStatus(
+    businessId: string,
+    integrationId: string,
+    routeId: string
+  ): Promise<
+    | { integrationStatus: IntegrationProjectionStatus; routeStatus: IntegrationProjectionStatus }
+    | undefined
+  > {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<{
+        integration_status: IntegrationProjectionStatus;
+        route_status: IntegrationProjectionStatus;
+      }>(
+        `SELECT i.status AS integration_status, r.status AS route_status
+           FROM integration_routes r
+           JOIN integrations i
+             ON i.business_id = r.business_id AND i.id = r.integration_id
+          WHERE r.business_id = $1 AND r.integration_id = $2 AND r.id = $3`,
+        [businessId, integrationId, routeId]
+      );
+      const row = result.rows[0];
+      if (row === undefined) return undefined;
+      return { integrationStatus: row.integration_status, routeStatus: row.route_status };
+    });
+  }
 }

@@ -59,10 +59,12 @@ Run from repo root. Turbo fans out across workspaces.
 
 ```bash
 pnpm install            # frozen install in CI: pnpm install --frozen-lockfile
-pnpm dev                # api on :4010, web on :4000
+pnpm dev                # api :4010, web :4000, worker :4020 (durable Run dispatch), integration-worker :4030 (Slack/Telegram ingress)
 pnpm dev:api            # api only
 pnpm dev:web            # web only
-pnpm dev:docs           # docs site on :4020
+pnpm dev:worker         # worker only
+pnpm dev:integration-worker # integration-worker only
+pnpm dev:docs           # docs site on :4020 — same port as worker; do not run both at once
 pnpm lint               # biome check across all workspaces
 pnpm typecheck          # tsc --noEmit across all workspaces
 pnpm test               # vitest run

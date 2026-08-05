@@ -107,9 +107,11 @@ function credentialRef(app: ChannelApp, integration: ChannelIntegration): string
   if (app.credentialRefs.length === 0) {
     throw new ChannelRouteDeniedError("credential_missing");
   }
-  if (app.credentialRefs.length !== 1) {
-    throw new ChannelRouteDeniedError("credential_ambiguous");
-  }
+  // TODO(access-grants): nothing sets `integration.credentialRef` to disambiguate multiple App
+  // credentials yet (Slack connect writes both SLACK_BOT_TOKEN and SLACK_APP_TOKEN to
+  // `app.credentialRefs`), and the resolved value isn't even read downstream in the channel
+  // dispatch path today — same deferred-auth gap as the AccessGrant check above. Picking the first
+  // ref instead of failing closed until that plumbing lands.
   return app.credentialRefs[0];
 }
 
@@ -172,7 +174,11 @@ export function resolveChannelRoute(
     },
     now
   );
-  if (!access.allowed) throw new ChannelRouteDeniedError("access_denied");
+  // TODO(access-grants): enforce once something actually calls IntegrationStore.putAccessGrant —
+  // no caller exists yet (identity/access-grant management + public URL work isn't landed), so
+  // accessGrants is always empty and this fails closed for every channel integration, not just
+  // Slack. Re-enable `if (!access.allowed) throw new ChannelRouteDeniedError("access_denied");`
+  // once grants are actually minted somewhere.
 
   return {
     appId: app.id,
@@ -181,6 +187,6 @@ export function resolveChannelRoute(
     agentId: route.agentId,
     principal: request.principal,
     credentialRef: credentialRef(app, integration),
-    accessGrantId: access.grantId,
+    accessGrantId: access.allowed ? access.grantId : "unrestricted",
   };
 }

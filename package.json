@@ -12,11 +12,12 @@
   },
   "scripts": {
     "build": "turbo build",
-    "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web --filter=@tulipfarm/worker",
+    "dev": "turbo dev --filter=@tulipfarm/api --filter=@tulipfarm/web --filter=@tulipfarm/worker --filter=@tulipfarm/integration-worker",
     "dev:api": "turbo dev --filter=@tulipfarm/api",
     "dev:docs": "turbo dev --filter=@tulipfarm/docs",
     "dev:web": "turbo dev --filter=@tulipfarm/web",
     "dev:worker": "turbo dev --filter=@tulipfarm/worker",
+    "dev:integration-worker": "turbo dev --filter=@tulipfarm/integration-worker",
     "reset:dev": "bash scripts/reset-dev.sh",
     "architecture:check": "node scripts/architecture-check.ts",
     "check:secure-context": "bash scripts/test/check-secure-context-apis.sh && vitest run scripts/test/check-secure-context-apis.test.ts",

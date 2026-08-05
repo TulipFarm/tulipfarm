@@ -17,7 +17,7 @@ import {
   turn,
 } from "../test/turn-host-fixtures";
 import { ok, type ToolDef } from "../tools/types";
-import { ChatTurnContextResolver } from "./turn-context";
+import { type ChannelDeliveryReader, ChatTurnContextResolver } from "./turn-context";
 import type { TurnAuthority } from "./turn-host";
 
 const AUTHORITY: TurnAuthority = {
@@ -59,7 +59,8 @@ function makeResolver(
     messages?: readonly PersistedMessage[];
     tools?: readonly string[];
     guardrails?: GuardrailsService;
-  } = {}
+  } = {},
+  channelDeliveries?: ChannelDeliveryReader
 ) {
   const store = new FakeConversationStore();
   for (const persisted of options.messages ?? []) store.messages.push(persisted);
@@ -78,6 +79,7 @@ function makeResolver(
       llmService: { resolve } as unknown as LlmService,
       toolRegistry: registry,
       ...(options.guardrails ? { guardrails: options.guardrails } : {}),
+      ...(channelDeliveries ? { channelDeliveries } : {}),
     }),
   };
 }
@@ -143,14 +145,35 @@ describe("ChatTurnContextResolver", () => {
     });
   });
 
-  it("withholds the Tools a Worker turn has nowhere to draw", async () => {
+  it("resolves the web chat surface, and all its Tools, for a Run with no Channel delivery", async () => {
     const { resolver } = makeResolver({ tools: ["record_create", "present", "navigate_to"] });
 
     const context = await resolver.resolve(AUTHORITY);
 
-    // No rendered surface on a Worker turn, and the imperative client Tools are browser-only.
-    expect(context.tools.map((tool) => tool.name)).toEqual(["record_create"]);
+    // No Channel delivery row for this Run falls back to the web chat surface, so both the
+    // presentation Tools and the browser-only imperative Tools are offered, same as a web Turn.
+    expect(context.tools.map((tool) => tool.name)).toEqual([
+      "record_create",
+      "present",
+      "navigate_to",
+    ]);
     expect(context.tools[0]).toMatchObject({ inputSchema: { type: "object" } });
+  });
+
+  it("withholds the browser-only Tools, but not presentation Tools, for a Slack-sourced Run", async () => {
+    const channelDeliveries = {
+      find: async () => ({ provider: "slack", destination: "C-OPS" }),
+    };
+    const { resolver } = makeResolver(
+      { tools: ["record_create", "present", "navigate_to"] },
+      channelDeliveries
+    );
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    // A Slack destination resolves the Slack message surface: presentation Tools are available
+    // there too, but the imperative client Tools stay browser-only.
+    expect(context.tools.map((tool) => tool.name)).toEqual(["record_create", "present"]);
   });
 
   it("drops the oldest history first when the transcript outgrows the budget", async () => {

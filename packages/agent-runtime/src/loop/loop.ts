@@ -317,6 +317,10 @@ export class AgentLoop {
 
       if (result.output.kind === "tool_calls") {
         const calls = normalizeCalls(result.output.calls, counters.iterations);
+        // Recorded before dispatch so the transcript carries the model's own proposed call
+        // alongside the result it provoked — without this, a validation error arrives as an
+        // unattributed message and the model cannot tell it is feedback on its own last action.
+        messages.push(assistantToolCallMessage(calls));
         let approval: { approvalId: string; callId: string } | undefined;
 
         for (const call of calls) {
@@ -440,6 +444,21 @@ function normalizeCalls(
 
 function toolMessage(callId: string, payload: Record<string, unknown>): ModelMessage {
   return { role: "tool", content: JSON.stringify({ callId, ...payload }) };
+}
+
+function assistantToolCallMessage(
+  calls: readonly { readonly callId: string; readonly name: string; readonly arguments: unknown }[]
+): ModelMessage {
+  return {
+    role: "assistant",
+    content: JSON.stringify({
+      toolCalls: calls.map((call) => ({
+        callId: call.callId,
+        name: call.name,
+        arguments: call.arguments,
+      })),
+    }),
+  };
 }
 
 function parseJson(text: string): unknown {

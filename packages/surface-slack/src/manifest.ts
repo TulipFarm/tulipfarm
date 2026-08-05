@@ -12,6 +12,9 @@ const commonComponents = {
   RecordTable: ["1.0"],
   Actions: ["1.0"],
   Choices: ["1.0"],
+  Divider: ["1.0"],
+  Image: ["1.0"],
+  MultiChoice: ["1.0"],
 } as const;
 
 export const slackMessageManifest: SurfaceRendererManifest = Object.freeze({

@@ -53,6 +53,11 @@ export async function startIntegrationWorker(
       NODE_ENV: "test",
       DATABASE_URL: options.databaseUrl,
       INTEGRATION_WORKER_PORT: String(port),
+      // Unreachable on purpose in these process tests — the Slack credential lease is expected to
+      // fail closed (`createSlackChannelLoops` catches it and boots with zero Channel loops), so
+      // no test here needs a real `apps/api` behind this URL.
+      INTERNAL_API_URL: "http://127.0.0.1:1",
+      INTEGRATION_WORKER_API_CREDENTIAL: "tfc_test.test",
       ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],

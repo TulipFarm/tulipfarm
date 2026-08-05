@@ -4,6 +4,10 @@ import {
   ARTIFACT_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
+  CHANNEL_INBOUND_STORAGE_STATEMENTS,
+  CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS,
+  CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS,
+  CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
   CHILD_STORAGE_STATEMENTS,
   CONCURRENCY_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
@@ -757,6 +761,28 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "encrypted raw webhook payload vault",
     up: async (q) => {
       for (const sql of WEBHOOK_VAULT_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 23,
+    description: "Channel inbound dedup, run-delivery correlation, and mention-thread tracking",
+    up: async (q) => {
+      for (const sql of [
+        ...CHANNEL_INBOUND_STORAGE_STATEMENTS,
+        ...CHANNEL_RUN_DELIVERY_STORAGE_STATEMENTS,
+        ...CHANNEL_MENTIONED_THREAD_STORAGE_STATEMENTS,
+      ]) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 24,
+    description: "channel_run_deliveries: track the posted approval prompt",
+    up: async (q) => {
+      for (const sql of CHANNEL_RUN_DELIVERY_APPROVAL_COLUMNS_STATEMENTS) {
         await q.query(sql);
       }
     },

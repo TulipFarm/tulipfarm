@@ -12,6 +12,7 @@ import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { Modal } from "~/components/ui/modal";
+import { Sheet } from "~/components/ui/sheet";
 import { ApiError } from "~/lib/api";
 import { copyText } from "~/lib/clipboard";
 import {
@@ -19,11 +20,13 @@ import {
   deleteIntegration,
   disconnectIntegration,
   getIntegration,
+  listSlackRoutes,
   type McpConnectionStatus,
   type OAuthConfig,
   type RequiredEnvVar,
   startOAuth,
 } from "~/lib/integrations";
+import { highlight } from "~/lib/shiki";
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
 
@@ -31,7 +34,18 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const name = params.name;
   if (!name) throw new ApiError(404, "missing integration name");
   const integration = await getIntegration(name);
-  return { integration };
+  let routesError: string | undefined;
+  if (name === "slack" && integration.connected) {
+    try {
+      // listSlackRoutes round-trips through Slack's auth.test — reused here purely to verify the
+      // stored bot token still works, surfaced as a routing status banner. A bad token must not
+      // take down the whole page — the rest of the integration detail should still render.
+      await listSlackRoutes();
+    } catch (err) {
+      routesError = errMessage(err);
+    }
+  }
+  return { integration, routesError };
 }
 
 const inputClass =
@@ -50,6 +64,11 @@ const STATUS_CLASS: Record<McpConnectionStatus, string> = {
   error: "text-destructive",
   disconnected: "text-muted-foreground",
 };
+
+function readTheme(): "light" | "dark" {
+  if (typeof document === "undefined") return "light";
+  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+}
 
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
@@ -81,6 +100,179 @@ function FieldHints({ field }: { field: RequiredEnvVar }) {
         )}
       </div>
     </details>
+  );
+}
+
+type WizardStep =
+  | { kind: "manifest"; installManifest: string }
+  | { kind: "field"; field: RequiredEnvVar };
+
+function ConnectWizard({
+  integrationName,
+  installManifest,
+  requiredEnv,
+  envValues,
+  setField,
+  onSubmit,
+  connecting,
+  actionError,
+}: {
+  integrationName: string;
+  installManifest?: string;
+  requiredEnv: RequiredEnvVar[];
+  envValues: Record<string, string>;
+  setField: (name: string) => (v: string) => void;
+  onSubmit: () => void;
+  connecting: boolean;
+  actionError?: string;
+}) {
+  const steps: WizardStep[] = [
+    ...(installManifest ? [{ kind: "manifest" as const, installManifest }] : []),
+    ...requiredEnv.map((field) => ({ kind: "field" as const, field })),
+  ];
+  const [step, setStep] = useState(0);
+  const current = steps[step];
+  const isLast = step === steps.length - 1;
+  const [copied, setCopied] = useState(false);
+  const [manifestHtml, setManifestHtml] = useState<string | null>(null);
+  const [theme, setTheme] = useState<"light" | "dark">(readTheme);
+
+  useEffect(() => {
+    const read = () => setTheme(readTheme());
+    window.addEventListener("themechange", read);
+    return () => window.removeEventListener("themechange", read);
+  }, []);
+
+  useEffect(() => {
+    if (current?.kind !== "manifest") return;
+    let cancelled = false;
+    highlight(current.installManifest, "json", theme)
+      .then((out) => {
+        if (!cancelled) setManifestHtml(out);
+      })
+      .catch(() => {
+        if (!cancelled) setManifestHtml(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current, theme]);
+
+  const currentFieldFilled =
+    current?.kind === "field" ? (envValues[current.field.name] ?? "").trim() !== "" : true;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted-foreground">
+        Step {step + 1} of {steps.length}
+      </p>
+
+      {current?.kind === "manifest" && (
+        <div className="flex flex-col gap-2">
+          <p className="text-sm text-foreground">
+            Open{" "}
+            <a
+              href="https://api.slack.com/apps"
+              target="_blank"
+              rel="noreferrer"
+              className="text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              Slack → Create New App → From a manifest
+            </a>
+            , paste this JSON, pick your workspace, and create the app.
+          </p>
+          {manifestHtml ? (
+            <div
+              className="max-h-64 overflow-auto rounded-sm border border-border text-xs [&_pre]:p-2"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki output is static, HTML-escaped source from this integration's own manifest.yml.
+              dangerouslySetInnerHTML={{ __html: manifestHtml }}
+            />
+          ) : (
+            <pre className="max-h-64 overflow-auto rounded-sm border border-border bg-muted p-2 text-xs text-foreground">
+              {current.installManifest}
+            </pre>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="self-start"
+            onClick={() => {
+              void copyText(current.installManifest).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1500);
+              });
+            }}
+          >
+            {copied ? "Copied" : "Copy manifest"}
+          </Button>
+        </div>
+      )}
+
+      {current?.kind === "field" && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <p className="text-sm font-medium text-foreground">{current.field.label}</p>
+            {current.field.description && (
+              <p className="text-xs text-muted-foreground">{current.field.description}</p>
+            )}
+          </div>
+          {current.field.steps && current.field.steps.length > 0 && (
+            <div className="flex flex-col gap-2 rounded-sm border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+              {current.field.steps.map((s) => (
+                <p key={s}>{s}</p>
+              ))}
+            </div>
+          )}
+          {current.field.setup_url && (
+            <a
+              href={current.field.setup_url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+            >
+              Open {integrationName} →
+            </a>
+          )}
+          <input
+            className={inputClass}
+            type={current.field.secret ? "password" : "text"}
+            placeholder={current.field.name}
+            value={envValues[current.field.name] ?? ""}
+            onChange={(e) => setField(current.field.name)(e.target.value)}
+            autoComplete={current.field.secret ? "off" : undefined}
+          />
+        </div>
+      )}
+
+      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={step === 0}
+          onClick={() => setStep((s) => Math.max(0, s - 1))}
+        >
+          Back
+        </Button>
+        {isLast ? (
+          <Button type="button" size="sm" disabled={connecting} onClick={onSubmit}>
+            {connecting ? "Connecting…" : "Connect"}
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            disabled={!currentFieldFilled}
+            onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
+          >
+            Next
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -135,13 +327,14 @@ function splitFields(
 }
 
 export default function IntegrationDetailPage() {
-  const { integration } = useLoaderData<typeof clientLoader>();
+  const { integration, routesError } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const requiredEnv = integration.manifest.required_env ?? [];
   const oauthConfig = integration.manifest.oauth;
   const { shared, oauthOnly, directOnly } = splitFields(requiredEnv, oauthConfig);
+  const useGuidedWizard = Boolean(integration.setupGuide) && !oauthConfig;
 
   const [envValues, setEnvValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(requiredEnv.map((e) => [e.name, ""]))
@@ -152,6 +345,7 @@ export default function IntegrationDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   const setField = (name: string) => (v: string) =>
     setEnvValues((prev) => ({ ...prev, [name]: v }));
@@ -171,8 +365,8 @@ export default function IntegrationDetailPage() {
     }
   }, [searchParams, setSearchParams, revalidator]);
 
-  async function handleConnect(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleConnect(e?: React.FormEvent) {
+    e?.preventDefault();
     setConnecting(true);
     setActionError(undefined);
     // Exclude oauth-only fields (client_id / client_secret) from direct connect env
@@ -310,7 +504,24 @@ export default function IntegrationDetailPage() {
         )}
 
         {/* Connect form (only when not connected) */}
-        {!isConnected && (
+        {!isConnected && useGuidedWizard && (
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-medium text-foreground">Connect</h2>
+            <p className="text-xs text-muted-foreground">
+              Step-by-step setup: create the app, then paste each credential as you go.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              className="self-start"
+              onClick={() => setWizardOpen(true)}
+            >
+              Guided setup →
+            </Button>
+          </div>
+        )}
+
+        {!isConnected && !useGuidedWizard && (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-2">
               <h2 className="text-sm font-medium text-foreground">Connect</h2>
@@ -325,15 +536,17 @@ export default function IntegrationDetailPage() {
               )}
             </div>
 
-            {/* Shared fields (e.g. Team ID) — always shown */}
-            {shared.map((field) => (
-              <EnvField
-                key={field.name}
-                field={field}
-                value={envValues[field.name] ?? ""}
-                onChange={setField(field.name)}
-              />
-            ))}
+            {/* Shared fields (e.g. Team ID) — only meaningful when OAuth splits the form into two
+                paths below; with no OAuth the simple layout already renders every field once. */}
+            {oauthConfig &&
+              shared.map((field) => (
+                <EnvField
+                  key={field.name}
+                  field={field}
+                  value={envValues[field.name] ?? ""}
+                  onChange={setField(field.name)}
+                />
+              ))}
 
             {actionError && <p className="text-sm text-destructive">{actionError}</p>}
             {oauthPending && (
@@ -439,6 +652,30 @@ export default function IntegrationDetailPage() {
           </div>
         )}
 
+        {/* Slack routing status */}
+        {integration.name === "slack" && isConnected && (
+          <div className="flex flex-col gap-2 rounded-sm border border-border p-3">
+            <h2 className="text-sm font-medium text-foreground">Routing</h2>
+            {routesError ? (
+              <>
+                <p className="text-sm text-destructive">
+                  Couldn't confirm channel routing: {routesError}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This usually means the stored Slack bot token is invalid or was revoked. Get a
+                  fresh Bot User OAuth Token (starts with <code>xoxb-</code>) from your Slack app's
+                  OAuth & Permissions page — reinstalling the app there mints a new one — then
+                  disconnect and reconnect this integration with it above.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                All Slack DMs and channel messages go to the default TulipFarm assistant.
+              </p>
+            )}
+          </div>
+        )}
+
         {/* Danger zone */}
         <div className="flex flex-col gap-2 rounded-sm border border-destructive/30 p-3">
           <h2 className="text-sm font-medium text-destructive">Remove</h2>
@@ -456,6 +693,27 @@ export default function IntegrationDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* Guided connect wizard */}
+      {useGuidedWizard && (
+        <Sheet
+          open={wizardOpen}
+          onClose={() => setWizardOpen(false)}
+          title={`Connect ${integration.name}`}
+          className="max-w-lg"
+        >
+          <ConnectWizard
+            integrationName={integration.name}
+            installManifest={integration.manifest.install_manifest}
+            requiredEnv={requiredEnv}
+            envValues={envValues}
+            setField={setField}
+            onSubmit={() => handleConnect()}
+            connecting={connecting}
+            actionError={actionError}
+          />
+        </Sheet>
+      )}
 
       {/* Setup guide modal */}
       {integration.setupGuide && (

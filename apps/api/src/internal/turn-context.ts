@@ -14,6 +14,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
+import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { estimateTokens } from "../chat/compaction";
 import { assembleAgentSystemPrompt } from "../chat/system-prompt";
@@ -26,7 +27,45 @@ import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
+import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
+
+/** Narrow read of one Run's Channel delivery correlation — just enough to resolve a target. */
+export interface ChannelDeliveryReader {
+  find(
+    businessId: string,
+    runId: string
+  ): Promise<{ readonly provider: string; readonly destination: string } | null>;
+}
+
+/**
+ * Where a Turn's answer is rendered, so `present`/`request_input` have somewhere to draw.
+ *
+ * A Run started from a Channel (Slack, Telegram, …) carries its destination in the correlation row
+ * `ChannelInternalRouteDeps.runDeliveries` recorded at mint time; a plain web Turn carries none, and
+ * falls back to the web chat surface keyed by conversation — the same target the (dead) debug route
+ * built by hand. Channels the Surface registry has no renderer for yet (e.g. GitHub, which has no
+ * `message` surface) fall back the same way rather than mint a target nothing can render.
+ */
+export async function presentationContextForAuthority(
+  authority: TurnAuthority,
+  channelDeliveries?: ChannelDeliveryReader
+): Promise<PresentationContext> {
+  const delivery = await channelDeliveries?.find(authority.businessId, authority.runId);
+  if (delivery?.provider === "slack") {
+    return presentationContextFor({ channel: "slack", surface: "message" }, delivery.destination);
+  }
+  if (delivery?.provider === "telegram") {
+    return presentationContextFor(
+      { channel: "telegram", surface: "message" },
+      delivery.destination
+    );
+  }
+  return presentationContextFor(
+    { channel: "web", surface: "chat" },
+    `conversation:${authority.turn.conversationId}`
+  );
+}
 
 /**
  * Resolves one turn's Context for the Worker (plan §3).
@@ -95,6 +134,7 @@ export interface ChatTurnContextResolverOptions {
   readonly guardrails?: GuardrailsService;
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
   readonly disabledBundledSkills?: ReadonlySet<string>;
+  readonly channelDeliveries?: ChannelDeliveryReader;
   now?(): Date;
 }
 
@@ -109,16 +149,28 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const request = await readChatRequest(this.options.artifacts, authority, this.now());
     const agent = resolveAgent(this.options.soulLoader, request.agentId);
     const platformAgent = getDefaultAssistant(agent.name);
-    const system = await this.buildSystemPrompt(authority, agent, platformAgent);
+    const presentationContext = await presentationContextForAuthority(
+      authority,
+      this.options.channelDeliveries
+    );
+    const system = await this.buildSystemPrompt(
+      authority,
+      agent,
+      platformAgent,
+      presentationContext
+    );
     const history = await this.options.store.listMessages(
       authority.businessId,
       authority.turn.conversationId
     );
 
-    // No presentation context: the Worker turn is not attached to a rendered surface, so the
-    // presentation Tools are withheld rather than offered to a model that has nowhere to draw.
-    // Channel parity gives each channel its own target and they come back for that channel.
-    const allowed = availableToolsFor(this.options.toolRegistry, platformAgent);
+    // Every Turn now resolves a presentation target (Channel destination, or the web chat surface
+    // keyed by conversation), so the presentation Tools are offered for every channel alike.
+    const allowed = availableToolsFor(
+      this.options.toolRegistry,
+      platformAgent,
+      presentationContext
+    );
     const allowedNames = new Set(allowed.map((tool) => tool.name));
     const tools = (this.options.toolRegistry?.getAll() ?? [])
       .filter((tool) => allowedNames.has(tool.name))
@@ -189,7 +241,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
   private async buildSystemPrompt(
     authority: TurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
-    platformAgent: ReturnType<typeof getDefaultAssistant>
+    platformAgent: ReturnType<typeof getDefaultAssistant>,
+    presentationContext: PresentationContext
   ): Promise<string> {
     const { soulLoader, workingMemory, knowledge, bundledSkills, disabledBundledSkills } =
       this.options;
@@ -200,6 +253,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         : [];
     const governancePages = knowledge ? await knowledge.governancePages() : [];
     const manifest = soulLoader?.manifest;
+    const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
 
     return assembleAgentSystemPrompt({
       agent,
@@ -219,7 +273,12 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       eagerSkills: listEagerSkills(soulLoader, bundledSkills, disabledBundledSkills),
       taggedResources: [],
       soulCatalogue: buildSoulCatalogue(soulLoader),
-      availableTools: availableToolsFor(this.options.toolRegistry, platformAgent),
+      availableTools: availableToolsFor(
+        this.options.toolRegistry,
+        platformAgent,
+        presentationContext
+      ),
+      surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
     });
   }
 }
