@@ -35,7 +35,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "d3-force": "^3.0.0",
-    "dompurify": "^3.4.11",
+    "dompurify": "^3.4.13",
     "isbot": "^5.1.44",
     "lucide-react": "^1.21.0",
     "nuqs": "^2.8.9",

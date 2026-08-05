@@ -24,3 +24,97 @@ minimumReleaseAgeExclude:
   - ai@6.0.201
   - dompurify@3.4.9
   - turbo@2.9.18
+  - estree-util-value-to-estree@3.3.3
+  - tar@7.5.7
+  - tar@7.5.3
+  - tar@7.5.8
+  - tar@7.5.10
+  - tar@7.5.11
+  - tar@7.5.4
+  - vite@6.4.2
+  - postcss@8.5.10
+  - turbo-stream@3.0.0
+  - esbuild@0.28.1
+  - tar@7.5.16
+  - vite@6.4.3
+  - undici@7.28.0
+  - undici@6.27.0
+  - brace-expansion@2.1.2
+  - brace-expansion@1.1.16
+  - brace-expansion@5.0.7
+  - js-yaml@4.3.0
+  - tar@7.5.18
+  - tar@7.5.19
+  - tar@7.5.17
+  - body-parser@1.20.6
+  - fast-uri@3.1.4
+  - sharp@0.35.0
+  - next@16.2.11
+  - postcss@8.5.12
+  - react-router@7.18.0
+  - find-my-way@9.6.1
+  - '@fastify/static@10.1.2'
+  - '@fastify/static@10.1.1'
+  - tar@7.5.21
+  - postcss@8.5.18
+  - valibot@1.4.2
+  - brace-expansion@1.1.17
+  - brace-expansion@2.1.3
+  - brace-expansion@5.0.8
+  - postcss@8.5.23
+  - undici@7.29.0
+  - undici@6.28.0
+  - fast-uri@3.1.5
+  - brace-expansion@5.0.9
+  - brace-expansion@2.1.4
+  - brace-expansion@1.1.18
+  - fast-uri@3.1.3
+overrides:
+  '@fastify/static@<=10.1.0': ^10.1.1
+  '@fastify/static@<=10.1.1': ^10.1.2
+  body-parser@<1.20.6: ^1.20.6
+  brace-expansion@<1.1.16: ^1.1.16
+  brace-expansion@<1.1.17: ^1.1.17
+  brace-expansion@<1.1.18: ^1.1.18
+  brace-expansion@>=2.0.0 <2.1.2: ^2.1.2
+  brace-expansion@>=2.0.0 <2.1.3: ^2.1.3
+  brace-expansion@>=2.0.0 <2.1.4: ^2.1.4
+  brace-expansion@>=3.0.0 <5.0.7: ^5.0.7
+  brace-expansion@>=4.0.0 <5.0.8: ^5.0.8
+  brace-expansion@>=4.0.0 <5.0.9: ^5.0.9
+  esbuild@<=0.24.2: ~0.25.0
+  esbuild@>=0.27.3 <0.28.1: ^0.28.1
+  estree-util-value-to-estree@<3.3.3: ^3.3.3
+  fast-uri@>=3.0.0 <3.1.3: ^3.1.3
+  fast-uri@>=3.0.0 <3.1.5: ^3.1.5
+  fast-uri@>=3.0.0 <=3.1.3: ^3.1.4
+  find-my-way@<=9.6.0: ^9.6.1
+  js-yaml@>=4.0.0 <4.3.0: ^4.3.0
+  next@>=16.0.0 <16.2.11: ^16.2.11
+  postcss@<8.5.10: ^8.5.10
+  postcss@<=8.5.11: ^8.5.12
+  postcss@<=8.5.17: ^8.5.18
+  postcss@<=8.5.22: ^8.5.23
+  react-router-dom@>=6.30.2 <=6.30.4: ~6.30.1
+  react-router@>=6.0.0 <7.18.0: ^8.3.0
+  sharp@<0.35.0: ^0.35.0
+  tar@<7.5.7: ^7.5.7
+  tar@<7.5.8: ^7.5.8
+  tar@<=7.5.10: ^7.5.11
+  tar@<=7.5.15: ^7.5.16
+  tar@<=7.5.16: ^7.5.17
+  tar@<=7.5.17: ^7.5.18
+  tar@<=7.5.18: ^7.5.19
+  tar@<=7.5.2: ^7.5.3
+  tar@<=7.5.20: ^7.5.21
+  tar@<=7.5.3: ^7.5.4
+  tar@<=7.5.9: ^7.5.10
+  turbo-stream@<3.0.0: ^3.0.0
+  undici@<6.27.0: ^6.27.0
+  undici@<6.28.0: ^6.28.0
+  undici@>=7.0.0 <7.28.0: ^7.28.0
+  undici@>=7.0.0 <7.29.0: ^7.29.0
+  undici@>=7.23.0 <7.28.0: ^7.28.0
+  valibot@<=1.4.1: ^1.4.2
+  vite@<=6.4.1: ^6.4.2
+  vite@<=6.4.2: ^6.4.3
