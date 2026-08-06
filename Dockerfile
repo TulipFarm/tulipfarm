@@ -90,6 +90,7 @@ COPY --from=builder /app/apps/worker/dist/ingress-hook-worker.cjs ./ingress-hook
 COPY --from=builder /app/apps/integration-worker/dist/integration-worker.cjs ./integration-worker.cjs
 COPY --from=builder /app/apps/web/build/client ./apps/web/build/client
 COPY --from=builder /app/skills ./skills
+COPY --from=builder /app/integrations ./integrations
 # /data holds the bootstrap secrets generated on first boot when the operator supplies none
 # (and, later, backups) — it must be a mounted volume or those keys die with the container.
 RUN mkdir -p /opt/tulipfarm/soul /data
