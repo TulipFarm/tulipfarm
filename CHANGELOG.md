@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.1](https://github.com/TulipFarm/tulipfarm/compare/v0.5.0...v0.5.1) (2026-08-06)
+
+### Features
+
+* **web:** redesign chat UI and update design system skill ([#320](https://github.com/TulipFarm/tulipfarm/issues/320)) ([56b10a5](https://github.com/TulipFarm/tulipfarm/commit/56b10a584305ec56218cea26f44973c3a57c29a7))
+
+### Bug Fixes
+
+* **docker:** ship bundled integrations directory into runtime image ([#321](https://github.com/TulipFarm/tulipfarm/issues/321)) ([808089d](https://github.com/TulipFarm/tulipfarm/commit/808089d0af5850ee6924aaa6e1973c89bfb7a648))
+
 ## [0.5.0](https://github.com/TulipFarm/tulipfarm/compare/v0.4.4...v0.5.0) (2026-08-06)
 
 ### Features
