@@ -637,6 +637,9 @@ export async function buildApp(opts: AppOptions = {}) {
           {
             identity: channelDeps.identity,
             actions: channelDeps.surfaceActionStore,
+            store: channelDeps.store,
+            invocations: channelDeps.invocations,
+            runDeliveries: channelDeps.runDeliveries,
             ...(opts.guardrailsService ? { guardrails: opts.guardrailsService } : {}),
           },
           requireAuth
