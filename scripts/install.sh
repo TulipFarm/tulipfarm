@@ -7,7 +7,7 @@
 # Detects/installs a container engine, fetches docker-compose.yml + .env.example,
 # generates bootstrap secrets, resolves host-port conflicts interactively, brings the
 # 3-service stack up, polls /health, and prints the setup-wizard URL. Re-running = update
-# (preserves secrets and PGDATA).
+# (preserves secrets and PGDATA, bumps TULIPFARM_VERSION to the resolved tag).
 #
 # Files are fetched from https://tulipfarm.site, which serves a flat layout built from the
 # tip of main. TF_VERSION still pins the app image, but the compose file is always latest.
@@ -331,6 +331,18 @@ update_runtime_port() {
   log "Updated the existing install to host port ${PORT}."
 }
 
+update_runtime_version() {
+  local tmp
+  tmp="$($SUDO mktemp "${INSTALL_DIR}/.env.tmp.XXXXXX")"
+  $SUDO awk -v version="$TF_VERSION" '
+    /^TULIPFARM_VERSION=/ { print "TULIPFARM_VERSION=" version; saw = 1; next }
+    { print }
+    END { if (!saw) print "TULIPFARM_VERSION=" version }
+  ' "${INSTALL_DIR}/.env" | $SUDO tee "$tmp" >/dev/null
+  $SUDO chmod 600 "$tmp"
+  $SUDO mv "$tmp" "${INSTALL_DIR}/.env"
+}
+
 # ---- compose -----------------------------------------------------------------
 # shellcheck disable=SC2086  # $SUDO may be empty and $ENGINE is a bare word — both must split
 compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose "$@" ); }
@@ -374,6 +386,7 @@ configure_runtime_port() {
   local saved_port
   if $SUDO test -f "${INSTALL_DIR}/.env"; then
     write_env
+    update_runtime_version
     load_runtime_info
     saved_port="$PORT"
     if [ -n "$PORT_OVERRIDE" ]; then
@@ -396,7 +409,7 @@ configure_runtime_port() {
 }
 
 bring_up() {
-  log "Pulling images and starting the stack…"
+  log "Pulling images (TULIPFARM_VERSION=${TF_VERSION}) and starting the stack…"
   compose pull || warn "image pull failed (rate limit / unpublished tag) — trying cached images"
   compose up -d || die "compose up failed — see logs above"
 }
