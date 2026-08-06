@@ -159,11 +159,16 @@ component contract.
 | Shell | AppShell, GlobalRail, ContextSidebar, TopBar, AppPage, Breadcrumbs |
 | Feedback | StatusBadge, PriorityBadge, LoadingState, EmptyState, ErrorState |
 | Data/forms | Panel, Field, SchemaTable, ResourceForm, LinkCombobox |
-| Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Knowledge editor |
+| Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Knowledge editor, CodeContextCard, SearchProgressBlock, SourceCarousel, FollowupPills, UserMessageBubble |
 
-The Chat composer vocabulary is closed: **Suggested prompt** (drafts text), **Action** (the person
-starts it), and **Auto action** (the Agent starts it within authority). Do not use “suggestion,”
-“action,” and “automation” interchangeably in UI copy or component APIs.
+The Chat UI vocabulary includes:
+- **Floating Composer**: Floating rounded input container (`rounded-2xl border bg-card shadow-lg`) hosting mode dropdowns, model selector, Tiptap mention triggers (`@`, `/`, `#`, `~`), paperclip attachment, and circular send/stop controls.
+- **CodeContextCard**: IDE dark-mode code block container with line numbers, flagged relevant line highlights (`bg-amber-500/10`), and line annotation badges.
+- **SearchProgressBlock**: Live tool execution and search progress block with query header, step status indicators (`✓`, `⁛`, `◌`), domain links, and a `Stop` pill action.
+- **SourceCarousel**: Horizontally scrollable reference card carousel (`flex overflow-x-auto gap-3`) featuring site domain branding, title, text snippet preview, and optional image thumbnail.
+- **FollowupPills**: Interactive prompt suggestion chips (`FollowupPills`) with icons placed directly below assistant messages.
+- **UserMessageBubble**: User query container with max-height clamping, bottom gradient fade overlay, and a "Show full message" toggle.
+- **Suggested prompt** (drafts text into composer), **Action** (person-initiated), and **Auto action** (Agent-initiated authority work). Do not use “suggestion,” “action,” and “automation” interchangeably in UI copy or component APIs.
 
 Prefer the index and source search over guessing component names.
 
