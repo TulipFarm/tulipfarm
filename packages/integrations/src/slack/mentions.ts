@@ -11,7 +11,10 @@ export interface SlackMentionResolverPort {
   resolveDisplayName(userId: string): Promise<string | undefined>;
 }
 
-const MENTION_PATTERN = /<@([A-Z0-9]+)(?:\|[^>]*)?>/g;
+// The `|label` suffix is bounded (Slack ids/labels are short) so a long run of unterminated
+// `<@ID|` tokens in untrusted message text can't make this scan quadratic (CodeQL: polynomial
+// regex on uncontrolled input).
+const MENTION_PATTERN = /<@([A-Z0-9]+)(?:\|[^>]{0,80})?>/g;
 
 /**
  * Replaces every `<@USERID>` token with `@DisplayName`. A token whose id the resolver cannot
