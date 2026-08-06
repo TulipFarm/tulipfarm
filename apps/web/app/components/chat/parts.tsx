@@ -4,7 +4,11 @@ import { SurfaceArtifact } from "~/components/surface-artifact";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 import { ApprovalCard } from "./approval-card";
+import { CodeContextCard } from "./code-context-card";
+import { FollowupPills } from "./followup-pills";
 import { Response } from "./response";
+import { SearchProgressBlock } from "./search-progress-block";
+import { SourceCarousel } from "./source-carousel";
 
 const STEP_MARK: Record<StepStatus, string> = {
   pending: "[ ]",
@@ -307,5 +311,17 @@ export function MessagePartView({
           {part.message}
         </div>
       );
+    case "code-context":
+      return (
+        <CodeContextCard filePath={part.filePath} language={part.language} lines={part.lines} />
+      );
+    case "search-progress":
+      return (
+        <SearchProgressBlock query={part.query} items={part.items} isSearching={part.isSearching} />
+      );
+    case "source-carousel":
+      return <SourceCarousel sources={part.sources} />;
+    case "followup-pills":
+      return <FollowupPills items={part.items} onPick={() => undefined} />;
   }
 }

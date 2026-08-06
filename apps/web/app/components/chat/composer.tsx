@@ -7,10 +7,13 @@ import {
   AtSign,
   Bold,
   BookOpen,
+  ChevronDown,
   Code,
   Database,
   Italic,
   Link as LinkIcon,
+  MessageSquare,
+  Paperclip,
   Slash,
   Sparkles,
   Square,
@@ -190,30 +193,8 @@ export function Composer({
 
   return (
     <div className="shrink-0 bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 pb-3 pt-2 sm:px-6">
-        <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
-          <ModelSelector value={model} onChange={setModel} disabled={busy} />
-          {activeAgent ? (
-            <>
-              <span aria-hidden className="h-4 w-px bg-border" />
-              <div className="flex min-w-0 items-center gap-1.5">
-                <AgentGlyph
-                  name={activeAgent.name}
-                  domain={activeAgent.domain}
-                  autonomy={activeAgent.autonomy}
-                  size="xs"
-                  active
-                  state={busy ? "thinking" : "idle"}
-                  decorative
-                />
-                <span className="truncate font-medium text-foreground">
-                  {activeAgent.label ?? activeAgent.name}
-                </span>
-              </div>
-            </>
-          ) : null}
-        </div>
-        <div className="overflow-hidden rounded-lg border border-input bg-card transition-[border-color,box-shadow] focus-within:border-primary focus-within:ring-[3px] focus-within:ring-ring/15">
+      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6">
+        <div className="overflow-hidden rounded-2xl border border-border/80 bg-card p-1.5 shadow-lg transition-all focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-ring/20 dark:border-zinc-800 dark:bg-zinc-900/90">
           {editor ? (
             <BubbleMenu
               editor={editor}
@@ -245,68 +226,119 @@ export function Composer({
               </FmtButton>
             </BubbleMenu>
           ) : null}
+
+          {/* Text Editor Surface */}
           <EditorContent editor={editor} />
-          <div className="flex items-center gap-1 px-2 pb-2 pt-0.5">
-            <ContextTrigger
-              label="Mention Agent"
-              shortcut="@"
-              onClick={() => insertContextTrigger("@")}
-            >
-              <AtSign aria-hidden className="size-4" />
-            </ContextTrigger>
-            <ContextTrigger
-              label="Add Skill"
-              shortcut="/"
-              onClick={() => insertContextTrigger("/")}
-            >
-              <Slash aria-hidden className="size-4" />
-            </ContextTrigger>
-            <ContextTrigger
-              label="Add Resource type"
-              shortcut="#"
-              onClick={() => insertContextTrigger("#")}
-            >
-              <Database aria-hidden className="size-4" />
-            </ContextTrigger>
-            <ContextTrigger
-              label="Pin Knowledge page"
-              shortcut="~"
-              onClick={() => insertContextTrigger("~")}
-            >
-              <BookOpen aria-hidden className="size-4" />
-            </ContextTrigger>
-            {busy ? (
-              <span className="ml-auto inline-flex">
+
+          {/* Bottom Control Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/40 px-2 pb-1 pt-2 dark:border-zinc-800/60">
+            {/* Left Controls: Mode Pill + Model Selector + Mention Triggers */}
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {/* Mode Dropdown Pill */}
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+              >
+                <MessageSquare className="size-3.5 text-muted-foreground" />
+                <span>Ask</span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </button>
+
+              {/* Model Selector */}
+              <ModelSelector value={model} onChange={setModel} disabled={busy} />
+
+              {activeAgent ? (
+                <div className="flex min-w-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-xs">
+                  <AgentGlyph
+                    name={activeAgent.name}
+                    domain={activeAgent.domain}
+                    autonomy={activeAgent.autonomy}
+                    size="xs"
+                    active
+                    state={busy ? "thinking" : "idle"}
+                    decorative
+                  />
+                  <span className="truncate font-medium text-foreground">
+                    {activeAgent.label ?? activeAgent.name}
+                  </span>
+                </div>
+              ) : null}
+
+              {/* Quick Trigger Icons */}
+              <div className="hidden items-center gap-0.5 sm:flex">
+                <ContextTrigger
+                  label="Mention Agent"
+                  shortcut="@"
+                  onClick={() => insertContextTrigger("@")}
+                >
+                  <AtSign aria-hidden className="size-3.5" />
+                </ContextTrigger>
+                <ContextTrigger
+                  label="Add Skill"
+                  shortcut="/"
+                  onClick={() => insertContextTrigger("/")}
+                >
+                  <Slash aria-hidden className="size-3.5" />
+                </ContextTrigger>
+                <ContextTrigger
+                  label="Add Resource type"
+                  shortcut="#"
+                  onClick={() => insertContextTrigger("#")}
+                >
+                  <Database aria-hidden className="size-3.5" />
+                </ContextTrigger>
+                <ContextTrigger
+                  label="Pin Knowledge page"
+                  shortcut="~"
+                  onClick={() => insertContextTrigger("~")}
+                >
+                  <BookOpen aria-hidden className="size-3.5" />
+                </ContextTrigger>
+              </div>
+            </div>
+
+            {/* Right Controls: Attachment Icon + Circular Send/Stop Button */}
+            <div className="flex items-center gap-1.5 ml-auto">
+              <Tooltip content="Attach context or files">
+                <button
+                  type="button"
+                  aria-label="Attach file"
+                  className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <Paperclip className="size-4" />
+                </button>
+              </Tooltip>
+
+              {busy ? (
                 <Tooltip content="Stop response">
                   <button
                     type="button"
                     onClick={handleStop}
                     aria-label="Stop response"
-                    className="inline-flex size-11 items-center justify-center rounded-full border border-input bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 sm:size-9"
+                    className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
                   >
-                    <Square aria-hidden className="size-3.5 fill-current" />
+                    <Square aria-hidden className="size-3 fill-current" />
                   </button>
                 </Tooltip>
-              </span>
-            ) : (
-              <span className="ml-auto inline-flex">
+              ) : (
                 <Tooltip content="Send prompt">
                   <button
                     type="button"
                     aria-label="Send prompt"
                     onClick={() => submitRef.current()}
                     disabled={isEmpty}
-                    className="inline-flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-35 sm:size-9"
+                    className="inline-flex size-8 items-center justify-center rounded-full bg-foreground text-background transition-all hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:opacity-30 dark:bg-zinc-100 dark:text-zinc-900"
                   >
-                    <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
+                    <ArrowUp aria-hidden className="size-4" strokeWidth={2.5} />
                   </button>
                 </Tooltip>
-              </span>
-            )}
+              )}
+            </div>
           </div>
         </div>
+
         {suggestions.length > 0 ? (
-          <fieldset className="mt-2 flex w-full min-w-0 gap-2 overflow-x-auto px-0.5 pb-1">
+          <fieldset className="mt-2.5 flex w-full min-w-0 gap-2 overflow-x-auto px-0.5 pb-1">
             <legend className="sr-only">Suggested prompts</legend>
             {suggestions.map((suggestion) => (
               <button
@@ -314,7 +346,7 @@ export function Composer({
                 type="button"
                 disabled={busy}
                 onClick={() => draftSuggestion(suggestion.prompt)}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:opacity-50"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-50"
               >
                 <Sparkles aria-hidden className="size-3.5 text-primary" />
                 {suggestion.label}

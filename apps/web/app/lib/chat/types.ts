@@ -133,6 +133,45 @@ export type TimelinePart =
       guard?: string;
       reason: string;
       message?: string;
+    }
+  | {
+      kind: "code-context";
+      filePath: string;
+      language?: string;
+      lines: { lineNumber: number; content: string; isRelevant?: boolean; annotation?: string }[];
+    }
+  | {
+      kind: "search-progress";
+      query: string;
+      isSearching?: boolean;
+      items: {
+        id: string;
+        title: string;
+        domain?: string;
+        url?: string;
+        status: "done" | "searching" | "pending";
+      }[];
+    }
+  | {
+      kind: "source-carousel";
+      sources: {
+        id: string;
+        title: string;
+        snippet?: string;
+        domain: string;
+        domainIcon?: string;
+        url?: string;
+        imageUrl?: string;
+      }[];
+    }
+  | {
+      kind: "followup-pills";
+      items: {
+        id: string;
+        label: string;
+        prompt: string;
+        iconName?: string;
+      }[];
     };
 
 export type ChatMessage = {
