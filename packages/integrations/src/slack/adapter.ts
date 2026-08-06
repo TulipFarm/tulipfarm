@@ -13,6 +13,7 @@ import type {
 import { classifyHttpFailure, type IntegrationHttpPort } from "../http";
 import { ChannelRouteDeniedError, resolveChannelRoute } from "../model";
 import { toSlackMrkdwn } from "./markdown";
+import { resolveMentionsInText, type SlackMentionResolverPort } from "./mentions";
 
 export interface SlackFile {
   id?: unknown;
@@ -54,6 +55,11 @@ export interface SlackChannelAdapterDeps {
   routing: ChannelRoutingSource;
   runs: ChannelRunStarter;
   now: () => string;
+  /**
+   * Resolves `<@USERID>` mention tokens to display names before the agent sees the message text.
+   * Undefined skips resolution — the raw token passes through, matching prior behavior.
+   */
+  mentions?: SlackMentionResolverPort;
 }
 
 function requiredString(value: unknown): string {
@@ -181,6 +187,12 @@ export class SlackChannelAdapter {
         action: "channels.message.receive",
         targetType: "slack.channel",
       });
+      const resolvedText = this.deps.mentions
+        ? await resolveMentionsInText(inbound.data.text, this.deps.mentions).catch(
+            () => inbound.data.text
+          )
+        : inbound.data.text;
+
       const run = await this.deps.runs.start({
         businessId,
         eventId: inbound.eventId,
@@ -188,7 +200,7 @@ export class SlackChannelAdapter {
         routeId: route.routeId,
         agentId: route.agentId,
         principal,
-        message: inbound.data,
+        message: { ...inbound.data, text: resolvedText },
       });
       return { outcome: run.outcome, runId: run.runId };
     } catch (error) {

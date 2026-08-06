@@ -13,6 +13,7 @@ import { InternalApiClient } from "../internal/client";
 import type { DrainableLoop } from "../shutdown";
 import { dispatchSlackEnvelope } from "../slack/dispatch";
 import { SlackWebApiHttp } from "../slack/http";
+import { slackUserDirectoryMentionResolver } from "../slack/mention-resolver";
 import { SlackSocketTransport } from "../slack/socket-transport";
 import { SlackSocketWorker } from "../slack/worker";
 import { channelDeliveryAuthorization } from "./delivery-authorization";
@@ -98,7 +99,15 @@ export async function createSlackChannelLoops(
     assistantStatus: { http, credential: botToken, log: deps.log },
   });
 
-  const channelAdapter = new SlackChannelAdapter({ inbound, identities, routing, runs, now });
+  const mentions = slackUserDirectoryMentionResolver(http, botToken, deps.log);
+  const channelAdapter = new SlackChannelAdapter({
+    inbound,
+    identities,
+    routing,
+    runs,
+    now,
+    mentions,
+  });
   const deliveryAdapter = new SlackDeliveryAdapter({
     ledger: channelDeliveryLedger(deliveryStore),
     authorization: channelDeliveryAuthorization(new IntegrationStore(transactions)),
