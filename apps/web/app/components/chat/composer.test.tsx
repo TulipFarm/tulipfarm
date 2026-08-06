@@ -128,10 +128,10 @@ test("send serializes mentions into agentId + skills + resources", async () => {
   });
 });
 
-test("the composer exposes the attachment affordance", () => {
+test("the composer exposes no file-attachment affordance", () => {
   const { container } = render(<Composer onSend={vi.fn()} />);
   expect(container.querySelector('input[type="file"]')).toBeNull();
-  expect(screen.getByLabelText(/attach/i)).toBeInTheDocument();
+  expect(screen.queryByLabelText(/attach|upload|file/i)).toBeNull();
 });
 
 test("a Suggested prompt drafts editable text without sending", async () => {

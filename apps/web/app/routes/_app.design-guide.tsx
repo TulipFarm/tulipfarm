@@ -1,11 +1,7 @@
 import type { MetaFunction } from "@remix-run/react";
 import { Check, Copy, Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
-import { CodeContextCard } from "~/components/chat/code-context-card";
 import { Composer } from "~/components/chat/composer";
-import { FollowupPills } from "~/components/chat/followup-pills";
-import { SearchProgressBlock } from "~/components/chat/search-progress-block";
-import { SourceCarousel } from "~/components/chat/source-carousel";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -39,7 +35,6 @@ const GUIDE_LINKS = [
   ["status-priority", "Status & priority systems"],
   ["hierarchy", "Component hierarchy"],
   ["composition", "Composition patterns"],
-  ["chat-ui", "Chat UI primitives"],
   ["actions", "Interactive patterns"],
   ["layout", "Layout system"],
   ["guide-page", "The /design-guide page"],
@@ -316,143 +311,6 @@ export default function DesignGuideRoute() {
               Changes apply after validation.
             </div>
           </article>
-        </div>
-      </GuideSection>
-
-      <GuideSection
-        id="chat-ui"
-        title="Chat UI primitives"
-        description="Redesigned IDE dark-mode code cards, live search progress execution, reference cards carousel, follow-up pills, and floating composer."
-      >
-        <div className="space-y-6">
-          {/* Code Context Card */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Code Context Card
-            </h4>
-            <CodeContextCard
-              filePath="src/auth/middleware.ts"
-              language="ts"
-              lines={[
-                {
-                  lineNumber: 38,
-                  content: "export async function validateSession(token: string) {",
-                },
-                { lineNumber: 39, content: "  if (!token) {" },
-                { lineNumber: 40, content: '    throw new UnauthorizedError("missing token");' },
-                { lineNumber: 41, content: "  }" },
-                {
-                  lineNumber: 42,
-                  content: "  const decoded = jwt.verify(token, SECRET);",
-                  isRelevant: true,
-                  annotation: "Relevant",
-                },
-                {
-                  lineNumber: 43,
-                  content: "  if (!decoded.userId) {",
-                  isRelevant: true,
-                  annotation: "Relevant",
-                },
-                {
-                  lineNumber: 44,
-                  content: '    throw new UnauthorizedError("invalid session");',
-                  isRelevant: true,
-                  annotation: "Relevant",
-                },
-                { lineNumber: 45, content: "  }" },
-                { lineNumber: 46, content: "  return decoded;" },
-              ]}
-            />
-          </div>
-
-          {/* Search Progress Block */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Search Progress Block
-            </h4>
-            <SearchProgressBlock
-              query="JWT auth vulnerabilities and middleware security best practices"
-              isSearching={true}
-              onStop={() => undefined}
-              items={[
-                {
-                  id: "s1",
-                  title: "JWT verification best practices",
-                  domain: "auth0.com/blog/jwt-security-best-practices",
-                  url: "https://auth0.com",
-                  status: "done",
-                },
-                {
-                  id: "s2",
-                  title: "Node.js authentication security guide",
-                  domain: "owasp.org/www-project-nodejs-goat",
-                  url: "https://owasp.org",
-                  status: "searching",
-                },
-                {
-                  id: "s3",
-                  title: "PortSwigger JWT Security Guide",
-                  domain: "portswigger.net/web-security/jwt",
-                  status: "pending",
-                },
-              ]}
-            />
-          </div>
-
-          {/* Source Carousel */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Source Cards Carousel
-            </h4>
-            <SourceCarousel
-              sources={[
-                {
-                  id: "src1",
-                  title: "What are Design Systems?",
-                  snippet: "A design system is a set of standards to manage and scale design...",
-                  domain: "Google",
-                  url: "https://google.com",
-                },
-                {
-                  id: "src2",
-                  title: "Design Systems 101 - NN/g",
-                  snippet: "A design system is a structured collection of reusable components...",
-                  domain: "Nielsen Norman Group",
-                  url: "https://nngroup.com",
-                },
-              ]}
-            />
-          </div>
-
-          {/* Followup Pills */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Followup Query Pills
-            </h4>
-            <FollowupPills
-              onPick={() => undefined}
-              items={[
-                {
-                  id: "p1",
-                  label: "Component Library Reference",
-                  prompt: "Explain the component library reference structure",
-                  iconName: "palette",
-                },
-                {
-                  id: "p2",
-                  label: "Design Token Structure",
-                  prompt: "How are design tokens organized?",
-                  iconName: "layers",
-                },
-                {
-                  id: "p3",
-                  label: "UI Component Variants",
-                  prompt: "What variants exist for UI components?",
-                  iconName: "code",
-                },
-              ]}
-            />
-          </div>
         </div>
       </GuideSection>
 
