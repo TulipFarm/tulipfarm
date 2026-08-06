@@ -20,8 +20,9 @@ models and the LLM-judge are wired in the app layer (`apps/api/src/evals/`).
   `complex` tier — no new secret.
 - **Nondeterminism is handled by sampling.** Each case runs `runs` times (default 3) and passes when
   the pass rate meets `minPassRate` (default 2/3). Per-case overrides live on the case.
-- **Live evals are on-demand + nightly, never a PR gate** (cost, flakiness, fork-PR secrets). Run
-  them with `EVAL_LIVE=1 … pnpm evals`; the nightly workflow is `.github/workflows/evals-live.yml`.
+- **Live evals are on-demand only, never a PR gate** (cost, flakiness, fork-PR secrets). Run them
+  locally with `EVAL_LIVE=1 … pnpm evals`, or from the GitHub Actions UI via the manual
+  (`workflow_dispatch`) `.github/workflows/evals-live.yml` — there is no cron schedule.
 
 ## Layout
 

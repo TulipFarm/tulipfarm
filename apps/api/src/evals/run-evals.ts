@@ -29,9 +29,10 @@ import { llmEvalModelPort } from "./live-target";
  *
  * Provider config comes from the environment so a dev needs no Soul checkout:
  *   EVAL_LIVE=1                      required, or the runner prints how to enable and exits 0
- *   EVAL_PROVIDER / LLM_PROVIDER     default "openai"
- *   EVAL_MODEL / LLM_MODEL           default per provider
- *   EVAL_API_KEY_ENV                 name of the env var holding the key (default "LLM_API_KEY")
+ *   EVAL_PROVIDER / LLM_PROVIDER     default "openai" (use "openai-compatible" for Ollama/local)
+ *   EVAL_MODEL / LLM_MODEL           default per provider (e.g. "gemma3" on Ollama)
+ *   EVAL_BASE_URL                    OpenAI-compatible base URL (Ollama: http://localhost:11434/v1)
+ *   EVAL_API_KEY_ENV                 env var holding the key (default "LLM_API_KEY"); optional for local
  *   EVAL_RUNS                        samples per case (default from the harness: 3)
  */
 
@@ -75,13 +76,36 @@ function defaultModel(provider: string): string {
   return provider === "anthropic" ? "claude-3-5-haiku-latest" : "gpt-4o-mini";
 }
 
-function buildLlmConfig(): { config: unknown; apiKeyEnv: string } {
+interface LlmSetup {
+  readonly config: unknown;
+  readonly provider: string;
+  readonly apiKeyEnv: string;
+  readonly baseUrl?: string;
+  /** Hosted providers need a key; a local OpenAI-compatible endpoint (e.g. Ollama) may not. */
+  readonly requiresKey: boolean;
+}
+
+function buildLlmConfig(): LlmSetup {
   const provider = process.env.EVAL_PROVIDER ?? process.env.LLM_PROVIDER ?? "openai";
   const model = process.env.EVAL_MODEL ?? process.env.LLM_MODEL ?? defaultModel(provider);
   const apiKeyEnv = process.env.EVAL_API_KEY_ENV ?? "LLM_API_KEY";
-  const entry = { provider, model, api_key_ref: `env://${apiKeyEnv}` };
+  const baseUrl = process.env.EVAL_BASE_URL;
+  const hasKey = Boolean(process.env[apiKeyEnv]);
+  const entry = {
+    provider,
+    model,
+    ...(baseUrl ? { base_url: baseUrl } : {}),
+    ...(hasKey ? { api_key_ref: `env://${apiKeyEnv}` } : {}),
+  };
   const tier = { providers: [entry] };
-  return { config: { tiers: { quick: tier, standard: tier, complex: tier } }, apiKeyEnv };
+  return {
+    config: { tiers: { quick: tier, standard: tier, complex: tier } },
+    provider,
+    apiKeyEnv,
+    ...(baseUrl ? { baseUrl } : {}),
+    // A local/OpenAI-compatible endpoint authenticates by URL, not a hosted key.
+    requiresKey: !baseUrl && provider !== "openai-compatible",
+  };
 }
 
 /** Minimal SecretsService stand-in: env:// key refs never touch it, and nothing else is used here. */
@@ -116,7 +140,8 @@ async function main(): Promise<void> {
       [
         "Live evals are opt-in. To run them against real providers:",
         "",
-        "  EVAL_LIVE=1 LLM_API_KEY=<key> [EVAL_PROVIDER=openai] [EVAL_MODEL=gpt-4o-mini] pnpm evals",
+        "  Hosted:  EVAL_LIVE=1 LLM_API_KEY=<key> [EVAL_PROVIDER=openai] [EVAL_MODEL=gpt-4o-mini] pnpm evals",
+        "  Ollama:  EVAL_LIVE=1 EVAL_PROVIDER=openai-compatible EVAL_BASE_URL=http://localhost:11434/v1 EVAL_MODEL=gemma3 pnpm evals",
         "",
         "They cost tokens and are nondeterministic, so they are not part of PR CI.",
       ].join("\n")
@@ -124,10 +149,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { config, apiKeyEnv } = buildLlmConfig();
-  if (!process.env[apiKeyEnv]) {
+  const { config, provider, apiKeyEnv, baseUrl, requiresKey } = buildLlmConfig();
+  if (requiresKey && !process.env[apiKeyEnv]) {
     console.error(
-      `EVAL_LIVE is set but ${apiKeyEnv} is empty. Set the provider API key and retry.`
+      `EVAL_LIVE is set but ${apiKeyEnv} is empty. Set the provider API key, or use a local ` +
+        "OpenAI-compatible endpoint via EVAL_PROVIDER=openai-compatible + EVAL_BASE_URL."
+    );
+    process.exitCode = 1;
+    return;
+  }
+  if (provider === "openai-compatible" && !baseUrl) {
+    console.error(
+      "EVAL_PROVIDER=openai-compatible requires EVAL_BASE_URL (e.g. http://localhost:11434/v1 for Ollama)."
     );
     process.exitCode = 1;
     return;

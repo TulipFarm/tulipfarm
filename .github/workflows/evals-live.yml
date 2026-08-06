@@ -1,13 +1,12 @@
 name: Evals (live)
 
-# Live agent/model quality evals against REAL providers. Not a PR gate: they cost tokens, are
-# nondeterministic, and need provider credentials. They run nightly and on demand; the run is
+# Live agent/model quality evals against REAL providers. Manual-only for now: trigger from the
+# GitHub Actions UI ("Run workflow"). There is deliberately NO schedule/cron — we run these
+# ourselves on demand. They are never a PR gate (cost, nondeterminism, fork-PR secrets). The run is
 # smoothed by the harness's multi-run pass-rate threshold, and the JSON/Markdown report is uploaded
-# as an artifact. Configure `LLM_API_KEY` (secret) and optionally `EVAL_PROVIDER` / `EVAL_MODEL`
-# (repo variables) for this workflow.
+# as an artifact. Configure `LLM_API_KEY` (secret) and optionally `EVAL_PROVIDER` / `EVAL_MODEL` /
+# `EVAL_BASE_URL` (repo variables) for this workflow.
 on:
-  schedule:
-    - cron: "0 7 * * *"
   workflow_dispatch:
     inputs:
       runs:
@@ -36,6 +35,7 @@ jobs:
           EVAL_RUNS: ${{ github.event.inputs.runs || '3' }}
           EVAL_PROVIDER: ${{ vars.EVAL_PROVIDER }}
           EVAL_MODEL: ${{ vars.EVAL_MODEL }}
+          EVAL_BASE_URL: ${{ vars.EVAL_BASE_URL }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
         run: pnpm evals
       - name: Upload report
