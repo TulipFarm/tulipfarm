@@ -228,6 +228,60 @@ describe("SlackChannelAdapter", () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it("resolves mention tokens in the text handed to the Run, not in the persisted event", async () => {
+    let persisted: ChannelInboundEvent | undefined;
+    const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
+    const mentionEvent = event();
+    if (mentionEvent.event === undefined) throw new Error("test setup: event missing");
+    mentionEvent.event.text = "create a task for <@U0AMFGRAKLY>";
+    const adapter = new SlackChannelAdapter({
+      inbound: {
+        accept: async (input) => {
+          persisted = input;
+          return { outcome: "accepted" };
+        },
+      },
+      identities: {
+        resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }),
+      },
+      routing: { load: async () => routing() },
+      runs: { start },
+      now: () => "2026-07-26T10:00:00.000Z",
+      mentions: {
+        resolveDisplayName: async (userId: string) =>
+          userId === "U0AMFGRAKLY" ? "Mohit" : undefined,
+      },
+    });
+
+    await adapter.receive(BUSINESS_ID, mentionEvent, async () => undefined);
+
+    expect(persisted?.data.text).toBe("create a task for <@U0AMFGRAKLY>");
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ text: "create a task for @Mohit" }),
+      })
+    );
+  });
+
+  it("passes text through unchanged when no mentions resolver is configured", async () => {
+    const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
+    const adapter = new SlackChannelAdapter({
+      inbound: { accept: async () => ({ outcome: "accepted" }) },
+      identities: {
+        resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }),
+      },
+      routing: { load: async () => routing() },
+      runs: { start },
+      now: () => "2026-07-26T10:00:00.000Z",
+    });
+
+    await adapter.receive(BUSINESS_ID, event(), async () => undefined);
+
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.objectContaining({ text: "status?" }) })
+    );
+  });
+
   it("reloads routing for every event so an Integration revocation applies immediately", async () => {
     let calls = 0;
     const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
