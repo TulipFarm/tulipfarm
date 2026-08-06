@@ -1,10 +1,10 @@
 import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { MarkdownView } from "~/components/markdown-view";
 import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
 import { MessagePartView } from "./parts";
 import type { MentionEntry } from "./use-mention-catalog";
-import { UserMessageBubble } from "./user-message-bubble";
 
 function partKey(part: TimelinePart, i: number): string {
   switch (part.kind) {
@@ -179,13 +179,15 @@ function AssistantActions({
   );
 }
 
-// User turn: a right-aligned bubble with a copy toolbar and expandable height.
+// User turn: a right-aligned bubble with a copy toolbar.
 function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: MentionEntry[] }) {
   const text = messageText(message);
 
   return (
-    <div className="group flex flex-col items-end gap-1 w-full">
-      <UserMessageBubble messageText={text} mentions={mentions} />
+    <div className="group flex flex-col items-end gap-1">
+      <div className="max-w-[80%] rounded-lg bg-muted px-3.5 py-2 text-sm text-foreground [&_:first-child]:mt-0 [&_:last-child]:mb-0">
+        <MarkdownView mentions={mentions}>{text}</MarkdownView>
+      </div>
       <div className={`${toolbar} justify-end`}>
         <CopyButton text={text} />
       </div>
