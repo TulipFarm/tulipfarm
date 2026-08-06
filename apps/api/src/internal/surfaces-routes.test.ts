@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { Type } from "@sinclair/typebox";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
   DurableInvocationGateway,
   DurableWaitManager,
@@ -75,6 +76,8 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
   let mappings: MemoryExternalIdentityRepo;
   let surfaceActionStore: MemorySurfaceActionStore;
   let surfaceArtifactStore: MemorySurfaceArtifactStore;
+  let conversationStore: FakeConversationStore;
+  let runDeliveries: ChannelRunDeliveryStore;
 
   beforeEach(async () => {
     db = await makePglite();
@@ -111,6 +114,8 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
     });
     surfaceActionStore = new MemorySurfaceActionStore();
     surfaceArtifactStore = new MemorySurfaceArtifactStore();
+    conversationStore = new FakeConversationStore();
+    runDeliveries = new ChannelRunDeliveryStore(transactions, () => new Date().toISOString());
 
     app = await buildApp({
       sessionStore: sessions,
@@ -119,7 +124,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
       identity: { apiClientRepo },
       toolApprovals,
       channels: () => ({
-        store: new FakeConversationStore(),
+        store: conversationStore,
         invocations: new DurableInvocationGateway({
           store: {
             persist: async (record) => ({ outcome: "started", runId: record.runId }),
@@ -134,7 +139,7 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
           log: { warn: () => {}, error: () => {}, info: () => {}, debug: () => {} } as never,
           mappings,
         }),
-        runDeliveries: new ChannelRunDeliveryStore(transactions, () => new Date().toISOString()),
+        runDeliveries,
         toolApprovals,
         surfaceStore: surfaceArtifactStore,
         surfaceActionStore,
@@ -204,6 +209,70 @@ describe("POST /api/v1/internal/surfaces/interactions", () => {
     const body = res.json();
     expect(body.artifactId).toBe("artifact-1");
     expect(body.principal).toBe(slackUser._id);
+  });
+
+  it("submits a follow-up turn and a new channel delivery so the reply reaches Slack", async () => {
+    const artifact = createSurfaceArtifact({
+      id: "artifact-2",
+      component: { name: "Actions", version: "1.0" },
+      props: { actions: [{ label: "Create it", action: { event: "resource.create" } }] },
+      target: { channel: "slack", surface: "message" },
+      audience: [slackUser._id],
+      classification: "internal",
+    });
+    await surfaceArtifactStore.create(artifact, { runId: "run-1" });
+    const handle = await surfaceActionStore.create({
+      artifactId: artifact.id,
+      revision: artifact.revision,
+      inputSchema: Type.Object({}),
+      audience: [slackUser._id],
+      target: artifact.target,
+      destination: "C-OPS",
+      conversationId: "conv-1",
+      runId: "run-1",
+      waitId: null,
+      guardrailRevision: "none",
+      expiresAt: new Date(Date.now() + 60_000),
+      action: { event: "resource.create" },
+    });
+
+    await runDeliveries.create({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      runId: "run-1",
+      integrationId: "integration-1",
+      routeId: "route-1",
+      provider: "slack",
+      destination: "C-OPS",
+      threadId: "T-1",
+      agentId: "agent-1",
+      principalId: slackUser._id,
+      idempotencyKey: "orig-event",
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/internal/surfaces/interactions",
+      headers: asWorker(),
+      payload: {
+        handle: handle.handle,
+        provider: "slack",
+        externalSubject: "U-LINKED",
+        input: {},
+      },
+    });
+    expect(res.statusCode).toBe(200);
+
+    expect(conversationStore.turns).toHaveLength(1);
+    expect(conversationStore.turns[0]?.conversationId).toBe("conv-1");
+    expect(conversationStore.messages[0]?.content).toBe("Submitted");
+
+    const pending = await runDeliveries.listPending(DEPLOYMENT_BUSINESS_ID);
+    expect(pending).toHaveLength(2);
+    const followUp = pending.find((row) => row.runId !== "run-1");
+    expect(followUp?.destination).toBe("C-OPS");
+    expect(followUp?.threadId).toBe("T-1");
+    expect(followUp?.provider).toBe("slack");
+    expect(followUp?.agentId).toBe("agent-1");
   });
 
   it("proxies the store's denial code for an unmapped sender", async () => {
