@@ -1,5 +1,50 @@
 # Changelog
 
+## [0.5.0](https://github.com/TulipFarm/tulipfarm/compare/v0.4.4...v0.5.0) (2026-08-06)
+
+### Features
+
+* **auth:** admin user management with forced password reset ([#317](https://github.com/TulipFarm/tulipfarm/issues/317)) ([c0b2010](https://github.com/TulipFarm/tulipfarm/commit/c0b2010f63358bae01f48eea9ebce69e0c183432))
+* **integration-worker:** boot the process ([#307](https://github.com/TulipFarm/tulipfarm/issues/307)) ([d785078](https://github.com/TulipFarm/tulipfarm/commit/d785078e1e3ab16778fd48de4be25b7045642b91))
+* **integration-worker:** rich Slack Block Kit UI via Surface system ([#310](https://github.com/TulipFarm/tulipfarm/issues/310)) ([4392767](https://github.com/TulipFarm/tulipfarm/commit/43927676440301a68c64c62bcf9c87b6a081caef))
+* **security:** fix high and medium severity findings from security audit ([#315](https://github.com/TulipFarm/tulipfarm/issues/315)) ([e0a6e29](https://github.com/TulipFarm/tulipfarm/commit/e0a6e2904ff38946c43cafe4148eaff9e788e950))
+* **soul:** persist execution bundles ([#292](https://github.com/TulipFarm/tulipfarm/issues/292)) ([5369048](https://github.com/TulipFarm/tulipfarm/commit/5369048fdccfb1b26514bd7e98d3c70f7e4de48e))
+* **web:** establish design system shell ([#296](https://github.com/TulipFarm/tulipfarm/issues/296)) ([aa90d66](https://github.com/TulipFarm/tulipfarm/commit/aa90d66f138ef2faaba9962c0aa711e150d27f8b))
+* **web:** refine chat shell and composer ([#299](https://github.com/TulipFarm/tulipfarm/issues/299)) ([77c4cd3](https://github.com/TulipFarm/tulipfarm/commit/77c4cd32be7256848a2fcd38543edd88beb2b0fc))
+* **worker:** answer Routine agent States from the pinned bundle ([#304](https://github.com/TulipFarm/tulipfarm/issues/304)) ([98c5a01](https://github.com/TulipFarm/tulipfarm/commit/98c5a01ee7fb18b84d859609b0b89abb43a15749))
+* **worker:** dispatch Routine Tool States through the broker ([#302](https://github.com/TulipFarm/tulipfarm/issues/302)) ([8b09bfc](https://github.com/TulipFarm/tulipfarm/commit/8b09bfcf273241d5ff0d5f2b5e35a660ddc8a251))
+* **worker:** own turn execution and stream every channel from run_events ([#286](https://github.com/TulipFarm/tulipfarm/issues/286)) ([2efccec](https://github.com/TulipFarm/tulipfarm/commit/2efccec2c2957a5224cbb9033bfbfc3d0c9a1559))
+* **worker:** park Routine approval States on durable waits ([#303](https://github.com/TulipFarm/tulipfarm/issues/303)) ([1d5abc9](https://github.com/TulipFarm/tulipfarm/commit/1d5abc9d60ff2744d68b7c79249e33e29aaca975))
+
+### Bug Fixes
+
+* **chat:** budget the turn routes per caller ([#288](https://github.com/TulipFarm/tulipfarm/issues/288)) ([00e22a0](https://github.com/TulipFarm/tulipfarm/commit/00e22a0a4a225b655271a3553e6ee2d583d22347))
+* **deps:** apply security patches and overrides ([#316](https://github.com/TulipFarm/tulipfarm/issues/316)) ([fa86035](https://github.com/TulipFarm/tulipfarm/commit/fa860350dc126895ca0821fea147ba924e10d701))
+* **web:** guard secure-context-only browser APIs ([#285](https://github.com/TulipFarm/tulipfarm/issues/285)) ([5471c47](https://github.com/TulipFarm/tulipfarm/commit/5471c47ea28a5fa979bcbbf8d0b7fa6e3dfb43ad))
+
+### Code Refactoring
+
+* **api:** compose hookIngress signed webhook Trigger consumption ([#306](https://github.com/TulipFarm/tulipfarm/issues/306)) ([87e0c42](https://github.com/TulipFarm/tulipfarm/commit/87e0c42f4966213a62f7382c03e85148220eb03a))
+* **api:** compose triggerInvoke Trigger consumption ([#305](https://github.com/TulipFarm/tulipfarm/issues/305)) ([a460112](https://github.com/TulipFarm/tulipfarm/commit/a4601120d4980b8c01a685c8a74576d911149069))
+* **routines:** pin Runs to active Soul bundles ([#295](https://github.com/TulipFarm/tulipfarm/issues/295)) ([4d10023](https://github.com/TulipFarm/tulipfarm/commit/4d10023b65efce97ae720426a752f1140ab7d9ed))
+* **run-kernel:** own durable invocation boundary ([#293](https://github.com/TulipFarm/tulipfarm/issues/293)) ([dda3e5d](https://github.com/TulipFarm/tulipfarm/commit/dda3e5daf094aa00fa045d1f2b835d32e8a372af))
+* **run-kernel:** schedule durable Routine States ([#298](https://github.com/TulipFarm/tulipfarm/issues/298)) ([b6dfcce](https://github.com/TulipFarm/tulipfarm/commit/b6dfcce916378fac4cd68d83cd58d7ae4a0594d4))
+* **runs:** separate source from routine identity ([#294](https://github.com/TulipFarm/tulipfarm/issues/294)) ([bed4a24](https://github.com/TulipFarm/tulipfarm/commit/bed4a2484b4582e66b72fdacf4f6105f35df4be1))
+* **worker:** execute deterministic routine branches ([#300](https://github.com/TulipFarm/tulipfarm/issues/300)) ([88c011a](https://github.com/TulipFarm/tulipfarm/commit/88c011acfe19702d8a0f6b11764a3814eeb357a8))
+* **worker:** execute Routine waits and bounded fan-out ([#301](https://github.com/TulipFarm/tulipfarm/issues/301)) ([7bc64b0](https://github.com/TulipFarm/tulipfarm/commit/7bc64b00b5a9cd5d5332f3f89c43c2961c8f6a18))
+* **worker:** host maintenance jobs ([#290](https://github.com/TulipFarm/tulipfarm/issues/290)) ([304ebd5](https://github.com/TulipFarm/tulipfarm/commit/304ebd5b54420bd0979ec7221fea1a083765c899))
+* **worker:** load exact Routine definitions ([#297](https://github.com/TulipFarm/tulipfarm/issues/297)) ([33cd399](https://github.com/TulipFarm/tulipfarm/commit/33cd399d3a5175a4f4d30a2bc128fdcb16d061c5))
+
+### Tests
+
+* **ci:** add browser smoke against the installed image and a secure-context guard ([#287](https://github.com/TulipFarm/tulipfarm/issues/287)) ([c25cebe](https://github.com/TulipFarm/tulipfarm/commit/c25cebea39f29ee35402f21fd1d9bf019a665400))
+* **e2e:** expand production product coverage ([#291](https://github.com/TulipFarm/tulipfarm/issues/291)) ([d31a7d9](https://github.com/TulipFarm/tulipfarm/commit/d31a7d936a1118459b24a667f2e19b17c92a89f0))
+
+### Maintenance
+
+* **deps:** bump actions/setup-node from 6 to 7 in the actions group ([#311](https://github.com/TulipFarm/tulipfarm/issues/311)) ([cb45f99](https://github.com/TulipFarm/tulipfarm/commit/cb45f99700bf8ae161eac489c3a6ed322d59ed2c))
+* remove internal spec/phase/ticket-code jargon repo-wide ([#308](https://github.com/TulipFarm/tulipfarm/issues/308)) ([9980a8b](https://github.com/TulipFarm/tulipfarm/commit/9980a8b9119d282a40eb7fce8ccc853c7a0606eb))
+
 ## [0.4.4](https://github.com/TulipFarm/tulipfarm/compare/v0.4.3...v0.4.4) (2026-07-30)
 
 ### Features
