@@ -81,6 +81,7 @@ type RunEventData = {
   stage?: string;
   reason?: string;
   messageId?: string | null;
+  artifactId?: string;
 };
 
 /**
@@ -200,9 +201,15 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
       case "stream.revoked":
         return [{ type: "error", data: { message: "access to this run was revoked" } }];
 
-      // `turn.started`, `surface.emitted`, and every operator-audience event have no timeline
-      // counterpart. Surfaces are not rendered from this stream: the event names an Artifact id,
-      // not the Artifact, and inventing one would show the participant something no Run produced.
+      // The event names an Artifact id, not the Artifact itself (revision isn't on the wire) — the
+      // surface part renders with just the id, and `SurfaceArtifact` fetches the rest by id (latest
+      // revision when none is known), the same fetch it already does on a restored conversation.
+      case "surface.emitted": {
+        if (!data.artifactId) return [];
+        return [{ type: "surface", data: { artifactId: data.artifactId } }];
+      }
+
+      // `turn.started` and every operator-audience event have no timeline counterpart.
       default:
         return [];
     }

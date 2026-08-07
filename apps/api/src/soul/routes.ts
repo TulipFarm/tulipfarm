@@ -322,7 +322,8 @@ export function registerSoulRoutes(
         await secretsService.set(SOUL_GIT_CREDENTIAL_KEY, credential);
       }
       try {
-        await gitSync.configureRemote(remoteUrl, credential || undefined);
+        const resolvedCredential = credential || undefined;
+        await gitSync.configureRemote(remoteUrl, async () => resolvedCredential);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });

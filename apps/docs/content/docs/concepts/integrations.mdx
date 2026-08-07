@@ -89,10 +89,17 @@ Scanning clones the repository temporarily. Nothing is written to the soul until
 explicitly confirm the install.
 </Callout>
 
+## GitHub is App-install, not MCP
+
+GitHub doesn't run as an MCP server or take a pasted token. Your deployment registers its
+own GitHub App on GitHub, and each install grants access to the org and repos you choose —
+the installation itself is the credential, and TulipFarm mints short-lived access tokens
+from it as needed. See [Connect GitHub](/docs/guides/connect-github) for setup.
+
 ## V1 limits
 
-- Only `type: mcp` integrations are supported. HTTP/SSE transports are accepted alongside
-  stdio; other types are ignored with a warning.
+- Besides GitHub, only `type: mcp` integrations are supported. HTTP/SSE transports are
+  accepted alongside stdio; other types are ignored with a warning.
 - Every agent gets access to all connected integration tools. Per-agent tool restriction
   is not yet available.
 - TulipFarm does not rotate or refresh tokens. If an OAuth access token expires, you need

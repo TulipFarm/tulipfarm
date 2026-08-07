@@ -113,7 +113,7 @@ async function makeApp(dir: string): Promise<FastifyInstance> {
       dekId: randomUUID(),
       key: randomBytes(32),
     }),
-    gitSync: new GitSyncService(soulPath, undefined, undefined, console),
+    gitSync: new GitSyncService(soulPath, undefined, async () => undefined, console),
   });
 }
 
@@ -250,7 +250,11 @@ describe("setup routes", () => {
       payload: { remoteUrl: "https://github.com/acme/soul.git", credentials: "ghp_test" },
     });
     expect(res.statusCode).toBe(204);
-    expect(configureRemote).toHaveBeenCalledWith("https://github.com/acme/soul.git", "ghp_test");
+    expect(configureRemote).toHaveBeenCalledWith(
+      "https://github.com/acme/soul.git",
+      expect.any(Function)
+    );
+    await expect(configureRemote.mock.calls[0][1]()).resolves.toBe("ghp_test");
     const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
       gitRemoteUrl?: string;
     };

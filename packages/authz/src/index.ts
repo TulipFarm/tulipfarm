@@ -88,3 +88,4 @@ export {
   RoleCycleError,
   RoleResolutionError,
 } from "./roles";
+export { compileRoutineAuthority } from "./routine-authority";

@@ -17,6 +17,7 @@ import {
   RUN_EVENT_STORAGE_STATEMENTS,
   RUN_STORAGE_STATEMENTS,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
+  SOUL_REPOSITORY_STORAGE_STATEMENTS,
   WAIT_STORAGE_STATEMENTS,
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
@@ -447,6 +448,78 @@ const WEBHOOK_VAULT_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS webhook_raw_payloads_business_idx ON webhook_raw_payloads (business_id)",
 ];
 
+/**
+ * Postgres storage for `@tulipfarm/knowledge`'s source/chunk ports (ACL-first Knowledge, e.g.
+ * Slack conversation indexing) — distinct from `knowledge_pages`/`knowledge_chunks` above, which
+ * back the wiki. `knowledge_source_chunks` cascades off its source so a deleted/revoked source's
+ * text cannot outlive the record that authorizes it.
+ */
+const KNOWLEDGE_SOURCES_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS knowledge_source_records (
+    source_id                      text NOT NULL,
+    business_id                    text NOT NULL,
+    integration_id                 text NOT NULL,
+    provider                       text NOT NULL,
+    external_id                    text NOT NULL,
+    external_tenant_id             text NOT NULL,
+    owner_external_id              text NOT NULL,
+    revision                       text NOT NULL,
+    classification                 text[] NOT NULL DEFAULT '{}',
+    status                         text NOT NULL,
+    verification                   text NOT NULL,
+    access_control_mode            text NOT NULL,
+    access_control_max_age_seconds integer NOT NULL,
+    acl_revision                   text,
+    acl_captured_at                timestamptz,
+    acl_principals                 jsonb,
+    provenance_captured_at         timestamptz NOT NULL,
+    provenance_content_hash        text NOT NULL,
+    provenance_checkpoint          text,
+    last_synced_at                 timestamptz NOT NULL,
+    created_at                     timestamptz NOT NULL,
+    updated_at                     timestamptz NOT NULL,
+    PRIMARY KEY (business_id, source_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS knowledge_source_records_business_idx ON knowledge_source_records (business_id)",
+  `CREATE TABLE IF NOT EXISTS knowledge_source_chunks (
+    business_id  text NOT NULL,
+    source_id    text NOT NULL,
+    chunk_id     text NOT NULL,
+    revision     text NOT NULL,
+    classification text[] NOT NULL DEFAULT '{}',
+    digest       text NOT NULL,
+    content      text NOT NULL,
+    embedding    vector,
+    tsv          tsvector NOT NULL,
+    model        text,
+    dim          integer,
+    created_at   timestamptz NOT NULL,
+    updated_at   timestamptz NOT NULL,
+    PRIMARY KEY (business_id, chunk_id),
+    FOREIGN KEY (business_id, source_id)
+      REFERENCES knowledge_source_records (business_id, source_id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS knowledge_source_chunks_tsv_gin ON knowledge_source_chunks USING gin (tsv)",
+  "CREATE INDEX IF NOT EXISTS knowledge_source_chunks_source_idx ON knowledge_source_chunks (business_id, source_id)",
+  "CREATE INDEX IF NOT EXISTS knowledge_source_chunks_dim_idx ON knowledge_source_chunks (dim)",
+];
+
+/**
+ * Durable per-channel resume position for `syncSlackKnowledge`
+ * (`SlackKnowledgeCheckpointStore`), keyed by `integrationId` alone — the port takes no
+ * `businessId` argument, and `integrationId` (`slack:<appId>:<teamId>`) is already
+ * business-unique per `slack-binding.ts`.
+ */
+const SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS slack_knowledge_checkpoints (
+    integration_id text NOT NULL,
+    channel_id     text NOT NULL,
+    cursor         text,
+    updated_at     timestamptz NOT NULL,
+    PRIMARY KEY (integration_id, channel_id)
+  )`,
+];
+
 async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
     handle              text PRIMARY KEY,
@@ -828,6 +901,33 @@ export const PG_MIGRATIONS: PgMigration[] = [
       // The forced-reset gate existed only to make an admin-minted temporary password single-use.
       // Nothing mints one now — the invited user chooses their own password on redemption.
       await q.query("ALTER TABLE users DROP COLUMN IF EXISTS must_reset_password");
+    },
+  },
+  {
+    version: 28,
+    description: "soul_repositories: one business's Soul repo mapping (Phase 10)",
+    up: async (q) => {
+      for (const sql of SOUL_REPOSITORY_STORAGE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 29,
+    description: "knowledge_source_records / knowledge_source_chunks: ACL-first Knowledge storage",
+    up: async (q) => {
+      for (const sql of KNOWLEDGE_SOURCES_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 30,
+    description: "slack_knowledge_checkpoints: durable per-channel Slack Knowledge sync cursor",
+    up: async (q) => {
+      for (const sql of SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS) {
+        await q.query(sql);
+      }
     },
   },
 ];

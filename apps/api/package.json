@@ -23,6 +23,7 @@
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",

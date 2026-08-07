@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("simple-git", () => ({ default: vi.fn() }));
-vi.mock("node:fs", () => ({ existsSync: vi.fn(), mkdirSync: vi.fn() }));
+vi.mock("node:fs", () => ({ existsSync: vi.fn(), mkdirSync: vi.fn(), writeFileSync: vi.fn() }));
 
 import { existsSync } from "node:fs";
 import simpleGit from "simple-git";
@@ -63,7 +63,7 @@ describe("GitSyncService", () => {
     it("initializes a dedicated repo when soulPath is not yet a git repo", async () => {
       mockExistsSync.mockReturnValue(false);
       mockGit.revparse.mockRejectedValue(new Error("not a git repository"));
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await svc.bootSync();
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("local-only"));
       expect(mockGit.init).toHaveBeenCalled();
@@ -72,14 +72,14 @@ describe("GitSyncService", () => {
     it("refuses to operate when soulPath is inside another git repo (footgun guard)", async () => {
       mockExistsSync.mockReturnValue(false); // soul has no .git of its own
       mockGit.revparse.mockResolvedValue("/some/parent/repo"); // but an enclosing repo exists
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await expect(svc.bootSync()).rejects.toThrow(/inside another git repository/);
       expect(mockGit.init).not.toHaveBeenCalled();
     });
 
     it("reuses an existing standalone repo without re-init", async () => {
       mockExistsSync.mockReturnValue(true);
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.init).not.toHaveBeenCalled();
     });
@@ -91,23 +91,26 @@ describe("GitSyncService", () => {
     });
 
     it("clones when .git does not exist", async () => {
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.clone).toHaveBeenCalledWith(REMOTE, SOUL);
     });
 
-    it("injects credentials into clone URL", async () => {
-      const svc = new GitSyncService(SOUL, REMOTE, "ghp_token", logger);
+    it("clones with the plain remote URL and applies the credential as a transient header, never embedding it in the URL", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, async () => "ghp_token", logger);
       await svc.bootSync();
-      expect(mockGit.clone).toHaveBeenCalledWith(
-        "https://ghp_token@github.com/user/soul.git",
-        SOUL
+      expect(mockGit.clone).toHaveBeenCalledWith(REMOTE, SOUL);
+      const basic = Buffer.from("x-access-token:ghp_token").toString("base64");
+      expect(mockSimpleGit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          config: [`http.extraheader=AUTHORIZATION: basic ${basic}`],
+        })
       );
     });
 
     it("throws on clone failure", async () => {
       mockGit.clone.mockRejectedValue(new Error("network error"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.bootSync()).rejects.toThrow("network error");
     });
   });
@@ -119,7 +122,7 @@ describe("GitSyncService", () => {
 
     it("runs pull when .git exists", async () => {
       mockGit.raw.mockResolvedValue("0\t3");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
       expect(mockGit.pull).toHaveBeenCalledWith("origin", "main", ["--ff-only"]);
@@ -127,7 +130,7 @@ describe("GitSyncService", () => {
 
     it("throws on pull failure", async () => {
       mockGit.fetch.mockRejectedValue(new Error("timeout"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.bootSync()).rejects.toThrow("timeout");
     });
   });
@@ -139,7 +142,7 @@ describe("GitSyncService", () => {
     });
 
     it("pushes local main to initialize the remote instead of fetching", async () => {
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.fetch).not.toHaveBeenCalled();
       expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
@@ -147,7 +150,7 @@ describe("GitSyncService", () => {
 
     it("does not push when local has no commits yet", async () => {
       mockGit.revparse.mockRejectedValue(new Error("no commits"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).not.toHaveBeenCalled();
     });
@@ -160,7 +163,7 @@ describe("GitSyncService", () => {
 
     it("no-op when fully in sync (ahead=0, behind=0)", async () => {
       mockGit.raw.mockResolvedValue("0\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.pull).not.toHaveBeenCalled();
       expect(mockGit.reset).not.toHaveBeenCalled();
@@ -168,7 +171,7 @@ describe("GitSyncService", () => {
 
     it("keeps local and logs when ahead-only (un-pushed commits)", async () => {
       mockGit.raw.mockResolvedValue("3\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.pull).not.toHaveBeenCalled();
       expect(mockGit.reset).not.toHaveBeenCalled();
@@ -177,7 +180,7 @@ describe("GitSyncService", () => {
 
     it("fast-forwards when behind-only", async () => {
       mockGit.raw.mockResolvedValue("0\t5");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.pull).toHaveBeenCalledWith("origin", "main", ["--ff-only"]);
       expect(mockGit.reset).not.toHaveBeenCalled();
@@ -187,7 +190,7 @@ describe("GitSyncService", () => {
       mockGit.raw
         .mockResolvedValueOnce("2\t3") // rev-list: 2 ahead, 3 behind
         .mockResolvedValueOnce("abc123 local commit\ndef456 another");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.reset).toHaveBeenCalledWith(["--hard", "origin/main"]);
       expect(mockGit.pull).not.toHaveBeenCalled();
@@ -199,7 +202,7 @@ describe("GitSyncService", () => {
     it("does not log the token in any log call", async () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.raw.mockResolvedValue("0\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, "ghp_secret_token", logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => "ghp_secret_token", logger);
       await svc.bootSync();
       const logged = [
         ...logger.info.mock.calls,
@@ -219,7 +222,7 @@ describe("GitSyncService", () => {
 
     it("retries push when ahead-only", async () => {
       mockGit.raw.mockResolvedValue("3\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("pushed"));
@@ -228,21 +231,21 @@ describe("GitSyncService", () => {
     it("push failure is non-fatal — warns and continues", async () => {
       mockGit.raw.mockResolvedValue("2\t0");
       mockGit.push.mockRejectedValue(new Error("permission denied"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.bootSync()).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("permission denied"));
     });
 
     it("does not push when behind-only (fast-forward path)", async () => {
       mockGit.raw.mockResolvedValue("0\t3");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).not.toHaveBeenCalled();
     });
 
     it("does not push on genuine divergence (hard-reset path)", async () => {
       mockGit.raw.mockResolvedValueOnce("2\t3").mockResolvedValueOnce("abc123 local commit");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).not.toHaveBeenCalled();
     });
@@ -254,7 +257,7 @@ describe("GitSyncService", () => {
     });
 
     it("sets bot identity, stages all, returns sha and filesChanged", async () => {
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       const result = await svc.commit("chore: update soul");
       expect(mockGit.addConfig).toHaveBeenCalledWith("user.name", "tulipfarm-bot");
       expect(mockGit.addConfig).toHaveBeenCalledWith("user.email", "tulipfarmhq@gmail.com");
@@ -264,33 +267,29 @@ describe("GitSyncService", () => {
 
     it("returns empty sha and zero changes when nothing to commit", async () => {
       mockGit.commit.mockResolvedValue({ commit: "", summary: { changes: 0 } });
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       const result = await svc.commit("chore: update soul");
       expect(result).toEqual({ sha: "", filesChanged: 0 });
     });
 
     it("propagates commit failure", async () => {
       mockGit.commit.mockRejectedValue(new Error("cannot commit"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.commit("chore: update soul")).rejects.toThrow("cannot commit");
     });
   });
 
   describe("push (tool)", () => {
-    it("pushes to origin/main with auth URL and returns true", async () => {
-      const svc = new GitSyncService(SOUL, REMOTE, "ghp_token", logger);
+    it("pushes to origin/main using the plain remote URL (credential applied as a header, never written to the URL) and returns true", async () => {
+      const svc = new GitSyncService(SOUL, REMOTE, async () => "ghp_token", logger);
       const pushed = await svc.push();
-      expect(mockGit.remote).toHaveBeenCalledWith([
-        "set-url",
-        "origin",
-        "https://ghp_token@github.com/user/soul.git",
-      ]);
+      expect(mockGit.remote).toHaveBeenCalledWith(["set-url", "origin", REMOTE]);
       expect(mockGit.push).toHaveBeenCalledWith("origin", "main");
       expect(pushed).toBe(true);
     });
 
     it("no-ops and returns false when remoteUrl is undefined", async () => {
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       const pushed = await svc.push();
       expect(mockGit.push).not.toHaveBeenCalled();
       expect(pushed).toBe(false);
@@ -298,7 +297,7 @@ describe("GitSyncService", () => {
 
     it("propagates push failure", async () => {
       mockGit.push.mockRejectedValue(new Error("permission denied"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.push()).rejects.toThrow("permission denied");
     });
   });
@@ -311,25 +310,21 @@ describe("GitSyncService", () => {
     it("adds origin and syncs when the repo previously had no remote (local-only boot)", async () => {
       mockGit.getRemotes.mockResolvedValue([]);
       mockGit.raw.mockResolvedValue("0\t0");
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
-      await svc.configureRemote(REMOTE, "ghp_token");
-      expect(mockGit.remote).toHaveBeenCalledWith([
-        "add",
-        "origin",
-        "https://ghp_token@github.com/user/soul.git",
-      ]);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+      await svc.configureRemote(REMOTE, async () => "ghp_token");
+      expect(mockGit.remote).toHaveBeenCalledWith(["add", "origin", REMOTE]);
       expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
     });
 
     it("repoints an existing origin and re-syncs", async () => {
       mockGit.getRemotes.mockResolvedValue([{ name: "origin", refs: { fetch: "", push: "" } }]);
       mockGit.raw.mockResolvedValue("0\t2");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
-      await svc.configureRemote("https://github.com/user/other-soul.git", "ghp_new");
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+      await svc.configureRemote("https://github.com/user/other-soul.git", async () => "ghp_new");
       expect(mockGit.remote).toHaveBeenCalledWith([
         "set-url",
         "origin",
-        "https://ghp_new@github.com/user/other-soul.git",
+        "https://github.com/user/other-soul.git",
       ]);
       expect(mockGit.pull).toHaveBeenCalledWith("origin", "main", ["--ff-only"]);
     });
@@ -337,8 +332,8 @@ describe("GitSyncService", () => {
     it("propagates a fetch/clone failure (bad URL or bad token)", async () => {
       mockGit.getRemotes.mockResolvedValue([]);
       mockGit.fetch.mockRejectedValue(new Error("Authentication failed"));
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
-      await expect(svc.configureRemote(REMOTE, "bad_token")).rejects.toThrow(
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+      await expect(svc.configureRemote(REMOTE, async () => "bad_token")).rejects.toThrow(
         "Authentication failed"
       );
     });
@@ -350,13 +345,13 @@ describe("GitSyncService", () => {
     });
 
     it("throws when no remote is configured", async () => {
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await expect(svc.syncNow()).rejects.toThrow("no git remote configured");
     });
 
     it("pulls and clears lastSyncError on success", async () => {
       mockGit.raw.mockResolvedValue("0\t0");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.syncNow();
       const status = await svc.getStatus();
       expect(status.lastSyncError).toBeNull();
@@ -365,7 +360,7 @@ describe("GitSyncService", () => {
 
     it("records lastSyncError and rethrows on failure", async () => {
       mockGit.fetch.mockRejectedValue(new Error("could not read Username"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.syncNow()).rejects.toThrow("could not read Username");
       const status = await svc.getStatus();
       expect(status.lastSyncError).toContain("could not read Username");
@@ -378,14 +373,14 @@ describe("GitSyncService", () => {
     });
 
     it("no-ops when no remote configured", async () => {
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await svc.syncOnce();
       expect(mockGit.fetch).not.toHaveBeenCalled();
     });
 
     it("runs pull and logs success", async () => {
       mockGit.raw.mockResolvedValue("0\t2");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.syncOnce();
       expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("periodic sync complete"));
@@ -393,7 +388,7 @@ describe("GitSyncService", () => {
 
     it("is non-fatal on pull failure", async () => {
       mockGit.fetch.mockRejectedValue(new Error("host unreachable"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.syncOnce()).resolves.toBeUndefined();
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("host unreachable"));
     });
@@ -401,12 +396,12 @@ describe("GitSyncService", () => {
 
   describe("hasRemote", () => {
     it("is false with no remote configured", () => {
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       expect(svc.hasRemote()).toBe(false);
     });
 
     it("is true once a remote is configured", () => {
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       expect(svc.hasRemote()).toBe(true);
     });
   });
@@ -414,7 +409,7 @@ describe("GitSyncService", () => {
   describe("getStatus", () => {
     it("reports not configured with no repo on disk", async () => {
       mockExistsSync.mockReturnValue(false);
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       await expect(svc.getStatus()).resolves.toEqual({
         remoteConfigured: false,
         remoteUrl: undefined,
@@ -429,7 +424,7 @@ describe("GitSyncService", () => {
     it("reports headSha with no remote configured", async () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.revparse.mockResolvedValue("abc1234");
-      const svc = new GitSyncService(SOUL, undefined, undefined, logger);
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
       const status = await svc.getStatus();
       expect(status).toEqual({
         remoteConfigured: false,
@@ -446,7 +441,7 @@ describe("GitSyncService", () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.revparse.mockResolvedValue("abc1234");
       mockGit.raw.mockResolvedValue("1\t2");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       const status = await svc.getStatus();
       expect(mockGit.fetch).toHaveBeenCalledWith("origin", "main");
       expect(status).toEqual({
@@ -464,7 +459,7 @@ describe("GitSyncService", () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.revparse.mockResolvedValue("abc1234");
       mockGit.fetch.mockRejectedValue(new Error("host unreachable"));
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.getStatus()).resolves.toEqual({
         remoteConfigured: true,
         remoteUrl: REMOTE,
@@ -476,22 +471,40 @@ describe("GitSyncService", () => {
       });
     });
 
-    it("reports zero ahead/behind with no error when remote has no main branch yet", async () => {
+    it("reports the real count of unpushed local commits when remote has no main branch yet", async () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.revparse.mockResolvedValue("abc1234");
       mockGit.listRemote.mockResolvedValue("");
-      const svc = new GitSyncService(SOUL, REMOTE, undefined, logger);
+      mockGit.raw.mockImplementation((args: string[]) =>
+        Promise.resolve(args.join(" ") === "rev-list --count HEAD" ? "3" : "0\t0")
+      );
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       const status = await svc.getStatus();
       expect(mockGit.fetch).not.toHaveBeenCalled();
       expect(status).toEqual({
         remoteConfigured: true,
         remoteUrl: REMOTE,
-        ahead: 0,
+        ahead: 3,
         behind: 0,
         headSha: "abc1234",
         lastSyncError: null,
-        lastSyncAt: expect.any(String),
+        lastSyncAt: null,
       });
+    });
+
+    it("preserves a prior lastSyncError instead of clearing it when remote still has no main branch", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.revparse.mockResolvedValue("abc1234");
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+
+      mockGit.fetch.mockRejectedValueOnce(new Error("host unreachable"));
+      const first = await svc.getStatus();
+      expect(first.lastSyncError).toBe("host unreachable");
+
+      mockGit.listRemote.mockResolvedValue("");
+      const second = await svc.getStatus();
+      expect(second.lastSyncError).toBe("host unreachable");
+      expect(second.lastSyncAt).toBe(first.lastSyncAt);
     });
   });
 });

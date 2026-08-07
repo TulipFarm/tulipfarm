@@ -73,6 +73,7 @@ export type {
   SoulGitStoreErrorCode,
 } from "./git-store";
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
+export type { CredentialProvider } from "./git-sync";
 export { GitSyncService } from "./git-sync";
 export type { SoulMigration } from "./migrations/index";
 export type { PinnedDefinition, PinnedDefinitionRef } from "./pinned-definition";
@@ -91,6 +92,7 @@ export {
 export { parseFrontmatter, SoulLoader } from "./published-loader";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
+export { scaffoldSoul } from "./scaffold-soul";
 export { validateSoulSemantics } from "./semantic";
 export type { BundleSigner } from "./signatures";
 export {
@@ -102,6 +104,7 @@ export {
   verifyExecutionBundle,
 } from "./signatures";
 export { runSoulMigrations } from "./soul-migrations";
+export { resolveSoulPath } from "./soul-path";
 export type {
   BodyMatch,
   ChatIngressConfig,

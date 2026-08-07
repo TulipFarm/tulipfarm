@@ -158,6 +158,29 @@ export async function unbindSlackRoute(routeId: string): Promise<void> {
   await apiDelete(`/api/v1/integrations/slack/routes/${encodeURIComponent(routeId)}`);
 }
 
+export type GitHubInstallation = {
+  installationId: string;
+  account: string;
+  repositories: string[];
+};
+
+export async function getGitHubStatus(): Promise<GitHubInstallation[]> {
+  const body = await apiGet<{ installations: GitHubInstallation[] }>(
+    "/api/v1/integrations/github/status"
+  );
+  return body.installations;
+}
+
+export async function disconnectGitHubInstallation(
+  installationId: string
+): Promise<{ status: string }> {
+  return apiWrite<{ status: string }>(
+    "POST",
+    `/api/v1/integrations/github/installations/${encodeURIComponent(installationId)}/disconnect`,
+    {}
+  );
+}
+
 export async function startOAuth(
   name: string,
   env: Record<string, string>

@@ -1,0 +1,120 @@
+---
+title: Connect GitHub
+description: Register your deployment's GitHub App and install it into your repos.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+GitHub connects differently from other integrations. Instead of pasting a token or running
+an OAuth app of your own (see [Connect an integration](/docs/guides/connect-an-integration)),
+your deployment registers its own **GitHub App** on GitHub, and each install grants
+TulipFarm access to the org and repos you choose. This is a one-time admin step per
+deployment — after that, installing (and adding more orgs later) is a single click.
+
+<Callout type="info">
+This mirrors how the Slack integration works: TulipFarm doesn't manage a shared app. You
+register your own, scoped to your account and your data.
+</Callout>
+
+## Prerequisites
+
+- Admin access to TulipFarm Settings
+- Permission to create a GitHub App on the account or organization you want TulipFarm to
+  work in
+- Your deployment's public URL (`PUBLIC_URL` — see
+  [Environment variables](/docs/reference/environment-variables))
+
+## 1. Register the GitHub App
+
+This is a one-time setup per deployment, done once by an admin.
+
+Go to `github.com/settings/apps/new` for a personal account, or
+`github.com/organizations/<org>/settings/apps/new` for an organization. Fill in:
+
+- **GitHub App name** — anything identifying, e.g. "TulipFarm — Acme Inc".
+- **Homepage URL** — your deployment's `PUBLIC_URL`.
+- **Callback URL** (under *Identifying and authorizing users*) — leave blank, and leave
+  **Request user authorization (OAuth) during installation** unchecked. TulipFarm never
+  exchanges a GitHub user's OAuth token; it authenticates as the App installation.
+- **Setup URL** (under *Post installation*) — `<PUBLIC_URL>/api/v1/integrations/github/install/callback`.
+  Check **Redirect on update** too, so re-approving the install after a permission change
+  comes back here as well.
+- **Webhook → Active** — leave unchecked. TulipFarm does not process GitHub webhook
+  events yet, so there's nothing listening on the other end.
+
+Under **Permissions**, grant:
+
+| Permission | Level | Why |
+| --- | --- | --- |
+| Contents | Read and write | Read repo files, commit and push branches |
+| Issues | Read and write | Read, comment on, label, assign, and close issues |
+| Pull requests | Read and write | Create, review, comment on, and merge PRs |
+| Checks | Read-only | Read CI/check-run status |
+
+Metadata (read-only) is included automatically — every GitHub App requires it.
+
+Under **Where can this GitHub App be installed?**, choose **Only on this account** unless
+you specifically want it installable across other orgs.
+
+Click **Create GitHub App**.
+
+## 2. Collect the App's credentials
+
+On the App's page after creation:
+
+- Note the **App ID**, shown near the top.
+- Note the **App slug** — the last segment of the App's URL
+  (`github.com/settings/apps/<slug>`).
+- Scroll to **Private keys** and click **Generate a private key**. GitHub downloads a
+  `.pem` file — keep it safe, it can't be downloaded again (you can generate a new one if
+  it's lost).
+
+## 3. Store the credentials
+
+Open **Settings → Secrets** and add each of the following as a custom secret (see
+[Store a secret](/docs/guides/store-a-secret) for the field walkthrough):
+
+| Key | Value |
+| --- | --- |
+| `github-app-id` | The App ID from step 2 |
+| `github-app-slug` | The App slug from step 2 |
+| `github-app-private-key` | The full contents of the downloaded `.pem` file, including the `BEGIN`/`END` lines |
+| `github-app-webhook-secret` | Any value — reserved for webhook verification once that ships; not read today |
+
+<Callout type="warn">
+Secret values are write-only — once saved, a value can't be displayed again. If you lose
+the private key file, generate a new one on the App's page and re-save it here.
+</Callout>
+
+## 4. Install the App
+
+Open **Integrations**, select **github**, and click **Install →**. You're sent to GitHub
+to pick an organization or account, then choose **All repositories** or **Selected
+repositories** — you can change this later from GitHub's own installation settings.
+Approve the install; GitHub redirects you back and the page lists the account and repos
+TulipFarm can now see.
+
+To add another org or account, open the integration and click **Add another install**. To
+add or remove repos, or uninstall, use `github.com/settings/installations` — TulipFarm's
+access always matches what's granted there.
+
+## Verify the connection
+
+```prompt
+List the open issues in <owner/repo>.
+```
+
+The assistant should return issues from a repo the installation covers.
+
+## Troubleshooting
+
+**"GitHub App is not configured"** — one of `github-app-id`, `github-app-slug`, or
+`github-app-private-key` isn't saved yet. Recheck Settings → Secrets.
+
+**"install state is invalid or expired"** — the install link was opened too long after
+clicking **Install →**, or in a different browser session. Start again from the
+integration page.
+
+**GitHub shows "pending_approval" after installing** — an org member requested the
+install but an org owner hasn't approved it yet. Nothing to do on the TulipFarm side until
+an owner approves from GitHub.

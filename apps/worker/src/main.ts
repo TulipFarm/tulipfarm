@@ -22,6 +22,7 @@ import {
   ArtifactStore,
   BudgetStore,
   EventStore,
+  IntegrationStore,
   RunEventStore,
   RunStore,
   WaitStore,
@@ -29,7 +30,7 @@ import {
 import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
-import { loadDataDirEnv } from "./data-dir";
+import { waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { EventOutboxDispatcher } from "./event-dispatcher";
@@ -44,6 +45,7 @@ import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
+import { buildGitHubTooling } from "./routine/adapters";
 import { BundleRoutineAgentPort } from "./routine/agent-port";
 import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
@@ -103,7 +105,32 @@ export async function main(): Promise<void> {
   // The API mints the credential and the KEK on its first boot and persists them to the shared
   // data volume; without this, a compose deployment that was never handed an `.env` cannot claim a
   // single Run. Env always wins, so a managed deployment never reads the volume at all.
-  const fromVolume = loadDataDirEnv();
+  // Retried rather than read once: Turbo starts the API and this worker concurrently in `pnpm
+  // dev`, and the API needs a database round trip before the file is (re)written — most visibly
+  // right after `reset-dev.sh`, where the old file's credential no longer matches the wiped DB.
+  // `verify` closes a narrower gap than presence: a stale file from *before* the reset can already
+  // be non-empty on this process's very first read, satisfying the missing-keys check moments
+  // before the API overwrites it with the real value — so presence alone is not proof of validity.
+  const fromVolume = await waitForDataDirEnv({
+    attempts: 15,
+    delayMs: 1_000,
+    onRetry: (missing, attempt) => {
+      logger.info(
+        `Waiting for ${missing.join(", ")} on the data volume (attempt ${attempt}/15)...`
+      );
+    },
+    verify: async (env) => {
+      if (!env.WORKER_API_CREDENTIAL || !env.INTERNAL_API_URL) return true;
+      try {
+        const response = await fetch(`${env.INTERNAL_API_URL}/api/v1/internal/llm/config`, {
+          headers: { authorization: `Bearer ${env.WORKER_API_CREDENTIAL}` },
+        });
+        return response.status !== 401;
+      } catch {
+        return false;
+      }
+    },
+  });
   if (fromVolume.length > 0) {
     logger.info(`Read ${fromVolume.join(", ")} from the data volume.`);
   }
@@ -157,11 +184,15 @@ export async function main(): Promise<void> {
   // The Soul's LLM configuration names providers and `api_key_ref`s; the credentials themselves are
   // unwrapped here, against this worker's own database, so no key material crosses the API hop.
   // `loadActiveDek`, never `loadOrProvision*`: the API mints keys, exactly as it owns migrations.
+  // Memoized: every consumer below (LLM keys, the GitHub installation-token provider) shares one
+  // instance rather than each re-running the DEK unwrap on its own first call.
+  let secretsService: Promise<SecretsService> | undefined;
   const secrets = async () =>
-    new SecretsService(
-      new PgSecretRepo(pool),
-      await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
-    );
+    (secretsService ??= (async () =>
+      new SecretsService(
+        new PgSecretRepo(pool),
+        await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
+      ))());
   const llm = new SoulLlm({
     source: () => turnHost.llmConfig(),
     secrets,
@@ -169,6 +200,15 @@ export async function main(): Promise<void> {
 
   const executors = new RunExecutorRegistry();
   const deliveryTargets = new DeliveryTargetRegistry();
+
+  // Installation-scope-only for this phase (see routine/github-context.ts): the real narrowing is
+  // `GitHubAdapter`'s own installation-scope check, not a Soul-authored AccessGrant yet.
+  const githubTooling = buildGitHubTooling({
+    businessId: config.businessId,
+    integrations: new IntegrationStore(transactions),
+    secrets,
+    log: logger,
+  });
 
   const chatExecutor = createChatExecutor({
     host: turnHost,
@@ -208,13 +248,18 @@ export async function main(): Promise<void> {
       transitions: new RunStoreStateTransitions(runStore),
       waits,
       // Every Tool a Routine dispatches goes through the Broker: it authorizes against the Run's
-      // own pinned Guardrails, reserves the effect in the ledger, and only then calls an adapter.
-      // The adapter map is empty until installed-Integration context has an owner in this process,
-      // so an authorized dispatch parks for reconciliation instead of reaching a provider by some
-      // other route — there is no second path to an external effect here.
+      // own pinned Guardrails and its own pinned ToolContracts' declared actions/resources
+      // (`BrokerRoutineToolPort.authorityFor` — the Routine's authority can never widen past what
+      // it declares wanting to call), reserves the effect in the ledger, and only then calls an
+      // adapter. GitHub is the only installed-Integration context with an owner in this process
+      // today; any other adapter ref still parks for reconciliation on `adapter_not_found` — there
+      // is no second path to an external effect here. No `authority` callback is passed: the
+      // bundle-derived layer above is this Run's only authority, and each adapter's own
+      // AccessGrant check narrows further still.
       tools: new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
-        adapters: new Map(),
+        adapters: githubTooling.adapters,
+        credentials: githubTooling.credentials,
       }),
       // An `approval` State parks on a durable wait registered by the API, in the same transaction
       // as the approval a human will see. The resume token stays there; this process learns the

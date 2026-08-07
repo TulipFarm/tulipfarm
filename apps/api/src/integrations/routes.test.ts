@@ -109,6 +109,12 @@ class FakeIntegrationStore {
     this.calls.push("putRoute");
     this.routesById.set(route.id, route);
   }
+  async loadProviderSnapshot(businessId: string, provider: string) {
+    void businessId;
+    void provider;
+    return { apps: [], integrations: this.githubIntegrations, accessGrants: [], routes: [] };
+  }
+  githubIntegrations: Array<{ id: string; status: string }> = [];
 }
 
 describe("integrations routes", () => {
@@ -194,6 +200,12 @@ describe("integrations routes", () => {
           setupGuide: "# Connect Slack",
         },
       ],
+      [
+        "github",
+        {
+          manifest: { name: "github", egress: { type: "none" } },
+        },
+      ],
     ]);
 
     integrationStore = new FakeIntegrationStore();
@@ -213,6 +225,12 @@ describe("integrations routes", () => {
           teamId: "T123",
           appId: "A456",
         }),
+      },
+      githubInstall: {
+        integrations: integrationStore as never,
+        secretsService: secretsService as never,
+        businessId: "biz-1",
+        soulRepositories: { get: async () => undefined, put: async () => {} } as never,
       },
     });
   });
@@ -242,7 +260,24 @@ describe("integrations routes", () => {
       const { integrations } = res.json();
       expect(integrations).toEqual([
         expect.objectContaining({ name: "slack", status: "disconnected" }),
+        expect.objectContaining({ name: "github", status: "disconnected" }),
       ]);
+    });
+
+    it("reflects GitHub App install status from IntegrationStore, not soul connection.yaml", async () => {
+      integrationStore.githubIntegrations = [{ id: "github:99", status: "active" }];
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations",
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      const { integrations } = res.json();
+      expect(integrations).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: "github", status: "connected" })])
+      );
     });
   });
 
@@ -341,6 +376,7 @@ describe("integrations routes", () => {
       });
       expect(list.json().integrations).toEqual([
         expect.objectContaining({ name: "slack", status: "disconnected" }),
+        expect.objectContaining({ name: "github", status: "disconnected" }),
       ]);
     });
   });

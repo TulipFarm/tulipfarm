@@ -125,13 +125,13 @@ const definitions = [
   defineSurfaceComponent({
     name: "RecordTable",
     version: "1.0",
-    description: "Two or more Records with shared columns.",
+    description: "One or more Records with shared columns.",
     propsSchema: Type.Object({
       columns: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
         minItems: 1,
         maxItems: 20,
       }),
-      records: Type.Array(record, { minItems: 2, maxItems: 100 }),
+      records: Type.Array(record, { minItems: 1, maxItems: 100 }),
     }),
     events: [],
     examples: [

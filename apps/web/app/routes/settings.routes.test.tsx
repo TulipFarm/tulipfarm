@@ -130,6 +130,15 @@ test("a configured provider is not offered in the add picker (managed via Edit o
   expect(optionLabels).toContain("Anthropic"); // nothing stored → still offered
 });
 
+test("selecting Custom… in the add picker reveals key/value fields and stores under the typed key", async () => {
+  renderWithData(<SettingsSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
+  await userEvent.selectOptions(screen.getByLabelText("secret provider"), "Custom…");
+  await userEvent.type(screen.getByLabelText("secret key"), "stripe-api-key");
+  await userEvent.type(screen.getByLabelText("secret value"), "sk_live_x");
+  await userEvent.click(screen.getByRole("button", { name: /save provider/i }));
+  expect(settings.putSecret).toHaveBeenCalledWith("stripe-api-key", "sk_live_x");
+});
+
 test("configuring a multi-field provider stores every field under its registry key", async () => {
   renderWithData(<SettingsSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
   await userEvent.selectOptions(screen.getByLabelText("secret provider"), "azure");

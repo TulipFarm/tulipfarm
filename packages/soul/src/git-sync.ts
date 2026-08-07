@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
+import { scaffoldSoul } from "./scaffold-soul";
 import type { Logger } from "./types";
 
 // Never let git block on an interactive username/password prompt (e.g. a bad/missing credential
@@ -12,11 +13,15 @@ process.env.GIT_TERMINAL_PROMPT ??= "0";
 
 const GIT_TIMEOUT_MS = 30_000;
 
+/** Resolves the current git credential (e.g. a PAT or GitHub App installation token) fresh on
+ * every call — never cached by the caller, since installation tokens expire hourly. */
+export type CredentialProvider = () => Promise<string | undefined>;
+
 export class GitSyncService extends EventEmitter {
   constructor(
     private readonly soulPath: string,
     private remoteUrl: string | undefined,
-    private credentials: string | undefined,
+    private credentialProvider: CredentialProvider,
     private readonly logger: Logger
   ) {
     super();
@@ -26,11 +31,30 @@ export class GitSyncService extends EventEmitter {
   private lastSyncError: string | null = null;
   private lastSyncAt: Date | null = null;
 
+  /**
+   * Per-invocation `-c http.extraheader=...` config carrying the credential as a transient HTTP
+   * header — never persisted to `.git/config` (unlike the previous `https://<token>@host/...`
+   * embedded-URL scheme, which left the live credential sitting in plaintext on disk for as long
+   * as the remote stayed configured). Empty when no remote/credential is set.
+   */
+  private async authConfig(): Promise<string[]> {
+    if (!this.remoteUrl) return [];
+    const credential = await this.credentialProvider();
+    if (!credential) return [];
+    const basic = Buffer.from(`x-access-token:${credential}`).toString("base64");
+    return [`http.extraheader=AUTHORIZATION: basic ${basic}`];
+  }
+
   /** `simpleGit` bound to `soulPath` with a hard timeout, so a hung/blocking git process
    * (network stall, unexpected credential prompt) fails after `GIT_TIMEOUT_MS` instead of
-   * hanging the request forever. */
-  private gitAt() {
-    return simpleGit(this.soulPath, { timeout: { block: GIT_TIMEOUT_MS } });
+   * hanging the request forever. The credential (if any) is applied as a per-instance
+   * `http.extraheader` config override rather than being written into the stored remote URL. */
+  private async gitAt() {
+    const config = await this.authConfig();
+    return simpleGit(this.soulPath, {
+      timeout: { block: GIT_TIMEOUT_MS },
+      ...(config.length > 0 ? { config } : {}),
+    });
   }
 
   get path(): string {
@@ -54,7 +78,7 @@ export class GitSyncService extends EventEmitter {
     if (!existsSync(join(this.soulPath, ".git"))) {
       let enclosing: string | null = null;
       try {
-        enclosing = (await this.gitAt().revparse(["--show-toplevel"])).trim();
+        enclosing = (await (await this.gitAt()).revparse(["--show-toplevel"])).trim();
       } catch {
         enclosing = null; // not inside any git repo — safe to init a fresh one
       }
@@ -63,20 +87,28 @@ export class GitSyncService extends EventEmitter {
           `Soul: SOUL_PATH "${this.soulPath}" is inside another git repository (${enclosing}). Point SOUL_PATH at a dedicated directory outside the project repo (e.g. ~/.tulipfarm/soul).`
         );
       }
-      await this.gitAt().init();
+      await (await this.gitAt()).init();
       this.logger.info(`Soul: initialized git repo at ${this.soulPath}`);
     }
 
-    const git = this.gitAt();
+    const git = await this.gitAt();
     await git.addConfig("user.name", BOT_GIT_NAME);
     await git.addConfig("user.email", BOT_GIT_EMAIL);
     this.ensured = true;
+
+    if (!(await this.hasCommits(git))) {
+      this.logger.info(
+        `Soul: ${this.soulPath} has no commits yet — scaffolding initial soul structure`
+      );
+      await scaffoldSoul(this.soulPath);
+    }
   }
 
-  private authUrl(): string {
-    if (!this.remoteUrl) return "";
-    if (!this.credentials) return this.remoteUrl;
-    return this.remoteUrl.replace("https://", `https://${this.credentials}@`);
+  private async hasCommits(git: Awaited<ReturnType<typeof this.gitAt>>): Promise<boolean> {
+    return git
+      .revparse(["HEAD"])
+      .then(() => true)
+      .catch(() => false);
   }
 
   async bootSync(): Promise<void> {
@@ -101,17 +133,33 @@ export class GitSyncService extends EventEmitter {
    * status display regardless of success or failure. Always rethrows on failure — callers decide
    * whether that's fatal (`configureRemote`/`syncNow`) or swallowed (boot). */
   private async syncWithRemote(): Promise<void> {
-    const url = this.authUrl();
+    const remoteUrl = this.remoteUrl;
+    if (remoteUrl === undefined) return;
+    const config = await this.authConfig();
     try {
       if (!existsSync(join(this.soulPath, ".git"))) {
         this.logger.info(`Soul: cloning from remote into ${this.soulPath}`);
-        await simpleGit({ timeout: { block: GIT_TIMEOUT_MS } })
+        await simpleGit({
+          timeout: { block: GIT_TIMEOUT_MS },
+          ...(config.length > 0 ? { config } : {}),
+        })
           .outputHandler((_cmd, stdout, stderr) => {
             stdout.pipe(process.stdout);
             stderr.pipe(process.stderr);
           })
-          .clone(url, this.soulPath);
+          .clone(remoteUrl, this.soulPath);
         this.logger.info("Soul: clone complete");
+
+        const git = await this.gitAt();
+        await git.addConfig("user.name", BOT_GIT_NAME);
+        await git.addConfig("user.email", BOT_GIT_EMAIL);
+        this.ensured = true;
+        if (!(await this.hasCommits(git))) {
+          this.logger.info("Soul: cloned an empty remote — scaffolding initial soul structure");
+          await scaffoldSoul(this.soulPath);
+          await git.push("origin", "main");
+          this.logger.info("Soul: pushed initial soul structure to origin/main");
+        }
       } else {
         this.logger.info("Soul: pulling from origin/main");
         await this.pull();
@@ -129,15 +177,17 @@ export class GitSyncService extends EventEmitter {
   /** A brand-new GitHub repo has no branches at all until something is pushed — `main` doesn't
    * exist on `origin` yet. Fetching/diffing against it would fail with "couldn't find remote ref
    * main", so callers check this first and push to initialize the branch instead. */
-  private async remoteHasMain(git: ReturnType<typeof this.gitAt>): Promise<boolean> {
+  private async remoteHasMain(git: Awaited<ReturnType<typeof this.gitAt>>): Promise<boolean> {
     const heads = await git.listRemote(["--heads", "origin", "main"]);
     return heads.trim() !== "";
   }
 
   /** Point `origin` at `url` — `set-url` if it already exists, else `add` (e.g. a repo that
-   * booted local-only never had an `origin` to point). */
+   * booted local-only never had an `origin` to point). `url` is always the plain remote URL —
+   * credentials are never embedded in it (see `authConfig`), so `.git/config` never stores a
+   * live credential. */
   private async ensureRemote(url: string): Promise<void> {
-    const git = this.gitAt();
+    const git = await this.gitAt();
     const remotes = await git.getRemotes();
     if (remotes.some((r) => r.name === "origin")) {
       await git.remote(["set-url", "origin", url]);
@@ -150,9 +200,9 @@ export class GitSyncService extends EventEmitter {
    * restart required, unlike the boot-time env vars this instance was originally constructed
    * with. Reuses `bootSync`'s `pull` branch, which now works whether or not `origin` already
    * existed (see `ensureRemote`). */
-  async configureRemote(remoteUrl: string, credentials?: string): Promise<void> {
+  async configureRemote(remoteUrl: string, credentialProvider: CredentialProvider): Promise<void> {
     this.remoteUrl = remoteUrl;
-    this.credentials = credentials;
+    this.credentialProvider = credentialProvider;
     await this.ensureRepo();
     await this.bootSync();
   }
@@ -185,7 +235,7 @@ export class GitSyncService extends EventEmitter {
       };
     }
 
-    const git = this.gitAt();
+    const git = await this.gitAt();
     let headSha: string | null;
     try {
       headSha = (await git.revparse(["HEAD"])).trim();
@@ -193,23 +243,27 @@ export class GitSyncService extends EventEmitter {
       headSha = null; // no commits yet
     }
 
-    if (!remoteConfigured) {
+    const remoteUrl = this.remoteUrl;
+    if (!remoteConfigured || remoteUrl === undefined) {
       return { remoteConfigured, ahead: 0, behind: 0, headSha, ...base };
     }
 
     try {
-      await this.ensureRemote(this.authUrl());
+      await this.ensureRemote(remoteUrl);
       if (!(await this.remoteHasMain(git))) {
-        this.lastSyncError = null;
-        this.lastSyncAt = new Date();
+        // The remote branch doesn't exist yet — either nothing has been pushed at all, or an
+        // earlier push (e.g. the empty-clone scaffold-then-push in `syncWithRemote`) failed and
+        // left commits sitting local-only. Report the real local-ahead count instead of a
+        // hardcoded 0, and leave `lastSyncError`/`lastSyncAt` as whatever the last actual sync
+        // attempt recorded — this call doesn't attempt a push, so it must not clear a real error.
+        const ahead = headSha !== null ? await this.localCommitCount(git) : 0;
         return {
           remoteConfigured,
           remoteUrl: this.remoteUrl,
-          ahead: 0,
+          ahead,
           behind: 0,
           headSha,
-          lastSyncError: null,
-          lastSyncAt: this.lastSyncAt.toISOString(),
+          ...base,
         };
       }
       await git.fetch("origin", "main");
@@ -243,9 +297,16 @@ export class GitSyncService extends EventEmitter {
     }
   }
 
+  private async localCommitCount(git: Awaited<ReturnType<typeof this.gitAt>>): Promise<number> {
+    const out = await git.raw(["rev-list", "--count", "HEAD"]);
+    return Number.parseInt(out.trim(), 10);
+  }
+
   private async pull(): Promise<void> {
-    const git = this.gitAt();
-    await this.ensureRemote(this.authUrl());
+    const remoteUrl = this.remoteUrl;
+    if (remoteUrl === undefined) return;
+    const git = await this.gitAt();
+    await this.ensureRemote(remoteUrl);
 
     if (!(await this.remoteHasMain(git))) {
       const hasCommits = await git
@@ -299,16 +360,17 @@ export class GitSyncService extends EventEmitter {
 
   async commit(message: string): Promise<{ sha: string; filesChanged: number }> {
     await this.ensureRepo();
-    const git = this.gitAt();
+    const git = await this.gitAt();
     await git.add("-A");
     const result = await git.commit(message);
     return { sha: result.commit, filesChanged: result.summary.changes };
   }
 
   async push(): Promise<boolean> {
-    if (!this.remoteUrl) return false;
-    const git = this.gitAt();
-    await git.remote(["set-url", "origin", this.authUrl()]);
+    const remoteUrl = this.remoteUrl;
+    if (remoteUrl === undefined) return false;
+    await this.ensureRemote(remoteUrl);
+    const git = await this.gitAt();
     await git.push("origin", "main");
     return true;
   }

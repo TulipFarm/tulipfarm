@@ -16,11 +16,14 @@
 If you'd rather build the app manually instead of importing a manifest: enable Socket Mode
 (Settings → Socket Mode) to mint the app-level token, turn on Agents & AI Apps
 (Features → Agents & AI Apps → enable Assistant), add Bot Token Scopes `chat:write`,
-`app_mentions:read`, `channels:history`, `im:history`, `users:read`, `users:read.email`,
+`app_mentions:read`, `channels:read`, `channels:history`, `groups:read`, `groups:history`,
+`im:read`, `im:history`, `mpim:read`, `mpim:history`, `users:read`, `users:read.email`,
 `assistant:write` (Features → OAuth & Permissions), and turn on
 Event Subscriptions (Features → Event Subscriptions, no Request URL needed under Socket Mode)
 subscribed to `message.channels`, `message.im`, `app_mention` — then continue from step 3 above.
 
 If you already connected Slack before this app started using the Agents & AI Apps status
-indicator, `assistant:write` is a new scope: reinstall the app (Settings → Install App →
-Reinstall to Workspace) to re-approve permissions, then reconnect here with the same tokens.
+indicator, `assistant:write` is a new scope, and if you connected before conversation indexing
+was added, `channels:read`, `groups:read`, `groups:history`, `im:read`, `mpim:read`, and
+`mpim:history` are new too: reinstall the app (Settings → Install App → Reinstall to Workspace)
+to re-approve permissions, then reconnect here with the same tokens.

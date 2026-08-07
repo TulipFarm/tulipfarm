@@ -1,9 +1,16 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type {
   ChannelBindTokenDoc,
   ExternalIdentityMappingDoc,
   ExternalIdentityRepo,
 } from "./external-links";
+import {
+  resolveSigningKey,
+  type SigningKeyStore,
+  signingKeyResolver,
+  signToken,
+  verifyToken,
+} from "./signed-token";
 
 /**
  * Channel identity binding: the *reverse* of `external-links.ts`. There, a signed-in user mints a
@@ -33,11 +40,7 @@ export const CHANNEL_BIND_SIGNING_KEY = "channel-bind.signing-key";
 export const CHANNEL_BIND_TTL_MS = 15 * 60_000;
 
 /** Just enough of `SecretsService` to hold one key, so callers need not carry the whole service. */
-export interface ChannelBindKeyStore {
-  list(): Promise<{ key: string }[]>;
-  get(key: string): Promise<string>;
-  set(key: string, plaintext: string, type: "auto-generated"): Promise<void>;
-}
+export type ChannelBindKeyStore = SigningKeyStore;
 
 /**
  * Reads the signing key, provisioning one on first use so a fresh deployment needs no operator
@@ -46,26 +49,12 @@ export interface ChannelBindKeyStore {
  * silently invalidate every link already in flight.
  */
 export async function resolveChannelBindKey(secrets: ChannelBindKeyStore): Promise<Buffer> {
-  const known = await secrets.list();
-  if (!known.some((meta) => meta.key === CHANNEL_BIND_SIGNING_KEY)) {
-    await secrets.set(
-      CHANNEL_BIND_SIGNING_KEY,
-      randomBytes(32).toString("base64"),
-      "auto-generated"
-    );
-  }
-  // Re-read rather than returning what was just generated: two API instances can reach this at
-  // once, and the loser must sign with the key that actually persisted or its links never verify.
-  return Buffer.from(await secrets.get(CHANNEL_BIND_SIGNING_KEY), "base64");
+  return resolveSigningKey(secrets, CHANNEL_BIND_SIGNING_KEY);
 }
 
 /** Memoizes the key for the process. It never rotates, and a bind link outlives no boot by design. */
 export function channelBindKeyResolver(secrets: ChannelBindKeyStore): () => Promise<Buffer> {
-  let pending: Promise<Buffer> | undefined;
-  return () => {
-    pending ??= resolveChannelBindKey(secrets);
-    return pending;
-  };
+  return signingKeyResolver(secrets, CHANNEL_BIND_SIGNING_KEY);
 }
 
 /** What the link asserts. Deliberately no user id — at issue time no account is known. */
@@ -80,12 +69,15 @@ function hashNonce(nonce: string): string {
   return createHash("sha256").update(nonce).digest("hex");
 }
 
-function sign(key: Buffer, payload: string): string {
-  return createHmac("sha256", key).update(payload).digest("hex");
-}
-
-function encodeClaims(claims: ChannelBindClaims): string {
-  return Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
+function isChannelBindClaims(claims: unknown): claims is ChannelBindClaims {
+  if (typeof claims !== "object" || claims === null) return false;
+  const { slug, senderId, issuedAt, nonce } = claims as Record<string, unknown>;
+  return (
+    typeof slug === "string" &&
+    typeof senderId === "string" &&
+    typeof issuedAt === "number" &&
+    typeof nonce === "string"
+  );
 }
 
 /**
@@ -93,25 +85,8 @@ function encodeClaims(claims: ChannelBindClaims): string {
  * constant-time so a forger learns nothing from how long a rejection took.
  */
 export function parseChannelBindToken(key: Buffer, token: string): ChannelBindClaims | null {
-  const separator = token.indexOf(".");
-  if (separator <= 0) return null;
-  const payload = token.slice(0, separator);
-  const presented = Buffer.from(token.slice(separator + 1), "utf8");
-  const expected = Buffer.from(sign(key, payload), "utf8");
-  if (presented.length !== expected.length || !timingSafeEqual(presented, expected)) return null;
-
-  try {
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
-    if (typeof claims !== "object" || claims === null) return null;
-    const { slug, senderId, issuedAt, nonce } = claims as Record<string, unknown>;
-    if (typeof slug !== "string" || typeof senderId !== "string") return null;
-    if (typeof issuedAt !== "number" || typeof nonce !== "string") return null;
-    return { slug, senderId, issuedAt, nonce };
-  } catch {
-    // A payload that survived the HMAC but is not our JSON means the key is being reused for
-    // something else. Refusing is the only safe reading.
-    return null;
-  }
+  const claims = verifyToken<ChannelBindClaims>(key, token);
+  return claims !== null && isChannelBindClaims(claims) ? claims : null;
 }
 
 export type ChannelBindDenialReason = "invalid_token";
@@ -177,8 +152,7 @@ export async function issueChannelBindToken(
     issuedAt: now.getTime(),
     nonce,
   };
-  const payload = encodeClaims(claims);
-  return { token: `${payload}.${sign(await deps.signingKey(), payload)}`, expiresAt };
+  return { token: signToken(await deps.signingKey(), claims), expiresAt };
 }
 
 /**
