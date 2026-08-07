@@ -14,9 +14,7 @@ export async function clientLoader() {
   if (needsSetup) throw redirect("/setup");
 
   try {
-    const user = await getSession();
-    if (user.mustResetPassword) throw redirect("/reset-password");
-    return { user };
+    return { user: await getSession() };
   } catch (err) {
     if (err instanceof ApiError && err.status === 401) {
       const here = typeof window !== "undefined" ? window.location.pathname : "/";

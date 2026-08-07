@@ -53,6 +53,7 @@ import { RoutineApprovalService } from "./approvals/routine-approvals";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
 import { ToolApprovalService } from "./approvals/tool-approvals";
 import { PgTokenRepo } from "./auth/api-tokens";
+import { PgUserInviteRepo } from "./auth/invites";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
@@ -461,7 +462,8 @@ async function boot() {
       sessionStore,
       userRepo,
       userAdminRepo: userRepo,
-      passwordResetRepo: userRepo,
+      passwordWriteRepo: userRepo,
+      userInviteRepo: new PgUserInviteRepo(pool),
       tokenRepo,
       // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.
       identity: {

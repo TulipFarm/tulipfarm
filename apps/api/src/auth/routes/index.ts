@@ -4,9 +4,10 @@ import { registerIdentityRoutes } from "../../identity/routes";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 import type { TokenRepo } from "../api-tokens";
+import type { UserInviteRepo } from "../invites";
 import { makeRequireAuth } from "../middleware";
 import type { SessionStore } from "../session-store";
-import type { PasswordResetRepo, UserAdminRepo, UserRepo } from "../users";
+import type { PasswordWriteRepo, UserAdminRepo, UserRepo } from "../users";
 import { registerSessionRoutes } from "./session";
 import { registerTokenRoutes } from "./tokens";
 import { registerAdminUserRoutes } from "./users";
@@ -18,7 +19,8 @@ interface AuthRouteOptions {
   rateLimiter?: RateLimiter;
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   userAdminRepo?: UserAdminRepo;
-  passwordResetRepo?: PasswordResetRepo;
+  passwordWriteRepo?: PasswordWriteRepo;
+  inviteRepo?: UserInviteRepo;
 }
 
 const AUTH_LIMIT = 100;
@@ -53,19 +55,26 @@ export function registerAuthRoutes(
     ? makeRateLimitHook(limiter, (req) => `rl:login:${req.ip}`, LOGIN_LIMIT, LOGIN_WINDOW_MS)
     : undefined;
 
-  registerSessionRoutes(
-    app,
+  registerSessionRoutes(app, {
     store,
     repo,
     requireAuth,
     ttlSeconds,
-    preHandler,
-    loginPreHandler,
-    options.passwordResetRepo
-  );
+    rateLimitHook: preHandler,
+    loginRateLimitHook: loginPreHandler,
+    passwordWriteRepo: options.passwordWriteRepo,
+    inviteRepo: options.inviteRepo,
+  });
   registerTokenRoutes(app, repo, tokenRepo, requireAuth, preHandler);
-  if (options.userAdminRepo) {
-    registerAdminUserRoutes(app, repo, options.userAdminRepo, requireAuth, preHandler);
+  if (options.userAdminRepo && options.inviteRepo) {
+    registerAdminUserRoutes(
+      app,
+      repo,
+      options.userAdminRepo,
+      options.inviteRepo,
+      requireAuth,
+      preHandler
+    );
   }
   registerIdentityRoutes(
     app,

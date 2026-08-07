@@ -807,4 +807,27 @@ export const PG_MIGRATIONS: PgMigration[] = [
       await q.query("DROP TABLE IF EXISTS routine_runs");
     },
   },
+  {
+    version: 27,
+    description: "invite links replace admin-minted temporary passwords",
+    up: async (q) => {
+      await q.query(`CREATE TABLE IF NOT EXISTS user_invites (
+        token_hash  text PRIMARY KEY,
+        user_id     uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_by  uuid NOT NULL REFERENCES users(id),
+        created_at  timestamptz NOT NULL,
+        expires_at  timestamptz NOT NULL,
+        consumed_at timestamptz
+      )`);
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS user_invites_user_idx ON user_invites (user_id, consumed_at)"
+      );
+      // An invited account has no password until its link is redeemed, and the column should say
+      // so rather than holding a placeholder that only fails to verify by accident.
+      await q.query("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL");
+      // The forced-reset gate existed only to make an admin-minted temporary password single-use.
+      // Nothing mints one now — the invited user chooses their own password on redemption.
+      await q.query("ALTER TABLE users DROP COLUMN IF EXISTS must_reset_password");
+    },
+  },
 ];

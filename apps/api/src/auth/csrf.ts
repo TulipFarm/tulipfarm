@@ -10,11 +10,21 @@ export const CSRF_HEADER = "x-csrf-token";
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
- * Login cannot carry a session-bound token: the session it authenticates does not exist yet, and
- * any session id the browser already holds is destroyed by rotation (see `rotateSession`). Forced
- * login is contained by the `SameSite=strict` session cookie plus that rotation.
+ * Routes that authenticate a caller who has no session yet, so they cannot carry a session-bound
+ * token: the session they establish does not exist when the request is made, and any session id the
+ * browser already holds is destroyed by rotation (see `rotateSession`). Forcing one is contained by
+ * the `SameSite=strict` session cookie plus that rotation.
+ *
+ * Invite preview and accept belong here for the same reason, and *must* be exempt rather than
+ * merely unauthenticated: an invite is redeemed in whatever browser the link was opened in, which
+ * in the recovery case is often one still holding the sender's live session. Gating on "no session
+ * cookie" would reject exactly the person the link was issued to.
  */
-const CSRF_EXEMPT_PATHS = new Set(["/api/v1/auth/login"]);
+const CSRF_EXEMPT_PATHS = new Set([
+  "/api/v1/auth/login",
+  "/api/v1/auth/invites/preview",
+  "/api/v1/auth/invites/accept",
+]);
 
 export function generateCsrfToken(): string {
   return crypto.randomBytes(32).toString("hex");

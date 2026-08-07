@@ -52,7 +52,6 @@ function user(id: string): UserDoc {
     role: "admin",
     status: "active",
     createdAt: NOW,
-    mustResetPassword: false,
   };
 }
 

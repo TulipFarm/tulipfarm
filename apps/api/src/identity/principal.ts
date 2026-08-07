@@ -36,13 +36,17 @@ declare module "fastify" {
   }
 }
 
-/** Projects a local user onto the authz principal contract for status/expiry checks. */
+/**
+ * Projects a local user onto the authz principal contract for status/expiry checks. Only `active`
+ * authenticates — the mapping is allowlist-shaped on purpose, so a future lifecycle state (as
+ * `invited` was) cannot silently default into an authenticatable principal.
+ */
 export function userAsAuthzPrincipal(user: UserDoc): Principal {
   return {
     id: user._id,
     businessId: DEPLOYMENT_BUSINESS_ID,
     kind: "user",
-    status: user.status === "disabled" ? "disabled" : "active",
+    status: user.status === "active" ? "active" : "disabled",
   };
 }
 
