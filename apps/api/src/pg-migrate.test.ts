@@ -17,6 +17,8 @@ describe("runPgMigrations", () => {
 
   it("repairs Surface storage for databases that already recorded schema version 14", async () => {
     // A stand-in for a database that stopped at 14, holding only what the later migrations touch.
+    // v27's `knowledge_source_chunks.embedding` needs pgvector, normally created by baseline (v1).
+    await db.query("CREATE EXTENSION IF NOT EXISTS vector");
     await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
@@ -31,6 +33,13 @@ describe("runPgMigrations", () => {
       external_subject text NOT NULL,
       user_id          uuid NOT NULL REFERENCES users(id),
       PRIMARY KEY (provider, external_subject)
+    )`);
+    // Minimal stand-in for the real `integrations` table (created at v11, well before this
+    // database's v14 cutoff) — v26's `soul_repositories` FK needs it to exist.
+    await db.query(`CREATE TABLE integrations (
+      business_id text NOT NULL,
+      id          text NOT NULL,
+      PRIMARY KEY (business_id, id)
     )`);
     await db.query(`CREATE TABLE schema_version (
       id boolean PRIMARY KEY DEFAULT true,
@@ -152,6 +161,8 @@ describe("runPgMigrations", () => {
 
   describe("migration 21", () => {
     it("backfills the Run source from the formerly overloaded Routine id", async () => {
+      // v27's `knowledge_source_chunks.embedding` needs pgvector, normally created by baseline (v1).
+      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
       await db.query(`CREATE TABLE runs (
         id uuid PRIMARY KEY,
         bundle jsonb NOT NULL
@@ -170,6 +181,13 @@ describe("runPgMigrations", () => {
       await db.query(`CREATE TABLE users (
         id uuid PRIMARY KEY,
         password_hash text NOT NULL
+      )`);
+      // Minimal stand-in for the real `integrations` table (created at v11, well before this
+      // database's v20 cutoff) — v26's `soul_repositories` FK needs it to exist.
+      await db.query(`CREATE TABLE integrations (
+        business_id text NOT NULL,
+        id          text NOT NULL,
+        PRIMARY KEY (business_id, id)
       )`);
 
       await runPgMigrations(db, undefined, () => {});

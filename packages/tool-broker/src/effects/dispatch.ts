@@ -43,7 +43,11 @@ export type ToolDispatchErrorCode =
 export class ToolDispatchError extends Error {
   constructor(
     readonly code: ToolDispatchErrorCode,
-    readonly effectId: string
+    readonly effectId: string,
+    /** The underlying `AdapterDispatchError.code` that caused a `dispatch_failed`, when known —
+     * callers use this to give a specific, actionable message instead of the opaque
+     * `dispatch_failed:<effectId>` default. */
+    readonly detail?: string
   ) {
     super(`${code}:${effectId}`);
     this.name = "ToolDispatchError";
@@ -177,7 +181,7 @@ export class EffectDispatcher {
           finishedAt: this.now(),
         });
         if (ambiguous) throw new ToolDispatchError("ambiguous", effectId);
-        if (!retry) throw new ToolDispatchError("dispatch_failed", effectId);
+        if (!retry) throw new ToolDispatchError("dispatch_failed", effectId, error.code);
         await this.wait(retryDelayMs(attemptNumber));
       }
     }

@@ -585,8 +585,10 @@ describe("soul routes", () => {
         expect(secretsService.set).toHaveBeenCalledWith("soul-git-credential", "ghp_test");
         expect(gitSync.configureRemote).toHaveBeenCalledWith(
           "https://github.com/acme/soul.git",
-          "ghp_test"
+          expect.any(Function)
         );
+        const providerArg = vi.mocked(gitSync.configureRemote).mock.calls[0][1];
+        await expect(providerArg()).resolves.toBe("ghp_test");
       });
 
       it("surfaces a configureRemote failure as 400", async () => {

@@ -21,8 +21,10 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import {
+  type CredentialProvider,
   GitSyncService,
   PgBundleStore,
+  resolveSoulPath,
   runSoulMigrations,
   SoulLoader,
   SoulPublicationCoordinator,
@@ -36,8 +38,10 @@ import {
   PgSoulPublicationStore,
   RunEventStore,
   RunStore,
+  SoulRepositoryStore,
   WaitStore,
 } from "@tulipfarm/storage";
+import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -69,6 +73,7 @@ import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
+import { ExternalLinkKnowledgeIdentityMap } from "./identity/knowledge-identity-map";
 import { IngressIdentityResolver } from "./ingress/identity";
 import {
   IngressDeliveriesRepo,
@@ -92,6 +97,13 @@ import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./knowledge/repo";
 import { KnowledgeService } from "./knowledge/service";
 import { PgKnowledgeSpaceOverrideRepo } from "./knowledge/space-overrides-repo";
 import { PgKnowledgeSpaceRepo } from "./knowledge/spaces-repo";
+import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
+import { PgKnowledgeEmissionSink } from "./knowledge-sources/emission-sink";
+import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
+import { SlackTenantLiveAuthorization } from "./knowledge-sources/live-authorization";
+import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
+import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
+import { buildSearchSlackConversationsTool } from "./knowledge-sources/tools";
 import { PgKvRepo } from "./kv/repo";
 import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
@@ -131,12 +143,15 @@ import {
   provisionIntegrationWorkerCredential,
   provisionWorkerCredential,
 } from "./setup/worker-credential";
+import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { loadBundledIntegrations } from "./soul/integrations/bundled";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { buildGitHubTooling } from "./tools/github/compose";
+import { buildGitHubTools } from "./tools/github/tools";
 import { buildToolRegistry } from "./tools/setup";
 
 // Load .env.local (symlinked from root by setup script)
@@ -177,17 +192,45 @@ async function boot() {
     const activeDek = await loadOrProvisionActiveDek(dekRepo, encryptionKeys);
     const secretsService = new SecretsService(secretRepo, activeDek);
 
-    const soulPath = process.env.SOUL_PATH as string;
-    // SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL only seed the very first boot. Once Settings → Soul
-    // persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret), that takes
-    // over — otherwise a restart would forget a remote configured after boot.
-    const persistedSoulConfig = await readSoulConfig(soulPath);
-    const gitRemoteUrl = persistedSoulConfig.gitRemoteUrl ?? process.env.SOUL_GIT_REMOTE_URL;
-    const gitCredential =
-      (await secretsService.get(SOUL_GIT_CREDENTIAL_KEY).catch(() => undefined)) ??
-      process.env.SOUL_GIT_CREDENTIAL;
+    // env.ts guarantees exactly one of SOUL_PATH/SOUL_ROOT is set. SOUL_PATH is the legacy flat
+    // single-tenant checkout (local dev always uses it); SOUL_ROOT is the hosted/production
+    // per-business layout (`resolveSoulPath` -> `<root>/<businessId>/soul`), authenticated via a
+    // GitHub App installation token instead of a static PAT.
+    const integrationStore = new IntegrationStore(transactionPort(pool));
+    const soulRepositoryStore = new SoulRepositoryStore(transactionPort(pool));
 
-    const gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredential, console);
+    let soulPath: string;
+    let gitRemoteUrl: string | undefined;
+    let gitCredentialProvider: CredentialProvider;
+
+    if (process.env.SOUL_PATH) {
+      soulPath = process.env.SOUL_PATH;
+      // SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL only seed the very first boot. Once Settings →
+      // Soul persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret),
+      // that takes over — otherwise a restart would forget a remote configured after boot.
+      const persistedSoulConfig = await readSoulConfig(soulPath);
+      gitRemoteUrl = persistedSoulConfig.gitRemoteUrl ?? process.env.SOUL_GIT_REMOTE_URL;
+      const gitCredential =
+        (await secretsService.get(SOUL_GIT_CREDENTIAL_KEY).catch(() => undefined)) ??
+        process.env.SOUL_GIT_CREDENTIAL;
+      gitCredentialProvider = async () => gitCredential;
+    } else {
+      soulPath = resolveSoulPath(process.env.SOUL_ROOT as string, DEPLOYMENT_BUSINESS_ID);
+      const soulRepository = await soulRepositoryStore.get(DEPLOYMENT_BUSINESS_ID);
+      gitRemoteUrl = soulRepository
+        ? `https://github.com/${soulRepository.owner}/${soulRepository.repo}.git`
+        : undefined;
+      gitCredentialProvider = soulRepository
+        ? createGitHubSoulCredentialProvider({
+            integrations: integrationStore,
+            businessId: DEPLOYMENT_BUSINESS_ID,
+            integrationId: soulRepository.integrationId,
+            secrets: secretsService,
+          })
+        : async () => undefined;
+    }
+
+    const gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console);
     // A stale/invalid remote (revoked PAT, unreachable host) must never crash-loop boot — fall
     // back to whatever soul state is already on disk and keep serving. `configureRemote` (the
     // Settings → Soul PUT route) still throws on the same failure so the user sees it there.
@@ -330,6 +373,35 @@ async function boot() {
       signingKey: channelBindKeyResolver(secretsService),
     };
 
+    // Shared with registerSlackKnowledgeSync below — one store instance per process, not one per
+    // caller, so the sync job and the search tool never disagree about what's indexed.
+    const knowledgeSourceStore = new PgKnowledgeSourceStore(pool);
+    const knowledgeIndexStore = new PgKnowledgeIndexStore(pool, embeddingService);
+    const slackKnowledgeSearchTool = buildSearchSlackConversationsTool({
+      sources: knowledgeSourceStore,
+      index: knowledgeIndexStore,
+      live: new SlackTenantLiveAuthorization(
+        integrationStore,
+        secretsService,
+        externalIdentityRepo
+      ),
+      now: () => new Date(),
+    });
+
+    // GitHub chat tool family: registered unconditionally (each tool's own effect dispatch fails
+    // closed with no installation), visibility gated live per turn on install status elsewhere
+    // (chat/turn-helpers.ts) rather than here — see docs/plans/2026-08-07-github-chat-tool-access.md.
+    const githubTooling = buildGitHubTooling({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      integrations: integrationStore,
+      secrets: async () => secretsService,
+    });
+    const githubEffects = new PgEffectStore(runTransactions);
+    const githubTools = buildGitHubTools(DEPLOYMENT_BUSINESS_ID, {
+      ...githubTooling,
+      effects: githubEffects,
+    });
+
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
@@ -355,10 +427,12 @@ async function boot() {
         bundledSkills,
         disabledBundledSkills,
       },
+      slackKnowledgeSearch: slackKnowledgeSearchTool,
+      github: githubTools,
       platform: {
         events: domainEventEmitter,
         soulLoader,
-        soulPath: process.env.SOUL_PATH,
+        soulPath,
         gitSync,
         bundledSkills,
         disabledBundledSkills,
@@ -393,6 +467,7 @@ async function boot() {
           bundledSkills,
           disabledBundledSkills,
           channelDeliveries: channelRunDeliveries,
+          githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
         }),
         tools: new RegistryToolDispatcher({
           registry: toolRegistry,
@@ -403,6 +478,7 @@ async function boot() {
           surfaceStore: surfaceArtifactStore,
           surfaceActionStore,
           guardrails: guardrailsService,
+          githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
         }),
         approvals: {
           // The subject comes from the Run, so the principal allowed to decide is the one the Run
@@ -479,6 +555,13 @@ async function boot() {
       disabledBundledSkills,
       bundledIntegrations,
       slackBind: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
+      githubInstall: {
+        integrations: channelIntegrations,
+        secretsService,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        soulRepositories: soulRepositoryStore,
+      },
+      githubStatus: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
       hookExecutor,
       resourceRepoFactory,
       counterStore,
@@ -616,7 +699,7 @@ async function boot() {
     await bootstrapFromEnv({
       userRepo,
       secretsService,
-      soulPath: process.env.SOUL_PATH as string,
+      soulPath,
       log: app.log,
     });
 
@@ -678,6 +761,14 @@ async function boot() {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
       service: knowledgeService,
+      activity: activityService,
+    });
+    await registerSlackKnowledgeSync(boss, {
+      integrations: integrationStore,
+      secrets: secretsService,
+      checkpoints: new PgSlackKnowledgeCheckpointStore(pool),
+      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
       activity: activityService,
     });
 

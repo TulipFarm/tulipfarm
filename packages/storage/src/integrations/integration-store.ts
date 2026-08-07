@@ -235,6 +235,19 @@ export class IntegrationStore {
     });
   }
 
+  /** Marks one Integration revoked without needing its full row re-supplied — e.g. a user
+   *  disconnecting one GitHub App installation from our own bookkeeping (not GitHub's App
+   *  registry itself). Excluding it from `active` status is what removes it from every
+   *  `active`-only projection (`loadProviderSnapshot`, `StoreGitHubInstallationDirectory`). */
+  async revokeIntegration(businessId: string, id: string): Promise<void> {
+    await this.transactions.withTransaction(async (transaction) => {
+      await transaction.query(
+        `UPDATE integrations SET status = 'revoked' WHERE business_id = $1 AND id = $2`,
+        [businessId, id]
+      );
+    });
+  }
+
   async putAccessGrant(grant: PersistedIntegrationAccessGrant): Promise<void> {
     await this.transactions.withTransaction(async (transaction) => {
       await transaction.query(
@@ -333,6 +346,53 @@ export class IntegrationStore {
         integrations: integrations.rows.map(persistedIntegration),
         accessGrants: grants.rows.map(persistedAccessGrant),
         routes: routes.rows.map(persistedRoute),
+      };
+    });
+  }
+
+  /**
+   * Every active/revoked Integration a business has for one provider, regardless of external
+   * tenant id — for a caller that must resolve context from a Tool call's arguments alone (e.g.
+   * which installed GitHub App installation covers a given repository) rather than from a known
+   * webhook delivery's installation id.
+   */
+  async loadProviderSnapshot(
+    businessId: string,
+    provider: string
+  ): Promise<PersistedRoutingSnapshot> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const integrations = await transaction.query<IntegrationRow>(
+        `SELECT i.id, i.business_id, i.app_id, i.external_tenant_id,
+                i.external_account_id, i.credential_ref, i.status
+           FROM integrations i
+           JOIN integration_apps a
+             ON a.business_id = i.business_id AND a.id = i.app_id
+          WHERE i.business_id = $1
+            AND a.provider = $2`,
+        [businessId, provider]
+      );
+      const appIds = [...new Set(integrations.rows.map((row) => row.app_id))];
+      const integrationIds = integrations.rows.map((row) => row.id);
+      if (integrationIds.length === 0) {
+        return { apps: [], integrations: [], accessGrants: [], routes: [] };
+      }
+      const apps = await transaction.query<AppRow>(
+        `SELECT id, business_id, provider, external_app_id, credential_refs, status
+           FROM integration_apps
+          WHERE business_id = $1 AND id = ANY($2::text[])`,
+        [businessId, appIds]
+      );
+      const grants = await transaction.query<AccessGrantRow>(
+        `SELECT id, business_id, integration_id, definition, status
+           FROM integration_access_grants
+          WHERE business_id = $1 AND integration_id = ANY($2::text[])`,
+        [businessId, integrationIds]
+      );
+      return {
+        apps: apps.rows.map(persistedApp),
+        integrations: integrations.rows.map(persistedIntegration),
+        accessGrants: grants.rows.map(persistedAccessGrant),
+        routes: [],
       };
     });
   }

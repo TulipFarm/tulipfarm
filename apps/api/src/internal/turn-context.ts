@@ -14,6 +14,7 @@ import {
 } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
+import type { IntegrationStore } from "@tulipfarm/storage";
 import type { PresentationContext } from "@tulipfarm/surface";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { estimateTokens } from "../chat/compaction";
@@ -28,6 +29,7 @@ import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
+import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
 
 /** Narrow read of one Run's Channel delivery correlation — just enough to resolve a target. */
@@ -135,6 +137,9 @@ export interface ChatTurnContextResolverOptions {
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
   readonly disabledBundledSkills?: ReadonlySet<string>;
   readonly channelDeliveries?: ChannelDeliveryReader;
+  /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
+   * never wired the GitHub tool family at all. */
+  readonly githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
   now?(): Date;
 }
 
@@ -153,11 +158,22 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       authority,
       this.options.channelDeliveries
     );
+    const excludedTools = this.options.githubStatus
+      ? await githubExcludedToolNames(this.options.githubStatus)
+      : undefined;
+    const disabledSkills = this.options.githubStatus
+      ? new Set([
+          ...(this.options.disabledBundledSkills ?? []),
+          ...(await githubDisabledSkillNames(this.options.githubStatus)),
+        ])
+      : this.options.disabledBundledSkills;
     const system = await this.buildSystemPrompt(
       authority,
       agent,
       platformAgent,
-      presentationContext
+      presentationContext,
+      excludedTools,
+      disabledSkills
     );
     const history = await this.options.store.listMessages(
       authority.businessId,
@@ -169,7 +185,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     const allowed = availableToolsFor(
       this.options.toolRegistry,
       platformAgent,
-      presentationContext
+      presentationContext,
+      excludedTools
     );
     const allowedNames = new Set(allowed.map((tool) => tool.name));
     const tools = (this.options.toolRegistry?.getAll() ?? [])
@@ -179,6 +196,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         description: tool.description,
         inputSchema: tool.inputSchema,
         tier: tool.tier,
+        mutating: tool.mutating,
       }));
 
     // A deployment that composed no guardrails service still ships the default policy rather than
@@ -242,10 +260,12 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     authority: TurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
     platformAgent: ReturnType<typeof getDefaultAssistant>,
-    presentationContext: PresentationContext
+    presentationContext: PresentationContext,
+    excludedTools?: ReadonlySet<string>,
+    disabledSkills?: ReadonlySet<string>
   ): Promise<string> {
-    const { soulLoader, workingMemory, knowledge, bundledSkills, disabledBundledSkills } =
-      this.options;
+    const { soulLoader, workingMemory, knowledge, bundledSkills } = this.options;
+    const disabledBundledSkills = disabledSkills ?? this.options.disabledBundledSkills;
     // Working memory is a person's, so a Run acting as an Integration or an Agent has none to read.
     const memory =
       workingMemory && authority.subject.kind === "user"
@@ -276,7 +296,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       availableTools: availableToolsFor(
         this.options.toolRegistry,
         platformAgent,
-        presentationContext
+        presentationContext,
+        excludedTools
       ),
       surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
     });

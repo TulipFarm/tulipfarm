@@ -57,9 +57,12 @@ export default function SettingsSecrets() {
     (p) => !p.fields.some((f) => storedKeys.has(f.key))
   );
   // Keep the add-form selection valid even if `providerId` went stale (its provider got configured).
-  const addProviderId = unconfiguredProviders.some((p) => p.id === providerId)
-    ? providerId
-    : (unconfiguredProviders[0]?.id ?? CUSTOM);
+  // CUSTOM is always a valid selection — it's not a member of `unconfiguredProviders`, which only
+  // ever holds real providers from the API.
+  const addProviderId =
+    providerId === CUSTOM || unconfiguredProviders.some((p) => p.id === providerId)
+      ? providerId
+      : (unconfiguredProviders[0]?.id ?? CUSTOM);
   const adding = providers.find((p) => p.id === addProviderId);
 
   // One list row per CONFIGURED provider (any of its fields stored); leftover keys not owned by a

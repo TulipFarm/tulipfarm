@@ -246,6 +246,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         const current = await this.options.runs.find(request.businessId, request.runId);
         return current !== null && CANCELLING_STATUSES.has(current.status);
       },
+      log: this.options.log,
       now: this.now,
     });
 

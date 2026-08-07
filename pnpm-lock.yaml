@@ -140,6 +140,9 @@ importers:
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
+      '@tulipfarm/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm

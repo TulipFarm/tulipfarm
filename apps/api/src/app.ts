@@ -42,6 +42,10 @@ import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import {
+  type GitHubInstallDeps,
+  registerGitHubInstallRoutes,
+} from "./integrations/github-install-routes";
 import { registerIntegrationRoutes } from "./integrations/routes";
 import {
   ensureDefaultSlackRoute,
@@ -111,6 +115,13 @@ export interface AppOptions {
     /** Test-only override for the live Slack auth.test call. */
     verifyBotToken?: SlackBindDeps["verifyBotToken"];
   };
+  /** GitHub App install flow. Requires the Channel integration store + business id. */
+  githubInstall?: Pick<
+    GitHubInstallDeps,
+    "integrations" | "secretsService" | "businessId" | "http" | "soulRepositories"
+  >;
+  /** Live GitHub-install check backing per-turn tool visibility on the conversation debug route. */
+  githubStatus?: { integrations: IntegrationStore; businessId: string };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -400,9 +411,11 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
-    // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
+    // Setup status: always registered so the web app gets an explicit 200 in all boot modes. Read
+    // off `gitSync.path` (not `process.env.SOUL_PATH`) so this keeps working once boot resolves a
+    // per-business path under `SOUL_ROOT` instead of the legacy flat `SOUL_PATH`.
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
-    const soulPath = process.env.SOUL_PATH;
+    const soulPath = opts.gitSync?.path;
     if (soulPath) {
       registerSetupStatusRoute(app, {
         userRepo: opts.userRepo,
@@ -497,7 +510,13 @@ export async function buildApp(opts: AppOptions = {}) {
               if (name === "slack" && slackBindDeps) {
                 await ensureDefaultSlackRoute(slackBindDeps);
               }
-            }
+            },
+            opts.githubInstall
+              ? {
+                  integrations: opts.githubInstall.integrations,
+                  businessId: opts.githubInstall.businessId,
+                }
+              : undefined
           );
           if (slackBindDeps) {
             registerSlackBindRoute(app, slackBindDeps);
@@ -535,6 +554,16 @@ export async function buildApp(opts: AppOptions = {}) {
         }
       }
     }
+    if (opts.githubInstall) {
+      registerGitHubInstallRoutes(app, {
+        integrations: opts.githubInstall.integrations,
+        secretsService: opts.githubInstall.secretsService,
+        businessId: opts.githubInstall.businessId,
+        http: opts.githubInstall.http,
+        soulRepositories: opts.githubInstall.soulRepositories,
+        requireAuth,
+      });
+    }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
       registerResourceRoutes(
         app,
@@ -567,6 +596,7 @@ export async function buildApp(opts: AppOptions = {}) {
           toolRegistry,
           bundledSkills: opts.bundledSkills,
           disabledBundledSkills: opts.disabledBundledSkills,
+          githubStatus: opts.githubStatus,
         },
         requireAuth
       );

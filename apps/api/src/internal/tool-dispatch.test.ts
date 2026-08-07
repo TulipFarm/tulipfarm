@@ -92,6 +92,7 @@ describe("RegistryToolDispatcher", () => {
         userId: "user-1",
         conversationId: CONVERSATION_ID,
         runId: RUN_ID,
+        toolCallId: "c1",
         agentId: DEFAULT_ASSISTANT_NAME,
         autonomy: undefined,
         guardrailRevision: "none",

@@ -38,6 +38,16 @@ const ALL_ACTIONS = [
   GITHUB_TOOL_IDS.issueLabel,
   GITHUB_TOOL_IDS.issueAssign,
   GITHUB_TOOL_IDS.issueClose,
+  GITHUB_TOOL_IDS.pullRequestRead,
+  GITHUB_TOOL_IDS.pullRequestSearch,
+  GITHUB_TOOL_IDS.pullRequestCreate,
+  GITHUB_TOOL_IDS.pullRequestComment,
+  GITHUB_TOOL_IDS.pullRequestReview,
+  GITHUB_TOOL_IDS.pullRequestMerge,
+  GITHUB_TOOL_IDS.checkRunRead,
+  GITHUB_TOOL_IDS.repoPush,
+  GITHUB_TOOL_IDS.contentRead,
+  GITHUB_TOOL_IDS.contentList,
 ];
 
 function context(overrides: Partial<GitHubEffectContext> = {}): GitHubEffectContext {
@@ -49,7 +59,7 @@ function context(overrides: Partial<GitHubEffectContext> = {}): GitHubEffectCont
       installationId: "inst-9",
       accountLogin: "tulip",
       repositories: ["tulip/farm"],
-      permissions: { issues: "write" },
+      permissions: { issues: "write", pull_requests: "write", checks: "read", contents: "write" },
     },
     principals: [{ kind: "agent", id: AGENT_ID }],
     grants: [grant(ALL_ACTIONS)],
@@ -77,11 +87,15 @@ function intent(action: string, args: unknown, idempotencyKey = "idem-1"): ToolI
   };
 }
 
+type RouteHandler =
+  | IntegrationHttpResponse
+  | ((request: IntegrationHttpRequest) => IntegrationHttpResponse);
+
 class FakeGitHubHttp {
   readonly calls: IntegrationHttpRequest[] = [];
-  private readonly routes = new Map<string, IntegrationHttpResponse>();
+  private readonly routes = new Map<string, RouteHandler>();
 
-  route(method: string, path: string, response: IntegrationHttpResponse): void {
+  route(method: string, path: string, response: RouteHandler): void {
     this.routes.set(`${method} ${path}`, response);
   }
 
@@ -91,11 +105,11 @@ class FakeGitHubHttp {
   ): Promise<IntegrationHttpResponse> {
     if (credential !== CREDENTIAL) throw new Error("adapter dispatched without the leased token");
     this.calls.push(request);
-    const response = this.routes.get(`${request.method} ${request.path}`);
-    if (response === undefined) {
+    const handler = this.routes.get(`${request.method} ${request.path}`);
+    if (handler === undefined) {
       throw new Error(`unscripted GitHub call: ${request.method} ${request.path}`);
     }
-    return response;
+    return typeof handler === "function" ? handler(request) : handler;
   }
 }
 
@@ -185,6 +199,93 @@ describe("GitHubAdapter reads", () => {
       ],
     });
     expect(http.calls[0]?.query?.q).toContain("repo:tulip/farm");
+  });
+
+  it("lists every issue when query is omitted, instead of filtering by text", async () => {
+    http.route("GET", "/search/issues", {
+      status: 200,
+      headers: {},
+      body: { total_count: 0, items: [] },
+    });
+    await dispatch(intent(GITHUB_TOOL_IDS.issueSearch, { repository: "tulip/farm" }));
+    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm is:issue state:open");
+  });
+
+  it("ORs an explicit repositories list into one search call", async () => {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        repositories: ["tulip/farm", "tulip/canary"],
+      },
+      grants: [
+        {
+          ...grant(ALL_ACTIONS),
+          spec: {
+            ...grant(ALL_ACTIONS).spec,
+            externalTargets: [
+              { type: GITHUB_REPOSITORY_TARGET, ids: ["tulip/farm", "tulip/canary"] },
+            ],
+          },
+        },
+      ],
+    });
+    http.route("GET", "/search/issues", {
+      status: 200,
+      headers: {},
+      body: { total_count: 0, items: [] },
+    });
+
+    await dispatch(
+      intent(GITHUB_TOOL_IDS.issueSearch, { repositories: ["tulip/farm", "tulip/canary"] })
+    );
+
+    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm repo:tulip/canary is:issue state:open");
+  });
+
+  it("denies a multi-repository search before any provider call when one repo isn't granted", async () => {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        repositories: ["tulip/farm", "tulip/canary"],
+      },
+      // Grant only covers tulip/farm — tulip/canary must still deny, fail-closed.
+    });
+
+    await expect(
+      dispatch(
+        intent(GITHUB_TOOL_IDS.issueSearch, { repositories: ["tulip/farm", "tulip/canary"] })
+      )
+    ).rejects.toThrow(AdapterDispatchError);
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it("searches every installed repository when neither repository nor repositories is given", async () => {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        repositories: ["tulip/farm"],
+      },
+    });
+    http.route("GET", "/search/issues", {
+      status: 200,
+      headers: {},
+      body: { total_count: 0, items: [] },
+    });
+
+    await dispatch(intent(GITHUB_TOOL_IDS.issueSearch, {}));
+
+    expect(http.calls[0]?.query?.q).toBe("repo:tulip/farm is:issue state:open");
+  });
+
+  it("requires an explicit repositories list for an account-wide installation, rather than widening", async () => {
+    resolved = context({
+      installation: { ...context().installation, repositories: "all" },
+    });
+
+    await expect(dispatch(intent(GITHUB_TOOL_IDS.issueSearch, {}))).rejects.toThrow(
+      AdapterDispatchError
+    );
+    expect(http.calls).toHaveLength(0);
   });
 });
 
@@ -495,5 +596,536 @@ describe("GitHubAdapter reconciliation", () => {
         operation: "github.issue.comment.lookup",
       })
     ).resolves.toMatchObject({ outcome: "ambiguous" });
+  });
+});
+
+const PULL_REQUEST_BODY = {
+  number: 12,
+  title: "Fix crash",
+  body: "closes #41",
+  state: "open",
+  merged: false,
+  html_url: "https://github.com/tulip/farm/pull/12",
+  head: { ref: "fix-crash" },
+  base: { ref: "main" },
+};
+
+describe("GitHubAdapter pull requests", () => {
+  it("reads a pull request through the typed Tool", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12", {
+      status: 200,
+      headers: {},
+      body: PULL_REQUEST_BODY,
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestRead, { repository: "tulip/farm", pullNumber: 12 })
+    );
+    expect(output).toEqual({
+      repository: "tulip/farm",
+      number: 12,
+      title: "Fix crash",
+      body: "closes #41",
+      state: "open",
+      merged: false,
+      htmlUrl: "https://github.com/tulip/farm/pull/12",
+      headRef: "fix-crash",
+      baseRef: "main",
+    });
+  });
+
+  it("denies a pull request read when the installation only holds issues permission", async () => {
+    resolved = context({
+      installation: { ...context().installation, permissions: { issues: "write" } },
+    });
+    await expect(
+      dispatch(
+        intent(GITHUB_TOOL_IDS.pullRequestRead, { repository: "tulip/farm", pullNumber: 12 })
+      )
+    ).rejects.toMatchObject({ code: "installation_scope_denied" });
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it("creates a pull request, stamping the effect marker in the body", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls", { status: 200, headers: {}, body: [] });
+    http.route("POST", "/repos/tulip/farm/pulls", {
+      status: 201,
+      headers: {},
+      body: PULL_REQUEST_BODY,
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+        repository: "tulip/farm",
+        title: "Fix crash",
+        head: "fix-crash",
+        base: "main",
+      })
+    );
+    const posted = http.calls.find((call) => call.method === "POST");
+    expect(String((posted?.body as { body: string }).body)).toContain(githubEffectMarker("idem-1"));
+    expect(output).toMatchObject({ number: 12, headRef: "fix-crash", baseRef: "main" });
+  });
+
+  it("returns the existing pull request on a duplicate delivery instead of opening a second one", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls", {
+      status: 200,
+      headers: {},
+      body: [PULL_REQUEST_BODY],
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+        repository: "tulip/farm",
+        title: "Fix crash",
+        head: "fix-crash",
+        base: "main",
+      })
+    );
+    expect(http.calls.some((call) => call.method === "POST")).toBe(false);
+    expect(output).toMatchObject({ number: 12 });
+  });
+
+  it("comments on a pull request via the shared issue-comments endpoint", async () => {
+    http.route("GET", "/repos/tulip/farm/issues/12/comments", {
+      status: 200,
+      headers: {},
+      body: [],
+    });
+    http.route("POST", "/repos/tulip/farm/issues/12/comments", {
+      status: 201,
+      headers: {},
+      body: {
+        id: 901,
+        html_url: "https://github.com/tulip/farm/pull/12#issuecomment-901",
+        created_at: "2026-07-25T00:00:00Z",
+      },
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestComment, {
+        repository: "tulip/farm",
+        pullNumber: 12,
+        body: "LGTM",
+      })
+    );
+    expect(output).toEqual({
+      commentId: "901",
+      htmlUrl: "https://github.com/tulip/farm/pull/12#issuecomment-901",
+      createdAt: "2026-07-25T00:00:00Z",
+    });
+  });
+
+  it("submits a review, stamping the effect marker in the review body", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12/reviews", { status: 200, headers: {}, body: [] });
+    http.route("POST", "/repos/tulip/farm/pulls/12/reviews", {
+      status: 200,
+      headers: {},
+      body: {
+        id: 55,
+        state: "APPROVED",
+        html_url: "https://github.com/tulip/farm/pull/12#pullrequestreview-55",
+      },
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestReview, {
+        repository: "tulip/farm",
+        pullNumber: 12,
+        event: "APPROVE",
+      })
+    );
+    const posted = http.calls.find((call) => call.method === "POST");
+    expect(String((posted?.body as { body: string }).body)).toContain(githubEffectMarker("idem-1"));
+    expect(output).toEqual({
+      reviewId: "55",
+      state: "APPROVED",
+      htmlUrl: "https://github.com/tulip/farm/pull/12#pullrequestreview-55",
+    });
+  });
+
+  it("merges a pull request", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12", {
+      status: 200,
+      headers: {},
+      body: { ...PULL_REQUEST_BODY, merged: false },
+    });
+    http.route("PUT", "/repos/tulip/farm/pulls/12/merge", {
+      status: 200,
+      headers: {},
+      body: { merged: true, sha: "abc123" },
+    });
+    await expect(
+      dispatch(
+        intent(GITHUB_TOOL_IDS.pullRequestMerge, {
+          repository: "tulip/farm",
+          pullNumber: 12,
+          mergeMethod: "squash",
+        })
+      )
+    ).resolves.toEqual({ merged: true, sha: "abc123" });
+    expect(http.calls.at(-1)?.body).toMatchObject({ merge_method: "squash" });
+  });
+
+  it("treats an already-merged pull request as done without merging twice", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12", {
+      status: 200,
+      headers: {},
+      body: { ...PULL_REQUEST_BODY, merged: true, merge_commit_sha: "already-merged" },
+    });
+    const output = await dispatch(
+      intent(GITHUB_TOOL_IDS.pullRequestMerge, { repository: "tulip/farm", pullNumber: 12 })
+    );
+    expect(output).toEqual({ merged: true, sha: "already-merged" });
+    expect(http.calls.some((call) => call.method === "PUT")).toBe(false);
+  });
+
+  it("reads a check run through the typed Tool", async () => {
+    http.route("GET", "/repos/tulip/farm/check-runs/555", {
+      status: 200,
+      headers: {},
+      body: {
+        id: 555,
+        name: "build",
+        status: "completed",
+        conclusion: "success",
+        html_url: "https://github.com/tulip/farm/runs/555",
+      },
+    });
+    await expect(
+      dispatch(intent(GITHUB_TOOL_IDS.checkRunRead, { repository: "tulip/farm", checkRunId: 555 }))
+    ).resolves.toEqual({
+      id: 555,
+      name: "build",
+      status: "completed",
+      conclusion: "success",
+      htmlUrl: "https://github.com/tulip/farm/runs/555",
+    });
+  });
+});
+
+describe("GitHubAdapter repo content", () => {
+  it("reads a file's content through the typed Tool", async () => {
+    http.route("GET", "/repos/tulip/farm/contents/README.md", {
+      status: 200,
+      headers: {},
+      body: {
+        path: "README.md",
+        sha: "abc123",
+        content: "SGVsbG8=",
+        encoding: "base64",
+        html_url: "https://github.com/tulip/farm/blob/main/README.md",
+      },
+    });
+    await expect(
+      dispatch(intent(GITHUB_TOOL_IDS.contentRead, { repository: "tulip/farm", path: "README.md" }))
+    ).resolves.toEqual({
+      repository: "tulip/farm",
+      path: "README.md",
+      sha: "abc123",
+      content: "SGVsbG8=",
+      encoding: "base64",
+      htmlUrl: "https://github.com/tulip/farm/blob/main/README.md",
+    });
+  });
+
+  it("passes ref through as a query parameter", async () => {
+    http.route("GET", "/repos/tulip/farm/contents/README.md", (request) => ({
+      status: 200,
+      headers: {},
+      body: {
+        path: "README.md",
+        sha: "def456",
+        content: "SGk=",
+        encoding: "base64",
+        html_url: "https://github.com/tulip/farm/blob/dev/README.md",
+        _ref: request.query?.ref,
+      },
+    }));
+    await dispatch(
+      intent(GITHUB_TOOL_IDS.contentRead, {
+        repository: "tulip/farm",
+        path: "README.md",
+        ref: "dev",
+      })
+    );
+    expect(http.calls[0]?.query).toEqual({ ref: "dev" });
+  });
+
+  it("lists a directory through the typed Tool", async () => {
+    http.route("GET", "/repos/tulip/farm/contents/src", {
+      status: 200,
+      headers: {},
+      body: [
+        {
+          name: "a.ts",
+          path: "src/a.ts",
+          type: "file",
+          sha: "sha-a",
+          html_url: "https://github.com/tulip/farm/blob/main/src/a.ts",
+        },
+        {
+          name: "lib",
+          path: "src/lib",
+          type: "dir",
+          sha: "sha-lib",
+          html_url: "https://github.com/tulip/farm/tree/main/src/lib",
+        },
+      ],
+    });
+    await expect(
+      dispatch(intent(GITHUB_TOOL_IDS.contentList, { repository: "tulip/farm", path: "src" }))
+    ).resolves.toEqual({
+      repository: "tulip/farm",
+      path: "src",
+      entries: [
+        {
+          name: "a.ts",
+          path: "src/a.ts",
+          type: "file",
+          sha: "sha-a",
+          htmlUrl: "https://github.com/tulip/farm/blob/main/src/a.ts",
+        },
+        {
+          name: "lib",
+          path: "src/lib",
+          type: "dir",
+          sha: "sha-lib",
+          htmlUrl: "https://github.com/tulip/farm/tree/main/src/lib",
+        },
+      ],
+    });
+  });
+
+  it("lists the repository root when no path is given", async () => {
+    http.route("GET", "/repos/tulip/farm/contents/", {
+      status: 200,
+      headers: {},
+      body: [],
+    });
+    await expect(
+      dispatch(intent(GITHUB_TOOL_IDS.contentList, { repository: "tulip/farm" }))
+    ).resolves.toEqual({ repository: "tulip/farm", path: "", entries: [] });
+  });
+});
+
+describe("GitHubAdapter repo push", () => {
+  const pushIntent = intent(GITHUB_TOOL_IDS.repoPush, {
+    repository: "tulip/farm",
+    branch: "main",
+    message: "fix crash",
+    files: [{ path: "src/a.ts", content: "export {}" }],
+  });
+  const marker = githubEffectMarker("idem-1");
+
+  it("pushes a commit through the Git Data API, stamping the marker in the message", async () => {
+    http.route("GET", "/repos/tulip/farm/commits", { status: 200, headers: {}, body: [] });
+    http.route("GET", "/repos/tulip/farm/git/ref/heads/main", {
+      status: 200,
+      headers: {},
+      body: { object: { sha: "head-sha" } },
+    });
+    http.route("GET", "/repos/tulip/farm/git/commits/head-sha", {
+      status: 200,
+      headers: {},
+      body: { tree: { sha: "tree-sha" } },
+    });
+    http.route("POST", "/repos/tulip/farm/git/blobs", {
+      status: 201,
+      headers: {},
+      body: { sha: "blob-sha" },
+    });
+    http.route("POST", "/repos/tulip/farm/git/trees", {
+      status: 201,
+      headers: {},
+      body: { sha: "new-tree-sha" },
+    });
+    http.route("POST", "/repos/tulip/farm/git/commits", {
+      status: 201,
+      headers: {},
+      body: { sha: "new-commit-sha" },
+    });
+    http.route("PATCH", "/repos/tulip/farm/git/refs/heads/main", {
+      status: 200,
+      headers: {},
+      body: { object: { sha: "new-commit-sha" } },
+    });
+
+    const output = await dispatch(pushIntent);
+
+    const commitCall = http.calls.find(
+      (call) => call.method === "POST" && call.path === "/repos/tulip/farm/git/commits"
+    );
+    expect(String((commitCall?.body as { message: string }).message)).toContain(marker);
+    const refCall = http.calls.find((call) => call.method === "PATCH");
+    expect(refCall?.body).toEqual({ sha: "new-commit-sha", force: false });
+    expect(output).toEqual({
+      repository: "tulip/farm",
+      branch: "main",
+      sha: "new-commit-sha",
+      htmlUrl: "https://github.com/tulip/farm/commit/new-commit-sha",
+    });
+  });
+
+  it("returns the existing commit on a duplicate delivery instead of pushing twice", async () => {
+    http.route("GET", "/repos/tulip/farm/commits", {
+      status: 200,
+      headers: {},
+      body: [{ sha: "already-pushed", commit: { message: `fix crash\n\n${marker}` } }],
+    });
+    const output = await dispatch(pushIntent);
+    expect(http.calls.some((call) => call.method === "POST" || call.method === "PATCH")).toBe(
+      false
+    );
+    expect(output).toEqual({
+      repository: "tulip/farm",
+      branch: "main",
+      sha: "already-pushed",
+      htmlUrl: "https://github.com/tulip/farm/commit/already-pushed",
+    });
+  });
+
+  it("pages past a full first page to find a marker further back in history", async () => {
+    const fullPage = Array.from({ length: 100 }, (_, i) => ({
+      sha: `recent-${i}`,
+      commit: { message: `noise ${i}` },
+    }));
+    http.route("GET", "/repos/tulip/farm/commits", (request) => {
+      const page = request.query?.page ?? "1";
+      if (page === "1") return { status: 200, headers: {}, body: fullPage };
+      if (page === "2") {
+        return {
+          status: 200,
+          headers: {},
+          body: [{ sha: "confirmed-sha", commit: { message: `fix crash\n\n${marker}` } }],
+        };
+      }
+      throw new Error(`unexpected page ${page}`);
+    });
+
+    const output = await dispatch(pushIntent);
+
+    expect(http.calls.filter((call) => call.path === "/repos/tulip/farm/commits")).toHaveLength(2);
+    expect(output).toEqual({
+      repository: "tulip/farm",
+      branch: "main",
+      sha: "confirmed-sha",
+      htmlUrl: "https://github.com/tulip/farm/commit/confirmed-sha",
+    });
+  });
+
+  it("denies a push when the installation only holds issues permission", async () => {
+    resolved = context({
+      installation: { ...context().installation, permissions: { issues: "write" } },
+    });
+    await expect(dispatch(pushIntent)).rejects.toMatchObject({ code: "installation_scope_denied" });
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it("confirms a push reconciliation by finding the marked commit", async () => {
+    http.route("GET", "/repos/tulip/farm/commits", {
+      status: 200,
+      headers: {},
+      body: [{ sha: "confirmed-sha", commit: { message: `fix crash\n\n${marker}` } }],
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: pushIntent,
+          idempotencyKey: pushIntent.idempotencyKey,
+          operation: "github.repo.push.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toEqual({
+      outcome: "confirmed",
+      evidenceRef: "github:repo:push:confirmed-sha",
+    });
+  });
+
+  it("reports not_applied when no commit carries the marker", async () => {
+    http.route("GET", "/repos/tulip/farm/commits", { status: 200, headers: {}, body: [] });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: pushIntent,
+          idempotencyKey: pushIntent.idempotencyKey,
+          operation: "github.repo.push.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toEqual({
+      outcome: "not_applied",
+      evidenceRef: "github:repo:push:tulip/farm:main",
+    });
+  });
+});
+
+describe("GitHubAdapter pull request reconciliation", () => {
+  it("confirms a pull request create by finding the open PR from head", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls", {
+      status: 200,
+      headers: {},
+      body: [PULL_REQUEST_BODY],
+    });
+    const createIntent = intent(GITHUB_TOOL_IDS.pullRequestCreate, {
+      repository: "tulip/farm",
+      title: "Fix crash",
+      head: "fix-crash",
+      base: "main",
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: createIntent,
+          idempotencyKey: createIntent.idempotencyKey,
+          operation: "github.pull_request.create.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toEqual({ outcome: "confirmed", evidenceRef: "github:pull_request:12" });
+  });
+
+  it("confirms a pull request review by finding the marked review", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12/reviews", {
+      status: 200,
+      headers: {},
+      body: [{ id: 55, body: githubEffectMarker("idem-1") }],
+    });
+    const reviewIntent = intent(GITHUB_TOOL_IDS.pullRequestReview, {
+      repository: "tulip/farm",
+      pullNumber: 12,
+      event: "APPROVE",
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: reviewIntent,
+          idempotencyKey: reviewIntent.idempotencyKey,
+          operation: "github.pull_request.review.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toEqual({ outcome: "confirmed", evidenceRef: "github:pull_request:review:55" });
+  });
+
+  it("confirms a pull request merge by reading merged state back", async () => {
+    http.route("GET", "/repos/tulip/farm/pulls/12", {
+      status: 200,
+      headers: {},
+      body: { ...PULL_REQUEST_BODY, merged: true },
+    });
+    const mergeIntent = intent(GITHUB_TOOL_IDS.pullRequestMerge, {
+      repository: "tulip/farm",
+      pullNumber: 12,
+    });
+    await expect(
+      adapter.reconcile(
+        {
+          intent: mergeIntent,
+          idempotencyKey: mergeIntent.idempotencyKey,
+          operation: "github.pull_request.merge.lookup",
+        },
+        CREDENTIAL
+      )
+    ).resolves.toEqual({
+      outcome: "confirmed",
+      evidenceRef: "github:pull_request:tulip/farm#12:merged",
+    });
   });
 });

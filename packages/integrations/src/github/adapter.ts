@@ -95,6 +95,12 @@ function stringArg(source: Arguments, key: string): string {
   return value;
 }
 
+/** Unlike `stringArg`, an absent or empty value is a legal "match everything" search. */
+function optionalStringArg(source: Arguments, key: string): string {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+
 function numberArg(source: Arguments, key: string): number {
   const value = source[key];
   if (typeof value !== "number" || !Number.isFinite(value)) {
@@ -109,6 +115,28 @@ function stringListArg(source: Arguments, key: string): string[] {
     throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
   }
   return value as string[];
+}
+
+interface PushFile {
+  readonly path: string;
+  readonly content: string;
+}
+
+function filesArg(source: Arguments, key: string): PushFile[] {
+  const value = source[key];
+  if (!Array.isArray(value)) {
+    throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+  }
+  return value.map((entry) => {
+    if (entry === null || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+    }
+    const { path, content } = entry as Record<string, unknown>;
+    if (typeof path !== "string" || path.length === 0 || typeof content !== "string") {
+      throw new AdapterDispatchError("before_dispatch", "invalid_arguments", false);
+    }
+    return { path, content };
+  });
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -133,11 +161,20 @@ function logins(value: unknown): string[] {
   return list(value).map((entry) => String(record(entry).login));
 }
 
+/** How far back `findCommitByMarker` looks for a redelivered effect's own earlier push. */
+const MARKER_SEARCH_PER_PAGE = 100;
+const MARKER_SEARCH_MAX_PAGES = 5;
+
 const MUTATING_TOOLS = new Set<string>([
   GITHUB_TOOL_IDS.issueComment,
   GITHUB_TOOL_IDS.issueLabel,
   GITHUB_TOOL_IDS.issueAssign,
   GITHUB_TOOL_IDS.issueClose,
+  GITHUB_TOOL_IDS.pullRequestCreate,
+  GITHUB_TOOL_IDS.pullRequestComment,
+  GITHUB_TOOL_IDS.pullRequestReview,
+  GITHUB_TOOL_IDS.pullRequestMerge,
+  GITHUB_TOOL_IDS.repoPush,
 ]);
 
 /** Repository slug from a search result's `repository_url`. */
@@ -146,14 +183,39 @@ function repositoryFromUrl(url: unknown): string {
   return parts.slice(-2).join("/");
 }
 
+/** Manifest permission family an action is scoped under (locked in the App manifest). */
+function permissionFor(action: string): "issues" | "pull_requests" | "checks" | "contents" {
+  if (action.startsWith("github.pull_request.")) return "pull_requests";
+  if (action.startsWith("github.check_run.")) return "checks";
+  if (action.startsWith("github.repo.") || action.startsWith("github.content.")) return "contents";
+  return "issues";
+}
+
 export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
   constructor(private readonly deps: GitHubAdapterDeps) {}
 
   async dispatch(request: ToolAdapterRequest, credential?: string): Promise<unknown> {
     const { intent } = request;
     const source = args(intent);
-    const repository = stringArg(source, "repository");
     const mutating = MUTATING_TOOLS.has(intent.action);
+
+    // Search alone may span more than one repository; every other action stays single-repo.
+    if (intent.action === GITHUB_TOOL_IDS.issueSearch) {
+      const repositories = await this.resolveSearchRepositories(intent, source, mutating);
+      if (credential === undefined || credential.length === 0) {
+        throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
+      }
+      return this.searchIssues(repositories, source, credential);
+    }
+    if (intent.action === GITHUB_TOOL_IDS.pullRequestSearch) {
+      const repositories = await this.resolveSearchRepositories(intent, source, mutating);
+      if (credential === undefined || credential.length === 0) {
+        throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
+      }
+      return this.searchPullRequests(repositories, source, credential);
+    }
+
+    const repository = stringArg(source, "repository");
 
     await this.authorize(intent, repository, mutating);
 
@@ -164,8 +226,6 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     switch (intent.action) {
       case GITHUB_TOOL_IDS.issueRead:
         return this.readIssue(repository, numberArg(source, "issueNumber"), credential);
-      case GITHUB_TOOL_IDS.issueSearch:
-        return this.searchIssues(repository, source, credential);
       case GITHUB_TOOL_IDS.issueComment:
         return this.comment(repository, source, request.idempotencyKey, credential);
       case GITHUB_TOOL_IDS.issueLabel:
@@ -174,6 +234,24 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
         return this.assign(repository, source, credential);
       case GITHUB_TOOL_IDS.issueClose:
         return this.close(repository, source, credential);
+      case GITHUB_TOOL_IDS.pullRequestRead:
+        return this.readPullRequest(repository, numberArg(source, "pullNumber"), credential);
+      case GITHUB_TOOL_IDS.pullRequestCreate:
+        return this.createPullRequest(repository, source, request.idempotencyKey, credential);
+      case GITHUB_TOOL_IDS.pullRequestComment:
+        return this.pullRequestComment(repository, source, request.idempotencyKey, credential);
+      case GITHUB_TOOL_IDS.pullRequestReview:
+        return this.review(repository, source, request.idempotencyKey, credential);
+      case GITHUB_TOOL_IDS.pullRequestMerge:
+        return this.mergePullRequest(repository, source, credential);
+      case GITHUB_TOOL_IDS.checkRunRead:
+        return this.readCheckRun(repository, source, credential);
+      case GITHUB_TOOL_IDS.repoPush:
+        return this.pushCommit(repository, source, request.idempotencyKey, credential);
+      case GITHUB_TOOL_IDS.contentRead:
+        return this.readContent(repository, source, credential);
+      case GITHUB_TOOL_IDS.contentList:
+        return this.listContent(repository, source, credential);
       default:
         throw new AdapterDispatchError("before_dispatch", "unsupported_action", false);
     }
@@ -196,7 +274,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
 
     try {
       assertRepositoryInScope(context.installation, parseRepositoryRef(repository), {
-        permission: "issues",
+        permission: permissionFor(intent.action),
         level: mutating ? "write" : "read",
       });
     } catch (error) {
@@ -223,6 +301,48 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
       }
       throw error;
     }
+  }
+
+  /**
+   * Resolves which repositories a search spans, authorizing each one exactly as a single-repo call
+   * would: `authorize()` already re-checks installation scope and the AccessGrant per repository,
+   * so looping it here means a multi-repo search widens nothing an equivalent series of single-repo
+   * searches wouldn't already have been allowed to see.
+   *
+   * When neither `repository` nor `repositories` is given, an installation with an explicit
+   * repository list searches all of it (each still individually authorized). An account-wide
+   * ("all") installation has no enumerable list to check AccessGrants against here, so it is asked
+   * to name repositories explicitly rather than silently searching everything the App can reach —
+   * never widen on absent data.
+   */
+  private async resolveSearchRepositories(
+    intent: ToolIntent,
+    source: Arguments,
+    mutating: boolean
+  ): Promise<string[]> {
+    const single = optionalStringArg(source, "repository");
+    if (single.length > 0) {
+      await this.authorize(intent, single, mutating);
+      return [single];
+    }
+
+    const rawList = source.repositories;
+    if (Array.isArray(rawList) && rawList.length > 0) {
+      const repositories = stringListArg(source, "repositories");
+      for (const repository of repositories) await this.authorize(intent, repository, mutating);
+      return repositories;
+    }
+
+    const context = await this.deps.context.resolve(intent);
+    if (context === undefined) {
+      throw new AdapterDispatchError("before_dispatch", "integration_context_unresolved", false);
+    }
+    if (context.installation.repositories === "all") {
+      throw new AdapterDispatchError("before_dispatch", "repository_list_required", false);
+    }
+    const repositories = [...context.installation.repositories];
+    for (const repository of repositories) await this.authorize(intent, repository, mutating);
+    return repositories;
   }
 
   private async call(
@@ -262,19 +382,23 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
   }
 
   private async searchIssues(
-    repository: string,
+    repositories: readonly string[],
     source: Arguments,
     credential: string
   ): Promise<unknown> {
     const state = typeof source.state === "string" ? source.state : "open";
-    const qualifiers = [`repo:${repository}`, "is:issue"];
+    // Repeated `repo:` qualifiers OR together (an issue lives in exactly one repo, so ANDing them
+    // could never match) — this is what turns N per-repo calls into a single search.
+    const qualifiers = [...repositories.map((repository) => `repo:${repository}`), "is:issue"];
     if (state !== "all") qualifiers.push(`state:${state}`);
+    const query = optionalStringArg(source, "query");
+    if (query.length > 0) qualifiers.push(query);
     const response = await this.call(
       {
         method: "GET",
         path: "/search/issues",
         query: {
-          q: `${qualifiers.join(" ")} ${stringArg(source, "query")}`,
+          q: qualifiers.join(" "),
           per_page: String(typeof source.limit === "number" ? source.limit : 20),
         },
       },
@@ -399,6 +523,437 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     };
   }
 
+  private pullRequestOutput(repository: string, pr: Record<string, unknown>): unknown {
+    return {
+      repository,
+      number: Number(pr.number),
+      title: String(pr.title),
+      body: typeof pr.body === "string" ? pr.body : "",
+      state: String(pr.state),
+      merged: pr.merged === true,
+      htmlUrl: String(pr.html_url),
+      headRef: String(record(pr.head).ref),
+      baseRef: String(record(pr.base).ref),
+    };
+  }
+
+  private async readPullRequest(
+    repository: string,
+    pullNumber: number,
+    credential: string
+  ): Promise<unknown> {
+    const response = await this.call(
+      { method: "GET", path: `/repos/${repository}/pulls/${pullNumber}` },
+      credential,
+      false
+    );
+    return this.pullRequestOutput(repository, record(response.body));
+  }
+
+  private async searchPullRequests(
+    repositories: readonly string[],
+    source: Arguments,
+    credential: string
+  ): Promise<unknown> {
+    const state = typeof source.state === "string" ? source.state : "open";
+    const qualifiers = [...repositories.map((repository) => `repo:${repository}`), "is:pr"];
+    if (state !== "all") qualifiers.push(`state:${state}`);
+    const query = optionalStringArg(source, "query");
+    if (query.length > 0) qualifiers.push(query);
+    const response = await this.call(
+      {
+        method: "GET",
+        path: "/search/issues",
+        query: {
+          q: qualifiers.join(" "),
+          per_page: String(typeof source.limit === "number" ? source.limit : 20),
+        },
+      },
+      credential,
+      false
+    );
+    const body = record(response.body);
+    return {
+      totalCount: Number(body.total_count),
+      items: list(body.items).map((entry) => {
+        const item = record(entry);
+        return {
+          repository: repositoryFromUrl(item.repository_url),
+          number: Number(item.number),
+          title: String(item.title),
+          state: String(item.state),
+          htmlUrl: String(item.html_url),
+        };
+      }),
+    };
+  }
+
+  private async findOpenPullRequestByHead(
+    repository: string,
+    head: string,
+    credential: string
+  ): Promise<Record<string, unknown> | undefined> {
+    const owner = repository.split("/")[0];
+    const response = await this.call(
+      {
+        method: "GET",
+        path: `/repos/${repository}/pulls`,
+        query: { head: `${owner}:${head}`, state: "open" },
+      },
+      credential,
+      false
+    );
+    const [first] = list(response.body).map((entry) => record(entry));
+    return first;
+  }
+
+  private async createPullRequest(
+    repository: string,
+    source: Arguments,
+    idempotencyKey: string,
+    credential: string
+  ): Promise<unknown> {
+    const head = stringArg(source, "head");
+    const base = stringArg(source, "base");
+    const marker = githubEffectMarker(idempotencyKey);
+
+    // Read before write: a redelivered effect must return the PR it already opened.
+    const existing = await this.findOpenPullRequestByHead(repository, head, credential);
+    if (existing !== undefined) return this.pullRequestOutput(repository, existing);
+
+    const body = typeof source.body === "string" ? source.body : "";
+    const response = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/pulls`,
+        body: {
+          title: stringArg(source, "title"),
+          body: `${body}\n\n${marker}`,
+          head,
+          base,
+          draft: source.draft === true,
+        },
+      },
+      credential,
+      true
+    );
+    return this.pullRequestOutput(repository, record(response.body));
+  }
+
+  private async pullRequestComment(
+    repository: string,
+    source: Arguments,
+    idempotencyKey: string,
+    credential: string
+  ): Promise<unknown> {
+    const pullNumber = numberArg(source, "pullNumber");
+    const marker = githubEffectMarker(idempotencyKey);
+
+    // PR comments are issue comments under the hood — same endpoint, same marker convention.
+    const existing = await this.findMarkedComment(repository, pullNumber, marker, credential);
+    if (existing !== undefined) return this.commentOutput(existing);
+
+    const response = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/issues/${pullNumber}/comments`,
+        body: { body: `${stringArg(source, "body")}\n\n${marker}` },
+      },
+      credential,
+      true
+    );
+    return this.commentOutput(record(response.body));
+  }
+
+  private async findMarkedReview(
+    repository: string,
+    pullNumber: number,
+    marker: string,
+    credential: string
+  ): Promise<Record<string, unknown> | undefined> {
+    const response = await this.call(
+      { method: "GET", path: `/repos/${repository}/pulls/${pullNumber}/reviews` },
+      credential,
+      false
+    );
+    return list(response.body)
+      .map((entry) => record(entry))
+      .find((review) => String(review.body ?? "").includes(marker));
+  }
+
+  private reviewOutput(review: Record<string, unknown>): unknown {
+    return {
+      reviewId: String(review.id),
+      state: String(review.state),
+      htmlUrl: String(review.html_url),
+    };
+  }
+
+  private async review(
+    repository: string,
+    source: Arguments,
+    idempotencyKey: string,
+    credential: string
+  ): Promise<unknown> {
+    const pullNumber = numberArg(source, "pullNumber");
+    const marker = githubEffectMarker(idempotencyKey);
+
+    const existing = await this.findMarkedReview(repository, pullNumber, marker, credential);
+    if (existing !== undefined) return this.reviewOutput(existing);
+
+    const body = typeof source.body === "string" ? source.body : "";
+    const response = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/pulls/${pullNumber}/reviews`,
+        body: { event: stringArg(source, "event"), body: `${body}\n\n${marker}` },
+      },
+      credential,
+      true
+    );
+    return this.reviewOutput(record(response.body));
+  }
+
+  private async mergePullRequest(
+    repository: string,
+    source: Arguments,
+    credential: string
+  ): Promise<unknown> {
+    const pullNumber = numberArg(source, "pullNumber");
+
+    // Read before write: an already-merged PR must never be merged twice.
+    const current = record(
+      (
+        await this.call(
+          { method: "GET", path: `/repos/${repository}/pulls/${pullNumber}` },
+          credential,
+          false
+        )
+      ).body
+    );
+    if (current.merged === true) {
+      return { merged: true, sha: String(current.merge_commit_sha ?? "") };
+    }
+
+    const mergeMethod = typeof source.mergeMethod === "string" ? source.mergeMethod : "merge";
+    const mergeBody: Record<string, unknown> = { merge_method: mergeMethod };
+    if (typeof source.commitTitle === "string") mergeBody.commit_title = source.commitTitle;
+
+    const response = await this.call(
+      { method: "PUT", path: `/repos/${repository}/pulls/${pullNumber}/merge`, body: mergeBody },
+      credential,
+      true
+    );
+    const result = record(response.body);
+    return { merged: result.merged === true, sha: String(result.sha ?? "") };
+  }
+
+  private async readCheckRun(
+    repository: string,
+    source: Arguments,
+    credential: string
+  ): Promise<unknown> {
+    const checkRunId = numberArg(source, "checkRunId");
+    const response = await this.call(
+      { method: "GET", path: `/repos/${repository}/check-runs/${checkRunId}` },
+      credential,
+      false
+    );
+    const checkRun = record(response.body);
+    return {
+      id: Number(checkRun.id),
+      name: String(checkRun.name),
+      status: String(checkRun.status),
+      conclusion: typeof checkRun.conclusion === "string" ? checkRun.conclusion : null,
+      htmlUrl: String(checkRun.html_url),
+    };
+  }
+
+  private async readContent(
+    repository: string,
+    source: Arguments,
+    credential: string
+  ): Promise<unknown> {
+    const path = stringArg(source, "path");
+    const ref = typeof source.ref === "string" ? source.ref : undefined;
+    const response = await this.call(
+      {
+        method: "GET",
+        path: `/repos/${repository}/contents/${path}`,
+        query: ref ? { ref } : undefined,
+      },
+      credential,
+      false
+    );
+    const entry = record(response.body);
+    return {
+      repository,
+      path: String(entry.path),
+      sha: String(entry.sha),
+      content: typeof entry.content === "string" ? entry.content : "",
+      encoding: typeof entry.encoding === "string" ? entry.encoding : "base64",
+      htmlUrl: String(entry.html_url),
+    };
+  }
+
+  private async listContent(
+    repository: string,
+    source: Arguments,
+    credential: string
+  ): Promise<unknown> {
+    const path = typeof source.path === "string" ? source.path : "";
+    const ref = typeof source.ref === "string" ? source.ref : undefined;
+    const response = await this.call(
+      {
+        method: "GET",
+        path: `/repos/${repository}/contents/${path}`,
+        query: ref ? { ref } : undefined,
+      },
+      credential,
+      false
+    );
+    const entries = list(response.body).map((entry) => {
+      const item = record(entry);
+      return {
+        name: String(item.name),
+        path: String(item.path),
+        type: String(item.type),
+        sha: String(item.sha),
+        htmlUrl: String(item.html_url),
+      };
+    });
+    return { repository, path, entries };
+  }
+
+  private pushOutput(repository: string, branch: string, commit: Record<string, unknown>): unknown {
+    const sha = String(commit.sha);
+    return { repository, branch, sha, htmlUrl: `https://github.com/${repository}/commit/${sha}` };
+  }
+
+  /**
+   * Committing via the Git Data API needs no `git` subprocess and no sandbox: it is HTTP calls.
+   * Pages up to `MARKER_SEARCH_MAX_PAGES` pages of `MARKER_SEARCH_PER_PAGE` commits looking for a
+   * redelivered effect's own earlier push. Not found after that bound is read as "never pushed"
+   * rather than an error — unlike a caller enumerating *every* matching item (`collectPages`'s
+   * contract), the common case here is a marker that legitimately doesn't exist yet, so silently
+   * stopping the search is correct, not a truncation to hide.
+   */
+  private async findCommitByMarker(
+    repository: string,
+    branch: string,
+    marker: string,
+    credential: string
+  ): Promise<Record<string, unknown> | undefined> {
+    for (let page = 1; page <= MARKER_SEARCH_MAX_PAGES; page += 1) {
+      const response = await this.call(
+        {
+          method: "GET",
+          path: `/repos/${repository}/commits`,
+          query: { sha: branch, per_page: String(MARKER_SEARCH_PER_PAGE), page: String(page) },
+        },
+        credential,
+        false
+      );
+      const commits = list(response.body).map((entry) => record(entry));
+      const match = commits.find((entry) =>
+        String(record(entry.commit).message ?? "").includes(marker)
+      );
+      if (match !== undefined) return match;
+      if (commits.length < MARKER_SEARCH_PER_PAGE) return undefined;
+    }
+    return undefined;
+  }
+
+  private async pushCommit(
+    repository: string,
+    source: Arguments,
+    idempotencyKey: string,
+    credential: string
+  ): Promise<unknown> {
+    const branch = stringArg(source, "branch");
+    const marker = githubEffectMarker(idempotencyKey);
+
+    // Read before write: a redelivered effect must return the commit it already pushed.
+    const existing = await this.findCommitByMarker(repository, branch, marker, credential);
+    if (existing !== undefined) return this.pushOutput(repository, branch, existing);
+
+    const refResponse = await this.call(
+      { method: "GET", path: `/repos/${repository}/git/ref/heads/${branch}` },
+      credential,
+      false
+    );
+    const headSha = String(record(record(refResponse.body).object).sha);
+
+    const headCommitResponse = await this.call(
+      { method: "GET", path: `/repos/${repository}/git/commits/${headSha}` },
+      credential,
+      false
+    );
+    const baseTreeSha = String(record(record(headCommitResponse.body).tree).sha);
+
+    const files = filesArg(source, "files");
+    const blobShas = await Promise.all(
+      files.map(async (file) => {
+        const blobResponse = await this.call(
+          {
+            method: "POST",
+            path: `/repos/${repository}/git/blobs`,
+            body: { content: file.content, encoding: "utf-8" },
+          },
+          credential,
+          true
+        );
+        return String(record(blobResponse.body).sha);
+      })
+    );
+
+    const treeResponse = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/git/trees`,
+        body: {
+          base_tree: baseTreeSha,
+          tree: files.map((file, index) => ({
+            path: file.path,
+            mode: "100644",
+            type: "blob",
+            sha: blobShas[index],
+          })),
+        },
+      },
+      credential,
+      true
+    );
+    const newTreeSha = String(record(treeResponse.body).sha);
+
+    const newCommitResponse = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/git/commits`,
+        body: {
+          message: `${stringArg(source, "message")}\n\n${marker}`,
+          tree: newTreeSha,
+          parents: [headSha],
+        },
+      },
+      credential,
+      true
+    );
+    const newCommit = record(newCommitResponse.body);
+
+    await this.call(
+      {
+        method: "PATCH",
+        path: `/repos/${repository}/git/refs/heads/${branch}`,
+        body: { sha: newCommit.sha, force: false },
+      },
+      credential,
+      true
+    );
+
+    return this.pushOutput(repository, branch, newCommit);
+  }
+
   /**
    * Resolve an ambiguous effect against provider state. The credential is optional because
    * reconciliation may run long after the leasing dispatch: with no way to read GitHub, the honest
@@ -414,18 +969,65 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
 
     const source = args(request.intent);
     const repository = stringArg(source, "repository");
-    const issueNumber = numberArg(source, "issueNumber");
 
     try {
       switch (request.operation) {
         case GITHUB_RECONCILIATION_OPERATIONS.comment:
-          return await this.reconcileComment(repository, issueNumber, request, credential);
+          return await this.reconcileComment(
+            repository,
+            numberArg(source, "issueNumber"),
+            request,
+            credential
+          );
         case GITHUB_RECONCILIATION_OPERATIONS.state:
-          return await this.reconcileState(repository, issueNumber, credential);
+          return await this.reconcileState(
+            repository,
+            numberArg(source, "issueNumber"),
+            credential
+          );
         case GITHUB_RECONCILIATION_OPERATIONS.labels:
-          return await this.reconcileLabels(repository, issueNumber, source, credential);
+          return await this.reconcileLabels(
+            repository,
+            numberArg(source, "issueNumber"),
+            source,
+            credential
+          );
         case GITHUB_RECONCILIATION_OPERATIONS.assignees:
-          return await this.reconcileAssignees(repository, issueNumber, source, credential);
+          return await this.reconcileAssignees(
+            repository,
+            numberArg(source, "issueNumber"),
+            source,
+            credential
+          );
+        case GITHUB_RECONCILIATION_OPERATIONS.pullRequestCreate:
+          return await this.reconcilePullRequestCreate(repository, source, credential);
+        case GITHUB_RECONCILIATION_OPERATIONS.pullRequestComment:
+          return await this.reconcileComment(
+            repository,
+            numberArg(source, "pullNumber"),
+            request,
+            credential
+          );
+        case GITHUB_RECONCILIATION_OPERATIONS.pullRequestReview:
+          return await this.reconcilePullRequestReview(
+            repository,
+            numberArg(source, "pullNumber"),
+            request,
+            credential
+          );
+        case GITHUB_RECONCILIATION_OPERATIONS.pullRequestMerge:
+          return await this.reconcilePullRequestMerge(
+            repository,
+            numberArg(source, "pullNumber"),
+            credential
+          );
+        case GITHUB_RECONCILIATION_OPERATIONS.repoPush:
+          return await this.reconcilePush(
+            repository,
+            stringArg(source, "branch"),
+            request,
+            credential
+          );
         default:
           return { outcome: "ambiguous", evidenceRef: "github:lookup_unsupported" };
       }
@@ -509,5 +1111,73 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return applied
       ? { outcome: "confirmed", evidenceRef }
       : { outcome: "not_applied", evidenceRef };
+  }
+
+  private async reconcilePullRequestCreate(
+    repository: string,
+    source: Arguments,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const head = stringArg(source, "head");
+    const existing = await this.findOpenPullRequestByHead(repository, head, credential);
+    const evidenceRef = `github:pull_request:${repository}:head:${head}`;
+    return existing === undefined
+      ? { outcome: "not_applied", evidenceRef }
+      : { outcome: "confirmed", evidenceRef: `github:pull_request:${String(existing.number)}` };
+  }
+
+  private async reconcilePullRequestReview(
+    repository: string,
+    pullNumber: number,
+    request: ToolReconciliationRequest,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const review = await this.findMarkedReview(
+      repository,
+      pullNumber,
+      githubEffectMarker(request.idempotencyKey),
+      credential
+    );
+    return review === undefined
+      ? {
+          outcome: "not_applied",
+          evidenceRef: `github:pull_request:review:absent:${repository}#${pullNumber}`,
+        }
+      : { outcome: "confirmed", evidenceRef: `github:pull_request:review:${String(review.id)}` };
+  }
+
+  private async reconcilePullRequestMerge(
+    repository: string,
+    pullNumber: number,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const response = await this.call(
+      { method: "GET", path: `/repos/${repository}/pulls/${pullNumber}` },
+      credential,
+      false
+    );
+    const current = record(response.body);
+    const evidenceRef = `github:pull_request:${repository}#${pullNumber}:merged`;
+    return current.merged === true
+      ? { outcome: "confirmed", evidenceRef }
+      : { outcome: "not_applied", evidenceRef };
+  }
+
+  private async reconcilePush(
+    repository: string,
+    branch: string,
+    request: ToolReconciliationRequest,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const commit = await this.findCommitByMarker(
+      repository,
+      branch,
+      githubEffectMarker(request.idempotencyKey),
+      credential
+    );
+    const evidenceRef = `github:repo:push:${repository}:${branch}`;
+    return commit === undefined
+      ? { outcome: "not_applied", evidenceRef }
+      : { outcome: "confirmed", evidenceRef: `github:repo:push:${String(commit.sha)}` };
   }
 }

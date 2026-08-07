@@ -330,7 +330,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         await secretsService.set("soul-git-credential", credentials);
       }
       try {
-        await gitSync.configureRemote(remoteUrl, credentials || undefined);
+        const resolvedCredentials = credentials || undefined;
+        await gitSync.configureRemote(remoteUrl, async () => resolvedCredentials);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });

@@ -99,6 +99,16 @@ else
   echo "✅ Soul directory already exists at $SOUL_DIR"
 fi
 
+# Data dir for the API's zero-setup auto-mint lane (bootstrap-secrets.ts / worker-credential.ts):
+# WORKER_API_CREDENTIAL and INTEGRATION_WORKER_API_CREDENTIAL are minted on the API's first boot
+# and persisted here for the worker/integration-worker to read back — the same mechanism prod
+# containers get from their /data volume. Without TF_DATA_DIR, resolveDataDir() finds nothing in
+# a local checkout and both credentials are left for a human to mint by hand (there is currently
+# no UI for that), which is why a fresh `pnpm dev` chat request used to hang forever with no error.
+DATA_DIR="$HOME/.tulipfarm/data"
+mkdir -p "$DATA_DIR"
+echo "✅ Data dir for auto-minted worker credentials: $DATA_DIR"
+
 # Copy .env.local.example to .env.local if not present
 if [ ! -f ".env.local" ]; then
   echo "📋 Creating .env.local from template..."
@@ -138,6 +148,19 @@ else
   sed -i "s|^SOUL_PATH=.*|SOUL_PATH=$SOUL_DIR|" .env.local
 fi
 echo "✅ DATABASE_URL synchronized with the bundled Postgres container"
+
+# Point every process at the same auto-mint data dir. Set (not just added) on every run so an
+# .env.local created before this variable existed still gets it.
+if grep -q '^TF_DATA_DIR=' .env.local; then
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "s|^TF_DATA_DIR=.*|TF_DATA_DIR=$DATA_DIR|" .env.local
+  else
+    sed -i "s|^TF_DATA_DIR=.*|TF_DATA_DIR=$DATA_DIR|" .env.local
+  fi
+else
+  echo "TF_DATA_DIR=$DATA_DIR" >> .env.local
+fi
+echo "✅ TF_DATA_DIR synchronized ($DATA_DIR)"
 
 # Symlink .env.local into every app started by `pnpm dev` because Turbo runs each command from its
 # package directory and dotenv resolves relative paths from that directory.
