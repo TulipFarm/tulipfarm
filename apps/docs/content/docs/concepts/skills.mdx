@@ -1,58 +1,35 @@
 ---
 title: Skills
-description: Reusable instructions agents load on demand, audited before they land.
+description: Reusable instruction packs that Agents load on demand and audit before install.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
-
-A skill is a packaged set of instructions an agent can load when it needs them. Skills
-follow the Claude agent-skills format: a `SKILL.md` with a `name`, a `description`, and a
-markdown body, optionally accompanied by reference files.
+A **Skill** is a reusable instruction pack. It gives an Agent task-specific process and references
+without loading that material into every turn. Skills follow the agent-skills shape: `SKILL.md` plus
+optional reference files.
 
 ## Progressive disclosure
 
-Skills are loaded in layers so an agent only pays for what it uses:
+Skills load in layers. The name and description are visible so the Agent can decide whether the
+Skill applies. The `SKILL.md` body is loaded with `load_skill` when needed. Reference files are
+loaded later with `load_skill_reference` only when the Skill asks for them.
 
-- **Level 1** — the name and description, always visible so the agent knows the skill
-  exists.
-- **Level 2** — the `SKILL.md` body, loaded when the agent decides to use the skill.
-- **Level 3** — reference files, loaded on demand from within the skill.
+That keeps normal turns small while still allowing deep instructions for specialized work.
 
-This keeps the agent's context lean while still giving it deep material when a task calls
-for it.
+## Built, bundled, or installed
 
-## Installing from a git repository
+TulipFarm ships bundled forge Skills such as `resource-forge`, `agent-forge`, `skill-forge`,
+`routine-forge`, `surface-component-forge`, and `onboarding`. You can author a new Skill by chat
+through `skill-forge`, or install Skills from a git repository through the marketplace flow.
 
-The **Skills → Marketplace** tab installs skills straight from a git URL. The flow has
-three steps: **scan** a repository for installable skills, **audit** the ones you select,
-then **confirm** the install. An installed skill is written to `soul/skills/{name}/`,
-committed, and recorded in `skills-lock.json` with its source URL, ref, and hash.
+The install flow scans a repository, runs **SkillAudit**, and then installs only after operator
+confirmation. Installed Skills are written to `soul/skills/{name}/` and pinned in
+`skills-lock.json` with provenance.
 
-See [Install a skill](/docs/guides/install-a-skill) for the walkthrough.
+## SkillAudit is advisory
 
-## Authoring a skill by chat
+SkillAudit is an LLM safety review that reports what the Skill asks Agents to do, suspicious
+instructions, and risk level. It is not a sandbox and not an authorization boundary. A low-risk
+report does not auto-install a Skill, and an installed Skill still runs with the Agent's available
+Tool reach.
 
-You do not have to find a skill in a repository — you can ask for one. Tell the assistant
-"make a skill that drafts refund replies in our tone", and chat loads
-its `skill-forge`, interviews you, and writes the `SKILL.md`. A skill authored this way
-lands in a **pending** state, runs through SkillAudit just like an installed one, and goes
-live only once you activate it. The audit is part of creation, not an afterthought.
-
-## SkillAudit: advisory, not a boundary
-
-Every skill — whether installed from a repository or authored locally — is reviewed by a
-built-in **SkillAudit** agent before it lands. SkillAudit produces a safety report: what
-tools and data the skill would steer an agent toward, any suspicious instructions
-(exfiltration, destructive actions, prompt-injection patterns), and an overall risk
-rating of low, medium, or high.
-
-<Callout type="warn">
-SkillAudit is advisory, not a guarantee. A skill is natural-language instruction, not
-code, so it cannot be sandboxed — it may read benign yet behave badly in a chat,
-and injection can be obscured. A "low risk" rating does not auto-install anything.
-</Callout>
-
-Because the audit is advisory, **you confirm every install yourself** after reading the
-report. And because there is no per-skill tool restriction yet, an installed skill runs
-with the agent's full tool reach. Risk in V1 is bounded by *audit report → human
-confirm*, not by a sandbox.
+Use [Install a Skill](/docs/guides/install-a-skill) for the install flow.

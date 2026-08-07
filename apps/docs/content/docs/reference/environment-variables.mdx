@@ -1,93 +1,118 @@
 ---
 title: Environment variables
-description: Every variable TulipFarm reads, with defaults and descriptions.
+description: Every environment variable TulipFarm reads or ships in its self-hosted runtime.
 ---
 
-TulipFarm is configured through environment variables. In self-hosted installs the
-installer writes these to `/opt/tulipfarm/.env`; in local development they live in
-`.env.local`. The tables below cover every variable the `app` reads.
+TulipFarm reads configuration from the process environment. Source checkouts usually load
+`.env.local`; self-hosted installs write `/opt/tulipfarm/.env` for Docker Compose. The tables below
+separate application reads from Compose-only values that shape the container stack.
 
-Deploying? [Deploy](/docs/deploy) covers which of these matter per platform, and the
-[production checklist](/docs/deploy/production-checklist) covers which ones you must not
-leave at their defaults.
+## Required boot configuration
 
-## Required (all deployments)
+`SOUL_PATH` and `SOUL_ROOT` are mutually exclusive. Local development uses `SOUL_PATH`; hosted or
+multi-business deployments can use `SOUL_ROOT`, which resolves to `<root>/<businessId>/soul`.
 
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | — | PostgreSQL 17 connection string. The single datastore (pgvector + pg-boss). Must allow the `vector` and `citext` extensions — the app creates them at boot. |
-| `SOUL_PATH` | — | Absolute path to the soul git repository. Must be outside the project repo — a relative or in-repo path is rejected at boot. |
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | Yes | — | PostgreSQL connection string. Must start with `postgres://` or `postgresql://`. |
+| `ENCRYPTION_KEY` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 key-encryption key for stored secrets. |
+| `JWT_SECRET` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 signing secret reserved for auth/session signing surfaces. |
+| `WEBHOOK_SIGNING_SECRET` | Yes outside managed data-dir boot | Generated into `TF_DATA_DIR/secrets.env` when a data dir exists | 32-byte base64 secret reserved for webhook signature verification. |
+| `SOUL_PATH` | Yes, unless `SOUL_ROOT` is set | — | Absolute path to the live Soul git checkout. |
+| `SOUL_ROOT` | Yes, unless `SOUL_PATH` is set | — | Root for per-business Soul checkouts. |
 
-Both are already set by the container image and the Compose file; you only supply them
-when running the API outside a container.
+## Networking and URLs
 
-## Bootstrap secrets
-
-Three keys, each validated as 32-byte base64 at boot. **In a container they are optional**:
-if any is missing, the app generates it on first boot and persists it to
-`$TF_DATA_DIR/secrets.env` (`mode 0600`), reusing it on every later boot. Setting the
-variable always overrides the generated value. Outside a container — where there is no data
-directory — all three are required and boot fails fast without them.
-
-Generate your own with `openssl rand -base64 32`.
-
-| Variable | Default | Description |
-|---|---|---|
-| `ENCRYPTION_KEY` | generated | Key that encrypts every secret the instance stores. Losing it makes those secrets unrecoverable, so the app refuses to boot if it generates a fresh one against a database that already holds encrypted secrets. |
-| `JWT_SECRET` | generated | Reserved for request signing — no feature is wired to it yet (API tokens are stored as hashes, not JWTs — see [Hashing](/docs/security/hashing)). |
-| `WEBHOOK_SIGNING_SECRET` | generated | Reserved for webhook signature verification — not yet wired (the routine webhook uses a per-trigger shared secret instead). |
-
-| Variable | Default | Description |
-|---|---|---|
-| `TF_DATA_DIR` | `/data` | Directory holding generated bootstrap secrets. Must be a mounted volume — the app refuses to boot rather than generate keys that a restart would destroy. Outside a container the default is only used if it already exists, so local development is unaffected. |
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `PORT` | No | `4010` from source, `8080` in the production image | API listen port. |
+| `PUBLIC_URL` | No | API falls back to `http://localhost:4000` for link generation and CORS | Public origin users reach. Drives CORS fallback, cookie secure behavior, and channel-link URLs. |
+| `CORS_ORIGIN` | No | `PUBLIC_URL`, then `http://localhost:${VITE_PORT ?? 4000}` | Browser origin allowed to call the API with credentials. |
+| `VITE_PORT` | No | `4000` | Remix web dev-server port and API CORS fallback. |
+| `VITE_API_URL` | No | `http://localhost:4010` | Browser API base URL for the web app. |
+| `VITE_API_TOKEN` | No | — | Optional bearer token the web dev client adds to API calls. |
+| `WEB_DIST` | No | — | Directory of built web assets for the API to serve in combined image mode. |
+| `INTERNAL_API_URL` | Worker processes: yes | — | Base URL workers use for service-only `/api/v1/internal/*` calls. |
 
 ## Headless seeding
 
-Set **all three** together to skip the web setup wizard and seed the first admin
-account automatically on first boot. Leave all three unset (the default for `curl | bash`
-installs) to use the interactive browser wizard instead.
+Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` together to skip the browser setup wizard.
+Production refuses to boot when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set without `LLM_API_KEY`.
 
-See [First-run setup and boot modes](/docs/concepts/setup) for a full explanation of how
-the instance decides which path to take.
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `ADMIN_EMAIL` | No | — | Email for the first admin account during headless boot. |
+| `ADMIN_PASSWORD` | No | — | Password for the first admin account during headless boot. |
+| `LLM_API_KEY` | Required with admin creds in production | — | Seeded into the selected provider secret during headless boot. |
+| `LLM_PROVIDER` | No | `anthropic` | Headless provider for `LLM_API_KEY`; `openai` is the other accepted value. |
+| `BUSINESS_NAME` | No | — | Written to Soul business metadata during headless boot. |
+| `BUSINESS_DESCRIPTION` | No | Empty string when `BUSINESS_NAME` is set | Written to Soul business metadata during headless boot. |
+| `NODE_ENV` | No | Depends on process manager | Enables production-only headless validation and non-dev route behavior. |
 
-| Variable | Default | Description |
-|---|---|---|
-| `ADMIN_EMAIL` | — | Email for the first admin account. Must be a valid email format. |
-| `ADMIN_PASSWORD` | — | Password for the first admin account. |
-| `LLM_API_KEY` | — | API key for the default LLM provider. Required alongside `ADMIN_EMAIL` + `ADMIN_PASSWORD` in production — omitting it in production causes the API to refuse to start. |
-| `LLM_PROVIDER` | `anthropic` | Provider for `LLM_API_KEY`. Accepts `anthropic` or `openai`. |
-| `BUSINESS_NAME` | — | Written to `soul.yaml` as `businessName` during headless seeding. Optional. |
-| `BUSINESS_DESCRIPTION` | — | Written to `soul.yaml` as `businessDescription`. Only used when `BUSINESS_NAME` is also set. |
+## Soul and git
 
-## OCI / production
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `SOUL_PATH` | See required boot configuration | — | Single live Soul checkout path. |
+| `SOUL_ROOT` | See required boot configuration | — | Root for resolved per-business Soul checkout paths. |
+| `SOUL_GIT_REMOTE_URL` | No | Persisted Soul git config, if present | Remote URL cloned on first boot or synced later. |
+| `SOUL_GIT_CREDENTIAL` | No | Persisted credential, if present | Credential used for Soul remote sync. |
+| `BOT_GIT_NAME` | No | `tulipfarm-bot` | Git author name for Soul commits. |
+| `BOT_GIT_EMAIL` | No | `tulipfarmhq@gmail.com` | Git author email for Soul commits. |
+| `GIT_TERMINAL_PROMPT` | No | Forced to `0` by `@tulipfarm/soul` | Disables interactive git credential prompts. |
+| `BUSINESS_ID` | No | `tulipfarm-local` | Deployment business id used in constants and per-business Soul paths. |
 
-Variables used by the Docker Compose stack and the production image. The installer
-generates and writes these; they are documented here for reference.
+## Workers and service credentials
 
-| Variable | Default | Description |
-|---|---|---|
-| `PUBLIC_URL` | `http://localhost:8080` | The externally reachable URL for this instance. Drives CORS and the cookie `Secure` flag: cookies are marked `Secure` when this is an `https://` URL, and deliberately not when it is `http://` (browsers discard `Secure` cookies on plain-HTTP origins, which would break login). |
-| `CORS_ORIGIN` | value of `PUBLIC_URL` | Allowed browser origin for the API. Override only if the web UI is served from a different origin than the API. |
-| `EXTERNAL_DATASTORE` | `false` | Documentation marker only — **no code reads it**. It records that `DATABASE_URL` points at a managed Postgres; what actually skips the bundled container is starting only the app (`docker compose up -d app`). See [Use a managed database](/docs/deploy/managed-database). |
-| `POSTGRES_PASSWORD` | `tulipfarm` | Password for the bundled Postgres container. The default exists so the Compose file runs with no setup and is safe only because port 5432 is never published — set your own on any networked host. Installer-generated. Not used when `EXTERNAL_DATASTORE=true`. |
-| `HOST_PORT` | `8080` | Host port the app is published on. |
-| `HOST_BIND` | `0.0.0.0` | Host interface the app is published on. Set to `127.0.0.1` when a reverse proxy fronts it, so the plain-HTTP port is not independently reachable. |
-| `TULIPFARM_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/tulipfarm:<tag>`). |
-| `PORT` | `8080` | Port the API listens on inside the container. |
-| `NODE_ENV` | `production` | Runtime environment. Affects logging, the cookie `Secure` fallback when `PUBLIC_URL` is unset, and headless-seeding validation. |
+The API can mint worker API-client credentials into `TF_DATA_DIR`. Environment values always win;
+files are only a fallback for container installs sharing the data volume.
 
-## Optional (all deployments)
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `TF_DATA_DIR` | No | `/data` when that directory exists | Stores generated `secrets.env`, `worker.env`, and `integration-worker.env`. |
+| `WORKER_API_CREDENTIAL` | Worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the durable Run worker. |
+| `INTEGRATION_WORKER_API_CREDENTIAL` | Integration worker: yes unless read from data dir | — | `tfc_<clientId>.<secret>` credential for the integration worker. |
+| `WORKER_PORT` | No | `4020` | Worker health probe port. Collides with the docs dev server if both run locally. |
+| `WORKER_OWNER` | No | `<hostname>:<pid>` | Lease owner recorded on claimed Runs. |
+| `WORKER_RUN_POLL_MS` | No | `1000` | Durable Run dispatch poll interval. |
+| `WORKER_WAIT_SWEEP_MS` | No | `5000` | Wait timer sweep interval. |
+| `WORKER_OUTBOX_POLL_MS` | No | `1000` | Event outbox delivery poll interval. |
+| `WORKER_BATCH_SIZE` | No | `25` | Maximum Runs claimed per dispatch batch. |
+| `WORKER_LEASE_MS` | No | `60000` | Run lease duration; must exceed `WORKER_RUN_POLL_MS`. |
+| `WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | Worker shutdown drain budget. |
+| `WORKER_MAINTENANCE` | No | `false` | Enables singleton maintenance consumers on one worker replica. |
+| `INTEGRATION_WORKER_PORT` | No | `4030` | Integration-worker health probe port. |
+| `INTEGRATION_WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | Integration-worker shutdown drain budget. |
 
-| Variable | Default | Description |
-|---|---|---|
-| `SESSION_TTL_SECONDS` | `604800` | Session cookie lifetime in seconds (7 days). |
-| `VITE_PORT` | `4000` | Port the web UI dev server listens on (local development only). |
-| `SOUL_GIT_REMOTE_URL` | — | Remote for the soul repository. When set, the instance clones on first boot and syncs on a schedule. Can also be set from the setup wizard, which syncs immediately. |
-| `SOUL_GIT_CREDENTIAL` | — | Credential for pushing to `SOUL_GIT_REMOTE_URL` (e.g. a GitHub personal access token). |
-| `BOT_GIT_NAME` | `tulipfarm-bot` | Git commit author name for soul writes. See [Soul](/docs/concepts/soul#commit-authorship). |
-| `BOT_GIT_EMAIL` | `tulipfarmhq@gmail.com` | Git commit author email for soul writes. See [Soul](/docs/concepts/soul#commit-authorship). |
-| `ENCRYPTION_KEY_PREVIOUS` | — | The prior `ENCRYPTION_KEY` during a key rotation. Decryption tries the current key first, then this one. See [Secrets](/docs/concepts/secrets). |
-| `API_TOKEN_PEPPER` | — | Base64 server secret (32 bytes). When set, API tokens are hashed with `HMAC-SHA256(token, pepper)` instead of plain SHA-256. See [Hashing](/docs/security/hashing). |
-| `HOOKS_DISABLED` | — | Set to `true` to skip resource `hooks.ts` execution entirely. Use to boot an instance whose hooks are failing. |
-| `KNOWLEDGE_TRGM_FALLBACK` | `on` | Typo-tolerance pass (pg_trgm) for lexical page search. Opt-out: set to `0` or `false` to turn it off. |
-| `MARKETPLACE_SOURCE` | `tulipfarm/skills` | The `owner/repo` the Skills marketplace scans by default. |
+## Sessions, secrets, and limits
+
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `SESSION_TTL_SECONDS` | No | `604800` | Session cookie lifetime in seconds. |
+| `HOOKS_DISABLED` | No | — | Set to `true` to skip resource hook execution. |
+| `ENCRYPTION_KEY_PREVIOUS` | No | — | Previous 32-byte base64 key during KEK rotation. |
+| `API_TOKEN_PEPPER` | No | — | 32-byte base64 HMAC key for hashing personal API tokens. |
+| `RECOVERY_KEY` | CLI only | — | Offline recovery key consumed by `pnpm --filter @tulipfarm/api keys recover`. |
+
+## Knowledge and LLM overrides
+
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `KNOWLEDGE_TRGM_FALLBACK` | No | `on` | Enables pg_trgm typo-tolerance for lexical page search unless set to `0` or `false`. |
+| `KNOWLEDGE_RERANK` | No | Off | Opts into the wired rerank seam. Today the enabled stage is an honest not-implemented stub. |
+| `MARKETPLACE_SOURCE` | No | `tulipfarm/skills` | Skills marketplace source repository. |
+| `BUNDLED_SKILLS_DIR` | No | Image/repo bundled skills directory | Overrides where bundled Skills are read from. |
+| `BUNDLED_INTEGRATIONS_DIR` | No | Image/repo bundled integrations directory | Overrides where bundled Integrations are read from. |
+| `TULIPFARM_VERSION` | No | `dev` | Version reported by the update-check endpoint. |
+| `env://<NAME>` LLM refs | Only when referenced | — | LLM config escape hatch; the named environment variable must be set at model creation time. |
+
+## Datastore container and Compose values
+
+These values are consumed by Docker Compose or the installer rather than by the API process itself.
+
+| Variable | Required | Default | What it does |
+| --- | --- | --- | --- |
+| `POSTGRES_PASSWORD` | Bundled Postgres only | `tulipfarm` in Compose | Password for the bundled PostgreSQL container and generated `DATABASE_URL`. |
+| `HOST_PORT` | No | `8080` | Host port published by the self-hosted Compose stack. |
+| `HOST_BIND` | No | `0.0.0.0` | Host interface Compose binds for the app port. |
+| `EXTERNAL_DATASTORE` | No | `false` | Installer/Compose switch documenting that `DATABASE_URL` points at managed Postgres. |

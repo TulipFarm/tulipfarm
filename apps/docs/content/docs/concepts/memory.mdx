@@ -1,0 +1,37 @@
+---
+title: Memory
+description: Per-user working memory, system-prompt facts, and Agent-scoped KV scratch space.
+---
+
+Memory is per-user working context that helps future turns adapt to the person asking. It is for
+preferences and recurring user-specific facts, not for static business identity or durable business
+Records.
+
+## Working memory
+
+Agents can update memory with `update_memory` and remove it with `delete_memory`. Users can inspect
+and edit their entries at `/settings/memory`, backed by `GET /api/v1/memory`,
+`PUT /api/v1/memory/{key}`, and `DELETE /api/v1/memory/{key}`.
+
+Good memory entries are facts like preferred tone, recurring formatting choices, or personal role
+context. They should be small, useful across turns, and safe to show to the user who owns them.
+
+## What belongs in the system prompt
+
+Static business facts belong in the system prompt, not working memory. The configured business name
+and description from `soul.yaml` (`businessName`, `businessDescription`) identify the instance and
+are rendered into the prompt as business context. They are not user preferences and should not be
+stored as memory just because onboarding collected them.
+
+## What belongs in Records or Knowledge
+
+Business state belongs in [Records](/docs/concepts/resources). Policies, procedures, and narrative
+reference material belong in [Knowledge](/docs/concepts/knowledge) spaces and pages. Memory should
+not become a hidden database of customers, tickets, policies, or operating rules.
+
+## Agent scratch space is KV, not memory
+
+TulipFarm also exposes an Agent-scoped key-value store through `kv_get`, `kv_set`, `kv_delete`, and
+`kv_list`, plus REST routes under `/api/v1/kv/{namespace}`. KV is durable scratch space for an
+Agent or workflow namespace. It is not per-user working memory and is not automatically rendered as
+user preference context.

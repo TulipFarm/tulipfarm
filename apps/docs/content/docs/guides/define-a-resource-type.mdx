@@ -1,50 +1,55 @@
 ---
 title: Define a resource type
-description: Create a new resource type by describing it to the assistant.
+description: Ask the assistant to create a schema-backed Resource type.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+This guide creates a [Resource type](/docs/concepts/resources) by chatting with the
+assistant. Resource types live in the Soul; Records live in PostgreSQL.
 
-This guide creates a new [resource type](/docs/concepts/resources) by asking the
-assistant for it. It assumes a running instance with a model configured (so agents can
-run) and that you are signed in. For the bigger picture, see
-[Building by chat](/docs/concepts/building).
+## Outcome
+
+At the end, the new type appears under **Resources**, with generated list, detail, create,
+and edit screens based on its schema.
 
 ## Ask the assistant
 
-Open **Chat** and describe the type you want in plain language. Name the fields, and call
-out anything special — an auto-numbered reference, a link to another type, a field that
-should be normalized:
+Open **Chat** and describe the type you want:
 
 ```prompt
-Create a ticket resource. It has a subject, a status that is either open or closed,
-and a customer it belongs to. Auto-number each ticket as TICK-1, TICK-2, and link the
-customer to our existing customer type.
+Create a ticket Resource type. It should have a subject, a status that is either
+open or closed, a priority of low, medium, or high, and a customer it belongs to.
+Auto-number each ticket as TICK-1, TICK-2, and link the customer to our existing
+customer Resource type.
 ```
 
-The assistant loads its
-`resource-forge` and confirms the details it needs — the fields, which one is the
-human-friendly identifier, and which fields link to other types. Answer its questions,
-and it builds the type.
+The assistant loads `resource-forge`, asks for any missing details, writes the schema to
+the Soul, commits it, and reconciles it live. There is no restart.
 
 <Callout type="info">
-The assistant builds one type at a time, in dependency order. If your `ticket`
-links to a `customer`, create the `customer` type first (or ask for both, and it will
-sequence them) — a link can only point at a type that exists.
+Links can only point at Resource types that exist. If you ask for several related types,
+the assistant creates them in dependency order.
 </Callout>
 
-## What it builds for you
+## Verify the generated UI
 
-From that description the assistant writes the schema, wires up the
-extensions, and commits it — no schema for you to write:
+<Steps>
+  <Step>
+    Open **Resources**.
+  </Step>
+  <Step>
+    Select the new type. The Record list is generated from the schema.
+  </Step>
+  <Step>
+    Choose **New**. The create form is also generated from the schema: strings become text
+    inputs, numbers become number fields, booleans become checkboxes, enums become selects,
+    dates become date pickers, arrays and objects become JSON textareas, and links become
+    searchable comboboxes.
+  </Step>
+  <Step>
+    Save an invalid value, such as a status outside the enum, to confirm the server
+    rejects it. Validation is server-authoritative and returns field paths for the UI to
+    display; the browser form is only a helper.
+  </Step>
+</Steps>
 
-- the `subject` and `status` fields, with `status` constrained to `open` or `closed`
-- an auto-assigned `ref` (`TICK-1`, `TICK-2`, …) via the `x-id-strategy` extension
-- a `customerId` that links to the `customer` type, checked on every write
-
-The new `ticket` table is reconciled immediately — there is no restart.
-
-## Verify
-
-Open **Resources** in the web UI. The `ticket` type now appears in the list, showing its
-field count. From here you can [work with records](/docs/guides/work-with-records).
+Next, [work with Records](/docs/guides/work-with-records) for this type.

@@ -6,9 +6,12 @@ description: Every supported way to run TulipFarm in production — one-line ins
 import { Callout } from "fumadocs-ui/components/callout";
 import { Cards, Card } from "fumadocs-ui/components/card";
 
-TulipFarm ships as **one container image** — `ghcr.io/tulipfarm/tulipfarm` — containing the
-API, the built web UI, and the in-process job workers. It needs PostgreSQL 17 with the
-`vector` and `citext` extensions, and two volumes. That is the entire deployment surface.
+TulipFarm ships as **one container image** — `ghcr.io/tulipfarm/tulipfarm` — but a
+production stack runs it as three processes: `app`, `worker`, and `integration-worker`.
+The `app` serves the API and built web UI and is the only migrator. The `worker` executes
+Runs, waits, and outbox loops. The `integration-worker` owns Slack and GitHub ingress,
+sync, delivery, retries, and reconciliation. PostgreSQL 17 with the `vector` and `citext`
+extensions backs all three.
 
 You never clone the repository to run TulipFarm. The source tree is for
 [contributors](/docs/development).
@@ -69,14 +72,18 @@ Identical across all of the above, because it is a property of the image, not th
 | Requirement | Detail |
 | --- | --- |
 | **Image** | `ghcr.io/tulipfarm/tulipfarm:latest`, or a pinned `:v…` tag. Multi-arch (amd64 + arm64). |
-| **Exactly one replica** | The soul is a git working tree on a volume and the job workers run inside the API process. Two replicas race both. Scale vertically. |
-| **PostgreSQL 17** | Must allow `CREATE EXTENSION vector` and `citext`; the app creates them at boot. |
-| **Volume: soul** | `/opt/tulipfarm/soul` — the git-backed configuration store. |
-| **Volume: data** | `/data` — generated bootstrap secrets. **Losing it loses the key that decrypts every stored secret.** |
-| **Port** | `8080` inside the container. |
-| **Liveness probe** | `GET /livez` — process is up, checks nothing else. |
-| **Readiness probe** | `GET /readyz` — datastore reachable; `503` when not. `/health` is an alias. |
-| **Startup budget** | Migrations run on boot, before the server listens. Give startup probes room. |
+| **Three workloads from one image** | `app` runs `node server.cjs`, `worker` runs `node worker.cjs`, and `integration-worker` runs `node integration-worker.cjs`. Keep all three on the same tag. |
+| **Exactly one `app` replica** | The `app` owns the soul git worktree and is the only process that applies migrations. |
+| **Exactly one maintenance `worker`** | The `worker` executes every turn and sets `WORKER_MAINTENANCE=true`; exactly one replica should own cron and maintenance consumers. |
+| **Exactly one `integration-worker`** | It owns integration ingress, sync, delivery, retries, and reconciliation. |
+| **PostgreSQL 17** | Must allow `CREATE EXTENSION vector` and `citext`; the `app` creates them at boot. |
+| **Volume: soul** | Mounted only on `app` at `/opt/tulipfarm/soul` — the git-backed configuration store. |
+| **Volume: data** | Mounted writable on `app` and read-only on both workers at `/data`. **Losing it loses the key that decrypts every stored secret.** |
+| **Published port** | Only `app` publishes container port `8080` to `${HOST_BIND:-0.0.0.0}:${HOST_PORT:-8080}`. |
+| **Worker probe ports** | `worker` listens on `4020`; `integration-worker` listens on `4030`. Neither publishes a host port. |
+| **Liveness probe** | `GET /livez` on each process — checks process health only. |
+| **Readiness probe** | `GET /readyz` on each process — datastore reachable and, for workers, schema floor met. `/health` on `app` is an alias. |
+| **Startup budget** | Migrations run in `app` before it listens. Workers depend on healthy `app` because they never migrate. |
 
 <Callout type="warn">
   **`PUBLIC_URL` is not optional in production.** It is the origin users actually reach, and
@@ -93,6 +100,7 @@ Stated plainly so you do not go looking:
 - **No one-click templates** in the Coolify, Portainer, Unraid, or DigitalOcean
   marketplaces. Every platform page below uses the Compose file directly instead, which
   works today.
-- **No horizontal scaling.** One replica, by design — see the table above.
-- **No built-in scheduled backups.** Back up PostgreSQL and the `/data` volume with your
-  own tooling; [Updating](/docs/deploy/updating) covers what to capture and when.
+- **No horizontal scaling.** One `app`, one maintenance `worker`, and one
+  `integration-worker`, by design — see the table above.
+- **No built-in scheduled backups.** Back up PostgreSQL, `/data`, and the soul volume with
+  your own tooling; [Updating](/docs/deploy/updating) covers what to capture and when.

@@ -3,13 +3,12 @@ title: TulipFarm
 description: The AI-native business operating system — install it, give it a soul, put it to work.
 ---
 
-import { Cards, Card } from "fumadocs-ui/components/card";
-import { Callout } from "fumadocs-ui/components/callout";
-
 TulipFarm is a self-hosted control panel where autonomous agents run your business
 operations. You **describe what you want in chat** — "track our customers", "create a
-support agent", "set up a hiring pipeline" — and agents build and run it for you. You do
+support agent", "review this pull request" — and agents build and run it for you. You do
 not configure it by editing files.
+
+It runs entirely on your own infrastructure, against your own model provider keys.
 
 ## Install it
 
@@ -45,27 +44,94 @@ docker compose up -d
 
 A TulipFarm instance has two halves:
 
-- **The soul** — a git-backed configuration store. Your resource schemas, agents, and
-  skills live here as files. Agents write to the soul when you ask them to build
-  something; the git history is your audit trail.
-- **The runtime** — the API and workers that load the soul, store your records, index
-  your knowledge, and run agent turns against your configured LLM providers.
+- **The soul** — a git-backed configuration store. Your resource schemas, agents, skills,
+  routines, and integrations live here as files. Agents write to the soul when you ask them
+  to build something; the git history is your audit trail.
+- **The runtime** — the API and workers that load the soul, store your records, index your
+  knowledge, and run agent turns against your configured LLM providers.
 
 Everything you build, an agent writes to the soul; everything your business produces is a
 record in the datastore. [Building by chat](/docs/concepts/building) is how the two come
-together — read [Concepts](/docs/concepts) for the full picture.
+together.
+
+## What you can build
+
+Once a model is configured, everything below is created by asking for it in chat:
+
+<Cards>
+  <Card
+    title="Resource types"
+    href="/docs/concepts/resources"
+    description="The things your business tracks. Describe one and its tables, forms, and list screens appear."
+  />
+  <Card
+    title="Agents"
+    href="/docs/concepts/agents"
+    description="Named owners for a job, each with its own instructions, tools, and bounded authority."
+  />
+  <Card
+    title="Routines"
+    href="/docs/concepts/routines"
+    description="Repeatable operations that run on a schedule, on an event, or on request."
+  />
+  <Card
+    title="Knowledge"
+    href="/docs/concepts/knowledge"
+    description="A wiki your agents read from and cite, with provenance attached to the answer."
+  />
+  <Card
+    title="Skills"
+    href="/docs/concepts/skills"
+    description="Installable capability packages from a git repository, audited before they run."
+  />
+  <Card
+    title="Integrations"
+    href="/docs/concepts/integrations"
+    description="Reach your agents where work already happens — GitHub and Slack ship in the box."
+  />
+</Cards>
 
 ## Where to start
 
 <Cards>
-  <Card title="Install" href="/docs/installation" description="The one-line installer, in detail — Linux, macOS, and Windows." />
-  <Card title="Deploy" href="/docs/deploy" description="Every supported deployment: Compose, Coolify, Portainer, Unraid, managed databases, TLS." />
-  <Card title="Get started" href="/docs/getting-started" description="First sign-in, configure a model, and build your first resource type by chatting." />
-  <Card title="Production checklist" href="/docs/deploy/production-checklist" description="What to change before the instance holds real data." />
-  <Card title="Building by chat" href="/docs/concepts/building" description="The core idea — describe what you want, and agents build it for you." />
-  <Card title="Concepts" href="/docs/concepts" description="How the soul, resources, agents, skills, knowledge, and LLM tiers fit together." />
-  <Card title="Guides" href="/docs/guides/define-a-resource-type" description="Task recipes: define a resource, install a skill, configure providers." />
-  <Card title="Reference" href="/docs/reference/environment-variables" description="Environment variables and the commands that run the project." />
-  <Card title="Security" href="/docs/security/encryption" description="How secrets are encrypted, hashed, and rotated." />
-  <Card title="Development" href="/docs/development" description="Run TulipFarm from source — for contributors changing the code." />
+  <Card
+    title="Install"
+    href="/docs/installation"
+    description="The one-line installer in detail — Linux, macOS, and Windows."
+  />
+  <Card
+    title="Get started"
+    href="/docs/getting-started"
+    description="First sign-in, configure a model, and build your first resource type by chatting."
+  />
+  <Card
+    title="Concepts"
+    href="/docs/concepts"
+    description="How the soul, agents, runs, approvals, guardrails, and knowledge fit together."
+  />
+  <Card
+    title="Guides"
+    href="/docs/guides"
+    description="Task recipes: define a resource, install a skill, connect Slack, approve agent work."
+  />
+  <Card
+    title="Deploy"
+    href="/docs/deploy"
+    description="Every supported deployment: Compose, Coolify, Portainer, Unraid, managed databases, TLS."
+  />
+  <Card
+    title="Reference"
+    href="/docs/reference"
+    description="Environment variables, commands, the REST API, and the agent tool catalog."
+  />
+  <Card
+    title="Security"
+    href="/docs/security"
+    description="How secrets are encrypted and hashed, privacy operations, and control evidence."
+  />
+  <Card
+    title="Troubleshooting"
+    href="/docs/troubleshooting"
+    description="The failures people actually hit, and the fix for each."
+  />
 </Cards>

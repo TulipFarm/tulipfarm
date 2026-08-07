@@ -1,0 +1,269 @@
+---
+title: Troubleshooting
+description: The failures people actually hit — installing, signing in, running turns, and connecting integrations — with the fix for each.
+---
+
+Every entry below is a real failure mode with a specific cause. Work top to bottom within
+the section that matches your symptom.
+
+<Callout type="info">
+  Almost every diagnosis starts with logs. From your install directory (`/opt/tulipfarm`
+  by default):
+
+  ```bash
+  docker compose logs -f app
+  docker compose logs -f worker
+  docker compose logs -f integration-worker
+  ```
+</Callout>
+
+## Installing
+
+<Accordions>
+
+<Accordion title="required command not found">
+
+The installer needs a POSIX shell, `openssl`, and a container engine. On a minimal server
+image `openssl` is often absent — install it from your package manager and re-run.
+
+</Accordion>
+
+<Accordion title="no container engine found">
+
+On Linux the installer will install Podman for you if it finds `apt`, `dnf`, `zypper`,
+`pacman`, or `apk`. If none of those exist — or you are on macOS — install Docker Desktop or
+Podman yourself, then re-run. To force a specific engine when both are present:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo TF_RUNTIME=docker bash
+```
+
+</Accordion>
+
+<Accordion title="host port 8080 is already in use">
+
+Something else owns the port. Pick another:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | sudo TF_PORT=9090 bash
+```
+
+The installer writes the choice into `PUBLIC_URL` so links and cookies stay correct.
+
+</Accordion>
+
+<Accordion title="unsupported OS">
+
+The installer targets Linux and macOS. On Windows, either use the PowerShell installer or
+run the shell installer inside WSL2:
+
+```powershell
+irm {{SITE_URL}}/install.ps1 | iex
+```
+
+</Accordion>
+
+<Accordion title="need root or sudo to write /opt/tulipfarm">
+
+The installer writes a Compose file and an `.env` into `/opt/tulipfarm`. Re-run with `sudo`,
+or point it somewhere you own:
+
+```bash
+curl -fsSL {{SITE_URL}}/install.sh | TF_INSTALL_DIR="$HOME/tulipfarm" bash
+```
+
+</Accordion>
+
+</Accordions>
+
+## Signing in
+
+<Accordions>
+
+<Accordion title="The setup wizard never appears — I land on a login page">
+
+The wizard only shows while the instance has no users. If an admin already exists, `/setup`
+locks and you get the login screen instead. That is the intended behaviour: it stops a
+second visitor claiming your instance.
+
+If you provisioned with [headless seeding](/docs/deploy/headless), the wizard is skipped by
+design and your admin is whatever `ADMIN_EMAIL` was set to.
+
+</Accordion>
+
+<Accordion title="I sign in successfully but get bounced straight back to the login page">
+
+Almost always `PUBLIC_URL`. The session cookie is issued for that origin, so if you reach the
+instance at a different host, port, or scheme than `PUBLIC_URL` says, the browser will not
+send it back.
+
+Set `PUBLIC_URL` to the exact URL you type into the address bar — including port — and
+restart. Once you are behind TLS it must be the `https://` URL: that is what marks the
+cookie `Secure`.
+
+```bash
+docker compose up -d --force-recreate app
+```
+
+</Accordion>
+
+<Accordion title="I forgot the admin password">
+
+There is no email-based reset in a fresh instance. Another admin can send an invite or
+manage the account from **Settings → Users**. If you are the only admin and locked out, the
+recovery path is to restore from a backup — see
+[Back up and restore](/docs/guides/back-up-and-restore).
+
+</Accordion>
+
+</Accordions>
+
+## Nothing happens when I chat
+
+<Accordions>
+
+<Accordion title="[llm] no llm.config.yaml found — LLM features disabled">
+
+No model is configured, so no turn can run. Open **Settings → Secrets**, add a provider API
+key, then **Settings → LLM** and assign a model to each tier.
+
+Full walkthrough: [Configure LLM providers](/docs/guides/configure-llm-providers).
+
+</Accordion>
+
+<Accordion title="My message sits there and never gets an answer">
+
+Turns execute in the `worker` service, not in the API. If `worker` is down or unhealthy,
+messages are accepted and then never progress.
+
+```bash
+docker compose ps
+docker compose logs -f worker
+```
+
+Check that `worker` is running and its readiness probe on port 4020 is passing. See
+[deployment troubleshooting](/docs/deploy/troubleshooting) for the schema-floor case, where
+`worker` deliberately refuses to start because it is older than the database schema `app`
+has already applied.
+
+</Accordion>
+
+<Accordion title="The model returns an authentication or quota error">
+
+The key stored in **Settings → Secrets** is rejected by the provider. Secret values are
+write-only once saved — you cannot read one back to check it, so replace it rather than
+inspect it. If you configured a fallback tier, TulipFarm will try the next model in the
+chain before failing the turn.
+
+</Accordion>
+
+<Accordion title="[embeddings] not configured — lexical fallback">
+
+Not an error. Without an embedding model, knowledge search falls back to lexical matching:
+results are still returned, they are just keyword-based rather than semantic. Configure an
+embedding model in **Settings → LLM** to enable vector search.
+
+If you later change embedding model, the log will say the dimension changed and a full
+re-index is required — expect existing content to need re-indexing before semantic results
+improve.
+
+</Accordion>
+
+</Accordions>
+
+## Agents and permissions
+
+<Accordions>
+
+<Accordion title="An agent says it is not allowed to do something">
+
+Two different mechanisms can produce this, and they behave differently:
+
+- A [guardrail](/docs/concepts/guardrails) is a hard limit. The agent cannot negotiate past
+  it and no approval unblocks it — the limit itself has to change.
+- An [approval](/docs/concepts/approvals) is a pause, not a refusal. The action is waiting
+  for a human decision in your **Inbox**.
+
+Check the Inbox first; if nothing is waiting there, it is a guardrail.
+
+</Accordion>
+
+<Accordion title="An agent cannot see a record a teammate can">
+
+Agent authority is the intersection of the agent's own grants and the authority of the
+principal it is acting for. An agent can never exceed the person who invoked it. See
+[Roles and permissions](/docs/reference/roles-and-permissions).
+
+</Accordion>
+
+<Accordion title="A run is stuck">
+
+Open the run and read its timeline — a run that is waiting is usually waiting on something
+nameable: an approval, a timer, or a child run. You can cancel, pause, resume, or retry from
+the run view. See [Watch a run](/docs/guides/watch-a-run).
+
+</Accordion>
+
+</Accordions>
+
+## Integrations
+
+<Accordions>
+
+<Accordion title="Slack or GitHub events never arrive">
+
+Ingress is handled by the `integration-worker` service. If it is down, the connection will
+look healthy in the UI while nothing is actually delivered.
+
+```bash
+docker compose ps integration-worker
+docker compose logs -f integration-worker
+```
+
+Also confirm the provider can reach you: your instance must be reachable at `PUBLIC_URL`
+from the public internet for Slack and GitHub to deliver webhooks. A laptop behind NAT
+cannot receive them.
+
+</Accordion>
+
+<Accordion title="GitHub App is not configured">
+
+The GitHub integration needs its App credentials before it can install anywhere. Work
+through [Connect GitHub](/docs/guides/connect-github) — the error means the credential step
+has not been completed on this instance.
+
+</Accordion>
+
+<Accordion title="I want an integration that is not listed">
+
+GitHub and Slack are the two integrations that ship in the box. Anything else is a skill —
+see [Install a skill](/docs/guides/install-a-skill).
+
+</Accordion>
+
+</Accordions>
+
+## Still stuck
+
+<Cards>
+  <Card
+    title="Deployment troubleshooting"
+    href="/docs/deploy/troubleshooting"
+    description="Readiness probes, migrations, volumes, and managed-database failures."
+  />
+  <Card
+    title="Production checklist"
+    href="/docs/deploy/production-checklist"
+    description="Most mystery failures are one of these items, skipped."
+  />
+  <Card
+    title="Environment variables"
+    href="/docs/reference/environment-variables"
+    description="What each variable does and what breaks without it."
+  />
+  <Card
+    title="Report an issue"
+    href="https://github.com/tulipfarm/tulipfarm/issues"
+    description="Include the output of `docker compose ps` and the failing service's logs."
+  />
+</Cards>

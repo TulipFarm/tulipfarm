@@ -1,0 +1,83 @@
+---
+title: Roles and permissions
+description: Principals, roles, grants, tokens, clients, sessions, invites, and user lifecycle.
+---
+
+TulipFarm has user roles in the auth database and a provider-neutral authorization vocabulary in
+`@tulipfarm/authz`. The UI exposes the current role catalog read-only at `/admin/roles`.
+
+## User roles
+
+| Role | Principal kind | Grants shown today |
+| --- | --- | --- |
+| `admin` | `user` | Allows any action on any resource. The first setup account is created with this role. |
+| `member` | `user` | Starts from broad user access, then denies admin-gated surfaces such as secrets, API tokens, identity, observability, LLM config, knowledge-source administration, system KV, setup, and operations. |
+
+Routes still enforce many permissions directly from `user.role`. Custom role changes are proposed
+through `POST /api/v1/roles/changesets`, but the `/admin/roles` screen is read-only today: it shows
+role name, principal kinds, grants, and conditions; it does not edit assignments in the browser.
+
+## Principals and grants
+
+`@tulipfarm/authz` models principals, roles, and access grants separately.
+
+| Concept | Reference shape |
+| --- | --- |
+| Principal | The authenticated actor. Request handling resolves user sessions, API clients, personal tokens, and external links into a request principal. |
+| Role | `id`, `businessId`, `assignableTo` (`user`, `agent`, or `both`), parent role ids, grants, and optional expiry. |
+| Access grant | `action`, `resourceType`, `effect` (`allow` or `deny`), optional conditions, and optional expiry. |
+| Role composition | Parent roles are flattened after cycle checks. Unknown, cyclic, expired, kind-mismatched, or cross-business assignments fail closed. |
+
+## Sessions
+
+Browser sessions use the `tf_sid` cookie. A successful session also has a session-bound CSRF token;
+mutating browser requests echo the `csrf_token` cookie as the `x-csrf-token` header. Login
+rotates the session id.
+
+Session lifetime is controlled by `SESSION_TTL_SECONDS`, defaulting to seven days.
+
+## Personal API tokens
+
+| Property | Behavior |
+| --- | --- |
+| Prefix | `tulip_` |
+| Owner | A user. Admins can list/delete all tokens; members list/delete their own. |
+| Storage | Only a hash is stored. `API_TOKEN_PEPPER` switches new and lazily upgraded hashes to HMAC-SHA256. |
+| Use | `Authorization: Bearer <tulip_...>`; CSRF is not required for bearer requests. |
+| Retrieval | The raw token is returned once when created and cannot be read later. |
+
+## API clients
+
+API clients are machine identities, not user API tokens.
+
+| Property | Behavior |
+| --- | --- |
+| Prefix | `tfc_<clientId>.<secret>` |
+| Owner | A named service client. Deployment-owned clients have `ownerUserId: null`. |
+| Storage | Only the secret hash is stored. |
+| Rotation | `POST /api/v1/identity/api-clients/:id/rotate` returns a new secret once and immediately invalidates the old one. |
+| Disable | `POST /api/v1/identity/api-clients/:id/disable` prevents the next request from authenticating. |
+| Built-in use | The API auto-mints separate worker and integration-worker clients into `TF_DATA_DIR` when container boot needs them. |
+
+## Invites and user status
+
+Admins create member accounts with no password. The response includes an invite link returned once;
+the invitee opens `/accept-invite`, previews the token, and accepts by setting their own password.
+Invite tokens are stored hash-only and consumed once.
+
+| Status | Meaning |
+| --- | --- |
+| `invited` | Account exists but has no password yet. It cannot authenticate. |
+| `active` | Account can authenticate through password, session, token, or linked identity paths as allowed. |
+| `disabled` | Account is refused on the next credential check. |
+
+`PATCH /api/v1/users/:id/status` enables or disables users. Re-enabling a never-accepted account
+returns it to `invited`, not `active`, because no password exists. An admin cannot disable their own
+account.
+
+## External and channel identities
+
+External identity links bind a verified provider subject to a TulipFarm user. Channel links are the
+same model for chat providers: Slack bind links are signed, single-use, short-lived credentials that
+must be confirmed by an authenticated user. The link token travels in the request body during
+preview and confirm flows.
