@@ -17,8 +17,14 @@ install_manifest:
       bot:
         - chat:write
         - app_mentions:read
+        - channels:read
         - channels:history
+        - groups:read
+        - groups:history
+        - im:read
         - im:history
+        - mpim:read
+        - mpim:history
         - users:read
         - users:read.email
         - assistant:write

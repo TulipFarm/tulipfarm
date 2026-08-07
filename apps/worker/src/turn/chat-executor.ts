@@ -140,6 +140,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
         const current = await options.runs.find(run.businessId, run.id);
         return current !== null && CANCELLING_STATUSES.has(current.status);
       },
+      log: options.log,
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 

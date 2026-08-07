@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadDataDirEnv, resolveDataDir } from "./data-dir";
+import { loadDataDirEnv, resolveDataDir, waitForDataDirEnv } from "./data-dir";
 
 const dirs: string[] = [];
 function tempDataDir(): string {
@@ -68,5 +68,60 @@ describe("loadDataDirEnv", () => {
   it("skips the file lane when there is no data dir", () => {
     const env: Record<string, string | undefined> = {};
     expect(loadDataDirEnv(env)).toEqual([]);
+  });
+});
+
+describe("waitForDataDirEnv", () => {
+  it("rejects a present-but-stale credential and re-reads until verify passes", async () => {
+    const dir = tempDataDir();
+    writeFileSync(
+      join(dir, "integration-worker.env"),
+      "INTEGRATION_WORKER_API_CREDENTIAL=tfc_stale.secret\n"
+    );
+    const env: Record<string, string | undefined> = { TF_DATA_DIR: dir };
+    const seenCredentials: string[] = [];
+
+    const promise = waitForDataDirEnv(
+      {
+        attempts: 5,
+        delayMs: 10,
+        sleep: async () => {
+          writeFileSync(
+            join(dir, "integration-worker.env"),
+            "INTEGRATION_WORKER_API_CREDENTIAL=tfc_fresh.secret\n"
+          );
+        },
+        verify: async (verifyEnv) => {
+          const credential = verifyEnv.INTEGRATION_WORKER_API_CREDENTIAL;
+          if (credential) seenCredentials.push(credential);
+          return credential === "tfc_fresh.secret";
+        },
+      },
+      env
+    );
+
+    await promise;
+    expect(env.INTEGRATION_WORKER_API_CREDENTIAL).toBe("tfc_fresh.secret");
+    expect(seenCredentials).toEqual(["tfc_stale.secret", "tfc_fresh.secret"]);
+  });
+
+  it("does not run verify at all when no data dir resolves", async () => {
+    const env: Record<string, string | undefined> = {};
+    let verifyCalls = 0;
+
+    const filled = await waitForDataDirEnv(
+      {
+        attempts: 3,
+        delayMs: 10,
+        verify: async () => {
+          verifyCalls += 1;
+          return false;
+        },
+      },
+      env
+    );
+
+    expect(filled).toEqual([]);
+    expect(verifyCalls).toBe(0);
   });
 });

@@ -166,6 +166,36 @@ describe("validateEnvironment", () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
+  it("exits when neither SOUL_PATH nor SOUL_ROOT is set", () => {
+    const exit = vi.fn();
+    const env = validEnv();
+    env.SOUL_PATH = undefined;
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    validateEnvironment(env, exit);
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("SOUL_PATH or SOUL_ROOT"));
+    errorSpy.mockRestore();
+  });
+
+  it("passes with SOUL_ROOT set instead of SOUL_PATH", () => {
+    const exit = vi.fn();
+    const env = validEnv();
+    env.SOUL_PATH = undefined;
+    env.SOUL_ROOT = "/data/souls";
+    validateEnvironment(env, exit);
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("exits when both SOUL_PATH and SOUL_ROOT are set", () => {
+    const exit = vi.fn();
+    const env = { ...validEnv(), SOUL_ROOT: "/data/souls" };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    validateEnvironment(env, exit);
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("mutually exclusive"));
+    errorSpy.mockRestore();
+  });
+
   it("exits when API_TOKEN_PEPPER is set but wrong byte length", () => {
     const exit = vi.fn();
     const env = { ...validEnv(), API_TOKEN_PEPPER: randomBytes(16).toString("base64") };

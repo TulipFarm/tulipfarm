@@ -5,6 +5,7 @@ set -euo pipefail
 #
 # Wipes local runtime state so you can start completely fresh:
 #   • the Postgres database (all users, secrets, encryption keys, chats, jobs)
+#   • the auto-minted worker/integration-worker credentials (~/.tulipfarm/data)
 #   • the soul repo (~/.tulipfarm/soul)
 #   • .env.local (+ the apps/api and apps/worker symlinks)
 #
@@ -72,6 +73,7 @@ esac
 
 echo "🧹 TulipFarm local reset — this will DELETE:"
 echo "   • Postgres database: $DB_NAME  (users, secrets, encryption keys, chats, jobs — all gone)"
+echo "   • Data dir:          $HOME/.tulipfarm/data  (auto-minted worker credentials)"
 if ! $DB_ONLY; then
   echo "   • Soul repo:         $SOUL_PATH"
   $KEEP_ENV || echo "   • Env file:          $REPO_ROOT/.env.local  (+ app symlinks)"
@@ -106,6 +108,19 @@ if [ -n "$DOCKER_CONTAINER" ]; then
 else
   echo "⚠ Bundled Postgres container is not running — start it, then re-run:"
   echo "    docker compose ${COMPOSE_ARGS[*]} up -d postgres"
+fi
+
+# 1b) Data dir — worker/integration-worker credentials the API auto-mints on first boot
+# (apps/api/src/setup/worker-credential.ts) and persists here for local dev
+# (TF_DATA_DIR, set by setup-dev.sh). These name API client rows in the database just dropped
+# above, so leaving the files behind after ANY database reset (including --db-only) hands the next
+# `pnpm dev` a credential that reads back as "present" but no longer authenticates — the API
+# re-mints a fresh one on its own next boot, but only after this stale file is gone.
+DATA_DIR="$HOME/.tulipfarm/data"
+if [ -d "$DATA_DIR" ]; then
+  echo "🔑 Removing stale worker credentials at $DATA_DIR..."
+  rm -rf "$DATA_DIR"
+  echo "✅ Data dir removed"
 fi
 
 if $DB_ONLY; then

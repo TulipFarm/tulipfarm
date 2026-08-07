@@ -15,6 +15,16 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
         GITHUB_TOOL_IDS.issueLabel,
         GITHUB_TOOL_IDS.issueAssign,
         GITHUB_TOOL_IDS.issueClose,
+        GITHUB_TOOL_IDS.pullRequestRead,
+        GITHUB_TOOL_IDS.pullRequestSearch,
+        GITHUB_TOOL_IDS.pullRequestCreate,
+        GITHUB_TOOL_IDS.pullRequestComment,
+        GITHUB_TOOL_IDS.pullRequestReview,
+        GITHUB_TOOL_IDS.pullRequestMerge,
+        GITHUB_TOOL_IDS.checkRunRead,
+        GITHUB_TOOL_IDS.repoPush,
+        GITHUB_TOOL_IDS.contentRead,
+        GITHUB_TOOL_IDS.contentList,
       ].sort()
     );
   });
@@ -92,5 +102,59 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
   it("scopes reads to a lower risk class than the close effect", () => {
     expect(byId.get(GITHUB_TOOL_IDS.issueRead)?.spec.riskClass).toBe("low");
     expect(byId.get(GITHUB_TOOL_IDS.issueClose)?.spec.riskClass).toBe("high");
+  });
+
+  it("scopes merge and review as high risk, at least as consequential as close", () => {
+    expect(byId.get(GITHUB_TOOL_IDS.pullRequestMerge)?.spec.riskClass).toBe("high");
+    expect(byId.get(GITHUB_TOOL_IDS.pullRequestReview)?.spec.riskClass).toBe("high");
+    expect(byId.get(GITHUB_TOOL_IDS.pullRequestRead)?.spec.riskClass).toBe("low");
+  });
+
+  it("validates pull request review arguments and rejects an unknown event", () => {
+    const review = byId.get(GITHUB_TOOL_IDS.pullRequestReview);
+    if (review === undefined) expect.unreachable("review contract missing");
+    const validate = ajv.compile(review.spec.inputSchema);
+    expect(validate({ repository: "tulip/farm", pullNumber: 12, event: "APPROVE" })).toBe(true);
+    expect(validate({ repository: "tulip/farm", pullNumber: 12, event: "MAYBE" })).toBe(false);
+  });
+
+  it("validates pull request merge arguments and rejects an unknown merge method", () => {
+    const merge = byId.get(GITHUB_TOOL_IDS.pullRequestMerge);
+    if (merge === undefined) expect.unreachable("merge contract missing");
+    const validate = ajv.compile(merge.spec.inputSchema);
+    expect(validate({ repository: "tulip/farm", pullNumber: 12, mergeMethod: "squash" })).toBe(
+      true
+    );
+    expect(validate({ repository: "tulip/farm", pullNumber: 12, mergeMethod: "octopus" })).toBe(
+      false
+    );
+  });
+
+  it("requires title, head, and base to create a pull request", () => {
+    const create = byId.get(GITHUB_TOOL_IDS.pullRequestCreate);
+    if (create === undefined) expect.unreachable("create contract missing");
+    const validate = ajv.compile(create.spec.inputSchema);
+    expect(
+      validate({ repository: "tulip/farm", title: "Fix crash", head: "fix-crash", base: "main" })
+    ).toBe(true);
+    expect(validate({ repository: "tulip/farm", title: "Fix crash" })).toBe(false);
+  });
+
+  it("scopes repo push as high risk, requires at least one file", () => {
+    const push = byId.get(GITHUB_TOOL_IDS.repoPush);
+    if (push === undefined) expect.unreachable("push contract missing");
+    expect(push.spec.riskClass).toBe("high");
+    const validate = ajv.compile(push.spec.inputSchema);
+    expect(
+      validate({
+        repository: "tulip/farm",
+        branch: "main",
+        message: "fix crash",
+        files: [{ path: "src/a.ts", content: "export {}" }],
+      })
+    ).toBe(true);
+    expect(
+      validate({ repository: "tulip/farm", branch: "main", message: "fix crash", files: [] })
+    ).toBe(false);
   });
 });

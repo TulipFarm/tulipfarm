@@ -39,3 +39,8 @@ export {
   INTEGRATION_STORAGE_STATEMENTS,
   IntegrationStore,
 } from "./integration-store";
+export type { PersistedSoulRepository } from "./soul-repository-store";
+export {
+  SOUL_REPOSITORY_STORAGE_STATEMENTS,
+  SoulRepositoryStore,
+} from "./soul-repository-store";

@@ -2,6 +2,7 @@ import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
+import type { IntegrationStore } from "@tulipfarm/storage";
 import type { ToolApprovalService } from "../approvals/tool-approvals";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import { availableToolsFor } from "../chat/turn-helpers";
@@ -13,6 +14,7 @@ import {
   surfaceCatalogRevisionFor,
   surfaceRendererRegistry,
 } from "../surfaces/renderer-registry";
+import { githubExcludedToolNames } from "../tools/github/visibility";
 import type { RequestContext, ToolDef } from "../tools/types";
 import {
   type ChannelDeliveryReader,
@@ -57,6 +59,9 @@ export interface RegistryToolDispatcherOptions {
   readonly surfaceActionStore?: SurfaceActionStore;
   /** Same revision `surfaces-routes.ts` checks a handle against at resolve time. */
   readonly guardrails?: GuardrailsService;
+  /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
+   * never wired the GitHub tool family at all. */
+  readonly githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
   now?(): Date;
 }
 
@@ -88,11 +93,15 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       authority,
       this.options.channelDeliveries
     );
+    const excludedTools = this.options.githubStatus
+      ? await githubExcludedToolNames(this.options.githubStatus)
+      : undefined;
     const allowed = new Set(
       availableToolsFor(
         this.options.registry,
         getDefaultAssistant(agent.name),
-        presentationContext
+        presentationContext,
+        excludedTools
       ).map((tool) => tool.name)
     );
     const definition = this.options.registry
@@ -130,6 +139,7 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
       userId: authority.subject.id,
       conversationId: authority.turn.conversationId,
       runId: authority.runId,
+      toolCallId: call.callId,
       agentId: agent.name,
       autonomy: request.autonomy as RequestContext["autonomy"],
       guardrailRevision: this.options.guardrails?.revision ?? "none",

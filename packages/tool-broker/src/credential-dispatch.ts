@@ -47,12 +47,7 @@ export class CredentialDispatcher {
       return await lease.use((credential) => adapter.dispatch(request, credential));
     } catch (error) {
       if (error instanceof AdapterDispatchError) {
-        throw new AdapterDispatchError(
-          error.phase,
-          "adapter_error",
-          error.retryable,
-          error.providerRequestId
-        );
+        throw error;
       }
       if (error instanceof SecretLeakError) {
         throw new AdapterDispatchError("after_dispatch", "credential_output_blocked", false);

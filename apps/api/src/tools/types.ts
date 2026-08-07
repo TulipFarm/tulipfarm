@@ -44,6 +44,9 @@ export interface RequestContext {
   surfaceActionStore?: SurfaceActionStore;
   guardrailRevision?: string;
   runId?: string;
+  /** The hosted loop's call id for this invocation — used by Tools that need a stable per-call
+   * occurrence key (e.g. integration-tier effect idempotency), not just the Run. */
+  toolCallId?: string;
   events?: EventEmitter;
   agentId?: string;
   autonomy?: ChatAutonomy;

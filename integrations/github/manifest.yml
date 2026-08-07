@@ -1,0 +1,8 @@
+name: github
+version: "1.0.0"
+description: Let TulipFarm agents triage issues, review and merge pull requests, and commit code
+  in your GitHub repos — installed as a GitHub App scoped to the repos you choose.
+maintainer: TulipFarm
+egress:
+  type: none
+setup_guide_path: setup-guide.md

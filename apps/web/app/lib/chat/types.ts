@@ -62,7 +62,11 @@ export type ChatEvent =
   | {
       type: "surface";
       data: {
-        artifact: SurfaceArtifact;
+        artifactId: string;
+        // Present when the caller already has the full Artifact (e.g. after an interaction);
+        // absent on the live `surface.emitted` wire event, which names only the id — the renderer
+        // fetches the rest itself.
+        artifact?: SurfaceArtifact;
         actionHandles?: Readonly<Record<string, string>>;
         resolvedView?: ResolvedSurfaceViewNode;
       };
@@ -121,7 +125,9 @@ export type TimelinePart =
   | {
       kind: "surface";
       artifactId: string;
-      revision: number;
+      // Absent until the live fetch (triggered by the missing `artifact`) resolves it; a restored
+      // conversation always has it, since the persisted `surface` tool-result part carries one.
+      revision?: number;
       artifact?: SurfaceArtifact;
       actionHandles?: Readonly<Record<string, string>>;
       resolvedView?: ResolvedSurfaceViewNode;

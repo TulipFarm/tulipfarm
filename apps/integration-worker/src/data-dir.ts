@@ -76,3 +76,58 @@ export function loadDataDirEnv(env: Env = process.env): Filled[] {
   }
   return filled;
 }
+
+export interface WaitForDataDirOptions {
+  attempts: number;
+  delayMs: number;
+  sleep?: (delayMs: number) => Promise<void>;
+  onRetry?: (missing: Filled[], attempt: number) => void;
+  /**
+   * Optional extra check once every key is present. Presence alone isn't enough for
+   * `INTEGRATION_WORKER_API_CREDENTIAL`: `reset-dev.sh` can leave a stale file on disk from before
+   * a database wipe, and this process can read it before the API's fresh mint overwrites it — a
+   * value that satisfies the missing-keys check but does not actually authenticate. Return `false`
+   * to force a fresh read next attempt instead of trusting the cached value again.
+   */
+  verify?: (env: Env) => Promise<boolean>;
+}
+
+/**
+ * Retries `loadDataDirEnv` until `INTEGRATION_WORKER_API_CREDENTIAL` is filled (and, if `verify`
+ * is given, passes it), or attempts are exhausted. This primarily handles local `pnpm dev`, where
+ * Turbo starts the API and this process concurrently: the API needs a database round trip before
+ * it (re)writes the credential file — on a freshly reset database the old file is stale until that
+ * happens — so this process reading the directory in that window sees nothing yet, not a permanent
+ * absence.
+ *
+ * A no-op single read when no data dir resolves at all: nothing here can turn a real
+ * misconfiguration (no `TF_DATA_DIR`, no env var) into a value, so there is nothing to wait for —
+ * and `verify` never runs, so an env-supplied credential in a managed deployment fails fast as
+ * before rather than spending the retry budget on it.
+ */
+export async function waitForDataDirEnv(
+  options: WaitForDataDirOptions,
+  env: Env = process.env
+): Promise<Filled[]> {
+  if (!resolveDataDir(env)) return loadDataDirEnv(env);
+
+  const sleep =
+    options.sleep ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)));
+  let filled: Filled[] = [];
+  for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
+    filled = loadDataDirEnv(env);
+    const missing = (Object.keys(SOURCES) as Filled[]).filter((name) => !env[name]);
+    if (missing.length === 0) {
+      if (!options.verify || (await options.verify(env))) return filled;
+      for (const name of filled) delete env[name];
+      if (attempt === options.attempts) return filled;
+      options.onRetry?.(Object.keys(SOURCES) as Filled[], attempt);
+      await sleep(options.delayMs);
+      continue;
+    }
+    if (attempt === options.attempts) return filled;
+    options.onRetry?.(missing, attempt);
+    await sleep(options.delayMs);
+  }
+  return filled;
+}

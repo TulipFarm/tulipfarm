@@ -29,6 +29,13 @@ export interface ExposedTool {
   readonly name: string;
   readonly description?: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
+  /**
+   * Whether this Tool writes. Only `false` unlocks concurrent dispatch (TOOL-V1-008's "concurrent
+   * reads, sequential writes" rule, applied here too) — absent or `true` keeps a Tool sequential,
+   * so a caller that has not threaded this field through yet keeps today's safe behavior rather
+   * than being silently parallelized.
+   */
+  readonly mutating?: boolean;
 }
 
 export interface AgentLoopInput {
@@ -122,7 +129,8 @@ export type AgentLoopFailureReason =
   | "tool_call_limit"
   | "repair_budget_exhausted"
   | "budget_exhausted"
-  | "model_error";
+  | "model_error"
+  | "empty_model_output";
 
 export type AgentLoopOutcome =
   | {
@@ -161,6 +169,8 @@ export interface AgentLoopDependencies {
   readonly events: AgentLoopEventSink;
   readonly budget: AgentLoopBudgetPort;
   isCancelled(): Promise<boolean>;
+  /** Diagnostic only — a blank final completion is otherwise invisible in server logs. */
+  readonly log?: { warn(obj: unknown, msg?: string): void };
   now?(): Date;
 }
 
@@ -323,7 +333,52 @@ export class AgentLoop {
         messages.push(assistantToolCallMessage(calls));
         let approval: { approvalId: string; callId: string } | undefined;
 
-        for (const call of calls) {
+        // Applies one dispatched result: records the transcript entry, and reports back either
+        // "keep going", the approval this Turn now waits on, or the failure reason that ends it.
+        const applyDispatch = async (
+          call: { callId: string; name: string; arguments: unknown },
+          dispatched: ToolDispatchResult
+        ): Promise<
+          | { kind: "continue" }
+          | { kind: "approval"; approvalId: string; callId: string }
+          | { kind: "fail"; reason: AgentLoopFailureReason }
+        > => {
+          await emit("tool_call_dispatched", {
+            toolName: call.name,
+            callId: call.callId,
+            outcome: dispatched.status,
+          });
+
+          if (dispatched.status === "awaiting_approval") {
+            return { kind: "approval", approvalId: dispatched.approvalId, callId: call.callId };
+          }
+
+          if (dispatched.status === "invalid_arguments") {
+            counters.repairs += 1;
+            if (counters.repairs > input.limits.maxRepairAttempts) {
+              return { kind: "fail", reason: "repair_budget_exhausted" };
+            }
+            messages.push(
+              toolMessage(call.callId, { error: "invalid_arguments", detail: dispatched.reason })
+            );
+            return { kind: "continue" };
+          }
+
+          if (dispatched.status === "succeeded") {
+            messages.push(toolMessage(call.callId, { output: dispatched.output }));
+            return { kind: "continue" };
+          }
+
+          // Denied and failed calls are data the model must reason about, not a retry signal.
+          messages.push(
+            toolMessage(call.callId, { error: dispatched.status, detail: dispatched.reason })
+          );
+          return { kind: "continue" };
+        };
+
+        let index = 0;
+        while (index < calls.length) {
+          const call = calls[index];
           const tool = exposed.get(call.name);
           if (tool === undefined) {
             // A Tool the caller never exposed is refused here; the broker never sees it.
@@ -333,56 +388,93 @@ export class AgentLoop {
               callId: call.callId,
               outcome: "tool_not_available",
             });
+            index += 1;
             continue;
           }
 
-          if (counters.toolCalls + 1 > input.limits.maxToolCalls) {
+          if (tool.mutating !== false) {
+            // A write dispatches alone: the next Tool call must never race the effect it causes.
+            if (counters.toolCalls + 1 > input.limits.maxToolCalls) {
+              return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
+            }
+            const dispatched = await this.deps.tools.dispatch({
+              businessId: input.businessId,
+              runId: input.runId,
+              stateId: input.stateId,
+              callId: call.callId,
+              name: call.name,
+              arguments: call.arguments,
+            });
+            counters.toolCalls += 1;
+            const outcome = await applyDispatch(call, dispatched);
+            if (outcome.kind === "fail") {
+              return finish({ status: "failed", reason: outcome.reason, ...counters }, "failed");
+            }
+            if (outcome.kind === "approval") {
+              approval = { approvalId: outcome.approvalId, callId: outcome.callId };
+              break;
+            }
+            index += 1;
+            continue;
+          }
+
+          // A run of consecutive, exposed, non-mutating calls dispatches together — reads share no
+          // effect to race (TOOL-V1-008's "concurrent reads, sequential writes" rule, applied here
+          // too). Peeking with a separate cursor, rather than advancing `index` as the run is
+          // found, is what lets a batch longer than the remaining budget still stop at the exact
+          // call that would exceed it: only the calls actually dispatched advance `index`.
+          let peek = index;
+          const batch: { callId: string; name: string; arguments: unknown }[] = [];
+          while (peek < calls.length) {
+            const next = calls[peek];
+            const nextTool = exposed.get(next.name);
+            if (nextTool === undefined || nextTool.mutating !== false) break;
+            batch.push(next);
+            peek += 1;
+          }
+
+          const available = input.limits.maxToolCalls - counters.toolCalls;
+          if (available <= 0) {
             return finish({ status: "failed", reason: "tool_call_limit", ...counters }, "failed");
           }
-
-          const dispatched = await this.deps.tools.dispatch({
-            businessId: input.businessId,
-            runId: input.runId,
-            stateId: input.stateId,
-            callId: call.callId,
-            name: call.name,
-            arguments: call.arguments,
-          });
-          counters.toolCalls += 1;
-          await emit("tool_call_dispatched", {
-            toolName: call.name,
-            callId: call.callId,
-            outcome: dispatched.status,
-          });
-
-          if (dispatched.status === "awaiting_approval") {
-            approval = { approvalId: dispatched.approvalId, callId: call.callId };
-            break;
-          }
-
-          if (dispatched.status === "invalid_arguments") {
-            counters.repairs += 1;
-            if (counters.repairs > input.limits.maxRepairAttempts) {
-              return finish(
-                { status: "failed", reason: "repair_budget_exhausted", ...counters },
-                "failed"
-              );
-            }
-            messages.push(
-              toolMessage(call.callId, { error: "invalid_arguments", detail: dispatched.reason })
-            );
-            continue;
-          }
-
-          if (dispatched.status === "succeeded") {
-            messages.push(toolMessage(call.callId, { output: dispatched.output }));
-            continue;
-          }
-
-          // Denied and failed calls are data the model must reason about, not a retry signal.
-          messages.push(
-            toolMessage(call.callId, { error: dispatched.status, detail: dispatched.reason })
+          const runBatch = batch.slice(0, available);
+          const dispatched = await Promise.all(
+            runBatch.map((batched) =>
+              this.deps.tools.dispatch({
+                businessId: input.businessId,
+                runId: input.runId,
+                stateId: input.stateId,
+                callId: batched.callId,
+                name: batched.name,
+                arguments: batched.arguments,
+              })
+            )
           );
+          counters.toolCalls += runBatch.length;
+          index += runBatch.length;
+
+          let failure: AgentLoopFailureReason | undefined;
+          for (
+            let i = 0;
+            i < runBatch.length && failure === undefined && approval === undefined;
+            i += 1
+          ) {
+            const batchCall = runBatch[i];
+            const batchResult = dispatched[i];
+            if (batchCall === undefined || batchResult === undefined) continue;
+            const outcome = await applyDispatch(batchCall, batchResult);
+            if (outcome.kind === "fail") failure = outcome.reason;
+            else if (outcome.kind === "approval") {
+              approval = { approvalId: outcome.approvalId, callId: outcome.callId };
+            }
+          }
+          if (failure !== undefined) {
+            return finish({ status: "failed", reason: failure, ...counters }, "failed");
+          }
+          if (approval !== undefined) break;
+          // A batch clipped by budget leaves its remainder at `index`; the next pass re-enters this
+          // branch, forms a fresh (now over-budget) peek, and fails via `available <= 0` above
+          // rather than ever dispatching past the limit.
         }
 
         await checkpoint();
@@ -415,6 +507,36 @@ export class AgentLoop {
           content: JSON.stringify({
             error: "structured_output_invalid",
             detail: errorText(validate),
+          }),
+        });
+        await checkpoint();
+        continue;
+      }
+
+      if (result.output.kind === "text" && result.output.text.length === 0) {
+        // A blank final completion with no tool call and no schema violation to explain it — the
+        // provider gave up silently. Nudge for a real answer within the same repair budget a
+        // schema-invalid completion uses, rather than terminal-failing the turn on the first blank.
+        this.deps.log?.warn(
+          {
+            event: "agent_loop.empty_completion",
+            requestId: request.requestId,
+            iteration: counters.iterations,
+            repairs: counters.repairs,
+            usage: result.usage,
+            providerRequestId: result.providerRequestId,
+          },
+          "model returned an empty final completion"
+        );
+        counters.repairs += 1;
+        if (counters.repairs > input.limits.maxRepairAttempts) {
+          return finish({ status: "failed", reason: "empty_model_output", ...counters }, "failed");
+        }
+        messages.push({
+          role: "user",
+          content: JSON.stringify({
+            error: "empty_output",
+            detail: "Your last response had no content. Provide a final answer for the user.",
           }),
         });
         await checkpoint();

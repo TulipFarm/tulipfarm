@@ -7,11 +7,13 @@ import type {
   SoulIntegration,
   SoulLoader,
 } from "@tulipfarm/soul";
+import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../auth/schemas";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { deleteConnectionSecrets, sealConnectionEnv } from "./connection-env";
+import { isGitHubInstalled } from "./github-status";
 
 /*
  * Generic connect/disconnect backend for Soul-declared integrations (manifest.yml + optional
@@ -114,7 +116,8 @@ export function registerIntegrationRoutes(
   secretsService: SecretsService,
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler,
-  onConnected?: (name: string) => Promise<void>
+  onConnected?: (name: string) => Promise<void>,
+  githubStatus?: { integrations: IntegrationStore; businessId: string }
 ): void {
   async function materializeIfBundledOnly(slug: string): Promise<void> {
     if (soulLoader.integrations.has(slug)) return;
@@ -154,6 +157,10 @@ export function registerIntegrationRoutes(
     },
     async () => {
       const merged = mergeIntegrations(soulLoader, bundled);
+      const githubEntry = merged.get("github");
+      if (githubEntry && githubStatus) {
+        githubEntry.connected = await isGitHubInstalled(githubStatus);
+      }
       return { integrations: [...merged.values()].map(toSummary) };
     }
   );
@@ -178,6 +185,9 @@ export function registerIntegrationRoutes(
       const { name } = req.params as { name: string };
       const entry = resolve(name);
       if (!entry) return reply.code(404).send({ error: `integration not found: ${name}` });
+      if (name === "github" && githubStatus) {
+        entry.connected = await isGitHubInstalled(githubStatus);
+      }
       return toDetail(entry);
     }
   );

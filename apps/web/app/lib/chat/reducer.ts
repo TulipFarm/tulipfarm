@@ -255,15 +255,15 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     }
 
     case "surface": {
-      const artifact = event.data.artifact;
-      if (hasSurface(state.messages, artifact.id)) {
+      const { artifactId, artifact } = event.data;
+      if (hasSurface(state.messages, artifactId)) {
         return {
           ...state,
           status: "streaming",
-          messages: mapSurface(state.messages, artifact.id, () => ({
+          messages: mapSurface(state.messages, artifactId, () => ({
             kind: "surface",
-            artifactId: artifact.id,
-            revision: artifact.revision,
+            artifactId,
+            revision: artifact?.revision,
             artifact,
             actionHandles: event.data.actionHandles,
             resolvedView: event.data.resolvedView,
@@ -273,8 +273,8 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       const { messages, target } = ensureAssistant(state.messages);
       const part: TimelinePart = {
         kind: "surface",
-        artifactId: artifact.id,
-        revision: artifact.revision,
+        artifactId,
+        revision: artifact?.revision,
         artifact,
         actionHandles: event.data.actionHandles,
         resolvedView: event.data.resolvedView,
