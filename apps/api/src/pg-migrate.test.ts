@@ -19,7 +19,7 @@ describe("runPgMigrations", () => {
     // A stand-in for a database that stopped at 14, holding only what the later migrations touch.
     await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
-    await db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
+    await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
     await db.query("CREATE TABLE runs (id uuid PRIMARY KEY, bundle jsonb NOT NULL)");
     await db.query("CREATE TABLE run_events (run_id uuid NOT NULL, sequence bigint NOT NULL)");
     await db.query(`CREATE TABLE api_clients (
@@ -165,10 +165,11 @@ describe("runPgMigrations", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
       // Minimal stand-in for the real `users` table (created well before v20): later migrations
-      // past 21 (e.g. v25's `ALTER TABLE users ADD COLUMN`) run in the same sweep and need it to
-      // exist, even though this test only exercises migration 21's behavior.
+      // past 21 run in the same sweep and need it to exist with the columns they touch (v25 adds
+      // one, v27 relaxes `password_hash`), even though this test only exercises migration 21.
       await db.query(`CREATE TABLE users (
-        id uuid PRIMARY KEY
+        id uuid PRIMARY KEY,
+        password_hash text NOT NULL
       )`);
 
       await runPgMigrations(db, undefined, () => {});

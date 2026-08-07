@@ -3,7 +3,17 @@ import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import { copyText } from "~/lib/clipboard";
-import { createUser, listUsers, setUserStatus, type UserSummary } from "~/lib/users";
+import {
+  createUser,
+  type Invite,
+  inviteUrl,
+  listUsers,
+  reissueInvite,
+  type SettableUserStatus,
+  setUserStatus,
+  type UserStatus,
+  type UserSummary,
+} from "~/lib/users";
 
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
@@ -27,17 +37,91 @@ export function ErrorBoundary() {
   );
 }
 
+/**
+ * Everything a row's status decides, in one table: what it is called, what re-issuing a link means
+ * for it, and what the enable/disable toggle does next. A disabled account offers no link at all —
+ * redeeming one would hand back an identity an admin deliberately switched off.
+ */
+const STATUS_ACTIONS: Record<
+  UserStatus,
+  {
+    label: string;
+    inviteLabel: string | null;
+    toggleLabel: string;
+    nextStatus: SettableUserStatus;
+  }
+> = {
+  active: {
+    label: "active",
+    inviteLabel: "Reset password link",
+    toggleLabel: "Disable",
+    nextStatus: "disabled",
+  },
+  invited: {
+    label: "invite pending",
+    inviteLabel: "New invite link",
+    toggleLabel: "Disable",
+    nextStatus: "disabled",
+  },
+  disabled: {
+    label: "disabled",
+    inviteLabel: null,
+    toggleLabel: "Enable",
+    nextStatus: "active",
+  },
+};
+
+// The one live link for a user, shown once. Re-issuing revokes whatever was outstanding, so the
+// copy an admin shared a moment ago stops working the instant they generate a replacement.
+function InvitePanel({
+  email,
+  invite,
+  onDismiss,
+}: {
+  email: string;
+  invite: Invite;
+  onDismiss: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const url = inviteUrl(invite);
+
+  return (
+    <div className="flex flex-col gap-2 rounded-sm border border-primary/50 bg-primary/5 px-3 py-3 text-sm">
+      <p>
+        Invite link for <strong>{email}</strong>. Share it manually — it won't be shown again, and
+        it expires {new Date(invite.expiresAt).toLocaleDateString()}.
+      </p>
+      <div className="flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded-sm border border-border bg-background px-2 py-1 font-mono text-xs">
+          {url}
+        </code>
+        <button
+          type="button"
+          className="shrink-0 rounded-sm border border-border px-2 py-1 text-xs"
+          onClick={async () => setCopied(await copyText(url))}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+        <button
+          type="button"
+          className="shrink-0 text-xs text-muted-foreground"
+          onClick={onDismiss}
+        >
+          Dismiss
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function UsersAdminRoute() {
   const { users } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ user: UserSummary; temporaryPassword: string } | null>(
-    null
-  );
-  const [copied, setCopied] = useState(false);
-  const [statusBusy, setStatusBusy] = useState<string>();
+  const [issued, setIssued] = useState<{ email: string; invite: Invite } | null>(null);
+  const [rowBusy, setRowBusy] = useState<string>();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -45,8 +129,7 @@ export default function UsersAdminRoute() {
     setBusy(true);
     try {
       const result = await createUser(email.trim());
-      setCreated(result);
-      setCopied(false);
+      setIssued({ email: result.user.email, invite: result.invite });
       setEmail("");
       revalidator.revalidate();
     } catch (err) {
@@ -56,13 +139,25 @@ export default function UsersAdminRoute() {
     }
   }
 
-  async function toggleStatus(user: UserSummary) {
-    setStatusBusy(user.id);
+  async function onReissue(user: UserSummary) {
+    setError(null);
+    setRowBusy(user.id);
     try {
-      await setUserStatus(user.id, user.status === "active" ? "disabled" : "active");
+      setIssued({ email: user.email, invite: await reissueInvite(user.id) });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "could not reach the API");
+    } finally {
+      setRowBusy(undefined);
+    }
+  }
+
+  async function toggleStatus(user: UserSummary) {
+    setRowBusy(user.id);
+    try {
+      await setUserStatus(user.id, STATUS_ACTIONS[user.status].nextStatus);
       revalidator.revalidate();
     } finally {
-      setStatusBusy(undefined);
+      setRowBusy(undefined);
     }
   }
 
@@ -71,36 +166,17 @@ export default function UsersAdminRoute() {
       <header>
         <h1 className="text-lg font-semibold">Users</h1>
         <p className="text-xs text-muted-foreground">
-          New users get a temporary password to share manually; they reset it on first login.
+          New users get an invite link to share manually; they choose their own password when they
+          open it. A new link is also how someone who forgot their password gets back in.
         </p>
       </header>
 
-      {created ? (
-        <div className="flex flex-col gap-2 rounded-sm border border-primary/50 bg-primary/5 px-3 py-3 text-sm">
-          <p>
-            Created <strong>{created.user.email}</strong>. Share this temporary password — it won't
-            be shown again:
-          </p>
-          <div className="flex items-center gap-2">
-            <code className="rounded-sm border border-border bg-background px-2 py-1 text-xs">
-              {created.temporaryPassword}
-            </code>
-            <button
-              type="button"
-              className="rounded-sm border border-border px-2 py-1 text-xs"
-              onClick={async () => setCopied(await copyText(created.temporaryPassword))}
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
-            <button
-              type="button"
-              className="ml-auto text-xs text-muted-foreground"
-              onClick={() => setCreated(null)}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
+      {issued ? (
+        <InvitePanel
+          email={issued.email}
+          invite={issued.invite}
+          onDismiss={() => setIssued(null)}
+        />
       ) : null}
 
       <form onSubmit={onSubmit} className="flex items-end gap-2">
@@ -115,7 +191,7 @@ export default function UsersAdminRoute() {
           />
         </label>
         <Button type="submit" className="rounded-sm" disabled={busy || email.trim().length === 0}>
-          {busy ? "Adding…" : "Add user"}
+          {busy ? "Inviting…" : "Invite user"}
         </Button>
       </form>
       {error ? (
@@ -129,21 +205,28 @@ export default function UsersAdminRoute() {
           <li key={user.id} className="flex flex-wrap items-center gap-3 px-3 py-3 text-xs">
             <span className="font-medium">{user.email}</span>
             <span className="text-muted-foreground">{user.role}</span>
-            <span className="text-muted-foreground">{user.status}</span>
-            {user.mustResetPassword ? (
-              <span className="rounded-sm border border-border px-1.5 py-0.5 text-[0.625rem] uppercase text-muted-foreground">
-                must reset password
-              </span>
-            ) : null}
+            <span className="text-muted-foreground">{STATUS_ACTIONS[user.status].label}</span>
             {user.role !== "admin" ? (
-              <button
-                type="button"
-                disabled={statusBusy === user.id}
-                onClick={() => toggleStatus(user)}
-                className="ml-auto rounded-sm border border-border px-2 py-1"
-              >
-                {user.status === "active" ? "Disable" : "Enable"}
-              </button>
+              <span className="ml-auto flex items-center gap-2">
+                {STATUS_ACTIONS[user.status].inviteLabel ? (
+                  <button
+                    type="button"
+                    disabled={rowBusy === user.id}
+                    onClick={() => onReissue(user)}
+                    className="rounded-sm border border-border px-2 py-1"
+                  >
+                    {STATUS_ACTIONS[user.status].inviteLabel}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={rowBusy === user.id}
+                  onClick={() => toggleStatus(user)}
+                  className="rounded-sm border border-border px-2 py-1"
+                >
+                  {STATUS_ACTIONS[user.status].toggleLabel}
+                </button>
+              </span>
             ) : null}
           </li>
         ))}

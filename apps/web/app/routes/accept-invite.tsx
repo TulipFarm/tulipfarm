@@ -1,0 +1,163 @@
+import { type MetaFunction, useNavigate } from "@remix-run/react";
+import { type FormEvent, useEffect, useState } from "react";
+import { Button } from "~/components/ui/button";
+import { ApiError, acceptInvite, previewInvite } from "~/lib/api";
+
+export const meta: MetaFunction = () => [{ title: "Accept invite · tulipfarm" }];
+
+const inputClass =
+  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
+
+// The token lives in the fragment, not the query string, so it is never sent to any server —
+// it stays out of nginx access logs and referrer headers. Read it here rather than in a
+// clientLoader so the same page handles a link pasted into an already-open tab.
+function tokenFromHash(): string {
+  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
+  return new URLSearchParams(hash).get("token") ?? "";
+}
+
+// A rejected link is a 404 — that and only that means spent, expired, or never real. Any other
+// failure (403, 500, a network fault) says nothing about the link, so telling the holder to ask for
+// a replacement would send them chasing a link that is actually fine.
+function isDeadLink(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/**
+ * Standalone (outside the `_app` gate) invite redemption: the invited person chooses their own
+ * password here, so an admin never mints or relays a credential for them. Redeeming signs them in,
+ * so they land in the app instead of retyping what they just chose at the login form.
+ *
+ * An admin can re-issue a link for an account that is already active, which makes this the
+ * password recovery path too — the copy shown adapts to neither case, because both are simply
+ * "choose your password".
+ */
+export default function AcceptInvite() {
+  const navigate = useNavigate();
+  const [token] = useState(tokenFromHash);
+  const [email, setEmail] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dead, setDead] = useState(false);
+
+  useEffect(() => {
+    if (!token) {
+      setError("this link is missing its invite token");
+      setDead(true);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    previewInvite(token)
+      .then((offer) => {
+        if (!cancelled) setEmail(offer.email);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.message : "could not reach the API");
+        setDead(isDeadLink(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  async function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    // The API owns every password rule and its message is what gets rendered; only the confirm
+    // match is checked here, since the server never sees that field. Redemption validates before
+    // it spends the token, so a rejected password leaves the link usable.
+    if (password !== confirmPassword) {
+      setError("passwords do not match");
+      return;
+    }
+    setBusy(true);
+    try {
+      await acceptInvite(token, password);
+      navigate("/", { replace: true });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "could not reach the API");
+      if (isDeadLink(err)) setDead(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="mx-auto flex min-h-svh max-w-sm flex-col justify-center px-6 py-16">
+      <p className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-primary">
+        [ ACCEPT INVITE ]
+      </p>
+      <h1 className="mt-1 text-2xl font-semibold text-foreground">Choose your password</h1>
+
+      {loading ? (
+        <p className="mt-1 text-sm text-muted-foreground">Checking this link…</p>
+      ) : dead ? (
+        <>
+          <p role="alert" className="mt-1 text-sm text-destructive">
+            error: {error}
+          </p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Invite links are single-use and expire. Ask an admin for a new one.
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Setting the password for <strong className="text-foreground">{email}</strong>.
+          </p>
+
+          <form onSubmit={onSubmit} className="mt-8 flex flex-col gap-3">
+            {error ? (
+              <p
+                role="alert"
+                className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                error: {error}
+              </p>
+            ) : null}
+
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              password
+              <input
+                type="password"
+                autoComplete="new-password"
+                className={inputClass}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                aria-label="password"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              confirm password
+              <input
+                type="password"
+                autoComplete="new-password"
+                className={inputClass}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                aria-label="confirm password"
+              />
+            </label>
+
+            <Button
+              type="submit"
+              className="mt-1 rounded-sm"
+              disabled={busy || password.length === 0 || confirmPassword.length === 0}
+            >
+              {busy ? "Setting password…" : "Set password and sign in"}
+            </Button>
+          </form>
+        </>
+      )}
+    </section>
+  );
+}
