@@ -101,13 +101,22 @@ describe("release changelog generation", () => {
     );
   });
 
-  it("rejects commits that would otherwise disappear silently", async () => {
+  it("excludes non-Conventional Commit subjects instead of blocking the release", async () => {
+    const cwd = createRepository();
+    commitChange(cwd, 'Revert "feat(web): redesign chat UI (#320)" (#324)');
+    commitChange(cwd, "fix(api): repair a regression");
+
+    const generated = await generateReleaseFiles("1.0.1", cwd);
+
+    expect(generated.section).toContain("repair a regression");
+    expect(generated.section).not.toContain("Revert");
+  });
+
+  it("fails the release when no commits are Conventional Commits", async () => {
     const cwd = createRepository();
     commitChange(cwd, "unknown: omit me");
 
-    await expect(generateReleaseFiles("1.0.1", cwd)).rejects.toThrow(
-      "is not an allowed Conventional Commit"
-    );
+    await expect(generateReleaseFiles("1.0.1", cwd)).rejects.toThrow("No releasable commits exist");
   });
 
   it("rejects an empty release section", () => {
