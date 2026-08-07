@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { GitSyncService } from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { routineForgeTool } from "../platform/tools";
+import { routineForgeTool } from "./tools";
 
 const VALID_DEFINITION: Record<string, unknown> = {
   id: "daily-report",

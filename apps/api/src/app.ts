@@ -68,8 +68,6 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
-import type { RoutineRoutesDeps } from "./routines/routes";
-import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
@@ -136,8 +134,6 @@ export interface AppOptions {
   activityService?: ActivityService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
-  /** Routine engine surface (v0.11): registry + runs repo + trigger service + enqueuers. */
-  routines?: RoutineRoutesDeps;
   /** Canonical proposal-only Routine authoring and simulation boundary. */
   routineAuthoring?: CanonicalRoutineAuthoringService;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
@@ -608,16 +604,6 @@ export async function buildApp(opts: AppOptions = {}) {
           approvals: opts.approvalsRepo,
           ...(opts.toolApprovals ? { toolApprovals: opts.toolApprovals } : {}),
           ...(opts.routineApprovals ? { routineApprovals: opts.routineApprovals } : {}),
-          ...(opts.routines
-            ? {
-                routines: {
-                  enqueueWake: (job) => {
-                    if (!opts.routines) return Promise.resolve();
-                    return opts.routines.enqueuers.enqueueWake(job);
-                  },
-                },
-              }
-            : {}),
         },
         requireAuth
       );
@@ -654,9 +640,6 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
-    }
-    if (opts.routines) {
-      registerRoutineRoutes(app, opts.routines, requireAuth);
     }
     // The retrieval spine is optional — only the page-search branch needs it (index.ts wires it in
     // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk

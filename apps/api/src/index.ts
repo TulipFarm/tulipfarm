@@ -555,7 +555,7 @@ async function boot() {
           llmProbe(llmService),
         ],
         // Routine-state Approvals resume through the routine wake queue, which has no consumer
-        // in this deployment (the Routine engine is not composed). Deciding one would silently
+        // in this deployment (the Routine engine has been removed). Deciding one would silently
         // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
         // this deployment actually produces — are resolved in-process and never reach here.
         enqueueWake: async () => {
