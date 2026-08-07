@@ -317,14 +317,20 @@ export default function DesignGuideRoute() {
       <GuideSection
         id="layout"
         title="Layout system"
-        description="A 56px product rail, 256px context panel, and 52px top bar adapt at 768px and 1024px."
+        description="A 56px product rail, 256px context panel, and 52px top bar adapt at 768px and 1024px. All three columns share the same 52px header row."
       >
-        <div className="flex h-28 overflow-hidden rounded-md border border-border text-xs">
-          <div className="flex w-14 items-center justify-center border-r border-border bg-background font-mono">
-            56
+        <div className="flex h-32 overflow-hidden rounded-md border border-border text-xs">
+          <div className="flex w-14 shrink-0 flex-col border-r border-border bg-background">
+            <div className="flex h-[52px] items-center justify-center border-b border-border font-mono">
+              56
+            </div>
+            <div className="flex-1" />
           </div>
-          <div className="flex w-64 items-center justify-center border-r border-border bg-sidebar font-mono">
-            256
+          <div className="flex w-64 shrink-0 flex-col border-r border-border bg-sidebar">
+            <div className="flex h-[52px] items-center border-b border-border px-4 font-mono">
+              256
+            </div>
+            <div className="flex-1" />
           </div>
           <div className="min-w-0 flex-1 bg-card">
             <div className="flex h-[52px] items-center border-b border-border px-4 font-mono">

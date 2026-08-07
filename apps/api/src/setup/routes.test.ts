@@ -197,21 +197,27 @@ describe("setup routes", () => {
     expect(loser.json()).toEqual({ error: "setup already complete" });
   });
 
-  it("business step persists name + description to soul.yaml", async () => {
+  it("business step persists name + description + website to soul.yaml", async () => {
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/setup/business",
       headers: authHeaders(cookies),
-      payload: { name: "Acme Tulips", description: "We sell tulips." },
+      payload: {
+        name: "Acme Tulips",
+        description: "We sell tulips.",
+        website: "https://acmetulips.example",
+      },
     });
     expect(res.statusCode).toBe(204);
     const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
       businessName?: string;
       businessDescription?: string;
+      businessWebsite?: string;
     };
     expect(cfg.businessName).toBe("Acme Tulips");
     expect(cfg.businessDescription).toBe("We sell tulips.");
+    expect(cfg.businessWebsite).toBe("https://acmetulips.example");
   });
 
   it("llm step stores the key (no live call in unit tests)", async () => {

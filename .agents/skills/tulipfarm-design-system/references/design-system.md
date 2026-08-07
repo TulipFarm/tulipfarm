@@ -75,6 +75,10 @@ Use Inter for headings, controls, navigation, and prose. Use JetBrains Mono for 
 logs, timestamps, command output, and dense tabular diagnostics. Keep reading measure near 65–75
 characters and use tabular figures for changing numbers.
 
+Top bar breadcrumbs are navigation chrome and take Label, not Title, even though they name the
+current page. Reserve Title for a heading the content area owns, and only when it says something
+the top bar does not already say.
+
 ## 5. Status & Priority Systems
 
 Status is domain-owned and maps explicitly to one semantic tone: `neutral`, `info`, `success`,
@@ -100,10 +104,24 @@ safer. Keep domain fetching and mutations out of primitives.
 ## 7. Composition Patterns
 
 - **App work surface:** product rail + contextual sidebar + top bar + scroll-owned main content.
+  The rail, the context panel header, and the top bar breadcrumb read mode and page identity from
+  one shared map, so no shell surface hardcodes another mode's label or icon.
+- **Top bar:** names what is open rather than the route that rendered it, so a conversation shows
+  its own title. Show a parent crumb only when it points somewhere else and says something the
+  current crumb does not. A record title must come from that record's own route data, never from a
+  capped sidebar list alone. The account is a monogram carrying its identity in a tooltip, because
+  the top bar is wayfinding and not a profile surface.
+- **Header ownership:** the top bar owns page identity. A route that also renders its own title
+  band names the page twice, so keep in-page headers for what the top bar cannot say.
 - **Page:** top bar, optional description/actions, then one `full`, `wide`, `reading`, or `form`
   content width.
 - **List/detail:** stable list controls, semantic table/list, empty/loading/error feedback, deep link.
 - **Form:** visible labels, persistent help, field-local errors, footer actions, first-error focus.
+- **Multi-step setup:** each step carries a label and a sentence saying why it is being asked. On
+  desktop show the whole step list so the shape of the flow stays visible; below `lg` fall back to
+  "Step n of m" plus a progress bar. Mark progress with `aria-current="step"` and an icon, not tone
+  alone. An optional step says so on the step, on its fields, and in a skip action beside the
+  primary one.
 - **Master/detail:** context panel owns selection; main surface owns detail and browser history.
 - **Chat:** transcript owns scrolling; composer remains visible without covering the last message.
 - **Chat composer:** show Model and active Agent as quiet context above the prompt; keep context
@@ -126,15 +144,29 @@ safer. Keep domain fetching and mutations out of primitives.
 - Provide hover, pressed, focus-visible, disabled, loading, selected, and error states without
   changing element bounds.
 - Use native controls and links. Do not turn `div` elements into buttons.
-- Label every icon-only action with `aria-label` and a tooltip when discoverability benefits.
-- Keep desktop controls 36–40px high and mobile hit areas at least 44×44px.
+- Label every icon-only action with `aria-label` and a tooltip when discoverability benefits. Use
+  the shared `Tooltip` rather than the native `title` attribute.
+- Keep desktop controls 36–40px high and mobile hit areas at least 44×44px. Keep mobile text inputs
+  at 16px, since iOS zooms the page when it focuses anything smaller.
 - Use 150–240ms color/opacity/transform transitions and respect `prefers-reduced-motion`.
+- Focus is global: `app.css` sets one `:focus-visible` outline for the whole app. Do not stack
+  per-component ring utilities on top of it.
+- Mark a selected navigation item with a shape cue as well as tone, and keep that marker clear of
+  the global focus outline.
+- Close off-canvas navigation with `inert`, which also drops its links from the tab order.
+  `aria-hidden` alone hides the panel from readers while leaving it reachable by keyboard.
+- Every control ships with a handler. Do not render placeholder menus or overflow buttons that do
+  nothing.
 - Escape closes temporary overlays and restores focus. Deep navigation uses URLs, not modal state.
 - Never rely on hover or color alone.
 
 ## 9. Layout System
 
 - Global rail: 56px. Context panel: 256px. Top bar: 52px.
+- Rail plus context panel is 312px. The mobile drawer uses that same 312px, so docking it does not
+  change the layout's width.
+- The rail brand band, the context panel header, and the top bar share one 52px header row, so all
+  three columns start on the same line.
 - `>=1024px`: persistent rail and context panel.
 - `768–1023px`: persistent rail and overlay context panel.
 - `<768px`: one menu opens a combined navigation drawer.
@@ -156,10 +188,14 @@ component contract.
 | Layer | Components |
 | --- | --- |
 | UI | Button, Badge, Input, Textarea, Select, Checkbox, Tooltip, Separator, Modal, Sheet |
-| Shell | AppShell, GlobalRail, ContextSidebar, TopBar, AppPage, Breadcrumbs |
+| Shell | AppShell, AppSidebar, and the `modeForPath`/`titleForPath`/`iconForPath` helpers, all in `components/app-sidebar.tsx` |
 | Feedback | StatusBadge, PriorityBadge, LoadingState, EmptyState, ErrorState |
 | Data/forms | Panel, Field, SchemaTable, ResourceForm, LinkCombobox |
 | Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Knowledge editor |
+
+The rail, context panel, breadcrumb, and account chip are internal to `app-sidebar.tsx` rather than
+exported primitives. Promote one into `components/ui` only when a second surface needs it, and add
+its `/design-guide` entry in the same change.
 
 The Chat composer vocabulary is closed: **Suggested prompt** (drafts text), **Action** (the person
 starts it), and **Auto action** (the Agent starts it within authority). Do not use “suggestion,”
@@ -179,8 +215,14 @@ Prefer the index and source search over guessing component names.
 ## 13. Common Mistakes to Avoid
 
 - Raw hex, `text-white`, or framework palette colors inside feature components.
-- Using coral for status, large fills, or decoration; using destructive red for emphasis.
+- Using coral for status, counts, large fills, or decoration; using destructive red for emphasis.
 - Rebuilding buttons, badges, fields, panels, or headers with route-local class strings.
+- Hardcoding one mode's icon or label into shared shell chrome instead of reading the mode map.
+- A route header that repeats the top bar, so the page names itself twice.
+- Per-component focus rings stacked on top of the global `:focus-visible` outline.
+- `aria-hidden` on a closed navigation drawer, which hides it from readers but leaves it tabbable.
+- Responsive visibility classes on a tooltip's child; the wrapper stays in the flow and keeps
+  consuming the parent's gap. Put them on a wrapper around the tooltip instead.
 - All-monospace prose, uppercase tracking on normal labels, or body text below 12px.
 - Nested page scroll areas, covered content, desktop-only navigation, or broken browser back.
 - Tiny icon targets, missing focus, placeholder-only labels, color-only feedback, or hover-only UI.

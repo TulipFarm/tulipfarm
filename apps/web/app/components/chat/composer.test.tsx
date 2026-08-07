@@ -68,7 +68,7 @@ test("Model Selector sets the per-message model override on send", async () => {
   render(<Composer onSend={onSend} />);
 
   await user.click(screen.getByRole("button", { name: /^Model:/ }));
-  await user.click(screen.getByRole("button", { name: "complex" }));
+  await user.click(screen.getByRole("button", { name: "Complex" }));
   await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {

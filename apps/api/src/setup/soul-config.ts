@@ -7,6 +7,7 @@ export const SOUL_GIT_CREDENTIAL_KEY = "soul-git-credential";
 export interface SoulConfig {
   businessName?: string;
   businessDescription?: string;
+  businessWebsite?: string;
   setupComplete?: boolean;
   gitRemoteUrl?: string;
   [key: string]: unknown;

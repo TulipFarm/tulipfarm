@@ -9,17 +9,28 @@ bootstrap.
 
 ## Wizard mode
 
-Wizard mode is the default when no users exist and no headless admin seed is present. The web app
-redirects to `/setup`, where the operator creates the first admin, records the business name and
-description in `soul.yaml`, optionally configures an LLM provider, and optionally configures Soul git
-backup.
+Wizard mode is the default when no users exist and no headless admin seed is present — the shape
+`curl | bash` self-hosted installs and local development land in, with no environment variables set.
+When `GET /api/v1/setup/status` returns `needsSetup: true`, the web app redirects to `/setup` and
+walks the operator through three steps: the first admin account, the business profile, and an
+optional LLM provider.
 
-The business profile becomes static business context in the system prompt. It is not working
-[memory](/docs/concepts/memory). LLM provider credentials are stored as [secrets](/docs/concepts/secrets),
-and Soul backup syncs immediately when configured.
+The admin step creates the first user and logs them in; it stays open only until a user exists, so
+it cannot mint a second admin. The business step records `businessName`, `businessDescription`, and
+the optional `businessWebsite` in `soul.yaml`, and all three become static business context in every
+Agent's system prompt. That profile is not working [memory](/docs/concepts/memory). The LLM step
+stores the provider credentials as [secrets](/docs/concepts/secrets) and writes a default
+`llm.config.yaml` with all three tiers pointing at the chosen provider and model; skipping it leaves
+that to **Settings → LLM Config**.
 
-`GET /api/v1/setup/status` remains available so the web app can decide whether setup is still open.
-Once setup is complete, `setupComplete: true` is written to `soul.yaml`.
+Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.
+The wizard step routes return `403` from then on, while `GET /api/v1/setup/status` remains available
+so the web app can decide whether setup is still open.
+
+<Callout type="info">
+Soul git backup is not part of the wizard. Configure the remote after setup in
+**Settings → Soul**, or seed it at boot with `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL`.
+</Callout>
 
 ## Headless mode
 

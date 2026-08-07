@@ -1,4 +1,5 @@
 import { Link } from "@remix-run/react";
+import { BookOpen } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { SurfaceArtifact } from "~/components/surface-artifact";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
@@ -14,7 +15,7 @@ const STEP_MARK: Record<StepStatus, string> = {
 };
 
 function Label({ text }: { text: string }) {
-  return <span className="text-xs uppercase tracking-[0.15em] text-muted-foreground">{text}</span>;
+  return <span className="font-mono text-xs font-medium text-muted-foreground">{text}</span>;
 }
 
 // Lightweight JSON syntax highlight tuned to the terminal palette: ruby keys, foreground values; the
@@ -88,7 +89,7 @@ function ToolPart({
           aria-hidden
           className={cn(
             "size-1.5 rounded-full",
-            running ? "bg-primary motion-safe:animate-pulse" : "bg-muted-foreground"
+            running ? "bg-status-info motion-safe:animate-pulse" : "bg-muted-foreground"
           )}
         />
         <Label text={`[tool: ${toolName}]`} />
@@ -125,7 +126,7 @@ function ReasoningPart({ text }: { text: string }) {
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2 py-1 text-left text-xs uppercase tracking-[0.15em] text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
         <span aria-hidden>{open ? "▾" : "▸"}</span>
         [reasoning]
@@ -154,7 +155,7 @@ function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
               className={cn(
                 "tabular-nums",
                 s.status === "done"
-                  ? "text-primary"
+                  ? "text-status-success"
                   : s.status === "error"
                     ? "text-destructive"
                     : "text-muted-foreground"
@@ -191,7 +192,7 @@ function SourcesPart({ sources }: { sources: SourceRef[] }) {
       <Label text="[sources]" />
       <ul className="mt-1 space-y-0.5">
         {sources.map((s, i) => {
-          const label = `📖 ${s.title ?? s.url ?? "source"}`;
+          const label = s.title ?? s.url ?? "Source";
           // Internal wiki citations (`/knowledge/…`) navigate in-app; external links open a new tab;
           // an unlinked source (no resolvable wiki page) renders as muted text.
           return (
@@ -199,15 +200,20 @@ function SourcesPart({ sources }: { sources: SourceRef[] }) {
               {s.url ? (
                 s.url.startsWith("/") ? (
                   <Link to={s.url} className={SOURCE_LINK_CLASS}>
+                    <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
                     {label}
                   </Link>
                 ) : (
                   <a href={s.url} target="_blank" rel="noreferrer" className={SOURCE_LINK_CLASS}>
+                    <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
                     {label}
                   </a>
                 )
               ) : (
-                <span className="text-muted-foreground">{label}</span>
+                <span className="text-muted-foreground">
+                  <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
+                  {label}
+                </span>
               )}
               {s.path ? <div className="text-xs text-muted-foreground">{s.path}</div> : null}
             </li>
@@ -285,8 +291,8 @@ export function MessagePartView({
       );
     case "guardrail":
       return (
-        <div className="rounded-sm border border-primary/60 bg-secondary px-3 py-2 text-sm">
-          <span className="text-xs uppercase tracking-[0.15em] text-primary">[guardrail]</span>{" "}
+        <div className="rounded-sm border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-sm">
+          <span className="font-mono text-xs font-medium text-status-warning">[guardrail]</span>{" "}
           <span className="text-foreground">{part.message ?? part.reason}</span>
         </div>
       );

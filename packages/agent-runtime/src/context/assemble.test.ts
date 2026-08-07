@@ -207,6 +207,16 @@ describe("assembleSystemPrompt — business-context", () => {
     expect(out).not.toContain("description:");
   });
 
+  it("renders the website when set and omits the line otherwise", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ business: { name: "Acme Corp", website: "https://acme.example" } })
+    );
+    expect(out).toContain("website: https://acme.example");
+    expect(assembleSystemPrompt(baseCtx({ business: { name: "Acme Corp" } }))).not.toContain(
+      "website:"
+    );
+  });
+
   it("omits the block entirely when name is absent", () => {
     const withDescOnly = assembleSystemPrompt(
       baseCtx({ business: { description: "Sells widgets." } })
