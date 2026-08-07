@@ -216,7 +216,7 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
   // replacement/cutover tests. New legacy edges must NOT be added here.
   legacyExceptions: {
     soul: ["constants"],
-    api: ["llm", "routine-engine"],
+    api: ["llm"],
     // The Worker executes the turn, so it is the process that calls a model. `@tulipfarm/llm` holds
     // the only provider/tier resolution there is, and the target home for it is `agent-runtime`
     // ("Model provider" in the extension-point table). Adding a second copy in the Worker would

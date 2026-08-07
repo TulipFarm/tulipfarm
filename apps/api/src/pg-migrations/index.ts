@@ -796,4 +796,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
       );
     },
   },
+  {
+    version: 26,
+    description: "retire the legacy Routine engine's run tables",
+    up: async (q) => {
+      // `routine_runs` and `routine_run_events` were the in-API Routine engine's own store. A
+      // Routine is now compiled to a Run and executed by the Worker against `runs`/`run_events`,
+      // and the engine that wrote these has been deleted — so nothing reads or writes them.
+      await q.query("DROP TABLE IF EXISTS routine_run_events");
+      await q.query("DROP TABLE IF EXISTS routine_runs");
+    },
+  },
 ];

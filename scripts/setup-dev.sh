@@ -141,7 +141,7 @@ echo "✅ DATABASE_URL synchronized with the bundled Postgres container"
 
 # Symlink .env.local into every app started by `pnpm dev` because Turbo runs each command from its
 # package directory and dotenv resolves relative paths from that directory.
-for app in api worker; do
+for app in api worker integration-worker; do
   env_link="apps/$app/.env.local"
   if [ -L "$env_link" ]; then
     echo "✅ .env.local symlink already exists in apps/$app"

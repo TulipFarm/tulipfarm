@@ -48,7 +48,6 @@
     "@ai-sdk/provider": "^4.0.0",
     "@electric-sql/pglite": "^0.5.3",
     "@electric-sql/pglite-pgvector": "^0.0.4",
-    "@tulipfarm/routine-engine": "workspace:*",
     "@tulipfarm/tsconfig": "workspace:*",
     "@types/node": "^26.1.1",
     "@types/pg": "^8.20.0",
