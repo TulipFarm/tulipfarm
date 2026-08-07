@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/TulipFarm/tulipfarm/compare/v0.5.1...v0.6.0) (2026-08-07)
+
+### Features
+
+* **auth:** replace temporary passwords with invite links ([#330](https://github.com/TulipFarm/tulipfarm/issues/330)) ([5aa4f18](https://github.com/TulipFarm/tulipfarm/commit/5aa4f186a962fb244576b700ba12a3d12daff948))
+* **integrations:** wire GitHub tools into chat with live-rendered surfaces ([#331](https://github.com/TulipFarm/tulipfarm/issues/331)) ([36bc109](https://github.com/TulipFarm/tulipfarm/commit/36bc109572c66c8bcab265d1c23140f2a54d61f1))
+
+### Bug Fixes
+
+* **api:** reply into the Slack thread after a Surface interaction resolves ([#325](https://github.com/TulipFarm/tulipfarm/issues/325)) ([a453d41](https://github.com/TulipFarm/tulipfarm/commit/a453d41f2bee613a175b14320856691a87bfd62b))
+* **install:** bump TULIPFARM_VERSION on re-run and log resolved tag ([#323](https://github.com/TulipFarm/tulipfarm/issues/323)) ([c1defd0](https://github.com/TulipFarm/tulipfarm/commit/c1defd01e9826c4205e2c2fcd5a4fb11a29c3af9))
+* **integrations:** resolve Slack mention tokens before agent turn ([#326](https://github.com/TulipFarm/tulipfarm/issues/326)) ([9ca784a](https://github.com/TulipFarm/tulipfarm/commit/9ca784a9e3e2e74935f5aca0ae1429ddc736d156))
+* **release:** exclude non-conventional commits from changelog instead of blocking ([#332](https://github.com/TulipFarm/tulipfarm/issues/332)) ([3930d37](https://github.com/TulipFarm/tulipfarm/commit/3930d372ba3ed943a533ebb440a2a1dc45796498)), closes [#N](https://github.com/TulipFarm/tulipfarm/issues/N)
+
+### Reverts
+
+* Revert "feat(web): redesign chat UI and update design system skill (#320)" (#324) ([1d796ce](https://github.com/TulipFarm/tulipfarm/commit/1d796ce9578548c004f70dcce34c1b96b06a2bce)), closes [#320](https://github.com/TulipFarm/tulipfarm/issues/320) [#324](https://github.com/TulipFarm/tulipfarm/issues/324)
+
+### Code Refactoring
+
+* **routines:** delete the retired Routine engine ([#327](https://github.com/TulipFarm/tulipfarm/issues/327)) ([05e3c2b](https://github.com/TulipFarm/tulipfarm/commit/05e3c2b54635aa236f3d2d691924e6c048d94dfe))
+* **surface-web:** flatten renderer dispatch and dedup markup ([#328](https://github.com/TulipFarm/tulipfarm/issues/328)) ([8bef3b0](https://github.com/TulipFarm/tulipfarm/commit/8bef3b077cdd2c3b6b373d10e2d30ae8b03c318d))
+
 ## [0.5.1](https://github.com/TulipFarm/tulipfarm/compare/v0.5.0...v0.5.1) (2026-08-06)
 
 ### Features
