@@ -13,7 +13,6 @@ function makeUser(overrides: Partial<UserDoc> = {}): UserDoc {
     role: "member",
     status: "active" as const,
     createdAt: new Date(),
-    mustResetPassword: false,
     ...overrides,
   };
 }
@@ -73,5 +72,22 @@ describe("PgUserRepo", () => {
     await repo.insert(makeUser({ role: "admin" }));
     await expect(repo.insert(makeUser({ role: "member" }))).resolves.toBeUndefined();
     expect(await repo.count()).toBe(2);
+  });
+
+  it("persists an invited account with no password hash", async () => {
+    const user = makeUser({ passwordHash: null, status: "invited" });
+    await repo.insert(user);
+    const found = await repo.findById(user._id);
+    expect(found?.passwordHash).toBeNull();
+    expect(found?.status).toBe("invited");
+  });
+
+  it("setPassword writes the hash and activates the account", async () => {
+    const user = makeUser({ passwordHash: null, status: "invited" });
+    await repo.insert(user);
+    await repo.setPassword(user._id, "argon2-hash");
+    const found = await repo.findById(user._id);
+    expect(found?.passwordHash).toBe("argon2-hash");
+    expect(found?.status).toBe("active");
   });
 });

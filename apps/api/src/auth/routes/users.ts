@@ -1,9 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { generateTempPassword } from "../passwords";
-import { ErrorSchema, PublicUserSchema } from "../schemas";
+import { issueInvite, type UserInviteRepo } from "../invites";
+import { ErrorSchema, InviteSchema, PublicUserSchema } from "../schemas";
 import {
-  createUser,
   EmailAlreadyExistsError,
+  inviteUser,
   toPublicUser,
   type UserAdminRepo,
   type UserRepo,
@@ -21,6 +21,7 @@ export function registerAdminUserRoutes(
   app: FastifyInstance,
   repo: UserRepo,
   userAdminRepo: UserAdminRepo,
+  inviteRepo: UserInviteRepo,
   requireAuth: PreHandler,
   rateLimitHook?: PreHandler
 ): void {
@@ -34,9 +35,9 @@ export function registerAdminUserRoutes(
       preHandler: adminOnly,
       schema: {
         description:
-          "Create a member user with a system-generated temporary password. The password is " +
-          "returned once for the admin to share out-of-band (e.g. Slack); the new user must " +
-          "reset it on first login.",
+          "Create a member account with no password and issue its invite link. The link is " +
+          "returned once for the admin to share out-of-band; the invited person chooses their " +
+          "own password by redeeming it, so no credential is ever relayed on their behalf.",
         tags: ["users"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         body: {
@@ -51,9 +52,9 @@ export function registerAdminUserRoutes(
             type: "object",
             properties: {
               user: PublicUserSchema,
-              temporaryPassword: { type: "string" },
+              invite: InviteSchema,
             },
-            required: ["user", "temporaryPassword"],
+            required: ["user", "invite"],
           },
           400: ErrorSchema,
           401: ErrorSchema,
@@ -68,17 +69,79 @@ export function registerAdminUserRoutes(
       if (!email) {
         return reply.code(400).send({ error: "email is required" });
       }
+      if (!req.user) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
 
-      const temporaryPassword = generateTempPassword();
       try {
-        const user = await createUser(repo, email, temporaryPassword, "member", true);
-        return reply.code(201).send({ user: toPublicUser(user), temporaryPassword });
+        const user = await inviteUser(repo, email);
+        const invite = await issueInvite(inviteRepo, {
+          userId: user._id,
+          createdBy: req.user._id,
+        });
+        return reply.code(201).send({
+          user: toPublicUser(user),
+          invite: { token: invite.token, expiresAt: invite.expiresAt.toISOString() },
+        });
       } catch (err) {
         if (err instanceof EmailAlreadyExistsError) {
           return reply.code(409).send({ error: err.message });
         }
         throw err;
       }
+    }
+  );
+
+  app.post(
+    "/api/v1/users/:id/invite",
+    {
+      preHandler: adminOnly,
+      schema: {
+        description:
+          "Issue a fresh invite link for an existing user, revoking any link still outstanding. " +
+          "For an account that has not accepted yet this replaces a lost link; for an active one " +
+          "it is the password recovery path. The account is left untouched — an existing " +
+          "password keeps working until the new link is redeemed.",
+        tags: ["users"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            properties: { invite: InviteSchema },
+            required: ["invite"],
+          },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string };
+      if (!req.user) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+
+      const target = await repo.findById(id);
+      if (!target) {
+        return reply.code(404).send({ error: "user not found" });
+      }
+      // A disabled account was switched off deliberately; handing out a link that sets a working
+      // password on it would undo that decision without ever naming it. Re-enable it first.
+      if (target.status === "disabled") {
+        return reply.code(400).send({ error: "cannot invite a disabled user" });
+      }
+
+      const invite = await issueInvite(inviteRepo, { userId: id, createdBy: req.user._id });
+      return reply.send({
+        invite: { token: invite.token, expiresAt: invite.expiresAt.toISOString() },
+      });
     }
   );
 
@@ -114,7 +177,11 @@ export function registerAdminUserRoutes(
     {
       preHandler: adminOnly,
       schema: {
-        description: "Enable or disable a user. An admin cannot disable their own account.",
+        description:
+          "Enable or disable a user. An admin cannot disable their own account. Re-enabling an " +
+          "account that never accepted its invite resolves to `invited` rather than `active`, " +
+          "since it has no password to be active with — so the returned status may differ from " +
+          "the requested one.",
         tags: ["users"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: {
@@ -161,8 +228,12 @@ export function registerAdminUserRoutes(
         return reply.code(400).send({ error: "cannot change the admin's status" });
       }
 
-      await userAdminRepo.setStatus(id, status);
-      return reply.send({ user: toPublicUser({ ...target, status }) });
+      // Re-enabling an account that never chose a password returns it to `invited`, not `active`:
+      // it has no credential to be active with, and saying otherwise would show the admin a
+      // working account that cannot sign in.
+      const resolved = status === "active" && target.passwordHash === null ? "invited" : status;
+      await userAdminRepo.setStatus(id, resolved);
+      return reply.send({ user: toPublicUser({ ...target, status: resolved }) });
     }
   );
 }

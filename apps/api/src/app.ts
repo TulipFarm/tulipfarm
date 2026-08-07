@@ -25,10 +25,11 @@ import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
+import type { UserInviteRepo } from "./auth/invites";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
-import type { PasswordResetRepo, UserAdminRepo, UserRepo } from "./auth/users";
+import type { PasswordWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
@@ -92,7 +93,8 @@ export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
   userAdminRepo?: UserAdminRepo;
-  passwordResetRepo?: PasswordResetRepo;
+  passwordWriteRepo?: PasswordWriteRepo;
+  userInviteRepo?: UserInviteRepo;
   tokenRepo?: TokenRepo;
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   rateLimiter?: RateLimiter;
@@ -389,7 +391,8 @@ export async function buildApp(opts: AppOptions = {}) {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
       ...(opts.userAdminRepo && { userAdminRepo: opts.userAdminRepo }),
-      ...(opts.passwordResetRepo && { passwordResetRepo: opts.passwordResetRepo }),
+      ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
+      ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,

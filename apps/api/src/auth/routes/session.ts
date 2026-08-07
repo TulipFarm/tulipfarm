@@ -1,11 +1,24 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sessionCookieOptions } from "../cookie-security";
 import { CSRF_COOKIE, setCsrfCookie } from "../csrf";
+import {
+  InviteDeniedError,
+  type InviteStores,
+  previewInvite,
+  redeemInvite,
+  type UserInviteRepo,
+} from "../invites";
 import { SESSION_COOKIE } from "../middleware";
-import { hashPassword, MAX_PASSWORD_LENGTH, verifyPassword } from "../passwords";
+import {
+  hashPassword,
+  MAX_PASSWORD_LENGTH,
+  MIN_PASSWORD_LENGTH,
+  validatePassword,
+  verifyPassword,
+} from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
-import { type PasswordResetRepo, toPublicUser, type UserRepo } from "../users";
+import { type PasswordWriteRepo, toPublicUser, type UserRepo } from "../users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -19,19 +32,34 @@ function getDummyHash(): Promise<string> {
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-export function registerSessionRoutes(
-  app: FastifyInstance,
-  store: SessionStore,
-  repo: UserRepo,
-  requireAuth: PreHandler,
-  ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
-  rateLimitHook?: PreHandler,
-  loginRateLimitHook?: PreHandler,
-  passwordResetRepo?: PasswordResetRepo
-): void {
+export interface SessionRouteDeps {
+  store: SessionStore;
+  repo: UserRepo;
+  requireAuth: PreHandler;
+  ttlSeconds?: number;
+  rateLimitHook?: PreHandler;
+  loginRateLimitHook?: PreHandler;
+  passwordWriteRepo?: PasswordWriteRepo;
+  inviteRepo?: UserInviteRepo;
+}
+
+export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
+  const {
+    store,
+    repo,
+    requireAuth,
+    ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
+    rateLimitHook,
+    loginRateLimitHook,
+    passwordWriteRepo,
+    inviteRepo,
+  } = deps;
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
     (hook): hook is PreHandler => hook !== undefined
   );
+  // Invite preview and accept verify a secret with no session behind them, exactly like login —
+  // so they share login's much tighter guessing budget, not the general auth one.
+  const invitePreHandlers = loginPreHandlers;
 
   app.post(
     "/api/v1/auth/login",
@@ -68,16 +96,19 @@ export function registerSessionRoutes(
       }
 
       const user = await repo.findByEmail(email);
-      if (!user) {
+      // An invited account has no password hash yet, so there is nothing to verify against — but
+      // it still burns the dummy verification, so "exists but has not accepted" costs the same as
+      // "does not exist".
+      if (!user || user.passwordHash === null) {
         await verifyPassword(await getDummyHash(), password);
         return reply.code(401).send({ error: "invalid credentials" });
       }
       if (!(await verifyPassword(user.passwordHash, password))) {
         return reply.code(401).send({ error: "invalid credentials" });
       }
-      // A disabled identity is denied with the same message as a bad password: whether an
-      // account exists and whether it is disabled are both unobservable to the caller.
-      if (user.status === "disabled") {
+      // Anything but an active identity is denied with the same message as a bad password: whether
+      // an account exists and what state it is in are both unobservable to the caller.
+      if (user.status !== "active") {
         return reply.code(401).send({ error: "invalid credentials" });
       }
 
@@ -140,23 +171,27 @@ export function registerSessionRoutes(
     }
   );
 
-  if (passwordResetRepo) {
+  if (passwordWriteRepo) {
     app.post(
       "/api/v1/auth/change-password",
       {
         preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
         schema: {
           description:
-            "Set a new password for the current user. Required to clear a forced password reset " +
-            "on an admin-created account; every other route 403s with password_reset_required " +
-            "until this is called.",
+            "Change the current user's password. The current password must be supplied: a " +
+            "stolen session should not be able to lock the account's owner out of it.",
           tags: ["auth"],
           security: [{ sessionCookie: [] }, { bearerToken: [] }],
           body: {
             type: "object",
-            required: ["newPassword"],
+            required: ["currentPassword", "newPassword"],
             properties: {
-              newPassword: { type: "string", minLength: 8 },
+              currentPassword: { type: "string", maxLength: MAX_PASSWORD_LENGTH },
+              newPassword: {
+                type: "string",
+                minLength: MIN_PASSWORD_LENGTH,
+                maxLength: MAX_PASSWORD_LENGTH,
+              },
             },
           },
           response: {
@@ -174,25 +209,157 @@ export function registerSessionRoutes(
         if (!req.user) {
           return reply.code(401).send({ error: "unauthorized" });
         }
-        const body = (req.body ?? {}) as { newPassword?: unknown };
+        const body = (req.body ?? {}) as { currentPassword?: unknown; newPassword?: unknown };
+        const currentPassword =
+          typeof body.currentPassword === "string" ? body.currentPassword : "";
         const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
-        if (newPassword.length < 8) {
-          return reply.code(400).send({ error: "password must be at least 8 characters" });
+
+        const invalid = validatePassword(newPassword);
+        if (invalid) {
+          return reply.code(400).send({ error: invalid.message });
+        }
+        // An account with no password (invited, never accepted) cannot reach this route — it
+        // cannot hold a session — but the null still has to be handled before verifying.
+        if (
+          req.user.passwordHash === null ||
+          !(await verifyPassword(req.user.passwordHash, currentPassword))
+        ) {
+          return reply.code(401).send({ error: "current password is incorrect" });
         }
 
-        const passwordHash = await hashPassword(newPassword);
-        await passwordResetRepo.updatePassword(req.user._id, passwordHash, false);
+        await passwordWriteRepo.setPassword(req.user._id, await hashPassword(newPassword));
 
-        // Rotate: a session minted under the temporary password shouldn't outlive the reset.
+        // Rotate: a session minted under the old password shouldn't outlive it.
         const session = await rotateSession(store, req.cookies[SESSION_COOKIE], {
           userId: req.user._id,
           authMethods: ["password"],
         });
         reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
         setCsrfCookie(reply, session.csrfToken, ttlSeconds);
-        return reply.send({
-          user: toPublicUser({ ...req.user, mustResetPassword: false }),
+        return reply.send({ user: toPublicUser(req.user) });
+      }
+    );
+  }
+
+  if (inviteRepo && passwordWriteRepo) {
+    const inviteStores: InviteStores = {
+      invites: inviteRepo,
+      users: repo,
+      passwords: passwordWriteRepo,
+    };
+    app.post(
+      "/api/v1/auth/invites/preview",
+      {
+        preHandler: invitePreHandlers,
+        schema: {
+          description:
+            "Resolve an invite link to the account it will set a password for, without spending " +
+            "it. Unauthenticated by design — the token is the only credential the holder has. " +
+            "The token travels in the body so it never reaches an access log or a referrer.",
+          tags: ["auth"],
+          body: {
+            type: "object",
+            required: ["token"],
+            properties: { token: { type: "string" } },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: {
+                email: { type: "string", format: "email" },
+                expiresAt: { type: "string", format: "date-time" },
+              },
+              required: ["email", "expiresAt"],
+            },
+            400: ErrorSchema,
+            404: ErrorSchema,
+          },
+        },
+      },
+      async (req, reply) => {
+        const body = (req.body ?? {}) as { token?: unknown };
+        const token = typeof body.token === "string" ? body.token : "";
+        if (!token) {
+          return reply.code(400).send({ error: "token is required" });
+        }
+        try {
+          const offer = await previewInvite(inviteStores, token);
+          return reply.send({ email: offer.email, expiresAt: offer.expiresAt.toISOString() });
+        } catch (err) {
+          if (err instanceof InviteDeniedError) {
+            return reply.code(404).send({ error: err.message });
+          }
+          throw err;
+        }
+      }
+    );
+
+    app.post(
+      "/api/v1/auth/invites/accept",
+      {
+        preHandler: invitePreHandlers,
+        schema: {
+          description:
+            "Redeem an invite link: set the account's password, activate it, and sign in. The " +
+            "link is single-use, so a replayed one sets nothing.",
+          tags: ["auth"],
+          body: {
+            type: "object",
+            required: ["token", "password"],
+            properties: {
+              token: { type: "string" },
+              password: {
+                type: "string",
+                minLength: MIN_PASSWORD_LENGTH,
+                maxLength: MAX_PASSWORD_LENGTH,
+              },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: { user: PublicUserSchema },
+              required: ["user"],
+            },
+            400: ErrorSchema,
+            404: ErrorSchema,
+          },
+        },
+      },
+      async (req, reply) => {
+        const body = (req.body ?? {}) as { token?: unknown; password?: unknown };
+        const token = typeof body.token === "string" ? body.token : "";
+        const password = typeof body.password === "string" ? body.password : "";
+        if (!token) {
+          return reply.code(400).send({ error: "token is required" });
+        }
+        const invalid = validatePassword(password);
+        if (invalid) {
+          return reply.code(400).send({ error: invalid.message });
+        }
+
+        let user: Awaited<ReturnType<typeof redeemInvite>>;
+        try {
+          user = await redeemInvite(inviteStores, {
+            raw: token,
+            passwordHash: await hashPassword(password),
+          });
+        } catch (err) {
+          if (err instanceof InviteDeniedError) {
+            return reply.code(404).send({ error: err.message });
+          }
+          throw err;
+        }
+
+        // Redemption signs the account in, so the person who just chose a password lands in the
+        // app rather than retyping it at a login form. Rotate for the usual fixation reason.
+        const session = await rotateSession(store, req.cookies[SESSION_COOKIE], {
+          userId: user._id,
+          authMethods: ["password"],
         });
+        reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
+        setCsrfCookie(reply, session.csrfToken, ttlSeconds);
+        return reply.send({ user: toPublicUser(user) });
       }
     );
   }

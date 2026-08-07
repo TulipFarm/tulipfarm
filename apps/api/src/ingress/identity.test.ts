@@ -13,7 +13,6 @@ const alice: UserDoc = {
   role: "member",
   status: "active" as const,
   createdAt: new Date(),
-  mustResetPassword: false,
 };
 const admin: UserDoc = {
   _id: "u0",
@@ -22,7 +21,6 @@ const admin: UserDoc = {
   role: "admin",
   status: "active" as const,
   createdAt: new Date(),
-  mustResetPassword: false,
 };
 
 const IDENTITY = {

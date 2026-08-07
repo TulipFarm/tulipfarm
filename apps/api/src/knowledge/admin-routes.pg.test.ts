@@ -46,7 +46,6 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
         role: req.headers["x-role"] === "admin" ? "admin" : "member",
         status: "active" as const,
         createdAt: new Date(),
-        mustResetPassword: false,
       };
     });
     await app.ready();

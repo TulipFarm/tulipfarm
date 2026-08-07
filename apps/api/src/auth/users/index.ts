@@ -5,21 +5,24 @@ import { hashPassword } from "../passwords";
 export type Role = "admin" | "member";
 
 /**
- * Lifecycle state of a local identity. A disabled user fails authentication at every credential
- * path — cookie session, API token, and identity link — so deactivation takes effect on the next
- * request instead of waiting for a session to lapse (SPEC §12).
+ * Lifecycle state of a local identity. A user that is not `active` fails authentication at every
+ * credential path — cookie session, API token, and identity link — so deactivation takes effect on
+ * the next request instead of waiting for a session to lapse (SPEC §12).
+ *
+ * `invited` is an account that exists but has chosen no password yet: the admin created it and
+ * shared an invite link, and it becomes `active` the moment that link is redeemed. It is a distinct
+ * state rather than a disabled account so the Users list can show who has not accepted yet.
  */
-export type UserStatus = "active" | "disabled";
+export type UserStatus = "active" | "invited" | "disabled";
 
 export interface UserDoc {
   _id: string;
   email: string;
-  passwordHash: string;
+  /** Null until the user chooses a password — an invited account has none, and should say so. */
+  passwordHash: string | null;
   role: Role;
   status: UserStatus;
   createdAt: Date;
-  /** True until the user sets their own password — forced on admin-created accounts. */
-  mustResetPassword: boolean;
 }
 
 // Shape returned to clients — never includes the password hash.
@@ -28,7 +31,6 @@ export interface PublicUser {
   email: string;
   role: Role;
   status: UserStatus;
-  mustResetPassword: boolean;
 }
 
 export function toPublicUser(user: UserDoc): PublicUser {
@@ -37,7 +39,6 @@ export function toPublicUser(user: UserDoc): PublicUser {
     email: user.email,
     role: user.role,
     status: user.status,
-    mustResetPassword: user.mustResetPassword,
   };
 }
 
@@ -63,11 +64,13 @@ export interface UserAdminRepo {
 }
 
 /**
- * The narrow surface the change-password flow needs. Kept separate from UserRepo for the same
- * reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
+ * The narrow surface the password-setting flows need — the Settings change-password form and
+ * invite redemption, which also activates the account it belongs to. Kept separate from UserRepo
+ * for the same reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
  */
-export interface PasswordResetRepo {
-  updatePassword(id: string, passwordHash: string, mustResetPassword: boolean): Promise<void>;
+export interface PasswordWriteRepo {
+  /** Sets the password and marks the account active — redemption is what ends `invited`. */
+  setPassword(id: string, passwordHash: string): Promise<void>;
 }
 
 /** Thrown by `insert()` on a duplicate email — the caller maps this to `409`. */
@@ -117,11 +120,10 @@ function rowToUser(row: Record<string, unknown>): UserDoc {
   return {
     _id: row.id as string,
     email: row.email as string,
-    passwordHash: row.password_hash as string,
+    passwordHash: (row.password_hash as string | null) ?? null,
     role: row.role as Role,
     status: row.status as UserStatus,
     createdAt: row.created_at as Date,
-    mustResetPassword: row.must_reset_password as boolean,
   };
 }
 
@@ -148,17 +150,9 @@ export class PgUserRepo implements UserRepo {
   async insert(user: UserDoc): Promise<void> {
     try {
       await this.q.query(
-        `INSERT INTO users (id, email, password_hash, role, status, created_at, must_reset_password)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [
-          user._id,
-          user.email,
-          user.passwordHash,
-          user.role,
-          user.status,
-          user.createdAt,
-          user.mustResetPassword,
-        ]
+        `INSERT INTO users (id, email, password_hash, role, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [user._id, user.email, user.passwordHash, user.role, user.status, user.createdAt]
       );
     } catch (err) {
       if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
@@ -187,15 +181,11 @@ export class PgUserRepo implements UserRepo {
     await this.q.query("UPDATE users SET status = $2 WHERE id = $1", [id, status]);
   }
 
-  async updatePassword(
-    id: string,
-    passwordHash: string,
-    mustResetPassword: boolean
-  ): Promise<void> {
-    await this.q.query(
-      "UPDATE users SET password_hash = $2, must_reset_password = $3 WHERE id = $1",
-      [id, passwordHash, mustResetPassword]
-    );
+  async setPassword(id: string, passwordHash: string): Promise<void> {
+    await this.q.query("UPDATE users SET password_hash = $2, status = 'active' WHERE id = $1", [
+      id,
+      passwordHash,
+    ]);
   }
 }
 
@@ -203,8 +193,7 @@ export async function createUser(
   repo: UserRepo,
   email: string,
   password: string,
-  role: Role,
-  mustResetPassword = false
+  role: Role
 ): Promise<UserDoc> {
   const user: UserDoc = {
     _id: randomUUID(),
@@ -213,7 +202,24 @@ export async function createUser(
     role,
     status: "active",
     createdAt: new Date(),
-    mustResetPassword,
+  };
+  await repo.insert(user);
+  return user;
+}
+
+/**
+ * Creates a member account that has no password at all. It cannot authenticate until its invite
+ * link is redeemed — which is the point: an admin provisioning a colleague never handles, sees, or
+ * relays a credential for them.
+ */
+export async function inviteUser(repo: UserRepo, email: string): Promise<UserDoc> {
+  const user: UserDoc = {
+    _id: randomUUID(),
+    email: normalizeEmail(email),
+    passwordHash: null,
+    role: "member",
+    status: "invited",
+    createdAt: new Date(),
   };
   await repo.insert(user);
   return user;
