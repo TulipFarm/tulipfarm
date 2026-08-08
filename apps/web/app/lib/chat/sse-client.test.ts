@@ -121,6 +121,23 @@ test("recovers a dropped stream from the Run's own events without duplicating th
   });
 });
 
+test("submits the effort preset id in the chat model field", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce(streamResponse("id: 1\nevent: turn.finished\ndata: {}\n\n"));
+  vi.stubGlobal("fetch", fetchMock);
+
+  await postChat(
+    { message: { role: "user", content: "hello" }, model: "balanced" },
+    { onEvent: vi.fn() }
+  );
+
+  const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
+  expect(init?.body).toBe(
+    JSON.stringify({ message: { role: "user", content: "hello" }, model: "balanced" })
+  );
+});
+
 test("projects Run events onto the timeline vocabulary", () => {
   const map = createRunEventMapper();
 
@@ -140,6 +157,45 @@ test("projects Run events onto the timeline vocabulary", () => {
   expect(map({ seq: 4, type: "tool.dispatched", data: { callId: "c1" } })).toEqual([]);
   expect(
     map({ seq: 5, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
+  ).toEqual([{ type: "finish", data: { reason: "stop", messageId: "msg-1" } }]);
+});
+
+test("projects a turn receipt from the participant-visible finish event", () => {
+  const map = createRunEventMapper();
+
+  expect(
+    map({
+      seq: 1,
+      type: "turn.finished",
+      data: {
+        status: "succeeded",
+        messageId: "msg-1",
+        modelId: "claude-sonnet-5",
+        effortPreset: "auto",
+        modelCallLatencyMs: 1234,
+      },
+    })
+  ).toEqual([
+    {
+      type: "finish",
+      data: {
+        reason: "stop",
+        messageId: "msg-1",
+        receipt: {
+          modelId: "claude-sonnet-5",
+          effortPreset: "auto",
+          modelCallLatencyMs: 1234,
+        },
+      },
+    },
+  ]);
+});
+
+test("accepts older turn.finished events without receipt fields", () => {
+  const map = createRunEventMapper();
+
+  expect(
+    map({ seq: 1, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
   ).toEqual([{ type: "finish", data: { reason: "stop", messageId: "msg-1" } }]);
 });
 

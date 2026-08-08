@@ -43,7 +43,7 @@ export type IngressAuditReport = SkillAuditReport;
  * report; throws if the model output does not satisfy the schema.
  */
 export async function buildIngressAudit(
-  model: ReturnType<LlmService["select"]>,
+  model: ReturnType<LlmService["effortModel"]>,
   integration: { name: string; handlerSource: string }
 ): Promise<IngressAuditReport> {
   const { object } = await generateObject({

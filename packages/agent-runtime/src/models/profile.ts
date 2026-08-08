@@ -1,4 +1,10 @@
-import type { ModelDataRetention, ModelProfileSpec, ModelReasoningLevel } from "@tulipfarm/schema";
+import type {
+  ModelDataRetention,
+  ModelModality,
+  ModelProfileSpec,
+  ModelReasoningLevel,
+  ModelProfileDenialReason as SchemaModelProfileDenialReason,
+} from "@tulipfarm/schema";
 
 /**
  * ModelProfile routing (SPEC §17). Model use is guardrail-driven through Soul-authored
@@ -32,20 +38,15 @@ export interface ModelRequirements {
   readonly dataRetention?: ModelDataRetention;
   readonly maxLatencyMs?: number;
   readonly requiredCapabilityClass?: string;
+  /**
+   * Content kinds this turn must send to / receive from the model. Omitted means text-only. A
+   * profile that cannot carry one of them is denied, never quietly handed content it would drop.
+   */
+  readonly inputModalities?: readonly ModelModality[];
+  readonly outputModalities?: readonly ModelModality[];
 }
 
-export type ModelProfileDenialReason =
-  | "unknown_profile"
-  | "tools_unsupported"
-  | "structured_output_unsupported"
-  | "context_window_exceeded"
-  | "residency_violation"
-  | "data_retention_violation"
-  | "training_not_permitted"
-  | "cost_budget_exceeded"
-  | "token_budget_exceeded"
-  | "latency_budget_exceeded"
-  | "capability_class_mismatch";
+export type ModelProfileDenialReason = SchemaModelProfileDenialReason;
 
 export interface ModelProfileAttempt {
   readonly profileId: string;
@@ -68,12 +69,27 @@ export type ModelProfileSelection =
       readonly attempts: readonly ModelProfileAttempt[];
     };
 
-/** Data retention strength, narrowest first. A profile may never retain more than requested. */
+/**
+ * Data retention strength, narrowest first. A profile may never retain more than requested.
+ */
 const RETENTION_RANK: Readonly<Record<ModelDataRetention, number>> = {
   none: 0,
   zero_retention: 1,
   provider_default: 2,
 };
+
+/** Text-only is the honest default for a profile authored before modality existed. */
+const DEFAULT_MODALITIES: readonly ModelModality[] = ["text"];
+
+/** Every required modality must be declared by the profile; an undeclared kind is unsupported. */
+function covers(
+  declared: readonly ModelModality[] | undefined,
+  required: readonly ModelModality[] | undefined
+): boolean {
+  if (required === undefined || required.length === 0) return true;
+  const supported = declared ?? DEFAULT_MODALITIES;
+  return required.every((modality) => supported.includes(modality));
+}
 
 /**
  * Checks one candidate against the request. Returns the first violated constraint so denial
@@ -86,6 +102,12 @@ export function checkModelProfile(
   if (requirements.needsTools && !profile.supports.tools) return "tools_unsupported";
   if (requirements.needsStructuredOutput && !profile.supports.structuredOutput) {
     return "structured_output_unsupported";
+  }
+  if (
+    !covers(profile.supports.inputModalities, requirements.inputModalities) ||
+    !covers(profile.supports.outputModalities, requirements.outputModalities)
+  ) {
+    return "modality_unsupported";
   }
   if (requirements.estimatedContextTokens > profile.supports.contextWindowTokens) {
     return "context_window_exceeded";
@@ -113,7 +135,7 @@ export function checkModelProfile(
     return "training_not_permitted";
   }
 
-  const costCeiling = constraints.maxCostUsd ?? profile.budgets?.maxCostUsd;
+  const costCeiling = constraints.maxCostUsd;
   if (
     requirements.estimatedCostUsd !== undefined &&
     costCeiling !== undefined &&
@@ -121,7 +143,7 @@ export function checkModelProfile(
   ) {
     return "cost_budget_exceeded";
   }
-  const tokenCeiling = constraints.maxTokens ?? profile.budgets?.maxTokens;
+  const tokenCeiling = constraints.maxTokens;
   if (tokenCeiling !== undefined && requirements.estimatedContextTokens > tokenCeiling) {
     return "token_budget_exceeded";
   }

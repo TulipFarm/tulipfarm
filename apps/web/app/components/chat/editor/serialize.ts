@@ -39,8 +39,8 @@ export interface MentionItem {
   // Agent-only glyph inputs (undefined for skill/resource mentions); see components/agent-glyph.
   domain?: string;
   autonomy?: Autonomy;
-  // Agent-only: the agent's configured model tier (frontmatter `model`; raw string, may be a tier,
-  // "auto", or a model id). Lets the composer reflect a mentioned agent's tier in the MODEL selector.
+  // Agent-only: the agent's configured selector (frontmatter `model`; raw string, may be an effort
+  // preset, a retired alias, or a model id). Lets the composer reflect a mentioned agent's preset.
   model?: string;
 }
 
@@ -121,7 +121,7 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
 
 /**
  * The id of the first `@agent` mention in a composer doc, or undefined if there is none. Pure (no
- * DOM) so the composer can read it from a `useEditorState` selector to drive the MODEL tier — without
+ * DOM) so the composer can read it from a `useEditorState` selector to drive the preset — without
  * the full `serializeDoc` pass. Mirrors `serializeDoc`'s "first agent mention wins" rule.
  */
 export function firstAgentMentionId(doc: PMNode): string | undefined {

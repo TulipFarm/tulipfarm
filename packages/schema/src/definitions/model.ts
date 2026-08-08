@@ -3,8 +3,10 @@ import {
   definitionRegistration,
   definitionSchema,
   MODEL_DATA_RETENTION,
+  MODEL_MODALITIES,
   MODEL_REASONING_LEVELS,
   type ModelDataRetention,
+  type ModelModality,
   type ModelReasoningLevel,
   refListSchema,
 } from "./common";
@@ -18,6 +20,23 @@ import {
 
 const KIND = "ModelProfile";
 
+export const MODEL_PROFILE_DENIAL_REASONS = [
+  "unknown_profile",
+  "tools_unsupported",
+  "structured_output_unsupported",
+  "modality_unsupported",
+  "context_window_exceeded",
+  "residency_violation",
+  "data_retention_violation",
+  "training_not_permitted",
+  "cost_budget_exceeded",
+  "token_budget_exceeded",
+  "latency_budget_exceeded",
+  "capability_class_mismatch",
+] as const;
+
+export type ModelProfileDenialReason = (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
+
 const modelSpecSchema = {
   type: "object",
   additionalProperties: false,
@@ -25,6 +44,9 @@ const modelSpecSchema = {
   properties: {
     provider: { type: "string", minLength: 1, maxLength: 128 },
     model: { type: "string", minLength: 1, maxLength: 128 },
+    // Which named provider connection supplies credentials. Absent means "the connection named
+    // after the provider" — so a single-account deployment never has to state it.
+    connection: { type: "string", minLength: 1, maxLength: 128 },
     capabilityClass: { type: "string", minLength: 1, maxLength: 64 },
     reasoning: { type: "string", enum: [...MODEL_REASONING_LEVELS] },
     supports: {
@@ -35,6 +57,18 @@ const modelSpecSchema = {
         tools: { type: "boolean" },
         structuredOutput: { type: "boolean" },
         contextWindowTokens: { type: "integer", minimum: 1 },
+        // Modality is a dimension, not a rung: absent means text-only, which is what every
+        // profile authored before modality existed actually was.
+        inputModalities: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", enum: [...MODEL_MODALITIES] },
+        },
+        outputModalities: {
+          type: "array",
+          uniqueItems: true,
+          items: { type: "string", enum: [...MODEL_MODALITIES] },
+        },
       },
     },
     constraints: {
@@ -72,12 +106,17 @@ export const MODEL_PROFILE_DEFINITION = definitionRegistration(KIND, ModelProfil
 export interface ModelProfileSpec {
   provider: string;
   model: string;
+  /** Named provider connection supplying credentials; defaults to the provider name. */
+  connection?: string;
   capabilityClass?: string;
   reasoning: ModelReasoningLevel;
   supports: {
     tools: boolean;
     structuredOutput: boolean;
     contextWindowTokens: number;
+    /** Absent means text-only — the honest reading of a profile authored before modality existed. */
+    inputModalities?: ModelModality[];
+    outputModalities?: ModelModality[];
   };
   constraints?: {
     maxCostUsd?: number;

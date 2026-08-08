@@ -1,7 +1,8 @@
 import { type ClientLoaderFunctionArgs, type MetaFunction, useLoaderData } from "@remix-run/react";
 import { useCallback, useState } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
-import type { ModelTier } from "~/lib/chat/types";
+import { DEFAULT_CHAT_MODEL_SELECTOR } from "~/components/chat/model-selector";
+import type { ChatModelSelector } from "~/lib/chat/types";
 import { useConversations } from "~/lib/conversations-context";
 import {
   dismissOnboardingChecklist,
@@ -15,7 +16,7 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 // `?agent=<name>` selects a user-created Agent. Without it, Chat uses the normal harness.
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const agentId = new URL(request.url).searchParams.get("agent") || undefined;
-  const defaultModel: ModelTier = "standard";
+  const defaultModel: ChatModelSelector = DEFAULT_CHAT_MODEL_SELECTOR;
   // Adaptive onboarding suggestions (ONB-V1-002/003) + the Getting-started checklist (ONB-V1).
   // Both non-blocking: a failed fetch resolves to a benign default so chat always
   // renders (mirrors the agent lookup above — no hard dependency).

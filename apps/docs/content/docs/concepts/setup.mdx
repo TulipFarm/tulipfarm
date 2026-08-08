@@ -20,7 +20,8 @@ it cannot mint a second admin. The business step records `businessName`, `busine
 the optional `businessWebsite` in `soul.yaml`, and all three become static business context in every
 Agent's system prompt. That profile is not working [memory](/docs/concepts/memory). The LLM step
 stores the provider credentials as [secrets](/docs/concepts/secrets) and writes a default
-`llm.config.yaml` with all three tiers pointing at the chosen provider and model; skipping it leaves
+`llm.config.yaml` with all three tiers pointing at the chosen provider and model, so every effort
+preset resolves from the start; skipping it leaves
 that to **Settings → LLM Config**.
 
 Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.

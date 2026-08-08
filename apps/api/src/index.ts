@@ -496,7 +496,6 @@ async function boot() {
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,
-          llmService,
           soulLoader,
           toolRegistry,
           workingMemory: workingMemoryService,

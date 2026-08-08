@@ -12,6 +12,7 @@ import {
   BundleRoutineAgentPort,
   type BundleRoutineAgentPortOptions,
   type RoutineAgentRequest,
+  type RoutineModelSelection,
 } from "./agent-port";
 
 const BUSINESS_ID = "biz-1";
@@ -47,23 +48,40 @@ function agent(overrides: Partial<AgentDefinition["spec"]> = {}): AgentDefinitio
   } as AgentDefinition;
 }
 
-function profile(contextWindowTokens = 100_000): ModelProfileDefinition {
+function profile(
+  overrides: {
+    readonly slug?: string;
+    readonly model?: string;
+    readonly contextWindowTokens?: number;
+    readonly supports?: Partial<ModelProfileDefinition["spec"]["supports"]>;
+    readonly fallbacks?: readonly string[];
+    readonly budgets?: ModelProfileDefinition["spec"]["budgets"];
+  } = {}
+): ModelProfileDefinition {
+  const slug = overrides.slug ?? "fast";
   return {
     apiVersion: "tulipfarm.ai/v1",
     kind: "ModelProfile",
     metadata: {
       id: "01J00000000000000000MODEL",
-      slug: "fast",
+      slug,
       schemaVersion: 1,
       authoredVersion: 1,
       lifecycle: "published",
     },
     spec: {
       provider: "anthropic",
-      model: "claude-sonnet-5",
+      model: overrides.model ?? "claude-sonnet-5",
       reasoning: "medium",
-      supports: { tools: true, structuredOutput: true, contextWindowTokens },
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: overrides.contextWindowTokens ?? 100_000,
+        ...overrides.supports,
+      },
+      ...(overrides.budgets === undefined ? {} : { budgets: overrides.budgets }),
       allowCaching: false,
+      ...(overrides.fallbacks === undefined ? {} : { fallbacks: overrides.fallbacks }),
     },
   } as ModelProfileDefinition;
 }
@@ -116,28 +134,41 @@ function answered(text: string): ModelInvocationResult {
 }
 
 let invoke: Mock<ModelPort["invoke"]>;
-let appended: { eventType: string; idempotencyKey: string }[];
+let modelSelections: RoutineModelSelection[];
+let appended: { eventType: string; idempotencyKey: string; payload: Record<string, unknown> }[];
+let openedBudgets: Readonly<Record<string, number>>[];
 let events: RunEventAppendPort;
 let runStatus: string;
 
 beforeEach(() => {
   invoke = vi.fn<ModelPort["invoke"]>(async () => answered("billing"));
+  modelSelections = [];
   appended = [];
+  openedBudgets = [];
   runStatus = "running";
   events = {
     append: async (input) => {
-      appended.push({ eventType: input.eventType, idempotencyKey: input.idempotencyKey });
+      appended.push({
+        eventType: input.eventType,
+        idempotencyKey: input.idempotencyKey,
+        payload: input.payload,
+      });
       return { sequence: appended.length } as Awaited<ReturnType<RunEventAppendPort["append"]>>;
     },
   };
 });
 
 function port(overrides: Partial<BundleRoutineAgentPortOptions> = {}): BundleRoutineAgentPort {
-  const model: ModelPort = { invoke: (input) => invoke(input) };
   return new BundleRoutineAgentPort({
-    model,
+    model: (selection) => {
+      modelSelections.push(selection);
+      return { invoke: (input) => invoke(input) };
+    },
     events,
     budgets: {
+      open: async (input) => {
+        openedBudgets.push(input.limits);
+      },
       consume: async () => ({
         outcome: "allowed",
         consumed: 1,
@@ -163,11 +194,12 @@ describe("BundleRoutineAgentPort", () => {
     expect(result).toEqual({ kind: "succeeded", output: "billing" });
     expect(invoke).toHaveBeenCalledTimes(1);
     const invoked = invoke.mock.calls[0]?.[0] as ModelInvocationRequest;
-    expect(invoked.modelProfileId).toBe("claude-sonnet-5");
+    expect(invoked.modelProfileId).toBe("fast");
     // The Agent's own instructions outrank the Routine's question, which is carried as the request.
     expect(invoked.messages[0]?.role).toBe("system");
     expect(invoked.messages[0]?.content).toContain("You triage incoming work.");
     expect(invoked.messages[1]?.content).toContain("invoice overdue");
+    expect(appended[1]?.payload).toMatchObject({ modelProfileId: "fast" });
   });
 
   it("names the Run's own clock so the Agent does not date-reason from its training cutoff", async () => {
@@ -191,10 +223,142 @@ describe("BundleRoutineAgentPort", () => {
   it("keys its events by the State occurrence and the attempt that claimed it", async () => {
     await port().execute(request());
 
-    expect(appended[0]?.eventType).toBe("context.assembled");
+    expect(appended.map((event) => event.eventType)).toEqual(["model.routed", "context.assembled"]);
     expect(appended.every((event) => event.idempotencyKey.startsWith(`${STATE_KEY}:3:`))).toBe(
       true
     );
+  });
+
+  it("records the selected ModelProfile chain and rejected fallback reasons", async () => {
+    await port().execute(
+      request({
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: agent() },
+          {
+            kind: "ModelProfile",
+            slug: "fast",
+            document: profile({ fallbacks: ["backup", "tiny"] }),
+          },
+          {
+            kind: "ModelProfile",
+            slug: "backup",
+            document: profile({ slug: "backup", model: "claude-haiku-5" }),
+          },
+          {
+            kind: "ModelProfile",
+            slug: "tiny",
+            document: profile({ slug: "tiny", model: "tiny-model", contextWindowTokens: 1 }),
+          },
+        ]),
+      })
+    );
+
+    expect(appended[0]).toMatchObject({
+      eventType: "model.routed",
+      idempotencyKey: `${STATE_KEY}:3:model`,
+      payload: {
+        outcome: "selected",
+        selector: "fast",
+        resolution: "profile_ref",
+        profileId: "fast",
+        chain: [
+          { profileId: "fast", modelId: "claude-sonnet-5" },
+          { profileId: "backup", modelId: "claude-haiku-5" },
+        ],
+        cacheAllowed: false,
+        rejectedFallbacks: [{ profileId: "tiny", reason: "context_window_exceeded" }],
+      },
+    });
+  });
+
+  it("invokes the whole selected chain, so a bundle-authored profile is never re-resolved", async () => {
+    await port().execute(
+      request({
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: agent() },
+          {
+            kind: "ModelProfile",
+            slug: "fast",
+            document: profile({ fallbacks: ["backup"] }),
+          },
+          {
+            kind: "ModelProfile",
+            slug: "backup",
+            document: profile({ slug: "backup", model: "claude-haiku-5" }),
+          },
+        ]),
+      })
+    );
+
+    // The port is built from the chain the router chose, not handed a profile id to look up again.
+    // Resolving `fast` a second time would search the deployment's *current* configuration, where a
+    // bundle-authored profile need not exist — dropping the pinned bundle and, with it, `backup`.
+    expect(modelSelections).toHaveLength(1);
+    expect(modelSelections[0]?.modelIds).toEqual(["claude-sonnet-5", "claude-haiku-5"]);
+    expect(modelSelections[0]?.routing).toMatchObject({ outcome: "selected", profileId: "fast" });
+  });
+
+  it("builds no model at all when the profile is denied", async () => {
+    const result = await port().execute(
+      request({
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: agent() },
+          {
+            kind: "ModelProfile",
+            slug: "fast",
+            document: profile({ contextWindowTokens: 1 }),
+          },
+        ]),
+      })
+    );
+
+    expect(result).toMatchObject({ kind: "unavailable" });
+    expect(modelSelections).toEqual([]);
+  });
+
+  it("opens model-scoped budgets before asking the model and records them in routing evidence", async () => {
+    await port().execute(
+      request({
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: agent() },
+          {
+            kind: "ModelProfile",
+            slug: "fast",
+            document: profile({ budgets: { maxTokens: 2_000, maxCostUsd: 0.0000001 } }),
+          },
+        ]),
+      })
+    );
+
+    expect(openedBudgets).toEqual([{ tokens: 2_000, costMicros: 1 }]);
+    expect(appended[0]).toMatchObject({
+      eventType: "model.routed",
+      payload: {
+        outcome: "selected",
+        budgetLimits: {
+          tokens: { value: 2_000, scope: "model" },
+          costMicros: { value: 1, scope: "model" },
+        },
+      },
+    });
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a profile with no authored budgets unbounded", async () => {
+    await port().execute(request());
+
+    expect(openedBudgets).toEqual([]);
+    expect(appended[0]?.payload.budgetLimits).toBeUndefined();
+  });
+
+  it("derives stable model routing event keys when the State is replayed", async () => {
+    await port().execute(request());
+    const firstKeys = appended.map((event) => event.idempotencyKey);
+    appended = [];
+
+    await port().execute(request());
+
+    expect(appended.map((event) => event.idempotencyKey)).toEqual(firstKeys);
   });
 
   it("refuses when the Run's bundle does not carry the authored Agent", async () => {
@@ -225,7 +389,16 @@ describe("BundleRoutineAgentPort", () => {
       request({ bundle: bundle([{ kind: "Agent", slug: "triage", document: agent() }]) })
     );
 
-    expect(result).toEqual({ kind: "unavailable", reason: "model_profile_not_in_bundle" });
+    expect(result).toEqual({ kind: "unavailable", reason: "model_unknown_profile" });
+    expect(appended[0]).toMatchObject({
+      eventType: "model.routed",
+      payload: {
+        outcome: "denied",
+        profileId: "fast",
+        reason: "unknown_profile",
+        attempts: [{ profileId: "fast", reason: "unknown_profile" }],
+      },
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -234,12 +407,42 @@ describe("BundleRoutineAgentPort", () => {
       request({
         bundle: bundle([
           { kind: "Agent", slug: "triage", document: agent() },
-          { kind: "ModelProfile", slug: "fast", document: profile(1) },
+          { kind: "ModelProfile", slug: "fast", document: profile({ contextWindowTokens: 1 }) },
         ]),
       })
     );
 
-    expect(result).toEqual({ kind: "unavailable", reason: "context_budget" });
+    // The router now catches this before the Context manifest is assembled, so the refusal names
+    // the constraint that was violated rather than reporting a generic budget overrun.
+    expect(result).toEqual({ kind: "unavailable", reason: "model_context_window_exceeded" });
+    expect(appended[0]?.payload).toMatchObject({
+      outcome: "denied",
+      reason: "context_window_exceeded",
+      attempts: [{ profileId: "fast", reason: "context_window_exceeded" }],
+    });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("refuses rather than answering a schema-bound State on a profile without structured output", async () => {
+    const result = await port().execute(
+      request({
+        outputSchema: { type: "object" },
+        bundle: bundle([
+          { kind: "Agent", slug: "triage", document: agent() },
+          {
+            kind: "ModelProfile",
+            slug: "fast",
+            document: profile({ supports: { structuredOutput: false } }),
+          },
+        ]),
+      })
+    );
+
+    expect(result).toEqual({ kind: "unavailable", reason: "model_structured_output_unsupported" });
+    expect(appended[0]?.payload).toMatchObject({
+      outcome: "denied",
+      reason: "structured_output_unsupported",
+    });
     expect(invoke).not.toHaveBeenCalled();
   });
 

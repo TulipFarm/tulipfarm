@@ -1,3 +1,4 @@
+import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type {
   ModelInvocationRequest,
@@ -195,8 +196,9 @@ export interface AgentLoopDependencies {
   now?(): Date;
 }
 
-const ITERATION_BUDGET_KEY = "agent_loop_iterations";
-const TOKEN_BUDGET_KEY = "agent_loop_tokens";
+const ITERATION_BUDGET_KEY = "iterations";
+const TOKEN_BUDGET_KEY = "tokens";
+const COST_BUDGET_KEY = "costMicros";
 
 /**
  * Marks a failure that came from the event sink rather than the model, so the model's own error
@@ -361,12 +363,25 @@ export class AgentLoop {
         return finish({ status: "failed", reason: "model_error", ...counters }, "failed");
       }
 
-      const tokenBudget = await this.deps.budget.consume({
-        key: TOKEN_BUDGET_KEY,
-        amount: result.usage.inputTokens + result.usage.outputTokens,
-      });
-      if (tokenBudget.outcome === "exhausted") {
-        return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
+      const tokens = result.usage.inputTokens + result.usage.outputTokens;
+      if (tokens > 0) {
+        const tokenBudget = await this.deps.budget.consume({
+          key: TOKEN_BUDGET_KEY,
+          amount: tokens,
+        });
+        if (tokenBudget.outcome === "exhausted") {
+          return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
+        }
+      }
+
+      if (result.usage.costUsd !== undefined && result.usage.costUsd > 0) {
+        const costBudget = await this.deps.budget.consume({
+          key: COST_BUDGET_KEY,
+          amount: usdToCostMicros(result.usage.costUsd),
+        });
+        if (costBudget.outcome === "exhausted") {
+          return finish({ status: "failed", reason: "budget_exhausted", ...counters }, "failed");
+        }
       }
 
       if (result.output.kind === "tool_calls") {

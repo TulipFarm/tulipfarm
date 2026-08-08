@@ -6,10 +6,11 @@ import {
 } from "@remix-run/react";
 import { useEffect } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
+import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "~/components/chat/model-selector";
 import { getAgent } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
 import { messagesToTimeline } from "~/lib/chat/hydrate";
-import type { ModelTier } from "~/lib/chat/types";
+import type { ChatModelSelector } from "~/lib/chat/types";
 import { getConversation, getConversationMessages } from "~/lib/conversations";
 import { useConversations } from "~/lib/conversations-context";
 import { getConversationFeedback } from "~/lib/feedback";
@@ -19,7 +20,7 @@ export const meta: MetaFunction = () => [{ title: "Chat · tulipfarm" }];
 // Restore a persisted chat (UUID-chat persistence). Fetch the conversation + its messages, rehydrate
 // the timeline, and seed ChatPanel so the transcript renders and follow-up turns reuse the same id. A
 // 404 (unknown/deleted id) redirects to the new-chat surface rather than dead-ending. The default
-// model tier is derived from the conversation's agent, mirroring the index route.
+// effort preset is derived from the conversation's agent, mirroring the index route.
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id as string;
   let convo: Awaited<ReturnType<typeof getConversation>>;
@@ -42,13 +43,13 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   }
 
   const agentId = convo.agentId ?? undefined;
-  let defaultModel: ModelTier = "standard";
+  let defaultModel: ChatModelSelector = DEFAULT_CHAT_MODEL_SELECTOR;
   if (agentId) {
     try {
       const agent = await getAgent(agentId);
-      if (agent.model === "complex") defaultModel = "complex";
+      defaultModel = asPickerPreset(agent.model) ?? DEFAULT_CHAT_MODEL_SELECTOR;
     } catch {
-      // Unknown Agent / transient API error — keep the standard default rather than break chat.
+      // Unknown Agent / transient API error — keep Auto rather than break Chat.
     }
   }
 

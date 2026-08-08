@@ -109,8 +109,24 @@ export async function getProviderConfig(): Promise<Record<string, string>> {
 
 export type TierConfig = { providers: ProviderEntry[] };
 
+export type ProviderConnection = {
+  provider: string;
+  api_key_ref?: string;
+  base_url?: string;
+  resource_name?: string;
+};
+
+export type EffortPresetMappings = {
+  default?: string;
+  fast?: string;
+  balanced?: string;
+  thorough?: string;
+};
+
 export type LlmConfig = {
-  tiers: { quick: TierConfig; standard: TierConfig; complex: TierConfig };
+  connections?: Record<string, ProviderConnection>;
+  tiers?: { quick: TierConfig; standard: TierConfig; complex: TierConfig };
+  presets?: EffortPresetMappings;
   embeddings?: { providers: ProviderEntry[] };
 };
 

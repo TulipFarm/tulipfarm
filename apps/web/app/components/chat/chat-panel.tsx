@@ -1,14 +1,14 @@
 import { Link } from "@remix-run/react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
-import type { ChatMessage, ModelTier } from "~/lib/chat/types";
+import type { ChatMessage, ChatModelSelector } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
 import { errorAction } from "~/lib/error-actions";
 import type { OnboardingChecklist, Suggestion } from "~/lib/onboarding";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
 import { Composer } from "./composer";
 import { GettingStartedCard } from "./getting-started-card";
-import { asTier } from "./model-selector";
+import { asPickerPreset, DEFAULT_CHAT_MODEL_SELECTOR } from "./model-selector";
 import { Transcript } from "./transcript";
 import { useMentionCatalog } from "./use-mention-catalog";
 
@@ -77,7 +77,7 @@ function EmptyState({
 /** Layer-1 chat surface: empty state → live transcript, with the composer pinned to the bottom. */
 export function ChatPanel({
   agentId,
-  defaultModel = "standard",
+  defaultModel = DEFAULT_CHAT_MODEL_SELECTOR,
   suggestions = [],
   checklist,
   businessName,
@@ -87,7 +87,7 @@ export function ChatPanel({
   onConversationChange,
 }: {
   agentId?: string;
-  defaultModel?: ModelTier;
+  defaultModel?: ChatModelSelector;
   suggestions?: Suggestion[];
   checklist?: OnboardingChecklist | null;
   businessName?: string;
@@ -106,6 +106,7 @@ export function ChatPanel({
     stop,
     approve,
     regenerate,
+    tryHarder,
     sendFeedback,
     sendSurfaceInteraction,
     connectionState,
@@ -124,11 +125,10 @@ export function ChatPanel({
   // cards) inside user messages.
   const { entries, agentByName } = useMentionCatalog();
   const agentInfo = activeAgentName ? agentByName.get(activeAgentName) : undefined;
-  // The composer's MODEL selector reflects the active agent's tier (and a mentioned agent's tier as
-  // it's typed). asTier narrows each agent's raw frontmatter `model` to a pickable tier (or undefined,
-  // for "auto"/raw ids → the selector then keeps its current value).
-  const activeAgentTier = asTier(agentInfo?.model);
-  const tierById = (id: string) => asTier(agentByName.get(id)?.model);
+  // The composer's preset selector reflects the active agent's preset (and a mentioned agent's
+  // preset as it's typed). Raw ids yield undefined, so the picker keeps its current value.
+  const activeAgentPreset = asPickerPreset(agentInfo?.model);
+  const presetById = (id: string) => asPickerPreset(agentByName.get(id)?.model);
   const hasMessages = messages.length > 0;
   // Actionable errors (e.g. "LLM not configured") get a deep-link CTA to where the user fixes them.
   const errorCta = status === "error" ? errorAction(error) : null;
@@ -163,6 +163,7 @@ export function ChatPanel({
           mentions={entries}
           onApprove={approve}
           onRegenerate={regenerate}
+          onTryHarder={tryHarder}
           onFeedback={sendFeedback}
           onSurfaceInteraction={sendSurfaceInteraction}
         />
@@ -173,7 +174,7 @@ export function ChatPanel({
           label={agentInfo?.label}
           checklist={checklist}
           onDismissChecklist={onDismissChecklist}
-          onPick={(text) => send(text, { model: activeAgentTier ?? defaultModel, agentId })}
+          onPick={(text) => send(text, { model: activeAgentPreset ?? defaultModel, agentId })}
         />
       )}
       {status === "error" ? (
@@ -205,9 +206,8 @@ export function ChatPanel({
         busy={busy}
         defaultModel={defaultModel}
         onStop={stop}
-        // The MODEL selector follows the active agent's tier, and a mentioned agent's tier as typed.
-        activeAgentTier={activeAgentTier}
-        tierById={tierById}
+        activeAgentPreset={activeAgentPreset}
+        presetById={presetById}
         activeAgent={
           activeAgentName
             ? {

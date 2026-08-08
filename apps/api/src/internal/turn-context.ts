@@ -4,7 +4,6 @@ import {
   DEFAULT_GUARDRAILS,
   type GuardrailsService,
 } from "@tulipfarm/agent-runtime";
-import type { LlmService } from "@tulipfarm/llm";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import {
   chatRequestArtifactId,
@@ -30,6 +29,7 @@ import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
 import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
+import { resolveModelSelector } from "./model-selector";
 import type { HostedTurnContext, TurnAuthority, TurnContextResolver } from "./turn-host";
 
 /** Narrow read of one Run's Channel delivery correlation — just enough to resolve a target. */
@@ -128,7 +128,6 @@ export async function readChatRequest(
 export interface ChatTurnContextResolverOptions {
   readonly artifacts: ArtifactService;
   readonly store: ConversationStore;
-  readonly llmService: LlmService;
   readonly soulLoader?: SoulLoader;
   readonly toolRegistry?: ToolRegistry;
   readonly workingMemory?: WorkingMemoryService;
@@ -237,7 +236,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     return {
       agentId: agent.name,
       subjectId: authority.subject.id,
-      modelProfileId: this.resolveModelId(request),
+      modelProfileId: resolveModelSelector(request),
       contextDigest: manifest.digest,
       guardrailDigest,
       guardrailPolicy,
@@ -251,15 +250,6 @@ export class ChatTurnContextResolver implements TurnContextResolver {
       compacted: dropped.size > 0,
       ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
-  }
-
-  private resolveModelId(request: ChatRequestPayload): string {
-    const resolved = this.options.llmService.resolve({
-      ...(request.model === undefined ? {} : { sessionModel: request.model }),
-      ...(request.hasTools === undefined ? {} : { hasTools: request.hasTools }),
-      ...(request.llmDecision === undefined ? {} : { llmDecision: request.llmDecision }),
-    });
-    return resolved.modelId;
   }
 
   private async buildSystemPrompt(

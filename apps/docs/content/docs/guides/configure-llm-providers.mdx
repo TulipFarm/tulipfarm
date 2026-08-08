@@ -1,16 +1,16 @@
 ---
 title: Configure LLM providers
-description: Add provider credentials, assign tier models, and verify fallback behavior.
+description: Add provider credentials, assign models behind each effort preset, and verify fallback behavior.
 ---
 
 This guide configures the model providers TulipFarm uses for chat, Agents, Skills, and
 Routines. This is one of the few setup tasks that is UI-first instead of prompt-first:
-provider secrets and tier assignments are managed by admins in **Settings**. For the model
-selection model, see [LLM](/docs/concepts/llm).
+provider secrets and model assignments are managed by admins in **Settings**. For how a request
+becomes a model, see [Model routing](/docs/concepts/llm).
 
 ## Outcome
 
-At the end, each LLM tier has at least one priced, chat-capable model and TulipFarm can
+At the end, each effort preset has at least one priced, chat-capable model behind it and TulipFarm can
 reload the model service without restarting the app.
 
 <Steps>
@@ -38,9 +38,13 @@ reload the model service without restarting the app.
   <Step>
     Open **Settings → LLM**. Each tier — `quick`, `standard`, and `complex` — is an
     ordered fallback chain. Add one or more provider rows to each tier.
+
+    These three tiers are what the `fast`, `balanced`, and `thorough` effort presets resolve to.
+    Tier is a retired term that survives here only as the authoring shape; nothing selects a model
+    by tier at runtime. See [Model routing](/docs/concepts/llm).
   </Step>
   <Step>
-    Pick a provider and model for each row. Tier models must resolve to priced,
+    Pick a provider and model for each row. Models must resolve to priced,
     chat-capable entries from the LiteLLM catalog. The settings page pins the resolved
     pricing, context window, and capability metadata into the Soul.
 
@@ -57,6 +61,13 @@ reload the model service without restarting the app.
     network error, or a 5xx response, falls through to the next row.
   </Step>
   <Step>
+    Optionally set the **effort preset** mapping. By default `fast`, `balanced`, and `thorough`
+    resolve to the like-named chains, and `auto` resolves to the declared default. Point a preset
+    at a different ModelProfile to change what participants get without changing the chains
+    themselves. A preset naming a profile that does not exist is rejected on save rather than
+    failing later at the first turn that needs it.
+  </Step>
+  <Step>
     Choose **Save**. The settings page writes `llm.config.yaml` in the Soul, commits it,
     and reloads the LLM service live.
   </Step>
@@ -64,7 +75,7 @@ reload the model service without restarting the app.
 
 ## Verify
 
-Start a new chat and ask a simple question. If a tier has multiple providers, temporarily
+Start a new chat and ask a simple question. If a chain has multiple providers, temporarily
 make the first row return a transient error and confirm the answer comes from the next
 row. Do not use invalid credentials for this test: credential failures are hard failures
 and intentionally stop fallback.

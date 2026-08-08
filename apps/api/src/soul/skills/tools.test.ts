@@ -55,7 +55,7 @@ function makeSoulLoader(skills: SoulSkill[] = []): SoulLoader {
 
 function makeLlmService(configured = true): LlmService {
   return {
-    select: configured
+    effortModel: configured
       ? vi.fn().mockReturnValue({})
       : vi.fn().mockImplementation(() => {
           throw new LlmNotConfiguredError();
@@ -207,7 +207,7 @@ describe("skill_create", () => {
     expect(mkdir).not.toHaveBeenCalled();
   });
 
-  it("returns audit_required if LlmNotConfiguredError thrown by llmService.select", async () => {
+  it("returns audit_required if LlmNotConfiguredError thrown by llmService.effortModel", async () => {
     const ctx = makeCtx([], makeLlmService(false));
     const res = await createTool.handler(
       { name: "code-review", body: "body", frontmatter: frontmatter("code-review") },
@@ -281,7 +281,7 @@ describe("skill_create", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("_pendingAudit") },
     });
-    expect(llmService.select).not.toHaveBeenCalled();
+    expect(llmService.effortModel).not.toHaveBeenCalled();
     expect(writeFile).not.toHaveBeenCalled();
   });
 

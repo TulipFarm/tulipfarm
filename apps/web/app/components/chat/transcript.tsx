@@ -1,7 +1,8 @@
-import { Check, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
-import type { ChatMessage, ChatStatus, TimelinePart } from "~/lib/chat/types";
+import { nextEffortPreset } from "~/lib/chat/effort-escalation";
+import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
 import { MessagePartView } from "./parts";
 import type { MentionEntry } from "./use-mention-catalog";
@@ -21,6 +22,76 @@ function partKey(part: TimelinePart, i: number): string {
 
 function messageText(message: ChatMessage): string {
   return message.parts.map((p) => (p.kind === "text" ? p.text : "")).join("");
+}
+
+function effortLabel(preset: ModelReceipt["effortPreset"]): string | undefined {
+  switch (preset) {
+    case "auto":
+      return "Auto";
+    case "fast":
+      return "Fast";
+    case "balanced":
+      return "Balanced";
+    case "thorough":
+      return "Thorough";
+    default:
+      return undefined;
+  }
+}
+
+function requiredEffortLabel(preset: NonNullable<ModelReceipt["effortPreset"]>): string {
+  return effortLabel(preset) ?? preset;
+}
+
+function formatLatency(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
+}
+
+function ModelReceiptView({ receipt }: { receipt: ModelReceipt }) {
+  const asked = effortLabel(receipt.effortPreset);
+  // `auto` is a request, not an outcome. Showing only "Auto" hides the choice the deployment made
+  // on the participant's behalf; showing only the rung hides that they never picked it.
+  const applied = receipt.effortPreset === "auto" ? effortLabel(receipt.effortApplied) : undefined;
+  const effort = applied ? `${asked} → ${applied}` : asked;
+  return (
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs leading-5 text-muted-foreground">
+      <span>Answered by</span>
+      <code className="break-all font-mono text-[11px] text-muted-foreground">
+        {receipt.modelId}
+      </code>
+      {effort ? <span>· {effort} effort</span> : null}
+      <span>· model call {formatLatency(receipt.modelCallLatencyMs)}</span>
+    </p>
+  );
+}
+
+function AssistantMetaRow({
+  receipt,
+  tryHarderTarget,
+  onTryHarder,
+}: {
+  receipt?: ModelReceipt;
+  tryHarderTarget?: NonNullable<ModelReceipt["effortPreset"]>;
+  onTryHarder?: () => void;
+}) {
+  if (!receipt && !tryHarderTarget) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+      {receipt ? <ModelReceiptView receipt={receipt} /> : null}
+      {tryHarderTarget && onTryHarder ? (
+        <button
+          type="button"
+          onClick={onTryHarder}
+          aria-label={`Try harder with ${requiredEffortLabel(tryHarderTarget)} effort`}
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-border bg-background px-2 text-xs font-medium text-muted-foreground transition hover:bg-accent hover:text-foreground active:translate-y-px sm:min-h-7"
+        >
+          <ChevronsUp aria-hidden className="size-3.5 text-primary" />
+          <span>Try harder: {requiredEffortLabel(tryHarderTarget)}</span>
+        </button>
+      ) : null}
+    </div>
+  );
 }
 
 // Shared action-row chrome. `toolbarBase` keeps the layout; visibility (opacity) is applied by the
@@ -203,6 +274,7 @@ function Message({
   mentions,
   onApprove,
   onRegenerate,
+  onTryHarder,
   onFeedback,
   onSurfaceInteraction,
 }: {
@@ -212,6 +284,7 @@ function Message({
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
+  onTryHarder?: (messageId: string, model: NonNullable<ModelReceipt["effortPreset"]>) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
   onSurfaceInteraction?: (
     handle: string,
@@ -238,6 +311,13 @@ function Message({
   const text = messageText(message);
   // Regenerate re-runs the last turn — only offer it on the latest, finished assistant reply.
   const canRegenerate = isLast && status === "idle" ? onRegenerate : undefined;
+  const nextPreset =
+    message.sealed && status === "idle" && message.sourceTurn && message.receipt
+      ? nextEffortPreset(
+          message.sourceTurn.options?.model ?? message.receipt.effortPreset,
+          message.receipt.effortApplied
+        )
+      : undefined;
   return (
     <article aria-label="Assistant response" className="group flex flex-col gap-2">
       {message.parts.map((part, i) => (
@@ -250,6 +330,15 @@ function Message({
           onSurfaceInteraction={onSurfaceInteraction}
         />
       ))}
+      {message.sealed ? (
+        <AssistantMetaRow
+          receipt={message.receipt}
+          tryHarderTarget={nextPreset}
+          onTryHarder={
+            nextPreset && onTryHarder ? () => onTryHarder(message.id, nextPreset) : undefined
+          }
+        />
+      ) : null}
       {message.sealed && text ? (
         <AssistantActions
           text={text}
@@ -281,6 +370,7 @@ export function Transcript({
   mentions,
   onApprove,
   onRegenerate,
+  onTryHarder,
   onFeedback,
   onSurfaceInteraction,
 }: {
@@ -289,6 +379,7 @@ export function Transcript({
   mentions?: MentionEntry[];
   onApprove: (approvalId: string, decision: "approve" | "deny") => void;
   onRegenerate?: () => void;
+  onTryHarder?: (messageId: string, model: NonNullable<ModelReceipt["effortPreset"]>) => void;
   onFeedback?: (messageId: string, rating: "up" | "down" | null, note?: string) => void;
   onSurfaceInteraction?: (
     handle: string,
@@ -321,6 +412,7 @@ export function Transcript({
             mentions={mentions}
             onApprove={onApprove}
             onRegenerate={onRegenerate}
+            onTryHarder={onTryHarder}
             onFeedback={onFeedback}
             onSurfaceInteraction={onSurfaceInteraction}
           />

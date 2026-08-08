@@ -7,7 +7,13 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Textarea } from "~/components/ui/textarea";
 import { ApiError } from "~/lib/api";
-import { type LlmProviderInfo, listProviders, putLlmConfig, putSecret } from "~/lib/settings";
+import {
+  type LlmConfig,
+  type LlmProviderInfo,
+  listProviders,
+  putLlmConfig,
+  putSecret,
+} from "~/lib/settings";
 import { completeSetup, getSetupStatus, setupAdmin, setupBusiness } from "~/lib/setup";
 import { cn } from "~/lib/utils";
 
@@ -36,7 +42,7 @@ const STEPS = [
   {
     label: "LLM setup",
     description:
-      "Agents need a model provider to run. Your key is stored encrypted, and you can change providers later in Settings.",
+      "Use one provider and Model ID for every effort preset. You can split them later in Settings.",
     optional: true,
   },
 ] as const satisfies readonly StepMeta[];
@@ -370,6 +376,18 @@ const DEFAULT_MODEL: Record<string, string> = {
 };
 
 type LlmDraft = { providerId: string; model: string; fieldValues: Record<string, string> };
+export function buildSetupLlmConfig(providerId: string, model: string): LlmConfig {
+  const entry = { provider: providerId, model: model.trim() };
+  return {
+    tiers: {
+      quick: { providers: [entry] },
+      standard: { providers: [entry] },
+      complex: { providers: [entry] },
+    },
+    // One provider seeds every preset; Settings splits them once more models are configured.
+    presets: { default: "balanced" },
+  };
+}
 
 // Step 3: LLM setup — uses the same registry and storage endpoints as Settings › Secrets + LLM Config.
 function LlmStep({
@@ -417,14 +435,7 @@ function LlmStep({
       await Promise.all(
         filled.map((f) => putSecret(f.key, (draft.fieldValues[f.key] ?? "").trim()))
       );
-      const entry = { provider: draft.providerId, model: draft.model.trim() };
-      await putLlmConfig({
-        tiers: {
-          quick: { providers: [entry] },
-          standard: { providers: [entry] },
-          complex: { providers: [entry] },
-        },
-      });
+      await putLlmConfig(buildSetupLlmConfig(draft.providerId, draft.model));
       onNext();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save LLM configuration.");
@@ -475,7 +486,11 @@ function LlmStep({
           />
         </Field>
       ))}
-      <Field id="setup-model" label="Model" hint="The exact model id your provider expects.">
+      <Field
+        id="setup-model"
+        label="Model ID"
+        hint="The provider's exact model identifier. Setup uses it for every effort preset."
+      >
         <Input
           id="setup-model"
           className={controlClass}

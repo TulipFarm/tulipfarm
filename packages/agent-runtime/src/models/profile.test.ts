@@ -128,6 +128,21 @@ describe("selectModelProfile", () => {
     expect(selection).toMatchObject({ outcome: "denied", reason: "latency_budget_exceeded" });
   });
 
+  it("does not treat execution budgets as selection constraints", () => {
+    const selection = selectModelProfile(
+      "primary",
+      requirements,
+      catalog(
+        profile({
+          constraints: { residency: "eu", dataRetention: "zero_retention" },
+          budgets: { maxTokens: 1, maxCostUsd: 0.000001 },
+        })
+      )
+    );
+
+    expect(selection).toMatchObject({ outcome: "selected", profileId: "primary" });
+  });
+
   it("denies a capability class the requester did not ask for", () => {
     const selection = selectModelProfile(
       "primary",
@@ -194,5 +209,57 @@ describe("selectModelProfile", () => {
     expect(selection.rejectedFallbacks).toEqual([
       { profileId: "ghost", reason: "unknown_profile" },
     ]);
+  });
+});
+
+describe("selectModelProfile — modality", () => {
+  const visionTurn: ModelRequirements = { ...requirements, inputModalities: ["image"] };
+
+  it("treats an undeclared modality as text-only rather than permissive", () => {
+    const selection = selectModelProfile("primary", visionTurn, catalog(profile()));
+
+    expect(selection).toMatchObject({ outcome: "denied", reason: "modality_unsupported" });
+  });
+
+  it("selects a profile that declares the required input modality", () => {
+    const vision = profile({
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "image"],
+      },
+    });
+
+    const selection = selectModelProfile("primary", visionTurn, catalog(vision));
+
+    expect(selection.outcome).toBe("selected");
+  });
+
+  it("never falls back from a vision profile to a text-only one", () => {
+    const vision = profile({
+      supports: {
+        tools: true,
+        structuredOutput: true,
+        contextWindowTokens: 100_000,
+        inputModalities: ["text", "image"],
+      },
+      fallbacks: ["text-only"],
+    });
+    const textOnly = profile({ profileId: "text-only", fallbacks: [] });
+
+    const selection = selectModelProfile("primary", visionTurn, catalog(vision, textOnly));
+
+    if (selection.outcome !== "selected") throw new Error("expected selection");
+    expect(selection.chain.map((entry) => entry.profileId)).toEqual(["primary"]);
+    expect(selection.rejectedFallbacks).toEqual([
+      { profileId: "text-only", reason: "modality_unsupported" },
+    ]);
+  });
+
+  it("leaves a text-only turn unaffected", () => {
+    const selection = selectModelProfile("primary", requirements, catalog(profile()));
+
+    expect(selection.outcome).toBe("selected");
   });
 });

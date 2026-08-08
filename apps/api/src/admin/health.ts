@@ -122,7 +122,7 @@ export function soulProbe(soul: SoulProbeTarget): HealthProbe {
 }
 
 export interface ModelProbeTarget {
-  getModel(tier: "standard"): unknown;
+  effortModel(preset: "balanced"): unknown;
 }
 
 /**
@@ -133,7 +133,7 @@ export function llmProbe(llm: ModelProbeTarget): HealthProbe {
   return {
     component: "llm",
     async check() {
-      llm.getModel("standard");
+      llm.effortModel("balanced");
       return { status: "ok" };
     },
   };

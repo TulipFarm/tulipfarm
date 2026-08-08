@@ -54,7 +54,7 @@ Note: ProseMirror can't be driven under jsdom — the editor's behavior is cover
 ## Persistence & history
 
 Conversations persist server-side (UUID id, auto-created on the first turn). On that first turn the API
-generates a **title** from the message via the quick LLM tier (async, non-blocking — see
+generates a **title** from the message via the `fast` effort preset (async, non-blocking — see
 `apps/api/src/chat/title.ts`). The shell holds the list in `lib/conversations-context.tsx`
 (`GET /api/v1/chats`, refetched on route change + on each turn via `onConversationChange`), which
 `app-sidebar.tsx` renders below a clickable **Chats** header (the entry point to the `/chats` browse
@@ -72,8 +72,21 @@ inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarr
 | `parts.tsx` Response (text) | `text` (live) |
 | `parts.tsx` tool block + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
 | `parts.tsx` reasoning / plan / task / sources / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits |
-| `model-selector.tsx` | sets POST `model` — a portalled dropdown over quick/standard/complex (signal-bar intensity icons); each option explains the tier (line 1) and lists its configured models (line 2, from `GET /api/v1/llm-config`) |
+| `model-selector.tsx` | sets POST `model` to an Effort Preset id — Auto/Fast/Balanced/Thorough in a portalled dropdown with signal-bar intensity icons. Auto is visible as the default path: the system balances effort, latency, and cost unless the participant deliberately overrides it. Fast, Balanced, and Thorough explain the tradeoff directly; the picker does not list provider model names because `GET /api/v1/llm-config` exposes legacy provider chains, not a per-preset display contract. |
 | `autonomy-control.tsx` | sets POST `autonomy`; `approval-required` arms the live tool-approval gate |
+
+## Try harder
+
+Completed assistant replies that carry the model receipt can show a quiet **Try harder** action beside
+that receipt. It replays the user turn that produced that reply as a new Turn, leaving the original
+assistant Message in place for comparison. The replay uses the same `runStream` path as regenerate,
+so it mints a fresh idempotency key and sends the same per-turn context (`agentId`, Skills,
+Resources, and Knowledge pages) with only `model` changed to the next Effort Preset.
+
+The escalation ladder is one step: Fast → Balanced → Thorough. Auto is not itself a ladder rung;
+backend `resolveEffortPreset` anchors Auto on the declared default, which this UI treats as Balanced,
+so Try harder from Auto targets Thorough. Thorough has no higher preset, so no action is rendered.
+The affordance is user-driven only and is hidden while any turn is streaming.
 
 ## Approval round-trip (live)
 

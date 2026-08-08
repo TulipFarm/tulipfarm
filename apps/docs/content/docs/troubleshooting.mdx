@@ -125,7 +125,7 @@ recovery path is to restore from a backup — see
 <Accordion title="[llm] no llm.config.yaml found — LLM features disabled">
 
 No model is configured, so no turn can run. Open **Settings → Secrets**, add a provider API
-key, then **Settings → LLM** and assign a model to each tier.
+key, then **Settings → LLM** and assign a model to each tier, so every effort preset resolves.
 
 Full walkthrough: [Configure LLM providers](/docs/guides/configure-llm-providers).
 
@@ -152,8 +152,12 @@ has already applied.
 
 The key stored in **Settings → Secrets** is rejected by the provider. Secret values are
 write-only once saved — you cannot read one back to check it, so replace it rather than
-inspect it. If you configured a fallback tier, TulipFarm will try the next model in the
-chain before failing the turn.
+inspect it.
+
+The two errors behave differently. A **quota** error (429) is transient, so TulipFarm falls
+through to the next provider in the chain. An **authentication** error is not: another provider
+cannot fix a rejected key, so the turn fails immediately rather than burning the rest of the chain
+on the same fault.
 
 </Accordion>
 

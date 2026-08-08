@@ -4,8 +4,10 @@ export { ajv } from "./ajv";
 export type { ValidationBoundary } from "./boundaries";
 export { BOUNDARIES } from "./boundaries";
 export { CANONICAL_HASH_ALGORITHM, canonicalHash, canonicalize } from "./canonicalize";
+export type { ModelProfileDenialReason } from "./definitions";
 export * from "./definitions";
 export * as definitions from "./definitions";
+export { MODEL_PROFILE_DENIAL_REASONS } from "./definitions";
 export { TulipFarmValidationError } from "./error";
 export type { SchemaContractErrorCode, SchemaValidationIssue } from "./errors";
 export {
@@ -40,6 +42,7 @@ export type {
   EmbeddingsConfig,
   LlmConfig,
   ModelSpec,
+  ProviderConnection,
   ProviderEntry,
   TierConfig,
 } from "./llm";
@@ -52,6 +55,24 @@ export {
   UnknownModelError,
   validateLlmConfig,
 } from "./llm";
+export type {
+  DerivedModelProfile,
+  EffortPreset,
+  EffortRung,
+  HoistedConnections,
+} from "./model-catalog";
+export {
+  asEffortPreset,
+  DEPRECATED_TIER_ALIASES,
+  deriveModelProfiles,
+  EFFORT_PRESETS,
+  EFFORT_RUNGS,
+  hoistProviderConnections,
+  isDeprecatedTierAlias,
+  isEffortPreset,
+  isEffortRung,
+  resolveEffortPreset,
+} from "./model-catalog";
 export type {
   SchemaRegistration,
   ValidatedSchemaDocument,

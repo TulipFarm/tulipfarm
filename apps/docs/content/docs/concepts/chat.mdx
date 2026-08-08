@@ -38,6 +38,25 @@ The web UI can start a turn with a selected Agent. A running Agent can also move
 
 Delegation is for scoped help; transfer is for changing the actor responsible for the chat.
 
+## Choosing effort, not a model
+
+A participant never picks a model. The composer offers an **effort preset** — Auto, Fast, Balanced,
+or Thorough — and the deployment maps each one to a [ModelProfile](/docs/concepts/llm). Auto is the
+default and lets the deployment decide. Picking effort says how much care a question deserves,
+which is a judgement the person asking is well placed to make; picking a model would ask them to
+know which provider handles their question best, which they are not.
+
+Every finished reply carries a quiet **receipt**: the model that answered, the effort, and how long
+the model call took. When Auto answered, the receipt names the level it resolved to — `Auto →
+Balanced` — so the choice made on the participant's behalf is visible rather than implied. Cost is
+not shown to participants; operators read the full routing decision from the `model.routed` Run
+event.
+
+When a reply falls short, **Try harder** re-runs the same message one level higher, escalating from
+the level the receipt says was actually applied. It is always the participant's choice — TulipFarm
+never silently upgrades a turn. See [Model routing](/docs/concepts/llm) for how presets resolve,
+and [Configure LLM providers](/docs/guides/configure-llm-providers) for the admin side.
+
 ## Feedback and suggestions
 
 Assistant messages support thumbs up and thumbs down feedback. Feedback is stored per user and

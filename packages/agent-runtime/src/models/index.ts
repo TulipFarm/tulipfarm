@@ -7,6 +7,8 @@ export type {
   RoutableModelProfile,
 } from "./profile";
 export { checkModelProfile, selectModelProfile } from "./profile";
+export type { ModelRequirementsPolicy } from "./requirements";
+export { deriveModelRequirements, estimateContextTokens } from "./requirements";
 export type {
   ModelInvocationScope,
   ModelRouterOptions,

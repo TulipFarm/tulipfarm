@@ -32,8 +32,10 @@ export * from "./knowledge";
 export * from "./memory";
 export {
   MODEL_PROFILE_DEFINITION,
+  MODEL_PROFILE_DENIAL_REASONS,
   type ModelProfileDefinition,
   ModelProfileDefinitionSchema,
+  type ModelProfileDenialReason,
   type ModelProfileSpec,
 } from "./model";
 export * from "./role";

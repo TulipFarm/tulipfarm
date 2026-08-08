@@ -1,56 +1,80 @@
+import { asEffortPreset } from "@tulipfarm/schema";
 import { Check, ChevronDown } from "lucide-react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { ModelTier } from "~/lib/chat/types";
-import { getLlmConfig } from "~/lib/settings";
+import type { ChatModelSelector } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 
-type Tier = "quick" | "standard" | "complex";
+export const DEFAULT_CHAT_MODEL_SELECTOR: ChatModelSelector = "auto";
 
-// The three pickable tiers, in ascending capability/intensity. `level` drives the signal-bar icon;
-// `blurb` explains what the tier means. (`auto` exists in the backend selector but isn't offered here.)
-const TIERS: { id: Tier; label: string; level: 1 | 2 | 3; blurb: string }[] = [
-  { id: "quick", label: "Quick", level: 1, blurb: "Fast and low-cost for short, simple tasks" },
-  { id: "standard", label: "Standard", level: 2, blurb: "Balanced default for everyday Chat" },
+type PresetOption = {
+  id: ChatModelSelector;
+  label: string;
+  level: 0 | 1 | 2 | 3;
+  description: string;
+  default?: boolean;
+};
+
+const AUTO_OPTION: PresetOption = {
+  id: "auto",
+  label: "Auto",
+  level: 0,
+  description: "Lets TulipFarm balance effort, latency, and cost for this turn.",
+  default: true,
+};
+
+const PRESET_OPTIONS: readonly PresetOption[] = [
+  AUTO_OPTION,
   {
-    id: "complex",
-    label: "Complex",
+    id: "fast",
+    label: "Fast",
+    level: 1,
+    description: "Lower effort for faster, lower-cost replies.",
+  },
+  {
+    id: "balanced",
+    label: "Balanced",
+    level: 2,
+    description: "Moderate effort for everyday depth, latency, and cost.",
+  },
+  {
+    id: "thorough",
+    label: "Thorough",
     level: 3,
-    blurb: "Deeper reasoning for hard, multi-step work",
+    description: "Higher effort for deeper work with more latency and cost.",
   },
 ];
 
-// The pickable tiers as plain ids (mirrors TIERS) for narrowing arbitrary model strings.
-const PICKABLE_TIERS: readonly ModelTier[] = ["quick", "standard", "complex"];
+const PICKABLE_PRESETS = PRESET_OPTIONS.map((option) => option.id);
 
-/**
- * Narrow an arbitrary model string — an agent's `frontmatter.model`, which may be a tier, `"auto"`,
- * or a raw provider model id — to one of the three *pickable* tiers. `"auto"`, raw ids, and undefined
- * all yield undefined, so callers leave the dropdown unchanged rather than show an unrepresentable value.
- */
-export function asTier(s: string | undefined): ModelTier | undefined {
-  return s != null && (PICKABLE_TIERS as readonly string[]).includes(s)
-    ? (s as ModelTier)
+export function asPickerPreset(s: string | undefined): ChatModelSelector | undefined {
+  const preset = asEffortPreset(s);
+  return preset != null && (PICKABLE_PRESETS as readonly string[]).includes(preset)
+    ? preset
     : undefined;
 }
 
-/**
- * The tier the composer's MODEL selector should reflect for the next turn: the `@`-mentioned agent's
- * tier if one is in the box, else the active conversation agent's tier, else the fallback. Pure and
- * id-keyed so the composer can sync the dropdown via an effect without driving ProseMirror.
- */
-export function effectiveTier(args: {
+export function effectiveEffortPreset(args: {
   mentionedAgentId?: string;
-  tierById: (id: string) => ModelTier | undefined;
-  activeAgentTier?: ModelTier;
-  fallback: ModelTier;
-}): ModelTier {
-  const mentioned = args.mentionedAgentId ? args.tierById(args.mentionedAgentId) : undefined;
-  return mentioned ?? args.activeAgentTier ?? args.fallback;
+  presetById: (id: string) => ChatModelSelector | undefined;
+  activeAgentPreset?: ChatModelSelector;
+  fallback: ChatModelSelector;
+}): ChatModelSelector {
+  const mentioned = args.mentionedAgentId ? args.presetById(args.mentionedAgentId) : undefined;
+  return mentioned ?? args.activeAgentPreset ?? args.fallback;
 }
 
-// Three ascending bars, like a volume/signal meter: bars up to `level` are lit, the rest dimmed.
-function SignalBars({ level }: { level: 1 | 2 | 3 }) {
+function optionFor(value: ChatModelSelector): PresetOption {
+  return PRESET_OPTIONS.find((option) => option.id === value) ?? AUTO_OPTION;
+}
+
+function optionIndex(value: ChatModelSelector): number {
+  const index = PRESET_OPTIONS.findIndex((option) => option.id === value);
+  return index >= 0 ? index : 0;
+}
+
+function SignalBars({ level }: { level: 0 | 1 | 2 | 3 }) {
   const bars = [3, 6, 9];
   return (
     <svg width="11" height="11" viewBox="0 0 11 11" aria-hidden="true" className="shrink-0">
@@ -69,48 +93,28 @@ function SignalBars({ level }: { level: 1 | 2 | 3 }) {
   );
 }
 
-/**
- * Per-message model override (maps 1:1 to the POST /chat `model` field). A dropdown over the three
- * tiers: the trigger shows the active tier with a signal-bar intensity icon, and each menu option
- * explains what the tier means (line 1) and lists the models configured for it (line 2, read once
- * from GET /api/v1/llm-config). The menu is portalled so the composer's clipping box never crops it.
- */
 export function ModelSelector({
   value,
   onChange,
   disabled,
 }: {
-  value: ModelTier;
-  onChange: (model: ModelTier) => void;
+  value: ChatModelSelector;
+  onChange: (preset: ChatModelSelector) => void;
   disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [models, setModels] = useState<Record<Tier, string[]>>({
-    quick: [],
-    standard: [],
-    complex: [],
-  });
   const [rect, setRect] = useState<DOMRect | null>(null);
+  const [focusedIndex, setFocusedIndex] = useState(() => optionIndex(value));
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const current = optionFor(value);
 
   useEffect(() => {
-    let alive = true;
-    getLlmConfig()
-      .then((cfg) => {
-        if (!alive) return;
-        const list = (t: Tier) =>
-          (cfg.tiers?.[t]?.providers ?? []).map((p) => `${p.provider} / ${p.model}`);
-        setModels({ quick: list("quick"), standard: list("standard"), complex: list("complex") });
-      })
-      // Non-admins or an unconfigured instance: the models line falls back to "not configured".
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, []);
+    if (!open) return;
+    optionRefs.current[focusedIndex]?.focus();
+  }, [focusedIndex, open]);
 
-  // Close on outside click, Escape, or any scroll/resize (the menu is fixed-positioned off the rect).
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -120,7 +124,10 @@ export function ModelSelector({
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
     };
     const close = () => setOpen(false);
     document.addEventListener("mousedown", onDown);
@@ -135,11 +142,57 @@ export function ModelSelector({
     };
   }, [open]);
 
-  const current = TIERS.find((t) => t.id === value) ?? TIERS[1];
+  function openMenu(nextIndex = optionIndex(value)) {
+    if (triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
+    setFocusedIndex(nextIndex);
+    setOpen(true);
+  }
 
   function toggle() {
-    if (!open && triggerRef.current) setRect(triggerRef.current.getBoundingClientRect());
-    setOpen((o) => !o);
+    if (open) {
+      setOpen(false);
+    } else {
+      openMenu();
+    }
+  }
+
+  function choose(option: PresetOption) {
+    onChange(option.id);
+    setOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  function moveFocus(delta: number) {
+    setFocusedIndex((index) => (index + delta + PRESET_OPTIONS.length) % PRESET_OPTIONS.length);
+  }
+
+  function onTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      openMenu(optionIndex(value));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      openMenu(PRESET_OPTIONS.length - 1);
+    }
+  }
+
+  function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      moveFocus(1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      moveFocus(-1);
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setFocusedIndex(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setFocusedIndex(PRESET_OPTIONS.length - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      choose(PRESET_OPTIONS[focusedIndex] ?? AUTO_OPTION);
+    }
   }
 
   return (
@@ -149,9 +202,10 @@ export function ModelSelector({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Model: ${current.label}`}
+        aria-label={`Effort preset: ${current.label}${current.default ? " (default)" : ""}`}
         disabled={disabled}
         onClick={toggle}
+        onKeyDown={onTriggerKeyDown}
         className={cn(
           "inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 font-medium text-foreground transition",
           "outline-none hover:border-primary/60 active:translate-y-px focus-visible:border-primary disabled:opacity-50"
@@ -159,6 +213,11 @@ export function ModelSelector({
       >
         <SignalBars level={current.level} />
         <span>{current.label}</span>
+        {current.default ? (
+          <span className="rounded-sm bg-secondary px-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+            Default
+          </span>
+        ) : null}
         <ChevronDown aria-hidden className="size-3 opacity-70" />
       </button>
 
@@ -166,39 +225,43 @@ export function ModelSelector({
         ? createPortal(
             <div
               ref={menuRef}
+              role="menu"
+              aria-label="Effort preset"
               className="fixed z-50 w-72 rounded-sm border border-border bg-card p-1 text-xs"
               style={{ left: rect.left, bottom: window.innerHeight - rect.top + 6 }}
+              onKeyDown={onMenuKeyDown}
             >
-              {TIERS.map((t) => {
-                const active = value === t.id;
-                const tierModels = models[t.id];
-                const modelLine = tierModels.length > 0 ? tierModels.join(", ") : "not configured";
+              {PRESET_OPTIONS.map((option, index) => {
+                const active = value === option.id;
                 return (
                   <button
-                    key={t.id}
-                    type="button"
-                    aria-label={t.label}
-                    aria-pressed={active}
-                    onClick={() => {
-                      onChange(t.id);
-                      setOpen(false);
+                    key={option.id}
+                    ref={(node) => {
+                      optionRefs.current[index] = node;
                     }}
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={active}
+                    onFocus={() => setFocusedIndex(index)}
+                    onClick={() => choose(option)}
                     className={cn(
                       "flex w-full flex-col gap-0.5 rounded-sm px-2 py-2 text-left transition hover:bg-secondary active:translate-y-px",
                       active && "bg-secondary"
                     )}
                   >
                     <span className="flex items-center gap-1.5 text-foreground">
-                      <SignalBars level={t.level} />
-                      <span className="font-medium">{t.label}</span>
+                      <SignalBars level={option.level} />
+                      <span className="font-medium">{option.label}</span>
+                      {option.default ? (
+                        <span className="rounded-sm bg-background px-1 text-[0.625rem] font-medium uppercase tracking-wide text-muted-foreground">
+                          Default
+                        </span>
+                      ) : null}
                       {active ? (
                         <Check aria-hidden className="ml-auto size-3.5 text-primary" />
                       ) : null}
                     </span>
-                    <span className="text-muted-foreground">{t.blurb}</span>
-                    <span className="break-words text-[0.6875rem] text-muted-foreground/70">
-                      {modelLine}
-                    </span>
+                    <span className="text-muted-foreground">{option.description}</span>
                   </button>
                 );
               })}

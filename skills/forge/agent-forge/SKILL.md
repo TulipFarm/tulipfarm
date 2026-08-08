@@ -31,7 +31,9 @@ never do.
 
 ### Step 3 — Model & autonomy
 
-- **model**: `quick` | `standard` | `complex` (default `standard`).
+- **model**: `fast` | `balanced` | `thorough` (default `balanced`). The old tier names
+  `quick`/`standard`/`complex` are still accepted for one release and translated to these effort
+  presets, but new Agents should be authored with the preset names.
 - **autonomy**: `supervised` (default) | `full` | `approval-required` | `manual`.
   `approval-required` gates every mutating Tool behind human Approval; `supervised`/`full` run
   without per-action gates; `manual` gates every Tool call.

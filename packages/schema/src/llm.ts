@@ -74,6 +74,22 @@ const TierConfigSchema = Type.Object({
   providers: Type.Array(ProviderEntrySchema, { minItems: 1 }),
 });
 
+/**
+ * A named set of provider credentials, addressed by ModelProfiles via `spec.connection`.
+ *
+ * Credentials are separated from routing because they answer a different question and have a
+ * different audience: a connection is admin/secret-bearing infrastructure, while a ModelProfile is
+ * git-audited governance. Keying by name rather than by provider preserves multi-account setups —
+ * two Azure resources with different keys are two connections, which per-entry `api_key_ref` in the
+ * tier config could express and a provider-keyed map could not.
+ */
+const ProviderConnectionSchema = Type.Object({
+  provider: Type.String({ minLength: 1 }),
+  api_key_ref: Type.Optional(Type.String()),
+  base_url: Type.Optional(Type.String()),
+  resource_name: Type.Optional(Type.String()),
+});
+
 const EmbeddingProviderEntrySchema = Type.Object({
   provider: Type.String(),
   model: Type.String({ minLength: 1, pattern: "^\\S+$" }),
@@ -88,16 +104,33 @@ const EmbeddingsConfigSchema = Type.Object({
 });
 
 export const LlmConfigSchema = Type.Object({
-  tiers: Type.Object({
-    quick: TierConfigSchema,
-    standard: TierConfigSchema,
-    complex: TierConfigSchema,
-  }),
+  /** Named provider credentials. ModelProfiles reference these by name; secrets never leave here. */
+  connections: Type.Optional(Type.Record(Type.String({ minLength: 1 }), ProviderConnectionSchema)),
+  // Legacy tier routing. Retained so an unmigrated Soul still validates and boots; the runtime
+  // derives ModelProfiles from it (see `model-catalog.ts`) rather than routing on it directly.
+  // Deprecated: authored ModelProfiles + effort presets are the canonical form.
+  tiers: Type.Optional(
+    Type.Object({
+      quick: TierConfigSchema,
+      standard: TierConfigSchema,
+      complex: TierConfigSchema,
+    })
+  ),
+  /** Effort preset → ModelProfile ref. The only model concept a participant ever picks. */
+  presets: Type.Optional(
+    Type.Object({
+      default: Type.Optional(Type.String({ minLength: 1 })),
+      fast: Type.Optional(Type.String({ minLength: 1 })),
+      balanced: Type.Optional(Type.String({ minLength: 1 })),
+      thorough: Type.Optional(Type.String({ minLength: 1 })),
+    })
+  ),
   embeddings: Type.Optional(EmbeddingsConfigSchema),
 });
 
 export type ModelSpec = Static<typeof ModelSpecSchema>;
 export type ProviderEntry = Static<typeof ProviderEntrySchema>;
+export type ProviderConnection = Static<typeof ProviderConnectionSchema>;
 export type TierConfig = Static<typeof TierConfigSchema>;
 export type EmbeddingProviderEntry = Static<typeof EmbeddingProviderEntrySchema>;
 export type EmbeddingsConfig = Static<typeof EmbeddingsConfigSchema>;
@@ -111,5 +144,12 @@ export function validateLlmConfig(data: unknown): LlmConfig {
     const path = e.instancePath ? `${e.instancePath}: ` : "";
     throw new LlmConfigValidationError(`${path}${e.message ?? "invalid config"}`);
   }
-  return data as LlmConfig;
+  const config = data as LlmConfig;
+  // Both routing sources are individually optional so a Soul can be on either side of the
+  // ModelProfile migration — but a config naming neither routes nothing, and silently accepting it
+  // would surface later as an unexplained "LLM not configured" at the first turn.
+  if (config.tiers === undefined && config.presets === undefined) {
+    throw new LlmConfigValidationError("config must declare either tiers or presets");
+  }
+  return config;
 }

@@ -8,6 +8,28 @@ test("text deltas merge and finish seals the assistant Turn", () => {
   state = chatReducer(state, { type: "finish", data: { reason: "stop" } });
   expect(state.messages[0]?.parts).toEqual([{ kind: "text", text: "Hello world" }]);
   expect(state.messages[0]?.sealed).toBe(true);
+  expect(state.messages[0]?.receipt).toBeUndefined();
+});
+
+test("finish stores the model receipt when present", () => {
+  let state = chatReducer(initialChatState, { type: "text", data: { delta: "Hello" } });
+  state = chatReducer(state, {
+    type: "finish",
+    data: {
+      reason: "stop",
+      receipt: {
+        modelId: "claude-sonnet-5",
+        effortPreset: "balanced",
+        modelCallLatencyMs: 1234,
+      },
+    },
+  });
+
+  expect(state.messages[0]?.receipt).toEqual({
+    modelId: "claude-sonnet-5",
+    effortPreset: "balanced",
+    modelCallLatencyMs: 1234,
+  });
 });
 
 test("Surface revisions replace the matching Artifact in place", () => {

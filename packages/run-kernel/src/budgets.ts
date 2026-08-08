@@ -1,4 +1,11 @@
-import type { LimitKey, ResolvedLimits } from "./limits";
+import type { ModelProfileSpec } from "@tulipfarm/schema";
+import {
+  LimitError,
+  type LimitKey,
+  type ResolvedLimits,
+  resolveLimits,
+  type ScopedLimits,
+} from "./limits";
 
 /**
  * What a Run does when a budget is exhausted (SPEC §9.1). Exhaustion is never raised away: it
@@ -51,6 +58,48 @@ export class BudgetError extends Error {
   ) {
     super(`${code}${key ? `:${key}` : ""}`);
   }
+}
+
+const MICROS_PER_USD = 1_000_000;
+
+/**
+ * Converts an authored USD ceiling to the integer micro-USD unit used by Run limits. Positive
+ * fractional budgets round up so a tiny explicit budget remains at least one micro-USD instead of
+ * silently becoming the hard-failing zero ceiling.
+ */
+export function usdToCostMicros(maxCostUsd: number): number {
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) {
+    throw new LimitError("invalid_limit", "costMicros");
+  }
+  const micros = maxCostUsd === 0 ? 0 : Math.max(1, Math.ceil(maxCostUsd * MICROS_PER_USD));
+  if (!Number.isSafeInteger(micros) || micros < 0) {
+    throw new LimitError("invalid_limit", "costMicros");
+  }
+  return micros;
+}
+
+/** The execution ceilings a ModelProfile contributes at SPEC §9.1's narrowest scope. */
+export function modelProfileBudgetScopedLimits(
+  profile: Pick<ModelProfileSpec, "budgets">
+): ScopedLimits | undefined {
+  const limits: ScopedLimits["limits"] = {};
+  if (profile.budgets?.maxTokens !== undefined) limits.tokens = profile.budgets.maxTokens;
+  if (profile.budgets?.maxCostUsd !== undefined) {
+    limits.costMicros = usdToCostMicros(profile.budgets.maxCostUsd);
+  }
+  return Object.keys(limits).length === 0 ? undefined : { scope: "model", limits };
+}
+
+/**
+ * Resolves a ModelProfile's execution budgets with any broader scopes. Missing budgets contribute
+ * nothing, so an unbounded profile stays unbounded rather than receiving an invented default.
+ */
+export function resolveModelProfileBudgetLimits(
+  profile: Pick<ModelProfileSpec, "budgets">,
+  scoped: readonly ScopedLimits[] = []
+): ResolvedLimits {
+  const modelLimits = modelProfileBudgetScopedLimits(profile);
+  return resolveLimits(modelLimits === undefined ? scoped : [...scoped, modelLimits]);
 }
 
 /** Narrow surface `RunBudgetManager` needs; `@tulipfarm/storage`'s `BudgetStore` satisfies it. */

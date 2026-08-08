@@ -174,7 +174,7 @@ describe("skills routes", () => {
       "utf8"
     );
 
-    const llmService = { select: vi.fn().mockReturnValue({}) } as never;
+    const llmService = { effortModel: vi.fn().mockReturnValue({}) } as never;
     app = await buildApp({
       sessionStore: store,
       userRepo,

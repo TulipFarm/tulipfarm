@@ -11,8 +11,15 @@
  * is why a lost connection reconnects by cursor instead of resending the question.
  */
 
+import type { EffortRung } from "@tulipfarm/schema";
 import { API_BASE, ApiError, apiWrite, mutationHeaders } from "~/lib/api";
-import type { Autonomy, ChatEvent, ChatEventType, ParsedFrame } from "~/lib/chat/types";
+import type {
+  Autonomy,
+  ChatEvent,
+  ChatEventType,
+  ChatModelSelector,
+  ParsedFrame,
+} from "~/lib/chat/types";
 
 // Terminal events end the stream — the reader stops once one is seen.
 const TERMINAL_EVENT_TYPES = new Set<ChatEventType>(["finish", "error"]);
@@ -81,6 +88,10 @@ type RunEventData = {
   stage?: string;
   reason?: string;
   messageId?: string | null;
+  modelId?: string;
+  effortPreset?: ChatModelSelector;
+  effortApplied?: EffortRung;
+  modelCallLatencyMs?: number;
   artifactId?: string;
 };
 
@@ -181,11 +192,24 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
 
       case "turn.finished": {
         finished = true;
+        const receipt =
+          typeof data.modelId === "string" && typeof data.modelCallLatencyMs === "number"
+            ? {
+                modelId: data.modelId,
+                ...(data.effortPreset === undefined ? {} : { effortPreset: data.effortPreset }),
+                ...(data.effortApplied === undefined ? {} : { effortApplied: data.effortApplied }),
+                modelCallLatencyMs: data.modelCallLatencyMs,
+              }
+            : undefined;
         if (data.status === "succeeded") {
           return [
             {
               type: "finish",
-              data: { reason: "stop", ...(data.messageId ? { messageId: data.messageId } : {}) },
+              data: {
+                reason: "stop",
+                ...(data.messageId ? { messageId: data.messageId } : {}),
+                ...(receipt === undefined ? {} : { receipt }),
+              },
             },
           ];
         }
@@ -219,7 +243,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
 export type ChatRequestBody = {
   message: { role: "user"; content: string };
   conversationId?: string;
-  model?: string;
+  model?: ChatModelSelector;
   agentId?: string;
   autonomy?: Autonomy;
   // Per-turn `/skill` + `#resource` tags from the composer, eagerly injected into the agent's

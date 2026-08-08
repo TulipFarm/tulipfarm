@@ -9,7 +9,7 @@ compaction, budgets, and delegation orchestration. tsconfig extends
 | Path | What |
 | --- | --- |
 | `src/ports/model.ts` | Provider-neutral model invocation boundary. |
-| `src/models/` | ModelProfile routing, constraint-equivalent fallback chains, usage/cost evidence. |
+| `src/models/` | ModelProfile routing, constraint-equivalent fallback chains, usage/cost evidence. `selectModelProfile` is the **only** model-selection path in the product; `deriveModelRequirements` turns one invocation into the requirements it is checked against, and must stay pure so replaying a Run routes identically. |
 | `src/context/` | Instruction precedence, Context manifests, and system-prompt assembly (`assembleSystemPrompt` + the `<governance-knowledge>` block). |
 | `src/guardrails/` | The 3 guard stages (input / tool-call / output), pattern guards, and the `DEFAULT_GUARDRAILS` fail-safe. |
 | `src/skills/` | Skill resolution: exact versions, trust tiers, scanning, ability intersection. |

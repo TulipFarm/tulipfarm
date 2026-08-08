@@ -18,11 +18,16 @@ const validConfig = {
 describe("validateLlmConfig", () => {
   it("accepts valid config", () => {
     const result = validateLlmConfig(validConfig);
-    expect(result.tiers.quick.providers[0]?.provider).toBe("anthropic");
+    expect(result.tiers?.quick.providers[0]?.provider).toBe("anthropic");
   });
 
   it("rejects missing tiers", () => {
     expect(() => validateLlmConfig({})).toThrow(LlmConfigValidationError);
+  });
+
+  it("accepts a config that declares presets instead of tiers", () => {
+    // Either side of the ModelProfile migration must validate; only naming neither is an error.
+    expect(() => validateLlmConfig({ presets: { default: "balanced" } })).not.toThrow();
   });
 
   it("rejects empty providers array", () => {

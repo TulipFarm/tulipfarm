@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   type BudgetConsumeResult,
   BudgetError,
+  modelProfileBudgetScopedLimits,
   RunBudgetManager,
   type RunBudgetStore,
+  resolveModelProfileBudgetLimits,
+  usdToCostMicros,
 } from "./budgets";
 import { resolveLimits } from "./limits";
 
@@ -176,5 +179,36 @@ describe("RunBudgetManager", () => {
     await open(1_000_000);
 
     expect(store.budgets.get(`${BUSINESS_ID}:${RUN_ID}:tokens`)?.limit).toBe(10);
+  });
+});
+
+describe("ModelProfile budget limits", () => {
+  it("contributes no limits when the profile authors no execution budgets", () => {
+    expect(modelProfileBudgetScopedLimits({})).toBeUndefined();
+    expect(resolveModelProfileBudgetLimits({})).toEqual({});
+  });
+
+  it("contributes authored token and cost budgets at the model scope", () => {
+    const resolved = resolveModelProfileBudgetLimits({
+      budgets: { maxTokens: 2_000, maxCostUsd: 0.25 },
+    });
+
+    expect(resolved.tokens).toEqual({ value: 2_000, scope: "model" });
+    expect(resolved.costMicros).toEqual({ value: 250_000, scope: "model" });
+  });
+
+  it("rounds positive fractional USD budgets up to at least one micro-USD", () => {
+    expect(usdToCostMicros(0.0000001)).toBe(1);
+    expect(usdToCostMicros(0)).toBe(0);
+  });
+
+  it("lets resolveLimits keep a lower non-model ceiling over the model ceiling", () => {
+    const resolved = resolveModelProfileBudgetLimits(
+      { budgets: { maxTokens: 2_000, maxCostUsd: 5 } },
+      [{ scope: "state", limits: { tokens: 500, costMicros: 1_000_000 } }]
+    );
+
+    expect(resolved.tokens).toEqual({ value: 500, scope: "state" });
+    expect(resolved.costMicros).toEqual({ value: 1_000_000, scope: "state" });
   });
 });

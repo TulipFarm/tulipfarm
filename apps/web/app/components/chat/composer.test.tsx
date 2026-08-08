@@ -40,14 +40,6 @@ vi.mock("~/components/chat/editor/mentions", () => ({
 }));
 vi.mock("~/components/chat/editor/use-mention-data", () => ({ useMentionData: () => () => [] }));
 
-// The model selector reads GET /api/v1/llm-config on mount for its tooltips; stub it so the composer
-// renders without a network call.
-vi.mock("~/lib/settings", () => ({
-  getLlmConfig: vi.fn().mockResolvedValue({
-    tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
-  }),
-}));
-
 // A plain single-paragraph document.
 const textDoc = (t: string): PMNode => ({
   type: "doc",
@@ -62,17 +54,17 @@ beforeEach(() => {
   viewFocus.mockClear();
 });
 
-test("Model Selector sets the per-message model override on send", async () => {
+test("Model Selector sets the per-message effort preset override on send", async () => {
   const user = userEvent.setup();
   const onSend = vi.fn();
   render(<Composer onSend={onSend} />);
 
-  await user.click(screen.getByRole("button", { name: /^Model:/ }));
-  await user.click(screen.getByRole("button", { name: "Complex" }));
+  await user.click(screen.getByRole("button", { name: /^Effort preset:/ }));
+  await user.click(screen.getByRole("menuitemradio", { name: /Thorough/ }));
   await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
-    model: "complex",
+    model: "thorough",
     agentId: undefined,
     skills: [],
     resources: [],
@@ -81,15 +73,31 @@ test("Model Selector sets the per-message model override on send", async () => {
   expect(clearContent).toHaveBeenCalled();
 });
 
-test("the model defaults to the active agent's tier", async () => {
+test("the effort preset defaults to Auto when nothing is chosen", async () => {
   const user = userEvent.setup();
   const onSend = vi.fn();
-  render(<Composer onSend={onSend} defaultModel="complex" />);
+  render(<Composer onSend={onSend} />);
 
   await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("do it", {
-    model: "complex",
+    model: "auto",
+    agentId: undefined,
+    skills: [],
+    resources: [],
+    knowledgePages: [],
+  });
+});
+
+test("the effort preset can default from the active agent", async () => {
+  const user = userEvent.setup();
+  const onSend = vi.fn();
+  render(<Composer onSend={onSend} defaultModel="thorough" />);
+
+  await user.click(screen.getByRole("button", { name: "Send prompt" }));
+
+  expect(onSend).toHaveBeenCalledWith("do it", {
+    model: "thorough",
     agentId: undefined,
     skills: [],
     resources: [],
@@ -120,7 +128,7 @@ test("send serializes mentions into agentId + skills + resources", async () => {
   await user.click(screen.getByRole("button", { name: "Send prompt" }));
 
   expect(onSend).toHaveBeenCalledWith("@GithubTriage triage with /copywriting on #tickets", {
-    model: "standard",
+    model: "auto",
     agentId: "GithubTriage",
     skills: ["copywriting"],
     resources: ["tickets"],

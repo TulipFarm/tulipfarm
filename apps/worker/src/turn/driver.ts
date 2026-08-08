@@ -11,6 +11,7 @@ import type {
   ConversationTurnCompleter,
   TurnOutcome,
 } from "../conversation-turn";
+import type { ModelCallReceipt } from "../model";
 import type { RunOutcome } from "../run-dispatcher";
 import type { TurnGuardrails } from "./guardrails";
 import type { TurnEventWriter } from "./run-events";
@@ -93,6 +94,12 @@ export interface TurnDriverOptions {
   readonly guardrails: TurnGuardrails;
   /** One writer per attempt — it keys events by the attempt it was built with. */
   buildEvents(request: TurnRequest): TurnEventWriter;
+  /**
+   * The model call this turn's reply came from, read once the turn succeeds. Optional because a
+   * caller may drive a port that keeps no receipt; the turn then finishes without one rather than
+   * reporting a model it cannot name.
+   */
+  modelReceipt?(): ModelCallReceipt | undefined;
 }
 
 export class TurnDriver {
@@ -277,9 +284,10 @@ export class TurnDriver {
     }
 
     if (completion.status === "succeeded") {
+      const receipt = this.options.modelReceipt?.();
       await events.emit(
         "turn.finished",
-        { status: "succeeded", messageId: completion.messageId },
+        { status: "succeeded", messageId: completion.messageId, ...(receipt ?? {}) },
         "finished"
       );
       return "succeeded";

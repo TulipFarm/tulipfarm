@@ -12,6 +12,8 @@ import type {
   ChatEvent,
   ChatMessage,
   ChatState,
+  ChatTurnOptions,
+  ChatTurnSource,
   TimelinePart,
 } from "~/lib/chat/types";
 import { randomUUID } from "~/lib/uuid";
@@ -26,13 +28,37 @@ function newId(): string {
   return randomUUID();
 }
 
+function cloneOptions(options: ChatTurnOptions | undefined): ChatTurnOptions | undefined {
+  if (options === undefined) return undefined;
+  return {
+    ...(options.model === undefined ? {} : { model: options.model }),
+    ...(options.autonomy === undefined ? {} : { autonomy: options.autonomy }),
+    ...(options.agentId === undefined ? {} : { agentId: options.agentId }),
+    ...(options.skills === undefined ? {} : { skills: [...options.skills] }),
+    ...(options.resources === undefined ? {} : { resources: [...options.resources] }),
+    ...(options.knowledgePages === undefined
+      ? {}
+      : { knowledgePages: [...options.knowledgePages] }),
+  };
+}
+
+function sourceTurn(text: string, options?: ChatTurnOptions): ChatTurnSource {
+  const cloned = cloneOptions(options);
+  return cloned === undefined ? { text } : { text, options: cloned };
+}
+
 // Push a user message and mark the turn submitted. Used by the hook before opening the stream.
-export function appendUserMessage(state: ChatState, text: string): ChatState {
+export function appendUserMessage(
+  state: ChatState,
+  text: string,
+  options?: ChatTurnOptions
+): ChatState {
   const message: ChatMessage = {
     id: newId(),
     role: "user",
     parts: [{ kind: "text", text }],
     sealed: true,
+    sourceTurn: sourceTurn(text, options),
   };
   return { ...state, messages: [...state.messages, message], status: "submitted" };
 }
@@ -57,7 +83,14 @@ function ensureAssistant(messages: ChatMessage[]): {
   if (last && last.role === "assistant" && !last.sealed) {
     return { messages, target: last };
   }
-  const target: ChatMessage = { id: newId(), role: "assistant", parts: [], sealed: false };
+  const source = last?.role === "user" ? last.sourceTurn : undefined;
+  const target: ChatMessage = {
+    id: newId(),
+    role: "assistant",
+    parts: [],
+    sealed: false,
+    ...(source === undefined ? {} : { sourceTurn: source }),
+  };
   return { messages: [...messages, target], target };
 }
 
@@ -309,7 +342,12 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
       // `id` (the React key) stays the client uuid — swapping it would remount.
       const sealed = withParts(messages, target, target.parts).map((m) =>
         m.id === target.id
-          ? { ...m, sealed: true, serverId: event.data.messageId ?? m.serverId }
+          ? {
+              ...m,
+              sealed: true,
+              serverId: event.data.messageId ?? m.serverId,
+              receipt: event.data.receipt ?? m.receipt,
+            }
           : m
       );
       return { ...state, status: "idle", messages: sealed };

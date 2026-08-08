@@ -43,6 +43,7 @@ import { startJobConsumers } from "./job-consumers";
 import { SoulLlm } from "./llm";
 import { type LoopLogger, runLoop } from "./loop";
 import { LlmModelPort } from "./model";
+import { MODEL_BUDGET_EXHAUSTION_POLICY } from "./model-budget";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { buildGitHubTooling } from "./routine/adapters";
@@ -218,7 +219,20 @@ export async function main(): Promise<void> {
     budgets: budgetStore,
     transitions: new RunStoreStateTransitions(runStore),
     waits: turnHost,
-    model: new LlmModelPort({ model: (id) => llm.model(id) }),
+    model: ({ events, budgets, businessId, runId }) =>
+      new LlmModelPort({
+        model: (selector, requirements) => llm.resolveModel(selector, requirements),
+        routingEvents: events,
+        budgets: {
+          open: (limits) =>
+            budgets.open({
+              businessId,
+              runId,
+              limits,
+              exhaustionPolicy: MODEL_BUDGET_EXHAUSTION_POLICY,
+            }),
+        },
+      }),
     log: logger,
   });
   executors.register(CHAT_RUN_SOURCE, chatExecutor);
@@ -269,7 +283,18 @@ export async function main(): Promise<void> {
       // ModelProfile the Run's own bundle names. It exposes no Tools: a Routine's effects belong to
       // its `tool` States, where the Broker authorizes and the ledger reserves them.
       agents: new BundleRoutineAgentPort({
-        model: new LlmModelPort({ model: (id) => llm.model(id) }),
+        // The chain is already selected — against the Run's pinned bundle, by the port itself — so
+        // this only builds the providers to run it. Routing events and budgets are deliberately
+        // unset: the Routine port emits `model.routed` and opens the ModelProfile's Run budget
+        // itself, and wiring them here would double both.
+        model: ({ modelIds, routing }) =>
+          new LlmModelPort({
+            model: async () => ({
+              kind: "available",
+              model: await llm.chainModel(modelIds),
+              routing,
+            }),
+          }),
         events: runEventStore,
         budgets: budgetStore,
         runs: runStore,
