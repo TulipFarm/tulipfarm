@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Transcript } from "~/components/chat/transcript";
 import { appendUserMessage, chatReducer, initialChatState } from "~/lib/chat/reducer";
-import type { ChatEvent, ChatState } from "~/lib/chat/types";
+import type { ChatEvent, ChatState, ChatTurnOptions } from "~/lib/chat/types";
 
 // jsdom has no layout engine; the transcript's auto-scroll calls scrollIntoView.
 beforeEach(() => {
@@ -12,8 +12,8 @@ beforeEach(() => {
 
 // Build renderable state by folding synthetic SSE events through the real reducer — exactly how the
 // live stream would, but deterministic. This drives every "renders X from its SSE event" check.
-function fold(events: ChatEvent[], user?: string): ChatState {
-  let state = user ? appendUserMessage(initialChatState, user) : initialChatState;
+function fold(events: ChatEvent[], user?: string, options?: ChatTurnOptions): ChatState {
+  let state = user ? appendUserMessage(initialChatState, user, options) : initialChatState;
   for (const e of events) state = chatReducer(state, e);
   return state;
 }
@@ -249,5 +249,201 @@ describe("Transcript message actions", () => {
     );
     expect(screen.queryByRole("button", { name: "Good response" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
+  });
+
+  it("shows a quiet model receipt on a sealed assistant reply", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        {
+          type: "finish",
+          data: {
+            reason: "stop",
+            receipt: {
+              modelId: "claude-sonnet-5",
+              effortPreset: "auto",
+              modelCallLatencyMs: 1234,
+            },
+          },
+        },
+      ],
+      "hi"
+    );
+
+    renderTranscript(state);
+
+    expect(screen.getByText("Answered by")).toBeInTheDocument();
+    expect(screen.getByText("claude-sonnet-5")).toBeInTheDocument();
+    expect(screen.getByText("· Auto effort")).toBeInTheDocument();
+    expect(screen.getByText("· model call 1.2 s")).toBeInTheDocument();
+  });
+
+  it("renders no receipt for older sealed replies without receipt fields", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      "hi"
+    );
+
+    renderTranscript(state);
+
+    expect(screen.queryByText("Answered by")).toBeNull();
+  });
+
+  it("offers Try harder with the next effort preset on a completed assistant reply", async () => {
+    const user = userEvent.setup();
+    const onTryHarder = vi.fn();
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        {
+          type: "finish",
+          data: {
+            reason: "stop",
+            receipt: {
+              modelId: "claude-sonnet-5",
+              effortPreset: "auto",
+              effortApplied: "balanced",
+              modelCallLatencyMs: 1234,
+            },
+          },
+        },
+      ],
+      "hi",
+      {
+        model: "auto",
+        agentId: "agent-1",
+        skills: ["triage"],
+        resources: ["ticket"],
+        knowledgePages: ["page-1"],
+      }
+    );
+    const assistantId = state.messages.find((message) => message.role === "assistant")?.id;
+
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onTryHarder={onTryHarder}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Try harder with Thorough effort" }));
+    expect(onTryHarder).toHaveBeenCalledWith(assistantId, "thorough");
+  });
+
+  it("shows what Auto resolved to, so the participant sees the choice made for them", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        {
+          type: "finish",
+          data: {
+            reason: "stop",
+            receipt: {
+              modelId: "claude-haiku-5",
+              effortPreset: "auto",
+              effortApplied: "fast",
+              modelCallLatencyMs: 200,
+            },
+          },
+        },
+      ],
+      "hi",
+      { model: "auto" }
+    );
+
+    render(<Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />);
+
+    expect(screen.getByText("· Auto → Fast effort")).toBeInTheDocument();
+  });
+
+  it("offers no Try harder when Auto reported no rung, rather than guessing one", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        {
+          type: "finish",
+          data: {
+            reason: "stop",
+            receipt: {
+              modelId: "claude-sonnet-5",
+              effortPreset: "auto",
+              modelCallLatencyMs: 1234,
+            },
+          },
+        },
+      ],
+      "hi",
+      { model: "auto" }
+    );
+
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onTryHarder={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /Try harder/ })).not.toBeInTheDocument();
+  });
+
+  it("does not offer Try harder at the top of the ladder", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        {
+          type: "finish",
+          data: {
+            reason: "stop",
+            receipt: {
+              modelId: "claude-sonnet-5",
+              effortPreset: "thorough",
+              modelCallLatencyMs: 1234,
+            },
+          },
+        },
+      ],
+      "hi",
+      { model: "thorough" }
+    );
+
+    render(
+      <Transcript
+        messages={state.messages}
+        status={state.status}
+        onApprove={vi.fn()}
+        onTryHarder={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /Try harder/i })).toBeNull();
+  });
+
+  it("keeps Try harder unavailable while a turn is streaming", () => {
+    const state = fold(
+      [
+        { type: "text", data: { delta: "Hello there" } },
+        { type: "finish", data: { reason: "stop" } },
+      ],
+      "hi",
+      { model: "fast" }
+    );
+
+    render(
+      <Transcript
+        messages={state.messages}
+        status="streaming"
+        onApprove={vi.fn()}
+        onTryHarder={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /Try harder/i })).toBeNull();
   });
 });

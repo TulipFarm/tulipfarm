@@ -19,16 +19,20 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { AgentGlyph } from "~/components/agent-glyph";
 import { Tooltip } from "~/components/ui/tooltip";
 import type { Autonomy } from "~/lib/agents";
-import type { ModelTier } from "~/lib/chat/types";
+import type { ChatModelSelector } from "~/lib/chat/types";
 import type { Suggestion } from "~/lib/onboarding";
 import { buildMentionExtensions, MENTION_PLUGIN_KEYS } from "./editor/mentions";
 import { firstAgentMentionId, type PMNode, serializeDoc } from "./editor/serialize";
 import { useMentionData } from "./editor/use-mention-data";
-import { effectiveTier, ModelSelector } from "./model-selector";
+import {
+  DEFAULT_CHAT_MODEL_SELECTOR,
+  effectiveEffortPreset,
+  ModelSelector,
+} from "./model-selector";
 
-/** What a composed turn carries to the parent: the model tier plus the resolved mention tags. */
+/** What a composed turn carries to the parent: the effort preset plus the resolved mention tags. */
 export type ComposerSendOptions = {
-  model: ModelTier;
+  model: ChatModelSelector;
   agentId?: string;
   skills: string[];
   resources: string[];
@@ -43,7 +47,7 @@ export type ComposerAgent = {
 };
 
 /**
- * Message composer: a Tiptap rich-text editor over a control row (model override + send). The editor
+ * Message composer: a Tiptap rich-text editor over a control row (effort override + send). The editor
  * supports markdown formatting (bold/italic/code/link via shortcuts + a selection BubbleMenu) and four
  * mention triggers — `@agent` (routes the turn), `/skill` and `#resource` (eagerly injected into the
  * agent's context for the turn). On send the document is serialized (`serializeDoc`) to markdown text
@@ -54,9 +58,9 @@ export function Composer({
   onSend,
   onStop,
   busy,
-  defaultModel = "standard",
-  activeAgentTier,
-  tierById,
+  defaultModel = DEFAULT_CHAT_MODEL_SELECTOR,
+  activeAgentPreset,
+  presetById,
   activeAgent,
   suggestions = [],
 }: {
@@ -65,11 +69,11 @@ export function Composer({
   // prompt into the editor to fix and resend.
   onStop?: () => void;
   busy?: boolean;
-  defaultModel?: ModelTier;
-  // The active conversation agent's tier — reflected in the MODEL selector when no `@agent` is typed.
-  activeAgentTier?: ModelTier;
-  // agentId → its pickable tier; used to reflect an `@`-mentioned agent's tier as it's typed.
-  tierById?: (id: string) => ModelTier | undefined;
+  defaultModel?: ChatModelSelector;
+  // The active conversation agent's preset — reflected when no `@agent` is typed.
+  activeAgentPreset?: ChatModelSelector;
+  // agentId → its pickable preset; used to reflect an `@`-mentioned agent's preset as it's typed.
+  presetById?: (id: string) => ChatModelSelector | undefined;
   // Quiet context indicator above the prompt surface. The editor's `@agent` mention still owns
   // per-Turn routing; this label describes the Agent currently attached to the Chat.
   activeAgent?: ComposerAgent;
@@ -77,11 +81,11 @@ export function Composer({
   // refine it before sending; suggestions never run automatically.
   suggestions?: Suggestion[];
 }) {
-  const [model, setModel] = useState<ModelTier>(defaultModel);
+  const [model, setModel] = useState<ChatModelSelector>(defaultModel);
   const getItems = useMentionData();
   const mentionExtensions = useMemo(() => buildMentionExtensions(getItems), [getItems]);
   // editorProps is frozen at creation, so route Enter through a ref that always holds the latest
-  // closure (current model/busy/onSend) — avoids the classic Tiptap stale-closure on send.
+  // closure (current preset/busy/onSend) — avoids the classic Tiptap stale-closure on send.
   const submitRef = useRef<() => void>(() => {});
   // The last sent document (Tiptap JSON), stashed before clearing so Stop can restore it verbatim —
   // mention chips included (getJSON ↔ setContent round-trips exactly).
@@ -124,25 +128,25 @@ export function Composer({
       italic: editor?.isActive("italic") ?? false,
       code: editor?.isActive("code") ?? false,
       link: editor?.isActive("link") ?? false,
-      // The first `@agent` mention in the box, recomputed on each edit — drives the MODEL tier below.
+      // The first `@agent` mention in the box, recomputed on each edit — drives the preset below.
       mentionedAgentId: editor ? firstAgentMentionId(editor.getJSON() as PMNode) : undefined,
     }),
   });
   const isEmpty = state?.isEmpty ?? true;
 
-  // The MODEL selector reflects the tier of the agent that will handle the next turn: the `@`-mentioned
-  // agent in the box, else the active conversation agent, else the default. Keyed on the derived tier
-  // string so the effect only fires on an actual tier change — a manual dropdown pick therefore sticks
+  // The preset selector reflects the agent that will handle the next turn: the `@`-mentioned agent
+  // in the box, else the active conversation agent, else the default. Keyed on the derived preset
+  // string so the effect only fires on an actual preset change — a manual dropdown pick therefore sticks
   // until the relevant agent changes (D5).
-  const tier = effectiveTier({
+  const preset = effectiveEffortPreset({
     mentionedAgentId: state?.mentionedAgentId,
-    tierById: tierById ?? (() => undefined),
-    activeAgentTier,
+    presetById: presetById ?? (() => undefined),
+    activeAgentPreset,
     fallback: defaultModel,
   });
   useEffect(() => {
-    setModel(tier);
-  }, [tier]);
+    setModel(preset);
+  }, [preset]);
 
   submitRef.current = () => {
     if (!editor || busy) return;

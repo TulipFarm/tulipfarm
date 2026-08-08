@@ -1,5 +1,4 @@
 import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-runtime";
-import type { LlmService } from "@tulipfarm/llm";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
@@ -73,7 +72,6 @@ function makeResolver(
   for (const persisted of options.messages ?? []) store.messages.push(persisted);
   const registry = new ToolRegistry();
   for (const name of options.tools ?? []) registry.register(toolDef(name));
-  const resolve = vi.fn(() => ({ modelId: "resolved-model" }));
   const soulLoader =
     options.skills === undefined
       ? undefined
@@ -89,13 +87,11 @@ function makeResolver(
 
   return {
     store,
-    resolve,
     resolver: new ChatTurnContextResolver({
       artifacts: {
         read: async () => ({ content: options.request ?? {} }),
       } as unknown as ArtifactService,
       store,
-      llmService: { resolve } as unknown as LlmService,
       toolRegistry: registry,
       ...(options.guardrails ? { guardrails: options.guardrails } : {}),
       ...(options.now ? { now: options.now } : {}),
@@ -156,19 +152,22 @@ describe("ChatTurnContextResolver", () => {
     expect(context.messages[0]?.content).toContain("time: 11:12 (UTC, UTC+00:00)");
   });
 
-  it("takes every per-turn parameter from the request Artifact", async () => {
-    const { resolver, resolve } = makeResolver({
+  it("forwards the Artifact's model selector for the router to resolve", async () => {
+    // This process names the intent; the Worker resolves it, because that is where the invocation
+    // happens and where a fallback chain can actually be tried.
+    const { resolver } = makeResolver({
       request: { model: "claude-x", hasTools: true, llmDecision: false },
     });
 
     const context = await resolver.resolve(AUTHORITY);
 
-    expect(context.modelProfileId).toBe("resolved-model");
-    expect(resolve).toHaveBeenCalledWith({
-      sessionModel: "claude-x",
-      hasTools: true,
-      llmDecision: false,
-    });
+    expect(context.modelProfileId).toBe("claude-x");
+  });
+
+  it("asks for auto when the request chose no model", async () => {
+    const { resolver } = makeResolver({ request: {} });
+
+    await expect(resolver.resolve(AUTHORITY)).resolves.toMatchObject({ modelProfileId: "auto" });
   });
 
   it("ships the policy the Worker must enforce, alongside the digest naming it", async () => {

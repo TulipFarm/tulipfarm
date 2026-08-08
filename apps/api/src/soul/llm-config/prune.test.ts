@@ -98,8 +98,8 @@ describe("pruneLlmConfig", () => {
     if (result.action !== "update") return;
 
     for (const tier of ["quick", "standard", "complex"] as const) {
-      expect(result.config.tiers[tier].providers.every((e) => e.provider !== "azure")).toBe(true);
-      expect(result.config.tiers[tier].providers.length).toBeGreaterThan(0);
+      expect(result.config.tiers?.[tier].providers.every((e) => e.provider !== "azure")).toBe(true);
+      expect(result.config.tiers?.[tier].providers.length).toBeGreaterThan(0);
     }
   });
 
@@ -117,8 +117,8 @@ describe("pruneLlmConfig", () => {
     const result = pruneLlmConfig(config, "azure-openai-api-key", azure);
     expect(result.action).toBe("update");
     if (result.action !== "update") return;
-    expect(result.config.tiers.quick.providers).toHaveLength(1);
-    expect(result.config.tiers.quick.providers[0]?.provider).toBe("anthropic");
+    expect(result.config.tiers?.quick.providers).toHaveLength(1);
+    expect(result.config.tiers?.quick.providers[0]?.provider).toBe("anthropic");
   });
 
   it("does not remove entries using env:// api_key_ref (reads from process.env, not secrets)", () => {

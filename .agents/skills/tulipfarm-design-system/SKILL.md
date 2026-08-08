@@ -31,6 +31,8 @@ composition patterns over route-local styling.
 - Use Inter for interface copy and JetBrains Mono for code, identifiers, logs, and technical data.
 - Keep primitives app-local under `apps/web/app/components/ui` until a second app needs them.
 - Use Lucide icons; label icon-only actions and preserve a minimum 44px touch target on mobile.
+- In Chat, a participant picks **effort** (Auto/Fast/Balanced/Thorough), never a model; a Model ID
+  appears only as receipt metadata on a finished reply.
 - Preserve `[data-theme="dark"]`, keyboard navigation, visible focus, reduced motion, and deep links.
 - Rely on the global `:focus-visible` outline, and close off-canvas panels with `inert` rather than
   `aria-hidden`.

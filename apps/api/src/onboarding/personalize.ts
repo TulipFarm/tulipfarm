@@ -81,7 +81,7 @@ export const SYSTEM_PROMPT = [
 
 const validatePersonalized = ajv.compile(PERSONALIZED_SCHEMA);
 
-type LlmModel = ReturnType<LlmService["select"]>;
+type LlmModel = ReturnType<LlmService["effortModel"]>;
 
 interface SoulState {
   resources: string[];
@@ -164,7 +164,7 @@ export async function getPersonalizedOnboarding(
   if (cached) return cached.value as Personalized;
 
   try {
-    const result = await generatePersonalized(llmService.select({ model: "quick" }), {
+    const result = await generatePersonalized(llmService.effortModel("fast"), {
       businessName: stringField(soul.manifest, "businessName"),
       businessDescription,
       state,

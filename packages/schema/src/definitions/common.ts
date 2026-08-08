@@ -85,6 +85,15 @@ export type ModelReasoningLevel = (typeof MODEL_REASONING_LEVELS)[number];
 export const MODEL_DATA_RETENTION = ["none", "zero_retention", "provider_default"] as const;
 export type ModelDataRetention = (typeof MODEL_DATA_RETENTION)[number];
 
+/**
+ * Content kinds a model can accept or produce (SPEC §17). Modality is a *dimension*, not a rung on
+ * the capability ladder: an image model is not "more" than a text model, it is a different one. A
+ * turn that needs a modality no profile supports is a denial, never a silent send to a model that
+ * would drop the content.
+ */
+export const MODEL_MODALITIES = ["text", "image", "audio", "video"] as const;
+export type ModelModality = (typeof MODEL_MODALITIES)[number];
+
 /** ULID (Crockford base32) or canonical UUID. */
 const ID_PATTERN =
   "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$";

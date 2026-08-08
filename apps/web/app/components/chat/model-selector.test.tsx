@@ -1,107 +1,112 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test, vi } from "vitest";
-import { asTier, effectiveTier, ModelSelector } from "~/components/chat/model-selector";
-import type { ModelTier } from "~/lib/chat/types";
-
-vi.mock("~/lib/settings", () => ({
-  getLlmConfig: vi.fn().mockResolvedValue({
-    tiers: {
-      quick: { providers: [{ provider: "azure", model: "gpt-4o-mini" }] },
-      standard: {
-        providers: [
-          { provider: "anthropic", model: "claude-sonnet-4-6" },
-          { provider: "openai", model: "gpt-4o" },
-        ],
-      },
-      complex: { providers: [] },
-    },
-  }),
-}));
+import {
+  asPickerPreset,
+  effectiveEffortPreset,
+  ModelSelector,
+} from "~/components/chat/model-selector";
+import type { ChatModelSelector } from "~/lib/chat/types";
 
 const openMenu = async (user: ReturnType<typeof userEvent.setup>) =>
-  user.click(screen.getByRole("button", { name: /^Model:/ }));
+  user.click(screen.getByRole("button", { name: /^Effort preset:/ }));
 
-test("the trigger shows the active tier and the menu is closed until opened", () => {
-  render(<ModelSelector value="standard" onChange={vi.fn()} />);
-  expect(screen.getByRole("button", { name: "Model: Standard" })).toBeInTheDocument();
-  // Options only exist once the dropdown is open.
-  expect(screen.queryByRole("button", { name: "Quick" })).not.toBeInTheDocument();
+const option = (name: string) => screen.getByRole("menuitemradio", { name: new RegExp(name) });
+
+test("Auto is the visible default and the menu is closed until opened", () => {
+  render(<ModelSelector value="auto" onChange={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Effort preset: Auto (default)" })).toHaveTextContent(
+    /Auto.*Default/
+  );
+  expect(screen.queryByRole("menuitemradio", { name: /Fast/ })).not.toBeInTheDocument();
 });
 
-test("opening the dropdown offers all three tiers including quick", async () => {
+test("opening the dropdown offers all four effort presets", async () => {
   const user = userEvent.setup();
-  render(<ModelSelector value="standard" onChange={vi.fn()} />);
+  render(<ModelSelector value="auto" onChange={vi.fn()} />);
   await openMenu(user);
-  for (const tier of ["Quick", "Standard", "Complex"]) {
-    expect(screen.getByRole("button", { name: tier })).toBeInTheDocument();
+  for (const preset of ["Auto", "Fast", "Balanced", "Thorough"]) {
+    expect(option(preset)).toBeInTheDocument();
   }
 });
 
-test("selecting a tier calls onChange with its id", async () => {
+test("selecting a preset calls onChange with its preset id", async () => {
   const user = userEvent.setup();
   const onChange = vi.fn();
-  render(<ModelSelector value="standard" onChange={onChange} />);
+  render(<ModelSelector value="auto" onChange={onChange} />);
   await openMenu(user);
-  await user.click(screen.getByRole("button", { name: "Quick" }));
-  expect(onChange).toHaveBeenCalledWith("quick");
+  await user.click(option("Thorough"));
+  expect(onChange).toHaveBeenCalledWith("thorough");
 });
 
-describe("asTier", () => {
-  test("passes through the three pickable tiers", () => {
-    expect(asTier("quick")).toBe("quick");
-    expect(asTier("standard")).toBe("standard");
-    expect(asTier("complex")).toBe("complex");
+describe("asPickerPreset", () => {
+  test("passes through effort presets", () => {
+    expect(asPickerPreset("auto")).toBe("auto");
+    expect(asPickerPreset("fast")).toBe("fast");
+    expect(asPickerPreset("balanced")).toBe("balanced");
+    expect(asPickerPreset("thorough")).toBe("thorough");
   });
 
-  test("rejects 'auto', raw model ids, and undefined (dropdown left unchanged)", () => {
-    expect(asTier("auto")).toBeUndefined();
-    expect(asTier("gpt-4o")).toBeUndefined();
-    expect(asTier(undefined)).toBeUndefined();
-    expect(asTier("")).toBeUndefined();
+  test("maps retired aliases for one release and rejects raw model ids", () => {
+    expect(asPickerPreset("quick")).toBe("fast");
+    expect(asPickerPreset("standard")).toBe("balanced");
+    expect(asPickerPreset("complex")).toBe("thorough");
+    expect(asPickerPreset("gpt-4o")).toBeUndefined();
+    expect(asPickerPreset(undefined)).toBeUndefined();
   });
 });
 
-describe("effectiveTier", () => {
-  const tierById = (id: string): ModelTier | undefined =>
-    ({ Billing: "standard", Architect: "complex" })[id] as ModelTier | undefined;
+describe("effectiveEffortPreset", () => {
+  const presetById = (id: string): ChatModelSelector | undefined =>
+    ({ Billing: "balanced", Architect: "thorough" })[id] as ChatModelSelector | undefined;
 
-  test("the @mentioned agent's tier wins over the active agent's", () => {
+  test("the @mentioned agent's preset wins over the active agent's", () => {
     expect(
-      effectiveTier({
+      effectiveEffortPreset({
         mentionedAgentId: "Architect",
-        tierById,
-        activeAgentTier: "standard",
-        fallback: "standard",
+        presetById,
+        activeAgentPreset: "balanced",
+        fallback: "auto",
       })
-    ).toBe("complex");
+    ).toBe("thorough");
   });
 
-  test("falls back to the active agent's tier when no mention is present", () => {
-    expect(effectiveTier({ tierById, activeAgentTier: "complex", fallback: "standard" })).toBe(
-      "complex"
+  test("falls back to the active agent's preset when no mention is present", () => {
+    expect(effectiveEffortPreset({ presetById, activeAgentPreset: "fast", fallback: "auto" })).toBe(
+      "fast"
     );
   });
 
-  test("falls back to the fallback when a mention has no pickable tier and no active tier", () => {
-    // 'Unknown' is not in tierById → undefined; no activeAgentTier → fallback.
-    expect(effectiveTier({ mentionedAgentId: "Unknown", tierById, fallback: "standard" })).toBe(
-      "standard"
-    );
+  test("falls back to Auto when a mention has no pickable preset and no active preset", () => {
+    expect(
+      effectiveEffortPreset({ mentionedAgentId: "Unknown", presetById, fallback: "auto" })
+    ).toBe("auto");
   });
 });
 
-test("each option explains the tier (line 1) and lists its models (line 2)", async () => {
+test("each option explains the effort, latency, and cost tradeoff", async () => {
   const user = userEvent.setup();
-  render(<ModelSelector value="standard" onChange={vi.fn()} />);
+  render(<ModelSelector value="auto" onChange={vi.fn()} />);
   await openMenu(user);
-  // Line 1: what the tier means.
-  expect(screen.getByText("Fast and low-cost for short, simple tasks")).toBeInTheDocument();
-  // Line 2: the models configured for the tier (all providers, comma-joined).
-  await waitFor(() => {
-    expect(screen.getByText("azure / gpt-4o-mini")).toBeInTheDocument();
-  });
-  expect(screen.getByText("anthropic / claude-sonnet-4-6, openai / gpt-4o")).toBeInTheDocument();
-  // A tier with no providers configured.
-  expect(screen.getByText("not configured")).toBeInTheDocument();
+  expect(
+    screen.getByText("Lets TulipFarm balance effort, latency, and cost for this turn.")
+  ).toBeInTheDocument();
+  expect(screen.getByText("Lower effort for faster, lower-cost replies.")).toBeInTheDocument();
+  expect(
+    screen.getByText("Moderate effort for everyday depth, latency, and cost.")
+  ).toBeInTheDocument();
+  expect(
+    screen.getByText("Higher effort for deeper work with more latency and cost.")
+  ).toBeInTheDocument();
+});
+
+test("keyboard navigation can select a preset", async () => {
+  const user = userEvent.setup();
+  const onChange = vi.fn();
+  render(<ModelSelector value="auto" onChange={onChange} />);
+
+  screen.getByRole("button", { name: "Effort preset: Auto (default)" }).focus();
+  await user.keyboard("{ArrowDown}{ArrowDown}{Enter}");
+
+  expect(onChange).toHaveBeenCalledWith("fast");
 });

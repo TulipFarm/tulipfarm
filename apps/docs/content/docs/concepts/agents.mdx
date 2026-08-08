@@ -32,9 +32,15 @@ The UI lists Agents and shows their prompt and governance details. To create one
 
 ## Autonomy and Approvals
 
-Autonomy describes how freely an Agent may act. It influences model-tier selection and whether
-runtime actions may pause for [Approvals](/docs/concepts/approvals). Soul edits remain direct and
-ungated, but actions on Records, external systems, or other effects can require a human decision.
+Autonomy describes how freely an Agent may act. It decides whether runtime actions may pause for
+[Approvals](/docs/concepts/approvals). Soul edits remain direct and ungated, but actions on Records,
+external systems, or other effects can require a human decision.
+
+Autonomy does **not** influence which model an Agent gets. It once did, and backwards — a `full`
+autonomy Agent was routed to the *weakest* model. How much oversight an Agent has and how much
+capability its work needs are independent; see [Model routing](/docs/concepts/llm). The `model`
+field above names an effort preset (`auto`, `fast`, `balanced`, `thorough`) and is the only thing
+that decides capability.
 
 Every Agent turn still goes through [Guardrails](/docs/concepts/guardrails), and every turn is a
 [Run](/docs/concepts/runs).

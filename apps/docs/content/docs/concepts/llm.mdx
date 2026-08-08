@@ -1,10 +1,16 @@
 ---
-title: LLM tiers
-description: The four providers, tier selection, model specs, and ordered fallback behavior.
+title: Model routing
+description: The four providers, effort presets, ModelProfile routing, model specs, and ordered fallback behavior.
 ---
 
-TulipFarm routes model calls through tiered provider chains. Agents select a tier or use `auto`, and
-the runtime resolves that into an ordered list of provider entries.
+TulipFarm routes every model call through a **ModelProfile** — a named set of capability, modality,
+residency, retention, and budget constraints. Callers ask for an *effort preset*
+(`auto`, `fast`, `balanced`, `thorough`), never a specific model, and the router resolves that into
+a ModelProfile plus an ordered chain of fallbacks that satisfy the *same* constraints.
+
+Constraint-equivalence is the point: a fallback that could not hold the request's context, or could
+not meet its residency terms, is not a fallback — routing to it would answer the request on weaker
+terms than were asked for. The router denies instead, naming the constraint it could not meet.
 
 ## Providers
 
@@ -22,29 +28,110 @@ secret keys are `anthropic-api-key`, `openai-api-key`, `azure-openai-api-key`,
 `azure-openai-resource-name`, `azure-foundry-endpoint`, `openai-compatible-api-key`, and
 `openai-compatible-base-url`.
 
-## Tiers and fallback
+## Effort presets
 
-`llm.config.yaml` defines tiers as ordered provider lists. `FallbackModel` tries providers in order.
+| Preset | Meaning |
+| --- | --- |
+| `auto` | The deployment's configured default. This is what a participant gets unless they choose otherwise. |
+| `fast` | Lowest latency and cost. |
+| `balanced` | The everyday default. |
+| `thorough` | Most capable, for work worth the extra time and cost. |
+
+A Soul maps each preset to a ModelProfile. The retired tier names `quick`, `standard`, and
+`complex` are still accepted on the wire for one release and translated to `fast`, `balanced`, and
+`thorough` respectively, with a deprecation logged.
+
+## ModelProfiles
+
+A ModelProfile names a model, what it supports (tools, structured output, input and output
+modalities, context window), and the terms it may be used under (data residency, retention,
+whether prompts may train the provider's models, and cost, token, and latency ceilings). It also
+names its own ordered fallbacks.
+
+Profiles come from one of two places, and the router does not care which:
+
+- **Authored** — `soul/models/*.yaml`, published into a bundle and version-pinned. A Run is routed
+  against the profiles it was minted with, not whichever ones are live when it finally executes.
+- **Derived** — for a Soul that has not authored any, profiles are derived from the provider lists
+  in `llm.config.yaml`. Capability is read from the pinned model spec rather than guessed.
+
+There is one router either way. A deployment without published profiles is not dropped onto a
+second, weaker selection path.
+
+## Denials
+
+If no profile can serve a request on the terms it was asked for, the request is **denied** and the
+reason is named — `tools_unsupported`, `modality_unsupported`, `context_window_exceeded`,
+`residency_violation`, `data_retention_violation`, `training_not_permitted`, and the cost, token,
+and latency budget reasons.
+
+Denial is deliberate. Quietly answering with a model that supports fewer things is the failure this
+design exists to prevent: a request needing tools answered by a model without them, or an image
+dropped by a text-only model, fails in ways nobody sees.
+
+## Budgets
+
+A ModelProfile's `constraints` and its `budgets` do different jobs. `constraints` are checked
+*before* the call: a profile whose cost, token, or latency ceiling the request would violate is
+denied, and another profile is tried. `budgets` bound the call *after* it is chosen — they become
+durable per-Run ceilings on tokens and cost, charged as the Run spends them.
+
+Ceilings resolve narrowest-wins across scopes, and a ModelProfile contributes at the narrowest
+scope of all. A ceiling is write-once for the life of a Run, so neither a restart nor an Agent's
+own proposal can raise a limit it is already operating under. A profile that declares no budgets
+contributes none: unbounded stays unbounded rather than acquiring an invented default. Exhausting
+a budget fails the Run on its declared failure path.
+
+## Fallback
+
+`FallbackModel` tries the selected chain in order.
 A hard failure stops the chain immediately because retrying another provider cannot fix it: request
 cancellation, missing or invalid credentials, and non-retryable API errors such as 400, 401, 403, or
 404. A transient error falls through to the next provider: 429, 5xx, timeout, network, or unknown
 retryable failures.
 
-If every provider in a tier fails transiently, the final error is returned after logging that all
+If every provider in a chain fails transiently, the final error is returned after logging that all
 providers were exhausted.
 
 ## Model specs
 
 When a model is added or refreshed, TulipFarm resolves its pricing and capability metadata from the
 LiteLLM catalog on a best-effort basis and pins the result into the Soul. Only priced, chat-capable
-models count as valid tier models. The model picker can also list live models for an
+models count as valid models. The model picker can also list live models for an
 OpenAI-compatible endpoint when a `base_url` is configured.
 
 ## Auto selection
 
-With `model: auto`, tier selection is deterministic. Agent autonomy supplies the starting tier,
-decision-like tasks may escalate, and turns with tools in scope avoid the cheapest path when needed.
-A single chat request can override the model for that turn only; the override is not persisted.
+`auto` resolves to the deployment's configured default preset, and that resolution is deterministic
+and recorded — so replaying a Run reaches the same model, and an audit can reconstruct why.
+
+Autonomy no longer influences which model is chosen. It once did, and backwards: a Run with `full`
+autonomy was handed the *weakest* model. Risk and effort are orthogonal, and how much human
+oversight a Run has says nothing about how much capability its work needs.
+
+A single chat request can override the preset for that turn only; the override is not persisted.
+
+## Receipts
+
+Because the participant no longer picks a model, every completed reply reports what actually
+answered it: the model, the effort that was asked for, and how long the model call took. Auto is
+only worth trusting if it says what it did — so when Auto answered, the receipt names the rung it
+resolved to as well, reading `Auto → Balanced` rather than just `Auto`.
+
+Cost is not shown to participants. Operators can read the full routing decision — the resolved
+ModelProfile, the whole fallback chain, any rejected fallbacks, and the budget ceilings in force —
+from the `model.routed` Run event.
+
+## Try harder
+
+When a reply falls short, a participant can re-run the same message one effort preset higher —
+`fast` to `balanced`, `balanced` to `thorough`. An `auto` reply escalates from the rung its receipt
+says it actually ran at, so the next step is never skipped on a deployment whose default is not the
+middle rung. At `thorough` there is nothing higher and the action is not offered.
+
+The escalation is a new turn: the original reply is left in place to compare against, and the same
+Agent, Skills, Resources, and Knowledge pages are carried over so only the effort changes.
+Escalation is always the participant's choice — TulipFarm never silently upgrades a turn.
 
 With no `llm.config.yaml`, LLM features are disabled until an admin configures providers. Use
 [Configure LLM providers](/docs/guides/configure-llm-providers) for the UI flow.

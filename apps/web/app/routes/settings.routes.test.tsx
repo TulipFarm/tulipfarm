@@ -195,7 +195,15 @@ test("llm pane saves the structured config via putLlmConfig", async () => {
     secretKeys: ["anthropic-api-key"],
   });
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
-  expect(settings.putLlmConfig).toHaveBeenCalledWith(llmConfig);
+  expect(settings.putLlmConfig).toHaveBeenCalledWith({
+    ...llmConfig,
+    presets: {
+      default: "balanced",
+      fast: "fast",
+      balanced: "balanced",
+      thorough: "thorough",
+    },
+  });
   await waitFor(() => expect(screen.getByText(/reloaded/i)).toBeInTheDocument());
 });
 

@@ -24,8 +24,8 @@ export interface MentionEntry {
   description?: string;
   domain?: string;
   autonomy?: Autonomy;
-  // Agent-only: the agent's configured model tier (raw `frontmatter.model`); lets ChatPanel reflect
-  // the active agent's tier in the composer's MODEL selector.
+  // Agent-only: the agent's configured selector (raw `frontmatter.model`); lets ChatPanel reflect
+  // the active agent's effort preset in the composer.
   model?: string;
 }
 

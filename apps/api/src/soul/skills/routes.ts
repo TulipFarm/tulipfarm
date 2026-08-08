@@ -762,7 +762,7 @@ export function registerSkillRoutes(
       let report: Awaited<ReturnType<typeof buildAudit>>;
       try {
         report = await buildAudit(
-          llmService.select({ model: "standard" }),
+          llmService.effortModel("balanced"),
           {
             name: skill.name,
             description: skill.description,

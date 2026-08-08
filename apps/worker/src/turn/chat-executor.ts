@@ -5,10 +5,17 @@ import {
   type ModelPort,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
-import type { BudgetStore, PersistedRun, RunStore } from "@tulipfarm/storage";
+import {
+  LIMIT_KEYS,
+  type LimitKey,
+  RunBudgetManager,
+  type RunBudgetStore,
+} from "@tulipfarm/run-kernel";
+import type { PersistedRun, RunStore } from "@tulipfarm/storage";
 import { AgentStateRunner, type ApprovalWaitPort, type StateTransitionPort } from "../agent-state";
 import { ConversationTurnCompleter, type TurnCompletionStore } from "../conversation-turn";
 import type { RunExecutor } from "../executors";
+import type { ModelCallReceiptSource } from "../model";
 import type { RunOutcome } from "../run-dispatcher";
 import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
 import { TurnGuardrails } from "./guardrails";
@@ -46,10 +53,10 @@ export interface ChatExecutorOptions {
   readonly context: TurnContextPort;
   readonly runs: Pick<RunStore, "find" | "findState">;
   readonly events: RunEventAppendPort;
-  readonly budgets: Pick<BudgetStore, "consume">;
+  readonly budgets: RunBudgetStore;
   readonly transitions: StateTransitionPort;
   readonly waits: ApprovalWaitPort;
-  readonly model: ModelPort;
+  readonly model: ModelPort | ((input: ChatModelFactoryInput) => ModelPort);
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
   now?(): Date;
@@ -120,6 +127,15 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       attempt: request.attempt,
       ...(options.now === undefined ? {} : { now: options.now }),
     });
+    const model =
+      typeof options.model === "function"
+        ? options.model({
+            events: writer,
+            budgets: new RunBudgetManager(options.budgets),
+            businessId: run.businessId,
+            runId: run.id,
+          })
+        : options.model;
 
     // Built here and configured by the driver once the Context names a policy: the dispatch port
     // has to be wrapped before the loop exists, and the policy is not known until then. Until it is
@@ -127,7 +143,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
     const guardrails = new TurnGuardrails(options.log);
 
     const loop = new AgentLoop({
-      model: options.model,
+      model,
       // Guarding wraps announcing, not the other way round: a call a guard refuses never reached a
       // Tool, so announcing it as a call that ran would misreport the turn.
       tools: guardrails.guard(announceToolCalls(options.host, writer), writer),
@@ -154,6 +170,9 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       completer: new ConversationTurnCompleter({ store: options.host }),
       guardrails,
       buildEvents: () => writer,
+      // Only a port that keeps a receipt can report one; a caller-supplied plain `ModelPort`
+      // finishes the turn without one rather than naming a model it never observed.
+      ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
     });
 
     return driver.run(request);
@@ -161,12 +180,37 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
 }
 
 /** The Run kernel budget, narrowed to the one Run being charged. */
+const LIMIT_KEY_SET: ReadonlySet<string> = new Set(LIMIT_KEYS);
+
+function isReceiptSource(port: unknown): port is ModelCallReceiptSource {
+  return (
+    typeof port === "object" &&
+    port !== null &&
+    typeof (port as ModelCallReceiptSource).latestModelCallReceipt === "function"
+  );
+}
+
+function isLimitKey(key: string): key is LimitKey {
+  return LIMIT_KEY_SET.has(key);
+}
+
+export interface ChatModelFactoryInput {
+  readonly events: TurnEventWriter;
+  readonly budgets: RunBudgetManager;
+  readonly businessId: string;
+  readonly runId: string;
+}
+
 function runBudget(
-  budgets: Pick<BudgetStore, "consume">,
+  budgets: RunBudgetStore,
   businessId: string,
   runId: string
 ): AgentLoopBudgetPort {
+  const manager = new RunBudgetManager(budgets);
   return {
-    consume: (input) => budgets.consume(businessId, runId, input.key, input.amount),
+    consume: (input) =>
+      isLimitKey(input.key)
+        ? manager.consume({ businessId, runId, key: input.key, amount: input.amount })
+        : budgets.consume(businessId, runId, input.key, input.amount),
   };
 }

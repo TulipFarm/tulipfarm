@@ -3,11 +3,22 @@ import type {
   ModelInvocationResult,
   ModelOutput,
   ModelPort,
+  ModelRequirements,
+  ModelRequirementsPolicy,
   ModelStreamChunk,
 } from "@tulipfarm/agent-runtime";
+import { deriveModelRequirements } from "@tulipfarm/agent-runtime";
+import { priceFor } from "@tulipfarm/llm";
+import type { ResolvedLimits } from "@tulipfarm/run-kernel";
+import {
+  asEffortPreset,
+  type EffortPreset,
+  type EffortRung,
+  isEffortRung,
+  type RunEventPayloads,
+} from "@tulipfarm/schema";
 import {
   jsonSchema,
-  type LanguageModel,
   type ModelMessage as SdkMessage,
   type SystemModelMessage,
   streamText,
@@ -16,6 +27,7 @@ import {
   type ToolSet,
   tool,
 } from "ai";
+import type { LlmModelResolution } from "./llm";
 
 /**
  * `ModelPort` over the Soul's configured providers (plan §2).
@@ -32,16 +44,69 @@ import {
 
 export interface LlmModelPortOptions {
   /**
-   * The provider for a resolved model id. Asked per call rather than held, so a Soul that
+   * The provider for a resolved selector. Asked per call rather than held, so a Soul that
    * republishes its providers mid-turn is honoured on the next iteration instead of on restart.
+   * Requirements travel with the request because routing must re-check them per call: a turn that
+   * gains a Tool halfway through is a different question of the model than the one that started it.
    */
-  model(modelId: string): Promise<LanguageModel>;
+  model(selector: string, requirements: ModelRequirements): Promise<LlmModelResolution>;
+  /**
+   * Optional because tests and non-Run callers may use this port, but Chat wires it from the
+   * per-attempt writer so the routing event is keyed with the Run/State identity that selected it.
+   */
+  readonly routingEvents?: {
+    emit(
+      type: "model.routed",
+      payload: RunEventPayloads["model.routed"],
+      key: string
+    ): Promise<void>;
+  };
+  /** Opens write-once Run budgets from the selected ModelProfile before the call spends them. */
+  readonly budgets?: {
+    open(limits: ResolvedLimits): Promise<void>;
+  };
+  /** Governance the request cannot carry — residency, retention, training, sensitivity. */
+  readonly policy?: ModelRequirementsPolicy;
   /** Aborts an in-flight model call when the worker is draining. */
   readonly signal?: AbortSignal;
+  /** Test hook for deterministic latency measurement. Defaults to `Date.now`. */
+  now?(): number;
 }
 
-export class LlmModelPort implements ModelPort {
+export interface ModelCallReceipt {
+  readonly modelId: string;
+  /** What the participant asked for — including `auto`, which is a request, not an outcome. */
+  readonly effortPreset?: EffortPreset;
+  /**
+   * The rung the call actually ran at, when it can be named.
+   *
+   * Without this, a client that wants the *next* rung up from an `auto` answer has to guess which
+   * rung `auto` meant, and guessing wrong skips a rung. Absent when a preset maps to an authored
+   * ModelProfile that is not itself a rung, where no honest rung name exists.
+   */
+  readonly effortApplied?: EffortRung;
+  readonly modelCallLatencyMs: number;
+}
+
+/**
+ * Reads the receipt for the most recent model call a port served. Chat builds one port per Turn
+ * attempt, so the receipt is scoped by that instance rather than by a process-wide registry: a
+ * registry keyed by Run would outlive the turns that wrote it, and a Turn that parks on an approval
+ * and resumes would attach the pre-approval call's receipt to the reply that followed it.
+ */
+export interface ModelCallReceiptSource {
+  latestModelCallReceipt(): ModelCallReceipt | undefined;
+}
+
+export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
+  private receipt: ModelCallReceipt | undefined;
+
   constructor(private readonly options: LlmModelPortOptions) {}
+
+  /** The last completed model call on this port, or `undefined` when none completed. */
+  latestModelCallReceipt(): ModelCallReceipt | undefined {
+    return this.receipt;
+  }
 
   async invoke(request: ModelInvocationRequest): Promise<ModelInvocationResult> {
     for await (const chunk of this.stream(request)) {
@@ -52,8 +117,27 @@ export class LlmModelPort implements ModelPort {
 
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
     const { instructions, messages } = splitPrompt(request.messages);
+    const resolution = await this.options.model(
+      request.modelProfileId,
+      deriveModelRequirements(request, this.options.policy)
+    );
+    if (resolution.kind === "available" && resolution.budgetLimits !== undefined) {
+      await this.options.budgets?.open(resolution.budgetLimits);
+    }
+    await this.options.routingEvents?.emit(
+      "model.routed",
+      resolution.routing,
+      `model:${request.requestId}`
+    );
+    if (resolution.kind === "denied") {
+      throw new Error(
+        `model profile "${resolution.routing.profileId}" denied: ${resolution.routing.reason}`
+      );
+    }
+
+    const startedAt = this.now();
     const result = streamText({
-      model: await this.options.model(request.modelProfileId),
+      model: resolution.model,
       messages,
       ...(instructions.length === 0 ? {} : { instructions }),
       ...(request.tools === undefined || request.tools.length === 0
@@ -82,6 +166,13 @@ export class LlmModelPort implements ModelPort {
     }
 
     const [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
+    const finishedAt = this.now();
+    const inputTokens = usage.inputTokens ?? 0;
+    const outputTokens = usage.outputTokens ?? 0;
+    const cost = priceFor(pricingModelId(resolution.routing), inputTokens, outputTokens);
+    this.receipt =
+      receiptFromRouting(resolution.routing, Math.max(0, Math.round(finishedAt - startedAt))) ??
+      this.receipt;
 
     // A stream that ended cleanly (no `error` part above) but produced no tool calls, no text, and
     // no usage is not a real completion — the provider call never actually ran (`ai@7`'s internal
@@ -125,12 +216,44 @@ export class LlmModelPort implements ModelPort {
         requestId: request.requestId,
         output: toOutput(calls, text),
         usage: {
-          inputTokens: usage.inputTokens ?? 0,
-          outputTokens: usage.outputTokens ?? 0,
+          inputTokens,
+          outputTokens,
+          ...(cost.costUsd === null ? {} : { costUsd: cost.costUsd }),
         },
       },
     };
   }
+
+  private now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+}
+
+function pricingModelId(routing: RunEventPayloads["model.routed"]): string | undefined {
+  if (routing.outcome === "raw_model") return routing.modelId;
+  if (routing.outcome === "selected") return routing.chain[0]?.modelId;
+  return undefined;
+}
+
+function receiptFromRouting(
+  routing: RunEventPayloads["model.routed"],
+  modelCallLatencyMs: number
+): ModelCallReceipt | undefined {
+  const modelId = pricingModelId(routing);
+  if (modelId === undefined) return undefined;
+  const selectedByPreset = routing.outcome === "selected" && routing.resolution === "effort_preset";
+  const effortPreset = selectedByPreset ? asEffortPreset(routing.selector) : undefined;
+  // `deriveModelProfiles` ids a preset's head profile by the preset's own name, so the resolved
+  // profile id *is* the rung whenever the deployment routes on derived profiles. When a preset
+  // points at an authored ModelProfile instead, the id names that profile and no rung is claimed.
+  const effortApplied =
+    selectedByPreset && isEffortRung(routing.profileId) ? routing.profileId : undefined;
+  return {
+    modelId,
+    ...(effortPreset === undefined ? {} : { effortPreset }),
+    ...(effortApplied === undefined ? {} : { effortApplied }),
+    modelCallLatencyMs,
+  };
 }
 
 /**

@@ -48,7 +48,8 @@ You build everything else by talking to the assistant, so it needs a model to ru
 skipped step 3 of the wizard, nothing below will work until you finish this one.
 
 Open **Settings → Secrets**, add an API key for a provider, then open **Settings → LLM** and
-assign a model to each tier. Tiers let cheap work use a cheap model and hard work use a
+assign a model to each tier. Tiers are the authoring shape behind the `fast`, `balanced`, and
+`thorough` effort presets, so that cheap work can use a cheap model and hard work can use a
 capable one, with fallback if a provider fails.
 
 The walkthrough is in

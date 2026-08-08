@@ -5,7 +5,13 @@ import {
   litellmModelsForProvider,
   resolveModelSpec,
 } from "@tulipfarm/llm";
-import { type LlmConfig, LlmConfigValidationError, validateLlmConfig } from "@tulipfarm/schema";
+import {
+  deriveModelProfiles,
+  type LlmConfig,
+  LlmConfigValidationError,
+  type TierConfig,
+  validateLlmConfig,
+} from "@tulipfarm/schema";
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -43,8 +49,99 @@ const EMPTY_LLM_CONFIG = {
 } as const;
 
 const TIER_KEYS = ["quick", "standard", "complex"] as const;
+const PRESET_KEYS = ["default", "fast", "balanced", "thorough"] as const;
 
 const LIVE_MODELS_TIMEOUT_MS = 5000;
+
+const ModelSpecRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    litellm_key: { type: "string" },
+    input_cost_per_token: { type: "number", minimum: 0 },
+    output_cost_per_token: { type: "number", minimum: 0 },
+    cache_read_input_token_cost: { type: "number", minimum: 0 },
+    cache_creation_input_token_cost: { type: "number", minimum: 0 },
+    max_input_tokens: { type: "integer", minimum: 1 },
+    max_output_tokens: { type: "integer", minimum: 1 },
+    mode: { type: "string" },
+    supports_function_calling: { type: "boolean" },
+    supports_vision: { type: "boolean" },
+    supports_prompt_caching: { type: "boolean" },
+    supports_reasoning: { type: "boolean" },
+    deprecation_date: { type: "string", nullable: true },
+    fetched_at: { type: "string" },
+  },
+} as const;
+
+const ProviderEntryRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    provider: { type: "string" },
+    model: { type: "string" },
+    api_key_ref: { type: "string" },
+    base_url: { type: "string" },
+    resource_name: { type: "string" },
+    spec: ModelSpecRouteSchema,
+  },
+} as const;
+
+const TierConfigRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    providers: { type: "array", items: ProviderEntryRouteSchema },
+  },
+} as const;
+
+const ProviderConnectionRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    provider: { type: "string" },
+    api_key_ref: { type: "string" },
+    base_url: { type: "string" },
+    resource_name: { type: "string" },
+  },
+} as const;
+
+const LlmConfigRouteSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    connections: {
+      type: "object",
+      additionalProperties: ProviderConnectionRouteSchema,
+    },
+    tiers: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        quick: TierConfigRouteSchema,
+        standard: TierConfigRouteSchema,
+        complex: TierConfigRouteSchema,
+      },
+    },
+    presets: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        default: { type: "string" },
+        fast: { type: "string" },
+        balanced: { type: "string" },
+        thorough: { type: "string" },
+      },
+    },
+    embeddings: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        providers: { type: "array", items: ProviderEntryRouteSchema },
+      },
+    },
+  },
+} as const;
 
 /**
  * For `openai-compatible` providers pointed at a self-hosted LiteLLM proxy, the static LiteLLM
@@ -101,12 +198,14 @@ async function fetchLiveModelOptions(
  * `force` re-resolves ALL models against a freshly-fetched catalog.
  */
 async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig> {
-  const all = TIER_KEYS.flatMap((t) => config.tiers[t].providers);
+  const tiers = config.tiers;
+  if (!tiers) return config; // migrated to ModelProfiles — specs are pinned on the profile
+  const all = TIER_KEYS.flatMap((t) => tiers[t].providers);
   if (!force && all.every((p) => p.spec)) return config; // nothing missing → no fetch
   const catalog = await getCatalog(force);
   if (!catalog) return config; // can't reach LiteLLM → save as-is
   const fetchedAt = new Date().toISOString().slice(0, 10);
-  const enrichTier = (tier: { providers: LlmConfig["tiers"]["quick"]["providers"] }) => ({
+  const enrichTier = (tier: TierConfig): TierConfig => ({
     ...tier,
     providers: tier.providers.map((p) => {
       if (p.spec && !force) return p;
@@ -117,11 +216,23 @@ async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig
   return {
     ...config,
     tiers: {
-      quick: enrichTier(config.tiers.quick),
-      standard: enrichTier(config.tiers.standard),
-      complex: enrichTier(config.tiers.complex),
+      quick: enrichTier(tiers.quick),
+      standard: enrichTier(tiers.standard),
+      complex: enrichTier(tiers.complex),
     },
   };
+}
+
+function validatePresetTargets(config: LlmConfig): string | null {
+  if (!config.presets || !config.tiers) return null;
+  const available = new Set(deriveModelProfiles(config).map((profile) => profile.profileId));
+  for (const key of PRESET_KEYS) {
+    const target = config.presets[key];
+    if (target !== undefined && !available.has(target)) {
+      return `preset ${key} points at unknown ModelProfile "${target}"`;
+    }
+  }
+  return null;
 }
 
 /*
@@ -211,7 +322,7 @@ export function registerLlmConfigRoutes(
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
-          200: { type: "object", additionalProperties: true },
+          200: LlmConfigRouteSchema,
           401: ErrorSchema,
         },
       },
@@ -331,9 +442,9 @@ export function registerLlmConfigRoutes(
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: { type: "object", properties: { refresh: { type: "boolean" } } },
-        body: { type: "object", additionalProperties: true },
+        body: LlmConfigRouteSchema,
         response: {
-          200: { type: "object", additionalProperties: true },
+          200: LlmConfigRouteSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           422: ErrorSchema,
@@ -354,6 +465,10 @@ export function registerLlmConfigRoutes(
           return reply.code(422).send({ error: err.message });
         }
         throw err;
+      }
+      const presetProblem = validatePresetTargets(config);
+      if (presetProblem) {
+        return reply.code(422).send({ error: presetProblem });
       }
 
       // Auto-pin specs for any model missing one (or all, with ?refresh=true) so cost tracking works

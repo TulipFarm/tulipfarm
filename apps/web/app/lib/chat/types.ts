@@ -7,6 +7,8 @@
  * starts emitting them. No Zod: validate by hand at the parse boundary.
  */
 
+import type { EffortPreset, EffortRung } from "@tulipfarm/schema";
+
 // ----- Wire: SSE events ------------------------------------------------------------------------
 
 export type ChatEventType =
@@ -81,7 +83,14 @@ export type ChatEvent =
     }
   // `messageId` is the persisted reply the turn produced; the turn's own finish event names it, so a
   // reply can be given feedback without a separate header.
-  | { type: "finish"; data: { reason: string; messageId?: string | null } }
+  | {
+      type: "finish";
+      data: {
+        reason: string;
+        messageId?: string | null;
+        receipt?: ModelReceipt;
+      };
+    }
   | { type: "error"; data: { message: string } };
 
 // Raw output of the frame parser, before mapping to a typed `ChatEvent`.
@@ -90,7 +99,23 @@ export type ParsedFrame = { seq: number; type: string; data: unknown };
 // ----- Request shape knobs ---------------------------------------------------------------------
 
 export type Autonomy = "full" | "supervised" | "approval-required" | "manual";
-export type ModelTier = "auto" | "quick" | "standard" | "complex";
+export type ChatModelSelector = EffortPreset;
+
+export type ChatTurnOptions = {
+  model?: ChatModelSelector;
+  autonomy?: Autonomy;
+  agentId?: string;
+  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
+  skills?: string[];
+  resources?: string[];
+  // Per-turn `~knowledge` page pins (pageIds) — full page content injected server-side this turn.
+  knowledgePages?: string[];
+};
+
+export type ChatTurnSource = {
+  text: string;
+  options?: ChatTurnOptions;
+};
 
 // ----- Timeline model --------------------------------------------------------------------------
 
@@ -101,6 +126,15 @@ export type ApprovalState = {
   approvalId: string;
   status: "pending" | ApprovalOutcome;
   expiresAt?: string;
+};
+
+export type ModelReceipt = {
+  modelId: string;
+  /** What was asked for. `auto` means the deployment chose — see `effortApplied` for what it chose. */
+  effortPreset?: EffortPreset;
+  /** The rung the call actually ran at, when the backend could name one. */
+  effortApplied?: EffortRung;
+  modelCallLatencyMs: number;
 };
 
 // A renderable segment of one message. The reducer appends/merges these as events arrive; order is
@@ -152,6 +186,10 @@ export type ChatMessage = {
   serverId?: string;
   // The caller's current thumbs vote on this reply, if any (persisted, see message_feedback).
   feedback?: "up" | "down";
+  // Quiet post-hoc receipt for the model call that produced the reply.
+  receipt?: ModelReceipt;
+  // The user turn and per-turn context that produced this message, for user-driven retries.
+  sourceTurn?: ChatTurnSource;
 };
 
 export type ChatStatus = "idle" | "submitted" | "streaming" | "error";

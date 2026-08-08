@@ -138,6 +138,7 @@ function harness(
     },
     events: appendPort,
     budgets: {
+      open: async () => {},
       consume: async (_businessId, _runId, key, amount): Promise<BudgetConsumeResult> => {
         charges.push({ key, amount });
         return { outcome: "unbounded", consumed: amount, limit: null, exhaustionPolicy: null };
@@ -206,7 +207,8 @@ describe("createChatExecutor", () => {
 
     await execute();
 
-    expect(recorded.charges).toContainEqual({ key: "agent_loop_iterations", amount: 1 });
+    expect(recorded.charges).toContainEqual({ key: "iterations", amount: 1 });
+    expect(recorded.charges).toContainEqual({ key: "tokens", amount: 15 });
   });
 
   it("succeeds without running a turn when the Run names no Turn", async () => {

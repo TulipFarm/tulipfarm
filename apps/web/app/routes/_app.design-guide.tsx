@@ -2,6 +2,7 @@ import type { MetaFunction } from "@remix-run/react";
 import { Check, Copy, Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { Composer } from "~/components/chat/composer";
+import { Transcript } from "~/components/chat/transcript";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -9,6 +10,7 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import { Textarea } from "~/components/ui/textarea";
+import type { ChatMessage } from "~/lib/chat/types";
 
 export const meta: MetaFunction = () => [{ title: "Design guide · tulipfarm" }];
 
@@ -16,6 +18,32 @@ export function clientLoader() {
   if (!import.meta.env.DEV) throw new Response("Not found", { status: 404 });
   return null;
 }
+
+/**
+ * A finished reply carrying a receipt. Auto is a request, not an outcome, so the receipt names the
+ * rung it resolved to — which is also what "Try harder" escalates from.
+ */
+const TRANSCRIPT_MESSAGES: ChatMessage[] = [
+  {
+    id: "guide-user",
+    role: "user",
+    sealed: true,
+    parts: [{ kind: "text", text: "Which invoices are overdue?" }],
+  },
+  {
+    id: "guide-assistant",
+    role: "assistant",
+    sealed: true,
+    parts: [{ kind: "text", text: "Three invoices are overdue by more than 30 days." }],
+    receipt: {
+      modelId: "claude-sonnet-5",
+      effortPreset: "auto",
+      effortApplied: "balanced",
+      modelCallLatencyMs: 1240,
+    },
+    sourceTurn: { text: "Which invoices are overdue?", options: { model: "auto" } },
+  },
+];
 
 const TOKENS = [
   ["Background", "bg-background"],
@@ -267,6 +295,14 @@ export default function DesignGuideRoute() {
         title="Composition patterns"
         description="Panels, navigation, and feedback use the same spacing and hierarchy."
       >
+        <div className="mb-6 overflow-hidden rounded-md border border-border bg-background px-4 py-4">
+          <Transcript
+            messages={TRANSCRIPT_MESSAGES}
+            status="idle"
+            onApprove={() => undefined}
+            onTryHarder={() => undefined}
+          />
+        </div>
         <div className="mb-6 overflow-hidden rounded-md border border-border bg-background">
           <Composer
             onSend={() => undefined}

@@ -2,6 +2,7 @@ import type { ModelInvocationRequest, ModelStreamChunk } from "@tulipfarm/agent-
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it } from "vitest";
+import type { LlmModelResolution } from "./llm";
 import { LlmModelPort } from "./model";
 
 type DoStreamResult = Awaited<ReturnType<MockLanguageModelV4["doStream"]>>;
@@ -15,7 +16,18 @@ function model(parts: StreamPart[]): {
     doStream: async () => ({ stream: simulateReadableStream<StreamPart>({ chunks: parts }) }),
   });
   return {
-    port: new LlmModelPort({ model: async () => mock as unknown as LanguageModel }),
+    port: new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+    }),
     calls: () => mock.doStreamCalls,
   };
 }
@@ -76,6 +88,299 @@ describe("LlmModelPort", () => {
     await expect(port.invoke(request())).resolves.toMatchObject({
       output: { kind: "text", text: "done" },
     });
+  });
+
+  it("emits the routing decision with a deterministic invocation key before calling the model", async () => {
+    const emitted: {
+      type: string;
+      payload: unknown;
+      key: string;
+    }[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", modelId: "claude-sonnet-5" },
+            { profileId: "backup", modelId: "claude-haiku-5" },
+          ],
+          cacheAllowed: true,
+          rejectedFallbacks: [{ profileId: "tiny", reason: "context_window_exceeded" }],
+        },
+      }),
+      routingEvents: {
+        emit: async (type, payload, key) => {
+          emitted.push({ type, payload, key });
+        },
+      },
+    });
+
+    await port.invoke(request({ modelProfileId: "balanced" }));
+
+    expect(emitted).toEqual([
+      {
+        type: "model.routed",
+        key: "model:request-1",
+        payload: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", modelId: "claude-sonnet-5" },
+            { profileId: "backup", modelId: "claude-haiku-5" },
+          ],
+          cacheAllowed: true,
+          rejectedFallbacks: [{ profileId: "tiny", reason: "context_window_exceeded" }],
+        },
+      },
+    ]);
+  });
+
+  it("opens selected ModelProfile budgets before recording the routing decision or calling the model", async () => {
+    const order: string[] = [];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => {
+        order.push("model");
+        return {
+          stream: simulateReadableStream<StreamPart>({
+            chunks: [...textParts("t1", ["ok"]), FINISH],
+          }),
+        };
+      },
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        budgetLimits: { tokens: { value: 2_000, scope: "model" } },
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [{ profileId: "primary", modelId: "claude-sonnet-5" }],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+          budgetLimits: { tokens: { value: 2_000, scope: "model" } },
+        },
+      }),
+      budgets: {
+        open: async (limits) => {
+          order.push(`open:${limits.tokens?.value}`);
+        },
+      },
+      routingEvents: {
+        emit: async () => {
+          order.push("event");
+        },
+      },
+    });
+
+    await port.invoke(request({ modelProfileId: "balanced" }));
+
+    expect(order).toEqual(["open:2000", "event", "model"]);
+  });
+
+  it("adds priced cost usage when the selected model is known to the price table", async () => {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [{ profileId: "primary", modelId: "claude-sonnet-4-6" }],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+      }),
+    });
+
+    await expect(port.invoke(request({ modelProfileId: "balanced" }))).resolves.toMatchObject({
+      usage: { inputTokens: 11, outputTokens: 4, costUsd: 0.000093 },
+    });
+  });
+
+  it("records a participant receipt for the selected model call after it completes", async () => {
+    const ticks = [100, 142];
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          chain: [
+            { profileId: "primary", modelId: "claude-sonnet-5" },
+            { profileId: "backup", modelId: "claude-haiku-5" },
+          ],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+      }),
+      now: () => ticks.shift() ?? 142,
+    });
+
+    await port.invoke(request({ requestId: "run-1:invoke:1", modelProfileId: "balanced" }));
+
+    expect(port.latestModelCallReceipt()).toEqual({
+      modelId: "claude-sonnet-5",
+      effortPreset: "balanced",
+      modelCallLatencyMs: 42,
+    });
+  });
+
+  it("names the rung Auto actually applied, so a client never has to guess it", async () => {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "auto",
+          resolution: "effort_preset",
+          // `deriveModelProfiles` ids a preset's head profile by the preset name, so this *is* the
+          // rung `auto` landed on for this deployment.
+          profileId: "fast",
+          chain: [{ profileId: "fast", modelId: "claude-haiku-5" }],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+      }),
+      now: () => 0,
+    });
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+
+    expect(port.latestModelCallReceipt()).toMatchObject({
+      effortPreset: "auto",
+      effortApplied: "fast",
+    });
+  });
+
+  it("claims no applied rung when a preset resolves to an authored ModelProfile", async () => {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "selected",
+          selector: "auto",
+          resolution: "effort_preset",
+          profileId: "house-counsel",
+          chain: [{ profileId: "house-counsel", modelId: "claude-opus-5" }],
+          cacheAllowed: true,
+          rejectedFallbacks: [],
+        },
+      }),
+      now: () => 0,
+    });
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+
+    const receipt = port.latestModelCallReceipt();
+    expect(receipt?.effortPreset).toBe("auto");
+    expect(receipt?.effortApplied).toBeUndefined();
+  });
+
+  it("keeps no receipt on a port whose model call never completed", async () => {
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "denied",
+        routing: {
+          outcome: "denied",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          reason: "tools_unsupported",
+          attempts: [{ profileId: "primary", reason: "tools_unsupported" }],
+        },
+      }),
+    });
+
+    await expect(port.invoke(request({ modelProfileId: "balanced" }))).rejects.toThrow();
+    expect(port.latestModelCallReceipt()).toBeUndefined();
+  });
+
+  it("emits denial evidence before refusing a model call", async () => {
+    const emitted: unknown[] = [];
+    const port = new LlmModelPort({
+      model: async (): Promise<LlmModelResolution> => ({
+        kind: "denied",
+        routing: {
+          outcome: "denied",
+          selector: "balanced",
+          resolution: "effort_preset",
+          profileId: "primary",
+          reason: "tools_unsupported",
+          attempts: [{ profileId: "primary", reason: "tools_unsupported" }],
+        },
+      }),
+      routingEvents: {
+        emit: async (_type, payload) => {
+          emitted.push(payload);
+        },
+      },
+    });
+
+    await expect(port.invoke(request({ modelProfileId: "balanced" }))).rejects.toThrow(
+      'model profile "primary" denied: tools_unsupported'
+    );
+    expect(emitted).toEqual([
+      {
+        outcome: "denied",
+        selector: "balanced",
+        resolution: "effort_preset",
+        profileId: "primary",
+        reason: "tools_unsupported",
+        attempts: [{ profileId: "primary", reason: "tools_unsupported" }],
+      },
+    ]);
   });
 
   it("treats a call as the answer even when the model narrated first", async () => {

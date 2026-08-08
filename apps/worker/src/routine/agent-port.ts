@@ -5,17 +5,29 @@ import {
   assembleContext,
   assembleSystemPrompt,
   type ContextCandidate,
+  deriveModelRequirements,
   type GuardContext,
   GuardrailsService,
   InMemoryLoopCheckpointStore,
   type ModelPort,
+  type ModelProfileCatalog,
+  type ModelProfileSelection,
+  selectModelProfile,
   type ToolDispatchPort,
 } from "@tulipfarm/agent-runtime";
-import type { AgentInvocationPlan, JsonObject } from "@tulipfarm/run-kernel";
-import type { AgentDefinition, ModelProfileDefinition } from "@tulipfarm/schema";
+import {
+  type AgentInvocationPlan,
+  type JsonObject,
+  LIMIT_KEYS,
+  type LimitKey,
+  RunBudgetManager,
+  type RunBudgetStore,
+} from "@tulipfarm/run-kernel";
+import type { AgentDefinition, ModelProfileDefinition, RunEventPayloads } from "@tulipfarm/schema";
 import { canonicalHash, canonicalize } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
-import type { BudgetStore, RunStore } from "@tulipfarm/storage";
+import type { RunStore } from "@tulipfarm/storage";
+import { type ModelBudgetEvidence, openModelProfileRunBudget } from "../model-budget";
 import type { RunEventAppendPort } from "../turn/run-events";
 import { TurnEventWriter } from "../turn/run-events";
 
@@ -66,13 +78,32 @@ export interface RoutineAgentPort {
 }
 
 export interface BundleRoutineAgentPortOptions {
-  readonly model: ModelPort;
+  /**
+   * Builds the port for a chain the router has **already** selected, rather than a shared port that
+   * would re-resolve the selection.
+   *
+   * A Routine routes over its Run's *pinned bundle* (see `bundleCatalog`), so the profile it picks
+   * need not exist in the deployment's current configuration at all. Handing a shared `ModelPort`
+   * the bundle's profile id would send it back through config-derived resolution, where that id is
+   * unknown — silently discarding both the pinned bundle and every constraint-equivalent fallback
+   * the router just chose. Binding the port to the chain keeps the decision made here the decision
+   * that runs.
+   */
+  model(selection: RoutineModelSelection): ModelPort;
   readonly events: RunEventAppendPort;
-  readonly budgets: Pick<BudgetStore, "consume">;
+  readonly budgets: RunBudgetStore;
   readonly runs: Pick<RunStore, "find">;
   /** Where a guard that timed out or threw is reported; it is skipped, never allowed to stall. */
   readonly log: { warn(obj: unknown, msg?: string): void };
   readonly now?: () => Date;
+}
+
+/** A settled routing decision: the chain to invoke, in order, and the evidence that chose it. */
+export interface RoutineModelSelection {
+  /** Provider Model IDs, primary first, then its constraint-equivalent fallbacks. */
+  readonly modelIds: readonly string[];
+  /** The routing evidence already emitted for this State, so the port need not re-derive it. */
+  readonly routing: RunEventPayloads["model.routed"];
 }
 
 /** Run statuses that mean the question must stop being asked. */
@@ -99,6 +130,53 @@ function estimateTokens(text: string): number {
 
 function definitionOf<T>(bundle: RuntimeBundle, kind: string, slug: string): T | undefined {
   return bundle.get(kind, slug)?.document as T | undefined;
+}
+
+/**
+ * The Run's own pinned bundle as a routing catalog.
+ *
+ * Routing reads the bundle and nothing else, for the same reason every other decision here does: a
+ * Run that waited through three publications must be answered against the ModelProfiles it was
+ * minted with, not whichever ones are live now.
+ */
+function bundleCatalog(bundle: RuntimeBundle): ModelProfileCatalog {
+  return {
+    get(profileId) {
+      const definition = definitionOf<ModelProfileDefinition>(bundle, "ModelProfile", profileId);
+      return definition === undefined ? undefined : { ...definition.spec, profileId };
+    },
+  };
+}
+
+function modelRoutingPayload(
+  selector: string,
+  selection: ModelProfileSelection,
+  budgetLimits?: ModelBudgetEvidence
+): RunEventPayloads["model.routed"] {
+  if (selection.outcome === "denied") {
+    return {
+      outcome: "denied",
+      selector,
+      resolution: "profile_ref",
+      profileId: selection.profileId,
+      reason: selection.reason,
+      attempts: selection.attempts,
+    };
+  }
+
+  return {
+    outcome: "selected",
+    selector,
+    resolution: "profile_ref",
+    profileId: selection.profileId,
+    chain: selection.chain.map((profile) => ({
+      profileId: profile.profileId,
+      modelId: profile.model,
+    })),
+    cacheAllowed: selection.cacheAllowed,
+    rejectedFallbacks: selection.rejectedFallbacks,
+    ...(budgetLimits === undefined ? {} : { budgetLimits }),
+  };
 }
 
 /**
@@ -168,15 +246,6 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       return { kind: "unavailable", reason: "agent_version_mismatch" };
     }
 
-    const profile = definitionOf<ModelProfileDefinition>(
-      bundle,
-      "ModelProfile",
-      agent.spec.modelProfile
-    );
-    if (profile === undefined) {
-      return { kind: "unavailable", reason: "model_profile_not_in_bundle" };
-    }
-
     // The guards are rebuilt from the deployment's default policy, and the digest recorded as
     // evidence is the one this service actually compiled — never a digest for a policy that did not
     // run. A bundle-authored prompt policy would be read here once Souls publish one.
@@ -206,18 +275,6 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const guardedInput = await guardrails.runInput(question, guardContext);
     if (guardedInput.blocked) return { kind: "failed", reason: "guardrail_input_blocked" };
 
-    const manifest = assembleContext({
-      businessId: request.businessId,
-      runId: request.runId,
-      stateId: request.stateKey,
-      candidates: candidatesFor(system, guardedInput.value),
-      guardrailDigest: guardrails.revision,
-      bundleDigest: bundle.digest,
-      budgetTokens: profile.spec.supports.contextWindowTokens,
-    });
-    // A question the Agent's own context window cannot hold is not one to ask half of.
-    if (manifest.excluded.length > 0) return { kind: "unavailable", reason: "context_budget" };
-
     const events = new TurnEventWriter({
       events: this.options.events,
       businessId: request.businessId,
@@ -228,6 +285,60 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       attempt: request.attempt,
       now: this.now,
     });
+
+    // Routines used to read `profile.spec.model` and invoke it, skipping every constraint the
+    // profile declares — a State could be answered by a model that could not hold its context, or
+    // that broke the profile's residency or retention terms, with nothing in the record saying so.
+    // The router that governs a chat turn decides here too, over a catalog of the Run's own pinned
+    // bundle, and a denial parks the State rather than answering against the profile's terms.
+    const selection = selectModelProfile(
+      agent.spec.modelProfile,
+      deriveModelRequirements({
+        requestId: request.stateKey,
+        modelProfileId: agent.spec.modelProfile,
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: guardedInput.value },
+        ],
+        ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
+      }),
+      bundleCatalog(bundle)
+    );
+    if (selection.outcome === "denied") {
+      await events.emit(
+        "model.routed",
+        modelRoutingPayload(agent.spec.modelProfile, selection),
+        "model"
+      );
+      this.options.log.warn(
+        { runId: request.runId, profileId: selection.profileId, reason: selection.reason },
+        "routine model profile denied"
+      );
+      return { kind: "unavailable", reason: `model_${selection.reason}` };
+    }
+    const primary = selection.chain[0];
+    if (primary === undefined) return { kind: "unavailable", reason: "model_unknown_profile" };
+    const budgetLimits = await openModelProfileRunBudget({
+      budgets: this.options.budgets,
+      businessId: request.businessId,
+      runId: request.runId,
+      profile: primary,
+    });
+    const routing = modelRoutingPayload(agent.spec.modelProfile, selection, budgetLimits);
+    await events.emit("model.routed", routing, "model");
+
+    const manifest = assembleContext({
+      businessId: request.businessId,
+      runId: request.runId,
+      stateId: request.stateKey,
+      candidates: candidatesFor(system, guardedInput.value),
+      guardrailDigest: guardrails.revision,
+      bundleDigest: bundle.digest,
+      budgetTokens: primary.supports.contextWindowTokens,
+    });
+    // A question the Agent's own context window cannot hold is not one to ask half of.
+    if (manifest.excluded.length > 0) return { kind: "unavailable", reason: "context_budget" };
+
     await events.emit(
       "context.assembled",
       {
@@ -235,13 +346,16 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
         guardrailDigest: guardrails.revision,
         messageCount: 2,
         compacted: false,
-        modelProfileId: profile.spec.model,
+        modelProfileId: selection.profileId,
       },
       "context"
     );
 
     const loop = new AgentLoop({
-      model: this.options.model,
+      model: this.options.model({
+        modelIds: selection.chain.map((profile) => profile.model),
+        routing,
+      }),
       tools: NO_TOOLS,
       checkpoints: new InMemoryLoopCheckpointStore(),
       events,
@@ -258,7 +372,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       businessId: request.businessId,
       runId: request.runId,
       stateId: request.stateKey,
-      modelProfileId: profile.spec.model,
+      modelProfileId: selection.profileId,
       contextDigest: manifest.digest,
       guardrailDigest: guardrails.revision,
       messages: [
@@ -294,9 +408,28 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
 
   /** The Run kernel budget, narrowed to the Run being charged. */
   private budget(request: RoutineAgentRequest): AgentLoopBudgetPort {
+    const manager = new RunBudgetManager(this.options.budgets);
     return {
       consume: (input) =>
-        this.options.budgets.consume(request.businessId, request.runId, input.key, input.amount),
+        isLimitKey(input.key)
+          ? manager.consume({
+              businessId: request.businessId,
+              runId: request.runId,
+              key: input.key,
+              amount: input.amount,
+            })
+          : this.options.budgets.consume(
+              request.businessId,
+              request.runId,
+              input.key,
+              input.amount
+            ),
     };
   }
+}
+
+const LIMIT_KEY_SET: ReadonlySet<string> = new Set(LIMIT_KEYS);
+
+function isLimitKey(key: string): key is LimitKey {
+  return LIMIT_KEY_SET.has(key);
 }

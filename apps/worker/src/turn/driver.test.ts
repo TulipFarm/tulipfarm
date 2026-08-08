@@ -11,6 +11,7 @@ import {
   type TurnCompletionRecord,
   type TurnCompletionStore,
 } from "../conversation-turn";
+import type { ModelCallReceipt } from "../model";
 import {
   type ResolvedTurnContext,
   type TurnContextPort,
@@ -95,7 +96,11 @@ class FakeCompletionStore implements TurnCompletionStore {
 
 function harness(
   outcome: AgentLoopOutcome | (() => Promise<AgentLoopOutcome>),
-  over: { context?: Partial<ResolvedTurnContext>; onLoop?: (input: AgentLoopInput) => void } = {}
+  over: {
+    context?: Partial<ResolvedTurnContext>;
+    onLoop?: (input: AgentLoopInput) => void;
+    receipt?: ModelCallReceipt;
+  } = {}
 ) {
   const events = new FakeAppendPort();
   const store = new FakeCompletionStore();
@@ -134,6 +139,7 @@ function harness(
         attempt: turn.attempt,
         now: () => new Date("2026-01-01T00:00:00.000Z"),
       }),
+    ...(over.receipt === undefined ? {} : { modelReceipt: () => over.receipt }),
   });
 
   return { driver, events, store, transitions, context };
@@ -200,6 +206,47 @@ describe("TurnDriver", () => {
     });
   });
 
+  it("attaches the model receipt to the finished assistant reply", async () => {
+    const { driver, events } = harness(
+      {
+        status: "completed",
+        output: "the answer",
+        ...counters,
+      },
+      {
+        receipt: {
+          modelId: "claude-sonnet-5",
+          effortPreset: "auto",
+          modelCallLatencyMs: 60,
+        },
+      }
+    );
+
+    await driver.run(request());
+
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: {
+        status: "succeeded",
+        messageId: "msg-1",
+        modelId: "claude-sonnet-5",
+        effortPreset: "auto",
+        modelCallLatencyMs: 60,
+      },
+    });
+  });
+
+  it("finishes without receipt fields when no model call was observed", async () => {
+    const { driver, events } = harness({ status: "completed", output: "hi", ...counters });
+
+    await driver.run(request());
+
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: { status: "succeeded", messageId: "msg-1" },
+    });
+  });
+
   it("records the event cursor so a reader resumes strictly after this attempt", async () => {
     const { driver, store } = harness({ status: "completed", output: "hi", ...counters });
     await driver.run(request());
@@ -241,6 +288,21 @@ describe("TurnDriver", () => {
     expect(events.appended.at(-1)).toEqual({
       eventType: "turn.finished",
       payload: { status: "failed", messageId: null, reason: "iteration_limit" },
+    });
+  });
+
+  it("omits receipt fields when the turn fails before model selection", async () => {
+    const { driver, events } = harness({
+      status: "failed",
+      reason: "model_error",
+      ...counters,
+    });
+
+    await driver.run(request({ runId: "run-without-model" }));
+
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "turn.finished",
+      payload: { status: "failed", messageId: null, reason: "model_error" },
     });
   });
 

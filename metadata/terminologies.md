@@ -77,6 +77,12 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
 | First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
+| A governed, Soul-authored model routing record | **ModelProfile** | `ModelProfile` | `/api/v1/model-profiles` | "Model profile" | one word, `PascalCase` — authored at `models/<slug>.yaml`; holds provider/model, capability, modality, constraints, budgets, fallbacks. ⛔ "tier" as the routing unit — retired |
+| A named effort level a participant may pick | **Effort Preset** | `EffortPreset` | — | "Auto"/"Fast"/"Balanced"/"Thorough" | the ONLY model concept a user sees; maps to a ModelProfile ref, one marked default. ⛔ "quick"/"standard"/"complex" — retired |
+| Credentials + endpoint for one provider | **Provider Connection** | `ProviderConnection` | — | "Provider" | `provider → {api_key_ref, base_url, resource_name}`; secret-bearing, admin-managed. Distinct from a ModelProfile, which is governance and git-audited |
+| The raw provider model identifier | **Model ID** | `modelId` | — | — | e.g. `claude-sonnet-4`; an implementation detail of a ModelProfile — never a user-facing choice, never a routing unit |
+| What a completed reply reports about the call that produced it | **Receipt** | `ModelCallReceipt` | — | "Answered by …" | participant-visible: Model ID, effort asked, effort applied, model-call latency. ⛔ cost — operator-only, on the `model.routed` Run event |
+| Re-running a turn one effort level higher | **Try harder** | `nextEffortPreset` | — | "Try harder" | always the participant's choice; escalates from the effort the receipt says was *applied*. ⛔ "retry"/"regenerate" — those repeat a turn unchanged |
 | Agent-to-channel presentation standard | **Tulip Surface Protocol** | `TSP`, `SurfaceArtifact`, `SurfaceRenderer`, `SurfaceInteraction` | `/api/v1/surfaces`, `/dev/surfaces`, `surface-components/` | "Tulip Surface Protocol", "presentation" | Channel-neutral semantic components; never persisted provider payloads or executable UI |
 
 ¹ `plugin` remains valid ONLY for build/library tooling (vite, rehype, Chart.js) — never for a Skill.
@@ -98,6 +104,9 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | collection (meaning a knowledge group) | space | retired (see Completed Renames) |
 | concept (knowledge node) | page | clean |
 | document (knowledge node) | page | clean |
+| tier (meaning model routing) | ModelProfile | retiring — accepted as a deprecated wire alias for one release |
+| quick / standard / complex | Effort Preset (Auto/Fast/Balanced/Thorough) | retiring — deprecated wire aliases for one release |
+| model (meaning the user-facing choice) | effort preset | clean — a user picks effort, never a model |
 
 ## Completed Renames (done 2026-06-27)
 

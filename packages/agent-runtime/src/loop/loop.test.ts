@@ -334,6 +334,29 @@ describe("AgentLoop", () => {
     expect(outcome).toMatchObject({ status: "failed", reason: "budget_exhausted" });
   });
 
+  it("charges token and priced cost budgets after a model call reports usage", async () => {
+    const charges: { key: string; amount: number }[] = [];
+    const outcome = await loop({
+      model: scriptedModel({
+        ...textResult("done"),
+        usage: { inputTokens: 7, outputTokens: 3, costUsd: 0.0000001 },
+      }),
+      budget: {
+        consume: async (charge) => {
+          charges.push(charge);
+          return { outcome: "allowed" };
+        },
+      },
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(charges).toEqual([
+      { key: "iterations", amount: 1 },
+      { key: "tokens", amount: 10 },
+      { key: "costMicros", amount: 1 },
+    ]);
+  });
+
   it("yields cancellation before calling the model again", async () => {
     const model = scriptedModel(
       toolCallResult([{ callId: "c1", name: "github.issue.comment", arguments: { body: "1" } }])

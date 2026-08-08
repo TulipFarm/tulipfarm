@@ -118,9 +118,9 @@ const skillCreate: SkillTool = {
         "LLM service not available — configure a provider before creating skills"
       );
     }
-    let model: ReturnType<typeof ctx.llmService.select>;
+    let model: ReturnType<typeof ctx.llmService.effortModel>;
     try {
-      model = ctx.llmService.select({ model: "standard" });
+      model = ctx.llmService.effortModel("balanced");
     } catch (e) {
       if (e instanceof LlmNotConfiguredError) {
         return err(

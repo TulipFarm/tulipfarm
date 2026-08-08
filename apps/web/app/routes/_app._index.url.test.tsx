@@ -26,7 +26,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
   vi.mocked(remix.useLoaderData).mockReturnValue({
     agentId: undefined,
-    defaultModel: "standard",
+    defaultModel: "auto",
     suggestions: [],
   });
 });

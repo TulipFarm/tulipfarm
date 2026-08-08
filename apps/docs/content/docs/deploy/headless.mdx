@@ -83,12 +83,12 @@ the user exists, the seed step is skipped silently.
 boots, the instance reads this flag and skips all setup checks without touching the
 database.
 
-## Configure LLM tiers after deployment
+## Configure models after deployment
 
-Headless seeding stores the LLM key and writes a default `llm.config.yaml` with the
-provider in all three tiers (quick, standard, complex) pointing to a default model. To
-adjust the model or add a fallback chain, sign in as the admin and go to
-**Settings → LLM Config**.
+Headless seeding stores the LLM key and writes a default `llm.config.yaml` with the provider in
+all three tiers pointing to a default model, from which the `fast`, `balanced`, and `thorough`
+effort presets are derived. To adjust the model or add a fallback chain, sign in as the admin and
+go to **Settings → LLM Config**.
 
 ## Remove the wizard permanently
 

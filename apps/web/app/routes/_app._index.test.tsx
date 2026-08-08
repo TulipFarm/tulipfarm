@@ -38,7 +38,7 @@ const Stub = createRemixStub([{ path: "/", Component: ChatRoute }]);
 test("default view is the live chat empty state with adaptive suggestions", () => {
   vi.mocked(remix.useLoaderData).mockReturnValue({
     agentId: undefined,
-    defaultModel: "standard",
+    defaultModel: "auto",
     suggestions: [
       {
         id: "tickets",
@@ -75,13 +75,13 @@ test("clientLoader never blocks chat: a failed suggestions fetch yields []", asy
 
   expect(data.suggestions).toEqual([]);
   expect(data.checklist).toBeNull();
-  expect(data.defaultModel).toBe("standard");
+  expect(data.defaultModel).toBe("auto");
 });
 
 test("the Getting-started card renders and route-level dismissal hides it (persists API call)", () => {
   vi.mocked(remix.useLoaderData).mockReturnValue({
     agentId: undefined,
-    defaultModel: "standard",
+    defaultModel: "auto",
     suggestions: [],
     checklist: {
       dismissed: false,

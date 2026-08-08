@@ -12,6 +12,9 @@
  * and cannot import each other.
  */
 
+import { MODEL_PROFILE_DENIAL_REASONS } from "./definitions/model";
+import { EFFORT_PRESETS, EFFORT_RUNGS, type EffortPreset, type EffortRung } from "./model-catalog";
+
 /**
  * Who an event may be shown to. `participant` is what the person in the conversation sees;
  * `operator` is evidence — digests, dispatch records, guardrail decisions — that belongs to
@@ -43,6 +46,7 @@ export const RUN_EVENT_TYPES = [
   "guardrail.blocked",
   "turn.finished",
   "context.assembled",
+  "model.routed",
   "tool.dispatched",
   "guardrail.decision",
   "delivery.classified",
@@ -164,6 +168,10 @@ const TURN_FINISHED_SCHEMA = {
     status: { type: "string", enum: ["succeeded", "failed", "cancelled"] },
     messageId: { type: ["string", "null"] },
     reason: { type: "string" },
+    modelId: { type: "string", minLength: 1 },
+    effortPreset: { type: "string", enum: EFFORT_PRESETS },
+    effortApplied: { type: "string", enum: EFFORT_RUNGS },
+    modelCallLatencyMs: { type: "integer", minimum: 0 },
     usage: {
       type: "object",
       additionalProperties: false,
@@ -187,6 +195,116 @@ const CONTEXT_ASSEMBLED_SCHEMA = {
     compacted: { type: "boolean" },
     modelProfileId: { type: "string", minLength: 1 },
   },
+} as const;
+
+const MODEL_ROUTED_ATTEMPT_SCHEMA = {
+  type: "object",
+  required: ["profileId", "reason"],
+  additionalProperties: false,
+  properties: {
+    profileId: { type: "string", minLength: 1 },
+    reason: { type: "string", enum: MODEL_PROFILE_DENIAL_REASONS },
+  },
+} as const;
+
+const MODEL_ROUTED_CHAIN_ENTRY_SCHEMA = {
+  type: "object",
+  required: ["profileId", "modelId"],
+  additionalProperties: false,
+  properties: {
+    profileId: { type: "string", minLength: 1 },
+    modelId: { type: "string", minLength: 1 },
+  },
+} as const;
+
+const MODEL_ROUTED_BUDGET_LIMIT_SCHEMA = {
+  type: "object",
+  required: ["value", "scope"],
+  additionalProperties: false,
+  properties: {
+    value: { type: "integer", minimum: 0 },
+    scope: {
+      type: "string",
+      enum: [
+        "deployment",
+        "role",
+        "agent",
+        "routine",
+        "run",
+        "state",
+        "tool",
+        "integration",
+        "model",
+      ],
+    },
+  },
+} as const;
+
+const MODEL_ROUTED_BUDGET_LIMITS_SCHEMA = {
+  type: "object",
+  minProperties: 1,
+  additionalProperties: false,
+  properties: {
+    tokens: MODEL_ROUTED_BUDGET_LIMIT_SCHEMA,
+    costMicros: MODEL_ROUTED_BUDGET_LIMIT_SCHEMA,
+  },
+} as const;
+
+/**
+ * Operator evidence for the model routing decision. Selection and denial share one event type so
+ * a replay checks one deterministic key for "the model decision for this invocation" regardless of
+ * which side of the router it landed on.
+ */
+const MODEL_ROUTED_SCHEMA = {
+  oneOf: [
+    {
+      type: "object",
+      required: [
+        "outcome",
+        "selector",
+        "resolution",
+        "profileId",
+        "chain",
+        "cacheAllowed",
+        "rejectedFallbacks",
+      ],
+      additionalProperties: false,
+      properties: {
+        outcome: { type: "string", enum: ["selected"] },
+        selector: { type: "string", minLength: 1 },
+        resolution: { type: "string", enum: ["effort_preset", "profile_ref"] },
+        profileId: { type: "string", minLength: 1 },
+        chain: { type: "array", minItems: 1, items: MODEL_ROUTED_CHAIN_ENTRY_SCHEMA },
+        cacheAllowed: { type: "boolean" },
+        rejectedFallbacks: { type: "array", items: MODEL_ROUTED_ATTEMPT_SCHEMA },
+        budgetLimits: MODEL_ROUTED_BUDGET_LIMITS_SCHEMA,
+      },
+    },
+    {
+      type: "object",
+      required: ["outcome", "selector", "resolution", "profileId", "reason", "attempts"],
+      additionalProperties: false,
+      properties: {
+        outcome: { type: "string", enum: ["denied"] },
+        selector: { type: "string", minLength: 1 },
+        resolution: { type: "string", enum: ["effort_preset", "profile_ref"] },
+        profileId: { type: "string", minLength: 1 },
+        reason: { type: "string", enum: MODEL_PROFILE_DENIAL_REASONS },
+        attempts: { type: "array", minItems: 1, items: MODEL_ROUTED_ATTEMPT_SCHEMA },
+      },
+    },
+    {
+      type: "object",
+      required: ["outcome", "selector", "resolution", "modelId"],
+      additionalProperties: false,
+      properties: {
+        outcome: { type: "string", enum: ["raw_model"] },
+        selector: { type: "string", minLength: 1 },
+        resolution: { type: "string", enum: ["raw_model_id"] },
+        modelId: { type: "string", minLength: 1 },
+      },
+    },
+  ],
 } as const;
 
 /** Operator evidence: the dispatch record a duplicate delivery is reconciled against. */
@@ -253,6 +371,7 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
   { type: "guardrail.blocked", audience: "participant", schema: GUARDRAIL_BLOCKED_SCHEMA },
   { type: "turn.finished", audience: "participant", schema: TURN_FINISHED_SCHEMA },
   { type: "context.assembled", audience: "operator", schema: CONTEXT_ASSEMBLED_SCHEMA },
+  { type: "model.routed", audience: "operator", schema: MODEL_ROUTED_SCHEMA },
   { type: "tool.dispatched", audience: "operator", schema: TOOL_DISPATCHED_SCHEMA },
   { type: "guardrail.decision", audience: "operator", schema: GUARDRAIL_DECISION_SCHEMA },
   { type: "delivery.classified", audience: "operator", schema: DELIVERY_CLASSIFIED_SCHEMA },
@@ -304,6 +423,10 @@ export interface RunEventPayloads {
     readonly status: "succeeded" | "failed" | "cancelled";
     readonly messageId?: string | null;
     readonly reason?: string;
+    readonly modelId?: string;
+    readonly effortPreset?: EffortPreset;
+    readonly effortApplied?: EffortRung;
+    readonly modelCallLatencyMs?: number;
     readonly usage?: { readonly inputTokens?: number; readonly outputTokens?: number };
   };
   readonly "context.assembled": {
@@ -313,6 +436,67 @@ export interface RunEventPayloads {
     readonly compacted?: boolean;
     readonly modelProfileId?: string;
   };
+  readonly "model.routed":
+    | {
+        readonly outcome: "selected";
+        readonly selector: string;
+        readonly resolution: "effort_preset" | "profile_ref";
+        readonly profileId: string;
+        readonly chain: readonly {
+          readonly profileId: string;
+          readonly modelId: string;
+        }[];
+        readonly cacheAllowed: boolean;
+        readonly rejectedFallbacks: readonly {
+          readonly profileId: string;
+          readonly reason: (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
+        }[];
+        readonly budgetLimits?: {
+          readonly tokens?: {
+            readonly value: number;
+            readonly scope:
+              | "deployment"
+              | "role"
+              | "agent"
+              | "routine"
+              | "run"
+              | "state"
+              | "tool"
+              | "integration"
+              | "model";
+          };
+          readonly costMicros?: {
+            readonly value: number;
+            readonly scope:
+              | "deployment"
+              | "role"
+              | "agent"
+              | "routine"
+              | "run"
+              | "state"
+              | "tool"
+              | "integration"
+              | "model";
+          };
+        };
+      }
+    | {
+        readonly outcome: "denied";
+        readonly selector: string;
+        readonly resolution: "effort_preset" | "profile_ref";
+        readonly profileId: string;
+        readonly reason: (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
+        readonly attempts: readonly {
+          readonly profileId: string;
+          readonly reason: (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
+        }[];
+      }
+    | {
+        readonly outcome: "raw_model";
+        readonly selector: string;
+        readonly resolution: "raw_model_id";
+        readonly modelId: string;
+      };
   readonly "tool.dispatched": {
     readonly callId: string;
     readonly name: string;

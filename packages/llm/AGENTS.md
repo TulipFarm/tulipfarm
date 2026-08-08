@@ -1,16 +1,23 @@
 # LLM — Agent Conventions
 
-`@tulipfarm/llm` — provider-agnostic LLM access with tiered fallback chains, wrapping the
+`@tulipfarm/llm` — provider-agnostic LLM access with fallback chains, wrapping the
 Vercel AI SDK (`ai` + `@ai-sdk/*`). See root `AGENTS.md`
 for commands/lint.
 
+**This package no longer selects models.** Routing is decided by `selectModelProfile`
+(`@tulipfarm/agent-runtime`) over a ModelProfile catalog; this package builds providers and runs
+the chain it is handed. The tier primitive and its autonomy-to-capability map are retired — that
+map gave a `full`-autonomy Run the *weakest* model, coupling oversight to capability backwards.
+`tiers` survives only as the shape `llm.config` is still authored in, and
+`@tulipfarm/schema`'s `model-catalog.ts` derives ModelProfiles from it.
+
 ## Public API (`src/index.ts`)
 
-- **`LlmService`** — entry point: `init`, `getModel`, `getModelById`, `select(req)`.
-- **`createModel(entry, secrets)`** — builds one `LanguageModelV1` from a `ProviderEntry`.
-- **`FallbackModel`** + **`isHardFailure()`** — the fallback chain (itself a `LanguageModelV1`).
-- **`resolveTier(ctx)`** — deterministic auto-tier selection.
-- Types: `Tier`, `SelectRequest`, `Autonomy`, `ModelSelector`, `SelectionContext`, `FallbackLogger`.
+- **`LlmService`** — entry point: `init`, `effortModel(preset)`, `chainModel(ids)`,
+  `getModelById`, `hasModelId`, `specFor`.
+- **`createModel(entry, secrets)`** — builds one `LanguageModelV4` from a `ProviderEntry`.
+- **`FallbackModel`** + **`isHardFailure()`** — the fallback chain (itself a `LanguageModelV4`).
+- Types: `ResolvedModelEntry`, `FallbackLogger`.
 
 > Config schemas/validators + LLM error classes (`LlmConfig`, `ProviderEntry`, `TierConfig`,
 > `validateLlmConfig`, `LlmConfigValidationError`, `LlmNotConfiguredError`, `UnknownModelError`,
@@ -22,8 +29,7 @@ for commands/lint.
 | File | Role |
 | --- | --- |
 | `provider.ts` | `createModel` — routes on `entry.provider` → `@ai-sdk/anthropic` \| `openai` \| `openai-compatible`. |
-| `selection.ts` | `resolveTier` — maps `autonomy` → tier, bumps `quick`→`standard` when tools are present. |
-| `llm-service.ts` | `LlmService`; `select` precedence: per-request `sessionModel` → caller `model` → `"auto"`. |
+| `llm-service.ts` | `LlmService`; `effortModel` resolves an effort preset through the derived ModelProfile catalog, `chainModel` runs a chain the router already chose. |
 | `fallback.ts` | `FallbackModel` tries providers in order; `isHardFailure` decides propagate vs. fall through. |
 
 ## How to extend
@@ -33,10 +39,13 @@ for commands/lint.
   (`@tulipfarm/secrets`).
 - **Tune fallback:** classify errors in `isHardFailure()` — auth / `404` / abort propagate
   immediately; `429` / `5xx` / timeout fall through to the next provider (logged via `FallbackLogger`).
-- **Tier rules:** keep `resolveTier` pure and deterministic — it's covered by `selection.test.ts`.
+- **Do not add a second selector here.** A capability decision belongs in `selectModelProfile`,
+  where the constraints, the denial reasons, and the routing evidence live. `chainModel` exists so
+  the whole selected chain executes — a chain collapsed to its head is not a fallback chain, which
+  is the bug this arrangement replaced.
 - Config is validated (TypeBox → AJV, via `@tulipfarm/schema`) at `init`; never read partial/unvalidated config.
 
 ## Tests
 
-Vitest, colocated `*.test.ts` (`provider` / `selection` / `llm-service` / `fallback`).
-Use fake `LanguageModelV1` stubs; assert fallback order and hard-vs-transient handling.
+Vitest, colocated `*.test.ts` (`provider` / `llm-service` / `fallback`).
+Use fake `LanguageModelV4` stubs; assert fallback order and hard-vs-transient handling.

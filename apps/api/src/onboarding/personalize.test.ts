@@ -70,7 +70,7 @@ function soul(
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: dummy model stand-in for the mocked SDK.
-const llmService = { select: () => ({}) as any } as unknown as LlmService;
+const llmService = { effortModel: () => ({}) as any } as unknown as LlmService;
 
 describe("buildStateKey", () => {
   it("is stable for the same inputs", () => {

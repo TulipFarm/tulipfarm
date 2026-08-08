@@ -53,7 +53,7 @@ test("clientLoader hydrates the conversation transcript", async () => {
   ]);
   vi.mocked(agents.getAgent).mockResolvedValue({
     name: "GeneralAssistant",
-    model: "standard",
+    model: "balanced",
   } as unknown as Awaited<ReturnType<typeof agents.getAgent>>);
 
   const data = await clientLoader(loaderArgs("c1"));
@@ -77,7 +77,7 @@ test("renders the rehydrated transcript", () => {
   vi.mocked(remix.useLoaderData).mockReturnValue({
     id: "c1",
     agentId: "GeneralAssistant",
-    defaultModel: "standard",
+    defaultModel: "auto",
     messages,
   });
   const Stub = createRemixStub([{ path: "/", Component: () => <ChatConversationRoute /> }]);

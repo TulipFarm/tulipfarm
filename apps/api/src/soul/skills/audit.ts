@@ -103,7 +103,7 @@ export const AUDIT_SYSTEM_PROMPT = [
   "low with an empty or informational findings list. Your report is advisory, not a guarantee.",
 ].join("\n");
 
-type LlmModel = ReturnType<LlmService["select"]>;
+type LlmModel = ReturnType<LlmService["effortModel"]>;
 
 interface SkillAuditModelReport {
   riskRating: "low" | "medium" | "high";

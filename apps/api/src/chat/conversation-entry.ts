@@ -125,7 +125,7 @@ async function openConversation(
   // tier and lands whenever it lands. A failure degrades to a truncated-prompt fallback.
   void buildAndStoreTitle({
     repo: deps.repo,
-    getModel: () => deps.llmService.getModel("quick"),
+    getModel: () => deps.llmService.effortModel("fast"),
     id: conversation._id,
     prompt: input.body.message.content,
     log: input.log,

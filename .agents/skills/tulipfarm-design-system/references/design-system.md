@@ -124,9 +124,18 @@ safer. Keep domain fetching and mutations out of primitives.
   primary one.
 - **Master/detail:** context panel owns selection; main surface owns detail and browser history.
 - **Chat:** transcript owns scrolling; composer remains visible without covering the last message.
-- **Chat composer:** show Model and active Agent as quiet context above the prompt; keep context
+- **Chat composer:** show Effort and active Agent as quiet context above the prompt; keep context
   triggers and the single send/stop action in a stable bottom row; place Suggested prompts directly
-  below the prompt surface.
+  below the prompt surface. A participant picks **effort**, never a model — the Effort preset
+  control offers Auto, Fast, Balanced, and Thorough, and marks which one the deployment defaults to.
+- **Chat receipt:** a completed reply says what answered it — Model ID in mono, the effort, and the
+  model-call latency — as quiet caption metadata beneath the message, never a badge competing with
+  the answer. When Auto answered, name the rung it resolved to (`Auto → Balanced`); reporting only
+  "Auto" hides the choice made on the participant's behalf, and reporting only the rung hides that
+  they never picked it. Cost is operator evidence and stays off this row.
+- **Try harder:** offered beside the receipt on the latest finished reply, escalating one rung from
+  the effort actually applied. It is an Action, not an Auto action — the person starts it. Offer no
+  step when the applied rung is unknown or already the highest, rather than a guessed one.
 - **Chat identity:** product brand, configured business, and user-created Agent are distinct. Show
   the business name in the normal Chat welcome, and show an Agent label only when an Agent is
   explicitly selected. Never present the default harness as a user-created Agent.
@@ -180,8 +189,8 @@ safer. Keep domain fetching and mutations out of primitives.
 The authenticated route exists only in development. Link it from Settings in development; return
 the normal not-found state in production. It must render real shared components and cover tokens,
 type, spacing, radii, icons, status, priority, primitive variants, feedback states, composition,
-shell dimensions, keyboard focus, and both themes. Update it in the same change as a public
-component contract.
+the Chat composer and transcript (effort control, receipt, Try harder), shell dimensions, keyboard
+focus, and both themes. Update it in the same change as a public component contract.
 
 ## 11. Component Index
 
@@ -201,6 +210,12 @@ The Chat composer vocabulary is closed: **Suggested prompt** (drafts text), **Ac
 starts it), and **Auto action** (the Agent starts it within authority). Do not use “suggestion,”
 “action,” and “automation” interchangeably in UI copy or component APIs.
 
+The Chat model vocabulary is closed too, and `metadata/terminologies.md` governs it: a participant
+picks an **Effort preset** (Auto/Fast/Balanced/Thorough), a completed reply carries a **Receipt**,
+and **Try harder** escalates one rung. A **Model ID** may be *reported* in a receipt but is never
+offered as a choice. Do not reintroduce a model picker, and do not surface the retired tier names
+`quick`, `standard`, or `complex` — they survive as wire aliases for one release, not as UI.
+
 Prefer the index and source search over guessing component names.
 
 ## 12. File Conventions
@@ -219,6 +234,10 @@ Prefer the index and source search over guessing component names.
 - Rebuilding buttons, badges, fields, panels, or headers with route-local class strings.
 - Hardcoding one mode's icon or label into shared shell chrome instead of reading the mode map.
 - A route header that repeats the top bar, so the page names itself twice.
+- Asking the participant to pick a model, or showing a raw Model ID as a choice rather than as
+  receipt metadata. Effort is the only model concept a participant selects.
+- Reporting `Auto` as the effort a reply ran at. Auto is a request, not an outcome — name the rung
+  it resolved to, or the receipt is telling only half the truth.
 - Per-component focus rings stacked on top of the global `:focus-visible` outline.
 - `aria-hidden` on a closed navigation drawer, which hides it from readers but leaves it tabbable.
 - Responsive visibility classes on a tooltip's child; the wrapper stays in the flow and keeps

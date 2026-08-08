@@ -24,26 +24,18 @@ import {
   stopChatRun,
 } from "~/lib/chat/sse-client";
 import type {
-  Autonomy,
   ChatEvent,
   ChatMessage,
+  ChatModelSelector,
   ChatState,
   ChatStatus,
-  ModelTier,
+  ChatTurnOptions,
+  ChatTurnSource,
 } from "~/lib/chat/types";
 import { clearFeedback, sendFeedback as postFeedback } from "~/lib/feedback";
 import { randomUUID } from "~/lib/uuid";
 
-export type SendOptions = {
-  model?: ModelTier;
-  autonomy?: Autonomy;
-  agentId?: string;
-  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
-  skills?: string[];
-  resources?: string[];
-  // Per-turn `~knowledge` page pins (pageIds) — full page content injected server-side this turn.
-  knowledgePages?: string[];
-};
+export type SendOptions = ChatTurnOptions;
 
 export type UseChatStreamOptions = {
   // Seed a restored conversation (the `/chat/:id` route) so its transcript renders and follow-up
@@ -74,7 +66,7 @@ export function seedState(opts?: UseChatStreamOptions): ChatState {
 // these out of `chatReducer` lets that reducer stay pure over the `ChatEvent` wire contract.
 type ChatAction =
   | ChatEvent
-  | { type: "user"; text: string }
+  | { type: "user"; text: string; options?: SendOptions }
   | { type: "meta"; meta: ChatStreamMeta }
   | { type: "regenerate" }
   | { type: "surface-submit" }
@@ -122,7 +114,7 @@ export function surfaceInteractionAnswer(input: Readonly<Record<string, unknown>
 }
 
 function reducer(state: ChatState, action: ChatAction): ChatState {
-  if (action.type === "user") return appendUserMessage(state, action.text);
+  if (action.type === "user") return appendUserMessage(state, action.text, action.options);
   if (action.type === "surface-submit") return { ...state, status: "submitted", error: undefined };
   if (action.type === "reset") return initialChatState;
   // Stop: rewind the in-flight turn (drop the user message + partial reply). The composer restores
@@ -149,6 +141,14 @@ function reducer(state: ChatState, action: ChatAction): ChatState {
     };
   }
   return chatReducer(state, action);
+}
+
+function lastUserSource(messages: ChatMessage[]): ChatTurnSource | undefined {
+  return [...messages].reverse().find((message) => message.role === "user")?.sourceTurn;
+}
+
+function sourceForMessage(messages: ChatMessage[], messageId: string): ChatTurnSource | undefined {
+  return messages.find((message) => message.id === messageId)?.sourceTurn;
 }
 
 export function useChatStream(opts?: UseChatStreamOptions) {
@@ -233,7 +233,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
 
   const send = useCallback(
     async (text: string, opts?: SendOptions) => {
-      dispatch({ type: "user", text });
+      dispatch({ type: "user", text, options: opts });
       lastOptsRef.current = opts;
       await runStream(text, opts);
     },
@@ -242,12 +242,27 @@ export function useChatStream(opts?: UseChatStreamOptions) {
 
   // Re-run the most recent user turn with the same options. Only meaningful on the last assistant msg.
   const regenerate = useCallback(async () => {
-    const lastUser = [...stateRef.current.messages].reverse().find((m) => m.role === "user");
-    const text = lastUser?.parts.map((p) => (p.kind === "text" ? p.text : "")).join("") ?? "";
-    if (!text) return;
+    const source = lastUserSource(stateRef.current.messages);
+    const text = source?.text ?? "";
+    if (text.length === 0) return;
+    const options = source?.options ?? lastOptsRef.current;
     dispatch({ type: "regenerate" });
-    await runStream(text, lastOptsRef.current);
+    lastOptsRef.current = options;
+    await runStream(text, options);
   }, [runStream]);
+
+  const tryHarder = useCallback(
+    async (assistantMessageId: string, model: ChatModelSelector) => {
+      if (isChatBusy(stateRef.current.status)) return;
+      const source = sourceForMessage(stateRef.current.messages, assistantMessageId);
+      if (!source || source.text.length === 0) return;
+      const options: SendOptions = { ...(source.options ?? {}), model };
+      dispatch({ type: "user", text: source.text, options });
+      lastOptsRef.current = options;
+      await runStream(source.text, options);
+    },
+    [runStream]
+  );
 
   // Stop the in-flight turn: cancel its Run (the executing process halts the turn), then abandon the
   // local stream — the catch dispatches `stopped`, rewinding the timeline. The runId arrives via the
@@ -316,6 +331,7 @@ export function useChatStream(opts?: UseChatStreamOptions) {
     stop,
     approve,
     regenerate,
+    tryHarder,
     sendFeedback,
     reset,
     sendSurfaceInteraction,

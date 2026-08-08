@@ -36,12 +36,16 @@ export function pruneLlmConfig(
   owner: LlmProviderInfo
 ): PruneResult {
   let changed = false;
-  const nextTiers = { ...config.tiers };
+  const tiers = config.tiers;
+  // A migrated Soul keeps its credentials in provider connections, not tiers — there is no tier
+  // entry that could reference the deleted key, so deleting one cannot invalidate the config.
+  if (!tiers) return { action: "unchanged" };
+  const nextTiers = { ...tiers };
 
   for (const tier of TIERS) {
-    const original = config.tiers[tier].providers;
+    const original = tiers[tier].providers;
     const kept = original.filter((entry) => !entryUsesKey(entry, deletedKey, owner.id));
-    nextTiers[tier] = { ...config.tiers[tier], providers: kept };
+    nextTiers[tier] = { ...tiers[tier], providers: kept };
     if (kept.length !== original.length) changed = true;
   }
 

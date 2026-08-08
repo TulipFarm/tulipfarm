@@ -1,11 +1,9 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { LlmConfigForm } from "~/components/llm-config-form";
 import { getModelOptions, type LlmConfig, type LlmProviderInfo } from "~/lib/settings";
 
-// The form lazily fetches model suggestions and auto-resolves specs over the network; stub both so the
-// component renders offline. `getModelOptions` is overridden per-test where its result matters.
 vi.mock("~/lib/settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/lib/settings")>();
   return {
@@ -46,9 +44,11 @@ const ALL_SECRETS = [
   "openai-api-key",
   "azure-openai-api-key",
   "azure-openai-resource-name",
+  "azure-secondary-key",
 ];
 
 const initial: LlmConfig = {
+  presets: { default: "balanced" },
   tiers: {
     quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
     standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
@@ -57,7 +57,12 @@ const initial: LlmConfig = {
   embeddings: { providers: [{ provider: "openai", model: "text-embedding-3-small" }] },
 };
 
-test("renders the three tiers with their current models", () => {
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getModelOptions).mockResolvedValue({ models: [], source: "unavailable" });
+});
+
+test("renders Effort Preset mappings and the ordered provider chains", () => {
   render(
     <LlmConfigForm
       initial={initial}
@@ -67,31 +72,18 @@ test("renders the three tiers with their current models", () => {
       submitting={false}
     />
   );
-  expect(screen.getByText("quick")).toBeInTheDocument();
+
+  expect(screen.getByText("Effort Presets")).toBeInTheDocument();
+  expect(screen.getByLabelText("Auto default ModelProfile")).toHaveValue("balanced");
+  expect(screen.getByText(/Auto resolves to the default/i)).toBeInTheDocument();
+  expect(screen.getAllByText("Fast").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Balanced").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Thorough").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Primary")).toHaveLength(3);
   expect(screen.getByDisplayValue("claude-haiku-4-5")).toBeInTheDocument();
-  expect(screen.getByDisplayValue("claude-opus-4-8")).toBeInTheDocument();
 });
 
-test("a provider that is not fully configured is disabled in the dropdown", () => {
-  // Only anthropic's key is set; azure is missing its resource_name → not configured.
-  render(
-    <LlmConfigForm
-      initial={initial}
-      providers={PROVIDERS}
-      secretKeys={["anthropic-api-key", "azure-openai-api-key"]}
-      onSubmit={vi.fn()}
-      submitting={false}
-    />
-  );
-  expect(
-    screen.getAllByRole("option").find((o) => o.textContent === "OpenAI — configure first")
-  ).toBeDisabled();
-  expect(
-    screen.getAllByRole("option").find((o) => o.textContent === "Azure Foundry — configure first")
-  ).toBeDisabled();
-});
-
-test("submitting serializes rows as {provider, model} only and round-trips embeddings", async () => {
+test("editing preset mappings submits presets alongside preserved provider chains", async () => {
   const onSubmit = vi.fn();
   render(
     <LlmConfigForm
@@ -102,11 +94,90 @@ test("submitting serializes rows as {provider, model} only and round-trips embed
       submitting={false}
     />
   );
+
+  await userEvent.selectOptions(screen.getByLabelText("Auto default ModelProfile"), "fast");
+  await userEvent.selectOptions(screen.getByLabelText("Thorough ModelProfile"), "thorough");
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
-  expect(onSubmit).toHaveBeenCalledWith(initial);
+
+  expect(onSubmit).toHaveBeenCalledWith({
+    ...initial,
+    presets: {
+      default: "fast",
+      fast: "fast",
+      balanced: "balanced",
+      thorough: "thorough",
+    },
+  });
 });
 
-test("blocks save when a row's provider is not fully configured", async () => {
+test("shows distinct Provider Connections for different credential tuples", () => {
+  const config: LlmConfig = {
+    presets: { default: "fast" },
+    tiers: {
+      quick: {
+        providers: [
+          {
+            provider: "azure",
+            model: "gpt-4o",
+            api_key_ref: "azure-openai-api-key",
+            resource_name: "primary-res",
+          },
+          {
+            provider: "azure",
+            model: "gpt-4o-mini",
+            api_key_ref: "azure-secondary-key",
+            resource_name: "secondary-res",
+          },
+        ],
+      },
+      standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+      complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+    },
+  };
+
+  render(
+    <LlmConfigForm
+      initial={config}
+      providers={PROVIDERS}
+      secretKeys={ALL_SECRETS}
+      onSubmit={vi.fn()}
+      submitting={false}
+    />
+  );
+
+  expect(screen.getByText("Provider Connection azure")).toBeInTheDocument();
+  expect(screen.getByText("Provider Connection azure-2")).toBeInTheDocument();
+  expect(screen.getByText("API key ref: azure-openai-api-key")).toBeInTheDocument();
+  expect(screen.getByText("API key ref: azure-secondary-key")).toBeInTheDocument();
+});
+
+test("serializes row-level Provider Connection fields", async () => {
+  const onSubmit = vi.fn();
+  render(
+    <LlmConfigForm
+      initial={initial}
+      providers={PROVIDERS}
+      secretKeys={ALL_SECRETS}
+      onSubmit={onSubmit}
+      submitting={false}
+    />
+  );
+
+  await userEvent.type(screen.getByLabelText("Fast provider 1 api key ref"), "anthropic-api-key");
+  await userEvent.type(screen.getByLabelText("Fast provider 1 base url"), "https://llm.example");
+  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+  const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
+  expect(submitted.tiers?.quick.providers[0]).toEqual({
+    provider: "anthropic",
+    model: "claude-haiku-4-5",
+    api_key_ref: "anthropic-api-key",
+    base_url: "https://llm.example",
+  });
+  expect(submitted.embeddings).toEqual(initial.embeddings);
+});
+
+test("blocks save when a row's Provider Connection is not fully configured", async () => {
   const onSubmit = vi.fn();
   const cfg: LlmConfig = {
     tiers: {
@@ -124,31 +195,13 @@ test("blocks save when a row's provider is not fully configured", async () => {
       submitting={false}
     />
   );
+
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
   expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByRole("alert")).toHaveTextContent(/Azure Foundry is not fully configured/i);
+  expect(screen.getByRole("alert")).toHaveTextContent(/Provider Connection secret or config/i);
 });
 
-test("blocks save on a fresh empty config (a tier has no providers)", async () => {
-  const onSubmit = vi.fn();
-  const empty: LlmConfig = {
-    tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
-  };
-  render(
-    <LlmConfigForm
-      initial={empty}
-      providers={PROVIDERS}
-      secretKeys={ALL_SECRETS}
-      onSubmit={onSubmit}
-      submitting={false}
-    />
-  );
-  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
-  expect(onSubmit).not.toHaveBeenCalled();
-  expect(screen.getByRole("alert")).toHaveTextContent(/quick tier needs at least one provider/i);
-});
-
-test("adding a provider row is reflected in the submitted config", async () => {
+test("adding a provider row adds a fallback profile option and submits the chain", async () => {
   const onSubmit = vi.fn();
   render(
     <LlmConfigForm
@@ -159,26 +212,24 @@ test("adding a provider row is reflected in the submitted config", async () => {
       submitting={false}
     />
   );
-  await userEvent.click(screen.getAllByRole("button", { name: /add provider/i })[0]);
-  await userEvent.type(screen.getByLabelText("quick provider 2 model"), "claude-3-5-haiku");
+
+  await userEvent.click(
+    screen.getAllByRole("button", { name: /add provider to fallback chain/i })[0]
+  );
+  await userEvent.type(screen.getByLabelText("Fast provider 2 model"), "claude-3-5-haiku");
+  expect(screen.getByText("fast-fallback-1")).toBeInTheDocument();
+  await userEvent.selectOptions(screen.getByLabelText("Fast ModelProfile"), "fast-fallback-1");
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
   const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
-  expect(submitted.tiers.quick.providers).toEqual([
+  expect(submitted.presets?.fast).toBe("fast-fallback-1");
+  expect(submitted.tiers?.quick.providers).toEqual([
     { provider: "anthropic", model: "claude-haiku-4-5" },
     { provider: "anthropic", model: "claude-3-5-haiku" },
   ]);
 });
 
-const azureInitial: LlmConfig = {
-  tiers: {
-    quick: { providers: [{ provider: "azure", model: "gpt-4o" }] },
-    standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
-    complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
-  },
-};
-
-test("the model picker lists catalog suggestions in a datalist (non-azure)", async () => {
+test("the model picker lists catalog suggestions in a datalist for non-Azure providers", async () => {
   vi.mocked(getModelOptions).mockResolvedValue({
     models: ["claude-haiku-4-5", "claude-opus-4-8"],
     source: "catalog",
@@ -192,7 +243,8 @@ test("the model picker lists catalog suggestions in a datalist (non-azure)", asy
       submitting={false}
     />
   );
-  await userEvent.click(screen.getByLabelText("quick provider 1 model"));
+
+  await userEvent.click(screen.getByLabelText("Fast provider 1 model"));
   await waitFor(() =>
     expect(
       document.querySelector('#models-anthropic option[value="claude-opus-4-8"]')
@@ -200,8 +252,15 @@ test("the model picker lists catalog suggestions in a datalist (non-azure)", asy
   );
 });
 
-test("azure has no suggestion list and a custom model name is submitted as-is", async () => {
+test("Azure keeps provider model id free text and submits custom deployment names", async () => {
   const onSubmit = vi.fn();
+  const azureInitial: LlmConfig = {
+    tiers: {
+      quick: { providers: [{ provider: "azure", model: "gpt-4o" }] },
+      standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+      complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+    },
+  };
   render(
     <LlmConfigForm
       initial={azureInitial}
@@ -211,15 +270,16 @@ test("azure has no suggestion list and a custom model name is submitted as-is", 
       submitting={false}
     />
   );
-  const input = screen.getByLabelText("quick provider 1 model");
-  await userEvent.click(input); // azure: must NOT trigger a deployment fetch / datalist
+
+  const input = screen.getByLabelText("Fast provider 1 model");
+  await userEvent.click(input);
   expect(getModelOptions).not.toHaveBeenCalledWith("azure");
   expect(document.querySelector("#models-azure")).toBeNull();
   await userEvent.clear(input);
   await userEvent.type(input, "my-custom-deploy");
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
   const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
-  expect(submitted.tiers.quick.providers[0]).toEqual({
+  expect(submitted.tiers?.quick.providers[0]).toEqual({
     provider: "azure",
     model: "my-custom-deploy",
   });
@@ -255,6 +315,7 @@ test("a pinned spec renders as metadata badges", () => {
       submitting={false}
     />
   );
+
   expect(screen.getByText("$0.80 / $4.00 per Mtok")).toBeInTheDocument();
   expect(screen.getByText("200k ctx")).toBeInTheDocument();
   expect(screen.getByText("tools")).toBeInTheDocument();

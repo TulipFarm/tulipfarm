@@ -241,6 +241,7 @@ describe("llm-config routes", () => {
 
     it("validates, writes, commits, reloads, and re-inits the LlmService", async () => {
       const next = {
+        presets: { default: "balanced" },
         tiers: {
           quick: {
             providers: [{ provider: "openai", model: "gpt-4o-mini", api_key_ref: "openai-key" }],
@@ -266,6 +267,62 @@ describe("llm-config routes", () => {
       expect(withSync).toHaveBeenCalledWith("soul: update llm config");
       expect(reload).toHaveBeenCalledOnce();
       expect(init).toHaveBeenCalledOnce();
+    });
+
+    it("accepts and round-trips preset mappings while preserving provider chains", async () => {
+      const next = {
+        presets: {
+          default: "balanced",
+          fast: "fast",
+          balanced: "balanced",
+          thorough: "thorough",
+        },
+        tiers: {
+          quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+          standard: {
+            providers: [
+              { provider: "anthropic", model: "claude-sonnet-4-6" },
+              { provider: "openai", model: "gpt-4o", api_key_ref: "openai-key" },
+            ],
+          },
+          complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+        },
+      };
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: next,
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual(next);
+
+      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+        llm: unknown;
+      };
+      expect(manifest.llm).toEqual(next);
+    });
+
+    it("rejects preset targets that are not available derived ModelProfiles", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          presets: { default: "missing-profile" },
+          tiers: {
+            quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
+            standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
+            complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          },
+        },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toContain("missing-profile");
+      expect(withSync).not.toHaveBeenCalled();
+      expect(init).not.toHaveBeenCalled();
     });
 
     it("rejects a structurally invalid config with 422, leaving the running config intact", async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ajv } from "./ajv";
+import { MODEL_PROFILE_DENIAL_REASONS } from "./definitions/model";
 import {
   RUN_EVENT_DEFINITIONS,
   RUN_EVENT_SCHEMAS,
@@ -13,6 +14,38 @@ function accepts(type: RunEventType, payload: unknown): boolean {
   const definition = runEventDefinition(type);
   if (!definition) throw new Error(`no definition for ${type}`);
   return ajv.compile(definition.schema)(payload);
+}
+
+type EnumSchema = { readonly enum?: readonly string[] };
+type AttemptArraySchema = {
+  readonly items?: { readonly properties?: { readonly reason?: EnumSchema } };
+};
+type ModelRoutedBranchSchema = {
+  readonly properties?: {
+    readonly reason?: EnumSchema;
+    readonly attempts?: AttemptArraySchema;
+    readonly rejectedFallbacks?: AttemptArraySchema;
+  };
+};
+type ModelRoutedSchema = {
+  readonly oneOf?: readonly ModelRoutedBranchSchema[];
+};
+
+function isStringEnum(value: readonly string[] | undefined): value is readonly string[] {
+  return value !== undefined;
+}
+
+function modelRoutedReasonEnums(): readonly (readonly string[])[] {
+  const definition = runEventDefinition("model.routed");
+  if (definition === undefined) throw new Error("missing model.routed definition");
+  const schema = definition.schema as ModelRoutedSchema;
+  return (schema.oneOf ?? []).flatMap((branch) =>
+    [
+      branch.properties?.reason?.enum,
+      branch.properties?.attempts?.items?.properties?.reason?.enum,
+      branch.properties?.rejectedFallbacks?.items?.properties?.reason?.enum,
+    ].filter(isStringEnum)
+  );
 }
 
 describe("run event vocabulary", () => {
@@ -37,10 +70,20 @@ describe("run event vocabulary", () => {
     );
     expect(operator).toEqual([
       "context.assembled",
+      "model.routed",
       "tool.dispatched",
       "guardrail.decision",
       "delivery.classified",
     ]);
+  });
+
+  it("uses the canonical ModelProfile denial reason enum for routing evidence", () => {
+    const enums = modelRoutedReasonEnums();
+
+    expect(enums.length).toBeGreaterThan(0);
+    for (const enumValues of enums) {
+      expect(enumValues).toEqual([...MODEL_PROFILE_DENIAL_REASONS]);
+    }
   });
 
   it("has no definition for a type outside the vocabulary", () => {
@@ -55,13 +98,52 @@ describe("run event vocabulary", () => {
     );
     expect(accepts("tool.result", { callId: "c1", status: "ok", summary: "1 row" })).toBe(true);
     expect(accepts("approval.requested", { waitId: "w1", intentId: "i1" })).toBe(true);
+    expect(
+      accepts("model.routed", {
+        outcome: "selected",
+        selector: "balanced",
+        resolution: "effort_preset",
+        profileId: "primary",
+        chain: [{ profileId: "primary", modelId: "claude-sonnet-5" }],
+        cacheAllowed: true,
+        rejectedFallbacks: [{ profileId: "tiny", reason: "context_window_exceeded" }],
+        budgetLimits: {
+          tokens: { value: 2_000, scope: "model" },
+          costMicros: { value: 250_000, scope: "model" },
+        },
+      })
+    ).toBe(true);
+    expect(
+      accepts("model.routed", {
+        outcome: "denied",
+        selector: "balanced",
+        resolution: "effort_preset",
+        profileId: "primary",
+        reason: "tools_unsupported",
+        attempts: [{ profileId: "primary", reason: "tools_unsupported" }],
+      })
+    ).toBe(true);
     expect(accepts("turn.finished", { status: "succeeded", messageId: "m1" })).toBe(true);
+    expect(
+      accepts("turn.finished", {
+        status: "succeeded",
+        messageId: "m1",
+        modelId: "claude-sonnet-5",
+        effortPreset: "auto",
+        modelCallLatencyMs: 1234,
+      })
+    ).toBe(true);
   });
 
   it("allows a finished turn to carry no Message", () => {
     // A blocked, failed, or cancelled turn produces none, and null says so rather than leaving the
     // reader to infer absence from a missing field.
     expect(accepts("turn.finished", { status: "failed", messageId: null })).toBe(true);
+  });
+
+  it("allows older finished turns without receipt fields", () => {
+    expect(accepts("turn.finished", { status: "succeeded", messageId: "m1" })).toBe(true);
+    expect(accepts("turn.finished", { status: "cancelled", messageId: null })).toBe(true);
   });
 
   it("rejects a payload missing a field its reader depends on", () => {
@@ -85,6 +167,20 @@ describe("run event vocabulary", () => {
 
   it("rejects out-of-range enums and counters", () => {
     expect(accepts("turn.finished", { status: "done" })).toBe(false);
+    expect(
+      accepts("turn.finished", {
+        status: "succeeded",
+        modelId: "claude-sonnet-5",
+        effortPreset: "quick",
+      })
+    ).toBe(false);
+    expect(
+      accepts("turn.finished", {
+        status: "succeeded",
+        modelId: "claude-sonnet-5",
+        modelCallLatencyMs: -1,
+      })
+    ).toBe(false);
     expect(accepts("guardrail.blocked", { stage: "middle", reason: "x" })).toBe(false);
     expect(accepts("text.delta", { text: "hi", index: -1 })).toBe(false);
     expect(accepts("turn.started", { turnId: "t1", attempt: 1.5, agentId: "a" })).toBe(false);

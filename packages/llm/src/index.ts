@@ -5,12 +5,7 @@ export {
   EmbeddingService,
 } from "./embeddings";
 export { type FallbackLogger, FallbackModel, isHardFailure } from "./fallback";
-export type {
-  ResolvedModel,
-  ResolvedModelEntry,
-  SelectRequest,
-  Tier,
-} from "./llm-service";
+export type { ResolvedModelEntry } from "./llm-service";
 export { LlmService } from "./llm-service";
 export {
   fetchLiteLlmCatalog,
@@ -21,5 +16,3 @@ export {
 } from "./model-spec";
 export { type ModelPrice, PRICING, type PriceResult, priceFor } from "./pricing";
 export { createModel } from "./provider";
-export type { Autonomy, ModelSelector, SelectionContext } from "./selection";
-export { resolveTier } from "./selection";
