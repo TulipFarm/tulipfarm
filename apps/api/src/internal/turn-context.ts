@@ -284,6 +284,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
           typeof manifest?.businessDescription === "string"
             ? manifest.businessDescription
             : undefined,
+        website:
+          typeof manifest?.businessWebsite === "string" ? manifest.businessWebsite : undefined,
       },
       memory,
       governancePages,

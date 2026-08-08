@@ -4,6 +4,7 @@ import {
   redirect,
   useLoaderData,
 } from "@remix-run/react";
+import { useEffect } from "react";
 import { ChatPanel } from "~/components/chat/chat-panel";
 import { getAgent } from "~/lib/agents";
 import { ApiError } from "~/lib/api";
@@ -62,12 +63,16 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
 
 export default function ChatConversationRoute() {
   const { id, title, agentId, defaultModel, messages } = useLoaderData<typeof clientLoader>();
-  const { refresh } = useConversations();
+  const { refresh, setActiveChatTitle } = useConversations();
+  // The top bar names the conversation. Publish the loader's title so it is right immediately, and
+  // stays right for chats older than the sidebar's Recent list.
+  useEffect(() => {
+    setActiveChatTitle(id, title ?? null);
+  }, [id, title, setActiveChatTitle]);
   return (
     <ChatPanel
       key={id}
       agentId={agentId}
-      title={title ?? undefined}
       defaultModel={defaultModel}
       initialConversationId={id}
       initialMessages={messages}

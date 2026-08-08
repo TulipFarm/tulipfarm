@@ -1,8 +1,15 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { BookOpen, Inbox, MessageSquare } from "lucide-react";
 import { beforeEach, expect, test, vi } from "vitest";
-import { AppShell, AppSidebar, modeForPath, titleForPath } from "~/components/app-sidebar";
+import {
+  AppShell,
+  AppSidebar,
+  iconForPath,
+  modeForPath,
+  titleForPath,
+} from "~/components/app-sidebar";
 import * as approvalsContext from "~/lib/approvals-context";
 import * as conversationsContext from "~/lib/conversations-context";
 
@@ -23,6 +30,32 @@ const ShellStub = createRemixStub([
     ),
   },
 ]);
+const AccountShellStub = createRemixStub([
+  {
+    path: "*",
+    Component: () => (
+      <AppShell
+        isAdmin
+        user={{ id: "u1", email: "priya.nair@northgate.dev", role: "admin", status: "active" }}
+      >
+        <p>Page content</p>
+      </AppShell>
+    ),
+  },
+]);
+
+const CONVERSATIONS = {
+  conversations: [],
+  loading: false,
+  error: null,
+  refresh: vi.fn(),
+  activeChatId: null,
+  setActiveChatId: vi.fn(),
+  activeChatTitle: null,
+  setActiveChatTitle: vi.fn(),
+  newChatNonce: 0,
+  startNewChat: vi.fn(),
+};
 
 beforeEach(() => {
   localStorage.clear();
@@ -33,16 +66,7 @@ beforeEach(() => {
     error: null,
     refresh: vi.fn(),
   });
-  useConversations.mockReturnValue({
-    conversations: [],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    activeChatId: null,
-    setActiveChatId: vi.fn(),
-    newChatNonce: 0,
-    startNewChat: vi.fn(),
-  });
+  useConversations.mockReturnValue(CONVERSATIONS);
 });
 
 test("maps deep routes to stable product modes and top-bar titles", () => {
@@ -51,8 +75,26 @@ test("maps deep routes to stable product modes and top-bar titles", () => {
   expect(modeForPath("/knowledge/spaces/ops")).toBe("knowledge");
   expect(modeForPath("/runs/run-1")).toBe("operate");
   expect(modeForPath("/settings/llm")).toBe("settings");
+  expect(modeForPath("/design-guide")).toBe("settings");
   expect(titleForPath("/resources/tickets")).toBe("Resources");
   expect(titleForPath("/operations")).toBe("Operations");
+});
+
+test("gives every page its own top-bar icon instead of the Chat glyph", () => {
+  expect(iconForPath("/inbox")).toBe(Inbox);
+  expect(iconForPath("/knowledge/spaces/ops")).toBe(BookOpen);
+  expect(iconForPath("/chat/c1")).toBe(MessageSquare);
+});
+
+test("names the context panel after the current mode, not the Chat glyph", () => {
+  render(<SidebarStub initialEntries={["/inbox"]} />);
+  expect(screen.getByRole("heading", { level: 2, name: "Operate" })).toBeInTheDocument();
+});
+
+test("drops the placeholder overflow menus from the sidebar and top bar", () => {
+  render(<ShellStub initialEntries={["/inbox"]} />);
+  expect(screen.queryByRole("button", { name: "Chat options" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Page options" })).not.toBeInTheDocument();
 });
 
 test("renders the global product-mode rail and Chat context", () => {
@@ -95,6 +137,7 @@ test("renders Settings destinations and the development design guide", () => {
   render(<SidebarStub initialEntries={["/settings/llm"]} />);
   for (const label of [
     "Secrets",
+    "Security",
     "LLM",
     "Observability",
     "Soul",
@@ -112,6 +155,7 @@ test("renders Settings destinations and the development design guide", () => {
 
 test("renders recent chats and highlights the active Chat", () => {
   useConversations.mockReturnValue({
+    ...CONVERSATIONS,
     conversations: [
       {
         id: "c1",
@@ -123,13 +167,8 @@ test("renders recent chats and highlights the active Chat", () => {
       },
       { id: "c2", title: null, agentId: null, starred: false, createdAt: "t", updatedAt: "t" },
     ],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
     activeChatId: "c1",
-    setActiveChatId: vi.fn(),
-    newChatNonce: 0,
-    startNewChat: vi.fn(),
+    activeChatTitle: "Inventory planning",
   });
   render(<SidebarStub initialEntries={["/"]} />);
   expect(screen.getByRole("link", { name: "Inventory planning" })).toHaveAttribute(
@@ -142,16 +181,7 @@ test("renders recent chats and highlights the active Chat", () => {
 test("starts a fresh Chat from the contextual sidebar", async () => {
   const user = userEvent.setup();
   const startNewChat = vi.fn();
-  useConversations.mockReturnValue({
-    conversations: [],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    activeChatId: null,
-    setActiveChatId: vi.fn(),
-    newChatNonce: 0,
-    startNewChat,
-  });
+  useConversations.mockReturnValue({ ...CONVERSATIONS, startNewChat });
   render(<SidebarStub initialEntries={["/"]} />);
   await user.click(screen.getByRole("button", { name: "New chat" }));
   expect(startNewChat).toHaveBeenCalledTimes(1);
@@ -171,4 +201,50 @@ test("renders the shared top bar and restores focus after Escape closes navigati
   await user.keyboard("{Escape}");
   expect(opener).toHaveAttribute("aria-expanded", "false");
   expect(opener).toHaveFocus();
+});
+
+test("trails the top-bar page behind a link back to its product mode", () => {
+  render(<ShellStub initialEntries={["/runs/run-1"]} />);
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(within(breadcrumb).getByRole("link", { name: "Operate" })).toHaveAttribute(
+    "href",
+    "/inbox"
+  );
+  expect(within(breadcrumb).getByText("Runs")).toHaveAttribute("aria-current", "page");
+});
+
+test("omits the parent crumb when it would only repeat the page", () => {
+  render(<ShellStub initialEntries={["/knowledge/spaces/ops"]} />);
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(within(breadcrumb).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(breadcrumb).getByText("Knowledge")).toHaveAttribute("aria-current", "page");
+});
+
+test("names the chat itself in the top bar, with no self-referential parent crumb", () => {
+  useConversations.mockReturnValue({
+    ...CONVERSATIONS,
+    activeChatId: "c1",
+    activeChatTitle: "Q3 pricing review",
+  });
+  render(<ShellStub initialEntries={["/chat/c1"]} />);
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(within(breadcrumb).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(breadcrumb).getByText("Q3 pricing review")).toHaveAttribute("aria-current", "page");
+});
+
+test("calls an untitled chat surface a new chat", () => {
+  render(<ShellStub initialEntries={["/"]} />);
+  const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+  expect(within(breadcrumb).queryByRole("link")).not.toBeInTheDocument();
+  expect(within(breadcrumb).getByText("New chat")).toBeInTheDocument();
+});
+
+test("reduces the signed-in account to a monogram in the top bar", () => {
+  render(<AccountShellStub initialEntries={["/inbox"]} />);
+  const account = screen.getByRole("link", {
+    name: "Account settings for priya.nair@northgate.dev",
+  });
+  expect(account).toHaveAttribute("href", "/settings/security");
+  expect(account).toHaveTextContent("PN");
+  expect(screen.queryByText("priya.nair@northgate.dev")).not.toBeInTheDocument();
 });

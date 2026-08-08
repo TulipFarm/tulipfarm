@@ -3,7 +3,6 @@ import { AgentGlyph } from "~/components/agent-glyph";
 import { ConnectionStatus } from "~/components/shell/states";
 import type { ChatMessage, ModelTier } from "~/lib/chat/types";
 import { useChatStream } from "~/lib/chat/use-chat-stream";
-import { useConversations } from "~/lib/conversations-context";
 import { errorAction } from "~/lib/error-actions";
 import type { OnboardingChecklist, Suggestion } from "~/lib/onboarding";
 import { ChatDebugDrawer } from "./chat-debug-drawer";
@@ -29,28 +28,48 @@ function EmptyState({
   onPick: (text: string) => void;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-5 overflow-y-auto px-4 py-6 sm:px-6">
-      <div className="flex w-full max-w-6xl flex-col gap-1.5 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500">
-        <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-          {agent
-            ? `Chat with ${label ?? agent}`
-            : businessName
-              ? `What can I help ${businessName} with?`
-              : "What can I help with?"}
-        </h1>
-        <p className="text-sm text-muted-foreground sm:text-base">
-          {agent
-            ? "This Chat is using a user-created Agent."
-            : "Ask about your business, build your system, or start with a suggested prompt."}
-        </p>
-      </div>
-      {checklist && !checklist.dismissed ? (
-        <GettingStartedCard
-          checklist={checklist}
-          onPick={onPick}
-          onDismiss={() => onDismissChecklist?.()}
-        />
-      ) : null}
+    <div className="flex flex-1 overflow-y-auto">
+      <section className="mx-auto flex w-full max-w-4xl flex-col justify-start gap-8 px-4 py-8 sm:px-6 sm:py-14 md:justify-center">
+        <div className="grid gap-7 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2 motion-safe:duration-500 md:grid-cols-[minmax(0,1fr)_12rem] md:items-end">
+          <div>
+            <p className="mb-3 text-sm font-medium text-primary">Chat</p>
+            <h1 className="max-w-2xl text-balance text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+              {agent
+                ? `Chat with ${label ?? agent}`
+                : businessName
+                  ? `What can I help ${businessName} with?`
+                  : "What can I help with?"}
+            </h1>
+            <p className="mt-3 max-w-xl text-pretty text-base leading-7 text-muted-foreground">
+              {agent
+                ? "This Chat is using a user-created Agent."
+                : "Ask about your business, build your system, or start with a suggested prompt."}
+            </p>
+          </div>
+          <aside className="border-l border-border pl-4 text-xs leading-6 text-muted-foreground">
+            <p className="font-medium text-foreground">Add context as you write</p>
+            <p>
+              <kbd className="font-mono text-primary">@</kbd> Agent
+            </p>
+            <p>
+              <kbd className="font-mono text-primary">/</kbd> Skill
+            </p>
+            <p>
+              <kbd className="font-mono text-primary">#</kbd> Resource type
+            </p>
+            <p>
+              <kbd className="font-mono text-primary">~</kbd> Knowledge page
+            </p>
+          </aside>
+        </div>
+        {checklist && !checklist.dismissed ? (
+          <GettingStartedCard
+            checklist={checklist}
+            onPick={onPick}
+            onDismiss={() => onDismissChecklist?.()}
+          />
+        ) : null}
+      </section>
     </div>
   );
 }
@@ -58,7 +77,6 @@ function EmptyState({
 /** Layer-1 chat surface: empty state → live transcript, with the composer pinned to the bottom. */
 export function ChatPanel({
   agentId,
-  title,
   defaultModel = "standard",
   suggestions = [],
   checklist,
@@ -69,8 +87,6 @@ export function ChatPanel({
   onConversationChange,
 }: {
   agentId?: string;
-  // The conversation's title (restored chats); shown beside the agent in the header.
-  title?: string;
   defaultModel?: ModelTier;
   suggestions?: Suggestion[];
   checklist?: OnboardingChecklist | null;
@@ -113,45 +129,31 @@ export function ChatPanel({
   // for "auto"/raw ids → the selector then keeps its current value).
   const activeAgentTier = asTier(agentInfo?.model);
   const tierById = (id: string) => asTier(agentByName.get(id)?.model);
-  // Live conversation title from the sidebar context — fills in for fresh chats once the title is
-  // async-generated; the prop is the immediate value for restored chats (from the loader).
-  const { conversations, activeChatId } = useConversations();
-  const liveTitle = activeChatId
-    ? (conversations.find((c) => c.id === activeChatId)?.title ?? undefined)
-    : undefined;
-  const displayTitle = liveTitle ?? title;
   const hasMessages = messages.length > 0;
   // Actionable errors (e.g. "LLM not configured") get a deep-link CTA to where the user fixes them.
   const errorCta = status === "error" ? errorAction(error) : null;
 
   return (
     <div className="flex h-[calc(100svh-3.25rem)] flex-col lg:h-full">
-      {hasMessages && (activeAgentName || displayTitle) ? (
-        <header className="flex shrink-0 items-center gap-2 border-b border-border px-6 py-2.5">
-          {activeAgentName ? (
-            <>
-              <AgentGlyph
-                name={activeAgentName}
-                domain={agentInfo?.domain}
-                autonomy={agentInfo?.autonomy}
-                size="sm"
-                active
-                state={busy ? "thinking" : "idle"}
-                decorative
-              />
-              <span className="text-xs font-medium text-foreground">
-                {agentInfo?.label ?? activeAgentName}
-              </span>
-            </>
-          ) : null}
-          {activeAgentName && displayTitle ? (
-            <span aria-hidden className="text-border">
-              ·
+      {/* The top bar names the conversation, so this strip only says what it can't: which Agent is
+          driving the chat. Without an Agent there is nothing left to show and it collapses away. */}
+      {hasMessages && activeAgentName ? (
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 sm:px-6">
+          <AgentGlyph
+            name={activeAgentName}
+            domain={agentInfo?.domain}
+            autonomy={agentInfo?.autonomy}
+            size="sm"
+            active
+            state={busy ? "thinking" : "idle"}
+            decorative
+          />
+          <p className="min-w-0 truncate text-xs text-muted-foreground">
+            Agent ·{" "}
+            <span className="font-medium text-foreground">
+              {agentInfo?.label ?? activeAgentName}
             </span>
-          ) : null}
-          {displayTitle ? (
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{displayTitle}</span>
-          ) : null}
+          </p>
         </header>
       ) : null}
       {hasMessages ? (
@@ -175,23 +177,27 @@ export function ChatPanel({
         />
       )}
       {status === "error" ? (
-        <p className="mx-auto w-full max-w-3xl px-6 pb-2 text-xs text-destructive">
-          [error] {error ?? "the stream failed"} — try again
+        <div
+          role="alert"
+          className="mx-auto mb-2 w-[calc(100%-2rem)] max-w-4xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:w-[calc(100%-3rem)]"
+        >
+          <span className="font-medium">Response failed.</span>{" "}
+          {error ?? "The stream ended unexpectedly."} Try again.
           {errorCta ? (
             <>
-              {" · "}
+              {" "}
               <Link
                 to={errorCta.to}
-                className="cursor-pointer font-medium underline underline-offset-2 hover:text-foreground"
+                className="font-medium underline underline-offset-2 hover:text-foreground"
               >
-                {errorCta.label} →
+                {errorCta.label}
               </Link>
             </>
           ) : null}
-        </p>
+        </div>
       ) : null}
       {connectionState === "reconnecting" ? (
-        <div className="mx-auto w-full max-w-3xl px-6 pb-2">
+        <div className="mx-auto w-full max-w-4xl px-4 pb-2 sm:px-6">
           <ConnectionStatus state="reconnecting" />
         </div>
       ) : null}

@@ -102,10 +102,12 @@ export async function completeOrSignIn(page: Page): Promise<void> {
     await page.locator('input[type="password"]').nth(0).fill(password);
     await page.locator('input[type="password"]').nth(1).fill(password);
     await page.getByRole("button", { name: "Continue" }).click();
-    await page.getByPlaceholder("Acme Corp").fill("Smoke Test Co");
+    // Anchored to the field id (the label's htmlFor target), not the placeholder: placeholder
+    // text is example copy, and rewriting it is what silently broke this step once already.
+    await page.locator("#setup-business-name").fill("Smoke Test Co");
     await page.getByRole("button", { name: "Continue" }).click();
+    // The LLM step is the last one — skipping it completes setup.
     await page.getByRole("button", { name: /Skip for now/i }).click();
-    await page.getByRole("button", { name: "Skip", exact: true }).click();
   } else {
     await page.getByLabel("email").fill(email);
     await page.getByLabel("password").fill(password);

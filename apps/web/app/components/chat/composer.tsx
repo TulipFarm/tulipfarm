@@ -8,11 +8,11 @@ import {
   Bold,
   BookOpen,
   Code,
+  CornerDownRight,
   Database,
   Italic,
   Link as LinkIcon,
   Slash,
-  Sparkles,
   Square,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -189,8 +189,8 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 bg-background">
-      <div className="mx-auto w-full max-w-6xl px-4 pb-3 pt-2 sm:px-6">
+    <div className="shrink-0 border-t border-border/70 bg-background">
+      <div className="mx-auto w-full max-w-4xl px-4 pb-4 pt-2 sm:px-6">
         <div className="mb-1.5 flex min-h-8 items-center gap-2 px-1 text-xs text-muted-foreground">
           <ModelSelector value={model} onChange={setModel} disabled={busy} />
           {activeAgent ? (
@@ -282,7 +282,7 @@ export function Composer({
                     type="button"
                     onClick={handleStop}
                     aria-label="Stop response"
-                    className="inline-flex size-11 items-center justify-center rounded-full border border-input bg-foreground text-background transition-colors hover:bg-foreground/85 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 sm:size-9"
+                    className="inline-flex size-11 items-center justify-center rounded-full border border-input bg-foreground text-background transition hover:bg-foreground/85 active:scale-95 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 sm:size-9"
                   >
                     <Square aria-hidden className="size-3.5 fill-current" />
                   </button>
@@ -296,7 +296,7 @@ export function Composer({
                     aria-label="Send prompt"
                     onClick={() => submitRef.current()}
                     disabled={isEmpty}
-                    className="inline-flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-35 sm:size-9"
+                    className="inline-flex size-11 items-center justify-center rounded-full bg-primary text-primary-foreground transition hover:bg-primary/90 active:scale-95 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-35 sm:size-9"
                   >
                     <ArrowUp aria-hidden className="size-4" strokeWidth={2.25} />
                   </button>
@@ -306,21 +306,26 @@ export function Composer({
           </div>
         </div>
         {suggestions.length > 0 ? (
-          <fieldset className="mt-2 flex w-full min-w-0 gap-2 overflow-x-auto px-0.5 pb-1">
-            <legend className="sr-only">Suggested prompts</legend>
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion.id}
-                type="button"
-                disabled={busy}
-                onClick={() => draftSuggestion(suggestion.prompt)}
-                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/60 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:opacity-50"
-              >
-                <Sparkles aria-hidden className="size-3.5 text-primary" />
-                {suggestion.label}
-              </button>
-            ))}
-          </fieldset>
+          <div className="mt-2 flex min-w-0 items-center gap-2">
+            <p className="hidden shrink-0 text-xs font-medium text-muted-foreground sm:block">
+              Suggested prompts
+            </p>
+            <fieldset className="flex min-w-0 flex-1 gap-2 overflow-x-auto px-0.5 pb-1">
+              <legend className="sr-only">Suggested prompts</legend>
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => draftSuggestion(suggestion.prompt)}
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 text-xs font-medium text-muted-foreground transition hover:border-primary/60 hover:bg-accent hover:text-foreground active:translate-y-px focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 disabled:opacity-50"
+                >
+                  <CornerDownRight aria-hidden className="size-3.5 text-primary" />
+                  {suggestion.label}
+                </button>
+              ))}
+            </fieldset>
+          </div>
         ) : null}
         <p className="sr-only">Enter to send · Shift+Enter for a new line</p>
       </div>
@@ -345,7 +350,7 @@ function ContextTrigger({
         type="button"
         aria-label={`${label} (${shortcut})`}
         onClick={onClick}
-        className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 sm:size-9"
+        className="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground active:scale-95 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25 sm:size-9"
       >
         {children}
       </button>
@@ -372,7 +377,7 @@ function FmtButton({
       aria-label={label}
       aria-pressed={active}
       onClick={onClick}
-      className={`rounded-sm p-1.5 transition-colors hover:bg-secondary ${
+      className={`rounded-sm p-1.5 transition hover:bg-secondary active:scale-95 ${
         active ? "text-primary" : "text-muted-foreground"
       }`}
     >

@@ -44,14 +44,14 @@ function renderWithItems(node: ReactElement, items: ConversationSummary[]) {
   render(<Stub initialEntries={["/"]} />);
 }
 
-test("lists chats linking each row to /chat/:id, with a search box and the All filter", () => {
+test("lists chats linking each row to /chat/:id, with search and a new-chat action", () => {
   renderWithItems(<ChatsRoute />, [convo()]);
   expect(screen.getByRole("link", { name: /Inventory Planning/ })).toHaveAttribute(
     "href",
     "/chat/c1"
   );
   expect(screen.getByLabelText("search chats")).toBeInTheDocument();
-  expect(screen.getByText("All")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /New chat/i })).toHaveAttribute("href", "/");
 });
 
 test("empty history shows a New chat link", () => {
@@ -68,6 +68,8 @@ test("pins starred chats above the rest", () => {
   const rows = screen.getAllByRole("link", { name: /Older|Pinned/ });
   expect(rows[0]).toHaveTextContent("Pinned");
   expect(rows[1]).toHaveTextContent("Older");
+  expect(screen.getByRole("heading", { name: "Starred" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Recent" })).toBeInTheDocument();
 });
 
 test("typing in the search box refetches server-side with the query", async () => {

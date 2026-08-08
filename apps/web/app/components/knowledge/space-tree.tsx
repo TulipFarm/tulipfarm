@@ -60,19 +60,6 @@ export function KnowledgeTree() {
 
   return (
     <nav aria-label="Knowledge" className="flex min-h-0 flex-1 flex-col text-sm">
-      <div className="flex shrink-0 items-center justify-between px-3 py-2">
-        <span className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Knowledge
-        </span>
-        <Link
-          to="/knowledge/spaces/new"
-          title="New space"
-          aria-label="New space"
-          className="cursor-pointer rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-primary"
-        >
-          <Plus className="size-3.5" aria-hidden />
-        </Link>
-      </div>
       <SidebarSearch />
       <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-3">
         {error ? (
