@@ -290,7 +290,8 @@ export const updatePresentationTool: ToolDef = {
         value.expectedRevision,
         value.props,
         ctx.surfaceCatalog,
-        ctx.surfaceRendererManifest
+        ctx.surfaceRendererManifest,
+        { runId: ctx.runId, stateKey: value.artifactId }
       );
       const actionHandles = await createActionHandles(
         artifact,

@@ -36,7 +36,8 @@ export type McpEntry =
 export type EgressConfig =
   | { type: "mcp"; entry: McpEntry }
   | { type: "openapi"; spec: string }
-  | { type: "ts-code"; handler: string; toolsSpec: string };
+  | { type: "ts-code"; handler: string; toolsSpec: string }
+  | { type: "none" };
 
 // ── Ingress (declarative, manifest-driven) ────────────────────────────────────
 // The host runs NO integration-specific code: webhook verification, handshake, dedup, and
@@ -164,6 +165,8 @@ export interface IntegrationManifest {
   required_env?: RequiredEnvVar[];
   setup_guide_path?: string;
   oauth?: OAuthConfig;
+  /** Provider app-manifest (e.g. Slack's app manifest) to paste during install, serialized as JSON for display. */
+  install_manifest?: Record<string, unknown>;
 }
 
 export interface IntegrationConnection {

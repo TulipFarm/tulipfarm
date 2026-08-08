@@ -3,26 +3,19 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import * as setupLib from "~/lib/setup";
-import * as soulLib from "~/lib/soul";
 import SetupRoute from "./setup";
 
 /*
- * Setup wizard flow tests, focused on the conditional Soul backup step: the step is hidden
- * (3-step wizard, finish after LLM) when the soul git remote is already configured — e.g. seeded
- * by SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL env vars at boot — and shown otherwise. Remote state
- * comes from getGitConfig() (fetched once, right after the admin step logs the user in).
+ * Setup wizard flow tests. The wizard is three steps — admin account, business profile, LLM setup
+ * — and completing (or skipping) the last one finishes setup. Drafts live in the route so stepping
+ * back never discards typed input.
  */
 
 vi.mock("~/lib/setup", () => ({
   getSetupStatus: vi.fn(),
   setupAdmin: vi.fn(),
   setupBusiness: vi.fn(),
-  setupGit: vi.fn(),
   completeSetup: vi.fn(),
-}));
-vi.mock("~/lib/soul", () => ({
-  getGitConfig: vi.fn(),
-  friendlyGitError: (raw: string) => raw,
 }));
 vi.mock("~/lib/settings", () => ({
   listProviders: vi.fn().mockResolvedValue([]),
@@ -33,25 +26,10 @@ vi.mock("~/lib/settings", () => ({
 const setupAdmin = vi.mocked(setupLib.setupAdmin);
 const setupBusiness = vi.mocked(setupLib.setupBusiness);
 const completeSetup = vi.mocked(setupLib.completeSetup);
-const getGitConfig = vi.mocked(soulLib.getGitConfig);
 
 afterEach(() => {
   vi.clearAllMocks();
 });
-
-function gitConfig(remoteConfigured: boolean): soulLib.SoulGitConfig {
-  return {
-    credentialSet: remoteConfigured,
-    status: {
-      remoteConfigured,
-      ahead: 0,
-      behind: 0,
-      headSha: null,
-      lastSyncError: null,
-      lastSyncAt: null,
-    },
-  };
-}
 
 function renderWizard() {
   const Stub = createRemixStub([{ path: "/", Component: () => <SetupRoute /> }]);
@@ -59,7 +37,10 @@ function renderWizard() {
 }
 
 /** Complete steps 1 (admin) and 2 (business), landing on the LLM step. */
-async function advanceToLlmStep(user: ReturnType<typeof userEvent.setup>) {
+async function advanceToLlmStep(
+  user: ReturnType<typeof userEvent.setup>,
+  business: { website?: string } = {}
+) {
   setupAdmin.mockResolvedValue(undefined as never);
   setupBusiness.mockResolvedValue(undefined as never);
 
@@ -69,46 +50,78 @@ async function advanceToLlmStep(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "Continue" }));
 
   await user.type(await screen.findByLabelText(/business name/i), "Oscorp");
+  if (business.website) await user.type(screen.getByLabelText(/website/i), business.website);
   await user.click(screen.getByRole("button", { name: "Continue" }));
 
   await screen.findByRole("heading", { name: "LLM setup" });
 }
 
-test("shows all four steps (incl. Soul backup) when no git remote is configured", async () => {
+test("finishes setup when the final LLM step is skipped", async () => {
   const user = userEvent.setup();
-  getGitConfig.mockResolvedValue(gitConfig(false));
-  renderWizard();
-
-  await advanceToLlmStep(user);
-  await user.click(screen.getByRole("button", { name: /Skip for now/ }));
-
-  expect(await screen.findByRole("heading", { name: "Soul backup" })).toBeInTheDocument();
-  expect(completeSetup).not.toHaveBeenCalled();
-}, 15_000);
-
-test("hides the Soul backup step and finishes after LLM when the remote is env-configured", async () => {
-  const user = userEvent.setup();
-  getGitConfig.mockResolvedValue(gitConfig(true));
   completeSetup.mockResolvedValue(undefined as never);
   renderWizard();
 
   await advanceToLlmStep(user);
-  // Indicator no longer offers the Soul backup step.
-  expect(screen.queryByText("Soul backup")).not.toBeInTheDocument();
-
   await user.click(screen.getByRole("button", { name: /Skip for now/ }));
-  await waitFor(() => expect(completeSetup).toHaveBeenCalledTimes(1));
-  expect(screen.queryByRole("heading", { name: "Soul backup" })).not.toBeInTheDocument();
-}, 15_000);
 
-test("falls back to showing the Soul backup step when the git status probe fails", async () => {
+  await waitFor(() => expect(completeSetup).toHaveBeenCalledTimes(1));
+});
+
+test("sends the optional website with the business profile", async () => {
   const user = userEvent.setup();
-  getGitConfig.mockRejectedValue(new Error("network down"));
+  renderWizard();
+
+  await advanceToLlmStep(user, { website: "https://oscorp.example" });
+
+  expect(setupBusiness).toHaveBeenCalledWith("Oscorp", "", "https://oscorp.example");
+});
+
+test("omits the website when it is left blank", async () => {
+  const user = userEvent.setup();
   renderWizard();
 
   await advanceToLlmStep(user);
-  await user.click(screen.getByRole("button", { name: /Skip for now/ }));
 
-  expect(await screen.findByRole("heading", { name: "Soul backup" })).toBeInTheDocument();
-  expect(completeSetup).not.toHaveBeenCalled();
+  expect(setupBusiness).toHaveBeenCalledWith("Oscorp", "", "");
+});
+
+test("steps back to an earlier step without losing what was already typed", async () => {
+  const user = userEvent.setup();
+  renderWizard();
+
+  await advanceToLlmStep(user);
+  const model = screen.getByLabelText(/^model/i);
+  await user.clear(model);
+  await user.type(model, "claude-haiku-4-5");
+
+  await user.click(screen.getByRole("button", { name: "Back" }));
+
+  expect(await screen.findByRole("heading", { name: "Business profile" })).toBeInTheDocument();
+  expect(screen.getByLabelText(/business name/i)).toHaveValue("Oscorp");
+
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+
+  await screen.findByRole("heading", { name: "LLM setup" });
+  expect(screen.getByLabelText(/^model/i)).toHaveValue("claude-haiku-4-5");
 }, 15_000);
+
+/*
+ * The installer browser smoke (scripts/test/browser-smoke.mjs) fills this field by id rather than
+ * by placeholder, after rewriting the placeholder copy silently broke it. Renaming the id would
+ * otherwise only surface in the slow Docker installer stage, so pin the contract here instead.
+ */
+test("keeps the business-name field id the installer browser smoke drives", async () => {
+  const user = userEvent.setup();
+  setupAdmin.mockResolvedValue(undefined as never);
+  renderWizard();
+
+  await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+  await user.type(screen.getByLabelText(/^password/i), "mypassword");
+  await user.type(screen.getByLabelText(/confirm password/i), "mypassword");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+
+  expect(await screen.findByLabelText(/business name/i)).toHaveAttribute(
+    "id",
+    "setup-business-name"
+  );
+});

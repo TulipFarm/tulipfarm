@@ -4,6 +4,7 @@ import type { StateTransitionPort } from "../agent-state";
 import {
   MissingStateError,
   RunStoreStateTransitions,
+  reclaimPendingState,
   reclaimWaitingState,
   StateTransitionConflictError,
 } from "./kernel-ports";
@@ -174,5 +175,50 @@ describe("reclaimWaitingState", () => {
       StateTransitionConflictError
     );
     expect(hops).toEqual([{ from: "waiting", to: "ready" }]);
+  });
+});
+
+describe("reclaimPendingState", () => {
+  function recorder(failAt?: string): {
+    port: StateTransitionPort;
+    hops: Array<{ from: string; to: string }>;
+  } {
+    const hops: Array<{ from: string; to: string }> = [];
+    return {
+      hops,
+      port: {
+        transition: async (input) => {
+          if (input.to === failAt) {
+            throw new StateTransitionConflictError(
+              input.runId,
+              input.stateKey,
+              input.from,
+              input.to
+            );
+          }
+          hops.push({ from: input.from, to: input.to });
+        },
+      },
+    };
+  }
+
+  it("claims a fresh State from the gateway's `pending` insert default, since pending -> running is not a transition", async () => {
+    const { port, hops } = recorder();
+
+    await reclaimPendingState(port, REQUEST);
+
+    expect(hops).toEqual([
+      { from: "pending", to: "ready" },
+      { from: "ready", to: "claimed" },
+    ]);
+  });
+
+  it("raises rather than stealing a State another worker claimed first", async () => {
+    const { port, hops } = recorder("claimed");
+
+    await expect(reclaimPendingState(port, REQUEST)).rejects.toBeInstanceOf(
+      StateTransitionConflictError
+    );
+    expect(hops).toEqual([{ from: "pending", to: "ready" }]);
   });
 });

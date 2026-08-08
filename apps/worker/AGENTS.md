@@ -17,6 +17,17 @@ which is what lets a compose file with no `.env` execute a turn. The environment
 nothing is invented here — a value on neither the environment nor the volume stays missing, and
 `loadConfig` names it.
 
+**`WORKER_API_CREDENTIAL` must be a real minted client, or chat silently never replies.**
+`loadConfig` only checks the variable is a non-empty string — the literal placeholder shipped in
+`.env.local.example` (`<mint in Settings → API clients>`) passes that check and boots cleanly. Every
+call this app makes back into `/api/v1/internal/*` (resolving the Turn, the Context, completion)
+then fails auth, and `RunDispatcher.dispatchBatch`'s catch releases the Run to
+`needs_reconciliation` **with no log line** (see Invariants below) — the symptom is a chat message
+that creates a Run and never gets a reply, with nothing in either process's logs to say why. Mint a
+real one from a running API (`POST /api/v1/identity/api-clients`, admin session) before trusting a
+local chat/turn repro; a `needs_reconciliation` Run whose `invoke` State never left `pending`
+(check `run_states`) is the signature of this, not of a code bug in the executor.
+
 ## Composition root (`src/main.ts`)
 
 Three independent loops share one `pg.Pool`. A failing loop backs off on its own without stopping
@@ -123,6 +134,16 @@ dispatched through a second authority. A satisfied `any`/`quorum` join that stil
 the same reason — this executor can settle a unit but cannot cancel one parked on a live timer.
 
 ## Executing a turn (`src/turn/`)
+
+A Run's `invoke` State arrives at whichever status the gateway's shared INSERT default left it in
+— `pending` on a first dispatch, the same default a Routine's start State gets — or `waiting` if
+this is a resumed approval. Neither is a legal `from` for the kernel's `-> running` edge (see
+`STATE_TRANSITIONS` in `@tulipfarm/run-kernel`), and nothing leases a State the way `RunLeaseManager`
+leases a Run, so `chat-executor.ts` claims it itself before building the `TurnRequest`:
+`reclaimPendingState`/`reclaimWaitingState` (`turn/kernel-ports.ts`) walk it through `ready` and
+`claimed` first. Skipping this for either status throws before Context is ever resolved, which
+`run-dispatcher.ts` swallows into `needs_reconciliation` with no log line — the same silent-failure
+shape as the credential gap above, so check `run_states.status` before assuming which one you hit.
 
 `TurnDriver` (`turn/driver.ts`) runs one turn end to end and owns nothing else: it announces the
 turn, resolves the Context **once**, hands the built `AgentLoopInput` to `AgentStateRunner`,

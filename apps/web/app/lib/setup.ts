@@ -11,8 +11,12 @@ export async function setupAdmin(email: string, password: string): Promise<void>
   await apiWrite("POST", "/api/v1/setup/admin", { email, password });
 }
 
-export async function setupBusiness(name: string, description: string): Promise<void> {
-  await apiSend("POST", "/api/v1/setup/business", { name, description });
+export async function setupBusiness(
+  name: string,
+  description: string,
+  website: string
+): Promise<void> {
+  await apiSend("POST", "/api/v1/setup/business", { name, description, website });
 }
 
 export async function setupGit(remoteUrl: string, credentials?: string): Promise<void> {

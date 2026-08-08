@@ -249,6 +249,24 @@ describe("createChatExecutor", () => {
     expect(recorded.completions).toEqual([{ status: "succeeded", messageId: "message-1" }]);
   });
 
+  it("claims a fresh Run's State from `pending`, the gateway's insert default", async () => {
+    // The invocation gateway persists a new invoke State at `pending` — the same INSERT a
+    // Routine's start State gets — and nothing leases a State the way a Run is leased. Left
+    // unclaimed, `pending -> running` is not a legal kernel transition and the executor would
+    // throw before ever resolving Context.
+    const { execute, recorded } = harness({ state: { ...STATE, status: "pending" } });
+
+    await expect(execute()).resolves.toBe("succeeded");
+
+    expect(recorded.transitions).toEqual([
+      { from: "pending", to: "ready" },
+      { from: "ready", to: "claimed" },
+      { from: "claimed", to: "running" },
+      { from: "running", to: "succeeded" },
+    ]);
+    expect(recorded.completions).toEqual([{ status: "succeeded", messageId: "message-1" }]);
+  });
+
   it("stops the loop when the Run is being cancelled elsewhere", async () => {
     // Cancellation is requested by whoever owns the Run — an operator, a parent Run — and none of
     // them can reach into this process, so it is read from the Run on each iteration.

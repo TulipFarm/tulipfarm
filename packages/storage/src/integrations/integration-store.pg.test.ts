@@ -151,4 +151,62 @@ describe("IntegrationStore", () => {
       credentialRef: "secret://slack/bot-rotated",
     });
   });
+
+  describe("loadDeliveryStatus", () => {
+    it("reports both statuses for an existing Integration/Route pair", async () => {
+      await seed();
+      await store.putRoute({
+        id: "route-1",
+        businessId: BUSINESS_ID,
+        integrationId: INTEGRATION_ID,
+        agentId: "agent-1",
+        channelId: "C-OPS",
+        threadId: null,
+        eventTypes: ["message"],
+        priority: 10,
+        status: "active",
+      });
+
+      expect(await store.loadDeliveryStatus(BUSINESS_ID, INTEGRATION_ID, "route-1")).toEqual({
+        integrationStatus: "active",
+        routeStatus: "active",
+      });
+    });
+
+    it("reflects a revoked Integration even when its Route is still active", async () => {
+      await seed();
+      await store.putRoute({
+        id: "route-1",
+        businessId: BUSINESS_ID,
+        integrationId: INTEGRATION_ID,
+        agentId: "agent-1",
+        channelId: "C-OPS",
+        threadId: null,
+        eventTypes: ["message"],
+        priority: 10,
+        status: "active",
+      });
+      await store.putIntegration({
+        id: INTEGRATION_ID,
+        businessId: BUSINESS_ID,
+        appId: APP_ID,
+        externalTenantId: "T-ACME",
+        credentialRef: "secret://slack/bot",
+        status: "revoked",
+      });
+
+      expect(await store.loadDeliveryStatus(BUSINESS_ID, INTEGRATION_ID, "route-1")).toEqual({
+        integrationStatus: "revoked",
+        routeStatus: "active",
+      });
+    });
+
+    it("returns undefined for an unknown pair, so callers fail closed", async () => {
+      await seed();
+
+      expect(
+        await store.loadDeliveryStatus(BUSINESS_ID, INTEGRATION_ID, "route-missing")
+      ).toBeUndefined();
+    });
+  });
 });

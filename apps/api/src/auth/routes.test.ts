@@ -5,9 +5,18 @@ import { encodeCursor, type PaginatedResult } from "../pagination";
 import { MemoryRateLimiter } from "../rate-limit";
 import type { TokenDoc, TokenRepo } from "./api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "./csrf";
+import { hashInviteToken, type UserInviteDoc, type UserInviteRepo } from "./invites";
 import { SESSION_COOKIE } from "./routes";
 import { MemorySessionStore } from "./session-store";
-import { createUser, type UserDoc, type UserRepo } from "./users";
+import {
+  createUser,
+  EmailAlreadyExistsError,
+  inviteUser,
+  type PasswordWriteRepo,
+  type UserAdminRepo,
+  type UserDoc,
+  type UserRepo,
+} from "./users";
 
 // A session binds its own CSRF token (see makeCsrfHook); tests look it up by session id.
 const csrfBySid = new Map<string, string>();
@@ -23,7 +32,7 @@ function csrfOf(sid: string): string {
   return csrfBySid.get(sid) ?? WRONG_CSRF;
 }
 
-class FakeUserRepo implements UserRepo {
+class FakeUserRepo implements UserRepo, UserAdminRepo, PasswordWriteRepo {
   constructor(private readonly users: UserDoc[] = []) {}
   async findByEmail(email: string): Promise<UserDoc | null> {
     const normalized = email.trim().toLowerCase();
@@ -36,7 +45,57 @@ class FakeUserRepo implements UserRepo {
     return this.users.length;
   }
   async insert(user: UserDoc): Promise<void> {
+    if (this.users.some((u) => u.email === user.email)) {
+      throw new EmailAlreadyExistsError();
+    }
     this.users.push(user);
+  }
+  async listAll(): Promise<UserDoc[]> {
+    return [...this.users];
+  }
+  async setStatus(id: string, status: UserDoc["status"]): Promise<void> {
+    const user = this.users.find((u) => u._id === id);
+    if (user) user.status = status;
+  }
+  async setPassword(id: string, passwordHash: string): Promise<void> {
+    const user = this.users.find((u) => u._id === id);
+    if (user) {
+      user.passwordHash = passwordHash;
+      user.status = "active";
+    }
+  }
+}
+
+class FakeInviteRepo implements UserInviteRepo {
+  readonly invites: UserInviteDoc[] = [];
+
+  async create(invite: UserInviteDoc): Promise<void> {
+    this.invites.push(invite);
+  }
+  async deleteUnconsumedForUser(userId: string): Promise<void> {
+    for (let i = this.invites.length - 1; i >= 0; i--) {
+      const invite = this.invites[i];
+      if (invite.userId === userId && invite.consumedAt === null) this.invites.splice(i, 1);
+    }
+  }
+  private live(tokenHash: string): UserInviteDoc | undefined {
+    return this.invites.find(
+      (i) => i.tokenHash === tokenHash && i.consumedAt === null && i.expiresAt > new Date()
+    );
+  }
+  async find(tokenHash: string): Promise<UserInviteDoc | null> {
+    return this.live(tokenHash) ?? null;
+  }
+  async consume(tokenHash: string): Promise<UserInviteDoc | null> {
+    const invite = this.live(tokenHash);
+    if (!invite) return null;
+    invite.consumedAt = new Date();
+    return invite;
+  }
+  /** Backdates a live invite so expiry can be exercised without waiting a week. */
+  expire(token: string): void {
+    const invite = this.invites.find((i) => i.tokenHash === hashInviteToken(token));
+    if (invite) invite.expiresAt = new Date(Date.now() - 1000);
   }
 }
 
@@ -794,5 +853,537 @@ describe("rate limiting", () => {
     expect(res.headers["x-ratelimit-limit"]).toBe("100");
     expect(res.headers["x-ratelimit-remaining"]).toBe("0");
     expect(Number(res.headers["x-ratelimit-reset"])).toBeGreaterThan(0);
+  });
+});
+
+describe("admin user management routes", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let inviteRepo: FakeInviteRepo;
+  let adminSid: string;
+  let memberSid: string;
+  let memberId: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    inviteRepo = new FakeInviteRepo();
+
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    const member = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberId = member._id;
+    adminSid = await issueSession(store, admin._id);
+    memberSid = await issueSession(store, memberId);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordWriteRepo: userRepo,
+      userInviteRepo: inviteRepo,
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("POST /users creates an invited member with no password and returns an invite link", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email: "new@example.com" },
+    });
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    expect(body.user).toMatchObject({
+      email: "new@example.com",
+      role: "member",
+      status: "invited",
+    });
+    expect(typeof body.invite.token).toBe("string");
+    expect(new Date(body.invite.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+    const created = await userRepo.findByEmail("new@example.com");
+    expect(created?.passwordHash).toBeNull();
+    // Only the hash is stored — the raw token is returned once and never recoverable.
+    expect(inviteRepo.invites.map((i) => i.tokenHash)).toContain(
+      hashInviteToken(body.invite.token)
+    );
+  });
+
+  it("POST /users/:id/invite re-issues a link and revokes the outstanding one", async () => {
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email: "new@example.com" },
+    });
+    const invitedId = first.json().user.id;
+    const firstToken = first.json().invite.token;
+
+    const second = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${invitedId}/invite`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().invite.token).not.toBe(firstToken);
+    expect(await inviteRepo.find(hashInviteToken(firstToken))).toBeNull();
+    expect(await inviteRepo.find(hashInviteToken(second.json().invite.token))).not.toBeNull();
+  });
+
+  it("POST /users/:id/invite issues a recovery link for an active user without changing it", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${memberId}/invite`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+    });
+    expect(res.statusCode).toBe(200);
+    const member = await userRepo.findById(memberId);
+    expect(member?.status).toBe("active");
+    expect(member?.passwordHash).not.toBeNull();
+  });
+
+  it("POST /users/:id/invite returns 400 for a disabled user", async () => {
+    await userRepo.setStatus(memberId, "disabled");
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${memberId}/invite`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("POST /users/:id/invite returns 403 for a non-admin", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${memberId}/invite`,
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("PATCH /users/:id/status re-enables a never-accepted account as invited, not active", async () => {
+    const invited = await inviteUser(userRepo, "pending@example.com");
+    await userRepo.setStatus(invited._id, "disabled");
+
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/users/${invited._id}/status`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "active" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.status).toBe("invited");
+    expect((await userRepo.findById(invited._id))?.status).toBe("invited");
+  });
+
+  it("POST /users returns 409 on duplicate email", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email: "member@example.com" },
+    });
+    expect(res.statusCode).toBe(409);
+  });
+
+  it("POST /users returns 403 for a non-admin", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: csrfOf(memberSid) },
+      headers: { [CSRF_HEADER]: csrfOf(memberSid) },
+      payload: { email: "new@example.com" },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("GET /users lists all users for an admin", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().items).toHaveLength(2);
+  });
+
+  it("GET /users returns 403 for a non-admin", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: memberSid },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it("PATCH /users/:id/status disables a member", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/users/${memberId}/status`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.status).toBe("disabled");
+    expect((await userRepo.findById(memberId))?.status).toBe("disabled");
+  });
+
+  it("PATCH /users/:id/status returns 400 for self", async () => {
+    const admin = await userRepo.findByEmail("admin@example.com");
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/api/v1/users/${admin?._id}/status`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("PATCH /users/:id/status returns 404 for unknown id", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/users/no-such-id/status",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { status: "disabled" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+});
+
+describe("invite acceptance", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let inviteRepo: FakeInviteRepo;
+  let adminSid: string;
+
+  async function invite(email: string): Promise<{ id: string; token: string }> {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/users",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+      payload: { email },
+    });
+    return { id: res.json().user.id, token: res.json().invite.token };
+  }
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    inviteRepo = new FakeInviteRepo();
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    adminSid = await issueSession(store, admin._id);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordWriteRepo: userRepo,
+      userInviteRepo: inviteRepo,
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  it("previews an invite without spending it", async () => {
+    const { token } = await invite("new@example.com");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/preview",
+      payload: { token },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().email).toBe("new@example.com");
+    expect(await inviteRepo.find(hashInviteToken(token))).not.toBeNull();
+  });
+
+  it("redeems in a browser that still holds a live session", async () => {
+    // The recovery case the link exists for: an active user forgot their password and opens the
+    // re-issued link where their old session is still alive. A session cookie without a CSRF header
+    // is exactly the shape a redemption arrives in, so both routes must be CSRF-exempt.
+    const { token } = await invite("new@example.com");
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/preview",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      payload: { token },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json().email).toBe("new@example.com");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      payload: { token, password: "a-strong-password" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toMatchObject({ email: "new@example.com", status: "active" });
+
+    // Rotation is what contains the fixation risk of exempting the route: the session the browser
+    // arrived with must not be the one it leaves with.
+    expect(cookieValue(res)).not.toBe(adminSid);
+    expect(await store.get(adminSid)).toBeNull();
+  });
+
+  it("accepting sets the password, activates the account, and signs in", async () => {
+    const { id, token } = await invite("new@example.com");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "a-strong-password" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user).toMatchObject({ email: "new@example.com", status: "active" });
+
+    const sid = cookieValue(res);
+    expect(sid).toBeTruthy();
+    const session = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/session",
+      cookies: { [SESSION_COOKIE]: sid as string },
+    });
+    expect(session.statusCode).toBe(200);
+    expect((await userRepo.findById(id))?.passwordHash).not.toBeNull();
+  });
+
+  it("the chosen password works at the login form", async () => {
+    const { token } = await invite("new@example.com");
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "a-strong-password" },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "new@example.com", password: "a-strong-password" },
+    });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("an invited account cannot log in before accepting", async () => {
+    await invite("new@example.com");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "new@example.com", password: "anything-at-all" },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe("invalid credentials");
+  });
+
+  it("a replayed invite sets nothing the second time", async () => {
+    const { token } = await invite("new@example.com");
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "a-strong-password" },
+    });
+
+    const replay = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "an-attacker-password" },
+    });
+    expect(replay.statusCode).toBe(404);
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "new@example.com", password: "an-attacker-password" },
+    });
+    expect(login.statusCode).toBe(401);
+  });
+
+  it("an expired invite is refused", async () => {
+    const { token } = await invite("new@example.com");
+    inviteRepo.expire(token);
+
+    const preview = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/preview",
+      payload: { token },
+    });
+    expect(preview.statusCode).toBe(404);
+
+    const accept = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "a-strong-password" },
+    });
+    expect(accept.statusCode).toBe(404);
+  });
+
+  it("an unknown token is refused with the same response as an expired one", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/preview",
+      payload: { token: "not-a-real-token" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("a disabled account's invite is dead", async () => {
+    const { id, token } = await invite("new@example.com");
+    await userRepo.setStatus(id, "disabled");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "a-strong-password" },
+    });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("rejects a password below the minimum length", async () => {
+    const { token } = await invite("new@example.com");
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "short" },
+    });
+    expect(res.statusCode).toBe(400);
+    // The token survives a rejected password — a typo must not burn the link.
+    expect(await inviteRepo.find(hashInviteToken(token))).not.toBeNull();
+  });
+
+  it("a re-issued link is the recovery path for a forgotten password", async () => {
+    const { id, token } = await invite("new@example.com");
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token, password: "the-forgotten-one" },
+    });
+
+    const reissued = await app.inject({
+      method: "POST",
+      url: `/api/v1/users/${id}/invite`,
+      cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: csrfOf(adminSid) },
+      headers: { [CSRF_HEADER]: csrfOf(adminSid) },
+    });
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/invites/accept",
+      payload: { token: reissued.json().invite.token, password: "the-replacement-one" },
+    });
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "new@example.com", password: "the-replacement-one" },
+    });
+    expect(login.statusCode).toBe(200);
+  });
+});
+
+describe("change password", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let memberSid: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    const member = await createUser(userRepo, "member@example.com", "current-password", "member");
+    memberSid = await issueSession(store, member._id);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordWriteRepo: userRepo,
+      userInviteRepo: new FakeInviteRepo(),
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  function change(sid: string, payload: Record<string, string>) {
+    return app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: csrfOf(sid) },
+      headers: { [CSRF_HEADER]: csrfOf(sid) },
+      payload,
+    });
+  }
+
+  it("sets a new password and rotates the session", async () => {
+    const res = await change(memberSid, {
+      currentPassword: "current-password",
+      newPassword: "new-strong-password",
+    });
+    expect(res.statusCode).toBe(200);
+
+    const newSid = cookieValue(res);
+    expect(newSid).toBeTruthy();
+    expect(newSid).not.toBe(memberSid);
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "member@example.com", password: "new-strong-password" },
+    });
+    expect(login.statusCode).toBe(200);
+  });
+
+  it("refuses a wrong current password and leaves the old one working", async () => {
+    const res = await change(memberSid, {
+      currentPassword: "not-the-current-one",
+      newPassword: "new-strong-password",
+    });
+    expect(res.statusCode).toBe(401);
+
+    const login = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/login",
+      payload: { email: "member@example.com", password: "current-password" },
+    });
+    expect(login.statusCode).toBe(200);
+  });
+
+  it("returns 400 for a short new password", async () => {
+    const res = await change(memberSid, {
+      currentPassword: "current-password",
+      newPassword: "short",
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns 401 without a session", async () => {
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/change-password",
+      payload: { currentPassword: "current-password", newPassword: "new-strong-password" },
+    });
+    expect(res.statusCode).toBe(401);
   });
 });

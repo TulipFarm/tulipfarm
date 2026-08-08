@@ -1,6 +1,6 @@
 import type { ServerResponse } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { formatSseEvent, writeSseEvent, writeSseHeaders } from "./sse";
+import { formatSseEvent, writeSseHeaders } from "./sse";
 
 describe("formatSseEvent", () => {
   it("frames id/event/data with a trailing blank line", () => {
@@ -12,18 +12,6 @@ describe("formatSseEvent", () => {
     expect(formatSseEvent({ seq: 9, eventType: "finish", data: { reason: "stop" } })).toBe(
       'id: 9\nevent: finish\ndata: {"reason":"stop"}\n\n'
     );
-  });
-});
-
-describe("writeSseEvent", () => {
-  it("writes the framed event to the raw response", () => {
-    const write = vi.fn();
-    writeSseEvent({ write } as unknown as ServerResponse, {
-      seq: 1,
-      eventType: "text",
-      data: { delta: "x" },
-    });
-    expect(write).toHaveBeenCalledWith('id: 1\nevent: text\ndata: {"delta":"x"}\n\n');
   });
 });
 

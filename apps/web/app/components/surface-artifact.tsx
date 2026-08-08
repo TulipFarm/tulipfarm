@@ -11,7 +11,9 @@ import { apiGet } from "~/lib/api";
 export interface SurfaceArtifactProps {
   readonly artifact?: SurfaceArtifactValue;
   readonly artifactId: string;
-  readonly revision: number;
+  // Absent on a live `surface.emitted` event (the wire names only the id) — the fetch below omits
+  // the query param, which resolves to the latest revision server-side.
+  readonly revision?: number;
   readonly resolvedView?: ResolvedSurfaceViewNode;
   readonly actionHandles?: Readonly<Record<string, string>>;
   readonly onInteraction?: (
@@ -52,7 +54,9 @@ export function SurfaceArtifact({
       artifact: SurfaceArtifactValue;
       actionHandles: Readonly<Record<string, string>>;
       resolvedView?: ResolvedSurfaceViewNode;
-    }>(`/api/v1/surfaces/${encodeURIComponent(artifactId)}?revision=${revision}`).then((value) => {
+    }>(
+      `/api/v1/surfaces/${encodeURIComponent(artifactId)}${revision === undefined ? "" : `?revision=${revision}`}`
+    ).then((value) => {
       if (active) {
         setArtifact(value.artifact);
         setActionHandles(value.actionHandles);

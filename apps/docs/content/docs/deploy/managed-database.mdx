@@ -31,23 +31,22 @@ Postgres 17 with pgvector installed.
 
 ## Switch to it
 
-Set `DATABASE_URL` and start only the `app` service:
+Set `EXTERNAL_DATASTORE=true`, set `DATABASE_URL`, and start the `app` service plus both
+workers:
 
 ```bash
+EXTERNAL_DATASTORE=true \
 DATABASE_URL=postgresql://tulipfarm:<password>@db.example.com:5432/tulipfarm?sslmode=require \
-  docker compose up -d app
+  docker compose up -d app worker integration-worker
 ```
 
-Naming only `app` is what keeps the bundled `postgres` service from ever being created — it
-is not skipped by a flag, it simply is not part of the run. `depends_on` is declared
-`required: false` for exactly this case, so nothing blocks waiting for it.
+Naming only `app worker integration-worker` is what keeps the bundled `postgres` service
+from ever being created — it is not skipped by a flag, it simply is not part of the run.
+The `app` is still the only migrator; both workers wait for healthy `app`, then refuse to
+boot if the schema floor they need is not present.
 
-<Callout type="info">
-  `EXTERNAL_DATASTORE=true` appears in `.env.example` and in the installer's generated
-  `.env`. **No code reads it.** It is a marker for whoever opens the file next; the real
-  switch is `DATABASE_URL` plus starting only `app`. Setting it is harmless, and leaving it
-  out changes nothing.
-</Callout>
+`EXTERNAL_DATASTORE=true` documents the intended mode for operators and platform UIs;
+`DATABASE_URL` is the value all three processes use to reach the database.
 
 On Kubernetes and managed app platforms there is no bundled Postgres to begin with —
 `DATABASE_URL` is all there is.
@@ -58,9 +57,11 @@ On Kubernetes and managed app platforms there is no bundled Postgres to begin wi
 curl -fsS http://localhost:8080/readyz
 ```
 
-`/readyz` runs an actual query against the pool, so a `200` means the app reached your
-database and migrations completed. A `503` with a connection error in the body means it did
-not — check the security group, the SSL mode, and whether the role can create extensions.
+`/readyz` on `app` runs an actual query against the pool, so a `200` means the app
+reached your database and migrations completed. Then confirm both workers are healthy in
+Compose: they should be running and their logs should not mention a schema-floor refusal.
+A `503` with a connection or extension error means the app did not finish booting — check
+the security group, SSL mode, and whether the role can create `vector` and `citext`.
 
 ## Backups
 

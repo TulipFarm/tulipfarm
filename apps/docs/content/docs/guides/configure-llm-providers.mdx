@@ -1,57 +1,75 @@
 ---
 title: Configure LLM providers
-description: Add a provider's credentials, then point your tiers at its models.
+description: Add provider credentials, assign tier models, and verify fallback behavior.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+This guide configures the model providers TulipFarm uses for chat, Agents, Skills, and
+Routines. This is one of the few setup tasks that is UI-first instead of prompt-first:
+provider secrets and tier assignments are managed by admins in **Settings**. For the model
+selection model, see [LLM](/docs/concepts/llm).
 
-This guide gets your agents running by configuring a model provider. There are two steps,
-in order: store the provider's credentials, then assign its models to the
-[tiers](/docs/concepts/llm). Both live under **Settings**, and both require admin.
+## Outcome
 
-## Add the provider's credentials
+At the end, each LLM tier has at least one priced, chat-capable model and TulipFarm can
+reload the model service without restarting the app.
 
-Open **Settings → Secrets**. Under *Configure a provider*, pick your provider from the
-dropdown (or choose **Custom…** for one not listed). The form shows the fields that
-provider needs — typically an API key, sometimes a base URL or resource name. Fill them
-in and choose **Save provider**.
+<Steps>
+  <Step>
+    Open **Settings → Secrets**.
+  </Step>
+  <Step>
+    Under **Configure a provider**, choose one of the four shipped provider ids:
 
-Saved provider credentials are stored encrypted; their values are never shown again, only
-listed as set. See [Store a secret](/docs/guides/store-a-secret) for more on the secrets
-store.
+    | Provider id | UI label | Secret/config keys |
+    | --- | --- | --- |
+    | `anthropic` | Anthropic | `anthropic-api-key` |
+    | `openai` | OpenAI | `openai-api-key` |
+    | `azure` | Azure Foundry | `azure-openai-api-key`, `azure-openai-resource-name`, `azure-foundry-endpoint` |
+    | `openai-compatible` | OpenAI-compatible | `openai-compatible-api-key`, `openai-compatible-base-url` |
 
-## Assign models to tiers
+    The `openai-compatible-api-key` is optional for proxies that do not require one; the
+    base URL is required so TulipFarm knows where to send requests.
+  </Step>
+  <Step>
+    Fill the fields and choose **Save provider**. Secret values are encrypted and
+    write-only. Non-secret config, such as a base URL or resource name, can be shown back
+    on the provider form.
+  </Step>
+  <Step>
+    Open **Settings → LLM**. Each tier — `quick`, `standard`, and `complex` — is an
+    ordered fallback chain. Add one or more provider rows to each tier.
+  </Step>
+  <Step>
+    Pick a provider and model for each row. Tier models must resolve to priced,
+    chat-capable entries from the LiteLLM catalog. The settings page pins the resolved
+    pricing, context window, and capability metadata into the Soul.
 
-Open **Settings → LLM**. You see the three tiers — `quick`, `standard`, and `complex` —
-each an ordered list of provider rows.
+    Provider model ids are accepted as follows:
 
-For each tier, choose a configured provider, then click into the **model** field. A
-provider only becomes selectable once its credentials are saved; unconfigured providers
-are disabled with a "configure first" note.
-
-The model field is a combobox: focusing it loads a dropdown of suggested model ids for
-that provider, but you can still type any custom id it doesn't list. Suggestions come
-from the LiteLLM catalog, except for **OpenAI-compatible**, which — when its **Base
-URL** is configured — queries the proxy's own `GET /models` endpoint so you pick from
-what it actually has deployed. **Azure Foundry** has no suggestions (deployment names
-can't be discovered); type the deployment name directly, for example `claude-sonnet-4-6`.
-
-<Callout type="info">
-The order of rows in a tier is its fallback chain — the top provider is tried first, and
-the runtime falls through to the next on failure. Add a second provider to a tier with
-**+ Add provider** to give it a backup.
-</Callout>
-
-When you move focus off a filled-in model field, the app resolves its LiteLLM spec and
-shows it as a row of badges — cost per million tokens, context window, and supported
-capabilities (tools, vision, cache, reasoning). If nothing matches, the row shows "No
-LiteLLM match — cost stays unpriced" instead; a **Refresh** button re-fetches a resolved
-spec.
-
-Each tier needs at least one provider with a model. Choose **Save**; the LLM service
-reloads with the new configuration, written to `soul/llm.config.yaml`.
+    - `anthropic` and `openai`: bare ids or provider-prefixed ids.
+    - `azure`: `azure_ai/`, `azure/`, or bare deployment ids.
+    - `openai-compatible`: bare ids sent to the configured `base_url`.
+  </Step>
+  <Step>
+    Put the preferred provider first. Runtime fallback tries rows in order. A hard
+    failure, such as bad credentials, a bad request, a missing model, or cancellation,
+    stops the chain immediately. A transient failure, such as rate limit, timeout,
+    network error, or a 5xx response, falls through to the next row.
+  </Step>
+  <Step>
+    Choose **Save**. The settings page writes `llm.config.yaml` in the Soul, commits it,
+    and reloads the LLM service live.
+  </Step>
+</Steps>
 
 ## Verify
 
-After saving you see a "Saved · LLM service reloaded." confirmation. Your agents now run
-against the providers you configured.
+Start a new chat and ask a simple question. If a tier has multiple providers, temporarily
+make the first row return a transient error and confirm the answer comes from the next
+row. Do not use invalid credentials for this test: credential failures are hard failures
+and intentionally stop fallback.
+
+<Callout type="warn">
+If there is no `llm.config.yaml`, LLM features are disabled. The app does not invent a
+model or silently call an unconfigured provider.
+</Callout>

@@ -163,6 +163,34 @@ describe("SlackChannelAdapter", () => {
     expect(JSON.stringify(persisted)).not.toContain("secret-path");
   });
 
+  it("threads a root @mention (no thread_ts) under the mention's own ts", async () => {
+    let persisted: ChannelInboundEvent | undefined;
+    const rootEvent = event();
+    const rootMessageEvent = rootEvent.event;
+    if (rootMessageEvent === undefined) {
+      throw new Error("test setup: event missing");
+    }
+    rootMessageEvent.thread_ts = undefined;
+    const adapter = new SlackChannelAdapter({
+      inbound: {
+        accept: async (input) => {
+          persisted = input;
+          return { outcome: "accepted" };
+        },
+      },
+      identities: {
+        resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }),
+      },
+      routing: { load: async () => routing() },
+      runs: { start: async () => ({ runId: "run-1", outcome: "started" as const }) },
+      now: () => "2026-07-26T10:00:00.000Z",
+    });
+
+    await adapter.receive(BUSINESS_ID, rootEvent, async () => {});
+
+    expect(persisted?.data.threadId).toBe("1785000000.000100");
+  });
+
   it("acks a duplicate after durable acceptance without resolving identity or starting a Run", async () => {
     const resolve = vi.fn();
     const start = vi.fn();
@@ -198,6 +226,60 @@ describe("SlackChannelAdapter", () => {
       reason: "external_identity_unmapped",
     });
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it("resolves mention tokens in the text handed to the Run, not in the persisted event", async () => {
+    let persisted: ChannelInboundEvent | undefined;
+    const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
+    const mentionEvent = event();
+    if (mentionEvent.event === undefined) throw new Error("test setup: event missing");
+    mentionEvent.event.text = "create a task for <@U0AMFGRAKLY>";
+    const adapter = new SlackChannelAdapter({
+      inbound: {
+        accept: async (input) => {
+          persisted = input;
+          return { outcome: "accepted" };
+        },
+      },
+      identities: {
+        resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }),
+      },
+      routing: { load: async () => routing() },
+      runs: { start },
+      now: () => "2026-07-26T10:00:00.000Z",
+      mentions: {
+        resolveDisplayName: async (userId: string) =>
+          userId === "U0AMFGRAKLY" ? "Mohit" : undefined,
+      },
+    });
+
+    await adapter.receive(BUSINESS_ID, mentionEvent, async () => undefined);
+
+    expect(persisted?.data.text).toBe("create a task for <@U0AMFGRAKLY>");
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({ text: "create a task for @Mohit" }),
+      })
+    );
+  });
+
+  it("passes text through unchanged when no mentions resolver is configured", async () => {
+    const start = vi.fn(async () => ({ runId: "run-1", outcome: "started" as const }));
+    const adapter = new SlackChannelAdapter({
+      inbound: { accept: async () => ({ outcome: "accepted" }) },
+      identities: {
+        resolve: async () => ({ kind: "user", id: PRINCIPAL_ID }),
+      },
+      routing: { load: async () => routing() },
+      runs: { start },
+      now: () => "2026-07-26T10:00:00.000Z",
+    });
+
+    await adapter.receive(BUSINESS_ID, event(), async () => undefined);
+
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.objectContaining({ text: "status?" }) })
+    );
   });
 
   it("reloads routing for every event so an Integration revocation applies immediately", async () => {
@@ -311,9 +393,49 @@ describe("SlackDeliveryAdapter", () => {
         path: "/chat.postMessage",
         body: {
           channel: "C-OPS",
-          text: "*Operations Agent*\nAll systems green.",
+          text: "All systems green.",
           thread_ts: "1784999999.000001",
           client_msg_id: "delivery-1",
+        },
+      },
+      "xoxb-leased"
+    );
+  });
+
+  it("includes blocks in chat.postMessage when supplied", async () => {
+    const ledger = new MemoryDeliveryLedger();
+    const send = vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      body: { ok: true, ts: "1785000002.000001" },
+    }));
+    const adapter = new SlackDeliveryAdapter({
+      ledger,
+      authorization: { authorize: async () => "allowed" },
+      http: { send },
+    });
+    const blocks = [{ type: "section", text: { type: "mrkdwn", text: "hi" } }];
+
+    await adapter.deliver(
+      {
+        ...attempt,
+        idempotencyKey: "delivery-blocks-1",
+        text: "hi",
+        agentDisplayName: "Agent",
+        blocks,
+      },
+      "xoxb-leased"
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      {
+        method: "POST",
+        path: "/chat.postMessage",
+        body: {
+          channel: "C-OPS",
+          text: "hi",
+          blocks,
+          client_msg_id: "delivery-blocks-1",
         },
       },
       "xoxb-leased"
@@ -395,5 +517,132 @@ describe("SlackDeliveryAdapter", () => {
       status: "ambiguous",
       code: "provider_unavailable",
     });
+  });
+
+  it("overwrites the placeholder message via chat.update when updateTs is present", async () => {
+    const ledger = new MemoryDeliveryLedger();
+    const send = vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      body: { ok: true, ts: "1785000001.000001" },
+    }));
+    const adapter = new SlackDeliveryAdapter({
+      ledger,
+      authorization: { authorize: async () => "allowed" },
+      http: { send },
+    });
+
+    await adapter.deliver(
+      {
+        ...attempt,
+        text: "All systems green.",
+        agentDisplayName: "Operations Agent",
+        updateTs: "1784999999.000001",
+      },
+      "xoxb-leased"
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      {
+        method: "POST",
+        path: "/chat.update",
+        body: {
+          channel: "C-OPS",
+          ts: "1784999999.000001",
+          text: "All systems green.",
+        },
+      },
+      "xoxb-leased"
+    );
+  });
+
+  it("includes blocks in chat.update when supplied", async () => {
+    const ledger = new MemoryDeliveryLedger();
+    const send = vi.fn(async () => ({
+      status: 200,
+      headers: {},
+      body: { ok: true, ts: "1785000001.000001" },
+    }));
+    const adapter = new SlackDeliveryAdapter({
+      ledger,
+      authorization: { authorize: async () => "allowed" },
+      http: { send },
+    });
+    const blocks = [{ type: "section", text: { type: "mrkdwn", text: "hi" } }];
+
+    await adapter.deliver(
+      {
+        ...attempt,
+        text: "All systems green.",
+        agentDisplayName: "Operations Agent",
+        updateTs: "1784999999.000001",
+        blocks,
+      },
+      "xoxb-leased"
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      {
+        method: "POST",
+        path: "/chat.update",
+        body: {
+          channel: "C-OPS",
+          ts: "1784999999.000001",
+          text: "All systems green.",
+          blocks,
+        },
+      },
+      "xoxb-leased"
+    );
+  });
+
+  it("update() rotates a still-pending placeholder without touching the ledger", async () => {
+    const ledger = new MemoryDeliveryLedger();
+    const send = vi.fn(async () => ({ status: 200, headers: {}, body: { ok: true } }));
+    const adapter = new SlackDeliveryAdapter({
+      ledger,
+      authorization: { authorize: async () => "allowed" },
+      http: { send },
+    });
+
+    await adapter.update(
+      { destination: "C-OPS", ts: "1784999999.000001", text: "Organizing…" },
+      "xoxb-leased"
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      {
+        method: "POST",
+        path: "/chat.update",
+        body: { channel: "C-OPS", ts: "1784999999.000001", text: "Organizing…" },
+      },
+      "xoxb-leased"
+    );
+    expect(ledger.failures).toHaveLength(0);
+  });
+
+  it("setStatus() posts the Agents & AI Apps status indicator without touching the ledger", async () => {
+    const ledger = new MemoryDeliveryLedger();
+    const send = vi.fn(async () => ({ status: 200, headers: {}, body: { ok: true } }));
+    const adapter = new SlackDeliveryAdapter({
+      ledger,
+      authorization: { authorize: async () => "allowed" },
+      http: { send },
+    });
+
+    await adapter.setStatus(
+      { destination: "C-OPS", threadId: "1784999999.000001", status: "is thinking…" },
+      "xoxb-leased"
+    );
+
+    expect(send).toHaveBeenCalledWith(
+      {
+        method: "POST",
+        path: "/assistant.threads.setStatus",
+        body: { channel_id: "C-OPS", thread_ts: "1784999999.000001", status: "is thinking…" },
+      },
+      "xoxb-leased"
+    );
+    expect(ledger.failures).toHaveLength(0);
   });
 });

@@ -15,66 +15,94 @@ import { Callout } from "fumadocs-ui/components/callout";
   and verify. It is not a supported install path.
 </Callout>
 
-If you want a supported deployment today, run the Compose stack on a VM. It is a single
-image and a single Postgres — Kubernetes buys you very little here, because TulipFarm
-**cannot scale horizontally** (see below).
+If you want a supported deployment today, run the Compose stack on a VM. Kubernetes buys
+you little until you need cluster-native secrets, ingress, or managed PostgreSQL, because
+TulipFarm does **not** scale horizontally.
 
-## The hard constraint: one replica
+## The hard constraint: one replica per workload
 
-`replicas: 1`, `strategy: Recreate`. Not a default — a requirement.
+Run three workloads from the same image, each with `replicas: 1` and `strategy: Recreate`.
+Do not use `RollingUpdate`: it briefly runs two copies and can race the soul worktree or
+maintenance consumers.
 
-- The **soul** is a git working tree on a `ReadWriteOnce` volume. Two pods writing commits
-  to the same tree corrupt it; two pods with separate trees diverge silently.
-- The **job workers** (pg-boss) run inside the API process. A second replica double-runs
-  every scheduled routine.
+| Workload | Command | Why it is single-replica |
+| --- | --- | --- |
+| `app` | default `node server.cjs` | Owns the API, built web UI, soul git worktree, and all database migrations. |
+| `worker` | `node worker.cjs` | Executes every turn, wait, outbox loop, cron, and maintenance consumer. Set `WORKER_MAINTENANCE=true` on exactly one copy. |
+| `integration-worker` | `node integration-worker.cjs` | Owns Slack and GitHub ingress, sync, delivery, retries, and reconciliation. |
 
-`RollingUpdate` is equally wrong: it briefly runs two pods, and the new one cannot mount an
-RWO volume the old one still holds. Use `Recreate` and accept the restart gap.
+## Workload contract
 
-## What the container needs
+| Workload | Container port | Probes | Volumes |
+| --- | --- | --- | --- |
+| `app` | `8080` | `/livez`, `/readyz` | `/opt/tulipfarm/soul` read-write; `/data` read-write. |
+| `worker` | `4020` | `/livez`, `/readyz` | `/data` read-only. |
+| `integration-worker` | `4030` | `/livez`, `/readyz` | `/data` read-only. |
 
-| | |
+`/readyz` on `app` checks the datastore. `/readyz` on both workers checks the datastore,
+the required schema floor, and whether required consumers are attached. The workers never
+migrate; they must start only after `app` has applied migrations and become ready.
+
+Give `app` a generous startup probe on `/readyz`. Migrations run before it listens, so a
+fresh database can take minutes on first boot. Without a startup probe, liveness can kill
+`app` mid-migration and loop forever.
+
+## Image and storage
+
+| Requirement | Detail |
 | --- | --- |
 | **Image** | `ghcr.io/tulipfarm/tulipfarm:<tag>` — multi-arch (amd64, arm64). Pin a tag; do not track `latest` in a cluster. |
-| **Container port** | `8080` |
-| **Liveness probe** | `GET /livez` — process check only, never touches the database. |
-| **Readiness probe** | `GET /readyz` — returns `503` while Postgres is unreachable. |
-| **Startup probe** | `GET /readyz`, with a **generous** `failureThreshold`. Migrations run before the server listens, so a fresh database can take minutes on the first boot. Without a startup probe, the liveness probe will kill the pod mid-migration and loop forever. |
-| **Volume** `/opt/tulipfarm/soul` | RWO PVC. The soul git tree. |
-| **Volume** `/data` | RWO PVC. Generated bootstrap secrets — see below. |
-| **Filesystem group** | The image runs as UID `1000` (`node`). Set `podSecurityContext.fsGroup: 1000` or the mounted PVCs are not writable. |
+| **Soul volume** | Mounted only by `app` at `/opt/tulipfarm/soul`. It is a git working tree, not shared application data. |
+| **Data volume** | Mounted read-write by `app` and read-only by both workers at `/data`. It holds generated bootstrap secrets and service credentials. |
+| **Filesystem group** | The image runs as UID `1000` (`node`). Set `podSecurityContext.fsGroup: 1000` or mounted PVCs may not be writable. |
+
+If your storage class cannot mount the same `/data` volume into all three workloads, supply
+`ENCRYPTION_KEY`, `WORKER_API_CREDENTIAL`, and `INTEGRATION_WORKER_API_CREDENTIAL` from
+Kubernetes `Secret` objects instead. The Compose path relies on `app` minting those
+credentials into `/data` on first boot and the workers reading them back.
 
 ## Required environment
 
-| Variable | Notes |
-| --- | --- |
-| `DATABASE_URL` | PostgreSQL 17 that permits `CREATE EXTENSION vector` and `citext`. Use a managed instance or an operator — see [Managed database](/docs/deploy/managed-database). |
-| `PUBLIC_URL` | The `https://` origin your Ingress serves. Drives CORS and the cookie `Secure` flag; wrong value means login silently fails. |
-| `SOUL_PATH` | `/opt/tulipfarm/soul` |
-| `TF_DATA_DIR` | `/data` |
-| `ENCRYPTION_KEY` | **Supply this from a `Secret`.** Do not let the app generate it in a cluster. |
-| `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET` | Same — from a `Secret`. |
+| Workload | Variable | Notes |
+| --- | --- | --- |
+| All | `DATABASE_URL` | PostgreSQL 17 that permits `CREATE EXTENSION vector` and `citext`. See [Managed database](/docs/deploy/managed-database). |
+| All | `NODE_ENV` | `production`. |
+| `app` | `PORT` | `8080`. |
+| `app` | `PUBLIC_URL` | The `https://` origin your Ingress serves. Wrong value means login silently fails. |
+| `app` | `SOUL_PATH` | `/opt/tulipfarm/soul`. |
+| `app` | `TF_DATA_DIR` | `/data`. |
+| `app`, `worker` | `ENCRYPTION_KEY` | Prefer a `Secret`. If unset, `app` generates it in `/data/secrets.env` and `worker` reads it from there. |
+| `app` | `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET` | Prefer `Secret` values. |
+| `worker` | `WORKER_PORT` | `4020`. |
+| `worker` | `WORKER_MAINTENANCE` | `true` on the one worker that owns cron and maintenance consumers. |
+| `worker` | `INTERNAL_API_URL` | URL for the `app` Service, for example `http://app:8080`. |
+| `worker` | `WORKER_API_CREDENTIAL` | Service credential. If unset, read from `/data/worker.env` after `app` mints it. |
+| `worker` | `TF_DATA_DIR` | `/data`. |
+| `integration-worker` | `INTEGRATION_WORKER_PORT` | `4030`. |
+| `integration-worker` | `INTERNAL_API_URL` | URL for the `app` Service, for example `http://app:8080`. |
+| `integration-worker` | `INTEGRATION_WORKER_API_CREDENTIAL` | Service credential. If unset, read from `/data/integration-worker.env` after `app` mints it. |
+| `integration-worker` | `TF_DATA_DIR` | `/data`. |
 
 Every variable is listed in [Environment variables](/docs/reference/environment-variables).
 
 <Callout type="warn">
   If `ENCRYPTION_KEY` is unset, the app generates one and writes it to `/data/secrets.env`.
-  In a cluster that is a trap: a PVC lost to a node failure, a namespace rebuild, or a
-  `StatefulSet` recreate takes the key with it, and the database — which holds only
-  ciphertext — becomes undecryptable. The app detects this and **refuses to boot** rather
-  than orphaning your secrets, which is the correct behaviour but not a recovery. Put the
-  key in a `Secret` from day one.
+  In a cluster that is a trap unless `/data` is backed up and reliably shared: losing that
+  volume makes the database — which holds only ciphertext — undecryptable. The app detects
+  this and **refuses to boot** rather than orphaning your secrets. Put the key in a
+  `Secret` from day one.
 </Callout>
 
 ## First boot
 
 There is no browser at first boot in most cluster workflows. Use
 [headless seeding](/docs/deploy/headless): set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and
-`LLM_API_KEY` together, and the instance seeds itself and skips the wizard.
+`LLM_API_KEY` together on `app`, and the instance seeds itself and skips the wizard.
 
 ## Ingress
 
-Terminate TLS at the Ingress.
+Terminate TLS at the Ingress and route only to the `app` Service on port `8080`. Do not
+publish `worker` or `integration-worker`; their HTTP servers are probe-only.
 
 **Disable response buffering.** Chat streams over Server-Sent Events; a buffering ingress
 holds every token until the turn completes and the UI looks frozen. On ingress-nginx:
@@ -86,14 +114,8 @@ nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
 
 ## Backups
 
-Back up the Postgres database **and** both PVCs. `/data` holds the encryption key when you
-have not supplied one; `/opt/tulipfarm/soul` holds your entire configuration unless it is
-mirrored to a git remote (`SOUL_GIT_REMOTE_URL`), which is the better arrangement in a
-cluster. See [Updating and rollback](/docs/deploy/updating).
-
-## When a chart lands
-
-A Helm chart is planned — `replicas: 1` hard-coded, `Recreate` strategy, optional bundled
-Postgres `StatefulSet`, optional `Secret` for the three keys, and `helm lint` plus a `kind`
-install running in CI. Until that ships and is exercised on every build, treat the section
-above as a specification for manifests you maintain, not as a supported product surface.
+Back up PostgreSQL **and** the persistent storage behind `/data` and
+`/opt/tulipfarm/soul`. `/data` holds the encryption key when you have not supplied one and
+also holds auto-minted worker credentials; the soul holds your entire configuration unless
+it is mirrored to a git remote (`SOUL_GIT_REMOTE_URL`). See
+[Updating and rollback](/docs/deploy/updating).

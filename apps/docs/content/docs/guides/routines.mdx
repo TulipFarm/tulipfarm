@@ -1,97 +1,61 @@
 ---
 title: Build and run a routine
-description: Describe an automation to the assistant, run it, watch it, and approve it when it pauses.
+description: Ask routine-forge to create an automation, then run and inspect it.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+This guide builds a [Routine](/docs/concepts/routines) by chatting, then runs it and
+watches the resulting [Run](/docs/concepts/runs). Routines are made of States and can
+pause for Approvals.
 
-This guide builds a [routine](/docs/concepts/routines) by describing it to the
-assistant, then runs it and follows the run. It assumes a running instance with a model
-configured. For what routines are and how they execute, see the
-[concept page](/docs/concepts/routines).
+## Outcome
+
+At the end, the Routine is live, visible in the Routines list, editable in the canvas
+authoring studio, and runnable from chat or the UI.
 
 ## Ask the assistant
 
-Open **Chat** and describe the automation — what starts it, what it does, and where a
-human should stay in the loop:
+Open **Chat** and describe the automation:
 
 ```prompt
-Create a routine that files each expense report as a record, and asks for my
-approval first whenever the amount is over 500. I want to trigger it manually
-and also every Monday at 9am.
+Create a Routine that files each expense report as a Record, asks for Approval
+when the amount is over 500, and sends a summary when the report is accepted. I
+want to trigger it manually.
 ```
 
-The assistant designs the routine — triggers, steps, the approval gate — and writes it
-to the soul with its routine forge. There is no review step: the routine is committed,
-validated, and live immediately. It appears in the **Routines** section, and its Monday
-schedule is registered the moment it lands.
+The assistant loads `routine-forge`, asks for missing inputs, writes the Routine into the
+Soul, commits it, and reconciles live.
 
-If the definition uses something the platform defers in V1 (parallel branches,
-sub-routines), the forge rejects it with a "deferred in V1" error instead of writing a
-routine that half-works.
+## Review it on the canvas
 
-## Run it now
+<Steps>
+  <Step>
+    Open **Routines** and select the new Routine.
+  </Step>
+  <Step>
+    Choose **Edit** to open the canvas authoring studio at `/routines/:slug/edit`.
+  </Step>
+  <Step>
+    Review the States, edges, inputs, and any Approval waits. Make small edits in the
+    studio when you want a visual pass instead of another chat turn.
+  </Step>
+</Steps>
 
-Two ways to start a run by hand:
+## Start a run
 
-- In chat:
+Use chat:
 
-  ```prompt
-  Run the expense report routine for a 220 dollar team lunch.
-  ```
-
-- In **Routines**, open the routine and use the **manual trigger** form. The form's
-  fields come from the routine's own input schema — required inputs are marked, and a
-  payload that doesn't match is rejected before a run starts.
-
-Either way you get a run and land on its page.
-
-## Watch the run
-
-The run page streams progress live: each state as it is entered, each action as it
-completes, retries as they are scheduled. The status badge tells you where the run is —
-`pending` (queued, not yet started), `running`, `sleeping` (waiting out a timer, costing
-nothing), `waiting approval`, `succeeded`, `failed`, or `cancelled`.
-
-Closing the page loses nothing. The run's history is permanent — reopen it tomorrow and
-the full event journal is there, and a live run picks the stream back up where you left
-it.
-
-## Approve a paused run
-
-When a run hits a human-approval state it stops, shows `waiting approval`, and files a
-request in **Approvals** alongside gated agent tool calls. The request names the routine
-and the paused state, links back to the run, and carries the run's data so you can judge
-it in place.
-
-**Approve** and the run continues from exactly where it paused. **Deny** and the denial
-flows through the routine's own error handling — a recovery step if the routine defines
-one, a failed run if not.
-
-<Callout type="info">
-An undecided routine approval times out after seven days and counts as a denial. Runs
-never wait forever.
-</Callout>
-
-## Cancel a run
-
-On the run page, **cancel run** stops a pending, sleeping, or waiting run immediately. A
-run that is mid-step finishes that step, then stops at the boundary. Finished runs
-cannot be cancelled — there is nothing left to stop.
-
-## Trigger it from outside
-
-A routine with a webhook trigger gets a URL an external system can call. The caller
-authenticates with the routine's shared secret in a header — this is the one step in
-this guide that happens outside TulipFarm, in whatever system is doing the calling:
-
-```bash
-curl -X POST https://your-instance.example/api/v1/hooks/routines/expense-report \
-  -H "Content-Type: application/json" \
-  -H "x-tulipfarm-webhook-secret: <the routine's secret>" \
-  -d '{"amount": 42, "memo": "webhook test"}'
+```prompt
+Run the expense report Routine for a 220 dollar team lunch.
 ```
 
-The response is the new run's id. The payload passes through the same input validation
-as the manual form, and a missing or wrong secret is rejected — a webhook routine whose
-secret is not configured refuses every call rather than running open.
+Or open the Routine and use its manual trigger form. The form is generated from the
+Routine input schema and rejects invalid payloads before a Run starts.
+
+## Watch the run canvas
+
+Open the Run from the Routine page. The run canvas shows each State as it enters,
+completes, retries, waits, or fails. If a State opens an Approval, the Run pauses until a
+human decides in the Inbox.
+
+Closing the browser does not lose progress. Run events are durable and the inspector can
+reattach later.

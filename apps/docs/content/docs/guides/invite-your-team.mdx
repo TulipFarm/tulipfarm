@@ -1,0 +1,54 @@
+---
+title: Invite your team
+description: Mint invite links, change user status, and force password reset from Admin Users.
+---
+
+This guide invites a teammate to TulipFarm. Invites use single-use invite links;
+TulipFarm does not create temporary passwords.
+
+## Outcome
+
+At the end, the teammate has accepted an invite at `/accept-invite`, set their own
+password, and can sign in.
+
+## Create an invite
+
+<Steps>
+  <Step>
+    Open **Admin → Users** at `/admin/users`.
+  </Step>
+  <Step>
+    Enter the teammate's email and create the user.
+  </Step>
+  <Step>
+    Copy the invite link shown once by the page.
+  </Step>
+  <Step>
+    Send the link to the teammate out of band.
+  </Step>
+</Steps>
+
+The API route behind this is `POST /api/v1/users`. It creates a member account with no
+password and returns an invite link for the admin to share.
+
+## Accept the invite
+
+The invitee opens `/accept-invite`. TulipFarm previews the invite first, then asks the
+invitee to set their own password. Accepting the invite consumes the link, activates the
+account, and signs them in.
+
+## Reissue or force password reset
+
+From **Admin → Users**, choose the row action:
+
+- **New invite link** for an invited user who lost the original link.
+- **Reset password link** for an active user who needs password recovery.
+
+Reissuing revokes any outstanding invite link. An active user's current password keeps
+working until the new reset link is redeemed.
+
+## Change user status
+
+Use the status action on the user row to disable or re-enable an account. Admins cannot
+disable their own account. Re-enabling a user who never accepted an invite returns them to
+`invited`, not `active`, because they still have no password.

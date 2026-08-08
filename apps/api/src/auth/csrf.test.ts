@@ -11,11 +11,13 @@ function makeReq(
     sessionCookie?: string;
     csrfCookie?: string;
     csrfHeader?: string;
+    url?: string;
   } = {}
 ): FastifyRequest {
-  const { method = "POST", authorization, sessionCookie, csrfCookie, csrfHeader } = opts;
+  const { method = "POST", authorization, sessionCookie, csrfCookie, csrfHeader, url } = opts;
   return {
     method,
+    url: url ?? "/api/v1/some-protected-route",
     headers: {
       ...(authorization !== undefined && { authorization }),
       ...(csrfHeader !== undefined && { [CSRF_HEADER]: csrfHeader }),
@@ -121,6 +123,51 @@ describe("csrfHook", () => {
       await csrfHook(req, reply);
       expect(reply.code).not.toHaveBeenCalled();
     }
+  });
+});
+
+/**
+ * The exemption has to hold *with* a session cookie present, which is the whole point: an invite is
+ * redeemed in whatever browser opened the link, often one still holding a live session. Skipping
+ * only on "no session cookie" would 403 exactly the person the link was issued to.
+ */
+describe("pre-session exempt paths", () => {
+  const exempt = [
+    "/api/v1/auth/login",
+    "/api/v1/auth/invites/preview",
+    "/api/v1/auth/invites/accept",
+  ];
+
+  for (const url of exempt) {
+    it(`passes ${url} with no CSRF token even when a live session cookie is present`, async () => {
+      const req = makeReq({ url, sessionCookie: "sid" });
+      const reply = makeReply();
+      await csrfHook(req, reply);
+      expect(reply.code).not.toHaveBeenCalled();
+    });
+
+    it(`passes ${url} through the session-bound hook without reading the session`, async () => {
+      const store = { read: vi.fn() } as unknown as SessionStore;
+      const req = makeReq({ url, sessionCookie: "sid", csrfCookie: "a", csrfHeader: "b" });
+      const reply = makeReply();
+      await makeCsrfHook(store)(req, reply);
+      expect(reply.code).not.toHaveBeenCalled();
+      expect(store.read).not.toHaveBeenCalled();
+    });
+  }
+
+  it("still rejects a neighbouring auth route, so the exemption is path-exact", async () => {
+    const req = makeReq({ url: "/api/v1/auth/change-password", sessionCookie: "sid" });
+    const reply = makeReply();
+    await csrfHook(req, reply);
+    expect(reply.code).toHaveBeenCalledWith(403);
+  });
+
+  it("matches on the route pattern rather than a crafted request url", async () => {
+    const req = makeReq({ url: "/api/v1/auth/invites/preview?x=1", sessionCookie: "sid" });
+    const reply = makeReply();
+    await csrfHook(req, reply);
+    expect(reply.code).toHaveBeenCalledWith(403);
   });
 });
 

@@ -1,65 +1,50 @@
 ---
 title: LLM tiers
-description: How TulipFarm chooses a model and falls back across providers.
+description: The four providers, tier selection, model specs, and ordered fallback behavior.
 ---
 
-TulipFarm talks to language models through a single adapter (the Vercel AI SDK). It
-ships four provider integrations — **Anthropic**, **OpenAI**, **Azure Foundry**, and any
-**OpenAI-compatible** endpoint (which covers gateways like OpenRouter, Together, and
-Groq through their compatible APIs). You do not wire a model into each agent. Instead you
-define **tiers**, and the runtime picks a tier per turn.
+TulipFarm routes model calls through tiered provider chains. Agents select a tier or use `auto`, and
+the runtime resolves that into an ordered list of provider entries.
 
-## Three tiers
+## Providers
 
-Every instance configures three tiers, from cheapest and fastest to most capable:
+The shipped provider ids are:
 
-| Tier | Recommended model |
-|---|---|
-| `quick` | `claude-haiku-4-5` |
-| `standard` | `claude-sonnet-4-6` |
-| `complex` | `claude-opus-4-8` |
+| Provider id | Label | Notes |
+| --- | --- | --- |
+| `anthropic` | Anthropic | Accepts bare or provider-prefixed model ids. |
+| `openai` | OpenAI | Accepts bare or provider-prefixed model ids. |
+| `azure` | Azure Foundry | Accepts `azure_ai/`, `azure/`, or bare model ids. |
+| `openai-compatible` | OpenAI-compatible | Uses bare model ids with a custom `base_url`; API key may be optional. |
 
-These are recommended models, not enforced defaults — each tier needs at least one
-provider and model assigned before agents can run. The tier configuration lives in
-`soul/llm.config.yaml` and is edited through **Settings → LLM** in the web UI. Each tier
-is an *ordered list* of providers — and the order is the fallback chain.
+Provider credentials are stored as secrets or resolved from environment references. The canonical
+secret keys are `anthropic-api-key`, `openai-api-key`, `azure-openai-api-key`,
+`azure-openai-resource-name`, `azure-foundry-endpoint`, `openai-compatible-api-key`, and
+`openai-compatible-base-url`.
 
-## Fallback chains
+## Tiers and fallback
 
-A tier can list more than one provider. The runtime tries the first; if that provider
-fails, it walks down the list to the next. This is why a tier is an ordered list rather
-than a single model: you can put a primary provider first and a backup beneath it, and a
-provider outage degrades to the backup instead of failing the turn.
+`llm.config.yaml` defines tiers as ordered provider lists. `FallbackModel` tries providers in order.
+A hard failure stops the chain immediately because retrying another provider cannot fix it: request
+cancellation, missing or invalid credentials, and non-retryable API errors such as 400, 401, 403, or
+404. A transient error falls through to the next provider: 429, 5xx, timeout, network, or unknown
+retryable failures.
 
-## Automatic tier selection
+If every provider in a tier fails transiently, the final error is returned after logging that all
+providers were exhausted.
 
-A turn does not have to name a tier. With `model: auto`, TulipFarm picks one from
-context. The starting point is the agent's [autonomy](/docs/concepts/agents):
+## Model specs
 
-| Autonomy | Starting tier |
-|---|---|
-| `full` | `quick` |
-| `supervised` | `standard` |
-| `approval-required` | `complex` |
-| `manual` | `standard` |
+When a model is added or refreshed, TulipFarm resolves its pricing and capability metadata from the
+LiteLLM catalog on a best-effort basis and pins the result into the Soul. Only priced, chat-capable
+models count as valid tier models. The model picker can also list live models for an
+OpenAI-compatible endpoint when a `base_url` is configured.
 
-An agent with no autonomy set starts at `standard`. Two adjustments then apply on top:
+## Auto selection
 
-- Tasks flagged as decisions escalate to `complex`.
-- A `quick` turn is bumped to `standard` when tools are in scope.
+With `model: auto`, tier selection is deterministic. Agent autonomy supplies the starting tier,
+decision-like tasks may escalate, and turns with tools in scope avoid the cheapest path when needed.
+A single chat request can override the model for that turn only; the override is not persisted.
 
-A single request can also override the model for that turn without changing the stored
-configuration.
-
-## Credentials
-
-A provider entry references its API key with an `api_key_ref` field. Two forms are
-accepted:
-
-- `env://VAR_NAME` — reads directly from the environment variable `VAR_NAME`.
-- A bare name like `anthropic-api-key` — resolved from the [secrets store](/docs/concepts/secrets)
-  at runtime and cached after first use.
-
-Keys never live in the LLM config file itself. A provider must have its credentials
-configured in **Settings → Secrets** before it can be selected in a tier — see
-[Configure LLM providers](/docs/guides/configure-llm-providers).
+With no `llm.config.yaml`, LLM features are disabled until an admin configures providers. Use
+[Configure LLM providers](/docs/guides/configure-llm-providers) for the UI flow.

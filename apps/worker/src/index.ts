@@ -66,6 +66,7 @@ export {
 export {
   MissingStateError,
   RunStoreStateTransitions,
+  reclaimPendingState,
   reclaimWaitingState,
   StateTransitionConflictError,
 } from "./turn/kernel-ports";

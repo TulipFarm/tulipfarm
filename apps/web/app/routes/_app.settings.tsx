@@ -7,6 +7,7 @@ import {
   Info,
   KeyRound,
   type LucideIcon,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -29,6 +30,12 @@ const sections: Section[] = [
     label: "Secrets",
     icon: KeyRound,
     description: "Provider credentials and custom secrets. Values are never shown.",
+  },
+  {
+    to: "/settings/security",
+    label: "Security",
+    icon: ShieldCheck,
+    description: "Change your password. The current one is required to set a new one.",
   },
   {
     to: "/settings/llm",

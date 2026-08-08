@@ -20,7 +20,7 @@ describe("scanImports (real repo)", () => {
   it("captures the known legacy edges", () => {
     const graph = scanImports(repoRoot);
     expect(graph.soul).toContain("constants");
-    expect(graph.api).toEqual(expect.arrayContaining(["llm", "routine-engine", "soul"]));
+    expect(graph.api).toEqual(expect.arrayContaining(["llm", "soul"]));
   });
 
   it("leaves the current tree free of architecture violations", () => {

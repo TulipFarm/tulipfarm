@@ -75,7 +75,8 @@ export function corsPassthrough(reply: FastifyReply): Record<string, string> {
 export function allowedToolNamesFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined,
-  presentationContext?: PresentationContext
+  presentationContext?: PresentationContext,
+  excluded?: ReadonlySet<string>
 ): ReadonlySet<string> | undefined {
   if (!(toolRegistry && toolRegistry.getAll().length > 0)) return undefined;
   const agentAllowed = pa?.toolAllowlist
@@ -83,6 +84,7 @@ export function allowedToolNamesFor(
     : new Set(toolRegistry.getAll().map((toolDefinition) => toolDefinition.name));
   return new Set(
     [...agentAllowed].filter((name) => {
+      if (excluded?.has(name)) return false;
       if (!presentationContext && PRESENTATION_TOOL_NAMES.has(name)) return false;
       if (
         WEB_ONLY_TOOL_NAMES.has(name) &&
@@ -124,10 +126,11 @@ export function canGroundKnowledge(
 export function availableToolsFor(
   toolRegistry: ToolRegistry | undefined,
   pa: PlatformAgent | undefined,
-  presentationContext?: PresentationContext
+  presentationContext?: PresentationContext,
+  excluded?: ReadonlySet<string>
 ): { name: string; description: string }[] {
   if (!toolRegistry) return [];
-  const allowed = allowedToolNamesFor(toolRegistry, pa, presentationContext);
+  const allowed = allowedToolNamesFor(toolRegistry, pa, presentationContext, excluded);
   return toolRegistry
     .getAll()
     .filter((t) => !allowed || allowed.has(t.name))

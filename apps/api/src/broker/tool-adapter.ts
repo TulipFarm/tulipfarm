@@ -100,7 +100,9 @@ export class ToolRegistry {
             ) {
               return err(
                 "surface_invalid",
-                "Surface correction limit reached. Do not call this presentation Tool again during this Turn."
+                "Surface correction limit reached. Do not call this presentation Tool again during " +
+                  "this Turn. Answer now in plain Markdown text summarizing the data you already " +
+                  "have — never tell the user a structured view was shown when it was not."
               );
             }
             const schema = t.inputSchemaFor?.(ctx) ?? t.inputSchema;
@@ -119,7 +121,9 @@ export class ToolRegistry {
               const correctionHint = isPresentationTool
                 ? attemptsRemaining > 0
                   ? ` ${attemptsRemaining} corrective attempt${attemptsRemaining === 1 ? "" : "s"} remaining.`
-                  : " Correction limit reached; do not call this Tool again during this Turn."
+                  : " Correction limit reached; do not call this Tool again during this Turn. " +
+                    "Answer now in plain Markdown text summarizing the data you already have — " +
+                    "never tell the user a structured view was shown when it was not."
                 : "";
               return err(
                 "validation_error",

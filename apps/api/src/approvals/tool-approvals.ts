@@ -172,6 +172,23 @@ export class ToolApprovalService {
   }
 
   /**
+   * The pending Tool approval a Run is currently parked on, if any — what a Channel host reads to
+   * decide whether to post an Approve/Deny prompt.
+   */
+  async pendingForRun(
+    runId: string
+  ): Promise<{ approvalId: string; toolName: string; args: unknown } | null> {
+    const row = await this.options.repo.findPendingByRun(runId);
+    if (row === null) return null;
+    const payload = payloadOf(row);
+    return {
+      approvalId: row.id,
+      toolName: payload.toolName ?? "unknown tool",
+      args: payload.args,
+    };
+  }
+
+  /**
    * Records a human decision and resumes the Run.
    *
    * The row is settled first and the wait signalled second, and the order matters: the settled row

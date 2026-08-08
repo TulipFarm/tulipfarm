@@ -16,6 +16,7 @@ import {
   type SurfaceComponentToolContext,
 } from "../soul/surface-components/tools.js";
 import { SURFACE_TOOLS } from "../surfaces/tools";
+import type { ToolDef } from "./types";
 
 /**
  * Builds the startup ToolRegistry by adapting module-specific tool definitions to the
@@ -32,6 +33,13 @@ export function buildToolRegistry(services: {
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
+  slackKnowledgeSearch?: ToolDef;
+  /** GitHub chat tool family — pre-built ToolDefs (see `tools/github/tools.ts`'s `buildGitHubTools`).
+   * Registered unconditionally when GitHub composition is available; per-turn visibility is gated
+   * separately on live install status (`chat/turn-helpers.ts`), not on registration. */
+  github?: readonly ToolDef[];
+  /** Slack chat tool family — pre-built ToolDefs (see `tools/slack/tools.ts`'s `buildSlackTools`). */
+  slack?: readonly ToolDef[];
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
@@ -181,6 +189,22 @@ export function buildToolRegistry(services: {
   // (client context) and return client-action descriptors. No services to close over.
   for (const t of FRONTEND_TOOLS) {
     registry.register(t);
+  }
+
+  if (services.slackKnowledgeSearch) {
+    registry.register(services.slackKnowledgeSearch);
+  }
+
+  if (services.github) {
+    for (const t of services.github) {
+      registry.register(t);
+    }
+  }
+
+  if (services.slack) {
+    for (const t of services.slack) {
+      registry.register(t);
+    }
   }
 
   return registry;

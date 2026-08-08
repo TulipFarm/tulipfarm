@@ -34,6 +34,10 @@ type ConversationsContextValue = {
   activeChatId: string | null;
   /** Shallow-set the active chat after a `replaceState` URL update (router location is unchanged). */
   setActiveChatId: (id: string) => void;
+  /** Title of the on-screen conversation — the top bar names the chat, so it needs this. */
+  activeChatTitle: string | null;
+  /** Publish a title the list can't supply: the `/chat/:id` loader knows chats older than the list. */
+  setActiveChatTitle: (id: string, title: string | null) => void;
   /** Remount key for the index chat surface — bumped by `startNewChat` to force a fresh transcript. */
   newChatNonce: number;
   /** Start a fresh chat from anywhere: clear active state, force a remount, and route to "/". */
@@ -48,6 +52,9 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   // Shallow override of the active chat id, set after a replaceState (router location stays "/").
   const [shallowId, setShallowId] = useState<string | null>(null);
+  // Title published by the open chat's loader, kept with its id so it self-invalidates on navigation
+  // (no reset effect to race with the route's own publish).
+  const [loadedTitle, setLoadedTitle] = useState<{ id: string; title: string | null } | null>(null);
   // Guards against overlapping fetches; tracks mount so a late resolve skips writes after unmount.
   const inFlight = useRef(false);
   // A refresh requested while a fetch is in flight is coalesced into one trailing re-fetch — so the
@@ -112,6 +119,10 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   }, [location]);
 
   const setActiveChatId = useCallback((id: string) => setShallowId(id), []);
+  const setActiveChatTitle = useCallback(
+    (id: string, title: string | null) => setLoadedTitle({ id, title }),
+    []
+  );
   const startNewChat = useCallback(() => {
     setShallowId(null);
     setNewChatNonce((n) => n + 1);
@@ -120,6 +131,12 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
   // A real /chat/:id route wins; otherwise fall back to the shallow override from a replaceState.
   const routeMatch = pathname.match(/^\/chat\/([^/]+)$/);
   const activeChatId = routeMatch ? decodeURIComponent(routeMatch[1]) : shallowId;
+  // The list is the fresher source (it picks up renames and async-generated titles); the loader's
+  // title only fills the gap before the list resolves, and for chats older than the list's window.
+  const activeChatTitle = activeChatId
+    ? (conversations.find((c) => c.id === activeChatId)?.title ??
+      (loadedTitle?.id === activeChatId ? loadedTitle.title : null))
+    : null;
 
   const value: ConversationsContextValue = {
     conversations,
@@ -128,6 +145,8 @@ export function ConversationsProvider({ children }: { children: ReactNode }) {
     refresh,
     activeChatId,
     setActiveChatId,
+    activeChatTitle,
+    setActiveChatTitle,
     newChatNonce,
     startNewChat,
   };
@@ -142,6 +161,8 @@ const INERT: ConversationsContextValue = {
   refresh: async () => {},
   activeChatId: null,
   setActiveChatId: () => {},
+  activeChatTitle: null,
+  setActiveChatTitle: () => {},
   newChatNonce: 0,
   startNewChat: () => {},
 };

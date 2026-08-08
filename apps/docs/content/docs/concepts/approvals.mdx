@@ -1,0 +1,40 @@
+---
+title: Approvals
+description: Why work pauses for a human, where decisions land, and how Runs resume afterward.
+---
+
+TulipFarm pauses work when a human decision is part of the contract. The paused work is still a
+[Run](/docs/concepts/runs): it is durably waiting, not blocked inside a web request or Worker
+thread.
+
+## What can wait for a person
+
+The Inbox collects four related waits:
+
+| Wait | Why it exists |
+| --- | --- |
+| Approval | A tool call or Routine State needs approve or deny before continuing. |
+| Human task | A person needs to do work outside the model loop. |
+| Form wait | A Run needs structured input from a person. |
+| Access request | A principal needs authority before the Run can proceed. |
+
+Approvals are the most visible form, but the Inbox is the unified place for all human attention.
+
+## Decisions resume Runs
+
+A decision settles the persisted wait and wakes the same Run that opened it. Tool-call Approvals
+resume the parked chat Run. Routine-State Approvals wake the suspended routine Run with the recorded
+decision. The Run then continues, fails, or routes through authored error handling depending on the
+result.
+
+Decisions are server-authorized. The request cannot replace the original intent, target,
+destination, or Guardrail revision, and the server resolves who is allowed to decide.
+
+## Where they appear
+
+The web app shows pending items in **Inbox** and the Run inspector shows why a Run is waiting. If
+Slack is connected, Approval prompts can also be answered from Slack. Slack clicks are resolved by
+the API into the same server-authorized decision path; the Worker never trusts the channel payload
+as the deciding identity.
+
+Use [Approve agent work](/docs/guides/approve-agent-work) for the task flow.

@@ -1,0 +1,71 @@
+name: slack
+version: "1.0.0"
+description: Talk to TulipFarm agents from Slack via Socket Mode — DM or @mention in a channel.
+maintainer: TulipFarm
+egress:
+  type: none
+install_manifest:
+  display_information:
+    name: TulipFarm
+  features:
+    bot_user:
+      display_name: TulipFarm
+      always_online: true
+    assistant_view: {}
+  oauth_config:
+    scopes:
+      bot:
+        - chat:write
+        - app_mentions:read
+        - channels:read
+        - channels:history
+        - groups:read
+        - groups:history
+        - im:read
+        - im:history
+        - mpim:read
+        - mpim:history
+        - users:read
+        - users:read.email
+        - assistant:write
+  settings:
+    event_subscriptions:
+      bot_events:
+        - message.channels
+        - message.im
+        - app_mention
+    interactivity:
+      is_enabled: false
+    org_deploy_enabled: false
+    socket_mode_enabled: true
+    token_rotation_enabled: false
+required_env:
+  - name: SLACK_APP_TOKEN
+    label: App-Level Token
+    description: App-level token with the connections:write scope (starts with xapp-).
+    secret: true
+    setup_url: https://api.slack.com/apps
+    steps:
+      - Open your new app and go to Settings → Basic Information, then scroll down to App-Level
+        Tokens. Click Generate Token and Scopes, name it "TulipFarm", add the connections:write
+        scope, and click Generate. Copy the token (it starts with xapp-) and paste it below.
+  - name: SLACK_BOT_TOKEN
+    label: Bot Token
+    description: Bot User OAuth Token (starts with xoxb-).
+    secret: true
+    setup_url: https://api.slack.com/apps
+    steps:
+      - Go to Settings → Install App → Install to Workspace and approve the requested scopes.
+        Once installed, copy the Bot User OAuth Token (it starts with xoxb-) from OAuth &
+        Permissions and paste it below.
+  - name: SLACK_TEAM_ID
+    label: Team ID
+    description: Slack workspace ID (starts with T).
+    secret: false
+    setup_url: https://app.slack.com
+    steps:
+      - This one isn't in the app settings — it belongs to your workspace, not the app. Open
+        your workspace at app.slack.com in a browser; the URL looks like
+        app.slack.com/client/T0XXXXXXX/..., and that "T"-prefixed segment is your Team ID.
+        Copy it and paste it below.
+setup_guide_path: setup-guide.md

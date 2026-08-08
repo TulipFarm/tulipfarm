@@ -124,8 +124,9 @@ knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`k
   Run's persisted `run_events`, frame for frame the same stream `GET /api/v1/runs/:id/events`
   serves — so a dropped connection reattaches by cursor (`?after=`, or `Last-Event-ID`) and loses
   nothing, because the Worker is executing the Run regardless. Authorization is re-checked every
-  poll, and the stream ends on the Run's own terminal status. `chat/stream-hub.ts` and
-  `chat/stream-resume.ts` survive only for Routine streams and go with them in PR 4.
+  poll, and the stream ends on the Run's own terminal status. This is now the *only* streaming
+  path — the in-process `chat/stream-hub.ts`/`stream-resume.ts` buffers went with the Routine
+  engine they were kept for.
 - Static business/identity facts (e.g. `soul.yaml`'s `businessName`/`businessDescription`) belong
   in the **system prompt** (`assembleSystemPrompt`), not `memory/` working_memory — don't route
   them through working_memory just because onboarding captured them at runtime.

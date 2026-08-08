@@ -8,16 +8,7 @@ import type { ToolApprovalService } from "./tool-approvals";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/** Routine-approval extension: run resumption for `routine_state` rows (v0.11). */
-export interface RoutineApprovalDeps {
-  enqueueWake: (job: {
-    runId: string;
-    reason: "approval";
-    token: string;
-    decision: "approved" | "denied";
-  }) => Promise<void>;
-}
-
+/** Deps for the one discriminated approval surface: `tool_call` and `routine_state` rows. */
 export interface ApprovalRoutesDeps {
   /** The authority for both kinds. Pending state is read from here, never from this process. */
   readonly approvals: ApprovalsRepo;
@@ -25,7 +16,6 @@ export interface ApprovalRoutesDeps {
   readonly toolApprovals?: ToolApprovalService;
   /** Settles a `routine_state` approval a Worker-executed Routine parked on. */
   readonly routineApprovals?: RoutineApprovalService;
-  readonly routines?: RoutineApprovalDeps;
 }
 
 /**
@@ -187,22 +177,6 @@ export function registerApprovalRoutes(
         }
       }
 
-      if (deps.routines) {
-        const row = await deps.approvals.findById(approvalId);
-        if (row && row.kind === "routine_state" && row.status === "pending") {
-          const payload = (row.payload ?? {}) as { runId?: string };
-          if (payload.runId) {
-            await deps.approvals.settle(approvalId, settled);
-            await deps.routines.enqueueWake({
-              runId: payload.runId,
-              reason: "approval",
-              token: `approval:${approvalId}`,
-              decision: settled,
-            });
-            return reply.send({ status: decision });
-          }
-        }
-      }
       return reply.code(404).send({ error: "approval not found or already resolved" });
     }
   );

@@ -203,6 +203,83 @@ describe("surfaceWebRenderer", () => {
     expect(markup).toContain('data-surface-action="sf_form"');
   });
 
+  it("renders Divider, Image, and MultiChoice", () => {
+    const divider = createSurfaceArtifact({
+      id: "divider",
+      component: { name: "Divider", version: "1.0" },
+      props: {},
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+    const image = createSurfaceArtifact({
+      id: "image",
+      component: { name: "Image", version: "1.0" },
+      props: { url: "https://example.com/chart.png", altText: "Revenue chart" },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+    const multiChoice = createSurfaceArtifact({
+      id: "regions",
+      component: { name: "MultiChoice", version: "1.0" },
+      props: {
+        question: "Which regions?",
+        choices: [{ label: "US", value: "us" }],
+        action: { event: "regions.choose" },
+      },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const dividerMarkup = renderToStaticMarkup(
+      surfaceWebRenderer.render(divider, { destination: "chat" })
+    );
+    const imageMarkup = renderToStaticMarkup(
+      surfaceWebRenderer.render(image, { destination: "chat" })
+    );
+    const multiChoiceMarkup = renderToStaticMarkup(
+      surfaceWebRenderer.render(multiChoice, {
+        destination: "chat",
+        actionHandleFor: () => "sf_mc",
+      })
+    );
+
+    expect(dividerMarkup).toContain("data-surface-divider");
+    expect(imageMarkup).toContain("data-surface-image");
+    expect(imageMarkup).toContain('alt="Revenue chart"');
+    expect(multiChoiceMarkup).toContain("data-surface-multi-choice");
+    expect(multiChoiceMarkup).toContain('type="checkbox"');
+  });
+
+  it("renders multiselect and radio Form fields with native controls", () => {
+    const artifact = createSurfaceArtifact({
+      id: "prefs",
+      component: { name: "Form", version: "1.0" },
+      props: {
+        fields: [
+          { name: "tags", label: "Tags", input: "multiselect", options: ["A", "B"] },
+          { name: "region", label: "Region", input: "radio", options: ["US", "EU"] },
+        ],
+        submit: "Continue",
+        action: { event: "prefs.submit" },
+      },
+      target: { channel: "web", surface: "chat" },
+      audience: ["user:1"],
+      classification: "internal",
+    });
+
+    const markup = renderToStaticMarkup(
+      surfaceWebRenderer.render(artifact, { destination: "chat", actionHandleFor: () => "sf_form" })
+    );
+
+    expect(markup).toContain("<select");
+    expect(markup).toContain('multiple=""');
+    expect(markup).toContain("data-surface-radio-group");
+    expect(markup).toContain('type="radio"');
+  });
+
   it("renders charts and ForceGraphs as accessible native SVG instead of JSON", () => {
     const chart = createSurfaceArtifact({
       id: "revenue",

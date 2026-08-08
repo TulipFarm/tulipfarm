@@ -83,6 +83,29 @@ function SurfacePanel({
   );
 }
 
+function SurfaceAlert({
+  severity,
+  eyebrow,
+  title,
+  message,
+}: {
+  readonly severity: string;
+  readonly eyebrow: string;
+  readonly title?: string;
+  readonly message: string;
+}) {
+  return (
+    <div role="alert" data-surface-alert data-severity={severity}>
+      <div data-surface-alert-marker aria-hidden="true" />
+      <div data-surface-alert-content>
+        <span data-surface-eyebrow>{eyebrow}</span>
+        {title !== undefined ? <strong>{title}</strong> : null}
+        <p>{message}</p>
+      </div>
+    </div>
+  );
+}
+
 function ActionButton(props: {
   readonly label: string;
   readonly action: SurfaceAction;
@@ -163,6 +186,67 @@ function SurfaceChoices({
   );
 }
 
+function SurfaceMultiChoice({
+  artifact,
+  props,
+  onInteraction,
+  actionHandleFor,
+}: {
+  readonly artifact: SurfaceArtifact;
+  readonly props: Record<string, unknown>;
+  readonly onInteraction?: SurfaceWebProps["onInteraction"];
+  readonly actionHandleFor?: SurfaceWebProps["actionHandleFor"];
+}) {
+  const [selected, setSelected] = useState<readonly string[]>([]);
+  const [submitted, setSubmitted] = useState(false);
+  const choices = props.choices as Array<{ label: string; value: string }>;
+  const action = props.action as SurfaceAction;
+  const handle = actionHandleFor?.(action);
+  const questionId = `surface-${artifact.id}-question`;
+  const toggle = (value: string) => {
+    setSelected((previous) =>
+      previous.includes(value) ? previous.filter((item) => item !== value) : [...previous, value]
+    );
+  };
+  const submit = () => {
+    setSubmitted(true);
+    if (handle) void onInteraction?.(handle, { ...action.payload, values: selected });
+  };
+
+  return (
+    <section data-surface-multi-choice aria-labelledby={questionId}>
+      <header data-surface-choices-header>
+        <span data-surface-eyebrow>Select any</span>
+        <h3 id={questionId}>{String(props.question)}</h3>
+      </header>
+      <div data-surface-choice-list>
+        {choices.map((choice) => (
+          <label key={choice.value} data-surface-checkbox>
+            <input
+              type="checkbox"
+              disabled={submitted}
+              checked={selected.includes(choice.value)}
+              onChange={() => toggle(choice.value)}
+            />
+            <span>{choice.label}</span>
+          </label>
+        ))}
+      </div>
+      <footer data-surface-form-footer>
+        <button
+          type="button"
+          disabled={submitted || !handle || selected.length === 0}
+          data-surface-button
+          data-variant="primary"
+          onClick={submit}
+        >
+          <span>Submit</span>
+        </button>
+      </footer>
+    </section>
+  );
+}
+
 function SurfaceForm({
   props,
   onInteraction,
@@ -225,57 +309,119 @@ function SurfaceForm({
             );
           }
 
-          return (
-            <label key={name} htmlFor={fieldId} data-surface-field>
-              <span>
-                {label}
-                {required ? <small data-surface-required>required</small> : null}
-              </span>
-              {input === "textarea" ? (
-                <textarea
-                  id={fieldId}
-                  name={name}
-                  required={required}
-                  rows={4}
-                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
-                    update(name, event.target.value)
-                  }
-                />
-              ) : input === "select" ? (
+          if (input === "radio") {
+            return (
+              <fieldset key={name} data-surface-radio-group>
+                <legend>
+                  {label}
+                  {required ? <small data-surface-required>required</small> : null}
+                </legend>
+                {options.map((option) => (
+                  <label key={option} htmlFor={`${fieldId}-${option}`} data-surface-radio>
+                    <input
+                      id={`${fieldId}-${option}`}
+                      name={name}
+                      type="radio"
+                      value={option}
+                      required={required}
+                      onChange={() => update(name, option)}
+                    />
+                    <span>{option}</span>
+                  </label>
+                ))}
+              </fieldset>
+            );
+          }
+
+          if (input === "multiselect") {
+            return (
+              <label key={name} htmlFor={fieldId} data-surface-field>
+                <span>
+                  {label}
+                  {required ? <small data-surface-required>required</small> : null}
+                </span>
                 <select
                   id={fieldId}
                   name={name}
                   required={required}
-                  defaultValue=""
+                  multiple
                   onChange={(event: ChangeEvent<HTMLSelectElement>) =>
-                    update(name, event.target.value)
+                    update(
+                      name,
+                      Array.from(event.target.selectedOptions, (option) => option.value)
+                    )
                   }
                 >
-                  <option value="" disabled>
-                    Select an option
-                  </option>
                   {options.map((option) => (
                     <option key={option} value={option}>
                       {option}
                     </option>
                   ))}
                 </select>
-              ) : (
-                <input
-                  id={fieldId}
-                  name={name}
-                  type={input}
-                  required={required}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                    update(
-                      name,
-                      input === "number" && event.target.value !== ""
-                        ? Number(event.target.value)
-                        : event.target.value
-                    )
-                  }
-                />
-              )}
+              </label>
+            );
+          }
+
+          let control: ReactElement;
+          if (input === "textarea") {
+            control = (
+              <textarea
+                id={fieldId}
+                name={name}
+                required={required}
+                rows={4}
+                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                  update(name, event.target.value)
+                }
+              />
+            );
+          } else if (input === "select") {
+            control = (
+              <select
+                id={fieldId}
+                name={name}
+                required={required}
+                defaultValue=""
+                onChange={(event: ChangeEvent<HTMLSelectElement>) =>
+                  update(name, event.target.value)
+                }
+              >
+                <option value="" disabled>
+                  Select an option
+                </option>
+                {options.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            );
+          } else {
+            control = (
+              <input
+                id={fieldId}
+                name={name}
+                type={input}
+                required={required}
+                onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                  update(
+                    name,
+                    input === "number" && event.target.value !== ""
+                      ? Number(event.target.value)
+                      : event.target.value
+                  )
+                }
+              />
+            );
+          }
+
+          return (
+            <label key={name} htmlFor={fieldId} data-surface-field>
+              <span>
+                {label}
+                {required ? <small data-surface-required>required</small> : null}
+              </span>
+              {control}
             </label>
           );
         })}
@@ -355,19 +501,17 @@ function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
   const baseline = y(0);
   const groupWidth = plotWidth / Math.max(labels.length, 1);
   const labelStep = Math.max(1, Math.ceil(labels.length / 8));
-  const labelX = (index: number) =>
-    kind === "line"
-      ? labels.length === 1
-        ? left + plotWidth / 2
-        : left + (index / (labels.length - 1)) * plotWidth
-      : left + index * groupWidth + groupWidth / 2;
+  const lineX = (index: number) =>
+    labels.length === 1 ? left + plotWidth / 2 : left + (index / (labels.length - 1)) * plotWidth;
+  const barX = (index: number) => left + index * groupWidth + groupWidth / 2;
+  const labelX = (index: number) => (kind === "line" ? lineX(index) : barX(index));
 
   return (
     <SurfacePanel
       kind="chart"
       eyebrow="Chart"
       title={`${humanize(kind)} chart`}
-      meta={`${series.length} ${series.length === 1 ? "series" : "series"}`}
+      meta={`${series.length} series`}
     >
       <figure data-surface-visual>
         <div data-surface-legend>
@@ -422,12 +566,8 @@ function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
               })
             : series.map((item, seriesIndex) => {
                 const points = labels.map((label, index) => {
-                  const x =
-                    labels.length === 1
-                      ? left + plotWidth / 2
-                      : left + (index / (labels.length - 1)) * plotWidth;
                   const value = item.values[index] ?? 0;
-                  return { label, value, x, y: y(value) };
+                  return { label, value, x: lineX(index), y: y(value) };
                 });
                 const path = points
                   .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
@@ -574,42 +714,42 @@ function SurfaceForceGraph({ props }: { readonly props: Record<string, unknown> 
   );
 }
 
-export function SurfaceView({
+function renderSurfaceContent({
   artifact,
   onInteraction,
   actionHandleFor,
 }: SurfaceWebProps): ReactElement {
   const props = artifact.props as Record<string, unknown>;
-  const name = artifact.component.name;
-  let content: ReactElement;
-  switch (name) {
+  switch (artifact.component.name) {
     case "Text":
-      content = (
+      return (
         <p data-surface-text data-tone={String(props.tone ?? "neutral")}>
           {String(props.text)}
         </p>
       );
-      break;
     case "Heading": {
-      const level = props.level === 1 ? 1 : props.level === 3 ? 3 : 2;
-      content =
-        level === 1 ? (
-          <h1 data-surface-heading data-level={level}>
+      if (props.level === 1) {
+        return (
+          <h1 data-surface-heading data-level={1}>
             {String(props.text)}
           </h1>
-        ) : level === 3 ? (
-          <h3 data-surface-heading data-level={level}>
+        );
+      }
+      if (props.level === 3) {
+        return (
+          <h3 data-surface-heading data-level={3}>
             {String(props.text)}
           </h3>
-        ) : (
-          <h2 data-surface-heading data-level={level}>
-            {String(props.text)}
-          </h2>
         );
-      break;
+      }
+      return (
+        <h2 data-surface-heading data-level={2}>
+          {String(props.text)}
+        </h2>
+      );
     }
     case "Section":
-      content = (
+      return (
         <SurfacePanel
           kind="section"
           eyebrow="Section"
@@ -618,9 +758,8 @@ export function SurfaceView({
           <p data-surface-body-copy>{String(props.body)}</p>
         </SurfacePanel>
       );
-      break;
     case "Card":
-      content = (
+      return (
         <SurfacePanel
           kind="card"
           eyebrow="Summary"
@@ -636,45 +775,33 @@ export function SurfaceView({
           <p data-surface-body-copy>{String(props.body)}</p>
         </SurfacePanel>
       );
-      break;
     case "Status":
-      content = (
+      return (
         <span role="status" data-surface-status data-tone={String(props.tone ?? "neutral")}>
           {String(props.label)}
         </span>
       );
-      break;
     case "Alert": {
       const severity = String(props.severity ?? "info");
-      content = (
-        <div role="alert" data-surface-alert data-severity={severity}>
-          <div data-surface-alert-marker aria-hidden="true" />
-          <div data-surface-alert-content>
-            <span data-surface-eyebrow>{humanize(severity)}</span>
-            {typeof props.title === "string" ? <strong>{props.title}</strong> : null}
-            <p>{String(props.message)}</p>
-          </div>
-        </div>
+      return (
+        <SurfaceAlert
+          severity={severity}
+          eyebrow={humanize(severity)}
+          title={typeof props.title === "string" ? props.title : undefined}
+          message={String(props.message)}
+        />
       );
-      break;
     }
     case "List": {
       const items = props.items as string[];
       const ordered = props.ordered === true;
+      const listItems = items.map((item, index) => <li key={`${item}-${index}`}>{item}</li>);
       const list = ordered ? (
-        <ol data-surface-list>
-          {items.map((item, index) => (
-            <li key={`${item}-${index}`}>{item}</li>
-          ))}
-        </ol>
+        <ol data-surface-list>{listItems}</ol>
       ) : (
-        <ul data-surface-list>
-          {items.map((item, index) => (
-            <li key={`${item}-${index}`}>{item}</li>
-          ))}
-        </ul>
+        <ul data-surface-list>{listItems}</ul>
       );
-      content = (
+      return (
         <SurfacePanel
           kind="list"
           eyebrow={ordered ? "Sequence" : "List"}
@@ -683,11 +810,10 @@ export function SurfaceView({
           {list}
         </SurfacePanel>
       );
-      break;
     }
     case "RecordDetail": {
       const record = props.record as Record<string, unknown>;
-      content = (
+      return (
         <SurfacePanel
           kind="record-detail"
           eyebrow="Record"
@@ -704,12 +830,11 @@ export function SurfaceView({
           </dl>
         </SurfacePanel>
       );
-      break;
     }
     case "RecordTable": {
       const columns = props.columns as string[];
       const records = props.records as Array<Record<string, unknown>>;
-      content = (
+      return (
         <SurfacePanel
           kind="record-table"
           eyebrow="Records"
@@ -739,11 +864,10 @@ export function SurfaceView({
           </div>
         </SurfacePanel>
       );
-      break;
     }
     case "Actions": {
       const actions = props.actions as Array<{ label: string; action: SurfaceAction }>;
-      content = (
+      return (
         <SurfacePanel
           kind="actions"
           eyebrow="Available actions"
@@ -763,10 +887,9 @@ export function SurfaceView({
           </div>
         </SurfacePanel>
       );
-      break;
     }
     case "Choices":
-      content = (
+      return (
         <SurfaceChoices
           artifact={artifact}
           props={props}
@@ -774,40 +897,59 @@ export function SurfaceView({
           actionHandleFor={actionHandleFor}
         />
       );
-      break;
     case "Form":
-      content = (
+      return (
         <SurfaceForm
           props={props}
           onInteraction={onInteraction}
           actionHandleFor={actionHandleFor}
         />
       );
-      break;
+    case "Divider":
+      return <hr data-surface-divider />;
+    case "Image":
+      return (
+        <figure data-surface-image>
+          <img src={String(props.url)} alt={String(props.altText)} data-surface-image-media />
+          {typeof props.title === "string" ? <figcaption>{props.title}</figcaption> : null}
+        </figure>
+      );
+    case "MultiChoice":
+      return (
+        <SurfaceMultiChoice
+          artifact={artifact}
+          props={props}
+          onInteraction={onInteraction}
+          actionHandleFor={actionHandleFor}
+        />
+      );
     case "Chart":
-      content = <SurfaceChart props={props} />;
-      break;
+      return <SurfaceChart props={props} />;
     case "ForceGraph":
-      content = <SurfaceForceGraph props={props} />;
-      break;
+      return <SurfaceForceGraph props={props} />;
     default:
-      content = (
-        <div role="alert" data-surface-alert data-severity="error">
-          <div data-surface-alert-marker aria-hidden="true" />
-          <div data-surface-alert-content>
-            <span data-surface-eyebrow>Unsupported</span>
-            <p>This presentation component is unavailable.</p>
-          </div>
-        </div>
+      return (
+        <SurfaceAlert
+          severity="error"
+          eyebrow="Unsupported"
+          message="This presentation component is unavailable."
+        />
       );
   }
+}
+
+export function SurfaceView({
+  artifact,
+  onInteraction,
+  actionHandleFor,
+}: SurfaceWebProps): ReactElement {
   return (
     <div
       data-surface-artifact={artifact.id}
       data-surface-revision={artifact.revision}
-      data-surface-component={name}
+      data-surface-component={artifact.component.name}
     >
-      {content}
+      {renderSurfaceContent({ artifact, onInteraction, actionHandleFor })}
     </div>
   );
 }

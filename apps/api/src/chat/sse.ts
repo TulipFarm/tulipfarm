@@ -1,5 +1,11 @@
 import type { ServerResponse } from "node:http";
-import type { StreamEvent } from "./stream-hub";
+
+/** One streamed SSE event: a monotonic `seq` (the SSE `id`), a type, and a JSON payload. */
+export interface StreamEvent {
+  seq: number;
+  eventType: string;
+  data: unknown;
+}
 
 /** SSE response headers for a hijacked raw reply. */
 export function writeSseHeaders(raw: ServerResponse, extra?: Record<string, string>): void {
@@ -21,9 +27,4 @@ export function writeSseHeaders(raw: ServerResponse, extra?: Record<string, stri
  */
 export function formatSseEvent(event: StreamEvent): string {
   return `id: ${event.seq}\nevent: ${event.eventType}\ndata: ${JSON.stringify(event.data)}\n\n`;
-}
-
-/** Write one event to the raw response. */
-export function writeSseEvent(raw: ServerResponse, event: StreamEvent): void {
-  raw.write(formatSseEvent(event));
 }

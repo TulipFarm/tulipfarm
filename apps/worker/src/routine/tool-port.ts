@@ -1,6 +1,7 @@
 import {
   type AuthorityLayer,
   compileGuardrailPolicy,
+  compileRoutineAuthority,
   type GuardrailPolicy,
   GuardrailPolicyError,
 } from "@tulipfarm/authz";
@@ -53,6 +54,12 @@ export interface RoutineToolRequest {
   readonly plan: ToolDispatchPlan;
   /** The Run's exact pinned bundle — the only source of contracts and policy. */
   readonly bundle: RuntimeBundle;
+  /**
+   * Layers beyond the bundle's own Tool authority — identity/Run-context layers a future caller
+   * may add. The bundle's ToolContracts always contribute their own layer (see `authorityFor`
+   * below); a Routine's authority can never widen past what it declares wanting to call, no
+   * matter what this array carries.
+   */
   readonly authorityLayers: readonly AuthorityLayer[];
 }
 
@@ -116,6 +123,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
   /** Per-bundle, because a bundle is immutable: compiling it twice can only produce the same. */
   private readonly policies = new Map<string, GuardrailPolicy>();
   private readonly catalogs = new Map<string, ToolCatalog>();
+  private readonly authorities = new Map<string, AuthorityLayer>();
 
   constructor(private readonly options: BrokerRoutineToolPortOptions) {
     this.now = options.now ?? (() => new Date());
@@ -141,7 +149,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
 
     const intent = intentOf(request);
     const outcome = new ToolBroker(catalog).authorize(intent, {
-      authorityLayers: request.authorityLayers,
+      authorityLayers: [...request.authorityLayers, this.authorityFor(request.bundle)],
       guardrailRules: policy.rules,
       dlpRules: policy.dlpRules,
       // The bundle digest is the revision: it names every Guardrail this Run is bound to, and
@@ -208,5 +216,19 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     const catalog = ToolCatalog.load(definitionsOf<ToolContractDefinition>(bundle, "ToolContract"));
     this.catalogs.set(bundle.digest, catalog);
     return catalog;
+  }
+
+  /** The Routine's own authority: exactly the actions/resources its pinned ToolContracts declare. */
+  private authorityFor(bundle: RuntimeBundle): AuthorityLayer {
+    const cached = this.authorities.get(bundle.digest);
+    if (cached !== undefined) return cached;
+    const layer: AuthorityLayer = {
+      name: "routine",
+      grants: compileRoutineAuthority(
+        definitionsOf<ToolContractDefinition>(bundle, "ToolContract")
+      ),
+    };
+    this.authorities.set(bundle.digest, layer);
+    return layer;
   }
 }

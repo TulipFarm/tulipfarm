@@ -1,0 +1,97 @@
+---
+title: Connect GitHub
+description: Register a GitHub App, install it into repositories, and enable Soul backup.
+---
+
+GitHub uses a GitHub App installation flow. After it is connected, Agents can work with
+issues, pull requests, check runs, and repository contents in the repositories you grant.
+GitHub can also hold a remote backup of the Soul.
+
+## Outcome
+
+At the end, TulipFarm has a GitHub App installation scoped to selected repositories, and
+optionally a GitHub repository configured as the Soul remote.
+
+## Register the GitHub App
+
+<Steps>
+  <Step>
+    Open **Integrations → github** and choose **Set up GitHub App**.
+  </Step>
+  <Step>
+    Create a new GitHub App under your personal account or organization.
+  </Step>
+  <Step>
+    Set **Homepage URL** to your deployment URL.
+  </Step>
+  <Step>
+    Set **Setup URL** to your API callback:
+    `<PUBLIC_URL>/api/v1/integrations/github/install/callback`. Enable **Redirect on
+    update**.
+  </Step>
+  <Step>
+    Leave the OAuth callback blank and leave **Request user authorization during
+    installation** unchecked. TulipFarm authenticates as the GitHub App installation, not
+    as a GitHub user's OAuth token.
+  </Step>
+  <Step>
+    Leave GitHub webhooks inactive. TulipFarm does not process GitHub webhook events yet.
+  </Step>
+  <Step>
+    Grant these permissions: Contents read/write, Issues read/write, Pull requests
+    read/write, and Checks read-only. Metadata read-only is automatic.
+  </Step>
+</Steps>
+
+## Store the App credentials
+
+Generate a private key on the GitHub App page, then store these values in **Settings →
+Secrets** or in the GitHub setup wizard:
+
+| Key | Value |
+| --- | --- |
+| `github-app-id` | The App ID from GitHub |
+| `github-app-slug` | The last segment of the App URL |
+| `github-app-private-key` | The full `.pem` private key, including BEGIN/END lines |
+| `github-app-webhook-secret` | A random value reserved for future webhook verification |
+
+Secret values are write-only.
+
+## Install into repositories
+
+<Steps>
+  <Step>
+    Return to **Integrations → github**.
+  </Step>
+  <Step>
+    Choose **Install**. GitHub opens its install screen.
+  </Step>
+  <Step>
+    Pick the account or organization, then choose all repositories or selected
+    repositories.
+  </Step>
+  <Step>
+    Approve the installation. GitHub redirects back to TulipFarm, where the Integration
+    page lists the installation and repositories.
+  </Step>
+</Steps>
+
+To add another account or organization, choose **Add another install**. To change which
+repositories are granted, use GitHub's installation settings.
+
+## Verify in chat
+
+```prompt
+List the open issues in owner/repo.
+```
+
+The repository must be included in the GitHub App installation scope.
+
+## Use GitHub for Soul backup
+
+Open **Settings → Soul** to configure a generic git remote, or use the GitHub-backed Soul
+repo flow under `/integrations/github/soul-repo`. TulipFarm can connect an already granted
+repo as the Soul remote, or create a new repo through `/integrations/github/soul-repo/create`
+when the installation has the required administration permission.
+
+For restore details, see [Back up and restore](/docs/guides/back-up-and-restore).

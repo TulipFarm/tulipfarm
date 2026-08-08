@@ -1,80 +1,64 @@
 ---
 title: Soul
-description: The git-backed configuration store that defines a TulipFarm instance.
+description: The git-backed definition store that defines a TulipFarm instance.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+The **Soul** is the definition store for a TulipFarm instance. It is a git repository, created at
+`~/.tulipfarm/soul` by default or wherever `SOUL_PATH` points. It holds the business system's shape:
+Resource type schemas, Agents, Skills, Routines, Integrations, Surface components, and policy files.
 
-The soul is your instance's configuration, stored as a git repository. It holds the
-definitions that make your TulipFarm what it is: resource schemas, agents, and skills.
-A fresh instance creates the soul at `~/.tulipfarm/soul`, controlled by the `SOUL_PATH`
-environment variable.
+Most users do not edit the Soul directly. They [build by chat](/docs/concepts/building), and the
+assistant writes the Soul artifacts underneath.
 
-You rarely touch the soul directly — agents write to it when you
-[build by chat](/docs/concepts/building). This page is about what that store *is* and how
-it behaves.
+## Why definitions live in git
 
-## Why a git repository
+Git makes the system definition readable, diffable, portable, and recoverable. A new Agent or
+Resource type is a committed change. A remote turns the definition store into a backup. Operators
+can inspect history with ordinary git tooling, while everyday users keep working through chat and
+Settings.
 
-TulipFarm treats the soul as a configuration database that happens to sync over git.
-That choice buys three things at once:
+## What lives there
 
-- **History is the audit trail.** Every change to an agent or schema is a commit. You
-  can see what changed, when, and why, with ordinary git tooling.
-- **Agents and humans edit the same store.** An agent that creates a resource type
-  writes the same `schema.yml` you would write by hand, then commits it.
-- **Durability and portability.** Point the soul at a remote and your configuration is
-  backed up and movable between machines.
+<Files>
+  <Folder name="soul" defaultOpen>
+    <Folder name="resources/{name}">
+      <File name="schema.yml" />
+      <File name="hooks.ts" />
+    </Folder>
+    <Folder name="agents/{name}">
+      <File name="AGENT.md" />
+    </Folder>
+    <Folder name="skills/{name}">
+      <File name="SKILL.md" />
+      <Folder name="references" />
+    </Folder>
+    <Folder name="routines/{name}" />
+    <Folder name="integrations/{name}" />
+    <Folder name="surface-components/{name}" />
+    <File name="soul.yaml" />
+    <File name="llm.config.yaml" />
+    <File name="guardrails.yaml" />
+    <File name="skills-lock.json" />
+  </Folder>
+</Files>
 
-## What lives in the soul
+Records, Knowledge pages, chats, Runs, Approvals, memory, secrets, audit, and identity live in
+PostgreSQL, not in the Soul. The Soul defines how the system behaves; the datastore records what
+happened and what the business knows.
 
-The repository has a fixed layout:
+## Live reconciliation
 
-```text
-soul/
-  resources/{name}/    schema.yml (+ optional hooks.ts)
-  agents/{name}/       AGENT.md
-  skills/{name}/       SKILL.md (+ references/)
-  routines/{name}/     routine definitions
-  integrations/{name}/ integration config
-  llm.config.yaml      LLM provider tiers
-  guardrails.yaml      input / tool-call / output guard rules
-  soul.yaml            root manifest
-  skills-lock.json     installed-skill provenance
-```
+Soul writes commit immediately and reconcile live. When a tool such as `create_resource_type` writes
+`resources/{name}/schema.yml`, the API reloads the Soul and reconciles the datastore without a
+restart. Guardrails, LLM config, Routines, Resource types, and other registries reload from the same
+`soul.synced` path.
 
-Records, knowledge, and chats are **not** in the soul — those are data, and
-they live in the datastore.
+Git backup can be configured during setup or later in Settings. Setting the remote through the UI
+syncs immediately. A manual `POST /api/v1/soul/reload` exists for dev-friendly remote-less Souls
+when hand-edited files need to be re-read.
 
-## How the soul syncs
+## Governance boundary
 
-The soul is loaded into the runtime at startup. If you set `SOUL_GIT_REMOTE_URL`, the
-instance clones the remote on first boot and pulls from it on a periodic schedule;
-`main` wins when histories genuinely diverge, but local commits that are merely ahead
-and un-pushed are preserved and retried, never discarded. Setting the remote from the
-setup wizard instead syncs immediately — no restart required.
-
-With no remote set, the soul is local-only. Writes still commit locally, and your
-configuration is captured by backups of the soul directory.
-
-<Callout type="info">
-Setting a remote is strongly recommended. It turns your soul into a backed-up,
-portable record of your whole instance.
-</Callout>
-
-## Commit authorship
-
-Soul commits are attributed to `tulipfarm-bot <tulipfarmhq@gmail.com>` by default —
-that's the author on every write regardless of whose credential authenticates the
-push to the remote. Override it with the `BOT_GIT_NAME` and `BOT_GIT_EMAIL`
-environment variables if you want soul history attributed to your own name or
-organization instead.
-
-## Soul writes are never gated
-
-Editing the soul — creating an agent, a schema, or a skill — is a direct write and
-commit. There is no approval step. The git history *is* the review record.
-
-This is distinct from what an agent does at runtime. When an agent takes a real-world or
-data action, that can be gated by its [autonomy level](/docs/concepts/agents). The rule
-is: **soul = database, no gate; actions on the world = gated.** Do not conflate the two.
+Soul writes are direct and ungated. Creating an Agent or Resource type changes the definition store
+and uses git history as the review record. Runtime work can still pause for
+[Approvals](/docs/concepts/approvals), and every turn remains a durable [Run](/docs/concepts/runs).

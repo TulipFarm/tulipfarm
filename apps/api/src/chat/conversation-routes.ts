@@ -1,4 +1,5 @@
 import type { SoulLoader } from "@tulipfarm/soul";
+import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
@@ -11,6 +12,7 @@ import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { listAvailableSkills, listEagerSkills } from "../soul/skills/registry";
 import { presentationContextFor, surfaceCatalogPromptFor } from "../surfaces/renderer-registry";
+import { githubDisabledSkillNames, githubExcludedToolNames } from "../tools/github/visibility";
 import type { ConversationDoc, ConversationRepo } from "./conversations";
 import type { MessageRepo } from "./messages";
 import { MessageSchema } from "./schemas";
@@ -43,6 +45,9 @@ export interface ConversationRoutesDeps {
   toolRegistry?: ToolRegistry;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: ReadonlySet<string>;
+  /** Live GitHub-install check backing per-turn tool visibility — absent only where a deployment
+   * never wired the GitHub tool family at all. */
+  githubStatus?: { readonly integrations: IntegrationStore; readonly businessId: string };
 }
 
 export function registerConversationRoutes(
@@ -59,6 +64,7 @@ export function registerConversationRoutes(
     toolRegistry,
     bundledSkills,
     disabledBundledSkills,
+    githubStatus,
   } = deps;
 
   app.get(
@@ -358,17 +364,31 @@ export function registerConversationRoutes(
           { channel: "web", surface: "chat" },
           `conversation:${id}`
         );
-        const tools = availableToolsFor(toolRegistry, platformAgent, presentationContext);
+        const excludedTools = githubStatus
+          ? await githubExcludedToolNames(githubStatus)
+          : undefined;
+        const skillsDisabled = githubStatus
+          ? new Set([
+              ...(disabledBundledSkills ?? []),
+              ...(await githubDisabledSkillNames(githubStatus)),
+            ])
+          : disabledBundledSkills;
+        const tools = availableToolsFor(
+          toolRegistry,
+          platformAgent,
+          presentationContext,
+          excludedTools
+        );
         const surfaceComponents = [...(soulLoader?.surfaceComponents.values() ?? [])];
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
           memory,
           governancePages,
-          availableSkills: listAvailableSkills(soulLoader, bundledSkills, disabledBundledSkills),
+          availableSkills: listAvailableSkills(soulLoader, bundledSkills, skillsDisabled),
           bundledSkills,
-          disabledBundledSkills,
-          eagerSkills: listEagerSkills(soulLoader, bundledSkills, disabledBundledSkills),
+          disabledBundledSkills: skillsDisabled,
+          eagerSkills: listEagerSkills(soulLoader, bundledSkills, skillsDisabled),
           taggedResources: [],
           soulCatalogue: buildSoulCatalogue(soulLoader),
           availableTools: tools,

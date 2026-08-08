@@ -1,33 +1,44 @@
 ---
 title: Concepts
-description: How TulipFarm's parts fit together — soul, resources, agents, skills, knowledge, LLM tiers, and secrets.
+description: "How TulipFarm's parts fit together: Soul, datastore, chat, Runs, and governance."
 ---
 
-import { Cards, Card } from "fumadocs-ui/components/card";
+TulipFarm is a self-hosted, AI-native business operating system. You operate it through
+[chat](/docs/concepts/chat): ask for everyday work, ask for new business objects, or ask for an
+Agent to take over a focused job. Underneath that simple surface is a deliberate split.
 
-You operate TulipFarm by **talking to it**. You describe what you want, and agents build
-and run it for you — see [Building by chat](/docs/concepts/building). Underneath, two
-things make that work, and the separation between them explains everything else:
+**Soul** is the git-backed definition store. It lives at `~/.tulipfarm/soul` by default and holds
+Resource type schemas, Agents, Skills, Routines, Integrations, Surface components, `soul.yaml`,
+`llm.config.yaml`, `guardrails.yaml`, and `skills-lock.json`. Soul writes commit immediately and
+reconcile live, so a newly built Resource type or Agent is available without restarting.
 
-- **Definitions live in the soul** (a git repository): resource schemas, agents,
-  skills. These are files agents write when you ask them to — readable, diffable, and
-  versioned.
-- **Data lives in the datastore** (PostgreSQL): the records your resources hold, your
-  knowledge base, chats, and secrets.
+**The datastore** is PostgreSQL 17 with pgvector. It holds Records, Knowledge spaces and pages,
+chats, Runs and Run events, Approvals, memory, secrets, audit, identity, and queues. It is the
+business state; the Soul is the business definition.
 
-Building the soul changes what your instance *is*. Writing to the datastore changes what
-it *knows*. Agents do both — but the two are governed differently. Soul writes are never
-gated; real-world actions an agent takes are gated by its autonomy level.
+That split is why TulipFarm can be both agent-built and operationally durable: Agents write the
+Soul when they build the system, but every turn, routine execution, integration delivery, and wait
+is persisted as a [Run](/docs/concepts/runs) in the datastore.
 
-## The parts
+## Concept map
 
 <Cards>
-  <Card title="Building by chat" href="/docs/concepts/building" description="How you build your system — describe it, and agents build it for you." />
-  <Card title="Soul" href="/docs/concepts/soul" description="The git-backed configuration store that defines your instance." />
-  <Card title="Resources" href="/docs/concepts/resources" description="Schema-defined data types and the records that fill them." />
-  <Card title="Agents" href="/docs/concepts/agents" description="The actors that run turns, defined by an AGENT.md file." />
-  <Card title="Skills" href="/docs/concepts/skills" description="Reusable instructions agents load on demand, audited before install." />
-  <Card title="Knowledge" href="/docs/concepts/knowledge" description="The searchable corpus agents draw on, backed by vector search." />
-  <Card title="LLM tiers" href="/docs/concepts/llm" description="How TulipFarm chooses and falls back across model providers." />
-  <Card title="Secrets" href="/docs/concepts/secrets" description="Encrypted storage for the credentials your instance needs." />
+  <Card title="Building by chat" href="/docs/concepts/building" description="Why building starts in chat and ends as committed Soul changes." />
+  <Card title="Chat" href="/docs/concepts/chat" description="The primary interface: default harness, Agents, delegation, feedback, and suggested prompts." />
+  <Card title="Soul" href="/docs/concepts/soul" description="The git-backed definition store for Resource types, Agents, Skills, Routines, and policy." />
+  <Card title="Resources" href="/docs/concepts/resources" description="Schema-defined Resource types, generated UIs, Records, links, validation, and hooks." />
+  <Card title="Agents" href="/docs/concepts/agents" description="Selectable actors with prompts, autonomy, tools, and handoff behavior." />
+  <Card title="Skills" href="/docs/concepts/skills" description="Reusable instruction packs loaded on demand, installed or authored with SkillAudit." />
+  <Card title="Routines" href="/docs/concepts/routines" description="Durable repeatable automations made of States, triggers, waits, and approvals." />
+  <Card title="Knowledge" href="/docs/concepts/knowledge" description="Spaces and pages that Agents search, cite, link, revise, and graph." />
+  <Card title="Memory" href="/docs/concepts/memory" description="Per-user working memory, distinct from the system prompt and Agent KV scratch space." />
+  <Card title="Surfaces" href="/docs/concepts/surfaces" description="Structured Artifacts rendered natively in web, Slack, GitHub, and Telegram renderers." />
+  <Card title="Runs" href="/docs/concepts/runs" description="The durable unit of work executed by the Worker and streamed from persisted events." />
+  <Card title="Approvals" href="/docs/concepts/approvals" description="Why work pauses, where decisions land, and how a decision resumes a Run." />
+  <Card title="Integrations" href="/docs/concepts/integrations" description="The bundled GitHub and Slack integrations, routing, identity links, and limits." />
+  <Card title="LLM tiers" href="/docs/concepts/llm" description="Providers, model tiers, selection, and ordered fallback semantics." />
+  <Card title="Guardrails" href="/docs/concepts/guardrails" description="Input, tool-call, and output guard stages enforced uniformly by the Worker." />
+  <Card title="Secrets" href="/docs/concepts/secrets" description="Encrypted, write-only credentials for providers, integrations, and operators." />
+  <Card title="Identity" href="/docs/concepts/identity" description="Users, sessions, API tokens, API clients, roles, grants, and Slack account linking." />
+  <Card title="Setup" href="/docs/concepts/setup" description="Wizard and headless boot paths that bring a fresh instance online." />
 </Cards>

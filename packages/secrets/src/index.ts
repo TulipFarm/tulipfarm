@@ -14,6 +14,18 @@ export { DecryptError, decryptSecret, encryptSecret } from "./crypto";
 export type { DekRepo, InsertWrapInput, KekLabel, WrappedDekRow } from "./dek-repo";
 export { PgDekRepo } from "./dek-repo";
 export { SecretsService, SecretUnavailableError } from "./encrypted-store";
+export type {
+  IntegrationAppField,
+  IntegrationAppFieldRole,
+  IntegrationAppId,
+  IntegrationAppInfo,
+} from "./integration-registry";
+export {
+  INTEGRATION_APPS,
+  integrationAppById,
+  integrationAppField,
+  isIntegrationAppConfigured,
+} from "./integration-registry";
 export { assertValidSecretKey, InvalidSecretKeyError } from "./key-guard";
 export type { ActiveDek } from "./key-manager";
 export {

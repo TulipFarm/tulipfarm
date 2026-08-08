@@ -12,7 +12,7 @@ import type { RunExecutor } from "../executors";
 import type { RunOutcome } from "../run-dispatcher";
 import { type TurnContextPort, TurnDriver, type TurnRequest } from "./driver";
 import { TurnGuardrails } from "./guardrails";
-import { reclaimWaitingState } from "./kernel-ports";
+import { reclaimPendingState, reclaimWaitingState } from "./kernel-ports";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 import { announceToolCalls } from "./tool-events";
 
@@ -90,11 +90,23 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       });
     }
 
+    // A first dispatch arrives `pending` — the gateway's INSERT default, shared with a Routine's
+    // start State. Nothing leases a State the way a Run is leased, so this claims it the same way
+    // a resumed one is reclaimed above.
+    if (state.status === "pending") {
+      await reclaimPendingState(options.transitions, {
+        businessId: run.businessId,
+        runId: run.id,
+        stateKey: INVOKE_STATE_KEY,
+      });
+    }
+
     const request: TurnRequest = {
       businessId: run.businessId,
       runId: run.id,
       stateKey: INVOKE_STATE_KEY,
-      stateStatus: state.status === "waiting" ? "claimed" : state.status,
+      stateStatus:
+        state.status === "waiting" || state.status === "pending" ? "claimed" : state.status,
       turnId: identity.turnId,
       conversationId: identity.conversationId,
       attempt: identity.attempt,
@@ -128,6 +140,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
         const current = await options.runs.find(run.businessId, run.id);
         return current !== null && CANCELLING_STATUSES.has(current.status);
       },
+      log: options.log,
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 

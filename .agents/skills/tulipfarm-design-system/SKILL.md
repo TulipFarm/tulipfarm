@@ -26,12 +26,16 @@ composition patterns over route-local styling.
 ## Guardrails
 
 - Keep the coral primary disciplined and destructive color danger-only.
+- Let the top bar own page identity, derive shell chrome from the shared mode map, and do not
+  repeat either in the page body.
 - Use Inter for interface copy and JetBrains Mono for code, identifiers, logs, and technical data.
 - Keep primitives app-local under `apps/web/app/components/ui` until a second app needs them.
 - Use Lucide icons; label icon-only actions and preserve a minimum 44px touch target on mobile.
 - Preserve `[data-theme="dark"]`, keyboard navigation, visible focus, reduced motion, and deep links.
+- Rely on the global `:focus-visible` outline, and close off-canvas panels with `inert` rather than
+  `aria-hidden`.
 - Do not introduce Storybook, a second component framework, raw palette values in components,
-  emoji icons, or one-off page headers.
+  emoji icons, one-off page headers, or controls wired to no handler.
 
 ## Completion Check
 
