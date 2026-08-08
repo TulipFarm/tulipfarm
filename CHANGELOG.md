@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1](https://github.com/TulipFarm/tulipfarm/compare/v0.6.0...v0.6.1) (2026-08-08)
+
+### Features
+
+* **integrations:** add send_slack_message chat tool with thread-reply continuity ([#336](https://github.com/TulipFarm/tulipfarm/issues/336)) ([e041785](https://github.com/TulipFarm/tulipfarm/commit/e041785b974d5110b959ec4432e013a1ab04d732))
+
+### Documentation
+
+* overhaul public docs for v0.6.0 ([#335](https://github.com/TulipFarm/tulipfarm/issues/335)) ([459ca56](https://github.com/TulipFarm/tulipfarm/commit/459ca568693446ab4c4b59d14239db9202a808c6))
+
 ## [0.6.0](https://github.com/TulipFarm/tulipfarm/compare/v0.5.1...v0.6.0) (2026-08-07)
 
 ### Features
