@@ -110,7 +110,9 @@ interface ToolDef {
 `tools/setup.ts` (`buildToolRegistry`). Group module tool arrays by tier (e.g. `PLATFORM_TOOLS`).
 Existing tools by category: system resource/agent/skill/resource-type CRUD (`resources/`,
 `soul/*/`), platform UI/routing/soul-batch (`platform/tools.ts`), memory (`memory/tools.ts`),
-knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`kv_set`/`kv_delete`/`kv_list`).
+knowledge (`knowledge/tools.ts`), kv (`kv/tools.ts` — agent-scoped `kv_get`/`kv_set`/`kv_delete`/`kv_list`),
+time (`platform/tools.ts` — `get_current_time`, a fresh reading when a long turn outlives the
+turn-start `<current-context>` block).
 
 ## Context & streaming
 

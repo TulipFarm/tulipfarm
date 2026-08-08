@@ -196,6 +196,10 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       ...(agent.spec.personality === undefined ? {} : { personality: agent.spec.personality }),
       memory: [],
       governancePages: [],
+      // A Routine State has no participant, so there is no `timezone` preference to read and the
+      // block renders UTC. Naming the Run's own clock is still worth more than leaving the Agent to
+      // date-reason from its training cutoff.
+      temporal: { now: this.now() },
     });
     const question = canonicalize(plan.input);
 

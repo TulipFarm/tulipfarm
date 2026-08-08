@@ -22,6 +22,7 @@ lazily fetched) makes the rendered prefix deterministic and therefore prompt-cac
 <available-skills>        lazy skill L1 — one `- name: description` per soul skill, 8k cap, drop-whole
 <soul-context>            repo catalogue L1 — `## Agents/Skills/Resource Types/Routines/Integrations`, 16k cap, drop-whole
 <available-tools>         tool L1 — one `- name: description` per allowed tool, 8k cap, drop-whole
+<current-context>         current date / day / time / timezone — renders LAST, no budget (see below)
 ```
 
 Each block renders to a string or `""`. Empty blocks are **omitted entirely** (filtered before
@@ -50,9 +51,38 @@ The Anthropic prompt cache keys on the longest byte-identical prefix. A fixed bl
 deterministic per-block rendering = cache hits across turns = lower cost/latency. Budgeted blocks
 drop **whole** on overflow (never half-rendered) so the prefix can't drift mid-block.
 
+## `<current-context>` — the one block that changes every turn
+
+Without it an agent has no idea what *now* is, so "next Tuesday" or "is this overdue?" is answered
+against the model's training cutoff — while `<memory-instructions>` already tells it to render
+dates in the user's timezone.
+
+Three rules keep it from costing anything the other blocks paid for:
+
+- **It renders last.** Every block above stays byte-identical across turns, so a per-turn timestamp
+  truncates the cacheable prefix instead of invalidating it.
+- **The instant is passed in, never read from the clock here.** `assembleSystemPrompt` stays pure —
+  the same `AssembleContext` renders the same prompt. Both callers already hold an injected
+  `now: () => Date` (`ChatTurnContextResolver`, `BundleRoutineAgentPort`), which is also what makes
+  the block testable at a fixed instant.
+- **No char budget.** Output is two lines fixed by construction, unlike the list-shaped blocks. An
+  `Invalid Date` omits the block rather than rendering as a fact about now.
+
+Timezone comes from the user's free-text `timezone` working-memory entry, so anything can arrive;
+`Intl` is the only real validator and an unusable value falls back to UTC rather than failing the
+turn. `Intl` is broader than strict IANA — it resolves legacy abbreviations like `PST` — and those
+are kept, since the rendered offset is explicit either way. A Routine's `agent` State has no
+participant and therefore no preference to read, so it renders UTC.
+
+`formatTemporalContext` is exported because the `get_current_time` platform Tool answers with the
+same text: the block is a turn-start snapshot, and a fresh mid-loop reading that disagreed in format
+would read as a different kind of fact. That Tool is chat-only — a Routine's `agent` State exposes
+no Tools — which is why the block's own text never mentions it.
+
 ## Acceptance criteria
 
-- Two consecutive turns with no soul/memory change → byte-identical cacheable prefix.
+- Two consecutive turns with no soul/memory change → byte-identical cacheable prefix
+  (everything above `<current-context>`, which carries the per-turn timestamp).
 - No typed-state block in the assembled prompt.
 
 ## Tests

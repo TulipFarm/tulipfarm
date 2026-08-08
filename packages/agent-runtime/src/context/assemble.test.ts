@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { type AssembleContext, assembleSystemPrompt, type MemoryEntry } from "./assemble";
+import {
+  type AssembleContext,
+  assembleSystemPrompt,
+  formatTemporalContext,
+  type MemoryEntry,
+} from "./assemble";
 import type { GovernancePage } from "./governance";
 
 /** The render-side `<memory>` budget declared in `assemble.ts` (100 entries × 256 value chars). */
@@ -654,5 +659,97 @@ describe("assembleSystemPrompt — available-tools (tool L1)", () => {
       })
     );
     expect(out.indexOf("<soul-context>")).toBeLessThan(out.indexOf("<available-tools>"));
+  });
+});
+
+describe("assembleSystemPrompt — current context block", () => {
+  // 2026-08-08T11:12:00Z is a Saturday; in Asia/Kolkata (+05:30) that reads 16:42 the same day.
+  const INSTANT = new Date("2026-08-08T11:12:00Z");
+
+  it("renders date, day, time and zone for the supplied timezone", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({ temporal: { now: INSTANT, timezone: "Asia/Kolkata" } })
+    );
+    expect(out).toContain("<current-context>");
+    expect(out).toContain("date: Saturday, 08 August 2026");
+    expect(out).toContain("time: 16:42 (Asia/Kolkata, UTC+05:30)");
+  });
+
+  it("falls back to UTC when the timezone is absent, blank or not a zone at all", () => {
+    for (const timezone of [undefined, "", "   ", "Mars/Olympus", "not a zone"]) {
+      const out = assembleSystemPrompt(baseCtx({ temporal: { now: INSTANT, timezone } }));
+      expect(out).toContain("time: 11:12 (UTC, UTC+00:00)");
+    }
+  });
+
+  // Intl resolves some legacy abbreviations ("PST" -> PST8PDT, DST included), so they are honored
+  // rather than discarded: the rendered offset is explicit either way, so there is nothing to
+  // misread. Only values Intl outright rejects fall back.
+  it("honors a legacy abbreviation Intl accepts instead of discarding it", () => {
+    const out = assembleSystemPrompt(baseCtx({ temporal: { now: INSTANT, timezone: "PST" } }));
+    expect(out).toContain("time: 04:12 (PST, UTC-07:00)");
+  });
+
+  it("omits the block entirely when no temporal context is supplied", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<current-context>");
+  });
+
+  it("omits the block rather than rendering an unusable instant as a fact about now", () => {
+    const out = assembleSystemPrompt(baseCtx({ temporal: { now: new Date("nonsense") } }));
+    expect(out).not.toContain("<current-context>");
+  });
+
+  it("renders last, after every cacheable block", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        platformInstructions: "platform rules",
+        memory: [mem("plan", "enterprise")],
+        knowledgeGrounding: true,
+        availableTools: [{ name: "agent_list", description: "list agents" }],
+        temporal: { now: INSTANT, timezone: "Asia/Kolkata" },
+      })
+    );
+    const start = out.indexOf("<current-context>");
+    expect(start).toBeGreaterThan(out.indexOf("<platform-instructions>"));
+    expect(start).toBeGreaterThan(out.indexOf("<memory>"));
+    expect(start).toBeGreaterThan(out.indexOf("<available-tools>"));
+    expect(start).toBeGreaterThan(out.indexOf("<knowledge-grounding>"));
+    expect(out.trimEnd().endsWith("</current-context>")).toBe(true);
+  });
+
+  it("leaves the prefix above it byte-identical as the instant advances", () => {
+    const prefixOf = (out: string) => out.slice(0, out.indexOf("<current-context>"));
+    const earlier = assembleSystemPrompt(
+      baseCtx({ platformInstructions: "rules", temporal: { now: INSTANT } })
+    );
+    const later = assembleSystemPrompt(
+      baseCtx({
+        platformInstructions: "rules",
+        temporal: { now: new Date(INSTANT.getTime() + 3_600_000) },
+      })
+    );
+    expect(prefixOf(earlier)).toBe(prefixOf(later));
+    expect(earlier).not.toBe(later);
+  });
+
+  it("stays pure — the same instant renders the same prompt", () => {
+    const ctx = baseCtx({ temporal: { now: INSTANT, timezone: "Asia/Kolkata" } });
+    expect(assembleSystemPrompt(ctx)).toBe(assembleSystemPrompt(ctx));
+  });
+});
+
+describe("formatTemporalContext", () => {
+  it("renders midnight as 00:00, never 24:00", () => {
+    const out = formatTemporalContext({ now: new Date("2026-08-09T00:00:00Z") });
+    expect(out).toContain("time: 00:00");
+    expect(out).toContain("date: Sunday, 09 August 2026");
+  });
+
+  it("renders a negative offset in the UTC±HH:MM spelling", () => {
+    const out = formatTemporalContext({
+      now: new Date("2026-08-08T11:12:00Z"),
+      timezone: "America/New_York",
+    });
+    expect(out).toContain("time: 07:12 (America/New_York, UTC-04:00)");
   });
 });

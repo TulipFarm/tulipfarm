@@ -28,6 +28,7 @@ export function assembleAgentSystemPrompt(args: {
   surfaceCatalog?: string;
   pinnedKnowledge?: AssembleContext["pinnedKnowledge"];
   knowledgeGrounding?: boolean;
+  temporal?: AssembleContext["temporal"];
 }): string {
   const {
     agent,
@@ -45,6 +46,7 @@ export function assembleAgentSystemPrompt(args: {
     surfaceCatalog,
     pinnedKnowledge,
     knowledgeGrounding,
+    temporal,
   } = args;
   // Resolve platform forge Skills against the boot-cached bundled map. Registry output normally
   // already contains them; the name-keyed merge below prevents duplicates while preserving access
@@ -80,5 +82,6 @@ export function assembleAgentSystemPrompt(args: {
     surfaceCatalog,
     pinnedKnowledge,
     knowledgeGrounding,
+    temporal,
   });
 }

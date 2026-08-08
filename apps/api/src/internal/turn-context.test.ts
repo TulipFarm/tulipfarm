@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
 import { MAX_HISTORY_TOKENS } from "../memory/limits";
+import type { WorkingMemoryService } from "../memory/service";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import {
   BUSINESS_ID,
@@ -59,6 +60,8 @@ function makeResolver(
     messages?: readonly PersistedMessage[];
     tools?: readonly string[];
     guardrails?: GuardrailsService;
+    memory?: readonly { key: string; value: string }[];
+    now?: () => Date;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -79,6 +82,14 @@ function makeResolver(
       llmService: { resolve } as unknown as LlmService,
       toolRegistry: registry,
       ...(options.guardrails ? { guardrails: options.guardrails } : {}),
+      ...(options.now ? { now: options.now } : {}),
+      ...(options.memory
+        ? {
+            workingMemory: {
+              list: async () => options.memory,
+            } as unknown as WorkingMemoryService,
+          }
+        : {}),
       ...(channelDeliveries ? { channelDeliveries } : {}),
     }),
   };
@@ -103,6 +114,28 @@ describe("ChatTurnContextResolver", () => {
     expect(context.compacted).toBe(false);
     expect(context.agentId).toBe(DEFAULT_ASSISTANT_NAME);
     expect(context.contextDigest).not.toBe("");
+  });
+
+  it("tells the agent what now is, in the timezone the user stored", async () => {
+    const { resolver } = makeResolver({
+      now: () => new Date("2026-08-08T11:12:00Z"),
+      memory: [{ key: "timezone", value: "Asia/Kolkata" }],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    const system = context.messages[0]?.content ?? "";
+    expect(system).toContain("<current-context>");
+    expect(system).toContain("date: Saturday, 08 August 2026");
+    expect(system).toContain("time: 16:42 (Asia/Kolkata, UTC+05:30)");
+  });
+
+  it("falls back to UTC when the user stored no timezone", async () => {
+    const { resolver } = makeResolver({ now: () => new Date("2026-08-08T11:12:00Z") });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.content).toContain("time: 11:12 (UTC, UTC+00:00)");
   });
 
   it("takes every per-turn parameter from the request Artifact", async () => {
