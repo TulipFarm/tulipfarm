@@ -8,18 +8,24 @@ reimplement package-owned logic. tsconfig extends `@tulipfarm/tsconfig/node.json
 ## Running it
 
 `pnpm --filter @tulipfarm/integration-worker dev` (tsx watch) or `node dist/main.js` (built via
-`tsc`) / the bundle a future Dockerfile entrypoint emits. Requires `DATABASE_URL`;
-`INTEGRATION_WORKER_PORT` (default `4030`) and `INTEGRATION_WORKER_DRAIN_TIMEOUT_MS` (default
-`15_000`) have defaults — see `src/config.ts`.
+`tsc`) / the bundle the Dockerfile entrypoint emits. Requires `DATABASE_URL`, `INTERNAL_API_URL`,
+and `INTEGRATION_WORKER_API_CREDENTIAL`; `INTEGRATION_WORKER_PORT` (default `4030`) and
+`INTEGRATION_WORKER_DRAIN_TIMEOUT_MS` (default `15_000`) have defaults — see `src/config.ts`.
+
+In a container the credential need not be set at all: `data-dir.ts` reads it back from the data
+volume the API wrote it to (`integration-worker.env`, minted by
+`apps/api/src/setup/worker-credential.ts`'s `provisionIntegrationWorkerCredential`) — same pattern
+as `apps/worker/src/data-dir.ts`, its own separate client and file. The environment always wins,
+and nothing is invented here — a value on neither the environment nor the volume stays missing, and
+`loadConfig` names it.
 
 ## Composition root (`src/main.ts`)
 
-Boot skeleton only, mirroring `apps/worker`'s own PR1 shape: wait for the schema floor
-(`preflight.ts`, same fail-closed check as `apps/worker` — this process never migrates), serve
-`/livez`+`/readyz` (`probe-server.ts`), drain cleanly on `SIGTERM`/`SIGINT` (`shutdown.ts`). **No
-consumer loop is registered yet** — `loops` in `main.ts` is an empty array. Slack Socket Mode,
-Telegram long-poll, and delivery retry each land in their own future PR and only need to push a
-`DrainableLoop` onto that array.
+Mirrors `apps/worker`'s shape: wait for the schema floor (`preflight.ts`, same fail-closed check as
+`apps/worker` — this process never migrates), serve `/livez`+`/readyz` (`probe-server.ts`), drain
+cleanly on `SIGTERM`/`SIGINT` (`shutdown.ts`). Slack Socket Mode ingress and its delivery poll loop
+(`channels/index.ts`) are registered on `loops`; Telegram long-poll and delivery retry land the
+same way — push a `DrainableLoop` onto that array.
 
 `db.ts` is a deliberate local copy of the same `pg` wiring `apps/worker` uses — an application may
 not import another application, and `@tulipfarm/storage` owns only the provider-neutral port, not

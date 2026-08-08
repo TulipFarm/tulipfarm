@@ -110,4 +110,47 @@ describe("runStage", () => {
     expect(result).toEqual({ blocked: false, value: "x" });
     expect(log.warn).toHaveBeenCalledTimes(1);
   });
+
+  it("blocks when a failMode:'closed' guard times out", async () => {
+    vi.useFakeTimers();
+    const log = makeLog();
+    const hang: Guard<string> = {
+      name: "critical",
+      failMode: "closed",
+      run: () => new Promise<Verdict<string>>(() => undefined),
+    };
+    const promise = runStage<string>([hang, passGuard("after")], "x", ctx, log);
+    await vi.advanceTimersByTimeAsync(GUARD_TIMEOUT_MS);
+    const result = await promise;
+    expect(result).toEqual({ blocked: true, guard: "critical", reason: "guard_timeout" });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks when a failMode:'closed' guard throws", async () => {
+    const log = makeLog();
+    const boom: Guard<string> = {
+      name: "critical",
+      failMode: "closed",
+      run: () => {
+        throw new Error("kaboom");
+      },
+    };
+    const result = await runStage<string>([boom, passGuard("after")], "x", ctx, log);
+    expect(result).toEqual({ blocked: true, guard: "critical", reason: "guard_error" });
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips a guard with failMode:'open' on timeout (default behavior)", async () => {
+    vi.useFakeTimers();
+    const log = makeLog();
+    const hang: Guard<string> = {
+      name: "lenient",
+      failMode: "open",
+      run: () => new Promise<Verdict<string>>(() => undefined),
+    };
+    const promise = runStage<string>([hang, passGuard("after")], "x", ctx, log);
+    await vi.advanceTimersByTimeAsync(GUARD_TIMEOUT_MS);
+    const result = await promise;
+    expect(result).toEqual({ blocked: false, value: "x" });
+  });
 });

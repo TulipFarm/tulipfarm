@@ -99,6 +99,6 @@ if it is pinned, bump it first. Migrations run automatically on boot — read
 
 ## Do not scale it
 
-Keep the `app` service at **one replica**. The soul is a git working tree and the job
-workers run in-process, so a second replica corrupts both. See
-[Deploy](/docs/deploy#what-every-deployment-needs).
+Keep `app`, `worker`, and `integration-worker` at **one replica each**. The `app` owns the
+soul git worktree and migrations; the `worker` owns turn execution plus cron/maintenance.
+See [Deploy](/docs/deploy#what-every-deployment-needs).

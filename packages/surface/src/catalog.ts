@@ -125,13 +125,13 @@ const definitions = [
   defineSurfaceComponent({
     name: "RecordTable",
     version: "1.0",
-    description: "Two or more Records with shared columns.",
+    description: "One or more Records with shared columns.",
     propsSchema: Type.Object({
       columns: Type.Array(Type.String({ minLength: 1, maxLength: 100 }), {
         minItems: 1,
         maxItems: 20,
       }),
-      records: Type.Array(record, { minItems: 2, maxItems: 100 }),
+      records: Type.Array(record, { minItems: 1, maxItems: 100 }),
     }),
     events: [],
     examples: [
@@ -202,6 +202,8 @@ const definitions = [
             Type.Literal("select"),
             Type.Literal("checkbox"),
             Type.Literal("date"),
+            Type.Literal("multiselect"),
+            Type.Literal("radio"),
           ]),
           required: Type.Optional(Type.Boolean()),
           options: Type.Optional(Type.Array(Type.String({ maxLength: 200 }), { maxItems: 100 })),
@@ -217,6 +219,57 @@ const definitions = [
         fields: [{ name: "email", label: "Email", input: "email", required: true }],
         submit: "Continue",
         action: { event: "contact.submit" },
+      },
+    ],
+  }),
+  defineSurfaceComponent({
+    name: "Divider",
+    version: "1.0",
+    description: "A visual separator between sections.",
+    propsSchema: Type.Object({}),
+    events: [],
+    examples: [{}],
+  }),
+  defineSurfaceComponent({
+    name: "Image",
+    version: "1.0",
+    description: "A single image with optional caption.",
+    propsSchema: Type.Object({
+      url: Type.String({ minLength: 1, maxLength: 2_000 }),
+      altText: Type.String({ minLength: 1, maxLength: 300 }),
+      title: Type.Optional(Type.String({ maxLength: 300 })),
+    }),
+    events: [],
+    examples: [
+      { url: "https://example.com/chart.png", altText: "Revenue chart", title: "This week" },
+    ],
+  }),
+  defineSurfaceComponent({
+    name: "MultiChoice",
+    version: "1.0",
+    description: "A multiple-selection semantic choice.",
+    propsSchema: Type.Object({
+      question: Type.String({ minLength: 1, maxLength: 500 }),
+      choices: Type.Array(
+        Type.Object({
+          label: Type.String({ minLength: 1, maxLength: 100 }),
+          value: Type.String({ minLength: 1, maxLength: 200 }),
+        }),
+        { minItems: 1, maxItems: 10 }
+      ),
+      minSelections: Type.Optional(Type.Integer({ minimum: 0 })),
+      maxSelections: Type.Optional(Type.Integer({ minimum: 1 })),
+      action: SurfaceActionSchema,
+    }),
+    events: events("choose"),
+    examples: [
+      {
+        question: "Which regions?",
+        choices: [
+          { label: "US", value: "us" },
+          { label: "EU", value: "eu" },
+        ],
+        action: { event: "regions.choose" },
       },
     ],
   }),
@@ -276,7 +329,7 @@ export const SURFACE_CATALOG = Object.freeze(
   ) as Readonly<Record<string, SurfaceComponentDefinition>>
 );
 
-export const SHIPPED_CATALOG_REVISION = "tsp-1.0-builtins-1";
+export const SHIPPED_CATALOG_REVISION = "tsp-1.1-builtins-1";
 
 export const SHIPPED_SURFACE_COMPONENTS: readonly SurfaceComponentDefinition[] = Object.freeze([
   ...definitions,

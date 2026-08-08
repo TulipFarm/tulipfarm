@@ -168,8 +168,28 @@ describe("BrokerRoutineToolPort", () => {
     expect(await effects.get(BUSINESS_ID, PLAN.effectId)).toBeUndefined();
   });
 
-  it("denies when the Run carries no authority, rather than reading absence as permission", async () => {
-    expect(await port().execute(request({ authorityLayers: [] }))).toEqual({
+  it("authorizes from the bundle's own ToolContract alone, even with no external authority layers", async () => {
+    expect(await port().execute(request({ authorityLayers: [] }))).toEqual({ kind: "succeeded" });
+  });
+
+  it("still denies when an external layer explicitly denies, even though the bundle's own contract allows", async () => {
+    const denied = request({
+      authorityLayers: [
+        {
+          name: "external",
+          grants: [
+            {
+              action: "issue.comment",
+              resourceType: "Tool",
+              recordSelector: "github.issue.comment",
+              effect: "deny",
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(await port().execute(denied)).toEqual({
       kind: "failed",
       reason: "authorization_denied",
     });

@@ -62,23 +62,19 @@ class FakeTokenRepo implements TokenRepo {
 }
 
 /**
- * routine_state approvals require the routes to be registered with routineDeps, which
- * app.ts only wires when BOTH approvalsRepo and routines options are present. The chat
- * deps (llmService/conversationRepo/messageRepo) gate route registration — fake the
- * minimum surface.
+ * `routine_state` rows on the shared list surface. Listing needs only the approvals repo — the
+ * decide path for this kind is exercised against its durable owner in the "decided by role" block.
  */
 describe("approval routes — routine_state kind", () => {
   let app: FastifyInstance;
   let db: PGlite;
   let sid: string;
   let approvals: ApprovalsRepo;
-  let wakes: Array<Record<string, unknown>>;
 
   beforeEach(async () => {
     db = await makePglite();
     await runPgMigrations(db);
     approvals = new ApprovalsRepo(db);
-    wakes = [];
 
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
@@ -94,18 +90,6 @@ describe("approval routes — routine_state kind", () => {
       llmService: { getModel: vi.fn() } as never,
       conversationRepo: {} as never,
       messageRepo: {} as never,
-      routines: {
-        registry: { list: () => [], getEntry: () => undefined, get: () => undefined } as never,
-        runs: {} as never,
-        triggerService: {} as never,
-        enqueuers: {
-          enqueueRun: async () => {},
-          enqueueWake: async (job: Record<string, unknown>) => {
-            wakes.push(job);
-          },
-        } as never,
-        getSecret: async () => "",
-      },
     });
   });
 
@@ -115,7 +99,6 @@ describe("approval routes — routine_state kind", () => {
   });
 
   const authed = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
-  const csrf = { [CSRF_HEADER]: TEST_CSRF };
 
   async function insertRoutineApproval(runId = randomUUID()) {
     const id = randomUUID();
@@ -146,49 +129,6 @@ describe("approval routes — routine_state kind", () => {
       stateName: "Gate",
       summary: { amount: 900 },
     });
-  });
-
-  it("decide approves a routine_state approval and wakes the run", async () => {
-    const { id, runId } = await insertRoutineApproval();
-    const res = await app.inject({
-      method: "POST",
-      url: `/api/v1/approvals/${id}/decide`,
-      cookies: authed(),
-      headers: csrf,
-      payload: { decision: "approve" },
-    });
-    expect(res.statusCode).toBe(200);
-    expect((await approvals.findById(id))?.status).toBe("approved");
-    expect(wakes).toEqual([
-      expect.objectContaining({ runId, reason: "approval", decision: "approved" }),
-    ]);
-  });
-
-  it("decide denies and wakes with denied", async () => {
-    const { id, runId } = await insertRoutineApproval();
-    await app.inject({
-      method: "POST",
-      url: `/api/v1/approvals/${id}/decide`,
-      cookies: authed(),
-      headers: csrf,
-      payload: { decision: "deny" },
-    });
-    expect((await approvals.findById(id))?.status).toBe("denied");
-    expect(wakes[0]).toMatchObject({ runId, decision: "denied" });
-  });
-
-  it("404s on already-settled approvals", async () => {
-    const { id } = await insertRoutineApproval();
-    await approvals.settle(id, "approved");
-    const res = await app.inject({
-      method: "POST",
-      url: `/api/v1/approvals/${id}/decide`,
-      cookies: authed(),
-      headers: csrf,
-      payload: { decision: "approve" },
-    });
-    expect(res.statusCode).toBe(404);
-    expect(wakes).toHaveLength(0);
   });
 });
 

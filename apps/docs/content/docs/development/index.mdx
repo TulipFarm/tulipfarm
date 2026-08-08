@@ -45,9 +45,12 @@ It asks nothing, and does four things:
    data volume).
 2. Initializes your soul repository at `~/.tulipfarm/soul` — its own git repo, deliberately
    outside the project tree so its commits never touch yours.
-3. Writes `.env.local` with generated `ENCRYPTION_KEY`, `JWT_SECRET`, and
-   `WEBHOOK_SIGNING_SECRET`, plus a `DATABASE_URL` pointing at the container.
-4. Symlinks `.env.local` into `apps/api/` (Turbo runs each task from its package directory).
+3. Creates `~/.tulipfarm/data`, where the API auto-mints worker credentials for local
+   `worker` and `integration-worker` processes.
+4. Writes `.env.local` with generated `ENCRYPTION_KEY`, `JWT_SECRET`, and
+   `WEBHOOK_SIGNING_SECRET`, plus `DATABASE_URL`, `SOUL_PATH`, and `TF_DATA_DIR`.
+5. Symlinks `.env.local` into `apps/api/`, `apps/worker/`, and
+   `apps/integration-worker/` because Turbo runs each task from its package directory.
 
 Confirm the database is up:
 
@@ -70,16 +73,22 @@ pnpm dev
 | --- | --- |
 | API | `http://localhost:4010` |
 | Web UI | `http://localhost:4000` |
+| Worker | `http://localhost:4020` (probe server) |
+| Integration worker | `http://localhost:4030` (probe server) |
 | Docs (this site) | `http://localhost:4020` — `pnpm dev:docs` |
 
-App processes run on the host with hot reload; only Postgres is containerized. Run one side
-alone with `pnpm dev:api` or `pnpm dev:web`.
+App processes run on the host with hot reload; only Postgres is containerized. Run one
+process with `pnpm dev:api`, `pnpm dev:web`, `pnpm dev:worker`, or
+`pnpm dev:integration-worker`. Do not run `pnpm dev:docs` at the same time as the worker:
+both use port `4020`.
 
 Check the API:
 
 ```bash
-curl http://localhost:4010/livez     # process is up
-curl http://localhost:4010/readyz    # database reachable too
+curl http://localhost:4010/livez     # API process is up
+curl http://localhost:4010/readyz    # API database reachable too
+curl http://localhost:4020/readyz    # worker schema floor and consumers ready
+curl http://localhost:4030/readyz    # integration-worker schema floor and consumers ready
 ```
 
 </Step>
@@ -106,8 +115,9 @@ the same [headless seeding](/docs/deploy/headless) path production uses.
 pnpm reset:dev
 ```
 
-Drops and recreates the database, removes `~/.tulipfarm/soul` and `.env.local`, then re-runs
-setup with fresh keys. Stop `pnpm dev` first. Narrower variants:
+Drops and recreates the database, removes `~/.tulipfarm/soul`, `~/.tulipfarm/data`, and
+`.env.local`, then re-runs setup with fresh keys and worker credentials. Stop `pnpm dev`
+first. Narrower variants:
 
 ```bash
 bash scripts/reset-dev.sh --db-only    # database only, keep soul + .env.local

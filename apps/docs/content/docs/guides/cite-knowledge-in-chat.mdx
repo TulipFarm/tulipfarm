@@ -1,43 +1,45 @@
 ---
 title: Cite knowledge in chat
-description: Ground an agent's answer in your knowledge base — read its citations and pin a specific page.
+description: Ask an Agent to answer from Knowledge and inspect the cited pages.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+This guide grounds a chat answer in [Knowledge](/docs/concepts/knowledge). It assumes at
+least one Knowledge space and page exist.
 
-This guide grounds a chat answer in your [knowledge base](/docs/concepts/knowledge). It
-assumes a running instance with at least one knowledge page and an agent that can search
-knowledge — normal chat can. It uses the chat workspace in the web
-UI.
+## Outcome
 
-## Ask, and read the citations
+At the end, the answer includes citations pointing back to the pages it used, or you know
+how to pin a specific page into a turn.
 
-Open a chat and ask a question your knowledge base can answer:
+## Ask a question
+
+Open **Chat** and ask a question your pages can answer:
 
 ```prompt
-What is our refund policy for orders older than 30 days?
+What is our refund policy for orders older than 30 days? Cite the Knowledge
+pages you used.
 ```
 
-The agent searches knowledge, answers from what it finds, and marks each claim it drew
-from a page with an inline citation — `[1]`, `[2]`, and so on. Each marker links to the
-source page, so you can open the exact page a statement came from.
+The Agent searches Knowledge, answers from matching pages, and can include inline
+citations. Each citation opens the page that supported the answer.
 
 <Callout type="info">
-If an answer has no citations, the agent did not draw on a stored page — either nothing
-matched, or it answered from the chat alone. Pin a page (below) to force it to use one.
+Search uses embeddings when an embedding model is configured. Without one, TulipFarm
+falls back to lexical search instead of failing the turn.
 </Callout>
 
-## Pin a specific page
+## Pin a page
 
-To make the agent answer from one page in particular, type `~` in the composer. A
-search-powered menu appears; pick the page you want. It is pinned into that turn, and the
-agent answers from its full content rather than from whatever search happens to return.
-Pin more than one page by repeating `~` for each.
+If you want the Agent to use a specific page, mention or select that page in the chat
+composer before sending the turn. Pinning gives the Agent the page content directly,
+instead of relying only on search ranking.
 
-## Governance pages load on their own
+```prompt
+Using the Refund Policy page, draft a customer-safe answer for an order that was
+delivered 45 days ago.
+```
 
-Some pages are flagged to always load. Those are injected into every agent's turn as
-governance — operating rules and policies the agent sees without searching and without
-your pinning them. You do not need to cite or pin a governance page for the agent to
-follow it. See [Governance knowledge](/docs/concepts/knowledge) for how the injection
-budget works.
+## Check provenance
+
+Open cited pages to review their tags, backlinks, graph context, and revision history. If
+an answer is wrong because a page is stale, edit the page first and ask again.

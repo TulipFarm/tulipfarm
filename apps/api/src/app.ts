@@ -13,7 +13,8 @@ import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import type { IntegrationStore } from "@tulipfarm/storage";
+import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
 import type { ActivityService } from "./activity/service";
 import { postgresProbe, probeHealth, type QueryableProbeTarget } from "./admin/health";
@@ -24,10 +25,11 @@ import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
+import type { UserInviteRepo } from "./auth/invites";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
-import type { UserRepo } from "./auth/users";
+import type { PasswordWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
@@ -40,7 +42,22 @@ import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import {
+  type GitHubInstallDeps,
+  registerGitHubInstallRoutes,
+} from "./integrations/github-install-routes";
+import { registerIntegrationRoutes } from "./integrations/routes";
+import {
+  ensureDefaultSlackRoute,
+  registerSlackBindRoute,
+  type SlackBindDeps,
+} from "./integrations/slack-binding";
+import {
+  type ChannelInternalRouteDeps,
+  registerChannelInternalRoutes,
+} from "./internal/channel-routes";
 import { type InternalTurnRouteDeps, registerInternalTurnRoutes } from "./internal/routes";
+import { registerSurfaceInternalRoutes } from "./internal/surfaces-routes";
 import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
@@ -56,14 +73,13 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
-import type { RoutineRoutesDeps } from "./routines/routes";
-import { registerRoutineRoutes } from "./routines/routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
+import type { BundledIntegration } from "./soul/integrations/bundled";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
@@ -80,6 +96,9 @@ import { registerTriggerRoutes, type TriggerInvokeDeps } from "./triggers/routes
 export interface AppOptions {
   sessionStore?: SessionStore;
   userRepo?: UserRepo;
+  userAdminRepo?: UserAdminRepo;
+  passwordWriteRepo?: PasswordWriteRepo;
+  userInviteRepo?: UserInviteRepo;
   tokenRepo?: TokenRepo;
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   rateLimiter?: RateLimiter;
@@ -88,6 +107,21 @@ export interface AppOptions {
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
+  bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
+  /** Slack -> Agent routing-table bind route. Requires the Channel integration store + business id. */
+  slackBind?: {
+    integrations: IntegrationStore;
+    businessId: string;
+    /** Test-only override for the live Slack auth.test call. */
+    verifyBotToken?: SlackBindDeps["verifyBotToken"];
+  };
+  /** GitHub App install flow. Requires the Channel integration store + business id. */
+  githubInstall?: Pick<
+    GitHubInstallDeps,
+    "integrations" | "secretsService" | "businessId" | "http" | "soulRepositories"
+  >;
+  /** Live GitHub-install check backing per-turn tool visibility on the conversation debug route. */
+  githubStatus?: { integrations: IntegrationStore; businessId: string };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -113,8 +147,6 @@ export interface AppOptions {
   activityService?: ActivityService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
-  /** Routine engine surface (v0.11): registry + runs repo + trigger service + enqueuers. */
-  routines?: RoutineRoutesDeps;
   /** Canonical proposal-only Routine authoring and simulation boundary. */
   routineAuthoring?: CanonicalRoutineAuthoringService;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
@@ -122,6 +154,13 @@ export interface AppOptions {
   routineApprovals?: RoutineApprovalService;
   /** Tool approvals as durable kernel waits — a decision signals the wait its Run parked on. */
   toolApprovals?: ToolApprovalService;
+  /**
+   * What `apps/integration-worker` calls back into for the Channel ports it cannot implement
+   * locally (identity resolution, Run minting, reply reading, approval decisions). Built per-app
+   * rather than eagerly because identity resolution logs through Fastify's logger, which does not
+   * exist until `buildApp` has run.
+   */
+  channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
   /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
   ingress?: IngressRoutesDeps;
   /** Trigger ingress: the canonical signed /hooks/:provider/:trigger webhook receiver. */
@@ -228,7 +267,7 @@ export async function buildApp(opts: AppOptions = {}) {
     credentials: true,
     // Without explicit methods the preflight rejects PUT/DELETE — the write verbs the SPA uses for
     // secrets, resources, and config. Custom headers (CSRF echo + optimistic-concurrency If-Match).
-    methods: ["GET", "HEAD", "POST", "PUT", "DELETE", "OPTIONS"],
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
       "Authorization",
@@ -250,11 +289,21 @@ export async function buildApp(opts: AppOptions = {}) {
   await app.register(cookie);
 
   // Relax CSP for the Scalar UI page so it can load its scripts and styles.
+  // Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot
+  // load arbitrary external scripts (SEC-AUDIT H-1).
   app.addHook("onSend", async (req, reply) => {
     if (req.url.startsWith("/docs")) {
       reply.header(
         "content-security-policy",
-        "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:"
+        [
+          "default-src 'self'",
+          "script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+          "style-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'",
+          "img-src 'self' data: https://cdn.jsdelivr.net",
+          "font-src 'self' data: https://cdn.jsdelivr.net",
+          "connect-src 'self'",
+          "frame-ancestors 'none'",
+        ].join("; ")
       );
     } else if (serveSpa && !isAppApiPath(req.url)) {
       // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
@@ -352,6 +401,9 @@ export async function buildApp(opts: AppOptions = {}) {
     registerAuthRoutes(app, opts.sessionStore, opts.userRepo, opts.tokenRepo, {
       rateLimiter: opts.rateLimiter,
       ...(opts.identity && { identity: opts.identity }),
+      ...(opts.userAdminRepo && { userAdminRepo: opts.userAdminRepo }),
+      ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
+      ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
     });
     const requireAuth = makeRequireAuth({
       store: opts.sessionStore,
@@ -359,9 +411,11 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
-    // Setup status: always registered so the web app gets an explicit 200 in all boot modes.
+    // Setup status: always registered so the web app gets an explicit 200 in all boot modes. Read
+    // off `gitSync.path` (not `process.env.SOUL_PATH`) so this keeps working once boot resolves a
+    // per-business path under `SOUL_ROOT` instead of the legacy flat `SOUL_PATH`.
     // In headless boot the wizard step routes below are absent (404), but status is always reachable.
-    const soulPath = process.env.SOUL_PATH;
+    const soulPath = opts.gitSync?.path;
     if (soulPath) {
       registerSetupStatusRoute(app, {
         userRepo: opts.userRepo,
@@ -434,6 +488,40 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.rateLimiter
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
+        if (opts.secretsService) {
+          const slackBindDeps: SlackBindDeps | undefined = opts.slackBind
+            ? {
+                soulLoader: opts.soulLoader,
+                secretsService: opts.secretsService,
+                integrations: opts.slackBind.integrations,
+                businessId: opts.slackBind.businessId,
+                verifyBotToken: opts.slackBind.verifyBotToken,
+                requireAuth,
+              }
+            : undefined;
+          registerIntegrationRoutes(
+            app,
+            opts.soulLoader,
+            opts.gitSync,
+            opts.secretsService,
+            opts.bundledIntegrations ?? new Map(),
+            requireAuth,
+            async (name) => {
+              if (name === "slack" && slackBindDeps) {
+                await ensureDefaultSlackRoute(slackBindDeps);
+              }
+            },
+            opts.githubInstall
+              ? {
+                  integrations: opts.githubInstall.integrations,
+                  businessId: opts.githubInstall.businessId,
+                }
+              : undefined
+          );
+          if (slackBindDeps) {
+            registerSlackBindRoute(app, slackBindDeps);
+          }
+        }
         const knowledgeService = opts.knowledgeService;
         registerOnboardingRoutes(app, opts.soulLoader, requireAuth, {
           kvService: opts.kvService,
@@ -465,6 +553,16 @@ export async function buildApp(opts: AppOptions = {}) {
           }
         }
       }
+    }
+    if (opts.githubInstall) {
+      registerGitHubInstallRoutes(app, {
+        integrations: opts.githubInstall.integrations,
+        secretsService: opts.githubInstall.secretsService,
+        businessId: opts.githubInstall.businessId,
+        http: opts.githubInstall.http,
+        soulRepositories: opts.githubInstall.soulRepositories,
+        requireAuth,
+      });
     }
     if (opts.resourceRepoFactory && opts.counterStore && opts.soulLoader) {
       registerResourceRoutes(
@@ -498,6 +596,7 @@ export async function buildApp(opts: AppOptions = {}) {
           toolRegistry,
           bundledSkills: opts.bundledSkills,
           disabledBundledSkills: opts.disabledBundledSkills,
+          githubStatus: opts.githubStatus,
         },
         requireAuth
       );
@@ -538,16 +637,6 @@ export async function buildApp(opts: AppOptions = {}) {
           approvals: opts.approvalsRepo,
           ...(opts.toolApprovals ? { toolApprovals: opts.toolApprovals } : {}),
           ...(opts.routineApprovals ? { routineApprovals: opts.routineApprovals } : {}),
-          ...(opts.routines
-            ? {
-                routines: {
-                  enqueueWake: (job) => {
-                    if (!opts.routines) return Promise.resolve();
-                    return opts.routines.enqueuers.enqueueWake(job);
-                  },
-                },
-              }
-            : {}),
         },
         requireAuth
       );
@@ -558,6 +647,24 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.internalTurns) {
       registerInternalTurnRoutes(app, opts.internalTurns, requireAuth);
     }
+    if (opts.channels) {
+      const channelDeps = opts.channels(app.log);
+      registerChannelInternalRoutes(app, channelDeps, requireAuth);
+      if (channelDeps.surfaceActionStore) {
+        registerSurfaceInternalRoutes(
+          app,
+          {
+            identity: channelDeps.identity,
+            actions: channelDeps.surfaceActionStore,
+            store: channelDeps.store,
+            invocations: channelDeps.invocations,
+            runDeliveries: channelDeps.runDeliveries,
+            ...(opts.guardrailsService ? { guardrails: opts.guardrailsService } : {}),
+          },
+          requireAuth
+        );
+      }
+    }
     if (opts.runReplay) {
       registerRunReplayRoutes(app, opts.runReplay, requireAuth, opts.rateLimiter);
     }
@@ -566,9 +673,6 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
-    }
-    if (opts.routines) {
-      registerRoutineRoutes(app, opts.routines, requireAuth);
     }
     // The retrieval spine is optional — only the page-search branch needs it (index.ts wires it in
     // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk

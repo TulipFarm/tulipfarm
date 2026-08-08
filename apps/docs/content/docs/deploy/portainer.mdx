@@ -91,6 +91,6 @@ have a down-path.
 
 ## Do not scale it
 
-Leave the `app` service at **one replica**; Portainer's scale control will corrupt the soul
-git tree and double-run scheduled jobs. See
-[Deploy](/docs/deploy#what-every-deployment-needs).
+Leave `app`, `worker`, and `integration-worker` at **one replica each**. Portainer's scale
+control can corrupt the soul git tree on `app` or duplicate maintenance work on `worker`.
+See [Deploy](/docs/deploy#what-every-deployment-needs).

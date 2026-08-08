@@ -1,5 +1,7 @@
 import { config as loadEnv } from "dotenv";
+import { createSlackChannelLoops, watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
+import { waitForDataDirEnv } from "./data-dir";
 import { connectPg } from "./db";
 import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
@@ -15,13 +17,42 @@ const logger = {
 /**
  * Composition root for the integration worker.
  *
- * Boot skeleton only: proves the process shape (schema-floor wait, `/livez`+`/readyz`, drain on
- * `SIGTERM`) before any dispatch logic exists. `loops` starts empty — no consumer (Slack Socket
- * Mode, Telegram long-poll, delivery retry) is registered yet; each lands in its own PR and only
- * has to push onto this array, not touch the boot sequence.
+ * Boot skeleton proving the process shape (schema-floor wait, `/livez`+`/readyz`, drain on
+ * `SIGTERM`), plus the Slack Socket Mode worker and its delivery poll loop (`channels/index.ts`)
+ * pushed onto `loops`. Telegram long-poll and other future channels land the same way — push onto
+ * this array, don't touch the boot sequence.
  */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
+  // Retried rather than read once: Turbo starts the API and this process concurrently in `pnpm
+  // dev`, and the API needs a database round trip before the file is (re)written — most visibly
+  // right after `reset-dev.sh`, where the old file's credential no longer matches the wiped DB.
+  // `verify` closes a narrower gap than presence: a stale file from *before* the reset can already
+  // be non-empty on this process's very first read, satisfying the missing-keys check moments
+  // before the API overwrites it with the real value — so presence alone is not proof of validity.
+  const fromVolume = await waitForDataDirEnv({
+    attempts: 15,
+    delayMs: 1_000,
+    onRetry: (missing, attempt) => {
+      logger.info(
+        `Waiting for ${missing.join(", ")} on the data volume (attempt ${attempt}/15)...`
+      );
+    },
+    verify: async (env) => {
+      if (!env.INTEGRATION_WORKER_API_CREDENTIAL || !env.INTERNAL_API_URL) return true;
+      try {
+        const response = await fetch(`${env.INTERNAL_API_URL}/api/v1/internal/llm/config`, {
+          headers: { authorization: `Bearer ${env.INTEGRATION_WORKER_API_CREDENTIAL}` },
+        });
+        return response.status !== 401;
+      } catch {
+        return false;
+      }
+    },
+  });
+  if (fromVolume.length > 0) {
+    logger.info(`Read ${fromVolume.join(", ")} from the data volume.`);
+  }
 
   const config = loadConfig();
   const pool = await connectPg(config.databaseUrl);
@@ -42,6 +73,25 @@ export async function main(): Promise<void> {
   const controller = new AbortController();
   const loops: DrainableLoop[] = [];
 
+  const slackDeps = {
+    businessId: config.businessId,
+    pool,
+    internalApiUrl: config.internalApiUrl,
+    internalApiCredential: config.internalApiCredential,
+    signal: controller.signal,
+    log: logger,
+  };
+  const slackLoops = await createSlackChannelLoops(slackDeps);
+  if (slackLoops.length > 0) {
+    loops.push(...slackLoops);
+  } else {
+    // Slack isn't connected yet: keep polling in the background so connecting it later via the
+    // web UI doesn't require restarting this process.
+    loops.push(
+      watchForSlackChannelCredential(slackDeps, (readyLoops) => loops.push(...readyLoops))
+    );
+  }
+
   const probeServer = await startProbeServer({
     port: config.port,
     database: pool,
@@ -60,13 +110,16 @@ export async function main(): Promise<void> {
     serving = false;
     logger.info(`integration-worker draining (${reason})`);
 
+    // Release the port immediately so a restart right after Ctrl+C doesn't hit EADDRINUSE
+    // while the (up to drainTimeoutMs) drain below is still running.
+    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
+
     const outcome = await drain({
       loops,
       abort: () => controller.abort(),
       timeoutMs: config.drainTimeoutMs,
     });
 
-    await new Promise<void>((resolve) => probeServer.close(() => resolve()));
     await pool.end();
 
     if (outcome.status === "drained") {

@@ -36,19 +36,27 @@ export function validateEnvironment(
   env: Record<string, string | undefined> = process.env,
   exit: (code: number) => void = process.exit
 ): void {
-  const required = [
-    "DATABASE_URL",
-    "SOUL_PATH",
-    "ENCRYPTION_KEY",
-    "JWT_SECRET",
-    "WEBHOOK_SIGNING_SECRET",
-  ];
+  const required = ["DATABASE_URL", "ENCRYPTION_KEY", "JWT_SECRET", "WEBHOOK_SIGNING_SECRET"];
   const missing = required.filter((key) => !env[key]);
 
   if (missing.length > 0) {
     console.error(`❌ Missing required environment variables: ${missing.join(", ")}`);
     console.error("📋 Copy .env.local.example to .env.local and generate secrets:");
     console.error("   openssl rand -base64 32");
+    exit(1);
+  }
+
+  // Exactly one of SOUL_PATH (legacy single-tenant checkout, still how local dev works) or
+  // SOUL_ROOT (per-business checkouts at <root>/<businessId>/soul, see resolveSoulPath) must be
+  // set — the boot sequence needs a soul-location strategy either way.
+  if (!env.SOUL_PATH && !env.SOUL_ROOT) {
+    console.error("❌ Missing required environment variable: SOUL_PATH or SOUL_ROOT");
+    console.error("📋 Copy .env.local.example to .env.local and generate secrets:");
+    console.error("   openssl rand -base64 32");
+    exit(1);
+  }
+  if (env.SOUL_PATH && env.SOUL_ROOT) {
+    console.error("❌ SOUL_PATH and SOUL_ROOT are mutually exclusive — set only one");
     exit(1);
   }
 
@@ -83,13 +91,8 @@ export function validateEnvironment(
 }
 
 export function logEnvironmentStatus(logger: { info: (msg: string) => void }): void {
-  const vars = [
-    "DATABASE_URL",
-    "SOUL_PATH",
-    "ENCRYPTION_KEY",
-    "JWT_SECRET",
-    "WEBHOOK_SIGNING_SECRET",
-  ];
+  const vars = ["DATABASE_URL", "ENCRYPTION_KEY", "JWT_SECRET", "WEBHOOK_SIGNING_SECRET"];
   const status = vars.map((name) => `${name}: ✓ set`).join(", ");
-  logger.info(`Environment validated — ${status}`);
+  const soulVar = process.env.SOUL_PATH ? "SOUL_PATH" : "SOUL_ROOT";
+  logger.info(`Environment validated — ${status}, ${soulVar}: ✓ set`);
 }

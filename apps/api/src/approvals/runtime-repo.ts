@@ -116,6 +116,26 @@ export class ApprovalsRepo {
     return rows.length > 0 ? rowToApproval(rows[0]) : null;
   }
 
+  /**
+   * The pending Tool approval currently open for one Run, if any.
+   *
+   * A Run parks on at most one tool-call approval at a time, so the newest pending row for the
+   * Run is the one it's waiting on — older rows for the same Run are already settled.
+   */
+  async findPendingByRun(runId: string): Promise<ApprovalRow | null> {
+    const { rows } = await this.db.query(
+      `SELECT id, kind, status, payload, expires_at, created_at, resolved_at
+       FROM approvals
+       WHERE kind = 'tool_call'
+         AND status = 'pending'
+         AND payload->>'runId' = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [runId]
+    );
+    return rows.length > 0 ? rowToApproval(rows[0]) : null;
+  }
+
   async findById(id: string): Promise<ApprovalRow | null> {
     const { rows } = await this.db.query(
       `SELECT id, kind, status, payload, expires_at, created_at, resolved_at

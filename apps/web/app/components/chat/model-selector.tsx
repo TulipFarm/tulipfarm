@@ -10,9 +10,14 @@ type Tier = "quick" | "standard" | "complex";
 // The three pickable tiers, in ascending capability/intensity. `level` drives the signal-bar icon;
 // `blurb` explains what the tier means. (`auto` exists in the backend selector but isn't offered here.)
 const TIERS: { id: Tier; label: string; level: 1 | 2 | 3; blurb: string }[] = [
-  { id: "quick", label: "quick", level: 1, blurb: "Fast & low-cost — short answers, simple tasks" },
-  { id: "standard", label: "standard", level: 2, blurb: "Balanced default for everyday chat" },
-  { id: "complex", label: "complex", level: 3, blurb: "Deepest reasoning — hard, multi-step work" },
+  { id: "quick", label: "Quick", level: 1, blurb: "Fast and low-cost for short, simple tasks" },
+  { id: "standard", label: "Standard", level: 2, blurb: "Balanced default for everyday Chat" },
+  {
+    id: "complex",
+    label: "Complex",
+    level: 3,
+    blurb: "Deeper reasoning for hard, multi-step work",
+  },
 ];
 
 // The pickable tiers as plain ids (mirrors TIERS) for narrowing arbitrary model strings.
@@ -148,12 +153,12 @@ export function ModelSelector({
         disabled={disabled}
         onClick={toggle}
         className={cn(
-          "inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 font-medium text-foreground transition-colors",
-          "outline-none focus-visible:border-primary disabled:opacity-50 hover:border-primary/60"
+          "inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-background px-2.5 font-medium text-foreground transition",
+          "outline-none hover:border-primary/60 active:translate-y-px focus-visible:border-primary disabled:opacity-50"
         )}
       >
         <SignalBars level={current.level} />
-        <span className="capitalize">{current.label}</span>
+        <span>{current.label}</span>
         <ChevronDown aria-hidden className="size-3 opacity-70" />
       </button>
 
@@ -179,7 +184,7 @@ export function ModelSelector({
                       setOpen(false);
                     }}
                     className={cn(
-                      "flex w-full flex-col gap-0.5 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-secondary",
+                      "flex w-full flex-col gap-0.5 rounded-sm px-2 py-2 text-left transition hover:bg-secondary active:translate-y-px",
                       active && "bg-secondary"
                     )}
                   >

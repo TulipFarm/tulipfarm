@@ -53,7 +53,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 // Write client (POST/PUT). Mirrors apiGet's cookie-first auth, adds a JSON body, the optional
 // `If-Match` concurrency header, and the CSRF echo header (no-op when authed by Bearer token).
 export async function apiWrite<T>(
-  method: "POST" | "PUT",
+  method: "POST" | "PUT" | "PATCH",
   path: string,
   body: unknown,
   ifMatch?: number
@@ -185,26 +185,72 @@ export async function readError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message, path);
 }
 
-export type SessionUser = { id: string; email: string; role: string };
+// `invited` is an account that exists but has no password yet: it holds an outstanding invite link
+// and cannot authenticate until that link is redeemed.
+export type UserStatus = "active" | "invited" | "disabled";
+
+export type SessionUser = {
+  id: string;
+  email: string;
+  role: string;
+  status: UserStatus;
+};
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the
-// CSRF cookie. No Bearer/CSRF headers needed — pre-login there is no session, so the CSRF hook is a
-// no-op. A 401 throws ApiError("invalid credentials"); the form surfaces err.message.
+// CSRF cookie. A 401 throws ApiError("invalid credentials"); the form surfaces err.message.
 export async function login(email: string, password: string): Promise<SessionUser> {
-  const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
-    method: "POST",
-    credentials: "include",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw await readError(res);
-  return ((await res.json()) as { user: SessionUser }).user;
+  return (await postPreSession<{ user: SessionUser }>("/api/v1/auth/login", { email, password }))
+    .user;
 }
 
 // Current authenticated user (cookie session or dev Bearer token). Throws ApiError(401) when
 // unauthenticated — the _app gate uses that to redirect to /login.
 export async function getSession(): Promise<SessionUser> {
   return (await apiGet<{ user: SessionUser }>("/api/v1/auth/session")).user;
+}
+
+// Change the current user's password. The current one is required — a stolen session must not be
+// able to lock the owner out. Rotates the session, so the caller stays signed in on the new one.
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<SessionUser> {
+  return (
+    await apiWrite<{ user: SessionUser }>("POST", "/api/v1/auth/change-password", {
+      currentPassword,
+      newPassword,
+    })
+  ).user;
+}
+
+// Login, invite preview, and invite accept all authenticate a caller who has no session yet, so
+// they skip the CSRF echo `apiWrite` adds: there is no session-bound token to send, and the API
+// exempts these paths for that reason (see `auth/csrf.ts`). Bodies carry the credential, so a
+// token never reaches a query string.
+async function postPreSession<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    credentials: "include",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await readError(res);
+  return (await res.json()) as T;
+}
+
+// Resolves an invite link to the account it will set a password for, without spending it.
+export async function previewInvite(token: string): Promise<{ email: string; expiresAt: string }> {
+  return postPreSession("/api/v1/auth/invites/preview", { token });
+}
+
+// Redeems an invite link: sets the password, activates the account, and signs in.
+export async function acceptInvite(token: string, password: string): Promise<SessionUser> {
+  return (
+    await postPreSession<{ user: SessionUser }>("/api/v1/auth/invites/accept", {
+      token,
+      password,
+    })
+  ).user;
 }
 
 // Destroy the session + clear the cookie. Best-effort: ignores the response (logout is idempotent).

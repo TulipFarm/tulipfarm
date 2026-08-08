@@ -12,8 +12,19 @@ export interface GuardContext {
   autonomy?: string;
 }
 
+export type FailMode = "open" | "closed";
+
 export interface Guard<T> {
   name: string;
+  /**
+   * How the pipeline treats a timeout or thrown error from this guard.
+   *
+   * - `"open"` (default): skip the guard (treat as `pass`) — availability wins.
+   * - `"closed"`: treat the failure as a `block` — safety wins. Use for
+   *   critical guards (prompt injection, PII filters) where a missed check
+   *   is worse than a stalled turn.
+   */
+  failMode?: FailMode;
   run(input: T, ctx: GuardContext): Promise<Verdict<T>> | Verdict<T>;
 }
 
@@ -53,6 +64,11 @@ export async function runStage<T>(
     try {
       verdict = await Promise.race([Promise.resolve(g.run(value, ctx)), timeout]);
     } catch (err) {
+      if (g.failMode === "closed") {
+        log.warn({ guard: g.name, err }, "guardrail guard errored — blocking (failMode: closed)");
+        clearTimeout(timer);
+        return { blocked: true, guard: g.name, reason: "guard_error" };
+      }
       log.warn({ guard: g.name, err }, "guardrail guard skipped");
       continue;
     } finally {
@@ -60,6 +76,13 @@ export async function runStage<T>(
     }
 
     if (verdict === TIMEOUT) {
+      if (g.failMode === "closed") {
+        log.warn(
+          { guard: g.name, timeoutMs: GUARD_TIMEOUT_MS },
+          "guardrail guard timed out — blocking (failMode: closed)"
+        );
+        return { blocked: true, guard: g.name, reason: "guard_timeout" };
+      }
       log.warn({ guard: g.name, timeoutMs: GUARD_TIMEOUT_MS }, "guardrail guard skipped");
       continue;
     }

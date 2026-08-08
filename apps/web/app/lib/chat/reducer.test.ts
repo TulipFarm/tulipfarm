@@ -19,9 +19,15 @@ test("Surface revisions replace the matching Artifact in place", () => {
     audience: ["user:1"],
     classification: "internal",
   });
-  let state = chatReducer(initialChatState, { type: "surface", data: { artifact: first } });
+  let state = chatReducer(initialChatState, {
+    type: "surface",
+    data: { artifactId: first.id, artifact: first },
+  });
   const second = { ...first, revision: 2, props: { label: "Done" } };
-  state = chatReducer(state, { type: "surface", data: { artifact: second } });
+  state = chatReducer(state, {
+    type: "surface",
+    data: { artifactId: second.id, artifact: second },
+  });
   expect(state.messages[0]?.parts).toEqual([
     {
       kind: "surface",

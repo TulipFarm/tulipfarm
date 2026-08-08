@@ -16,6 +16,7 @@ export const SoulManifestSchema = Type.Object(
     soulFormatVersion: Type.Optional(Type.Number()),
     businessName: Type.Optional(Type.String()),
     businessDescription: Type.Optional(Type.String()),
+    businessWebsite: Type.Optional(Type.String()),
     setupComplete: Type.Optional(Type.Boolean()),
     gitRemoteUrl: Type.Optional(Type.String()),
     llm: Type.Optional(LlmConfigSchema),

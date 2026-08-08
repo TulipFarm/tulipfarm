@@ -1,112 +1,52 @@
 ---
 title: First-run setup and boot modes
-description: How TulipFarm decides whether to open the setup wizard or seed from environment variables.
+description: How TulipFarm opens the setup wizard or seeds a fresh instance from environment variables.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
-
-When TulipFarm starts for the first time it has no admin and no configuration. It needs
-to reach a usable state before it can serve requests. There are two paths to get there:
-**wizard mode** (the default) and **headless mode** (for automated deployments).
-
-## How the instance decides which mode to use
-
-At startup the API checks three signals, in order:
-
-1. **Environment variables** — if `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `LLM_API_KEY` are
-   all set, the instance enters headless mode. It seeds the admin account and LLM key from
-   those values and writes `setupComplete: true` to `soul.yaml`. The web wizard never
-   appears.
-
-2. **`setupComplete` in `soul.yaml`** — if the flag is `true` and the env check did not
-   trigger, setup is already done. Normal boot proceeds.
-
-3. **User count** — if no users exist in the database and no env vars are set, the wizard
-   is still open. The instance registers the setup-wizard routes and returns
-   `needsSetup: true` from `GET /api/v1/setup/status`.
-
-The result of the first check that resolves to "done" is cached for the life of the
-process so subsequent requests never re-query the database or filesystem.
-
-<Callout type="info">
-`GET /api/v1/setup/status` is always registered, regardless of boot mode. The web client
-polls it on load to decide whether to redirect to `/setup` or to the main app.
-</Callout>
+A fresh TulipFarm instance needs an admin user, a business profile, and usually an LLM provider
+before it is useful. Setup can happen through the web wizard or through environment-driven headless
+bootstrap.
 
 ## Wizard mode
 
-Wizard mode is the default for `curl | bash` self-hosted installs and local development.
-No environment variables need to be set. When `GET /api/v1/setup/status` returns
-`needsSetup: true`, the web app redirects to `/setup` and walks the operator through
-four steps:
+Wizard mode is the default when no users exist and no headless admin seed is present — the shape
+`curl | bash` self-hosted installs and local development land in, with no environment variables set.
+When `GET /api/v1/setup/status` returns `needsSetup: true`, the web app redirects to `/setup` and
+walks the operator through three steps: the first admin account, the business profile, and an
+optional LLM provider.
 
-1. **Admin account** — creates the first user and logs them in. The route locks once any
-   user exists, so it cannot be used to create a second admin.
-2. **Business profile** — stores `businessName` and `businessDescription` in `soul.yaml`.
-3. **LLM provider** — stores the provider credentials (API key, resource name, or base URL
-   depending on the provider) and writes a default `llm.config.yaml` with all three tiers
-   pointing to the chosen provider and model. This step can be skipped and configured later
-   in **Settings → LLM Config**.
-4. **Soul backup** — sets a git remote URL and optional credential so the soul syncs to
-   a private repository. The instance clones/pulls the remote immediately on submit — no
-   restart required. This step can also be skipped.
+The admin step creates the first user and logs them in; it stays open only until a user exists, so
+it cannot mint a second admin. The business step records `businessName`, `businessDescription`, and
+the optional `businessWebsite` in `soul.yaml`, and all three become static business context in every
+Agent's system prompt. That profile is not working [memory](/docs/concepts/memory). The LLM step
+stores the provider credentials as [secrets](/docs/concepts/secrets) and writes a default
+`llm.config.yaml` with all three tiers pointing at the chosen provider and model; skipping it leaves
+that to **Settings → LLM Config**.
 
-After step 4, the wizard calls `POST /api/v1/setup/complete`, which writes
-`setupComplete: true` to `soul.yaml`. Subsequent wizard-step routes return `403`.
+Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.
+The wizard step routes return `403` from then on, while `GET /api/v1/setup/status` remains available
+so the web app can decide whether setup is still open.
+
+<Callout type="info">
+Soul git backup is not part of the wizard. Configure the remote after setup in
+**Settings → Soul**, or seed it at boot with `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL`.
+</Callout>
 
 ## Headless mode
 
-Headless mode is designed for container platforms (Cloud Run, Fly.io, Azure App Service,
-Kubernetes) where all configuration is injected as environment variables and no browser
-interaction is possible.
+Headless bootstrap is for deployments where configuration is injected before the first boot.
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` seed the first admin when no users exist. Supplying `LLM_API_KEY`
+completes the full headless seed by storing the default provider key as well. In production,
+admin credentials without `LLM_API_KEY` are refused so the instance does not start half-configured.
 
-Set all three required variables:
+`BUSINESS_NAME` and related business environment values can seed the Soul profile. The bootstrap is
+idempotent: once any user exists, it does not create another admin.
 
-| Variable | Purpose |
-|---|---|
-| `ADMIN_EMAIL` | Email for the first admin account. |
-| `ADMIN_PASSWORD` | Password for the first admin account. |
-| `LLM_API_KEY` | API key for the default LLM provider (`anthropic` unless `LLM_PROVIDER=openai`). |
+## Recovery shape
 
-On the first boot with these variables present, the instance:
+The persistent setup marker is in the Soul, but the database still matters. If `soul.yaml` is
+restored from an old backup without `setupComplete` and users already exist, the instance treats
+setup as complete rather than reopening first-admin creation. If the database is lost, users,
+Records, Knowledge, Runs, secrets, and identity are lost even if the Soul survives.
 
-1. Creates the admin account.
-2. Stores the LLM API key in the secrets store.
-3. Optionally writes `businessName`/`businessDescription` to `soul.yaml` if
-   `BUSINESS_NAME` is set.
-4. Writes `setupComplete: true` to `soul.yaml`.
-
-The operation is idempotent. If the admin already exists (a restart of a running instance),
-the seed step is skipped.
-
-<Callout type="warn">
-In production (`NODE_ENV=production`), setting `ADMIN_EMAIL` and `ADMIN_PASSWORD` without
-`LLM_API_KEY` causes the API to refuse to start with a clear error message. This prevents
-a silently half-configured instance. Outside production (local dev), the partial combination
-is allowed: the admin is seeded and you configure LLM credentials later via **Settings**.
-</Callout>
-
-## The `setupComplete` flag
-
-`soul.yaml` holds a `setupComplete: true` key once setup is done. This is the persistent,
-cross-restart signal that the wizard has run. The key is written by:
-
-- `POST /api/v1/setup/complete` (final wizard step), or
-- `bootstrapFromEnv` (headless seeding on first boot).
-
-Nothing else writes it. If you need to re-run the wizard on an existing instance, you must
-manually remove the key from `soul.yaml` and delete all users from the database.
-
-### Recovery when `soul.yaml` is lost
-
-If the soul directory is deleted or restored from a backup that predates setup, `soul.yaml`
-will not have `setupComplete`. The instance falls back to the user-count check: if users
-exist in the database, setup is treated as complete and normal boot proceeds. On the next
-restart a single database query runs to confirm this; the result is then cached for the
-process lifetime.
-
-<Callout type="info">
-The soul directory is the right thing to back up regularly. Losing `soul.yaml` while the
-database is intact is recoverable; losing the database is not. See [Soul](/docs/concepts/soul)
-for backup options.
-</Callout>
+See [Back up and restore](/docs/guides/back-up-and-restore) for operational guidance.

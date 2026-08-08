@@ -1,4 +1,11 @@
 {
   "title": "Reference",
-  "pages": ["environment-variables", "commands"]
+  "pages": [
+    "index",
+    "environment-variables",
+    "commands",
+    "api",
+    "agent-tools",
+    "roles-and-permissions"
+  ]
 }

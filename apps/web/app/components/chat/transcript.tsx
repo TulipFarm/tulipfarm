@@ -26,10 +26,11 @@ function messageText(message: ChatMessage): string {
 // Shared action-row chrome. `toolbarBase` keeps the layout; visibility (opacity) is applied by the
 // caller so the assistant row can stay visible once a vote is active while un-voted rows hover-gate.
 const toolbarBase =
-  "flex items-center gap-1 pt-1 text-xs text-muted-foreground transition-opacity duration-150 focus-within:opacity-100 group-hover:opacity-100";
-const toolbar = `${toolbarBase} opacity-0`;
+  "flex items-center gap-1 pt-1 text-xs text-muted-foreground opacity-100 transition-opacity duration-150 focus-within:opacity-100 sm:opacity-0 sm:group-hover:opacity-100";
+const toolbar = toolbarBase;
 // `active:scale-90` gives a press cue on click; `transition` (not just colors) animates the scale.
-const iconBtn = "rounded-sm p-1 transition hover:bg-accent hover:text-foreground active:scale-90";
+const iconBtn =
+  "inline-flex size-10 items-center justify-center rounded-md transition hover:bg-accent hover:text-foreground active:scale-90 sm:size-7";
 
 // A compact icon button for a message action, with a styled tooltip on hover/focus. `active` (toggle
 // controls only) renders aria-pressed and a ruby tint; the label is the accessible name + tooltip.
@@ -184,14 +185,14 @@ function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: M
   const text = messageText(message);
 
   return (
-    <div className="group flex flex-col items-end gap-1">
-      <div className="max-w-[80%] rounded-lg bg-muted px-3.5 py-2 text-sm text-foreground [&_:first-child]:mt-0 [&_:last-child]:mb-0">
+    <article aria-label="Your message" className="group flex flex-col items-end gap-1">
+      <div className="max-w-[90%] rounded-lg bg-secondary px-3.5 py-2.5 text-sm leading-6 text-foreground sm:max-w-[78%] [&_:first-child]:mt-0 [&_:last-child]:mb-0">
         <MarkdownView mentions={mentions}>{text}</MarkdownView>
       </div>
       <div className={`${toolbar} justify-end`}>
         <CopyButton text={text} />
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -238,7 +239,7 @@ function Message({
   // Regenerate re-runs the last turn — only offer it on the latest, finished assistant reply.
   const canRegenerate = isLast && status === "idle" ? onRegenerate : undefined;
   return (
-    <div className="group flex flex-col gap-2">
+    <article aria-label="Assistant response" className="group flex flex-col gap-2">
       {message.parts.map((part, i) => (
         <MessagePartView
           key={partKey(part, i)}
@@ -258,7 +259,7 @@ function Message({
           onFeedback={onFeedback}
         />
       ) : null}
-    </div>
+    </article>
   );
 }
 
@@ -310,7 +311,7 @@ export function Transcript({
 
   return (
     <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-7 px-4 py-7 sm:px-6 sm:py-9">
         {messages.map((m, i) => (
           <Message
             key={m.id}

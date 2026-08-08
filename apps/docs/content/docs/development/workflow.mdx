@@ -61,9 +61,11 @@ pnpm exec vitest run apps/api/src/app.test.ts   # one file
 
 | Path | What |
 | --- | --- |
-| `apps/api` | Fastify API. PostgreSQL, migration-on-boot, the soul git store, in-process workers. |
+| `apps/api` | Fastify API. PostgreSQL, migration-on-boot, the soul git store, built SPA serving in production. |
 | `apps/web` | Remix + React web UI. |
-| `apps/docs` | This documentation site (Fumadocs, static export). |
+| `apps/worker` | Durable Run dispatch, wait sweeping, outbox delivery, cron, and maintenance consumers. |
+| `apps/integration-worker` | Integration ingress, sync, delivery, retries, and reconciliation. |
+| `apps/docs` | This documentation site (Fumadocs, static export; dev server also uses port `4020`). |
 | `packages/*` | Shared libraries — `llm`, `soul`, `schema`, `secrets`, `surface`, `ui`, `types`, and more. |
 | `scripts/` | `setup-dev.sh`, `reset-dev.sh`, and the installer. |
 

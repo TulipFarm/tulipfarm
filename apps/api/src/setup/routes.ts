@@ -7,6 +7,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { sessionCookieOptions } from "../auth/cookie-security";
 import { setCsrfCookie } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
+import { MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH, validatePassword } from "../auth/passwords";
 import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
@@ -150,7 +151,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           required: ["email", "password"],
           properties: {
             email: { type: "string", format: "email" },
-            password: { type: "string", minLength: 8 },
+            password: {
+              type: "string",
+              minLength: MIN_PASSWORD_LENGTH,
+              maxLength: MAX_PASSWORD_LENGTH,
+            },
           },
         },
         response: {
@@ -164,10 +169,12 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       const body = (req.body ?? {}) as { email?: unknown; password?: unknown };
       const email = typeof body.email === "string" ? body.email : "";
       const password = typeof body.password === "string" ? body.password : "";
-      if (!email || password.length < 8) {
-        return reply
-          .code(400)
-          .send({ error: "email and a password of at least 8 characters are required" });
+      if (!email) {
+        return reply.code(400).send({ error: "email is required" });
+      }
+      const pwErr = validatePassword(password);
+      if (pwErr) {
+        return reply.code(400).send({ error: pwErr.message });
       }
       // requireSetupOpen's count() check is a fast-path only — it cannot prevent two
       // concurrent requests both observing zero users. The database's single-admin
@@ -188,13 +195,13 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     }
   );
 
-  // Step 2: record business name + description in soul.yaml.
+  // Step 2: record business name + description + website in soul.yaml.
   app.post(
     "/api/v1/setup/business",
     {
       preHandler: wizardStep,
       schema: {
-        description: "Record the business name + description in the soul.",
+        description: "Record the business name, description, and website in the soul.",
         tags: ["setup"],
         security: [{ sessionCookie: [] }],
         body: {
@@ -203,6 +210,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           properties: {
             name: { type: "string", minLength: 1 },
             description: { type: "string" },
+            website: { type: "string" },
           },
         },
         response: {
@@ -214,11 +222,20 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       },
     },
     async (req, reply) => {
-      const body = (req.body ?? {}) as { name?: unknown; description?: unknown };
+      const body = (req.body ?? {}) as {
+        name?: unknown;
+        description?: unknown;
+        website?: unknown;
+      };
       const name = typeof body.name === "string" ? body.name.trim() : "";
       const description = typeof body.description === "string" ? body.description : "";
+      const website = typeof body.website === "string" ? body.website.trim() : "";
       if (!name) return reply.code(400).send({ error: "name is required" });
-      await patchSoulConfig(soulPath, { businessName: name, businessDescription: description });
+      await patchSoulConfig(soulPath, {
+        businessName: name,
+        businessDescription: description,
+        businessWebsite: website,
+      });
       await gitSync.commit("chore: set business profile").catch(() => {});
       return reply.code(204).send();
     }
@@ -323,7 +340,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         await secretsService.set("soul-git-credential", credentials);
       }
       try {
-        await gitSync.configureRemote(remoteUrl, credentials || undefined);
+        const resolvedCredentials = credentials || undefined;
+        await gitSync.configureRemote(remoteUrl, async () => resolvedCredentials);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });

@@ -2,24 +2,41 @@ import { describe, expect, it } from "vitest";
 import { buildChecklist, buildSteps, deriveSignals, type SoulSlice } from "./checklist";
 
 function soul(
-  opts: { resources?: string[]; skills?: string[]; agents?: string[] } = {}
+  opts: {
+    resources?: string[];
+    skills?: string[];
+    agents?: string[];
+    connectedIntegrations?: string[];
+  } = {}
 ): SoulSlice {
   const toMap = (names: string[] = []) => new Map(names.map((n) => [n, {}]));
   return {
     resources: toMap(opts.resources),
     skills: toMap(opts.skills),
     agents: toMap(opts.agents),
+    integrations: new Map(
+      (opts.connectedIntegrations ?? []).map((n) => [n, { connection: { enabled: true } }])
+    ),
   } as unknown as SoulSlice;
 }
 
 describe("deriveSignals", () => {
   it("flips each signal from the corresponding map size", () => {
-    const sig = deriveSignals(soul({ resources: ["tickets"], skills: ["s"], agents: ["a"] }), true);
+    const sig = deriveSignals(
+      soul({
+        resources: ["tickets"],
+        skills: ["s"],
+        agents: ["a"],
+        connectedIntegrations: ["slack"],
+      }),
+      true
+    );
     expect(sig).toEqual({
       hasResource: true,
       hasSkill: true,
       hasAgent: true,
       hasKnowledge: true,
+      hasIntegration: true,
       firstResourceName: "tickets",
     });
   });
@@ -30,6 +47,7 @@ describe("deriveSignals", () => {
     expect(sig.hasSkill).toBe(false);
     expect(sig.hasAgent).toBe(false);
     expect(sig.hasKnowledge).toBe(false);
+    expect(sig.hasIntegration).toBe(false);
     expect(sig.firstResourceName).toBeUndefined();
   });
 
@@ -53,17 +71,15 @@ describe("buildSteps", () => {
     ]);
   });
 
-  it("marks all four core steps todo (with prompts) and routine/integration coming-soon on a fresh instance", () => {
+  it("marks the five actionable steps todo (with prompts) and routine coming-soon on a fresh instance", () => {
     const steps = buildSteps(empty);
     const byId = Object.fromEntries(steps.map((s) => [s.id, s]));
-    for (const id of ["resource", "skill", "agent", "knowledge"]) {
+    for (const id of ["resource", "skill", "agent", "knowledge", "integration"]) {
       expect(byId[id].status).toBe("todo");
       expect(byId[id].prompt).toBeTruthy();
     }
     expect(byId.routine.status).toBe("coming-soon");
-    expect(byId.integration.status).toBe("coming-soon");
     expect(byId.routine.prompt).toBeUndefined();
-    expect(byId.integration.prompt).toBeUndefined();
   });
 
   it("marks a step done (no prompt) once its signal is true", () => {
@@ -80,15 +96,19 @@ describe("buildSteps", () => {
     expect(named?.prompt).toBe("Help me create a resource type for Acme.");
   });
 
-  it("marks all four core steps done when every signal is true", () => {
+  it("marks all five actionable steps done when every signal is true", () => {
     const steps = buildSteps(
-      deriveSignals(soul({ resources: ["r"], skills: ["s"], agents: ["a"] }), true)
+      deriveSignals(
+        soul({ resources: ["r"], skills: ["s"], agents: ["a"], connectedIntegrations: ["slack"] }),
+        true
+      )
     );
     expect(steps.filter((s) => s.status === "done").map((s) => s.id)).toEqual([
       "resource",
       "skill",
       "agent",
       "knowledge",
+      "integration",
     ]);
   });
 });

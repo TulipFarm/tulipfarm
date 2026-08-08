@@ -22,8 +22,6 @@ const DEFERRED_OPTIONS: Readonly<Record<string, string>> = {
   // Replay recompiles the recorded Routine and re-executes it; the run-event stream it reads is
   // only half of what it needs.
   runReplay: "PR 4 — Routine/Trigger consumers on the worker",
-  // PR 4: the @tulipfarm/routine-engine subtree is being retired, not revived.
-  routines: "PR 4 — jobs and tool effects to their owners",
   routineAuthoring: "PR 4 — jobs and tool effects to their owners",
   // PR 6: no form storage exists, and GovernedFormView is rendered by no route.
   forms: "PR 6 — compose the governed packages",

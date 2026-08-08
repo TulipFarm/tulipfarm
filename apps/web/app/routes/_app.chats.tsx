@@ -1,9 +1,9 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { MoreHorizontal, Pencil, Star } from "lucide-react";
+import { MessageSquare, MoreHorizontal, Pencil, Plus, Search, Star } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
+import { Button } from "~/components/ui/button";
 import { ApiError } from "~/lib/api";
 import {
   type ConversationSummary,
@@ -17,7 +17,7 @@ import { cn } from "~/lib/utils";
 export const meta: MetaFunction = () => [{ title: "Chats · tulipfarm" }];
 
 const inputClass =
-  "h-8 w-full rounded-sm border border-border bg-background px-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "h-10 w-full rounded-md border border-input bg-background pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25";
 
 // Browse + search every persisted chat (UUID-chat persistence). The sidebar "Chats" header links
 // here. Search is server-side across all the caller's chats by title (debounced); each row's three-dots
@@ -35,6 +35,7 @@ export default function ChatsRoute() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
 
   // Server-side search, debounced. The loader already seeded the first render, so skip the initial
   // (empty-query) run; subsequent changes — including clearing the box back to "" — refetch.
@@ -46,6 +47,7 @@ export default function ChatsRoute() {
     }
     let ignore = false;
     const q = query.trim();
+    setSearching(true);
     const handle = setTimeout(() => {
       listConversations(q ? { q, limit: 200 } : { limit: 200 })
         .then((next) => {
@@ -56,6 +58,9 @@ export default function ChatsRoute() {
         })
         .catch((err) => {
           if (!ignore) setError(err instanceof Error ? err.message : "search failed");
+        })
+        .finally(() => {
+          if (!ignore) setSearching(false);
         });
     }, 250);
     return () => {
@@ -93,57 +98,153 @@ export default function ChatsRoute() {
   // Starred chats pinned to the top; recency order (server-sorted) preserved within each group by the
   // stable sort.
   const sorted = [...items].sort((a, b) => Number(b.starred) - Number(a.starred));
+  const starred = sorted.filter((chat) => chat.starred);
+  const recent = sorted.filter((chat) => !chat.starred);
 
   return (
-    <ResourcePanel crumbs={[{ label: "chats" }]}>
-      <input
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        placeholder="search chats…"
-        aria-label="search chats"
-        className={inputClass}
-      />
-
-      {/* Filter row — only "All" for now (no real filters yet). */}
-      <div className="flex items-center gap-2 text-xs">
-        <span className="rounded-sm border border-primary/40 bg-secondary px-2 py-0.5 font-medium text-foreground">
-          All
-        </span>
-      </div>
-
-      {error ? <p className="text-destructive">error: {error}</p> : null}
-
-      {sorted.length === 0 ? (
-        <p className="text-muted-foreground">
-          {query.trim() ? "0 chats match that search." : "No chats yet."}{" "}
-          <Link to="/" className="text-primary hover:underline">
-            Start a new chat
+    <main className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
+      <header className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-primary">Chat history</p>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Your chats</h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-muted-foreground">
+            Return to previous work, pin important chats, or rename them for easier scanning.
+          </p>
+        </div>
+        <Button asChild className="self-start sm:self-auto">
+          <Link to="/">
+            <Plus aria-hidden />
+            New chat
           </Link>
-          .
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-0.5">
-          {sorted.map((c) => (
-            <li key={c.id}>
-              {renamingId === c.id ? (
-                <RenameRow
-                  initialTitle={c.title ?? ""}
-                  onSave={(title) => onRename(c.id, title)}
-                  onCancel={() => setRenamingId(null)}
-                />
-              ) : (
-                <ChatRow
-                  chat={c}
-                  onToggleStar={() => onToggleStar(c)}
-                  onStartRename={() => setRenamingId(c.id)}
-                />
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </ResourcePanel>
+        </Button>
+      </header>
+
+      <section aria-label="Chat history" className="pt-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <label className="relative block min-w-0 flex-1">
+            <span className="sr-only">Search chats</span>
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search by title"
+              aria-label="search chats"
+              className={inputClass}
+            />
+          </label>
+          <p aria-live="polite" className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            {searching
+              ? "Searching…"
+              : `${sorted.length} ${sorted.length === 1 ? "chat" : "chats"}`}
+          </p>
+        </div>
+
+        {error ? (
+          <p
+            role="alert"
+            className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
+          >
+            Search failed. {error}
+          </p>
+        ) : null}
+
+        {sorted.length === 0 ? (
+          <div className="mt-8 flex flex-col items-start rounded-md bg-muted/50 px-5 py-8">
+            <MessageSquare aria-hidden className="size-5 text-muted-foreground" />
+            <h2 className="mt-4 text-base font-semibold">
+              {query.trim() ? "No matching chats" : "No chats yet"}
+            </h2>
+            <p className="mt-1 max-w-md text-sm leading-6 text-muted-foreground">
+              {query.trim()
+                ? "Try a different title or clear the search."
+                : "Start a chat and it will appear here for you to revisit."}
+            </p>
+            {!query.trim() ? (
+              <Link to="/" className="mt-4 text-sm font-medium text-primary hover:underline">
+                Start a new chat
+              </Link>
+            ) : null}
+          </div>
+        ) : (
+          <div className="mt-8 space-y-8">
+            {starred.length > 0 ? (
+              <ChatGroup
+                title="Starred"
+                items={starred}
+                renamingId={renamingId}
+                onRename={onRename}
+                onCancelRename={() => setRenamingId(null)}
+                onToggleStar={onToggleStar}
+                onStartRename={setRenamingId}
+              />
+            ) : null}
+            {recent.length > 0 ? (
+              <ChatGroup
+                title="Recent"
+                items={recent}
+                renamingId={renamingId}
+                onRename={onRename}
+                onCancelRename={() => setRenamingId(null)}
+                onToggleStar={onToggleStar}
+                onStartRename={setRenamingId}
+              />
+            ) : null}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function ChatGroup({
+  title,
+  items,
+  renamingId,
+  onRename,
+  onCancelRename,
+  onToggleStar,
+  onStartRename,
+}: {
+  title: string;
+  items: ConversationSummary[];
+  renamingId: string | null;
+  onRename: (id: string, title: string) => void;
+  onCancelRename: () => void;
+  onToggleStar: (chat: ConversationSummary) => void;
+  onStartRename: (id: string) => void;
+}) {
+  return (
+    <section aria-labelledby={`${title.toLowerCase()}-chats`}>
+      <h2
+        id={`${title.toLowerCase()}-chats`}
+        className="mb-2 text-xs font-medium text-muted-foreground"
+      >
+        {title}
+      </h2>
+      <ul className="divide-y divide-border border-y border-border">
+        {items.map((chat) => (
+          <li key={chat.id}>
+            {renamingId === chat.id ? (
+              <RenameRow
+                initialTitle={chat.title ?? ""}
+                onSave={(nextTitle) => onRename(chat.id, nextTitle)}
+                onCancel={onCancelRename}
+              />
+            ) : (
+              <ChatRow
+                chat={chat}
+                onToggleStar={() => onToggleStar(chat)}
+                onStartRename={() => onStartRename(chat.id)}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -157,12 +258,15 @@ function ChatRow({
   onStartRename: () => void;
 }) {
   return (
-    <div className="group flex items-center gap-2 rounded-sm pr-1 transition-colors hover:bg-secondary">
-      <Link to={`/chat/${chat.id}`} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2">
+    <div className="group flex min-h-14 items-center gap-2 transition-colors hover:bg-muted/60">
+      <Link
+        to={`/chat/${chat.id}`}
+        className="flex min-w-0 flex-1 items-center gap-3 px-2 py-3 sm:px-3"
+      >
         {chat.starred ? (
-          <Star aria-label="starred" className="size-3.5 shrink-0 fill-primary text-primary" />
+          <Star aria-label="starred" className="size-4 shrink-0 fill-primary text-primary" />
         ) : null}
-        <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
           {chat.title ?? "New chat"}
         </span>
         <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
@@ -236,7 +340,7 @@ function ChatRowMenu({
         aria-label="Chat actions"
         onClick={toggle}
         className={cn(
-          "shrink-0 rounded-sm p-1.5 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100",
+          "mr-1 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-100 transition hover:bg-accent hover:text-foreground active:scale-95 sm:size-9 sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100",
           open && "opacity-100"
         )}
       >
@@ -303,22 +407,24 @@ function RenameRow({
     fn();
   };
   return (
-    <input
-      // biome-ignore lint/a11y/noAutofocus: focus belongs on the field the user just chose to edit
-      autoFocus
-      type="text"
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={(e) => e.currentTarget.select()}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") commit(() => onSave(value));
-        else if (e.key === "Escape") commit(onCancel);
-      }}
-      onBlur={() => commit(() => onSave(value))}
-      aria-label="Rename chat"
-      maxLength={200}
-      className={cn(inputClass, "my-0.5")}
-    />
+    <div className="px-2 py-2 sm:px-3">
+      <input
+        // biome-ignore lint/a11y/noAutofocus: focus belongs on the field the user just chose to edit
+        autoFocus
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit(() => onSave(value));
+          else if (e.key === "Escape") commit(onCancel);
+        }}
+        onBlur={() => commit(() => onSave(value))}
+        aria-label="Rename chat"
+        maxLength={200}
+        className={inputClass}
+      />
+    </div>
   );
 }
 

@@ -89,8 +89,8 @@ Three things, and a provider snapshot only covers the first:
 
 | What | Why |
 | --- | --- |
-| The PostgreSQL database | Records, chats, knowledge, jobs. |
-| `tulipfarm-data` (`/data`) | The generated `ENCRYPTION_KEY`, if you did not supply one. **The database is ciphertext without it.** |
+| The PostgreSQL database | Records, chats, knowledge, Runs, and queues. |
+| `tulipfarm-data` (`/data`) | Generated bootstrap secrets plus worker credentials. **The database is ciphertext without the encryption key.** |
 | `tulipfarm-soul` (`/opt/tulipfarm/soul`) | Your whole configuration — unless step 7 mirrors it to git. |
 
 TulipFarm has no built-in scheduled backups. Use your platform's snapshots or your own
@@ -104,8 +104,9 @@ has never been restarted has not been tested.
 
 ## Constraints you cannot configure away
 
-- **Exactly one replica.** The soul is a git working tree and job workers run in-process.
-  Two replicas corrupt the tree and double-run every scheduled routine. Scale vertically.
+- **Exactly one `app`, one maintenance `worker`, and one `integration-worker`.** The `app`
+  owns the soul git worktree and migrations. The `worker` owns turn execution and
+  cron/maintenance consumers via `WORKER_MAINTENANCE=true`. Scale vertically.
 - **No down-migrations.** Rolling back to an older image after a migration ran requires a
   database restore, not a tag change.
 - **Kubernetes is untested.** CI exercises the Compose stack only. See

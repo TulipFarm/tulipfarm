@@ -1,30 +1,22 @@
 ---
 title: Resources
-description: Schema-defined data types and the records that fill them.
+description: Schema-driven Resource types, generated UIs, Records, links, validation, and hooks.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+A **Resource type** is a business data shape, such as customer, ticket, invoice, or asset. A
+**Record** is one instance of that type. You create Resource types by describing them in chat; the
+assistant writes JSON Schema into the [Soul](/docs/concepts/soul), and TulipFarm reconciles storage
+and UI from that schema.
 
-A resource is a data type, like `customer` or `ticket`. A resource *type* is its shape; a
-*record* is one instance of that type. You create a type by describing it to the
-assistant — "track customers with a name and an email" — and from then on you get
-validated storage and a full interface for its records.
+## Schema in the Soul, Records in Postgres
 
-You never have to write the shape yourself. The rest of this page describes what the
-assistant builds on your behalf and how it behaves, so you know what is possible to ask
-for. To do it, see [Define a resource type](/docs/guides/define-a-resource-type).
+Resource type definitions live at `soul/resources/{name}/schema.yml`. Records live in per-type
+Postgres tables. Reconciliation creates or updates the storage shape from the schema and runs live,
+so a new type is ready without restarting.
 
-## Two halves: schema and data
+Here is the kind of read-only artifact the assistant writes underneath:
 
-Under the hood a type is a **JSON Schema** the assistant writes into the
-[soul](/docs/concepts/soul) at `resources/{name}/schema.yml`; the records live in the
-datastore. TulipFarm reads each schema and materializes a table for it — this is called
-reconciliation. A type the assistant creates is reconciled immediately, ready to hold
-records with no restart.
-
-The schema it writes is plain JSON Schema in YAML — for the `customer` example, this:
-
-```yaml title="resources/customer/schema.yml"
+```yaml title="soul/resources/customer/schema.yml"
 type: object
 properties:
   name:
@@ -36,53 +28,35 @@ required:
   - name
 ```
 
-Every write is validated against the schema before it is stored.
+Every create, replace, patch, and delete is validated server-side. Validation failures return a
+JSON Pointer `path`, so both the UI and Agents can point to the field that failed.
 
-## Identifiers
+## Generated UI
 
-Each record has a system `id` that is a UUID — stable, internal, and used for linking.
-Human-friendly identifiers like `TICK-123` are a separate field, produced by the
-`x-id-strategy` extension and never the primary `id`:
+The web app generates list, detail, create, edit, and schema views from the Resource type schema.
+Strings become text inputs, numbers become numeric inputs, booleans become checkboxes, enums become
+selects, `date` and `date-time` formats become date controls, and arrays or objects become JSON
+text areas. `x-links` fields render as searchable comboboxes, and `x-immutable` locks a field on
+edit.
 
-```yaml
-properties:
-  ref:
-    type: string
-"x-id-strategy":
-  field: ref
-  prefix: "TICK-"
-  sequence: true
-```
+This is why Resource types are more than tables: the schema is also the contract that drives a
+zero-code UI and the Agent tools.
 
-## Relationships with `x-links`
+## Links and extensions
 
-A field can declare that it points at another resource using `x-links`. On write,
-TulipFarm verifies the target record exists; a link to a missing record is rejected.
-This catches the common case of an agent inventing a `customerId` that was never real.
+`x-links` declares a relationship to another Resource type. TulipFarm verifies linked Records exist
+on write, rejects invented ids, and shows unresolved links when a target has been soft-deleted.
 
-Deletes are soft and do not cascade. If you delete a record that others link to, the
-referencing records remain — their link simply no longer resolves to a live record, and
-the UI surfaces it as unresolved rather than blocking the delete.
+Common data-shaping extensions include `x-normalize` for canonical forms, `x-computed` for derived
+values, and `x-id-strategy` for human-friendly references such as `TICK-123`. The system UUID
+remains the stable primary id.
 
-## Computed and normalized fields
+## Resource hooks
 
-Beyond identifiers and links, schemas support declarative transforms applied before a
-write:
+A Resource type can also include `hooks.ts`. Hooks run in the `@tulipfarm/sandbox` isolate and are
+managed by `PUT`, `GET`, and `DELETE /api/v1/resource-types/{name}/hooks`. They cover logic that is
+awkward to express declaratively, while static analysis blocks banned patterns before the hook is
+stored.
 
-- **`x-normalize`** — clean a value into canonical form. Supported strategies: `trim`,
-  `lowercase`, `uppercase`, `slugify`, `phone-e164`, `email-normalize`.
-- **`x-computed`** — derive a field's value from others. Supported strategies: `sha256`,
-  `uuid`, `sequence`.
-
-These cover the common before-write cases without code. For arbitrary logic, a resource
-type can include a `hooks.ts` file executed in an isolated sandbox (`isolated-vm`). You
-ask for these in plain language too — "auto-number tickets as `TICK-1`", "lowercase the
-email" — and the assistant wires up the right extension.
-
-<Callout type="info">
-You create resource types by asking the assistant — see
-[Define a resource type](/docs/guides/define-a-resource-type). You can also edit
-`schema.yml` in the soul by hand if you prefer; that is the power-user path. Either way,
-[Work with records](/docs/guides/work-with-records) covers managing data once a type
-exists.
-</Callout>
+Use [Define a resource type](/docs/guides/define-a-resource-type) to build a type and
+[Work with records](/docs/guides/work-with-records) to use Records.

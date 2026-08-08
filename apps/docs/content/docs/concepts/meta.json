@@ -3,15 +3,22 @@
   "pages": [
     "index",
     "building",
+    "chat",
     "soul",
-    "setup",
     "resources",
     "agents",
     "skills",
     "routines",
-    "integrations",
     "knowledge",
+    "memory",
+    "surfaces",
+    "runs",
+    "approvals",
+    "integrations",
     "llm",
-    "secrets"
+    "guardrails",
+    "secrets",
+    "identity",
+    "setup"
   ]
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ModelInvocationResult, ModelPort, ModelStreamChunk } from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
 import {
@@ -115,6 +115,7 @@ function loop(options: {
   events?: { append: (event: AgentLoopEvent) => Promise<void> };
   budget?: { consume: (input: { key: string; amount: number }) => Promise<{ outcome: string }> };
   cancelled?: () => Promise<boolean>;
+  log?: { warn(obj: unknown, msg?: string): void };
 }) {
   return new AgentLoop({
     model: options.model,
@@ -123,6 +124,7 @@ function loop(options: {
     events: options.events ?? collector().sink,
     budget: options.budget ?? { consume: async () => ({ outcome: "allowed" }) },
     isCancelled: options.cancelled ?? (async () => false),
+    ...(options.log === undefined ? {} : { log: options.log }),
   });
 }
 
@@ -206,6 +208,35 @@ describe("AgentLoop", () => {
     }).run(input());
 
     expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
+  });
+
+  it("retries a blank final completion within the repair budget", async () => {
+    const outcome = await loop({
+      model: scriptedModel(textResult(""), textResult("here you go")),
+    }).run(input());
+
+    expect(outcome).toMatchObject({ status: "completed", output: "here you go", repairs: 1 });
+  });
+
+  it("fails closed as empty_model_output once the repair budget is spent on blank completions", async () => {
+    const outcome = await loop({
+      model: scriptedModel(textResult(""), textResult(""), textResult("")),
+    }).run(input({ limits: { maxIterations: 5, maxToolCalls: 3, maxRepairAttempts: 2 } }));
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "empty_model_output", repairs: 3 });
+  });
+
+  it("logs a diagnostic warning when the model returns a blank final completion", async () => {
+    const warn = vi.fn();
+    await loop({
+      model: scriptedModel(textResult(""), textResult("done")),
+      log: { warn },
+    }).run(input());
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ event: "agent_loop.empty_completion" }),
+      expect.any(String)
+    );
   });
 
   it("normalizes a provider that omits or repeats a call id", async () => {
@@ -462,5 +493,132 @@ describe("AgentLoop", () => {
     const deltas = events.events.filter((event) => event.type === "text_delta");
     expect(deltas.map((event) => event.text)).toEqual(["thinking", "all ", "done"]);
     expect(deltas.map((event) => event.textIndex)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("AgentLoop concurrent dispatch", () => {
+  const readTools = [
+    { name: "github.issue.search", inputSchema: { type: "object" }, mutating: false },
+    { name: "github.pull_request.search", inputSchema: { type: "object" }, mutating: false },
+  ];
+
+  /** Tracks in-flight dispatches so a test can prove two calls overlapped rather than serialized. */
+  function trackingDispatcher(delayMs = 5): ToolDispatchPort & {
+    calls: string[];
+    maxConcurrent: number;
+  } {
+    let inFlight = 0;
+    const port = {
+      calls: [] as string[],
+      maxConcurrent: 0,
+      dispatch: async (call: { callId: string; name: string; arguments: unknown }) => {
+        port.calls.push(call.name);
+        inFlight += 1;
+        port.maxConcurrent = Math.max(port.maxConcurrent, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        inFlight -= 1;
+        return { status: "succeeded" as const, callId: call.callId, output: {} };
+      },
+    };
+    return port;
+  }
+
+  it("dispatches consecutive non-mutating Tool calls concurrently", async () => {
+    const tools = trackingDispatcher();
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: {} },
+          { callId: "c2", name: "github.pull_request.search", arguments: {} },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed", toolCalls: 2 });
+    expect(tools.maxConcurrent).toBe(2);
+  });
+
+  it("keeps mutating Tool calls strictly sequential even when interleaved with reads", async () => {
+    const tools = trackingDispatcher();
+    const mixedTools = [
+      ...readTools,
+      { name: "github.issue.comment", inputSchema: { type: "object" }, mutating: true },
+    ];
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.comment", arguments: { body: "1" } },
+          { callId: "c2", name: "github.issue.comment", arguments: { body: "2" } },
+        ]),
+        textResult("done")
+      ),
+      tools,
+    }).run(
+      input({
+        tools: mixedTools,
+        limits: { maxIterations: 5, maxToolCalls: 5, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed", toolCalls: 2 });
+    expect(tools.maxConcurrent).toBe(1);
+  });
+
+  it("stops at the exact Tool-call limit when a parallel batch would exceed it", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "c1", output: {} },
+      { status: "succeeded", callId: "c2", output: {} }
+    );
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: {} },
+          { callId: "c2", name: "github.pull_request.search", arguments: {} },
+        ])
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 9, maxToolCalls: 1, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "tool_call_limit" });
+    expect(tools.calls).toHaveLength(1);
+  });
+
+  it("still fails closed on the repair budget when an invalid call lands inside a parallel batch", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "c1", output: {} },
+      { status: "invalid_arguments", callId: "c2", reason: "invalid_arguments" },
+      { status: "invalid_arguments", callId: "c3", reason: "invalid_arguments" },
+      { status: "invalid_arguments", callId: "c4", reason: "invalid_arguments" }
+    );
+    const outcome = await loop({
+      model: scriptedModel(
+        toolCallResult([
+          { callId: "c1", name: "github.issue.search", arguments: {} },
+          { callId: "c2", name: "github.pull_request.search", arguments: {} },
+        ]),
+        toolCallResult([{ callId: "c3", name: "github.issue.search", arguments: {} }]),
+        toolCallResult([{ callId: "c4", name: "github.issue.search", arguments: {} }])
+      ),
+      tools,
+    }).run(
+      input({
+        tools: readTools,
+        limits: { maxIterations: 9, maxToolCalls: 9, maxRepairAttempts: 2 },
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
   });
 });

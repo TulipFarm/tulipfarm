@@ -10,6 +10,7 @@
     "kubernetes",
     "---Make it production-ready---",
     "production-checklist",
+    "troubleshooting",
     "tls",
     "managed-database",
     "headless",

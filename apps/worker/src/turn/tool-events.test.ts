@@ -97,6 +97,32 @@ describe("announceToolCalls", () => {
     ]);
   });
 
+  it("announces surface.emitted after a present call that rendered a Surface Artifact", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: {
+        artifact: { id: "artifact-1", component: { name: "RecordTable", version: "1.0" } },
+        actionHandles: {},
+      },
+    }));
+    const request: ToolDispatchRequest = { ...REQUEST, name: "present" };
+
+    await announceToolCalls(broker.port, writer(events)).dispatch(request);
+
+    expect(events.appended.map((event) => event.eventType)).toEqual([
+      "tool.call",
+      "tool.result",
+      "surface.emitted",
+    ]);
+    expect(events.appended.at(-1)).toEqual({
+      eventType: "surface.emitted",
+      payload: { artifactId: "artifact-1", componentId: "RecordTable" },
+      key: "turn-1:1:surface:emitted:call-1",
+    });
+  });
+
   it("reports a refused call as an error carrying the dispatcher's own reason", async () => {
     const events = new FakeAppendPort();
     const broker = port((request) => ({

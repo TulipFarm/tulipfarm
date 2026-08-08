@@ -66,6 +66,7 @@ export interface AssembleContext {
   business?: {
     name?: string;
     description?: string;
+    website?: string;
   };
   /** The agent's AGENT.md body. */
   personality?: string;
@@ -143,6 +144,8 @@ function renderBusinessContext(ctx: AssembleContext): string {
   const lines = [`name: ${name}`];
   const description = ctx.business?.description?.trim();
   if (description) lines.push(`description: ${description}`);
+  const website = ctx.business?.website?.trim();
+  if (website) lines.push(`website: ${website}`);
   return block("business-context", lines.join("\n"));
 }
 

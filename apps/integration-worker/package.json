@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "@tulipfarm/integrations": "workspace:*",
+    "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",
     "dotenv": "^17.4.2",
     "pg": "^8.22.0"

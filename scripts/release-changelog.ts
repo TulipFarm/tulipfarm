@@ -136,9 +136,10 @@ export function collectReleaseCommits(sourceSha: string, cwd = process.cwd()): R
       const match = CONVENTIONAL_SUBJECT.exec(subject);
       const type = match?.[1];
       if (!sha || !type || !ALLOWED_COMMIT_TYPES.has(type)) {
-        throw new Error(
-          `Commit ${sha || "(unknown)"} is not an allowed Conventional Commit: ${subject}`
+        console.warn(
+          `Excluding commit ${sha || "(unknown)"} from changelog — not an allowed Conventional Commit: ${subject}`
         );
+        return undefined;
       }
 
       return { sha, subject, type };

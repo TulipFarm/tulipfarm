@@ -12,8 +12,12 @@ export interface SlackBlock {
   readonly type: string;
   readonly text?: { readonly type: "mrkdwn" | "plain_text"; readonly text: string };
   readonly elements?: readonly Record<string, unknown>[];
+  readonly accessory?: Record<string, unknown>;
   readonly fields?: readonly { readonly type: "mrkdwn"; readonly text: string }[];
   readonly block_id?: string;
+  readonly image_url?: string;
+  readonly alt_text?: string;
+  readonly title?: { readonly type: "plain_text"; readonly text: string };
 }
 
 export interface SlackSurfacePayload {
@@ -124,21 +128,75 @@ function blocksFor(
         {
           type: "section",
           text: { type: "mrkdwn", text: String(props.question) },
-          elements: [
-            {
-              type: "static_select",
-              action_id: actionHandle(action, context),
-              options: (props.choices as Array<{ label: string; value: string }>).map((choice) => ({
-                text: { type: "plain_text", text: choice.label },
-                value: choice.value,
-              })),
-            },
-          ],
+          accessory: {
+            type: "static_select",
+            action_id: actionHandle(action, context),
+            options: (props.choices as Array<{ label: string; value: string }>).map((choice) => ({
+              text: { type: "plain_text", text: choice.label },
+              value: choice.value,
+            })),
+          },
+        },
+      ];
+    }
+    case "Divider":
+      return [{ type: "divider" }];
+    case "Image":
+      return [
+        {
+          type: "image",
+          image_url: String(props.url),
+          alt_text: String(props.altText),
+          ...(props.title ? { title: { type: "plain_text", text: String(props.title) } } : {}),
+        },
+      ];
+    case "MultiChoice": {
+      const action = props.action as SurfaceAction;
+      return [
+        {
+          type: "section",
+          text: { type: "mrkdwn", text: String(props.question) },
+          accessory: {
+            type: "multi_static_select",
+            action_id: actionHandle(action, context),
+            options: (props.choices as Array<{ label: string; value: string }>).map((choice) => ({
+              text: { type: "plain_text", text: choice.label },
+              value: choice.value,
+            })),
+          },
         },
       ];
     }
     default:
       return [{ type: "section", text: { type: "mrkdwn", text: "Presentation unavailable." } }];
+  }
+}
+
+function formFieldElement(field: Record<string, unknown>): Record<string, unknown> {
+  const actionId = String(field.name);
+  const options = ((field.options as string[] | undefined) ?? []).map((option) => ({
+    text: { type: "plain_text", text: option },
+    value: option,
+  }));
+  switch (field.input) {
+    case "email":
+      return { type: "email_text_input", action_id: actionId };
+    case "number":
+      return { type: "number_input", action_id: actionId, is_decimal_allowed: true };
+    case "textarea":
+      return { type: "plain_text_input", action_id: actionId, multiline: true };
+    case "select":
+      return { type: "static_select", action_id: actionId, options };
+    case "multiselect":
+      return { type: "multi_static_select", action_id: actionId, options };
+    case "checkbox":
+      return { type: "checkboxes", action_id: actionId, options };
+    case "radio":
+      return { type: "radio_buttons", action_id: actionId, options };
+    case "date":
+      return { type: "datepicker", action_id: actionId };
+    default:
+      return { type: "plain_text_input", action_id: actionId };
   }
 }
 
@@ -188,10 +246,7 @@ export function createSlackRenderer(
               type: "input",
               block_id: String(field.name),
               label: { type: "plain_text", text: String(field.label) },
-              element: {
-                type: "plain_text_input",
-                action_id: String(field.name),
-              },
+              element: formFieldElement(field),
               optional: field.required !== true,
             })),
           },

@@ -136,6 +136,7 @@ describe("installer host-port handling", () => {
         "CORS_ORIGIN=http://192.168.68.110:9000",
         "HOST_PORT=9000",
         "JWT_SECRET=keep-me",
+        "TULIPFARM_VERSION=latest",
         "",
       ].join("\n")
     );

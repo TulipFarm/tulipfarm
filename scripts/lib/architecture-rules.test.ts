@@ -147,9 +147,7 @@ describe("ARCHITECTURE_CONFIG", () => {
 
   it("documents the current legacy exceptions", () => {
     expect(ARCHITECTURE_CONFIG.legacyExceptions.soul).toContain("constants");
-    expect(new Set(ARCHITECTURE_CONFIG.legacyExceptions.api)).toEqual(
-      new Set(["llm", "routine-engine"])
-    );
+    expect(new Set(ARCHITECTURE_CONFIG.legacyExceptions.api)).toEqual(new Set(["llm"]));
   });
 
   it("never lists a package in both its allowlist and its legacy exceptions", () => {

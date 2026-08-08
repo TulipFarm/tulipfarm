@@ -1,4 +1,4 @@
-import { Outlet, redirect } from "@remix-run/react";
+import { Outlet, redirect, useLoaderData } from "@remix-run/react";
 import { AppShell } from "~/components/app-sidebar";
 import { GlobalConnectionStatus } from "~/components/shell/states";
 import { ApiError, getSession } from "~/lib/api";
@@ -27,10 +27,11 @@ export async function clientLoader() {
 // Persistent shell: sidebar + main panel. Wraps every section route. ApprovalsProvider polls pending
 // approvals (sidebar badge + Approvals page); ConversationsProvider holds the Recent chats list.
 export default function AppLayout() {
+  const { user } = useLoaderData<typeof clientLoader>();
   return (
     <ApprovalsProvider>
       <ConversationsProvider>
-        <AppShell>
+        <AppShell isAdmin={user.role === "admin"} user={user}>
           <a
             href="#main-content"
             className="fixed left-2 top-2 z-[100] -translate-y-16 bg-background px-3 py-2 text-sm focus:translate-y-0"
