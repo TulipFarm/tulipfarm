@@ -31,6 +31,7 @@ import {
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
+  ChannelMentionedThreadStore,
   ChannelRunDeliveryStore,
   ChildLinkStore,
   EventStore,
@@ -153,6 +154,8 @@ import { surfaceRendererRegistry } from "./surfaces/renderer-registry";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
 import { buildToolRegistry } from "./tools/setup";
+import { buildSlackTooling } from "./tools/slack/compose";
+import { buildSlackTools } from "./tools/slack/tools";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -365,6 +368,9 @@ async function boot() {
     const channelRunDeliveries = new ChannelRunDeliveryStore(runTransactions, () =>
       new Date().toISOString()
     );
+    const channelMentionedThreads = new ChannelMentionedThreadStore(runTransactions, () =>
+      new Date().toISOString()
+    );
     const channelIntegrations = new IntegrationStore(runTransactions);
     // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
     // constant in the image, which every deployment would share.
@@ -402,6 +408,20 @@ async function boot() {
       effects: githubEffects,
     });
 
+    // Slack send tool: same effect-ledger dispatch pattern as GitHub. Writes an
+    // `integration_conversations` mapping on send (see `tools/slack/tools.ts`) so a human reply in
+    // the sent message's thread routes back to this conversation instead of starting a new one.
+    const slackTooling = buildSlackTooling({
+      secrets: async () => secretsService,
+    });
+    const slackEffects = new PgEffectStore(runTransactions);
+    const slackTools = buildSlackTools(DEPLOYMENT_BUSINESS_ID, {
+      ...slackTooling,
+      effects: slackEffects,
+      threads: integrationThreads,
+      mentionedThreads: channelMentionedThreads,
+    });
+
     // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
     // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
@@ -429,6 +449,7 @@ async function boot() {
       },
       slackKnowledgeSearch: slackKnowledgeSearchTool,
       github: githubTools,
+      slack: slackTools,
       platform: {
         events: domainEventEmitter,
         soulLoader,

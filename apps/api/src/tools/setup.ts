@@ -38,6 +38,8 @@ export function buildToolRegistry(services: {
    * Registered unconditionally when GitHub composition is available; per-turn visibility is gated
    * separately on live install status (`chat/turn-helpers.ts`), not on registration. */
   github?: readonly ToolDef[];
+  /** Slack chat tool family — pre-built ToolDefs (see `tools/slack/tools.ts`'s `buildSlackTools`). */
+  slack?: readonly ToolDef[];
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
@@ -195,6 +197,12 @@ export function buildToolRegistry(services: {
 
   if (services.github) {
     for (const t of services.github) {
+      registry.register(t);
+    }
+  }
+
+  if (services.slack) {
+    for (const t of services.slack) {
       registry.register(t);
     }
   }

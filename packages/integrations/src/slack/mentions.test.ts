@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { resolveMentionsInText, type SlackMentionResolverPort } from "./mentions";
+import {
+  encodeMentionsInText,
+  resolveMentionsInText,
+  type SlackMentionResolverPort,
+  type SlackUserLookupPort,
+} from "./mentions";
 
 function resolverFrom(names: Record<string, string | undefined>): SlackMentionResolverPort {
   return {
     resolveDisplayName: async (userId: string) => names[userId],
+  };
+}
+
+function lookupFrom(ids: Record<string, string | undefined>): SlackUserLookupPort {
+  return {
+    resolveUserId: async (name: string) => ids[name.toLowerCase()],
   };
 }
 
@@ -42,6 +53,36 @@ describe("resolveMentionsInText", () => {
 
   it("is a no-op when there are no mentions", async () => {
     const result = await resolveMentionsInText("no mentions here", resolverFrom({}));
+    expect(result).toBe("no mentions here");
+  });
+});
+
+describe("encodeMentionsInText", () => {
+  it("replaces a single plain @name with the resolved <@ID> token", async () => {
+    const result = await encodeMentionsInText("hi @mohit", lookupFrom({ mohit: "U0AMFGRAKLY" }));
+    expect(result).toBe("hi <@U0AMFGRAKLY>");
+  });
+
+  it("replaces multiple distinct @names", async () => {
+    const result = await encodeMentionsInText(
+      "hi @mohit and @shiv!",
+      lookupFrom({ mohit: "U1", shiv: "U2" })
+    );
+    expect(result).toBe("hi <@U1> and <@U2>!");
+  });
+
+  it("matches case-insensitively", async () => {
+    const result = await encodeMentionsInText("hi @Mohit", lookupFrom({ mohit: "U1" }));
+    expect(result).toBe("hi <@U1>");
+  });
+
+  it("leaves an unresolved @name untouched", async () => {
+    const result = await encodeMentionsInText("hi @unknown", lookupFrom({}));
+    expect(result).toBe("hi @unknown");
+  });
+
+  it("is a no-op when there are no @names", async () => {
+    const result = await encodeMentionsInText("no mentions here", lookupFrom({}));
     expect(result).toBe("no mentions here");
   });
 });

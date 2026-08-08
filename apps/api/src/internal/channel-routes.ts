@@ -68,7 +68,11 @@ interface ChannelMessageBody {
   text: string;
 }
 
-function externalThreadKey(provider: string, message: ChannelMessageBody): string {
+/** Exported so a Tool that proactively sends into a channel (e.g. `send_slack_message`) can write
+ * the same `integration_conversations` key the reactive ingress path would derive on first reply,
+ * making a human's thread reply route back to the sending conversation instead of starting a new
+ * one. */
+export function externalThreadKey(provider: string, message: ChannelMessageBody): string {
   return `${provider}:${message.channelId}:${message.threadId ?? message.channelId}`;
 }
 

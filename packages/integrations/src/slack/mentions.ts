@@ -44,3 +44,45 @@ export async function resolveMentionsInText(
     return name ? `@${name}` : whole;
   });
 }
+
+export interface SlackUserLookupPort {
+  /** Resolves a plain `@name` token (as typed, case-insensitive) to a Slack user id, or undefined
+   * if unknown/ambiguous/unavailable. */
+  resolveUserId(name: string): Promise<string | undefined>;
+}
+
+// Matches a plain `@name` the agent wrote as prose — never a token already inside `<@ID>`/`<@ID|label>`,
+// since those are Slack's own opaque mention syntax and must pass through unchanged.
+const PLAIN_MENTION_PATTERN = /(?<=^|[\s(])@([A-Za-z0-9][\w.'-]{0,79})(?=[\s.,!?;:)]|$)/g;
+
+/**
+ * Replaces every plain `@name` token with the resolved `<@USERID>` Slack mention syntax, the
+ * opposite direction of `resolveMentionsInText`. Without this, an agent's `@name` in outgoing
+ * message text posts as inert text — Slack only renders a highlighted, notifying mention for the
+ * `<@ID>` form. Best-effort, same as the decode side: a name the resolver cannot match is left
+ * untouched rather than blocking the send.
+ */
+export async function encodeMentionsInText(
+  text: string,
+  resolver: SlackUserLookupPort
+): Promise<string> {
+  const names = new Set<string>();
+  for (const match of text.matchAll(PLAIN_MENTION_PATTERN)) {
+    names.add(match[1]);
+  }
+  if (names.size === 0) return text;
+
+  const ids = new Map<string, string>();
+  await Promise.all(
+    Array.from(names).map(async (name) => {
+      const id = await resolver.resolveUserId(name);
+      if (id) ids.set(name, id);
+    })
+  );
+  if (ids.size === 0) return text;
+
+  return text.replace(PLAIN_MENTION_PATTERN, (whole, name: string) => {
+    const id = ids.get(name);
+    return id ? `<@${id}>` : whole;
+  });
+}
