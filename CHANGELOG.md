@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0](https://github.com/TulipFarm/tulipfarm/compare/v0.6.1...v0.7.0) (2026-08-08)
+
+### Features
+
+* **agent-runtime:** give agents the current date and time ([#338](https://github.com/TulipFarm/tulipfarm/issues/338)) ([dea9293](https://github.com/TulipFarm/tulipfarm/commit/dea9293ad3c5798356c9712f81ddd0e0ed1d9e87))
+* **agent-runtime:** narrow offered tools to the active Skill's scope ([#339](https://github.com/TulipFarm/tulipfarm/issues/339)) ([e64e178](https://github.com/TulipFarm/tulipfarm/commit/e64e1789dbd3a2dafa3ddcf8d114b3787b7990c8))
+* **llm:** converge model selection onto ModelProfile routing ([#340](https://github.com/TulipFarm/tulipfarm/issues/340)) ([c1a6c72](https://github.com/TulipFarm/tulipfarm/commit/c1a6c72631ba00295a00eb6bf29d698171efd459))
+* **web:** rebuild the app shell rail, sidebar, and top bar ([#334](https://github.com/TulipFarm/tulipfarm/issues/334)) ([3eb0b16](https://github.com/TulipFarm/tulipfarm/commit/3eb0b16f8dcba9063bc0329f54006374c6a1667d))
+
 ## [0.6.1](https://github.com/TulipFarm/tulipfarm/compare/v0.6.0...v0.6.1) (2026-08-08)
 
 ### Features
