@@ -359,6 +359,35 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
 };
 const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
 
+/**
+ * The V1 meta-schema accepts any `agent:<name>` operation string (it only resolves `refName`
+ * against the declared `functions[]`, not the name against the real Agent registry) — so a
+ * hallucinated Agent name would otherwise only surface as a Run failure at Trigger time. Checking
+ * it here, against the same Soul-loaded agent map `agent_list` reads, lets the author's pre-write
+ * `agent_list` call be optional instead of load-bearing.
+ */
+function findUnknownAgentRef(
+  definition: Record<string, unknown>,
+  ctx: PlatformToolContext
+): string | undefined {
+  // Nothing to check against — this is "cannot verify", not "unknown". Never block on a context
+  // that has no Soul loaded (e.g. the schema's own unit tests construct a bare context).
+  if (!ctx.soulLoader) return undefined;
+  const functions = definition.functions;
+  if (!Array.isArray(functions)) return undefined;
+  for (const fn of functions) {
+    if (typeof fn !== "object" || fn === null) continue;
+    const operation = (fn as { operation?: unknown }).operation;
+    if (typeof operation !== "string") continue;
+    const match = /^agent:(\S+)$/.exec(operation);
+    if (!match) continue;
+    const agentName = match[1];
+    const known = ctx.soulLoader?.agents.has(agentName) || ctx.platformAgentNames?.has(agentName);
+    if (!known) return agentName;
+  }
+  return undefined;
+}
+
 export const routineForgeTool: PlatformTool = {
   name: "routine_forge",
   description:
@@ -366,9 +395,15 @@ export const routineForgeTool: PlatformTool = {
     "not skill_create, whenever the user asks to 'create a routine' / 'automate X' / 'every " +
     "morning do Y' / 'when X happens do Y'. `definition` is a CNCF Serverless Workflow 0.8 subset " +
     'and MUST include the top-level fields `id` (matches `name`), `version` (e.g. "1.0"), ' +
-    "`start` (the first state's name), `states` (min 1), and `x-triggers` (min 1, e.g. " +
-    "[{ type: 'cron', schedule: '0 9 * * *' }] or [{ type: 'manual' }]) — additional properties " +
-    "are rejected at every level. Minimal example: " +
+    "`start` (the first state's name), `states` (min 1), and `x-triggers` (min 1) — additional " +
+    "properties are rejected at every level. `x-triggers` entries: `{ type: 'cron', schedule: " +
+    "'0 9 * * *', timezone?: 'America/New_York' }` for a recurring cron schedule (5-field cron, " +
+    "UTC unless `timezone` given — 'every hour' is `0 * * * *`, 'Monday 8am' is `0 8 * * 1`); " +
+    "`{ type: 'datetime', at: '2026-09-01T08:00:00Z' }` for a single one-off fire at an ISO instant; " +
+    "`{ type: 'interval', everyMs: 3600000, startAt: '2026-08-08T00:00:00Z' }` for a fixed period " +
+    "anchored to `startAt`; or `{ type: 'manual' }`. `cron`/`interval`/`datetime` triggers are " +
+    "dispatched automatically (see the schedule dispatcher) — no separate activation step. " +
+    "Minimal example: " +
     '{ id: "daily-report", version: "1.0", start: "Report", "x-triggers": [{ type: "cron", ' +
     'schedule: "0 9 * * *" }], functions: [{ name: "send", operation: "tool:resource_search" }], ' +
     'states: [{ name: "Report", type: "operation", actions: [{ functionRef: { refName: "send" } }], ' +
@@ -396,6 +431,11 @@ export const routineForgeTool: PlatformTool = {
         return err("validation_error", `${e.path || "/"}: ${e.message}`);
       }
       return err("internal_error", e instanceof Error ? e.message : String(e));
+    }
+
+    const unknownAgentRef = findUnknownAgentRef(definition, ctx);
+    if (unknownAgentRef) {
+      return err("validation_error", `functions: agent "${unknownAgentRef}" not found`);
     }
 
     try {

@@ -2,6 +2,19 @@
 name: routine-forge
 description: "Forge a Routine: design triggers, States, retries, Approvals, and hooks."
 category: forge
+tools:
+  [
+    routine_forge,
+    routine_picker,
+    trigger_routine,
+    agent_list,
+    agent_get,
+    record_search,
+    record_get,
+    send_slack_message,
+    present,
+    request_input,
+  ]
 ---
 # Routine Forge Workflow
 
@@ -15,10 +28,15 @@ whole session; this Skill reports its outcome directly.
 ## Decide first: Routine, Agent, or Skill?
 
 - **Routine** — a repeatable, mostly deterministic pipeline on a Trigger ("every morning at 9, tag
-  overdue tickets and email a digest"; "when a lead is created, score it and notify sales"). States
-  call Tools, Agents, or hook functions and pass data between States.
-- If it needs a persona / free-form Chat → **Agent** (`agent-forge`). If it is a single
-  stateless instruction an Agent loads on demand → **Skill** (`skill-forge`). Stop and switch.
+  overdue tickets and email a digest"; "when a lead is created, score it and notify sales"; "every
+  2 minutes post a joke to Slack"). A schedule/event that produces generated or free-form *content*
+  (a joke, a quote, a summary) is still a Routine — one State calls `agent:<agentName>` (Step 3) to
+  generate the content, then a later State delivers it. Needing generated content on a Trigger is
+  NOT by itself a reason to switch to Agent.
+- Switch to **Agent** (`agent-forge`) only when there is no Trigger/schedule at all — the user wants
+  a standing persona they'll talk to ad hoc. Switch to **Skill** (`skill-forge`) only for a single
+  stateless instruction an Agent loads on demand. If the request names a cadence or event ("every
+  X", "when Y happens", "at TIME"), stay in Routine — do not stop and switch.
 
 ## V1 surface
 
@@ -26,9 +44,12 @@ whole session; this Skill reports its outcome directly.
   cap 1000), `sleep` (ISO-8601 duration), `inject` (merge literal data). Deferred: `parallel`,
   `event` State, child Routine (`subFlowRef`).
 - **Triggers (`x-triggers`, ≥1):** `manual`, `cron` (`schedule` cron expression, optional
-  `timezone`), `webhook` (`secret_ref` → a Secret name), `event` (`event` ∈
+  `timezone`), `interval` (`everyMs`, `startAt` ISO instant it's anchored to — for plain "every N
+  minutes/hours" use this, not a cron expression), `datetime` (`at` ISO instant, fires once),
+  `webhook` (`secret_ref` → a Secret name), `event` (`event` ∈
   resource.created·resource.updated·conversation.created·conversation.completed·integration.event,
-  optional `filter`), `agent`. Deferred: `datetime`, `integration`.
+  optional `filter`), `agent`. `cron`/`interval`/`datetime` are dispatched automatically by the
+  schedule dispatcher — no separate activation step. Deferred: `integration`.
 - **Approval channels:** `ui` (always), `slack` (if the Slack Integration is present).
   `email`/`sms` are Schema-accepted but fall back to `ui`.
 
@@ -37,7 +58,8 @@ whole session; this Skill reports its outcome directly.
 ### Step 1 — Purpose & Trigger(s)
 
 Establish the one-sentence purpose and what starts it. Pick Trigger type(s) and their config
-(cron `schedule`, webhook `secret_ref`, event `event` name + optional `filter`). Most Routines
+(cron `schedule`, interval `everyMs`/`startAt`, datetime `at`, webhook `secret_ref`, event `event`
+name + optional `filter`). Most Routines
 have exactly one Trigger; declare `{ type: "manual" }` too if the user should be able to run it
 by hand from the Routines UI.
 
@@ -52,11 +74,19 @@ manual-Trigger form and validates webhook/Agent payloads. Inputs arrive at runti
 Every external call a State makes is a named entry in `functions[]` with `operation`:
 
 - `tool:<toolName>` — a platform Tool. Common ones: `record_search`, `record_get`,
-  `record_create`, `record_update`, `record_delete` (Record CRUD). Only reference
-  Tools you know exist; a bad name fails at runtime, not at write.
+  `record_create`, `record_update`, `record_delete` (Record CRUD), `send_slack_message`
+  (requires a Slack **channel** — name or ID). Only reference Tools you know exist; a bad name
+  fails at runtime, not at write.
 - `agent:<agentName>` — spawn a headless Agent Turn (pass its brief as an `arguments.task`
-  string). Confirm the Agent exists with `agent_list` first.
+  string). `routine_forge` validates the name against the real Agent registry at write time (a
+  bad name comes back as `validation_error`), so `agent_list` is only needed when you're unsure
+  which Agent to name in the first place — don't call it as a routine pre-check.
 - `hook:<fnName>` — a function you define in `hooks.ts` (Step 8) for pure in-Routine computation.
+
+**Ask for every required argument the request didn't already give you** — never invent or guess
+one (a Slack channel, a record id, an email address). If the user's ask names a delivery Tool but
+leaves out its target (e.g. "send me a joke on Slack" with no channel), that's a Step 1/3 interview
+question, not a default to assume: ask which channel before writing the definition.
 
 ### Step 4 — States & flow
 

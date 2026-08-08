@@ -2,6 +2,7 @@
 name: knowledge-research
 description: Research stored Knowledge, reconcile sources, and cite the supporting Pages.
 category: core
+tools: [query_knowledge, get_page, get_page_by_path, get_backlinks, navigate_space, list_spaces]
 ---
 # Knowledge Research
 

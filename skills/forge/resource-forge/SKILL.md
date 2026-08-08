@@ -2,6 +2,19 @@
 name: resource-forge
 description: "Forge a Resource type Schema: design fields, links, transforms, and hooks."
 category: forge
+tools:
+  [
+    list_resource_types,
+    resource_type_schema,
+    resource_type_update,
+    create_resource_type,
+    create_resource_hooks,
+    resource_hooks_get,
+    resource_hooks_delete,
+    validate_artifact,
+    present,
+    request_input,
+  ]
 ---
 # Resource Forge Workflow
 

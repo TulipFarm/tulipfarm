@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ModelInvocationResult, ModelPort, ModelStreamChunk } from "../ports";
+import type {
+  ModelInvocationRequest,
+  ModelInvocationResult,
+  ModelPort,
+  ModelStreamChunk,
+} from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
 import {
   AgentLoop,
@@ -62,6 +67,26 @@ function streamingModel(
       port.streamed += 1;
       for (const text of deltas) yield { kind: "text_delta" as const, text };
       yield { kind: "completed" as const, result };
+    },
+  };
+  return port;
+}
+
+/** Like `scriptedModel`, but records each request's offered Tool names for narrowing assertions. */
+function recordingModel(...results: readonly ModelInvocationResult[]): ModelPort & {
+  requests: number;
+  toolNamesByRequest: string[][];
+} {
+  const queue = [...results];
+  const port = {
+    requests: 0,
+    toolNamesByRequest: [] as string[][],
+    invoke: async (request: ModelInvocationRequest) => {
+      port.requests += 1;
+      port.toolNamesByRequest.push((request.tools ?? []).map((t) => t.name));
+      const next = queue.shift();
+      if (next === undefined) throw new Error("model called more times than scripted");
+      return next;
     },
   };
   return port;
@@ -620,5 +645,127 @@ describe("AgentLoop concurrent dispatch", () => {
     );
 
     expect(outcome).toMatchObject({ status: "failed", reason: "repair_budget_exhausted" });
+  });
+});
+
+describe("AgentLoop skill-scoped tool narrowing", () => {
+  const catalog = [
+    { name: "load_skill", inputSchema: { type: "object" } },
+    { name: "complete_task", inputSchema: { type: "object" } },
+    { name: "routine_forge", inputSchema: { type: "object" } },
+    { name: "record_search", inputSchema: { type: "object" } },
+    { name: "agent_list", inputSchema: { type: "object" } },
+  ];
+
+  it("offers the full catalog unchanged when no skillToolScopes is given", async () => {
+    const model = recordingModel(textResult("done"));
+    await loop({ model }).run(input({ tools: catalog }));
+
+    expect(model.toolNamesByRequest[0]).toEqual(catalog.map((t) => t.name));
+  });
+
+  it("narrows to a Skill's declared tools (plus the always-exposed baseline) after load_skill succeeds", async () => {
+    const tools = dispatcher({
+      status: "succeeded",
+      callId: "call-1",
+      output: { name: "routine-forge" },
+    });
+    const model = recordingModel(
+      toolCallResult([
+        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
+      ]),
+      textResult("done")
+    );
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([["routine-forge", ["routine_forge"]]]),
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    // Iteration 1 (before load_skill resolves) still sees everything.
+    expect(model.toolNamesByRequest[0]).toEqual(catalog.map((t) => t.name));
+    // Iteration 2 is narrowed to the declared scope plus the always-exposed baseline.
+    expect(model.toolNamesByRequest[1]).toEqual(
+      expect.arrayContaining(["load_skill", "complete_task", "routine_forge"])
+    );
+    expect(model.toolNamesByRequest[1]).not.toContain("record_search");
+    expect(model.toolNamesByRequest[1]).not.toContain("agent_list");
+  });
+
+  it("does not narrow when the active Skill has no declared scope", async () => {
+    const tools = dispatcher({
+      status: "succeeded",
+      callId: "call-1",
+      output: { name: "no-scope-skill" },
+    });
+    const model = recordingModel(
+      toolCallResult([
+        { callId: "call-1", name: "load_skill", arguments: { name: "no-scope-skill" } },
+      ]),
+      textResult("done")
+    );
+    await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([["routine-forge", ["routine_forge"]]]),
+      })
+    );
+
+    expect(model.toolNamesByRequest[1]).toEqual(catalog.map((t) => t.name));
+  });
+
+  it("replaces rather than unions the scope when the model switches Skills mid-turn", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { name: "routine-forge" } },
+      { status: "succeeded", callId: "call-2", output: { name: "agent-forge" } }
+    );
+    const model = recordingModel(
+      toolCallResult([
+        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
+      ]),
+      toolCallResult([
+        { callId: "call-2", name: "load_skill", arguments: { name: "agent-forge" } },
+      ]),
+      textResult("done")
+    );
+    await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([
+          ["routine-forge", ["routine_forge"]],
+          ["agent-forge", ["agent_list"]],
+        ]),
+      })
+    );
+
+    expect(model.toolNamesByRequest[2]).toEqual(
+      expect.arrayContaining(["load_skill", "complete_task", "agent_list"])
+    );
+    expect(model.toolNamesByRequest[2]).not.toContain("routine_forge");
+  });
+
+  it("still authorizes dispatch of a Tool the narrowed offer excluded (narrowing is not a security boundary)", async () => {
+    const tools = dispatcher(
+      { status: "succeeded", callId: "call-1", output: { name: "routine-forge" } },
+      { status: "succeeded", callId: "call-2", output: { ok: true } }
+    );
+    const model = scriptedModel(
+      toolCallResult([
+        { callId: "call-1", name: "load_skill", arguments: { name: "routine-forge" } },
+      ]),
+      toolCallResult([{ callId: "call-2", name: "record_search", arguments: {} }]),
+      textResult("done")
+    );
+    const outcome = await loop({ model, tools }).run(
+      input({
+        tools: catalog,
+        skillToolScopes: new Map([["routine-forge", ["routine_forge"]]]),
+      })
+    );
+
+    expect(outcome).toMatchObject({ status: "completed" });
+    expect(tools.calls.map((c) => c.name)).toEqual(["load_skill", "record_search"]);
   });
 });

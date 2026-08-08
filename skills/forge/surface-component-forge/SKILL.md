@@ -2,6 +2,13 @@
 name: surface-component-forge
 description: "Forge a declarative Tulip Surface Protocol business component."
 category: forge
+tools:
+  [
+    surface_component_list,
+    surface_component_create,
+    surface_component_update,
+    surface_component_get,
+  ]
 ---
 # Surface Component Forge
 

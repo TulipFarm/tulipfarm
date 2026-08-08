@@ -2,6 +2,7 @@
 name: onboarding
 description: "Run guided first-time business onboarding and generate a verified starter Soul."
 category: core
+tools: [update_memory, request_input]
 ---
 # Onboarding Workflow
 

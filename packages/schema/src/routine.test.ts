@@ -105,12 +105,26 @@ describe("validateRoutineDefinition", () => {
     expect(() => validateRoutineDefinition(routine)).toThrowError(/deferred in V1/);
   });
 
-  it("rejects datetime and integration triggers as deferred", () => {
-    for (const type of ["datetime", "integration"]) {
-      const routine = baseRoutine();
-      routine["x-triggers"] = [{ type }];
-      expect(() => validateRoutineDefinition(routine)).toThrowError(/deferred in V1/);
-    }
+  it("rejects integration triggers as deferred", () => {
+    const routine = baseRoutine();
+    routine["x-triggers"] = [{ type: "integration" }];
+    expect(() => validateRoutineDefinition(routine)).toThrowError(/deferred in V1/);
+  });
+
+  it("accepts cron, interval, and datetime triggers", () => {
+    const cronRoutine = baseRoutine();
+    cronRoutine["x-triggers"] = [{ type: "cron", schedule: "0 9 * * *" }];
+    expect(() => validateRoutineDefinition(cronRoutine)).not.toThrow();
+
+    const intervalRoutine = baseRoutine();
+    intervalRoutine["x-triggers"] = [
+      { type: "interval", everyMs: 3_600_000, startAt: "2026-08-08T00:00:00Z" },
+    ];
+    expect(() => validateRoutineDefinition(intervalRoutine)).not.toThrow();
+
+    const datetimeRoutine = baseRoutine();
+    datetimeRoutine["x-triggers"] = [{ type: "datetime", at: "2026-09-01T08:00:00Z" }];
+    expect(() => validateRoutineDefinition(datetimeRoutine)).not.toThrow();
   });
 
   it("accepts an integration.event trigger with a filter", () => {

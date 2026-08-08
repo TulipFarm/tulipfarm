@@ -2,6 +2,7 @@
 name: skill-forge
 description: Create and improve safe, reusable Skills.
 category: forge
+tools: [skill_list, skill_get, skill_create, skill_update, skill_activate, present, request_input]
 ---
 # Skill Forge Skill
 
@@ -56,6 +57,13 @@ Do not use this workflow for:
 - `name`: lowercase letters, numbers, dots, underscores, or hyphens; maximum 64 characters.
 - `name` must equal the Skill directory name; `description` is required.
 - `description`: one sentence, maximum 60 characters by house style, ending with a period.
+- `tools`: the array of exact Tool names this Skill's procedure actually calls — required for every
+  new Skill. Once loaded, the loop offers the model only this list plus the always-exposed baseline
+  (`load_skill`, `complete_task`, `transfer_to_agent`, `delegate_to_agent`, `present`,
+  `request_input`, `update_presentation`) instead of the full catalog, so omitting a Tool the
+  procedure calls makes that call unreachable while the Skill is active. Do not list one the
+  procedure never calls. A Skill with no `tools` declared falls back to the full catalog — every
+  Skill should declare its list rather than rely on that fallback.
 - Unknown benign fields are tolerated; authority-grant and underscore-prefixed fields are reserved.
 
 Body section order:
@@ -86,7 +94,8 @@ Aim for roughly 100 lines for a simple Skill. Move bulky or branch-specific mate
    finish condition. Remove generic advice that would not change Agent behavior.
 4. **Draft compact frontmatter and body.**
    Follow the Quick Reference constraints and mandatory section order. Keep the description
-   trigger-focused and put procedure details in the body or references.
+   trigger-focused and put procedure details in the body or references. List every Tool the
+   procedure calls under `tools`; leave out any the procedure never calls.
 5. **Choose create, patch, or rewrite.**
    Use create only for a distinct Skill. For maintenance, prefer a surgical patch containing
    enough exact surrounding text to match once. Use a full rewrite only when the structure itself
@@ -129,6 +138,7 @@ Aim for roughly 100 lines for a simple Skill. Move bulky or branch-specific mate
 - [ ] Existing Skills were checked and unnecessary duplication was avoided.
 - [ ] The name matches the directory and satisfies the lowercase 64-character limit.
 - [ ] The description is at most 60 characters, one sentence, and ends with a period.
+- [ ] `tools` lists exactly the Tools the procedure calls — no more, no fewer.
 - [ ] The body follows the mandatory section order and has a checkable completion criterion.
 - [ ] A surgical update used an exact unique match or an intentional `replace_all`.
 - [ ] A new Skill returned both deterministic and LLM SkillAudit evidence.

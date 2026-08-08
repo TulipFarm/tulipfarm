@@ -65,13 +65,59 @@ export class LlmModelPort implements ModelPort {
       ...(this.options.signal === undefined ? {} : { abortSignal: this.options.signal }),
     });
 
+    let finishReason: string | undefined;
+    let rawFinishReason: string | undefined;
+
     for await (const part of result.fullStream) {
       if (part.type === "text-delta" && part.text.length > 0) {
         yield { kind: "text_delta", text: part.text };
       }
+      if (part.type === "error") {
+        throw part.error instanceof Error ? part.error : new Error(String(part.error));
+      }
+      if (part.type === "finish") {
+        finishReason = part.finishReason;
+        rawFinishReason = part.rawFinishReason;
+      }
     }
 
     const [calls, text, usage] = await Promise.all([result.toolCalls, result.text, result.usage]);
+
+    // A stream that ended cleanly (no `error` part above) but produced no tool calls, no text, and
+    // no usage is not a real completion — the provider call never actually ran (`ai@7`'s internal
+    // step pipeline can reach `finish` this way on certain setup failures without ever emitting an
+    // `error` part). Surfacing it as `completed` with blank text sends the loop into its
+    // silent-retry repair budget instead of the real diagnosis.
+    if (
+      calls.length === 0 &&
+      text.length === 0 &&
+      (usage.inputTokens ?? 0) === 0 &&
+      (usage.outputTokens ?? 0) === 0
+    ) {
+      const [warnings, sdkRequest, sdkResponse] = await Promise.all([
+        Promise.resolve(result.warnings).catch((error: unknown) => [
+          { toString: () => String(error) },
+        ]),
+        Promise.resolve(result.request).catch((error: unknown) => ({ body: String(error) })),
+        Promise.resolve(result.response).catch((error: unknown) => ({ body: String(error) })),
+      ]);
+      const outgoing = {
+        instructionCount: instructions.length,
+        messageCount: messages.length,
+        roles: messages.map((m) => m.role),
+        lastMessage: messages.at(-1),
+        toolCount: request.tools?.length ?? 0,
+        toolNames: request.tools?.map((t) => t.name) ?? [],
+      };
+      throw new Error(
+        `model call produced no output (finishReason=${finishReason ?? "unknown"}` +
+          `${rawFinishReason ? `, rawFinishReason=${rawFinishReason}` : ""}, ` +
+          `warnings=${JSON.stringify(warnings)}, ` +
+          `request=${JSON.stringify(sdkRequest).slice(0, 2000)}, ` +
+          `response=${JSON.stringify(sdkResponse).slice(0, 2000)}, ` +
+          `outgoing=${JSON.stringify(outgoing).slice(0, 4000)})`
+      );
+    }
 
     yield {
       kind: "completed",

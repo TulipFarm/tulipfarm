@@ -71,7 +71,7 @@ describe("routine_forge", () => {
         definition: {
           ...VALID_DEFINITION,
           id: "bad",
-          "x-triggers": [{ type: "datetime", at: "2027-01-01" }],
+          "x-triggers": [{ type: "integration" }],
         },
       },
       { gitSync, onRoutinesChanged }
@@ -97,6 +97,65 @@ describe("routine_forge", () => {
     );
     expect(badSchema.success).toBe(false);
     expect(withSync).not.toHaveBeenCalled();
+  });
+
+  it("rejects an agent: function ref naming an unknown agent when a Soul is loaded", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_DEFINITION,
+          functions: [{ name: "send", operation: "agent:ghost-agent" }],
+        },
+      },
+      {
+        gitSync,
+        onRoutinesChanged,
+        soulLoader: { skills: new Map(), agents: new Map() },
+      }
+    );
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain('agent "ghost-agent" not found');
+    }
+    expect(withSync).not.toHaveBeenCalled();
+  });
+
+  it("accepts a known agent: function ref when a Soul is loaded", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_DEFINITION,
+          functions: [{ name: "send", operation: "agent:joke-generator" }],
+        },
+      },
+      {
+        gitSync,
+        onRoutinesChanged,
+        soulLoader: {
+          skills: new Map(),
+          agents: new Map([
+            ["joke-generator", { name: "joke-generator", frontmatter: {}, body: "" }],
+          ]),
+        },
+      }
+    );
+    expect(result.success).toBe(true);
+  });
+
+  it("does not block an agent: function ref when no Soul is loaded (cannot verify)", async () => {
+    const result = await routineForgeTool.handler(
+      {
+        name: "daily-report",
+        definition: {
+          ...VALID_DEFINITION,
+          functions: [{ name: "send", operation: "agent:whatever" }],
+        },
+      },
+      { gitSync, onRoutinesChanged }
+    );
+    expect(result.success).toBe(true);
   });
 
   it("describes the required top-level fields so the model doesn't fall through to skill_create", () => {
