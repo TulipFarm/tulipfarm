@@ -302,8 +302,19 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         excludedTools
       ),
       surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
+      temporal: { now: this.now(), timezone: timezoneFrom(memory) },
     });
   }
+}
+
+/**
+ * The user's preferred zone, read off the working memory already loaded for the prompt. `timezone`
+ * is the well-known key `MEMORY_GUIDANCE` tells the model to store and the Settings → Memory UI
+ * offers as a preset, so this is the one place it is written. The value is whatever the user typed;
+ * validating it is the renderer's job, which falls back to UTC rather than failing the turn.
+ */
+function timezoneFrom(memory: readonly { key: string; value: string }[]): string | undefined {
+  return memory.find((entry) => entry.key === "timezone")?.value;
 }
 
 /** How many times the loop may ask the model to repair a malformed call before giving up. */

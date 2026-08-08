@@ -1,6 +1,7 @@
 import type { EventEmitter } from "node:events";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { formatTemporalContext } from "@tulipfarm/agent-runtime";
 import { ajv, TulipFarmValidationError, validateRoutineDefinition } from "@tulipfarm/schema";
 import type {
   GitSyncService,
@@ -691,6 +692,48 @@ export const completeTaskTool: PlatformTool = {
   },
 };
 
+// ── get_current_time ──────────────────────────────────────────────────────────
+
+const GET_CURRENT_TIME_SCHEMA: Record<string, unknown> = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    timezone: {
+      type: "string",
+      minLength: 1,
+      description:
+        "IANA zone to read the time in (e.g. 'Asia/Kolkata'). Defaults to UTC. Pass the zone shown " +
+        "in <current-context> to stay consistent with the rest of the turn.",
+    },
+  },
+};
+const validateGetCurrentTime = ajv.compile(GET_CURRENT_TIME_SCHEMA);
+
+/**
+ * A fresh clock reading mid-turn. The `<current-context>` block is resolved once at turn start, so
+ * a long Tool loop can outlive it — this is how an Agent re-reads the time instead of computing
+ * from a stale snapshot. Deliberately stateless: the zone is an argument rather than a lookup, so
+ * this Tool needs no access to the user's working memory.
+ *
+ * Shares `formatTemporalContext` with the block on purpose. A fresh reading that disagreed in
+ * format with the one the Agent was already given would read as a different kind of fact.
+ */
+export const getCurrentTimeTool: PlatformTool = {
+  name: "get_current_time",
+  description:
+    "Get the current date, day of week and time. The <current-context> block is read once at the " +
+    "start of the turn, so call this when a long-running turn may have outlived it, or to read the " +
+    "time in a different timezone.",
+  mutating: false,
+  inputSchema: GET_CURRENT_TIME_SCHEMA,
+  handler: async (args) => {
+    if (!validateGetCurrentTime(args))
+      return err("validation_error", firstError(validateGetCurrentTime.errors));
+    const { timezone } = args as { timezone?: string };
+    return ok({ current: formatTemporalContext({ now: new Date(), timezone }) });
+  },
+};
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 export const PLATFORM_TOOLS: PlatformTool[] = [
@@ -709,4 +752,5 @@ export const PLATFORM_TOOLS: PlatformTool[] = [
   callSkillTool,
   completeStateTool,
   completeTaskTool,
+  getCurrentTimeTool,
 ];

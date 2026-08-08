@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
 import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import type { BundledSkill } from "../soul/skills/bundled";
@@ -11,6 +12,7 @@ import {
   completeTaskTool,
   delegateToAgentTool,
   endSoulBatchTool,
+  getCurrentTimeTool,
   loadSkillReferenceTool,
   loadSkillTool,
   PLATFORM_TOOLS,
@@ -684,6 +686,7 @@ describe("PLATFORM_TOOLS registry", () => {
       "call_skill",
       "complete_state",
       "complete_task",
+      "get_current_time",
     ]);
   });
 
@@ -697,5 +700,52 @@ describe("PLATFORM_TOOLS registry", () => {
     expect(byName.soul_repo_push).toBe(true);
     expect(byName.call_skill).toBe(false);
     expect(byName.complete_state).toBe(true);
+  });
+});
+
+describe("get_current_time", () => {
+  const ctx = {} as PlatformToolContext;
+
+  /** Narrow the result union so a failure surfaces its message instead of an undefined read. */
+  function data(result: Awaited<ReturnType<typeof getCurrentTimeTool.handler>>): {
+    current: string;
+  } {
+    if (!result.success) throw new Error(`expected success, got ${result.error.message}`);
+    return result.data as { current: string };
+  }
+
+  it("reads the current time in the requested zone", async () => {
+    const { current } = data(await getCurrentTimeTool.handler({ timezone: "Asia/Kolkata" }, ctx));
+    expect(current).toContain("Asia/Kolkata");
+    expect(current).toMatch(/^date: \w+, \d{2} \w+ \d{4}\ntime: \d{2}:\d{2} \(/);
+  });
+
+  it("defaults to UTC when no zone is given", async () => {
+    expect(data(await getCurrentTimeTool.handler({}, ctx)).current).toContain("(UTC, UTC+00:00)");
+  });
+
+  it("renders in the same shape as the <current-context> block so the two cannot drift", async () => {
+    const { current } = data(await getCurrentTimeTool.handler({ timezone: "UTC" }, ctx));
+    const block = assembleSystemPrompt({
+      memory: [],
+      governancePages: [],
+      temporal: { now: new Date(), timezone: "UTC" },
+    });
+    // Same labelled lines, produced by the shared formatter.
+    for (const line of current.split("\n")) {
+      expect(block).toContain(`${line.split(":")[0]}:`);
+    }
+  });
+
+  it("rejects an unknown argument rather than silently ignoring it", async () => {
+    const result = await getCurrentTimeTool.handler({ zone: "Asia/Kolkata" }, ctx);
+    expect(result.success).toBe(false);
+    if (result.success) throw new Error("expected a validation failure");
+    expect(result.error.code).toBe("validation_error");
+  });
+
+  it("is read-only and registered", () => {
+    expect(getCurrentTimeTool.mutating).toBe(false);
+    expect(PLATFORM_TOOLS.map((t) => t.name)).toContain("get_current_time");
   });
 });

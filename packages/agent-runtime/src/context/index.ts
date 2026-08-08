@@ -5,8 +5,9 @@ export type {
   MemoryEntry,
   SoulCatalogue,
   SoulCatalogueEntry,
+  TemporalContext,
 } from "./assemble";
-export { assembleSystemPrompt } from "./assemble";
+export { assembleSystemPrompt, formatTemporalContext } from "./assemble";
 export type { GovernancePage } from "./governance";
 export { BLOCK_CHAR_CAP, buildGovernanceBlock, PER_DOC_CHAR_CAP } from "./governance";
 export type {

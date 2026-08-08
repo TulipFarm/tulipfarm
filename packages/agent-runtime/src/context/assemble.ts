@@ -13,6 +13,23 @@ export interface MemoryEntry {
   readonly value: string;
 }
 
+/**
+ * The wall-clock reading for one turn, as `<current-context>` renders it. The instant is supplied
+ * by the caller rather than read from the clock here, which is what keeps `assembleSystemPrompt`
+ * pure: the same context renders the same prompt, so the determinism the prompt cache depends on
+ * survives a block whose content changes every turn.
+ */
+export interface TemporalContext {
+  /** The instant to render — resolved once at turn start by the caller's injected clock. */
+  readonly now: Date;
+  /**
+   * IANA zone to render `now` in (e.g. `Asia/Kolkata`). This arrives from the user's free-text
+   * `timezone` working-memory entry, so anything at all can land here; an unusable value falls
+   * back to UTC rather than failing the turn.
+   */
+  readonly timezone?: string;
+}
+
 /** One Skill projected to its eager surface — the full body goes into `<skills>`. */
 export interface EagerSkill {
   readonly name: string;
@@ -111,6 +128,11 @@ export interface AssembleContext {
    * it with `cite_sources`. Ephemeral (varies per turn); dropped whole when over budget.
    */
   pinnedKnowledge?: { id: string; title: string; content: string }[];
+  /**
+   * Wall-clock reading for this turn — renders as `<current-context>`. Unset → block omitted, which
+   * is what every prompt did before this existed. Both production callers supply it.
+   */
+  temporal?: TemporalContext;
   /**
    * When true, append the `<knowledge-grounding>` block instructing the agent to search stored
    * knowledge (`query_knowledge`) and cite the pages it used (`cite_sources`). Set per turn only
@@ -434,6 +456,88 @@ function renderKnowledgeGrounding(ctx: AssembleContext): string {
   return ctx.knowledgeGrounding ? block("knowledge-grounding", KNOWLEDGE_GROUNDING_TEXT) : "";
 }
 
+/** Zone every unusable `timezone` falls back to. Never guessed from the host clock. */
+const FALLBACK_TIME_ZONE = "UTC";
+
+/**
+ * Narrow a caller-supplied zone to one `Intl` accepts. The value originates in a free-text working
+ * memory entry a user typed, so "PST", "" and outright junk all reach here; constructing the
+ * formatter is the only real validation available, and a `RangeError` means fall back rather than
+ * fail the turn over a preference.
+ *
+ * Note `Intl` is broader than strict IANA `Area/Location`: it resolves legacy abbreviations like
+ * "PST" (to `PST8PDT`, DST included). Those are kept rather than rejected — the rendered offset is
+ * explicit, so a zone spelled unusually is still read unambiguously.
+ */
+function resolveTimeZone(timezone: string | undefined): string {
+  const candidate = timezone?.trim();
+  if (!candidate) return FALLBACK_TIME_ZONE;
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: candidate });
+    return candidate;
+  } catch {
+    return FALLBACK_TIME_ZONE;
+  }
+}
+
+/**
+ * Render one instant as the two lines `<current-context>` carries. Exported because the
+ * `get_current_time` Tool answers with the same text — a fresh reading mid-loop that disagreed in
+ * format with the block the agent was given at turn start would be read as a different kind of
+ * fact, so both go through here.
+ *
+ * `hourCycle: "h23"` is deliberate: `hour12: false` alone renders midnight as `24:00` under some
+ * locales. The offset is relabelled from `Intl`'s `GMT+05:30` to `UTC+05:30`, and UTC's bare `GMT`
+ * is written out as `UTC+00:00`, so the agent never has to interpret two spellings of one concept.
+ */
+export function formatTemporalContext(temporal: TemporalContext): string {
+  const timeZone = resolveTimeZone(temporal.timezone);
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    weekday: "long",
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZoneName: "longOffset",
+  }).formatToParts(temporal.now);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  const rawOffset = part("timeZoneName");
+  const offset = rawOffset === "GMT" ? "UTC+00:00" : rawOffset.replace("GMT", "UTC");
+  return [
+    `date: ${part("weekday")}, ${part("day")} ${part("month")} ${part("year")}`,
+    `time: ${part("hour")}:${part("minute")} (${timeZone}, ${offset})`,
+  ].join("\n");
+}
+
+/**
+ * Fixed framing for `<current-context>`. Deliberately silent about `get_current_time`: that Tool is
+ * registered for chat turns only — a Routine's `agent` State exposes none — so naming it here would
+ * advertise a capability half the callers cannot use. The Tool's own description carries the
+ * staleness note instead, where only agents that actually hold it will read it.
+ */
+const CURRENT_CONTEXT_TEXT =
+  "The current date and time, read at the start of this turn. Resolve every relative time reference " +
+  "against it.";
+
+/**
+ * `<current-context>` block. Rendered **last** so every block above it stays byte-identical across
+ * turns: this is the one block whose content changes every time, and keeping it at the tail means
+ * it truncates the cacheable prefix rather than invalidating it.
+ *
+ * No char budget — unlike the list-shaped blocks, the output is two lines fixed by construction.
+ * An unusable instant omits the block: a prompt with no time in it leaves the agent where it was
+ * before this existed, while `Invalid Date` would read as a fact about now.
+ */
+function renderCurrentContext(ctx: AssembleContext): string {
+  const temporal = ctx.temporal;
+  if (temporal === undefined || Number.isNaN(temporal.now.getTime())) return "";
+  return block("current-context", `${CURRENT_CONTEXT_TEXT}\n${formatTemporalContext(temporal)}`);
+}
+
 /**
  * Assemble the agent system prompt from the 11 ordered blocks. Pure
  * and synchronous. Each block renders to a string or "" (when empty or over budget); empty blocks
@@ -461,6 +565,9 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderAvailableTools(ctx),
     renderPinnedKnowledge(ctx),
     renderKnowledgeGrounding(ctx),
+    // Last on purpose: the only block whose content changes every turn, so it truncates the
+    // cacheable prefix instead of invalidating it. See renderCurrentContext.
+    renderCurrentContext(ctx),
   ];
   return blocks.filter((b) => b.length > 0).join("\n");
 }

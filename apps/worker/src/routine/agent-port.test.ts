@@ -170,6 +170,17 @@ describe("BundleRoutineAgentPort", () => {
     expect(invoked.messages[1]?.content).toContain("invoice overdue");
   });
 
+  it("names the Run's own clock so the Agent does not date-reason from its training cutoff", async () => {
+    const now = new Date("2026-08-08T11:12:00Z");
+    await port({ now: () => now }).execute(request());
+
+    const invoked = invoke.mock.calls[0]?.[0] as ModelInvocationRequest;
+    // A Routine State has no participant, so there is no timezone preference to read: UTC.
+    expect(invoked.messages[0]?.content).toContain("<current-context>");
+    expect(invoked.messages[0]?.content).toContain("date: Saturday, 08 August 2026");
+    expect(invoked.messages[0]?.content).toContain("time: 11:12 (UTC, UTC+00:00)");
+  });
+
   it("exposes no Tools to the Agent, so a Routine's effects stay on its Tool States", async () => {
     await port().execute(request());
 
