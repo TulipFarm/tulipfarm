@@ -5,7 +5,7 @@ import { TulipFarmValidationError } from "./error";
 /**
  * routine.yaml meta-schema (ROUT-V1-004/005). CNCF Serverless Workflow 0.8
  * subset + `x-` extensions. Deferred constructs (`parallel`/`event` states, `subFlowRef`,
- * `datetime`/`integration` triggers) are detected in a pre-pass and rejected with an
+ * `integration` triggers) are detected in a pre-pass and rejected with an
  * explicit "deferred in V1" error before AJV runs, so authors see the real reason instead
  * of a union-mismatch message.
  *
@@ -19,11 +19,19 @@ import { TulipFarmValidationError } from "./error";
  */
 
 export const ROUTINE_STATE_TYPES = ["operation", "switch", "foreach", "sleep", "inject"] as const;
-export const ROUTINE_TRIGGER_TYPES = ["event", "manual", "cron", "webhook", "agent"] as const;
+export const ROUTINE_TRIGGER_TYPES = [
+  "event",
+  "manual",
+  "cron",
+  "interval",
+  "datetime",
+  "webhook",
+  "agent",
+] as const;
 export const ROUTINE_APPROVAL_CHANNELS = ["ui", "slack", "email", "sms"] as const;
 /** Deferred to post-V1 (ROUT-V1-004/005). */
 export const DEFERRED_STATE_TYPES = ["parallel", "event"] as const;
-export const DEFERRED_TRIGGER_TYPES = ["datetime", "integration"] as const;
+export const DEFERRED_TRIGGER_TYPES = ["integration"] as const;
 
 /**
  * Domain-event names a routine `event` trigger may subscribe to. Mirrors
@@ -76,6 +84,26 @@ const CronTrigger = Type.Object(
   { additionalProperties: false }
 );
 
+const IntervalTrigger = Type.Object(
+  {
+    type: Type.Literal("interval"),
+    /** Fixed UTC period in milliseconds between fires. */
+    everyMs: Type.Integer({ minimum: 1 }),
+    /** ISO-8601 instant the interval is anchored to; occurrences fall at `startAt + n * everyMs`. */
+    startAt: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false }
+);
+
+const DatetimeTrigger = Type.Object(
+  {
+    type: Type.Literal("datetime"),
+    /** ISO-8601 instant this Routine fires at, exactly once. */
+    at: Type.String({ minLength: 1 }),
+  },
+  { additionalProperties: false }
+);
+
 const WebhookTrigger = Type.Object(
   {
     type: Type.Literal("webhook"),
@@ -91,6 +119,8 @@ const Trigger = Type.Union([
   EventTrigger,
   ManualTrigger,
   CronTrigger,
+  IntervalTrigger,
+  DatetimeTrigger,
   WebhookTrigger,
   AgentTrigger,
 ]);

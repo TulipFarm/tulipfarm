@@ -71,6 +71,39 @@ export function integrationInvoker(invocations: DurableInvocationGateway) {
 }
 
 /**
+ * Starts a Routine from a `cron`/`interval`/`datetime` `x-triggers` fire (the schedule
+ * dispatcher — see `apps/api/src/schedule/`). Reuses `MANUAL_REQUEST_SCHEMA_REF` for the same
+ * reason `triggerRunStarter` does: the Worker's Routine executor only reconstructs a manual
+ * request (`{slug, inputs}`) from the request Artifact.
+ *
+ * `initiator`/`effectiveSubject` are always the fixed `service:cron-scheduler` identity — a
+ * schedule fire has no human or Integration caller to attribute the Run to, and this must never be
+ * confused with `manualRoutineTrigger`'s `agent:assistant` (a chat-initiated Run).
+ */
+export function scheduledRoutineTrigger(invocations: DurableInvocationGateway) {
+  return async (input: {
+    readonly slug: string;
+    readonly inputs?: Record<string, unknown>;
+    readonly idempotencyKey: string;
+  }): Promise<{ readonly runId: string; readonly outcome: "started" | "duplicate" }> => {
+    const identity = { kind: "service", id: "cron-scheduler" };
+    const payload = { slug: input.slug, inputs: input.inputs ?? {} };
+    const result = await invocations.start({
+      source: "schedule",
+      runSource: "routine",
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      initiator: identity,
+      effectiveSubject: identity,
+      definitionRef: `published:routine:${input.slug}`,
+      payload,
+      payloadSchemaRef: MANUAL_REQUEST_SCHEMA_REF,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return { runId: result.runId, outcome: result.outcome };
+  };
+}
+
+/**
  * Starts a Routine from a bound Trigger invocation. Reuses `MANUAL_REQUEST_SCHEMA_REF` rather than
  * a Trigger-specific schema: the Worker's Routine executor only reconstructs a manual request
  * (`{slug, inputs}`) from the request Artifact, so a Trigger-invoked Run must publish the same shape

@@ -25,7 +25,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ambientTransactionPort, type Queryable, transactionPort } from "../db";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
-import { integrationInvoker, manualRoutineTrigger, triggerRunStarter } from "./invocation-callers";
+import {
+  integrationInvoker,
+  manualRoutineTrigger,
+  scheduledRoutineTrigger,
+  triggerRunStarter,
+} from "./invocation-callers";
 import { ActiveRoutineInvocationResolver } from "./invocation-definitions";
 
 /** A verified Slack delivery as the ingress route hands it over, after signature + accept checks. */
@@ -222,6 +227,27 @@ describe("non-chat invocation callers", () => {
         now: new Date(),
       })
     ).resolves.toMatchObject({ content: { slug: "daily-digest", inputs: { limit: 5 } } });
+  });
+
+  it("attributes a schedule-fired Routine to the cron-scheduler identity under the schedule source, distinct from a manual trigger", async () => {
+    await scheduledRoutineTrigger(invocations)({
+      slug: "daily-digest",
+      idempotencyKey: "daily-digest:cron:1",
+    });
+
+    const runs = await db.query<{
+      source: string;
+      run_source: string;
+      identity: { initiator: { kind: string; id: string } };
+    }>(
+      `SELECT runs.identity, runs.source AS run_source, invocation.source
+         FROM runs
+         JOIN durable_invocations invocation
+           ON invocation.business_id = runs.business_id AND invocation.run_id = runs.id`
+    );
+    expect(runs.rows[0]?.source).toBe("schedule");
+    expect(runs.rows[0]?.run_source).toBe("routine");
+    expect(runs.rows[0]?.identity.initiator).toEqual({ kind: "service", id: "cron-scheduler" });
   });
 
   it("starts a Routine from a bound Trigger invocation, under the Trigger's background identity", async () => {

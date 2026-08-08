@@ -2,6 +2,7 @@
 name: structured-results
 description: Present lists, metrics, comparisons, and forms with clear structured surfaces.
 category: core
+tools: [present, update_presentation, request_input]
 ---
 # Structured Results
 

@@ -96,6 +96,14 @@ export interface HostedTurnContext {
     readonly maxRepairAttempts: number;
   };
   readonly compacted: boolean;
+  /**
+   * Per-Skill tool narrowing: once the loop sees a successful `load_skill` for a name present here,
+   * later iterations offer only that Skill's declared list (plus the loop's own always-exposed
+   * baseline) instead of the full `tools` catalog. Built from each loaded Skill's `tools:`
+   * frontmatter; a Skill absent from this map is not narrowed. Context-size optimization only, not
+   * an authorization boundary — `tools` above remains the ceiling `ToolDispatchPort` enforces.
+   */
+  readonly skillToolScopes?: Record<string, readonly string[]>;
 }
 
 export interface TurnContextResolver {

@@ -2,12 +2,14 @@ import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-run
 import type { LlmService } from "@tulipfarm/llm";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
+import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
 import { MAX_HISTORY_TOKENS } from "../memory/limits";
 import type { WorkingMemoryService } from "../memory/service";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
+import type { BundledSkill } from "../soul/skills/bundled";
 import {
   BUSINESS_ID,
   CONVERSATION_ID,
@@ -62,6 +64,8 @@ function makeResolver(
     guardrails?: GuardrailsService;
     memory?: readonly { key: string; value: string }[];
     now?: () => Date;
+    skills?: readonly SoulSkill[];
+    bundledSkills?: Record<string, BundledSkill>;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -70,6 +74,18 @@ function makeResolver(
   const registry = new ToolRegistry();
   for (const name of options.tools ?? []) registry.register(toolDef(name));
   const resolve = vi.fn(() => ({ modelId: "resolved-model" }));
+  const soulLoader =
+    options.skills === undefined
+      ? undefined
+      : ({
+          skills: new Map(options.skills.map((skill) => [skill.name, skill])),
+          agents: new Map(),
+          surfaceComponents: new Map(),
+        } as unknown as SoulLoader);
+  const bundledSkills =
+    options.bundledSkills === undefined
+      ? undefined
+      : new Map(Object.entries(options.bundledSkills));
 
   return {
     store,
@@ -91,6 +107,8 @@ function makeResolver(
           }
         : {}),
       ...(channelDeliveries ? { channelDeliveries } : {}),
+      ...(soulLoader ? { soulLoader } : {}),
+      ...(bundledSkills ? { bundledSkills } : {}),
     }),
   };
 }
@@ -226,5 +244,62 @@ describe("ChatTurnContextResolver", () => {
     expect(context.messages.map((entry) => entry.role)).toEqual(["system", "user"]);
     expect(context.messages[1]?.content.startsWith("new")).toBe(true);
     expect(context.compacted).toBe(true);
+  });
+
+  it("ships skillToolScopes built from Soul-loaded Skills' tools: frontmatter", async () => {
+    const { resolver } = makeResolver({
+      skills: [
+        {
+          name: "routine-forge",
+          frontmatter: { tools: ["routine_forge", "agent_list"] },
+          body: "",
+        },
+        { name: "agent-forge", frontmatter: {}, body: "" },
+      ],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.skillToolScopes).toEqual({ "routine-forge": ["routine_forge", "agent_list"] });
+  });
+
+  it("omits skillToolScopes entirely when no Skill declares a tools: list", async () => {
+    const { resolver } = makeResolver({
+      skills: [{ name: "agent-forge", frontmatter: {}, body: "" }],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.skillToolScopes).toBeUndefined();
+  });
+
+  it("lets a Soul-authored Skill's tools: list override its bundled namesake, like mergedSkills does", async () => {
+    const bundled = {
+      "routine-forge": {
+        name: "routine-forge",
+        frontmatter: { tools: ["routine_forge"] },
+        body: "",
+        category: "forge",
+        categoryDescription: "",
+        directory: "forge/routine-forge",
+        references: [],
+      } as unknown as BundledSkill,
+    };
+    const { resolver } = makeResolver({
+      bundledSkills: bundled,
+      skills: [
+        {
+          name: "routine-forge",
+          frontmatter: { tools: ["routine_forge", "agent_list"] },
+          body: "",
+        },
+      ],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.skillToolScopes).toEqual({
+      "routine-forge": ["routine_forge", "agent_list"],
+    });
   });
 });

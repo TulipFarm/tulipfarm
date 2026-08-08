@@ -2,6 +2,17 @@
 name: business-records
 description: Inspect schemas, find records, and make verified business-data changes.
 category: core
+tools:
+  [
+    list_resource_types,
+    resource_type_schema,
+    record_search,
+    record_list,
+    record_get,
+    record_create,
+    record_update,
+    record_delete,
+  ]
 ---
 # Business Records
 

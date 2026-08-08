@@ -3,6 +3,26 @@ name: github
 description: Triage GitHub issues, work pull requests, and read repository content.
 eager: true
 category: integrations
+tools:
+  [
+    github_repository_list,
+    github_issue_read,
+    github_issue_search,
+    github_issue_comment,
+    github_issue_label,
+    github_issue_assign,
+    github_issue_close,
+    github_pull_request_read,
+    github_pull_request_search,
+    github_pull_request_create,
+    github_pull_request_comment,
+    github_pull_request_review,
+    github_pull_request_merge,
+    github_check_run_read,
+    github_content_read,
+    github_content_list,
+    github_repo_push,
+  ]
 ---
 # GitHub
 

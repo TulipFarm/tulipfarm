@@ -50,7 +50,28 @@ export interface AgentLoopInput {
   readonly tools: readonly ExposedTool[];
   readonly limits: AgentLoopLimits;
   readonly outputSchema?: Readonly<Record<string, unknown>>;
+  /**
+   * Per-Skill tool narrowing (context-size optimization only, not a security boundary — `exposed`
+   * below still authorizes every `tools` entry regardless of what a given iteration offers the
+   * model). Keyed by Skill name, from that Skill's `SKILL.md` `tools:` frontmatter. A Skill absent
+   * from this map, or no active Skill at all, offers the full `tools` list unchanged.
+   */
+  readonly skillToolScopes?: ReadonlyMap<string, readonly string[]>;
 }
+
+/**
+ * Structural/escape-hatch Tools a narrowed iteration must never drop, or a turn scoped into a Skill
+ * could not switch Skills, hand off, or finish.
+ */
+const ALWAYS_EXPOSED_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "load_skill",
+  "complete_task",
+  "transfer_to_agent",
+  "delegate_to_agent",
+  "present",
+  "request_input",
+  "update_presentation",
+]);
 
 export interface ToolDispatchRequest {
   readonly businessId: string;
@@ -205,6 +226,20 @@ export class AgentLoop {
     const validate = input.outputSchema === undefined ? undefined : ajv.compile(input.outputSchema);
     const messages: ModelMessage[] = [...input.messages];
     let sequence = 0;
+    // The most recently *successfully* loaded Skill, per the `load_skill` dispatch — a switch
+    // replaces it rather than unioning, since the model has moved on and a union only re-grows
+    // the catalog this exists to shrink.
+    let activeSkillName: string | undefined;
+
+    /** What `request.tools` offers this iteration — never what `exposed` authorizes for dispatch. */
+    const toolsForIteration = (): readonly ExposedTool[] => {
+      const scope =
+        activeSkillName === undefined ? undefined : input.skillToolScopes?.get(activeSkillName);
+      if (scope === undefined) return input.tools;
+      return input.tools.filter(
+        (t) => ALWAYS_EXPOSED_TOOL_NAMES.has(t.name) || scope.includes(t.name)
+      );
+    };
 
     const emit = async (
       type: AgentLoopEventType,
@@ -302,7 +337,7 @@ export class AgentLoop {
         requestId: `${input.runId}:${input.stateId}:${counters.iterations}`,
         modelProfileId: input.modelProfileId,
         messages,
-        tools: input.tools,
+        tools: toolsForIteration(),
         ...(input.outputSchema === undefined ? {} : { outputSchema: input.outputSchema }),
       };
 
@@ -314,6 +349,15 @@ export class AgentLoop {
         // happened is not: the caller must reconcile it, so it escapes rather than being recorded
         // as a model failure through the very sink that just failed.
         if (error instanceof EventSinkFailure) throw error.cause;
+        this.deps.log?.warn(
+          {
+            event: "agent_loop.model_error",
+            requestId: request.requestId,
+            iteration: counters.iterations,
+            error: error instanceof Error ? error.message : String(error),
+          },
+          "model call failed"
+        );
         return finish({ status: "failed", reason: "model_error", ...counters }, "failed");
       }
 
@@ -366,6 +410,10 @@ export class AgentLoop {
 
           if (dispatched.status === "succeeded") {
             messages.push(toolMessage(call.callId, { output: dispatched.output }));
+            if (call.name === "load_skill") {
+              const loaded = extractSkillName(call.arguments);
+              if (loaded !== undefined) activeSkillName = loaded;
+            }
             return { kind: "continue" };
           }
 
@@ -562,6 +610,13 @@ function normalizeCalls(
     seen.add(callId);
     return { callId, name: call.name, arguments: call.arguments };
   });
+}
+
+/** `load_skill`'s only argument is `{ name: string }` — the Skill this call switched into. */
+function extractSkillName(callArguments: unknown): string | undefined {
+  if (typeof callArguments !== "object" || callArguments === null) return undefined;
+  const name = (callArguments as { name?: unknown }).name;
+  return typeof name === "string" ? name : undefined;
 }
 
 function toolMessage(callId: string, payload: Record<string, unknown>): ModelMessage {

@@ -2,6 +2,7 @@
 name: agent-forge
 description: "Forge an Agent (AGENT.md): define its persona, model, autonomy, and UI guidance."
 category: forge
+tools: [agent_list, agent_get, agent_create, agent_update, validate_artifact, present, request_input]
 ---
 # Agent Forge Workflow
 

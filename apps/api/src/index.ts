@@ -125,6 +125,7 @@ import { runCanceller } from "./runs/cancel";
 import {
   integrationInvoker,
   manualRoutineTrigger,
+  scheduledRoutineTrigger,
   triggerRunStarter,
 } from "./runtime/invocation-callers";
 import {
@@ -133,6 +134,9 @@ import {
   ActiveWebhookTriggerResolver,
 } from "./runtime/invocation-definitions";
 import { resolveSoulBundleSigner } from "./runtime/soul-bundle-signer";
+import { ScheduleDispatcher } from "./schedule/dispatcher";
+import { registerScheduleDispatch } from "./schedule/register";
+import { RoutineScheduleStateStore } from "./schedule/state-store";
 import { bootstrapFromEnv } from "./setup/bootstrap";
 import {
   assertNoOrphanedDeks,
@@ -288,6 +292,16 @@ async function boot() {
       ),
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleSigner),
+    });
+    // Ticks every `cron`/`interval`/`datetime` `x-triggers` entry across active Routines and starts
+    // a Run for whatever's due. Lives here (not the Worker) since only this process holds the live
+    // Soul checkout. See docs/plans/2026-08-08-routine-cron-scheduler-design.md.
+    const scheduleDispatcher = new ScheduleDispatcher({
+      soulLoader,
+      stateStore: new RoutineScheduleStateStore(pool),
+      startRoutine: scheduledRoutineTrigger(invocations),
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      log: console,
     });
     // Canonical event intake/outbox for Trigger invocation, shared in shape (not process) with the
     // Worker's own `EventStore` — this is the first API-side instantiation of it.
@@ -460,6 +474,9 @@ async function boot() {
         triggerRoutine: manualRoutineTrigger(invocations),
         onRoutinesChanged: async () => {
           await soulLoader.reload();
+          // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
+          // to SCHEDULE_DISPATCH_INTERVAL_MS for the next periodic tick.
+          await scheduleDispatcher.tick();
         },
       },
     });
@@ -729,6 +746,9 @@ async function boot() {
       soulLoader,
       log: app.log,
     });
+    const scheduleDispatchInterval = registerScheduleDispatch(scheduleDispatcher, {
+      log: app.log,
+    });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
@@ -814,6 +834,7 @@ async function boot() {
       force.unref();
       try {
         if (soulSyncInterval) clearInterval(soulSyncInterval);
+        clearInterval(scheduleDispatchInterval);
         await app.close();
         await boss.stop({ graceful: false });
         // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.

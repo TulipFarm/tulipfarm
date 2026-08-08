@@ -520,6 +520,26 @@ const SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
   )`,
 ];
 
+/**
+ * Durable fire-state for `cron`/`interval`/`datetime` Routine `x-triggers` (the schedule
+ * dispatcher's due-scan). One row per `(businessId, routineSlug, triggerIndex)`, created lazily on
+ * first tick and dropped once the schedule dispatcher sees the trigger no longer exists.
+ */
+const ROUTINE_SCHEDULE_STATE_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS routine_schedule_state (
+    business_id            text NOT NULL,
+    routine_slug           text NOT NULL,
+    trigger_index          integer NOT NULL,
+    dedup_key              text NOT NULL,
+    last_scheduled_for_ms  bigint,
+    next_due_at_ms         bigint,
+    updated_at             timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (business_id, routine_slug, trigger_index)
+  )`,
+  `CREATE INDEX IF NOT EXISTS routine_schedule_state_due_idx
+    ON routine_schedule_state (business_id, next_due_at_ms)`,
+];
+
 async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
     handle              text PRIMARY KEY,
@@ -926,6 +946,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "slack_knowledge_checkpoints: durable per-channel Slack Knowledge sync cursor",
     up: async (q) => {
       for (const sql of SLACK_KNOWLEDGE_CHECKPOINT_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 31,
+    description: "routine_schedule_state: cron/interval/datetime Routine trigger fire-state",
+    up: async (q) => {
+      for (const sql of ROUTINE_SCHEDULE_STATE_STATEMENTS) {
         await q.query(sql);
       }
     },

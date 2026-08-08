@@ -73,6 +73,8 @@ export interface ResolvedTurnContext {
   readonly limits: AgentLoopLimits;
   /** Whether history was compacted to fit; operator evidence, not a participant's concern. */
   readonly compacted: boolean;
+  /** Mirrors `HostedTurnContext.skillToolScopes` — see `AgentLoopInput.skillToolScopes`. */
+  readonly skillToolScopes?: Record<string, readonly string[]>;
 }
 
 export interface TurnContextPort {
@@ -171,6 +173,9 @@ export class TurnDriver {
       messages: guarded.messages,
       tools: context.tools,
       limits: context.limits,
+      ...(context.skillToolScopes === undefined
+        ? {}
+        : { skillToolScopes: new Map(Object.entries(context.skillToolScopes)) }),
     };
     const result = await this.options.states.execute(stateRequest, input);
 

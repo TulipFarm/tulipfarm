@@ -229,6 +229,11 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         .map((message) => ({ role: message.role, content: message.content })),
     ];
 
+    const skillToolScopes = buildSkillToolScopes(
+      this.options.soulLoader,
+      this.options.bundledSkills
+    );
+
     return {
       agentId: agent.name,
       subjectId: authority.subject.id,
@@ -244,6 +249,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         maxRepairAttempts: MAX_REPAIR_ATTEMPTS,
       },
       compacted: dropped.size > 0,
+      ...(skillToolScopes === undefined ? {} : { skillToolScopes }),
     };
   }
 
@@ -331,6 +337,35 @@ const SYSTEM_SOURCE_ID = "system";
  * earlier message can never outrank the Agent, and the Agent's instructions are weighed against the
  * budget before any of it.
  */
+/**
+ * The Skill → Tools map the loop uses to narrow what it offers the model once a Skill is active
+ * (see `docs/plans/2026-08-08-skill-scoped-tool-narrowing.md`). Reads each Soul-loaded and bundled
+ * Skill's optional `tools:` frontmatter — an array of Tool names — and skips any Skill that
+ * declares none, which is what keeps the mechanism backward compatible: an undeclared Skill is
+ * simply absent from the map, so the loop falls back to the full catalog for it exactly as before
+ * this map existed. Returns `undefined` when nothing declares a scope, so the field is omitted
+ * from the wire payload rather than shipped as an empty object.
+ */
+function buildSkillToolScopes(
+  soulLoader: SoulLoader | undefined,
+  bundledSkills: ReadonlyMap<string, BundledSkill> | undefined
+): Record<string, readonly string[]> | undefined {
+  const scopes: Record<string, readonly string[]> = {};
+  // Bundled first, Soul last — a Soul-authored override of a bundled Skill name must win, matching
+  // `mergedSkills`/`resolveSkill` (soul/skills/registry.ts).
+  const sources = [bundledSkills, soulLoader?.skills];
+  for (const source of sources) {
+    if (source === undefined) continue;
+    for (const skill of source.values()) {
+      const declared = skill.frontmatter.tools;
+      if (!Array.isArray(declared)) continue;
+      const names = declared.filter((entry): entry is string => typeof entry === "string");
+      if (names.length > 0) scopes[skill.name] = names;
+    }
+  }
+  return Object.keys(scopes).length > 0 ? scopes : undefined;
+}
+
 function candidatesFor(
   system: string,
   history: readonly PersistedMessage[]
