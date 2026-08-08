@@ -1,35 +1,70 @@
 ---
 title: Run operational reviews
-description: Review access, retention, audit health, and recovery evidence.
+description: Use Operations, Runs, Inbox, activities, and observability screens for routine checks.
 ---
 
-This is an operator procedure. It does not ask an Agent to grant itself authority or modify its own
-Guardrails.
+This guide is for admins running regular operational reviews. It uses shipped operator
+screens; it does not ask an Agent to change its own authority.
 
-## Monthly access review
+## Outcome
 
-1. Export the current principal, role, AccessGrant, Credential-reference, and external identity
-   mapping inventory from the authorized administration surfaces.
-2. Confirm every entry has a business owner and current purpose.
-3. Remove stale access through its governed administration flow.
-4. Require a different in-business reviewer; self-review is rejected.
-5. Retain the review decision and evidence according to your retention policy.
+At the end, you have checked current health, waiting work, risky Runs, recent activity,
+and recovery posture.
 
-Evidence: `packages/authz/src/recertification.test.ts`
+## Review the Operations console
 
-## Retention review
+<Steps>
+  <Step>
+    Open **Operations**.
+  </Step>
+  <Step>
+    Review **Health** for degraded or failed components.
+  </Step>
+  <Step>
+    Review **Incidents**, **Quarantine**, and **Kill switches**. A non-empty panel is an
+    item to triage before allowing more mutation-heavy work.
+  </Step>
+  <Step>
+    Review **Recent operational activity**. Use the filter to narrow by actor, target,
+    event, or status, then open **Settings → Activities** for the full activity log.
+  </Step>
+  <Step>
+    Review **Recovery** for last reported backup age and whether support bundle creation
+    is available.
+  </Step>
+</Steps>
 
-1. Confirm every audit category has an approved retention period.
-2. Review active legal holds before selecting eligible records.
-3. Test export verification before deletion.
-4. Record erase authorization, key destruction, tombstone, and verification result.
+If support asks for diagnostics, choose **Create support bundle** only after reviewing the
+preview. Bundle creation is audited.
 
-Evidence: `packages/audit/src/retention.test.ts`
+## Clear waiting human work
 
-## Daily operational review
+Open **Inbox**. It contains Approvals, human tasks, form waits, and access requests. Decide
+items you own so Runs can continue. For the decision procedure, see
+[Approve Agent work](/docs/guides/approve-agent-work).
 
-Review readiness, authorization denials, incident groups, queue age, waiting Runs, ambiguous
-effects, audit sealing, and backup age. Treat unavailable correctness-critical storage as not
-ready; optional telemetry failure is degraded and must not corrupt accepted work.
+## Inspect Runs
 
-Evidence: `packages/observability/src/resilience.test.ts`
+Open **Runs**. The list is newest-first and links to the Run inspector. For Runs that are
+stuck, costly, failed, or waiting unexpectedly, open the inspector and review:
+
+- States and attempts
+- effects and waits
+- Guardrail decisions
+- lineage
+- model cost and token count
+
+Use server-authorized controls only when needed: **pause**, **resume**, **retry**,
+**reconcile**, or **cancel**. See [Watch a Run](/docs/guides/watch-a-run) for the control
+flow.
+
+## Check observability
+
+Open **Settings → Observability** for recent turns, trace drill-down, cost/usage summary,
+and export status. Use **Settings → Activities** for the broader activity log.
+
+## Record the review
+
+Capture the date, reviewer, findings, decisions, and follow-up owners in your normal
+operations log. Do not paste prompts, credentials, cookies, Tool arguments, or sensitive
+results into an incident or review note.

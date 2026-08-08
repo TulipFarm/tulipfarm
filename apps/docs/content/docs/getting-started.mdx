@@ -1,13 +1,10 @@
 ---
 title: Get started
-description: Sign in to a fresh TulipFarm instance, give it a model, and build your first resource type by chatting.
+description: Sign in to a fresh TulipFarm instance, give it a model, and build a working resource type, agent, and routine by chatting.
 ---
 
-import { Step, Steps } from "fumadocs-ui/components/steps";
-import { Callout } from "fumadocs-ui/components/callout";
-
-You have a running instance and its URL. This guide takes you from there to a working
-resource type with a record in it — about ten minutes, all of it in the browser.
+You have a running instance and its URL. This guide takes you from there to something that
+actually does work for you — about twenty minutes, all of it in the browser.
 
 <Callout type="info">
   No instance yet? [Install one](/docs/installation) — a single command, nothing to clone.
@@ -19,20 +16,21 @@ resource type with a record in it — about ten minutes, all of it in the browse
 
 ### Create your admin account
 
-Open your instance's URL. Because no admin exists yet, the app redirects to the setup
-wizard at `/setup`. Work through the four steps:
+Open your instance's URL. Because no admin exists yet, the app redirects to the setup wizard
+at `/setup`. Work through the four steps:
 
 1. **Admin account** — enter an email and password. This creates the first admin and logs
    you in.
-2. **Business profile** — give your instance a name and optional description.
-3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure OpenAI, or an
+2. **Business profile** — give your instance a name and optional description. Agents read
+   this, so a real sentence about what your business does is worth more than a placeholder.
+3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure Foundry, or an
    OpenAI-compatible endpoint), enter the credentials, and pick a model. You can skip this
    and configure it later.
-4. **Soul backup** — optionally point the soul at a git remote for backup. You can skip
-   this and set it up in **Settings** later.
+4. **Soul backup** — optionally point the soul at a git remote for backup. You can skip this
+   and set it up in **Settings** later.
 
-After step 4 the wizard redirects to the main workspace and the setup route locks — a
-second browser visitor cannot create another admin through it.
+After step 4 the wizard redirects to the main workspace and the setup route locks — a second
+browser visitor cannot create another admin through it.
 
 <Callout type="warn">
   Until an admin exists, `/setup` is unauthenticated: on an internet-reachable instance,
@@ -47,11 +45,13 @@ second browser visitor cannot create another admin through it.
 ### Give the assistant a model
 
 You build everything else by talking to the assistant, so it needs a model to run. If you
-skipped step 3 of the wizard:
+skipped step 3 of the wizard, nothing below will work until you finish this one.
 
-Open **Settings → Secrets**, add an API key for a provider (Anthropic, OpenAI, Azure, or
-any OpenAI-compatible endpoint), then open **Settings → LLM** and assign a model to each
-tier. The walkthrough is in
+Open **Settings → Secrets**, add an API key for a provider, then open **Settings → LLM** and
+assign a model to each tier. Tiers let cheap work use a cheap model and hard work use a
+capable one, with fallback if a provider fails.
+
+The walkthrough is in
 [Configure LLM providers](/docs/guides/configure-llm-providers).
 
 </Step>
@@ -63,38 +63,104 @@ tier. The walkthrough is in
 Open **Chat** and type what you want in plain language:
 
 ```prompt
-Create a customer resource type with a name and an email.
+Create a customer resource type with a name, an email, and a status of active, churned, or trial.
 ```
 
 The assistant confirms a couple of details and builds the type for you. There is no schema
-to write and no restart — the new `customer` table is ready the moment it finishes. Open
-**Resources** and you will see `customer` in the list.
+to write and no restart — the new `customer` type is ready the moment it finishes, with list
+and detail screens generated for it. Open **Resources** and you will see it.
 
 This is the normal way to build in TulipFarm; see
-[Building by chat](/docs/concepts/building) for the full picture.
+[Building by chat](/docs/concepts/building) for why it works this way.
 
 </Step>
 
 <Step>
 
-### Create a record
+### Put a record in it
 
-Ask the assistant to add one:
+Ask:
 
 ```prompt
-Add a customer named Ada Lovelace with email ada@example.com.
+Add a customer named Ada Lovelace, ada@example.com, status trial.
 ```
 
-Or open **Resources → customer → New** and fill in the form by hand. Either way you now
-have a running TulipFarm instance with a custom resource type and your first record.
+Or open **Resources → customer → New** and fill in the form by hand. Both paths write the
+same record — see [Work with records](/docs/guides/work-with-records).
+
+</Step>
+
+<Step>
+
+### Give the job an owner
+
+A resource type stores things. An agent does things with them. Ask for one:
+
+```prompt
+Create a customer success agent that watches for customers stuck in trial and drafts a check-in note for each one.
+```
+
+You now have a named agent with its own instructions and its own bounded authority. It can
+never do more than the person who invoked it is allowed to do — see
+[Agents](/docs/concepts/agents) and
+[Roles and permissions](/docs/reference/roles-and-permissions).
+
+</Step>
+
+<Step>
+
+### Make it happen on its own
+
+Ask the agent's work to repeat:
+
+```prompt
+Run the customer success check-in every Monday at 9am and put the drafts in my inbox for approval.
+```
+
+That creates a [routine](/docs/concepts/routines). Each time it fires you get a
+[run](/docs/concepts/runs) you can watch, pause, or cancel, and anything it wants you to
+decide arrives as an [approval](/docs/concepts/approvals) in your **Inbox**.
 
 </Step>
 
 </Steps>
 
+## What you have now
+
+A resource type with real records, an agent that owns a job, a schedule that triggers it, and
+a human decision point before anything lands. That is the shape of most TulipFarm work.
+
 ## Next steps
 
-- Read how [building by chat](/docs/concepts/building), the [soul](/docs/concepts/soul), and [resources](/docs/concepts/resources) fit together.
-- Ask the assistant to "create a support agent" — see [Agents](/docs/concepts/agents).
-- [Install a skill](/docs/guides/install-a-skill) from a git repository.
-- Before this instance holds real data, walk the [production checklist](/docs/deploy/production-checklist).
+<Cards>
+  <Card
+    title="Invite your team"
+    href="/docs/guides/invite-your-team"
+    description="TulipFarm gets useful when the approvals land with the right people."
+  />
+  <Card
+    title="Connect Slack"
+    href="/docs/guides/connect-slack"
+    description="Talk to your agents where you already work."
+  />
+  <Card
+    title="Install a skill"
+    href="/docs/guides/install-a-skill"
+    description="Add capability from a git repository, with a safety audit before it runs."
+  />
+  <Card
+    title="Use the knowledge wiki"
+    href="/docs/guides/use-the-knowledge-wiki"
+    description="Give agents something of your own to cite."
+  />
+  <Card
+    title="Concepts"
+    href="/docs/concepts"
+    description="The full picture — soul, runs, guardrails, memory, surfaces."
+  />
+  <Card
+    title="Production checklist"
+    href="/docs/deploy/production-checklist"
+    description="Walk this before the instance holds real data."
+  />
+</Cards>

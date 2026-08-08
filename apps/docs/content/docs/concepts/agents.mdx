@@ -1,21 +1,20 @@
 ---
 title: Agents
-description: The actors that run turns, each defined by an AGENT.md file.
+description: User-created actors with instructions, autonomy, tools, and handoff behavior.
 ---
 
-An Agent is an actor that runs turns against an LLM with access to TulipFarm's tools. Normal chat
-is the built-in harness; Agents are the custom actors you create by describing them to chat, such as
-"create a support agent that answers customer questions and files tickets."
+An **Agent** is a user-created actor that can run a chat turn with its own instructions and metadata.
+Agents are different from the built-in `__tulipfarm_default__` chat harness: the harness is the
+front desk, while Agents are business-specific specialists you create, select, transfer to, or
+delegate work to.
 
-## What an agent is made of
+## What the assistant writes
 
-Each agent the assistant builds is a single `AGENT.md` file in the
-[soul](/docs/concepts/soul): YAML frontmatter plus a markdown body. The body is the
-agent's system prompt; the frontmatter is its metadata. You do not write this — it is what
-the assistant produces from your description, shown here so you know what each setting
-means when you ask for it.
+Agents live in the [Soul](/docs/concepts/soul) as `agents/{name}/AGENT.md`: frontmatter plus a
+markdown instruction body. This is read-only explanation of the generated artifact, not a file a
+reader needs to type.
 
-```markdown title="agents/support/AGENT.md"
+```markdown title="soul/agents/support/AGENT.md"
 ---
 label: Support
 domain: customer-success
@@ -24,49 +23,31 @@ model: auto
 autonomy: supervised
 ---
 
-You are the support agent. You answer customer questions using the
-knowledge base and create tickets as resources when follow-up is needed.
+You are the support Agent. Answer customer questions using Knowledge and create ticket Records when
+follow-up is needed.
 ```
 
-Names are flat and kebab-cased. `domain` is display-only — it groups agents in the UI but
-grants no special access. Agents are loaded into the registry at startup.
+The UI lists Agents and shows their prompt and governance details. To create one, use chat and the
+`agent-forge` handoff; see [Create an Agent](/docs/guides/create-an-agent).
 
-## Autonomy: how much an agent can do unsupervised
+## Autonomy and Approvals
 
-The `autonomy` field controls when an agent must pause for human approval before taking a
-real-world or data action. It takes one of four values:
+Autonomy describes how freely an Agent may act. It influences model-tier selection and whether
+runtime actions may pause for [Approvals](/docs/concepts/approvals). Soul edits remain direct and
+ungated, but actions on Records, external systems, or other effects can require a human decision.
 
-| Autonomy | Behavior |
-|---|---|
-| `full` | Acts without pausing. |
-| `supervised` | Acts, but surfaces what it does. |
-| `approval-required` | Pauses for explicit human approval before a gated action. |
-| `manual` | Driven step by step. |
+Every Agent turn still goes through [Guardrails](/docs/concepts/guardrails), and every turn is a
+[Run](/docs/concepts/runs).
 
-When an `approval-required` agent calls a tool that requires approval, the turn pauses
-and emits an approval request; it resumes only once a human resolves it. This is the
-oversight mechanism that makes autonomous operation safe.
+## Tools and current limits
 
-Autonomy also influences model selection: see [LLM tiers](/docs/concepts/llm).
+Agents use TulipFarm's built-in tools for Records, Knowledge, Soul artifacts, memory, KV, Routines,
+Surfaces, and connected integrations. Today, per-Agent tool restriction is not available; connected
+integration tools are broadly available to Agents on eligible turns. Risk is managed through
+Guardrails, Approvals, SkillAudit, and role-based authority, not per-Agent tool allowlists in the UI.
 
-## What agents may touch
+## Transfer and delegation
 
-Editing the soul — creating or changing an agent, skill, or schema — is never gated. The
-`autonomy` gate applies only to actions on the outside world and your data. In V1 every
-agent has access to the full tool set; there is no per-agent tool restriction yet.
-
-## Guardrails
-
-Independent of autonomy, every turn runs through three guard stages configured in
-`soul/guardrails.yaml`: **input** (before the model sees the message), **tool-call**
-(before each tool executes), and **output** (after the model responds). Guards use
-pattern matching — no extra LLM required. If `guardrails.yaml` is absent or invalid,
-the instance falls back to built-in safe defaults.
-
-## Creating agents
-
-Ask the assistant — "create a support agent", "make me an agent that triages bugs". The
-assistant loads `agent-forge`, asks what the agent should do and how much
-autonomy it gets, then writes the `AGENT.md` and commits it to the soul. There is no
-approval step, and the agent is selectable as soon as it is built. The web UI lists your
-agents and shows each one's prompt; to change an agent, ask the assistant to edit it.
+`transfer_to_agent` changes who owns the active chat. `delegate_to_agent` starts helper work as a
+child Run and returns results to the current Agent. Delegation is useful for scoped work; transfer is
+useful when another Agent should become the main actor.

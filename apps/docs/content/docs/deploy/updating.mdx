@@ -11,7 +11,8 @@ Updates are always manual. TulipFarm never updates itself — no background pull
 
 Releases publish `ghcr.io/tulipfarm/tulipfarm:<version>`, plus `:latest` for stable
 releases. Pin `TULIPFARM_VERSION` in production so an unattended pull cannot move you across
-a breaking migration at a time you did not choose.
+a breaking migration at a time you did not choose. One tag pairs the API with workers that
+speak the same schema, so `app`, `worker`, and `integration-worker` must move together.
 
 ## Back up first
 
@@ -20,7 +21,7 @@ Every update runs migrations, and migrations have no down-path. Take these befor
 | What | How |
 | --- | --- |
 | The database | `pg_dump` it, or take your managed provider's snapshot. |
-| `tulipfarm-data` (`/data`) | Volume copy. Holds the generated `ENCRYPTION_KEY` if you did not supply your own. |
+| `tulipfarm-data` (`/data`) | Volume copy. Holds the generated `ENCRYPTION_KEY` and auto-minted worker credentials if you did not supply your own. |
 | `tulipfarm-soul` | Volume copy — or nothing, if `SOUL_GIT_REMOTE_URL` already mirrors it to git. |
 
 <Callout type="warn">
@@ -45,14 +46,18 @@ curl -fsSL {{SITE_URL}}/install.sh | sudo bash
 docker compose pull && docker compose up -d
 ```
 
-**Pinned installs:** bump `TULIPFARM_VERSION` in `.env` first, then pull and up.
+**Pinned installs:** bump `TULIPFARM_VERSION` in `.env` first, then pull and up. The
+Compose file uses that one value for `app`, `worker`, and `integration-worker`, keeping the
+API and workers in schema agreement.
 
 **Coolify / Portainer / Dokploy:** redeploy the resource or update the stack with *re-pull
 image* enabled.
 
 ## What happens on boot
 
-The app runs ordered, idempotent migrations **before** it starts listening. So:
+The `app` runs ordered, idempotent migrations **before** it starts listening. The workers
+never migrate; they wait for healthy `app` and then refuse to boot below their schema floor.
+So:
 
 - The instance is briefly unavailable during a migration. Health checks report `503` on
   `/readyz` — that is correct, not a failure.
@@ -60,6 +65,8 @@ The app runs ordered, idempotent migrations **before** it starts listening. So:
   them.
 - First boot after a big schema change can take minutes. Do not shorten your startup probe
   to "fix" it.
+- If `worker` or `integration-worker` refuses its schema floor after an update, inspect
+  `app` logs first; a worker cannot repair a migration that never completed.
 
 Verify afterwards:
 
@@ -74,11 +81,11 @@ There are no down-migrations: the old image meets a schema it does not understan
 
 An actual rollback is:
 
-1. Stop the app.
+1. Stop `app`, `worker`, and `integration-worker`.
 2. Restore the database backup you took before the update.
 3. Restore the `/data` volume if you also restored an older database — the encryption key
    must match the ciphertext.
-4. Start the previous image tag.
+4. Start all three services on the previous image tag.
 
 This is the whole reason the backup step is not optional.
 

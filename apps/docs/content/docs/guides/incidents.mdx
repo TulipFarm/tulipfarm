@@ -1,33 +1,70 @@
 ---
 title: Respond to an incident
-description: Contain mutations, preserve evidence, recover, and close an incident.
+description: Triage, contain, recover, and close a TulipFarm operational incident.
 ---
+
+This guide covers a shipped incident response path using Operations, Runs, Inbox,
+activities, and observability screens.
+
+## Outcome
+
+At the end, unsafe work is contained, evidence is preserved, ambiguous effects are
+reconciled, and the incident has an owner and closure record.
 
 ## Triage
 
-1. Assign an incident owner, severity, start time, affected business, and safe reason code.
-2. Correlate request, event, Run, State, effect, Integration, sandbox, model, and audit identifiers.
-   Do not copy prompts, credentials, cookies, Tool arguments, or results into the incident record.
-3. Determine whether accepted durable work is safe to continue.
+<Steps>
+  <Step>
+    Open **Operations** and identify the affected health item, incident, quarantine item,
+    or kill switch.
+  </Step>
+  <Step>
+    Assign an incident owner, severity, start time, affected business area, and safe
+    reason code in your incident tracker.
+  </Step>
+  <Step>
+    Correlate identifiers from **Runs**, **Settings → Observability**, and **Settings →
+    Activities**: Run id, State key, effect id, Integration, model, actor, target, and
+    audit event id.
+  </Step>
+</Steps>
+
+<Callout type="warn">
+Do not copy prompts, credentials, cookies, Tool arguments, Tool results, or secret values
+into the incident record. Store only identifiers, redacted summaries, and links.
+</Callout>
 
 ## Contain
 
-Use the deployment's durable kill-switch store to stop the narrowest affected mutation scope:
-Agent, Routine, Tool, provider, Integration, destination, model, data class, or all mutations.
-The effect dispatcher checks the switch before creating an attempt or calling an adapter. If
-switch state cannot be read, mutation dispatch fails closed.
+Use the narrowest available control:
 
-Evidence: `packages/tool-broker/src/effects/dispatch.test.ts`
+- Pause or cancel an affected Run from the Run inspector.
+- Leave an Approval undecided or deny it when the requested action is unsafe.
+- Keep quarantined or ambiguous effects from being retried until they are reconciled.
+- Use operational kill switches only for the smallest affected mutation scope.
 
-Do not bypass the Tool Broker, substitute another Credential, or fall back to unsandboxed
-execution. Preserve ambiguous effects for reconciliation.
+## Reconcile and recover
 
-## Recover and close
+<Steps>
+  <Step>
+    Open each affected Run and review States, waits, effects, Guardrail decisions, and
+    lineage.
+  </Step>
+  <Step>
+    Use **reconcile** for ambiguous effects before any retry. Reconciliation is what tells
+    the system whether an external mutation already happened.
+  </Step>
+  <Step>
+    After the fault is removed, use **resume** or **retry** on the specific Runs that are
+    safe to continue.
+  </Step>
+  <Step>
+    Watch **Operations**, **Runs**, and **Settings → Observability** for recurrence.
+  </Step>
+</Steps>
 
-1. Verify the fault is removed and required capability checks pass.
-2. Reconcile ambiguous effects before retrying.
-3. Restore dispatch gradually and watch for recurrence.
-4. Verify the audit chain, record the recovery action, and perform a denied-access smoke check.
-5. Close with timeline, impact, evidence references, corrective actions, and an owner.
+## Close
 
-Evidence: `packages/run-kernel/src/reconcile-state.test.ts`
+Close the incident with timeline, impact, evidence links, recovery actions, unresolved
+risks, and owners for corrective work. Confirm the activity log contains the operational
+decisions you made.

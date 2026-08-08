@@ -1,84 +1,52 @@
 ---
 title: Building by chat
-description: How you build your system in TulipFarm — you describe what you want, and agents build it.
+description: How TulipFarm turns plain-language requests into live Soul-backed system changes.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+TulipFarm is built by chatting. You describe the business object, Agent, Skill, Routine, or Surface
+you need; the assistant gathers the missing details, writes the right Soul artifact, commits it, and
+reloads the live runtime. The files are the result of the chat, not the interface most users edit.
 
-You do not configure TulipFarm by editing files. You **describe what you want in chat**,
-and agents build it for you — resource types, agents, skills, and your day-to-day
-records and knowledge. The files in the [soul](/docs/concepts/soul) are the *result* of
-those chats, not something you normally write by hand.
+## The default harness
 
-## The assistant is your front desk
+Normal chat runs through the built-in `__tulipfarm_default__` harness. It is not an Agent listed in
+**Agents** and it is not an `AGENT.md` file in the Soul. It is the front-desk assistant for the
+product: it answers questions, reads and creates [Records](/docs/concepts/resources), and reads and
+creates [Knowledge](/docs/concepts/knowledge) directly.
 
-Normal chat answers questions, reads
-your resources and knowledge, and handles everyday data work directly — creating records,
-writing knowledge pages, searching. If your intent is clear, it acts; it does not ask for
-confirmation it does not need.
+When the request changes what the business system is, the default harness loads a forge Skill rather
+than improvising the build. The handoff appears in the transcript, so the user can see that a
+specialized build workflow is now guiding the turn.
 
-What the assistant does **not** do is build your system itself. The moment you ask for
-something that changes what your instance *is* — a new resource type, an agent, a skill,
-or first-time setup — it hands the chat to a specialist.
+## Forges are the build paths
 
-## Building in the same chat
+A forge is a bundled Skill with a focused authoring workflow. The shipped forge Skills are:
 
-When you ask to build or change your system, the same chat loads the appropriate forge, asks for
-the details it needs, and builds the artifact.
+| Forge Skill | Builds |
+| --- | --- |
+| `resource-forge` | Resource type schemas and optional Resource hooks |
+| `agent-forge` | User-created Agents |
+| `skill-forge` | Skills and their references |
+| `routine-forge` | Routines and their States |
+| `surface-component-forge` | Business Surface components |
+| `onboarding` | Guided first-run business setup |
 
-A request like any of these triggers the handoff on the first turn:
+Forges build one artifact at a time and in dependency order: Resource types before Agents that use
+them, Skills before Agents that load them, and Agents before Routines that call them.
 
-- "Create an invoices resource" · "Track support tickets" · "Store our customers"
-- "Build me a CRM" · "Set up a hiring pipeline"
-- "Create a support agent" · "Make a skill that drafts replies"
-- "Set up my business" (first-time onboarding)
+## Soul writes go live immediately
 
-You do not phrase these in any special way and you do not write schema. You say what you
-want in plain language; the assistant asks the few questions it needs and
-does the rest.
+A completed build writes to the [Soul](/docs/concepts/soul), commits immediately, reloads the Soul,
+and reconciles live. A new Resource type is ready to hold Records without restarting; a new Agent is
+selectable as soon as it is created; a Skill is visible to the runtime after it is activated.
 
-## Forges guide the build
+Soul changes are direct writes, not Approval-gated work. Runtime actions on data or external systems
+can still pause for [Approvals](/docs/concepts/approvals), but changing the definition store uses git
+history as its review record.
 
-The assistant does not improvise. For each kind of artifact it loads a
-built-in **forge** — a structured interview that walks from intent to a finished
-artifact:
+## What stays outside chat
 
-| Forge | Builds |
-|---|---|
-| `resource-forge` | a resource type and its schema |
-| `agent-forge` | an agent |
-| `skill-forge` | a skill |
-| `onboarding` | a whole starter setup, in one guided session |
-
-Forges ship with TulipFarm. They are not something you install or edit — they are how
-building works.
-
-## The result lives in the soul
-
-When the assistant finishes, the artifact is written to your
-[soul repository](/docs/concepts/soul) and committed — a resource type becomes
-`resources/{name}/schema.yml`, an agent becomes `agents/{name}/AGENT.md`. There is no
-approval step for soul writes, and the change takes effect immediately — a new resource
-type's table is ready without a restart. The git history is your audit trail of every
-build.
-
-You *can* edit those files by hand if you want to — they are plain text in a git repo —
-but that is the power-user path, not the everyday one. Each concept page shows the
-underlying format for readers who want it.
-
-## What you still do in Settings
-
-Two things are deliberately kept out of chat, because they are operator decisions, not
-building:
-
-<Callout type="info">
-Agents cannot set **secrets** or change your **LLM providers**. You configure those under
-**Settings** as an admin — see [Configure LLM providers](/docs/guides/configure-llm-providers)
-and [Store a secret](/docs/guides/store-a-secret). Everything else, you build by chatting.
-</Callout>
-
-## Where to go next
-
-- [Define a resource type](/docs/guides/define-a-resource-type) — the build chat, step by step.
-- [Resources](/docs/concepts/resources), [Agents](/docs/concepts/agents), [Skills](/docs/concepts/skills) — what you can build, and the format each produces.
-- [Soul](/docs/concepts/soul) — where everything you build is stored and versioned.
+Secrets and LLM provider configuration are operator settings. Admins configure them in Settings so
+API keys, provider endpoints, and model assignments are handled by purpose-built forms instead of by
+model-generated text. See [Configure LLM providers](/docs/guides/configure-llm-providers) and
+[Store a secret](/docs/guides/store-a-secret).

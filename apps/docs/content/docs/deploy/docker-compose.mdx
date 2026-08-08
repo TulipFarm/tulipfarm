@@ -22,8 +22,10 @@ docker compose up -d
 
 Open `http://localhost:8080` and finish the [setup wizard](/docs/installation#finish-setup).
 
-That is the whole procedure. Two services start: `app` (the API, the web UI, and the
-in-process workers, all one image) and `postgres` (PostgreSQL 17 with pgvector).
+That is the whole procedure. Four services start: `app` (API, built web UI, and
+migrations), `worker` (Runs, waits, outbox, cron, and maintenance consumers),
+`integration-worker` (Slack and GitHub ingress, sync, delivery, retries, and
+reconciliation), and `postgres` (PostgreSQL 17 with pgvector).
 
 <Callout type="info">
   Deploying through a UI instead? The same file goes straight into
@@ -69,7 +71,7 @@ form. All are optional.
 | `HOST_PORT` | `8080` | Publish on a different host port. |
 | `PUBLIC_URL` | `http://localhost:8080` | The URL users actually type. Drives CORS and the cookie `Secure` flag — set it to your real origin or logins will not stick. |
 | `POSTGRES_PASSWORD` | `tulipfarm` | Replace the default database password. |
-| `TULIPFARM_VERSION` | `latest` | Pin an image tag instead of tracking `latest`. |
+| `TULIPFARM_VERSION` | `latest` | Pin one image tag for `app`, `worker`, and `integration-worker` instead of tracking `latest`. |
 
 <Callout type="warn">
   The bundled database defaults to the password `tulipfarm`. That is what lets the file run
@@ -92,10 +94,10 @@ LAN box; set it to `https://your-domain` once TLS is in front.
 ## Use a managed database instead
 
 Point `DATABASE_URL` at your own PostgreSQL 17, set `EXTERNAL_DATASTORE=true`, and start
-only the app — the bundled `postgres` service is then never created:
+the app plus both workers — the bundled `postgres` service is then never created:
 
 ```bash
-docker compose up -d app
+docker compose up -d app worker integration-worker
 ```
 
 Full walkthrough, including the extensions your provider must allow:
@@ -105,13 +107,15 @@ Full walkthrough, including the extensions your provider must allow:
 
 Two endpoints, for the two questions an orchestrator asks:
 
-| Endpoint | Meaning | Use for |
-| --- | --- | --- |
-| `/livez` | The process is running. Checks nothing else. | Liveness probes — restart the container when this fails. |
-| `/readyz` | The datastore is reachable and this instance can serve. `503` when not. | Readiness and startup probes, load-balancer checks. |
+| Process | Port | Liveness | Readiness |
+| --- | --- | --- | --- |
+| `app` | `8080` | `/livez` | `/readyz`; `/health` is an alias. |
+| `worker` | `4020` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
+| `integration-worker` | `4030` | `/livez` | `/readyz`; also checks the schema floor and required consumers. |
 
-`/health` is kept as an alias of `/readyz`. Give startup probes a generous timeout:
-database migrations run on boot, before the server starts listening.
+Only `app` publishes a host port. The worker probe ports are internal to Compose. Give
+startup probes a generous timeout: database migrations run in `app` before it starts
+listening, and both workers wait for healthy `app` because they never migrate.
 
 ## Update
 
@@ -124,6 +128,8 @@ Migrations apply automatically on boot, and there are **no down-migrations** —
 
 ## Scale-out is not supported
 
-Run **exactly one `app` replica**. The soul is a git working tree on a local volume and the
-job workers run inside the same process; a second replica would race both. Vertical scaling
-is the supported path. This is a deliberate design constraint, not a missing feature.
+Run **exactly one `app` replica**, **one maintenance `worker`**, and **one
+`integration-worker`**. The `app` owns the soul git worktree and applies migrations. The
+`worker` executes every turn and owns cron/maintenance consumers through
+`WORKER_MAINTENANCE=true`. Scale vertically; horizontal scaling is a deliberate design
+constraint, not a missing feature.

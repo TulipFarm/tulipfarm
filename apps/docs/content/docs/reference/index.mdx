@@ -1,0 +1,54 @@
+---
+title: Reference
+description: Complete, neutral lookup — environment variables, commands, the REST API, the tools agents can call, and who is allowed to do what.
+---
+
+Reference pages describe what exists, exhaustively and without opinion. When you want to be
+walked through a task, use a [guide](/docs/guides); when you want to understand why something
+works the way it does, read the [concepts](/docs/concepts).
+
+<Cards>
+  <Card
+    title="Environment variables"
+    href="/docs/reference/environment-variables"
+    description="Every variable TulipFarm reads, what it defaults to, and what breaks without it."
+  />
+  <Card
+    title="Commands"
+    href="/docs/reference/commands"
+    description="The installer, the Compose commands, and the scripts that run the project from source."
+  />
+  <Card
+    title="REST API"
+    href="/docs/reference/api"
+    description="Base URL, authentication, error shapes, and every public endpoint by area."
+  />
+  <Card
+    title="Agent tools"
+    href="/docs/reference/agent-tools"
+    description="The complete catalog of tools an agent can call, and how tool calls behave."
+  />
+  <Card
+    title="Roles and permissions"
+    href="/docs/reference/roles-and-permissions"
+    description="Users, roles, grants, API tokens, and machine identities."
+  />
+</Cards>
+
+## Also reference-shaped
+
+<Cards>
+  <Card
+    title="Security"
+    href="/docs/security"
+    description="Encryption, hashing, privacy operations, and the control evidence map."
+  />
+  <Card
+    title="Deploy"
+    href="/docs/deploy"
+    description="What the image needs from a host, and every supported way to run it."
+  />
+</Cards>
+
+Your own instance also serves a live, generated OpenAPI document at `/api/v1/openapi.json`,
+which is always exactly in step with the version you are running.

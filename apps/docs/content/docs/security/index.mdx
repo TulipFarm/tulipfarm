@@ -1,0 +1,60 @@
+---
+title: Security
+description: How TulipFarm protects data at rest, what it hashes, how privacy requests are served, and where the evidence for each control lives.
+---
+
+TulipFarm runs on your own infrastructure, holds your business data, and hands agents real
+authority over it. These pages describe the mechanisms that make that safe to do, precisely
+enough that you can audit them rather than take them on trust.
+
+<Cards>
+  <Card
+    title="Encryption"
+    href="/docs/security/encryption"
+    description="What is encrypted at rest, the key material involved, and how rotation works."
+  />
+  <Card
+    title="Hashing"
+    href="/docs/security/hashing"
+    description="Password hashing, token digests, and the hash chain over the audit log."
+  />
+  <Card
+    title="Privacy"
+    href="/docs/security/privacy"
+    description="Export and erasure requests, retention, and what leaves the instance."
+  />
+  <Card
+    title="Control evidence"
+    href="/docs/security/control-evidence"
+    description="Which artifact demonstrates which control, for an auditor or a security review."
+  />
+</Cards>
+
+## Related
+
+Security is not only cryptography. Three other areas carry as much weight:
+
+<Cards>
+  <Card
+    title="Guardrails"
+    href="/docs/concepts/guardrails"
+    description="The limits an agent cannot argue its way past."
+  />
+  <Card
+    title="Approvals"
+    href="/docs/concepts/approvals"
+    description="Where a human decision is required before an action lands."
+  />
+  <Card
+    title="Roles and permissions"
+    href="/docs/reference/roles-and-permissions"
+    description="Who can do what, and how an agent's authority is bounded by its principal's."
+  />
+</Cards>
+
+<Callout type="warn">
+  Everything here assumes you protect the deployment itself: keep the instance behind TLS, keep
+  the `tulipfarm-data` volume — which holds the encryption key for every stored secret — backed
+  up, and keep the database private. See the
+  [production checklist](/docs/deploy/production-checklist).
+</Callout>

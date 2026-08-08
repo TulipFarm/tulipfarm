@@ -1,66 +1,58 @@
 ---
 title: Use the knowledge wiki
-description: Create a space, write linked pages, and navigate them through backlinks, the graph, and search.
+description: Create spaces and pages, link them, and find them through search and graph views.
 ---
 
-import { Callout } from "fumadocs-ui/components/callout";
+This guide builds a small [Knowledge](/docs/concepts/knowledge) wiki by hand in the web
+UI. The assistant can also create spaces and pages from chat, but this guide covers the
+manual editor.
 
-This guide builds a small wiki by hand in the **Knowledge** section of the web UI: a
-space, a few cross-linked pages, and the tools to navigate them. It assumes a running
-instance and an account that can write knowledge. For how knowledge fits the wider system,
-see [Knowledge](/docs/concepts/knowledge).
+## Outcome
 
-<Callout type="info">
-You can also just ask the assistant — "create a space for our refund policies and add a
-page on 30-day returns". It writes spaces and pages the same way you do here. This guide
-covers the manual editor for when you want to write knowledge yourself.
-</Callout>
+At the end, you have a space with pages, backlinks, tags, revisions, and a graph you can
+use for navigation.
 
 ## Create a space
 
-In the sidebar, choose **Knowledge**, then **New space**. Give it a name and an optional
-description, and save. The space opens with an empty page tree.
+<Steps>
+  <Step>
+    Open **Knowledge**.
+  </Step>
+  <Step>
+    Choose **New space**.
+  </Step>
+  <Step>
+    Add a name and optional description, then save.
+  </Step>
+</Steps>
 
-## Add a page
+## Add and edit pages
 
-With the space open, choose **New page**. A page needs a **path** — its address within
-the space, such as `tables/orders` or `policies/refunds`. Give it a title, write the body
-in markdown, and save. The page appears in the space tree at its path.
+Open the space and choose **New page**. Give the page a path, title, tags, and markdown
+body. Paths organize pages inside the space, such as `policies/refunds` or
+`ops/on-call`.
 
-## Link pages together
+Every edit creates a revision. Use the page history when you need to inspect or restore a
+previous version.
 
-Pages link like a wiki, from inside the editor:
+## Link and tag pages
 
-- Type `@` to open a menu of pages, agents, and resource types. Pick one to insert a link
-  to it. A page in the same space links directly; a page in another space is linked by
-  name and resolved when the page is indexed.
-- Type `#` to tag the page. Tags become filters you can search by.
+Use `@` in the editor to insert links to pages, Agents, and Resource types. When another
+page links to the current page, it appears in **Linked from** as a backlink. Use `#` to
+add tags; tag pages are reachable at `/knowledge/tags/:tag`.
+
+## Browse the graph
+
+Open the space graph to see pages as nodes and links as edges. Use it to find pages that
+have no backlinks or to understand how a policy area is connected.
+
+## Search
+
+Search finds pages by title and body. When an embedding model is configured, Knowledge
+search can use pgvector embeddings. If no embedding model is configured, TulipFarm logs a
+lexical fallback and uses lexical search instead, so search still works.
 
 <Callout type="info">
-You do not write `tf:` link syntax by hand — selecting a cross-space target from the `@`
-menu encodes it for you.
+Knowledge data lives in PostgreSQL, not in the Soul. Back up the database when you back
+up the Soul.
 </Callout>
-
-## See what links to a page
-
-Open any page. Below its body, a **Linked from** list shows every page that links to it.
-This backlink list is maintained automatically — it is the reverse of the links you
-authored, so there is nothing to keep in sync.
-
-## Browse the space graph
-
-From the space, open its **graph** view. Pages are nodes and links are edges; links that
-leave the space show as faded stub nodes. Use it to see how the space hangs together and
-to find orphan pages that nothing links to.
-
-## Search with ⌘K
-
-Press **⌘K** (or **Ctrl-K**), or click the sidebar search box, to open the knowledge
-command palette. Type to search pages by title and body — results are grouped by space
-and tolerate typos. Filter to a single space when you only want results from there.
-
-## Restore a previous version
-
-Every edit is snapshotted. To roll a page back, open it, open the `⋯` overflow menu, and
-choose **History**. Read any past revision, then **Restore** it. The restored content
-becomes current and is itself snapshotted, so you can always move forward again.
