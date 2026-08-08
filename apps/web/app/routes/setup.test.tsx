@@ -104,3 +104,24 @@ test("steps back to an earlier step without losing what was already typed", asyn
   await screen.findByRole("heading", { name: "LLM setup" });
   expect(screen.getByLabelText(/^model/i)).toHaveValue("claude-haiku-4-5");
 }, 15_000);
+
+/*
+ * The installer browser smoke (scripts/test/browser-smoke.mjs) fills this field by id rather than
+ * by placeholder, after rewriting the placeholder copy silently broke it. Renaming the id would
+ * otherwise only surface in the slow Docker installer stage, so pin the contract here instead.
+ */
+test("keeps the business-name field id the installer browser smoke drives", async () => {
+  const user = userEvent.setup();
+  setupAdmin.mockResolvedValue(undefined as never);
+  renderWizard();
+
+  await user.type(screen.getByLabelText(/email/i), "admin@example.com");
+  await user.type(screen.getByLabelText(/^password/i), "mypassword");
+  await user.type(screen.getByLabelText(/confirm password/i), "mypassword");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+
+  expect(await screen.findByLabelText(/business name/i)).toHaveAttribute(
+    "id",
+    "setup-business-name"
+  );
+});
