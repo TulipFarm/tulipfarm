@@ -202,6 +202,45 @@ export function registerConversationRoutes(
     }
   );
 
+  app.delete(
+    "/api/v1/chats/:id",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Permanently delete an owned conversation and its persisted Chat data. Refuses while " +
+          "a Turn is pending or running.",
+        tags: ["chat"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["id"],
+          properties: { id: { type: "string" } },
+        },
+        response: {
+          204: { type: "null" },
+          401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const user = req.user as UserDoc;
+      const { id } = req.params as { id: string };
+      const outcome = await repo.deleteOwned(id, user._id);
+      if (outcome === "not_found") {
+        return reply.code(404).send({ error: "conversation not found" });
+      }
+      if (outcome === "active_turn") {
+        return reply.code(409).send({
+          error: "This chat has a Turn in progress. Wait for it to finish before deleting.",
+        });
+      }
+      return reply.code(204).send();
+    }
+  );
+
   app.get(
     "/api/v1/chats/:id",
     {

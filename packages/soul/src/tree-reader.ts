@@ -1,12 +1,14 @@
-import type { VersionedSchemaDocument } from "@tulipfarm/schema";
+import { type LlmConfig, type VersionedSchemaDocument, validateLlmConfig } from "@tulipfarm/schema";
 import simpleGit, { type SimpleGit } from "simple-git";
+import { parse as parseYaml } from "yaml";
 import type { BundleSourceFile } from "./compiler";
+import { modelProfileDocuments } from "./model-profile-documents";
 import { parseSoulFile } from "./parse";
 import type { SoulTreeReader } from "./publication";
 
 const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const DEFINITION_FILE =
-  /(?:^|\/)(?:agent|skill)\.ya?ml$|^(?:tools|routines|triggers|roles|guardrails|knowledge|forms|models)\/[^/]+\.ya?ml$|^integrations\/.+\.ya?ml$|^soul\.ya?ml$/;
+  /(?:^|\/)(?:agent|skill)\.ya?ml$|^(?:tools|routines|triggers|roles|guardrails|knowledge|forms)\/[^/]+\.ya?ml$|^integrations\/.+\.ya?ml$/;
 const SKILL_COMPANION = /^skills\/[^/]+\/(?!skill\.ya?ml$).+$/;
 
 export class GitSoulTreeReader implements SoulTreeReader {
@@ -31,7 +33,8 @@ export class GitSoulTreeReader implements SoulTreeReader {
 
   async readDefinitions(commitSha: string): Promise<readonly VersionedSchemaDocument[]> {
     const definitions: VersionedSchemaDocument[] = [];
-    for (const path of await this.paths(commitSha)) {
+    const paths = await this.paths(commitSha);
+    for (const path of paths) {
       if (!DEFINITION_FILE.test(path)) continue;
       const parsed = parseSoulFile({
         operation: "upsert",
@@ -40,6 +43,14 @@ export class GitSoulTreeReader implements SoulTreeReader {
       });
       if (parsed.parsed?.definition !== undefined) {
         definitions.push(parsed.parsed.definition.document);
+      }
+    }
+    if (paths.includes("soul.yaml")) {
+      const manifest = parseYaml(await this.content(commitSha, "soul.yaml")) as
+        | Record<string, unknown>
+        | undefined;
+      if (manifest?.llm !== undefined) {
+        definitions.push(...modelProfileDocuments(validateLlmConfig(manifest.llm as LlmConfig)));
       }
     }
     return definitions;

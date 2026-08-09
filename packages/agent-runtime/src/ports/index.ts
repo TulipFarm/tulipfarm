@@ -1,4 +1,5 @@
 export type {
+  ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
@@ -6,3 +7,4 @@ export type {
   ModelPort,
   ModelStreamChunk,
 } from "./model";
+export { ModelInvocationError } from "./model";

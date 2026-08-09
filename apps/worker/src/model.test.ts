@@ -1,4 +1,5 @@
 import type { ModelInvocationRequest, ModelStreamChunk } from "@tulipfarm/agent-runtime";
+import { LlmProviderError } from "@tulipfarm/llm";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
 import { describe, expect, it } from "vitest";
@@ -87,6 +88,35 @@ describe("LlmModelPort", () => {
 
     await expect(port.invoke(request())).resolves.toMatchObject({
       output: { kind: "text", text: "done" },
+    });
+  });
+
+  it("carries a safe provider failure reason across the model port", async () => {
+    const providerError = new LlmProviderError(
+      "model_billing_inactive",
+      new Error("provider response")
+    );
+    const mock = new MockLanguageModelV4({
+      doStream: async () => {
+        throw providerError;
+      },
+    });
+    const port = new LlmModelPort({
+      model: async (selector): Promise<LlmModelResolution> => ({
+        kind: "available",
+        model: mock as unknown as LanguageModel,
+        routing: {
+          outcome: "raw_model",
+          selector,
+          resolution: "raw_model_id",
+          modelId: selector,
+        },
+      }),
+    });
+
+    await expect(port.invoke(request())).rejects.toMatchObject({
+      name: "ModelInvocationError",
+      reason: "model_billing_inactive",
     });
   });
 
@@ -296,7 +326,7 @@ describe("LlmModelPort", () => {
     });
   });
 
-  it("claims no applied rung when a preset resolves to an authored ModelProfile", async () => {
+  it("claims no applied rung when a preset resolves to a non-rung ModelProfile", async () => {
     const mock = new MockLanguageModelV4({
       doStream: async () => ({
         stream: simulateReadableStream<StreamPart>({

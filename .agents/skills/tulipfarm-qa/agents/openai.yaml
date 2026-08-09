@@ -1,0 +1,4 @@
+interface:
+  display_name: "TulipFarm QA Runner"
+  short_description: "Agent-driven manual QA against the running dev app"
+  default_prompt: "Use $tulipfarm-qa to run the QA playbooks against the running TulipFarm dev app."

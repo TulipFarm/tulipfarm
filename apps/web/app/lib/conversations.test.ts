@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  deleteConversation,
   getConversation,
   getConversationMessages,
   listConversations,
@@ -81,6 +82,15 @@ describe("conversations client", () => {
     expect(calls[0].init.method).toBe("PUT");
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ starred: true });
     expect(out.starred).toBe(true);
+  });
+
+  it("deleteConversation DELETEs the encoded conversation id", async () => {
+    const calls = mockFetch(() => null);
+
+    await deleteConversation("a/b");
+
+    expect(calls[0].url).toContain("/api/v1/chats/a%2Fb");
+    expect(calls[0].init.method).toBe("DELETE");
   });
 
   it("getConversation GETs a single conversation by id", async () => {

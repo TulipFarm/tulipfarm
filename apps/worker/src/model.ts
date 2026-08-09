@@ -7,8 +7,8 @@ import type {
   ModelRequirementsPolicy,
   ModelStreamChunk,
 } from "@tulipfarm/agent-runtime";
-import { deriveModelRequirements } from "@tulipfarm/agent-runtime";
-import { priceFor } from "@tulipfarm/llm";
+import { deriveModelRequirements, ModelInvocationError } from "@tulipfarm/agent-runtime";
+import { classifyProviderError, priceFor } from "@tulipfarm/llm";
 import type { ResolvedLimits } from "@tulipfarm/run-kernel";
 import {
   asEffortPreset,
@@ -116,7 +116,6 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
-    const { instructions, messages } = splitPrompt(request.messages);
     const resolution = await this.options.model(
       request.modelProfileId,
       deriveModelRequirements(request, this.options.policy)
@@ -135,6 +134,18 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       );
     }
 
+    try {
+      yield* this.streamProvider(request, resolution);
+    } catch (error) {
+      throw new ModelInvocationError(classifyProviderError(error), error);
+    }
+  }
+
+  private async *streamProvider(
+    request: ModelInvocationRequest,
+    resolution: Extract<LlmModelResolution, { kind: "available" }>
+  ): AsyncIterable<ModelStreamChunk> {
+    const { instructions, messages } = splitPrompt(request.messages);
     const startedAt = this.now();
     const result = streamText({
       model: resolution.model,
@@ -245,7 +256,7 @@ function receiptFromRouting(
   const effortPreset = selectedByPreset ? asEffortPreset(routing.selector) : undefined;
   // `deriveModelProfiles` ids a preset's head profile by the preset's own name, so the resolved
   // profile id *is* the rung whenever the deployment routes on derived profiles. When a preset
-  // points at an authored ModelProfile instead, the id names that profile and no rung is claimed.
+  // points at a non-rung ModelProfile instead, the id names that profile and no rung is claimed.
   const effortApplied =
     selectedByPreset && isEffortRung(routing.profileId) ? routing.profileId : undefined;
   return {

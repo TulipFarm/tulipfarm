@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./ajv": "./src/ajv.ts",
-    "./canonicalize": "./src/canonicalize.ts"
+    "./canonicalize": "./src/canonicalize.ts",
+    "./model-catalog": "./src/model-catalog.ts"
   },
   "scripts": {
     "lint": "biome check --no-errors-on-unmatched .",

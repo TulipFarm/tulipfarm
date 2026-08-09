@@ -1,12 +1,14 @@
 import { Link, type MetaFunction, useLoaderData, useRouteError } from "@remix-run/react";
-import { MessageSquare, MoreHorizontal, Pencil, Plus, Search, Star } from "lucide-react";
+import { MessageSquare, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
+import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
 import {
   type ConversationSummary,
+  deleteConversation,
   listConversations,
   renameConversation,
   setConversationStarred,
@@ -35,6 +37,8 @@ export default function ChatsRoute() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<ConversationSummary | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [searching, setSearching] = useState(false);
 
   // Server-side search, debounced. The loader already seeded the first render, so skip the initial
@@ -95,6 +99,22 @@ export default function ChatsRoute() {
     }
   }
 
+  async function onDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      await deleteConversation(pendingDelete.id);
+      setItems((previous) => previous.filter((chat) => chat.id !== pendingDelete.id));
+      await refresh();
+      setPendingDelete(null);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not delete chat");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // Starred chats pinned to the top; recency order (server-sorted) preserved within each group by the
   // stable sort.
   const sorted = [...items].sort((a, b) => Number(b.starred) - Number(a.starred));
@@ -102,7 +122,7 @@ export default function ChatsRoute() {
   const recent = sorted.filter((chat) => !chat.starred);
 
   return (
-    <main className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
+    <div className="mx-auto flex w-full max-w-5xl flex-col px-4 py-8 sm:px-6 sm:py-10">
       <header className="flex flex-col gap-5 border-b border-border pb-7 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-sm font-medium text-primary">Chat history</p>
@@ -148,7 +168,7 @@ export default function ChatsRoute() {
             role="alert"
             className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
           >
-            Search failed. {error}
+            Request failed. {error}
           </p>
         ) : null}
 
@@ -180,6 +200,7 @@ export default function ChatsRoute() {
                 onCancelRename={() => setRenamingId(null)}
                 onToggleStar={onToggleStar}
                 onStartRename={setRenamingId}
+                onDelete={setPendingDelete}
               />
             ) : null}
             {recent.length > 0 ? (
@@ -191,12 +212,21 @@ export default function ChatsRoute() {
                 onCancelRename={() => setRenamingId(null)}
                 onToggleStar={onToggleStar}
                 onStartRename={setRenamingId}
+                onDelete={setPendingDelete}
               />
             ) : null}
           </div>
         )}
       </section>
-    </main>
+      <ConfirmModal
+        open={pendingDelete !== null}
+        onClose={() => setPendingDelete(null)}
+        onConfirm={() => void onDelete()}
+        title="Delete chat"
+        description={`Permanently delete “${pendingDelete?.title ?? "New chat"}” and all of its messages? This cannot be undone.`}
+        busy={deleting}
+      />
+    </div>
   );
 }
 
@@ -208,6 +238,7 @@ function ChatGroup({
   onCancelRename,
   onToggleStar,
   onStartRename,
+  onDelete,
 }: {
   title: string;
   items: ConversationSummary[];
@@ -216,6 +247,7 @@ function ChatGroup({
   onCancelRename: () => void;
   onToggleStar: (chat: ConversationSummary) => void;
   onStartRename: (id: string) => void;
+  onDelete: (chat: ConversationSummary) => void;
 }) {
   return (
     <section aria-labelledby={`${title.toLowerCase()}-chats`}>
@@ -239,6 +271,7 @@ function ChatGroup({
                 chat={chat}
                 onToggleStar={() => onToggleStar(chat)}
                 onStartRename={() => onStartRename(chat.id)}
+                onDelete={() => onDelete(chat)}
               />
             )}
           </li>
@@ -252,10 +285,12 @@ function ChatRow({
   chat,
   onToggleStar,
   onStartRename,
+  onDelete,
 }: {
   chat: ConversationSummary;
   onToggleStar: () => void;
   onStartRename: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="group flex min-h-14 items-center gap-2 transition-colors hover:bg-muted/60">
@@ -277,6 +312,7 @@ function ChatRow({
         starred={chat.starred}
         onToggleStar={onToggleStar}
         onStartRename={onStartRename}
+        onDelete={onDelete}
       />
     </div>
   );
@@ -288,10 +324,12 @@ function ChatRowMenu({
   starred,
   onToggleStar,
   onStartRename,
+  onDelete,
 }: {
   starred: boolean;
   onToggleStar: () => void;
   onStartRename: () => void;
+  onDelete: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -378,6 +416,18 @@ function ChatRowMenu({
               >
                 <Pencil className="size-3.5" />
                 Rename
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  onDelete();
+                  setOpen(false);
+                }}
+                className={`${itemClass} text-destructive hover:bg-destructive/10`}
+              >
+                <Trash2 className="size-3.5" />
+                Delete
               </button>
             </div>,
             document.body

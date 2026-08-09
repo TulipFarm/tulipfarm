@@ -4,6 +4,7 @@ import {
   type LlmService,
   litellmModelsForProvider,
   resolveModelSpec,
+  resolveModelSpecCandidate,
 } from "@tulipfarm/llm";
 import {
   deriveModelProfiles,
@@ -199,7 +200,7 @@ async function fetchLiveModelOptions(
  */
 async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig> {
   const tiers = config.tiers;
-  if (!tiers) return config; // migrated to ModelProfiles — specs are pinned on the profile
+  if (!tiers) return config; // defensive for unchecked callers; validation requires chains
   const all = TIER_KEYS.flatMap((t) => tiers[t].providers);
   if (!force && all.every((p) => p.spec)) return config; // nothing missing → no fetch
   const catalog = await getCatalog(force);
@@ -230,6 +231,22 @@ function validatePresetTargets(config: LlmConfig): string | null {
     const target = config.presets[key];
     if (target !== undefined && !available.has(target)) {
       return `preset ${key} points at unknown ModelProfile "${target}"`;
+    }
+  }
+  return null;
+}
+
+function validateRoutingCapacity(config: LlmConfig): string | null {
+  if (!config.tiers) return null;
+  for (const tier of TIER_KEYS) {
+    for (const entry of config.tiers[tier].providers) {
+      const capacity = entry.spec?.max_input_tokens;
+      if (typeof capacity !== "number" || !Number.isInteger(capacity) || capacity <= 0) {
+        return (
+          `${tier} model ${entry.provider}/${entry.model} needs a verified context window. ` +
+          "Select a LiteLLM candidate or enter max input tokens in Settings before saving."
+        );
+      }
     }
   }
   return null;
@@ -339,7 +356,7 @@ export function registerLlmConfigRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Resolve a model's spec (pricing/context/capabilities) from LiteLLM for a given provider+model, to pin into llm.config. Admin only. `spec` is null when no confident match was found (use `candidates`).",
+          "Resolve a model's spec (pricing/context/capabilities) from LiteLLM for a given provider+model, to pin into llm.config. Admin only. `spec` is null when no confident match was found (use `candidates` and resubmit the selected `candidate`).",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: {
@@ -350,6 +367,7 @@ export function registerLlmConfigRoutes(
             model: { type: "string" },
             base_url: { type: "string" },
             refresh: { type: "boolean" },
+            candidate: { type: "string" },
           },
         },
         response: {
@@ -364,6 +382,7 @@ export function registerLlmConfigRoutes(
           },
           401: ErrorSchema,
           403: ErrorSchema,
+          422: ErrorSchema,
           502: ErrorSchema,
         },
       },
@@ -371,12 +390,26 @@ export function registerLlmConfigRoutes(
     async (req, reply) => {
       const actor = req.user as UserDoc;
       if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
-      const q = req.query as { provider: string; model: string; refresh?: boolean };
+      const q = req.query as {
+        provider: string;
+        model: string;
+        refresh?: boolean;
+        candidate?: string;
+      };
       const catalog = await getCatalog(q.refresh === true);
       if (!catalog) {
         return reply.code(502).send({ error: "could not reach the LiteLLM model catalog" });
       }
       const fetchedAt = new Date().toISOString().slice(0, 10);
+      if (q.candidate) {
+        const resolution = resolveModelSpecCandidate(q.candidate, catalog, fetchedAt);
+        if (!resolution.spec) {
+          return reply.code(422).send({
+            error: "The selected LiteLLM candidate has no usable context-window specification.",
+          });
+        }
+        return reply.send(resolution);
+      }
       return reply.send(resolveModelSpec(q.provider, q.model, catalog, fetchedAt));
     }
   );
@@ -438,7 +471,7 @@ export function registerLlmConfigRoutes(
       preHandler: requireAuth,
       schema: {
         description:
-          "Replace the LLM config (admin only). Each model's spec (pricing/context/capabilities) is auto-resolved from LiteLLM and pinned (best-effort); `?refresh=true` re-resolves all. Validated before write; the soul is committed and the LlmService reloaded.",
+          "Replace the LLM config (admin only). Each model's spec (pricing/context/capabilities) is auto-resolved from LiteLLM and pinned; unresolved models require an explicit positive context window. `?refresh=true` re-resolves all. Validated before write; the soul is committed and the LlmService reloaded.",
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         querystring: { type: "object", properties: { refresh: { type: "boolean" } } },
@@ -475,6 +508,10 @@ export function registerLlmConfigRoutes(
       // without a per-model click. Best-effort — a LiteLLM outage saves the config unchanged.
       const { refresh } = req.query as { refresh?: boolean };
       config = await enrichSpecs(config, refresh === true);
+      const capacityProblem = validateRoutingCapacity(config);
+      if (capacityProblem) {
+        return reply.code(422).send({ error: capacityProblem });
+      }
 
       await writeLlmConfigToSoulYaml(gitSync.path, config);
       await gitSync.withSync("soul: update llm config");

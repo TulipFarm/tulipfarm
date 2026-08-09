@@ -17,16 +17,24 @@ vi.mock("@remix-run/react", async () => {
 });
 
 vi.mock("~/lib/conversations", () => ({
+  deleteConversation: vi.fn(),
   listConversations: vi.fn(),
   renameConversation: vi.fn(),
   setConversationStarred: vi.fn(),
 }));
 
+const contextMocks = vi.hoisted(() => ({ refresh: vi.fn(async () => {}) }));
+
 vi.mock("~/lib/conversations-context", () => ({
-  useConversations: () => ({ refresh: vi.fn(async () => {}) }),
+  useConversations: () => ({ refresh: contextMocks.refresh }),
 }));
 
-import { listConversations, renameConversation, setConversationStarred } from "~/lib/conversations";
+import {
+  deleteConversation,
+  listConversations,
+  renameConversation,
+  setConversationStarred,
+} from "~/lib/conversations";
 
 const convo = (over: Partial<ConversationSummary> = {}): ConversationSummary => ({
   id: "c1",
@@ -46,6 +54,7 @@ function renderWithItems(node: ReactElement, items: ConversationSummary[]) {
 
 test("lists chats linking each row to /chat/:id, with search and a new-chat action", () => {
   renderWithItems(<ChatsRoute />, [convo()]);
+  expect(screen.queryByRole("main")).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Inventory Planning/ })).toHaveAttribute(
     "href",
     "/chat/c1"
@@ -96,4 +105,32 @@ test("the three-dots menu renames a chat inline", async () => {
   fireEvent.change(input, { target: { value: "Renamed" } });
   fireEvent.keyDown(input, { key: "Enter" });
   expect(renameConversation).toHaveBeenCalledWith("c1", "Renamed");
+});
+
+test("deleting a chat requires confirmation, removes it, and refreshes the sidebar", async () => {
+  vi.mocked(deleteConversation).mockResolvedValue(undefined);
+  renderWithItems(<ChatsRoute />, [convo()]);
+  fireEvent.click(screen.getByRole("button", { name: /chat actions/i }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /delete/i }));
+
+  expect(deleteConversation).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog", { name: "Delete chat" })).toHaveTextContent(
+    "Permanently delete “Inventory Planning” and all of its messages? This cannot be undone."
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+  await waitFor(() => expect(deleteConversation).toHaveBeenCalledWith("c1"));
+  await waitFor(() => expect(contextMocks.refresh).toHaveBeenCalled());
+  expect(screen.queryByRole("link", { name: /Inventory Planning/ })).not.toBeInTheDocument();
+});
+
+test("a failed delete keeps the chat and shows the API error", async () => {
+  vi.mocked(deleteConversation).mockRejectedValue(new Error("Turn in progress"));
+  renderWithItems(<ChatsRoute />, [convo()]);
+  fireEvent.click(screen.getByRole("button", { name: /chat actions/i }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /delete/i }));
+  fireEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Turn in progress");
+  expect(screen.getByRole("link", { name: /Inventory Planning/ })).toBeInTheDocument();
 });

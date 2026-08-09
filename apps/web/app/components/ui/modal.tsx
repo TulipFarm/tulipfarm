@@ -1,6 +1,6 @@
 import { X } from "lucide-react";
 import type * as React from "react";
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Button } from "~/components/ui/button";
 import { cn } from "~/lib/utils";
 
@@ -26,6 +26,7 @@ export function Modal({
   className?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   // Drive open/close from props. Guard against calling when already in the
   // desired state to prevent spurious 'close' events triggering onClose.
@@ -69,10 +70,13 @@ export function Modal({
     if (outside) onClose();
   }
 
+  if (!open) return null;
+
   return (
     // biome-ignore lint/a11y/useKeyWithClickEvents: <dialog> handles keyboard dismissal natively via the Escape key (cancel → close event)
     <dialog
       ref={ref}
+      aria-labelledby={titleId}
       onClick={onBackdropClick}
       className={cn(
         "m-auto w-full max-w-sm rounded-sm border border-border bg-card p-0 text-foreground",
@@ -81,7 +85,9 @@ export function Modal({
       )}
     >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
-        <h2 className="text-sm font-medium text-foreground">{title}</h2>
+        <h2 id={titleId} className="text-sm font-medium text-foreground">
+          {title}
+        </h2>
         <button
           type="button"
           aria-label="Close"

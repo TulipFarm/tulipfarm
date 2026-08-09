@@ -68,10 +68,11 @@ const inputClass =
 const subtleInputClass =
   "w-full rounded-sm border border-input bg-background px-2.5 py-1.5 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
-type SpecState = "loading" | "matched" | "unmatched" | "error";
+type SpecState = "loading" | "matched" | "manual" | "unmatched" | "error";
 type Row = ProviderEntry & {
   uid: number;
   specState?: SpecState;
+  specCandidates?: string[];
 };
 type Tiers = Record<TierName, Row[]>;
 type PresetState = Record<PresetTargetKey, string>;
@@ -94,7 +95,12 @@ function cloneTiers(config: LlmConfig): Tiers {
     (ps ?? []).map((p) => ({
       ...p,
       uid: nextUid++,
-      specState: p.spec ? "matched" : undefined,
+      specState:
+        p.spec && typeof p.spec.max_input_tokens === "number"
+          ? "matched"
+          : p.spec
+            ? "unmatched"
+            : undefined,
     }));
   return {
     quick: rows(config.tiers?.quick.providers),
@@ -358,12 +364,50 @@ export function LlmConfigForm({
       patchRowByUid(
         tier,
         uid,
-        { spec: res.spec ?? undefined, specState: res.spec ? "matched" : "unmatched" },
+        {
+          spec: res.spec ?? undefined,
+          specCandidates: res.candidates,
+          specState: res.spec ? "matched" : "unmatched",
+        },
         stillTarget
       );
     } catch {
       patchRowByUid(tier, uid, { specState: "error" }, stillTarget);
     }
+  }
+
+  async function selectSpecCandidate(tier: TierName, idx: number, candidate: string) {
+    const row = tiers[tier][idx];
+    if (!row.provider || !row.model.trim()) return;
+    const { uid, provider } = row;
+    const model = row.model.trim();
+    const stillTarget = (item: Row) => item.provider === provider && item.model.trim() === model;
+    patchRowByUid(tier, uid, { specState: "loading" }, stillTarget);
+    try {
+      const res = await resolveModelSpec(provider, model, false, candidate);
+      patchRowByUid(
+        tier,
+        uid,
+        {
+          spec: res.spec ?? undefined,
+          specCandidates: [],
+          specState: res.spec ? "matched" : "unmatched",
+        },
+        stillTarget
+      );
+    } catch {
+      patchRowByUid(tier, uid, { specState: "error" }, stillTarget);
+    }
+  }
+
+  function setManualContextWindow(tier: TierName, idx: number, rawValue: string) {
+    const value = Number(rawValue);
+    const row = tiers[tier][idx];
+    patchRow(tier, idx, {
+      spec:
+        Number.isInteger(value) && value > 0 ? { ...row.spec, max_input_tokens: value } : undefined,
+      specState: Number.isInteger(value) && value > 0 ? "manual" : "unmatched",
+    });
   }
 
   function validate(): string | null {
@@ -378,6 +422,13 @@ export function LlmConfigForm({
             return `${info?.label ?? row.provider} needs a Provider Connection secret or config.`;
           }
           if (!row.model.trim()) return `Set a provider model id for every row in ${chain.label}.`;
+          const contextWindow = row.spec?.max_input_tokens;
+          if (
+            (row.specState === "unmatched" || row.specState === "error") &&
+            (typeof contextWindow !== "number" || contextWindow <= 0)
+          ) {
+            return `${chain.label} needs a verified context window for ${row.model}.`;
+          }
           const apiKeyRef = trimOptional(row.api_key_ref);
           if (apiKeyRef !== undefined && !secretKeys.includes(apiKeyRef)) {
             return `Secret ${apiKeyRef} is not stored yet.`;
@@ -556,6 +607,7 @@ export function LlmConfigForm({
                               resource_name: undefined,
                               spec: undefined,
                               specState: undefined,
+                              specCandidates: undefined,
                             });
                             void loadModelOptions(e.target.value);
                           }}
@@ -591,6 +643,7 @@ export function LlmConfigForm({
                               model: e.target.value,
                               spec: undefined,
                               specState: undefined,
+                              specCandidates: undefined,
                             })
                           }
                           onFocus={() => void loadModelOptions(row.provider)}
@@ -696,8 +749,8 @@ export function LlmConfigForm({
                       ) : row.specState === "loading" ? (
                         <span className="text-muted-foreground">Resolving spec…</span>
                       ) : row.specState === "unmatched" ? (
-                        <span className="text-muted-foreground">
-                          No LiteLLM match — cost stays unpriced.
+                        <span className="text-destructive">
+                          Select the matching LiteLLM model or enter its context window.
                         </span>
                       ) : row.specState === "error" ? (
                         <span className="text-destructive">
@@ -719,6 +772,45 @@ export function LlmConfigForm({
                         </Button>
                       ) : null}
                     </div>
+                    {row.specState === "unmatched" ||
+                    row.specState === "error" ||
+                    row.specState === "manual" ? (
+                      <div className="flex flex-col gap-2 rounded-sm border border-border p-3">
+                        {row.specCandidates && row.specCandidates.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {row.specCandidates.map((candidate) => (
+                              <Button
+                                key={candidate}
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => selectSpecCandidate(chain.tier, idx, candidate)}
+                              >
+                                {candidate}
+                              </Button>
+                            ))}
+                          </div>
+                        ) : null}
+                        <label className="flex max-w-xs flex-col gap-1 text-xs text-muted-foreground">
+                          max input tokens
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            className={subtleInputClass}
+                            value={row.spec?.max_input_tokens ?? ""}
+                            onChange={(event) =>
+                              setManualContextWindow(chain.tier, idx, event.target.value)
+                            }
+                            aria-label={`${chain.label} provider ${idx + 1} max input tokens`}
+                          />
+                          <span>
+                            Use the provider&rsquo;s documented context capacity. Pricing may remain
+                            unavailable.
+                          </span>
+                        </label>
+                      </div>
+                    ) : null}
                   </div>
                 );
               })}

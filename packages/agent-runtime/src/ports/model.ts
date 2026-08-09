@@ -16,6 +16,25 @@ export interface ModelInvocationRequest {
   readonly maxOutputTokens?: number;
 }
 
+export type ModelInvocationFailureReason =
+  | "model_billing_inactive"
+  | "model_authentication_failed"
+  | "model_not_found"
+  | "model_rate_limited"
+  | "model_provider_unavailable"
+  | "model_error";
+
+/** A participant-safe model failure. The provider's original error remains operator-only. */
+export class ModelInvocationError extends Error {
+  constructor(
+    readonly reason: ModelInvocationFailureReason,
+    cause: unknown
+  ) {
+    super(reason, { cause });
+    this.name = "ModelInvocationError";
+  }
+}
+
 export type ModelOutput =
   | { readonly kind: "text"; readonly text: string }
   | {

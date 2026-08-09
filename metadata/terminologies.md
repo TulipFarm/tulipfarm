@@ -73,7 +73,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | An installable agent capability module | **Skill** | `Skill` | `/skills`, `/api/v1/skills` | "Skills" | `plugin`/`capability` → retired as synonyms¹ |
 | Where skills are browsed/installed | **Marketplace** / **Install** | — | `/skills/marketplace`, `/skills/install` | "Marketplace" | |
 | The git-backed config repo | **Soul** | `Soul` | `/api/v1/soul` | "Soul" | holds agents/routines/skills/integrations/resources |
-| Git-tracked YAML settings inside the Soul repo | **Soul Config** | `SoulConfig` | — | — | e.g. `soul.yaml`, `llm.config.yaml`; non-secret, runtime-editable but reload behavior varies (some apply on `soul.synced`, others require restart) |
+| Git-tracked YAML settings inside the Soul repo | **Soul Config** | `SoulConfig` | — | — | e.g. `soul.yaml`, `guardrails.yaml`; non-secret, runtime-editable but reload behavior varies (some apply on `soul.synced`, others require restart) |
 | The knowledge wiki feature | **Knowledge** | — | `/knowledge` | "Knowledge" | a wiki |
 | A grouping of pages | **Space** | `Space` | `/knowledge/spaces/:id` | "Space" | retires `bundle`, `collection`²; DB: knowledge_spaces, knowledge_space_overrides |
 | A knowledge content node | **Page** | `Page` | `/knowledge/pages/:id` | "Page" | retires `concept`, `document`; pages link pages (backlink graph); DB: knowledge_pages |
@@ -101,7 +101,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
 | First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
-| A governed, Soul-authored model routing record | **ModelProfile** | `ModelProfile` | `/api/v1/model-profiles` | "Model profile" | one word, `PascalCase` — authored at `models/<slug>.yaml`; holds provider/model, capability, modality, constraints, budgets, fallbacks. ⛔ "tier" as the routing unit — retired |
+| A governed model routing record derived from Soul Config | **ModelProfile** | `ModelProfile` | `/api/v1/model-profiles` | "Model profile" | one word, `PascalCase` — synthesized deterministically from `soul.yaml#llm` and pinned into immutable bundles; holds provider/model, capability, modality, constraints, budgets, fallbacks. There is no authored `models/` directory. ⛔ "tier" as the routing unit — retired |
 | A named effort level a participant may pick | **Effort Preset** | `EffortPreset` | — | "Auto"/"Fast"/"Balanced"/"Thorough" | the ONLY model concept a user sees; maps to a ModelProfile ref, one marked default. ⛔ "quick"/"standard"/"complex" — retired |
 | Credentials + endpoint for one provider | **Provider Connection** | `ProviderConnection` | — | "Provider" | `provider → {api_key_ref, base_url, resource_name}`; secret-bearing, admin-managed. Distinct from a ModelProfile, which is governance and git-audited |
 | The raw provider model identifier | **Model ID** | `modelId` | — | — | e.g. `claude-sonnet-4`; an implementation detail of a ModelProfile — never a user-facing choice, never a routing unit |

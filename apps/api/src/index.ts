@@ -136,6 +136,7 @@ import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
+import { ActiveRoutineCatalog } from "./routines/catalog";
 import { runCanceller } from "./runs/cancel";
 import {
   integrationInvoker,
@@ -266,7 +267,10 @@ async function boot() {
       );
     }
 
-    await runSoulMigrations(soulPath, console);
+    const soulMigrated = await runSoulMigrations(soulPath, console);
+    if (soulMigrated) {
+      await gitSync.withSyncPaths("chore(soul): migrate format", ["soul.yaml", "models"]);
+    }
 
     const soulLoader = new SoulLoader(soulPath, console, surfaceRendererRegistry);
     await soulLoader.load();
@@ -689,6 +693,11 @@ async function boot() {
       internalTurns,
       approvalsRepo,
       routineApprovals,
+      routineCatalog: new ActiveRoutineCatalog(
+        soulPublications,
+        soulBundleSigner,
+        DEPLOYMENT_BUSINESS_ID
+      ),
       toolApprovals,
       channels: (log: FastifyBaseLogger) => ({
         store: conversationStore,

@@ -4,6 +4,7 @@ import type {
   LanguageModelV4StreamPart,
 } from "@ai-sdk/provider";
 import { APICallError, LoadAPIKeyError } from "ai";
+import { LlmProviderError } from "./provider-error";
 
 /** Minimal logger surface for fallback events (pino/console compatible). */
 export interface FallbackLogger {
@@ -25,6 +26,7 @@ function isAbortError(err: unknown): boolean {
  */
 export function isHardFailure(err: unknown): boolean {
   if (isAbortError(err)) return true;
+  if (err instanceof LlmProviderError) return true;
   if (LoadAPIKeyError.isInstance(err)) return true;
   if (APICallError.isInstance(err)) return err.isRetryable === false;
   return false;

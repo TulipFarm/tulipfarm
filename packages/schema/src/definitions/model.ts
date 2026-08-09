@@ -12,7 +12,7 @@ import {
 } from "./common";
 
 /**
- * ModelProfile authored definition (SPEC §7.1, §17). Provider/model, capability class, reasoning
+ * ModelProfile bundle definition (SPEC §7.1, §17). Provider/model, capability class, reasoning
  * level, Tool/structured-output/context support, cost/latency/data-retention/training/residency
  * constraints, fallback order, budgets, and whether caching is permitted. Model output is
  * untrusted; AJV validation, Guardrail, and Tool authorization remain independent of the model.

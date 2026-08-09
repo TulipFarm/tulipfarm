@@ -1,11 +1,13 @@
 import { usdToCostMicros } from "@tulipfarm/run-kernel";
 import { ajv } from "@tulipfarm/schema";
 import type {
+  ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
   ModelPort,
 } from "../ports";
+import { ModelInvocationError } from "../ports";
 import type { AgentLoopCheckpoint, LoopCheckpointStore } from "./checkpoint";
 
 /**
@@ -151,7 +153,7 @@ export type AgentLoopFailureReason =
   | "tool_call_limit"
   | "repair_budget_exhausted"
   | "budget_exhausted"
-  | "model_error"
+  | ModelInvocationFailureReason
   | "empty_model_output";
 
 export type AgentLoopOutcome =
@@ -351,16 +353,21 @@ export class AgentLoop {
         // happened is not: the caller must reconcile it, so it escapes rather than being recorded
         // as a model failure through the very sink that just failed.
         if (error instanceof EventSinkFailure) throw error.cause;
+        const reason =
+          error instanceof ModelInvocationError ? error.reason : ("model_error" as const);
+        const diagnostic =
+          error instanceof ModelInvocationError && error.cause !== undefined ? error.cause : error;
         this.deps.log?.warn(
           {
             event: "agent_loop.model_error",
             requestId: request.requestId,
             iteration: counters.iterations,
-            error: error instanceof Error ? error.message : String(error),
+            reason,
+            error: diagnostic instanceof Error ? diagnostic.message : String(diagnostic),
           },
           "model call failed"
         );
-        return finish({ status: "failed", reason: "model_error", ...counters }, "failed");
+        return finish({ status: "failed", reason, ...counters }, "failed");
       }
 
       const tokens = result.usage.inputTokens + result.usage.outputTokens;

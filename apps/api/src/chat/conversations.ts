@@ -34,7 +34,11 @@ export interface ConversationRepo {
    * optional `q` filters by title (case-insensitive substring); rows with no title are excluded.
    */
   list(userId: string, limit: number, q?: string): Promise<ConversationDoc[]>;
+  /** Owner-scoped hard delete. Active Turns reject deletion until they settle. */
+  deleteOwned(id: string, userId: string): Promise<ConversationDeleteOutcome>;
 }
+
+export type ConversationDeleteOutcome = "deleted" | "not_found" | "active_turn";
 
 export class ConversationOwnerlessError extends Error {
   constructor(message: string) {
@@ -118,5 +122,31 @@ export class PgConversationRepo implements ConversationRepo {
       [userId, limit, q ?? null]
     );
     return rows.map(rowToConversation);
+  }
+
+  async deleteOwned(id: string, userId: string): Promise<ConversationDeleteOutcome> {
+    const { rows } = await this.q.query(
+      `WITH target AS (
+         SELECT c.id,
+                EXISTS (
+                  SELECT 1 FROM conversation_turns t
+                  WHERE t.conversation_id = c.id AND t.status IN ('pending', 'running')
+                ) AS active_turn
+         FROM conversations c
+         WHERE c.id = $1 AND c.user_id = $2
+       ), deleted AS (
+         DELETE FROM conversations c
+         USING target
+         WHERE c.id = target.id AND NOT target.active_turn
+         RETURNING c.id
+       )
+       SELECT CASE
+         WHEN NOT EXISTS (SELECT 1 FROM target) THEN 'not_found'
+         WHEN EXISTS (SELECT 1 FROM deleted) THEN 'deleted'
+         ELSE 'active_turn'
+       END AS outcome`,
+      [id, userId]
+    );
+    return (rows[0]?.outcome as ConversationDeleteOutcome | undefined) ?? "not_found";
   }
 }

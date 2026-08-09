@@ -4,7 +4,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { SOUL_MIGRATIONS } from "./migrations/index";
 import type { Logger } from "./types";
 
-export async function runSoulMigrations(soulPath: string, logger: Logger): Promise<void> {
+export async function runSoulMigrations(soulPath: string, logger: Logger): Promise<boolean> {
   const soulYamlPath = join(soulPath, "soul.yaml");
 
   let manifest: Record<string, unknown> = {};
@@ -23,21 +23,32 @@ export async function runSoulMigrations(soulPath: string, logger: Logger): Promi
   );
 
   if (pending.length === 0) {
-    return;
+    return false;
   }
 
+  let changed = false;
   for (const migration of pending) {
     logger.info(`Soul: running format migration v${migration.version}: ${migration.description}`);
     try {
       await migration.up(soulPath);
+      try {
+        manifest = (parseYaml(await readFile(soulYamlPath, "utf8")) ?? {}) as Record<
+          string,
+          unknown
+        >;
+      } catch {
+        manifest = {};
+      }
       manifest = { ...manifest, soulFormatVersion: migration.version };
       await writeFile(soulYamlPath, stringifyYaml(manifest), "utf8");
+      changed = true;
       logger.info(`Soul: format migration v${migration.version} applied`);
     } catch (err) {
       logger.error(
         `Soul: format migration v${migration.version} failed — ${err instanceof Error ? err.message : String(err)}`
       );
-      return;
+      return changed;
     }
   }
+  return changed;
 }

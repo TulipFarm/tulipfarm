@@ -244,10 +244,33 @@ describe("llm-config routes", () => {
         presets: { default: "balanced" },
         tiers: {
           quick: {
-            providers: [{ provider: "openai", model: "gpt-4o-mini", api_key_ref: "openai-key" }],
+            providers: [
+              {
+                provider: "openai",
+                model: "gpt-4o-mini",
+                api_key_ref: "openai-key",
+                spec: { max_input_tokens: 128000 },
+              },
+            ],
           },
-          standard: { providers: [{ provider: "anthropic", model: "claude-sonnet-4-6" }] },
-          complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          standard: {
+            providers: [
+              {
+                provider: "anthropic",
+                model: "claude-sonnet-4-6",
+                spec: { max_input_tokens: 200000 },
+              },
+            ],
+          },
+          complex: {
+            providers: [
+              {
+                provider: "anthropic",
+                model: "claude-opus-4-8",
+                spec: { max_input_tokens: 200000 },
+              },
+            ],
+          },
         },
       };
       const res = await app.inject({
@@ -278,14 +301,39 @@ describe("llm-config routes", () => {
           thorough: "thorough",
         },
         tiers: {
-          quick: { providers: [{ provider: "anthropic", model: "claude-haiku-4-5" }] },
-          standard: {
+          quick: {
             providers: [
-              { provider: "anthropic", model: "claude-sonnet-4-6" },
-              { provider: "openai", model: "gpt-4o", api_key_ref: "openai-key" },
+              {
+                provider: "anthropic",
+                model: "claude-haiku-4-5",
+                spec: { max_input_tokens: 200000 },
+              },
             ],
           },
-          complex: { providers: [{ provider: "anthropic", model: "claude-opus-4-8" }] },
+          standard: {
+            providers: [
+              {
+                provider: "anthropic",
+                model: "claude-sonnet-4-6",
+                spec: { max_input_tokens: 200000 },
+              },
+              {
+                provider: "openai",
+                model: "gpt-4o",
+                api_key_ref: "openai-key",
+                spec: { max_input_tokens: 128000 },
+              },
+            ],
+          },
+          complex: {
+            providers: [
+              {
+                provider: "anthropic",
+                model: "claude-opus-4-8",
+                spec: { max_input_tokens: 200000 },
+              },
+            ],
+          },
         },
       };
       const res = await app.inject({
@@ -377,6 +425,23 @@ describe("llm-config routes", () => {
       expect(body.matchedKey).toBe("azure_ai/kimi-k2.5");
       expect(body.spec?.input_cost_per_token).toBe(0.00000057);
       expect(body.spec?.litellm_key).toBe("azure_ai/kimi-k2.5");
+    });
+
+    it("resolves an administrator-selected ambiguous candidate", async () => {
+      stubCatalog(CATALOG);
+      const res = await app.inject({
+        method: "GET",
+        url:
+          "/api/v1/llm-config/resolve-spec?provider=openai-compatible&model=kimi-k2.5" +
+          "&candidate=azure_ai%2Fkimi-k2.5",
+        cookies: cookies(adminSid),
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toMatchObject({
+        matchedKey: "azure_ai/kimi-k2.5",
+        spec: { max_input_tokens: 256000 },
+      });
     });
   });
 
@@ -497,7 +562,7 @@ describe("llm-config routes", () => {
       expect(manifest.llm.tiers.quick.providers[0].spec?.input_cost_per_token).toBe(0.00000057);
     });
 
-    it("leaves a model unpriced (no spec) when LiteLLM has no match", async () => {
+    it("rejects an unresolved model without writing or reloading", async () => {
       stubCatalog(CATALOG); // catalog has only kimi-k2.5
       const res = await app.inject({
         method: "PUT",
@@ -512,11 +577,37 @@ describe("llm-config routes", () => {
           },
         },
       });
-      expect(res.statusCode).toBe(200);
-      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
-        llm: { tiers: { quick: { providers: Array<{ spec?: unknown }> } } };
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toContain("needs a verified context window");
+      expect(withSync).not.toHaveBeenCalled();
+      expect(reload).not.toHaveBeenCalled();
+      expect(init).not.toHaveBeenCalled();
+      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
+    });
+
+    it("accepts an explicit context capacity when pricing stays unresolved", async () => {
+      stubCatalog(CATALOG);
+      const entry = {
+        provider: "azure",
+        model: "some-unknown-model-xyz",
+        spec: { max_input_tokens: 131072 },
       };
-      expect(manifest.llm.tiers.quick.providers[0].spec).toBeUndefined();
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/llm-config",
+        cookies: cookies(adminSid),
+        headers,
+        payload: {
+          tiers: {
+            quick: { providers: [entry] },
+            standard: { providers: [entry] },
+            complex: { providers: [entry] },
+          },
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().tiers.quick.providers[0].spec).toEqual({ max_input_tokens: 131072 });
     });
   });
 });

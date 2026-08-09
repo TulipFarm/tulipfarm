@@ -95,6 +95,23 @@ type RunEventData = {
   artifactId?: string;
 };
 
+export function modelFailureMessage(reason: string | undefined): string {
+  switch (reason) {
+    case "model_billing_inactive":
+      return "The model provider's API billing is inactive. Activate billing or use another Provider Credential.";
+    case "model_authentication_failed":
+      return "The Provider Credential was rejected. Update it before trying again.";
+    case "model_not_found":
+      return "The configured model is unavailable. Choose another ModelProfile in Settings.";
+    case "model_rate_limited":
+      return "The model provider is rate limiting requests. Wait a moment and try again.";
+    case "model_provider_unavailable":
+      return "The model provider is temporarily unavailable. Try again shortly.";
+    default:
+      return "The model request failed. Try again.";
+  }
+}
+
 /**
  * Projects the Run event stream onto the timeline's own vocabulary.
  *
@@ -214,7 +231,7 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
           ];
         }
         if (data.status === "cancelled") return [{ type: "finish", data: { reason: "cancelled" } }];
-        return [{ type: "error", data: { message: data.reason ?? "the turn failed" } }];
+        return [{ type: "error", data: { message: modelFailureMessage(data.reason) } }];
       }
 
       // The Run reached a terminal status. Normally `turn.finished` already said so; when it did

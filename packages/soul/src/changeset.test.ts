@@ -135,6 +135,23 @@ describe("validateSoulChangeset", () => {
     }
   });
 
+  it("rejects authored models paths because soul.yaml is the sole model source", () => {
+    const input = changeset({
+      files: [{ operation: "delete", path: "models/balanced.yaml" }],
+    });
+
+    expect(() => validateSoulChangeset(input, baseCommit)).toThrowError(
+      expect.objectContaining({
+        issues: [
+          expect.objectContaining({
+            code: "UNSUPPORTED_SOUL_PATH",
+            path: "models/balanced.yaml",
+          }),
+        ],
+      })
+    );
+  });
+
   it("rejects a stale expected base before validating protected contents", () => {
     const secret = "protected-payload-do-not-log";
     const input = changeset({

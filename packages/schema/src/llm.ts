@@ -106,9 +106,8 @@ const EmbeddingsConfigSchema = Type.Object({
 export const LlmConfigSchema = Type.Object({
   /** Named provider credentials. ModelProfiles reference these by name; secrets never leave here. */
   connections: Type.Optional(Type.Record(Type.String({ minLength: 1 }), ProviderConnectionSchema)),
-  // Legacy tier routing. Retained so an unmigrated Soul still validates and boots; the runtime
-  // derives ModelProfiles from it (see `model-catalog.ts`) rather than routing on it directly.
-  // Deprecated: authored ModelProfiles + effort presets are the canonical form.
+  // Authoring shape for the three ordered provider chains. Runtime and publication both derive
+  // ModelProfiles from it (see `model-catalog.ts`); no second models/ representation exists.
   tiers: Type.Optional(
     Type.Object({
       quick: TierConfigSchema,
@@ -145,11 +144,10 @@ export function validateLlmConfig(data: unknown): LlmConfig {
     throw new LlmConfigValidationError(`${path}${e.message ?? "invalid config"}`);
   }
   const config = data as LlmConfig;
-  // Both routing sources are individually optional so a Soul can be on either side of the
-  // ModelProfile migration — but a config naming neither routes nothing, and silently accepting it
-  // would surface later as an unexplained "LLM not configured" at the first turn.
-  if (config.tiers === undefined && config.presets === undefined) {
-    throw new LlmConfigValidationError("config must declare either tiers or presets");
+  // Provider chains are the sole authored model source. Effort Presets name the derived profiles;
+  // without chains they point at nothing and would fail only when the first turn routes.
+  if (config.tiers === undefined) {
+    throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }
   return config;
 }

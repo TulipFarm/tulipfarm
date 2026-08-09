@@ -48,10 +48,12 @@ export type SpecResolution = {
 export async function resolveModelSpec(
   provider: string,
   model: string,
-  refresh = false
+  refresh = false,
+  candidate?: string
 ): Promise<SpecResolution> {
   const q = new URLSearchParams({ provider, model });
   if (refresh) q.set("refresh", "true");
+  if (candidate) q.set("candidate", candidate);
   return apiGet<SpecResolution>(`/api/v1/llm-config/resolve-spec?${q.toString()}`);
 }
 

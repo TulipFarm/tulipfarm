@@ -366,6 +366,31 @@ export class GitSyncService extends EventEmitter {
     return { sha: result.commit, filesChanged: result.summary.changes };
   }
 
+  /** Commit only migration-owned paths, preserving unrelated local Soul edits. */
+  async commitPaths(
+    message: string,
+    paths: readonly string[]
+  ): Promise<{ sha: string; filesChanged: number }> {
+    if (
+      paths.length === 0 ||
+      paths.some((path) => path.startsWith("/") || path.split("/").includes(".."))
+    ) {
+      throw new Error("Soul: commit paths must be non-empty relative paths");
+    }
+    await this.ensureRepo();
+    const git = await this.gitAt();
+    const changedPaths: string[] = [];
+    for (const path of paths) {
+      const status = await git.raw(["status", "--porcelain", "--", path]);
+      if (status.trim().length === 0) continue;
+      await git.add(["-A", "--", path]);
+      changedPaths.push(path);
+    }
+    if (changedPaths.length === 0) throw new Error("Soul: no migration-owned changes to commit");
+    const result = await git.commit(message, changedPaths);
+    return { sha: result.commit, filesChanged: result.summary.changes };
+  }
+
   async push(): Promise<boolean> {
     const remoteUrl = this.remoteUrl;
     if (remoteUrl === undefined) return false;
@@ -385,6 +410,22 @@ export class GitSyncService extends EventEmitter {
         this.logger.warn(
           `Soul: withSync push failed — ${err instanceof Error ? err.message : String(err)}`
         );
+      }
+    }
+    return result;
+  }
+
+  /** Scoped variant used by format migrations so later Settings commits never sweep their files. */
+  async withSyncPaths(
+    message: string,
+    paths: readonly string[]
+  ): Promise<{ sha: string; filesChanged: number }> {
+    const result = await this.commitPaths(message, paths);
+    if (this.remoteUrl) {
+      try {
+        await this.push();
+      } catch (err) {
+        this.logger.warn(`Soul: push failed — ${err instanceof Error ? err.message : String(err)}`);
       }
     }
     return result;

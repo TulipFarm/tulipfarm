@@ -93,6 +93,8 @@ test("names the context panel after the current mode, not the Chat glyph", () =>
 
 test("drops the placeholder overflow menus from the sidebar and top bar", () => {
   render(<ShellStub initialEntries={["/inbox"]} />);
+  expect(screen.getAllByRole("main")).toHaveLength(1);
+  expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
   expect(screen.queryByRole("button", { name: "Chat options" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Page options" })).not.toBeInTheDocument();
 });

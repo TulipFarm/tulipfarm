@@ -22,7 +22,6 @@ const DEFINITION_PATHS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^integrations\/[^/]+\.ya?ml$/, "Integration"],
   [/^knowledge\/[^/]+\.ya?ml$/, "KnowledgeSource"],
   [/^forms\/[^/]+\.ya?ml$/, "Form"],
-  [/^models\/[^/]+\.ya?ml$/, "ModelProfile"],
   [/^soul\.ya?ml$/, "Settings"],
 ];
 
