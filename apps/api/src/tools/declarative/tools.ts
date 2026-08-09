@@ -145,7 +145,7 @@ function compileIntegration(integration: SoulIntegration): CompiledIntegration {
   );
   const tools = compileOpenApiEgress({
     slug,
-    manifest,
+    egress: manifest.egress,
     document: integration.egressSpec,
     env,
   });

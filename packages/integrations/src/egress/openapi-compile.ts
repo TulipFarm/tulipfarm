@@ -3,8 +3,60 @@ import {
   type ToolContractDefinition,
   type ToolContractSpec,
 } from "@tulipfarm/schema";
-import type { EgressAuth, EgressOperation, IntegrationManifest } from "@tulipfarm/soul";
 import type { IntegrationHttpMethod } from "../http";
+
+/**
+ * The `egress` block this compiler is given, declared here rather than imported from
+ * `@tulipfarm/soul`.
+ *
+ * Soul owns the manifest format, but a manifest is a TulipFarm concept and this is a generic
+ * OpenAPI-to-Tool compiler — it reads nothing else from a manifest, so depending on that type
+ * would couple a provider-neutral adapter to the artifact layer above it (see
+ * `docs/architecture/dependency-rules.md`). These are structurally compatible with soul's
+ * `EgressConfig`, so a caller that has one passes `manifest.egress` unchanged and any drift
+ * surfaces as a compile error where the two meet.
+ */
+export interface OpenApiEgressAuth {
+  /** Connection env var holding the credential. Sealed values resolve through the secrets store. */
+  readonly token_env: string;
+  /** Where the credential is placed. Default `header`. */
+  readonly in?: "header" | "base_url";
+  /** Header the credential rides in. Ignored when `in` is `base_url`. */
+  readonly header?: string;
+  /** Value template; var: `{token}`. Ignored when `in` is `base_url`. */
+  readonly format?: string;
+}
+
+/** One OpenAPI operation published as an agent-callable Tool. */
+export interface OpenApiEgressOperation {
+  /** `operationId` in the referenced spec. */
+  readonly operation: string;
+  /** Tool name agents call. Namespaced by slug, so it need not be unique across integrations. */
+  readonly name: string;
+  /** What the agent is told this does. The model picks tools from this, so it is load-bearing. */
+  readonly description: string;
+  /** Overrides the default (any method other than GET is mutating). */
+  readonly mutating?: boolean;
+}
+
+export interface OpenApiEgress {
+  readonly type: "openapi";
+  readonly spec: string;
+  readonly operations?: readonly OpenApiEgressOperation[];
+  readonly base_url?: string;
+  readonly auth?: OpenApiEgressAuth;
+  readonly headers?: Record<string, string>;
+}
+
+/**
+ * Egress kinds this compiler does not handle, accepted so a caller can pass any integration's
+ * `egress` block unchanged and get an empty result rather than having to discriminate first.
+ */
+export interface UnsupportedEgress {
+  readonly type: "mcp" | "ts-code" | "none";
+}
+
+export type EgressInput = OpenApiEgress | UnsupportedEgress;
 
 /**
  * Compiles a manifest's `egress: { type: "openapi" }` into executable Tool contracts.
@@ -120,7 +172,8 @@ export interface CompiledEgressTool {
 export interface CompileOpenApiEgressInput {
   /** Integration slug — namespaces tool ids so two integrations may publish the same tool name. */
   readonly slug: string;
-  readonly manifest: IntegrationManifest;
+  /** The integration's `egress` block. A non-openapi kind compiles to no Tools. */
+  readonly egress: EgressInput | undefined;
   /** The parsed spec document named by `egress.spec`. */
   readonly document: unknown;
   /**
@@ -307,7 +360,7 @@ function resolveEnvPlaceholders(
  * problem. The host is already required to be literal by `resolveBaseUrl`, so `{token}` can only
  * ever land in the path and can never move the destination.
  */
-function assertAuthPlacement(baseUrl: string, auth: EgressAuth | undefined): void {
+function assertAuthPlacement(baseUrl: string, auth: OpenApiEgressAuth | undefined): void {
   const hasPlaceholder = baseUrl.includes("{token}");
   if (auth?.in === "base_url") {
     if (!hasPlaceholder) {
@@ -386,7 +439,7 @@ function deriveOutput(
   return { ...PERMISSIVE_SCHEMA };
 }
 
-function authBinding(auth: EgressAuth | undefined): OpenApiOperationBinding["auth"] {
+function authBinding(auth: OpenApiEgressAuth | undefined): OpenApiOperationBinding["auth"] {
   if (auth === undefined) return undefined;
   if (auth.in === "base_url") return { in: "base_url" };
   return {
@@ -398,12 +451,12 @@ function authBinding(auth: EgressAuth | undefined): OpenApiOperationBinding["aut
 
 function compileOne(
   slug: string,
-  declared: EgressOperation,
+  declared: OpenApiEgressOperation,
   operation: SpecOperation,
   root: Record<string, unknown>,
   baseUrl: string,
   headers: Readonly<Record<string, string>>,
-  auth: EgressAuth | undefined
+  auth: OpenApiEgressAuth | undefined
 ): CompiledEgressTool {
   if (!TOOL_NAME_RE.test(declared.name)) {
     throw new EgressCompileError("tool_name_invalid", declared.name);
@@ -470,7 +523,7 @@ function compileOne(
  * integration may exist purely for ingress, or declare no operations yet.
  */
 export function compileOpenApiEgress(input: CompileOpenApiEgressInput): CompiledEgressTool[] {
-  const egress = input.manifest.egress;
+  const egress = input.egress;
   if (egress?.type !== "openapi") return [];
   const declaredOperations = egress.operations ?? [];
   if (declaredOperations.length === 0) return [];

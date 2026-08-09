@@ -758,9 +758,6 @@ importers:
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
-      '@tulipfarm/soul':
-        specifier: workspace:*
-        version: link:../soul
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../tool-broker

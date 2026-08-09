@@ -10,6 +10,11 @@ export {
   compileOpenApiEgress,
   EgressCompileError,
   type EgressCompileErrorCode,
+  type EgressInput,
+  type OpenApiEgress,
+  type OpenApiEgressAuth,
+  type OpenApiEgressOperation,
   type OpenApiOperationBinding,
   type OpenApiParamBinding,
+  type UnsupportedEgress,
 } from "./openapi-compile";

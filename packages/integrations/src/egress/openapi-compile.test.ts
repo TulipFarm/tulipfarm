@@ -1,4 +1,3 @@
-import type { IntegrationManifest } from "@tulipfarm/soul";
 import { describe, expect, it } from "vitest";
 import { compileOpenApiEgress, EgressCompileError } from "./openapi-compile";
 
@@ -63,23 +62,19 @@ const SPEC = {
   },
 };
 
-function manifest(egress: IntegrationManifest["egress"]): IntegrationManifest {
-  return { name: "acme", version: "1.0.0", description: "", egress } as IntegrationManifest;
-}
-
 const SEARCH_OP = { operation: "search", name: "search_acme", description: "Search Acme." };
 
 describe("compileOpenApiEgress", () => {
   it("publishes nothing when the egress is not openapi", () => {
     expect(
-      compileOpenApiEgress({ slug: "acme", manifest: manifest({ type: "none" }), document: SPEC })
+      compileOpenApiEgress({ slug: "acme", egress: { type: "none" }, document: SPEC })
     ).toEqual([]);
   });
 
   it("publishes nothing when no operations are declared", () => {
     const compiled = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json" }),
+      egress: { type: "openapi", spec: "spec.json" },
       document: SPEC,
     });
     expect(compiled).toEqual([]);
@@ -88,7 +83,7 @@ describe("compileOpenApiEgress", () => {
   it("publishes only the declared operations, not every operation in the spec", () => {
     const compiled = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(compiled).toHaveLength(1);
@@ -99,7 +94,7 @@ describe("compileOpenApiEgress", () => {
   it("resolves local $refs so the schema can be compiled by AJV", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(JSON.stringify(tool?.contract.spec.inputSchema)).not.toContain("$ref");
@@ -112,7 +107,7 @@ describe("compileOpenApiEgress", () => {
   it("substitutes a permissive schema for a self-referential type rather than recursing forever", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     const properties = tool?.contract.spec.inputSchema.properties as Record<string, unknown>;
@@ -140,7 +135,7 @@ describe("compileOpenApiEgress", () => {
     };
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: remote,
     });
     expect(JSON.stringify(tool?.contract.spec.inputSchema)).not.toContain("evil.example");
@@ -149,11 +144,11 @@ describe("compileOpenApiEgress", () => {
   it("merges path-level parameters and marks a path parameter required even when the spec omits it", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [{ operation: "getPage", name: "get_page", description: "Read a page." }],
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.contract.spec.inputSchema.required).toEqual(["page_id"]);
@@ -165,11 +160,11 @@ describe("compileOpenApiEgress", () => {
   it("drops cookie parameters rather than guessing where to send them", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [{ operation: "getPage", name: "get_page", description: "Read a page." }],
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.binding.params.map((p) => p.name)).not.toContain("session");
@@ -178,11 +173,11 @@ describe("compileOpenApiEgress", () => {
   it("falls back to a permissive output schema when the operation documents no JSON response", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [{ operation: "getPage", name: "get_page", description: "Read a page." }],
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.contract.spec.outputSchema).toEqual({
@@ -194,29 +189,29 @@ describe("compileOpenApiEgress", () => {
   it("derives mutating from the method and lets the manifest override it", () => {
     const [read] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [{ operation: "getPage", name: "get_page", description: "Read." }],
-      }),
+      },
       document: SPEC,
     });
     expect(read?.mutating).toBe(false);
 
     const [written] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(written?.mutating).toBe(true);
 
     const [overridden] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [{ ...SEARCH_OP, mutating: false }],
-      }),
+      },
       document: SPEC,
     });
     expect(overridden?.mutating).toBe(false);
@@ -227,13 +222,13 @@ describe("compileOpenApiEgress", () => {
   it("carries the manifest's static headers and auth binding onto every call", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [SEARCH_OP],
         headers: { "Acme-Version": "2026-01-01" },
         auth: { token_env: "ACME_TOKEN" },
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.binding.headers).toEqual({ "Acme-Version": "2026-01-01" });
@@ -247,13 +242,13 @@ describe("compileOpenApiEgress", () => {
   it("compiles a base_url credential placement and keeps the destination literal", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [SEARCH_OP],
         base_url: "https://api.acme.com/bot{token}",
         auth: { token_env: "ACME_TOKEN", in: "base_url" },
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.binding.auth).toEqual({ in: "base_url" });
@@ -266,13 +261,13 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP],
           base_url: "https://api.acme.com",
           auth: { token_env: "ACME_TOKEN", in: "base_url" },
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/auth_placement_invalid/);
@@ -282,13 +277,13 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP],
           base_url: "https://api.acme.com/bot{token}",
           auth: { token_env: "ACME_TOKEN" },
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/auth_placement_invalid/);
@@ -298,13 +293,13 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP],
           base_url: "https://{token}.acme.com",
           auth: { token_env: "ACME_TOKEN", in: "base_url" },
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/base_url_invalid/);
@@ -313,12 +308,12 @@ describe("compileOpenApiEgress", () => {
   it("honours a non-bearer auth placement", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [SEARCH_OP],
         auth: { token_env: "ACME_TOKEN", header: "X-Api-Key", format: "{token}" },
-      }),
+      },
       document: SPEC,
     });
     expect(tool?.binding.auth).toEqual({ in: "header", header: "X-Api-Key", format: "{token}" });
@@ -327,7 +322,7 @@ describe("compileOpenApiEgress", () => {
   it("publishes no auth binding when the manifest declares no credential", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(tool?.binding.auth).toBeUndefined();
@@ -336,19 +331,19 @@ describe("compileOpenApiEgress", () => {
   it("takes the base URL from the spec and lets the manifest override it", () => {
     const [fromSpec] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(fromSpec?.binding.baseUrl).toBe("https://api.example.com/v1");
 
     const [overridden] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({
+      egress: {
         type: "openapi",
         spec: "spec.json",
         operations: [SEARCH_OP],
         base_url: "https://eu.example.com/v1/",
-      }),
+      },
       document: SPEC,
     });
     expect(overridden?.binding.baseUrl).toBe("https://eu.example.com/v1");
@@ -357,7 +352,7 @@ describe("compileOpenApiEgress", () => {
   it("records the destination host on the contract", () => {
     const [tool] = compileOpenApiEgress({
       slug: "acme",
-      manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+      egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
       document: SPEC,
     });
     expect(tool?.contract.spec.allowedDestinations).toEqual(["api.example.com"]);
@@ -367,12 +362,12 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP],
           base_url: "http://api.example.com",
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(EgressCompileError);
@@ -382,12 +377,12 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP],
           base_url: "https://{tenant}.example.com",
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/base_url_invalid/);
@@ -397,7 +392,7 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+        egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
         document: { ...SPEC, servers: [{ url: "http://api.example.com" }] },
       })
     ).toThrow(/base_url_invalid/);
@@ -407,11 +402,11 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [{ operation: "nope", name: "nope_tool", description: "x" }],
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/operation_not_found/);
@@ -421,11 +416,11 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [{ ...SEARCH_OP, name: "Search Acme" }],
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/tool_name_invalid/);
@@ -435,11 +430,11 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({
+        egress: {
           type: "openapi",
           spec: "spec.json",
           operations: [SEARCH_OP, { ...SEARCH_OP, operation: "getPage" }],
-        }),
+        },
         document: SPEC,
       })
     ).toThrow(/duplicate_tool/);
@@ -449,7 +444,7 @@ describe("compileOpenApiEgress", () => {
     expect(() =>
       compileOpenApiEgress({
         slug: "acme",
-        manifest: manifest({ type: "openapi", spec: "spec.json", operations: [SEARCH_OP] }),
+        egress: { type: "openapi", spec: "spec.json", operations: [SEARCH_OP] },
         document: { swagger: "2.0", paths: {} },
       })
     ).toThrow(/spec_invalid/);
@@ -469,16 +464,15 @@ describe("base_url env placeholders", () => {
   ) =>
     compileOpenApiEgress({
       slug: "acme",
-      manifest: {
-        name: "acme",
-        egress: {
-          type: "openapi",
-          spec: "openapi.json",
-          base_url,
-          auth: { token_env: "ACME_TOKEN", ...(placement === undefined ? {} : { in: placement }) },
-          operations: [{ operation: "listSpaces", name: "list_spaces" }],
-        },
-      } as IntegrationManifest,
+      egress: {
+        type: "openapi",
+        spec: "openapi.json",
+        base_url,
+        auth: { token_env: "ACME_TOKEN", ...(placement === undefined ? {} : { in: placement }) },
+        operations: [
+          { operation: "listSpaces", name: "list_spaces", description: "List Acme spaces." },
+        ],
+      },
       document: spec,
       ...(env === undefined ? {} : { env }),
     });
