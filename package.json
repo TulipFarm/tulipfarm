@@ -35,21 +35,21 @@
     "*.{ts,tsx,js,jsx,json,css}": "biome check --write --no-errors-on-unmatched"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@commitlint/cli": "^21.1.0",
-    "@commitlint/config-conventional": "^21.1.0",
+    "@biomejs/biome": "^2.5.7",
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.1.1",
-    "@types/semver": "^7.7.1",
+    "@types/semver": "^7.8.0",
     "conventional-changelog": "^7.2.0",
     "conventional-changelog-conventionalcommits": "^9.3.1",
-    "lefthook": "^2.1.9",
-    "lint-staged": "^17.0.8",
+    "lefthook": "^2.1.10",
+    "lint-staged": "^17.3.0",
     "playwright": "^1.62.1",
     "semver": "^7.7.4",
-    "turbo": "^2.10.0",
+    "turbo": "^2.10.8",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.10"
   },
   "resolutions": {
     "dompurify": "^3.4.12",
