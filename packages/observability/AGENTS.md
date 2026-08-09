@@ -1,7 +1,8 @@
 # Observability — Agent Conventions
 
 `@tulipfarm/observability` — OTel conventions, metrics, health/readiness, correlation and
-redaction helpers. **Today:** `src/ports/` defines the provider-neutral `TelemetryPort` and the
+redaction helpers. **Today:** `src/ports/` defines the provider-neutral `TelemetryPort` (spans,
+counters, optional histograms/gauges, and logs) and the
 typed capability catalog (`CAPABILITY_IDS`, `CAPABILITY_CLASSIFICATIONS`,
 `assertRequiredCapabilities`) that classifies the ten SPEC §22 backends required-vs-optional —
 PostgreSQL is the sole correctness-critical capability. tsconfig extends

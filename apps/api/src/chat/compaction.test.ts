@@ -175,6 +175,30 @@ describe("compactHistory", () => {
     expect(out).toEqual([summary, u2, a2]);
   });
 
+  it("records an Episode from the summary it already created", async () => {
+    const u1 = doc("user", sized(MAX_HISTORY_TOKENS));
+    const a1 = doc("assistant", "old answer");
+    const u2 = doc("user", "recent q");
+    const recorder = { recordConversationEpisode: vi.fn().mockResolvedValue(undefined) };
+    const repo = fakeRepo();
+
+    await compactHistory({
+      docs: [u1, a1, u2],
+      conversationId: "c1",
+      extraTokens: 0,
+      messageRepo: repo,
+      summarize: vi.fn().mockResolvedValue("Decision: use Cedar."),
+      episodeRecorder: recorder,
+      log: silentLog,
+    });
+
+    expect(recorder.recordConversationEpisode).toHaveBeenCalledWith({
+      conversationId: "c1",
+      summary: "Decision: use Cedar.",
+      outcome: "history compacted",
+    });
+  });
+
   it("a second turn after compaction does not re-summarize (one pass per overflow)", async () => {
     const u1 = doc("user", sized(MAX_HISTORY_TOKENS));
     const a1 = doc("assistant", "old");

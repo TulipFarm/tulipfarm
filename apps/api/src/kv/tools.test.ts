@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertValidEntry, type KvEntry, type KvRepo, type KvScope } from "./repo";
+import { assertValidAssertion, type KvEntry, type KvRepo, type KvScope } from "./repo";
 import { KvService } from "./service";
 import {
   KV_TOOLS,
@@ -30,7 +30,7 @@ class FakeKvRepo implements KvRepo {
     return !e.expiresAt || e.expiresAt.getTime() > Date.now();
   }
   async upsert(doc: KvEntry): Promise<void> {
-    assertValidEntry(doc);
+    assertValidAssertion(doc);
     const n: KvEntry = { ...doc, ownerId: doc.scope === "system" ? undefined : doc.ownerId };
     const i = this.idx(n.scope, n.ownerId, n.namespace, n.key);
     if (i >= 0)

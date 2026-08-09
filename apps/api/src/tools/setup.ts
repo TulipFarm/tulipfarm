@@ -3,8 +3,11 @@ import type { KnowledgeService } from "../knowledge/service";
 import { KNOWLEDGE_TOOLS } from "../knowledge/tools";
 import type { KvService } from "../kv/service";
 import { KV_TOOLS } from "../kv/tools";
-import type { WorkingMemoryService } from "../memory/service";
-import { MEMORY_TOOLS } from "../memory/tools";
+import type { MemoryLifecycleService } from "../memory/lifecycle-service";
+import type { MemoryRecallService } from "../memory/recall-service";
+import type { MemoryService } from "../memory/service";
+import type { PlatformTool } from "../memory/tools";
+import { MEMORY_TOOLS, recallMemoryTool, rememberCorrectionTool } from "../memory/tools";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
@@ -24,7 +27,11 @@ import type { ToolDef } from "./types";
  * (userId, agentId) is needed at call time.
  */
 export function buildToolRegistry(services: {
-  workingMemory?: WorkingMemoryService;
+  memory?: MemoryService;
+  /** Durable relevance recall. Absent leaves `recall_memory` reporting itself unavailable. */
+  memoryRecall?: MemoryRecallService;
+  /** Procedural corrections and forget/erase. Absent leaves `remember_correction` unregistered. */
+  memoryLifecycle?: MemoryLifecycleService;
   kv?: KvService;
   knowledge?: KnowledgeService;
   resources?: ResourceServices;
@@ -33,7 +40,6 @@ export function buildToolRegistry(services: {
   skillTools?: SkillToolContext;
   surfaceComponents?: SurfaceComponentToolContext;
   platform?: PlatformToolContext;
-  slackKnowledgeSearch?: ToolDef;
   /** GitHub chat tool family — pre-built ToolDefs (see `tools/github/tools.ts`'s `buildGitHubTools`).
    * Registered unconditionally when GitHub composition is available; per-turn visibility is gated
    * separately on live install status (`chat/turn-helpers.ts`), not on registration. */
@@ -43,16 +49,31 @@ export function buildToolRegistry(services: {
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
-  if (services.workingMemory) {
-    const svc = services.workingMemory;
-    for (const t of MEMORY_TOOLS) {
+  if (services.memory) {
+    const svc = services.memory;
+    const recall = services.memoryRecall;
+    const lifecycle = services.memoryLifecycle;
+    // A tool that cannot run should not be offered: without the service it needs wired, the tool is
+    // left unregistered rather than registered to report itself unavailable.
+    const unavailable = new Set<PlatformTool>();
+    if (recall === undefined) unavailable.add(recallMemoryTool);
+    if (lifecycle === undefined) unavailable.add(rememberCorrectionTool);
+    const memoryTools = MEMORY_TOOLS.filter((t) => !unavailable.has(t));
+    for (const t of memoryTools) {
       registry.register({
         name: t.name,
         tier: "platform",
         mutating: t.mutating,
         description: t.description,
         inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId }) => t.handler(args, { userId, service: svc, agentId }),
+        execute: (args, { userId, agentId }) =>
+          t.handler(args, {
+            userId,
+            service: svc,
+            agentId,
+            ...(recall === undefined ? {} : { recall }),
+            ...(lifecycle === undefined ? {} : { lifecycle }),
+          }),
       });
     }
   }
@@ -80,7 +101,15 @@ export function buildToolRegistry(services: {
         mutating: t.mutating,
         description: t.description,
         inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId }) => t.handler(args, { userId, service: svc, agentId }),
+        execute: (args, { userId, agentId, guardrailRevision, runId, conversationId }) =>
+          t.handler(args, {
+            userId,
+            service: svc,
+            agentId,
+            guardrailRevision,
+            runId,
+            conversationId,
+          }),
       });
     }
   }
@@ -189,10 +218,6 @@ export function buildToolRegistry(services: {
   // (client context) and return client-action descriptors. No services to close over.
   for (const t of FRONTEND_TOOLS) {
     registry.register(t);
-  }
-
-  if (services.slackKnowledgeSearch) {
-    registry.register(services.slackKnowledgeSearch);
   }
 
   if (services.github) {

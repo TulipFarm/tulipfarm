@@ -1,0 +1,24 @@
+name: confluence
+version: "1.0.0"
+description: Index Confluence pages into TulipFarm Knowledge with per-user ACL fidelity.
+maintainer: TulipFarm
+egress:
+  type: none
+required_env:
+  - name: CONFLUENCE_CLOUD_ID
+    label: Cloud ID
+    description: Atlassian Cloud ID for the Confluence site.
+    secret: false
+    setup_url: https://admin.atlassian.com
+    steps:
+      - Open Atlassian Admin for the site and copy the Cloud ID. This becomes the Confluence
+        tenant identifier used for sync checkpoints and citations.
+  - name: CONFLUENCE_ACCESS_TOKEN
+    label: OAuth Access Token
+    description: OAuth bearer token with read access to Confluence pages, spaces, groups, and users.
+    secret: true
+    setup_url: https://developer.atlassian.com/console/myapps/
+    steps:
+      - Create or open an Atlassian OAuth app with Confluence read scopes for content, spaces,
+        restrictions, groups, and users. Copy a current access token and paste it here.
+setup_guide_path: setup-guide.md

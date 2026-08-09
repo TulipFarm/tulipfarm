@@ -10,9 +10,9 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { runPgMigrations } from "../pg-migrate";
 import { makePglite } from "../test/pglite";
+import { EngineMemoryRepo } from "./engine-repo";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
-import { WorkingMemoryService } from "./service";
-import { PgWorkingMemoryRepo } from "./working-memory";
+import { MemoryService } from "./service";
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -66,7 +66,7 @@ type ApiEntry = {
 describe("memory routes", () => {
   let app: FastifyInstance;
   let db: PGlite;
-  let repo: PgWorkingMemoryRepo;
+  let repo: EngineMemoryRepo;
   let userId: string;
   let sid: string;
   let otherUserId: string;
@@ -74,8 +74,8 @@ describe("memory routes", () => {
   beforeEach(async () => {
     db = await makePglite();
     await runPgMigrations(db);
-    repo = new PgWorkingMemoryRepo(db);
-    const service = new WorkingMemoryService(repo);
+    repo = new EngineMemoryRepo(db);
+    const service = new MemoryService(repo);
 
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
@@ -90,7 +90,7 @@ describe("memory routes", () => {
       sessionStore: store,
       userRepo,
       tokenRepo,
-      workingMemoryService: service,
+      memoryService: service,
     });
   });
 

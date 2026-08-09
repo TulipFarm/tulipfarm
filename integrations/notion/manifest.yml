@@ -1,0 +1,20 @@
+name: notion
+version: "1.0.0"
+description: Index Notion pages into TulipFarm Knowledge when per-user ACLs are verifiable.
+maintainer: TulipFarm
+egress:
+  type: none
+required_env:
+  - name: NOTION_WORKSPACE_ID
+    label: Notion Workspace ID
+    description: Workspace identifier used for sync checkpoints.
+    secret: false
+  - name: NOTION_ACCESS_TOKEN
+    label: Notion Internal Integration Token
+    description: Notion token with page read access.
+    secret: true
+  - name: NOTION_READER_PROPERTY
+    label: Reader Property
+    description: Optional People/email property that explicitly lists readers; absent means pages are excluded.
+    secret: false
+setup_guide_path: setup-guide.md

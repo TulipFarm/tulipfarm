@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertValidEntry, type KvEntry, type KvRepo, type KvScope } from "./repo";
+import { assertValidAssertion, type KvEntry, type KvRepo, type KvScope } from "./repo";
 import { KvService } from "./service";
 
 /** Owner key as the DB stores it: '' for system, the ownerId otherwise. Mirrors `owner_id`. */
@@ -31,7 +31,7 @@ class FakeKvRepo implements KvRepo {
   }
 
   async upsert(doc: KvEntry): Promise<void> {
-    assertValidEntry(doc);
+    assertValidAssertion(doc);
     const normalized: KvEntry = {
       ...doc,
       ownerId: doc.scope === "system" ? undefined : doc.ownerId,

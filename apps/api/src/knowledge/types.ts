@@ -175,9 +175,16 @@ export interface QueryKnowledgeHit {
   title: string;
   snippet: string;
   source: KnowledgeSource;
+  /** Retrieval stack that produced the hit; source-stack hits also carry `provider`. */
+  origin: "okf" | "knowledge_source";
   score: number;
   path?: string;
   spaceId?: string;
+  provider?: string;
+  sourceId?: string;
+  chunkId?: string;
+  classification?: readonly string[];
+  revision?: string;
 }
 
 export interface SearchResults {

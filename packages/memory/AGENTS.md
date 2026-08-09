@@ -15,6 +15,9 @@ for commands/lint.
 - `src/retrieve.ts` — `recallMemory`: reauthorizes scope *and* Knowledge evidence on every recall
   through `MemoryEvidenceAuthorizationPort` (supplied by the composing app, since this package may
   not import `@tulipfarm/knowledge`). Exclusions are reason counts only.
+- `src/telemetry.ts` — Memory metric/span names plus redaction-safe helpers. Labels and span
+  attributes are bounded enums/counts only; never pass statement, subject, entity, query, principal,
+  business, Assertion, Pending Memory, Episode, Conversation, or Run ids.
 - `test/security/` — scope × requester × lifecycle × evidence-provider matrices with side-channel
   assertions.
 

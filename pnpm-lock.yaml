@@ -146,6 +146,12 @@ importers:
       '@tulipfarm/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@tulipfarm/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@tulipfarm/run-kernel':
         specifier: workspace:*
         version: link:../../packages/run-kernel
@@ -833,6 +839,9 @@ importers:
       '@tulipfarm/audit':
         specifier: workspace:*
         version: link:../audit
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema

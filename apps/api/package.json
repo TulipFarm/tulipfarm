@@ -25,6 +25,8 @@
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
     "@tulipfarm/llm": "workspace:*",
+    "@tulipfarm/memory": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/run-kernel": "workspace:*",
     "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/schema": "workspace:*",

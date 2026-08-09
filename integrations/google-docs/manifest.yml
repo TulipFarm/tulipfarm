@@ -1,0 +1,16 @@
+name: google-docs
+version: "1.0.0"
+description: Index Google Docs into TulipFarm Knowledge with Drive-backed per-user ACL fidelity.
+maintainer: TulipFarm
+egress:
+  type: none
+required_env:
+  - name: GOOGLE_WORKSPACE_ID
+    label: Google Workspace ID
+    description: Workspace/customer identifier used for sync checkpoints.
+    secret: false
+  - name: GOOGLE_DOCS_ACCESS_TOKEN
+    label: Google Docs OAuth Access Token
+    description: OAuth bearer token with Docs export plus Drive metadata and permissions scopes.
+    secret: true
+setup_guide_path: setup-guide.md

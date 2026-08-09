@@ -10,8 +10,10 @@ GitHub tools are available only when the GitHub integration is connected.
 
 | Tool | What it does |
 | --- | --- |
-| `update_memory` | Create or update a working-memory entry. |
-| `delete_memory` | Delete a working-memory entry. |
+| `update_memory` | Create or update a durable Memory entry about the user. |
+| `delete_memory` | Forget a durable Memory entry. |
+| `recall_memory` | Search the user's durable Memory for facts not already in context. |
+| `remember_correction` | Record a standing correction to how the Agent should behave. |
 | `kv_get` | Read an agent-scoped key-value entry. |
 | `kv_set` | Create or update an agent-scoped key-value entry. |
 | `kv_delete` | Delete an agent-scoped key-value entry. |

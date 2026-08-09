@@ -62,8 +62,10 @@ import { registerKnowledgeRoutes } from "./knowledge/routes";
 import type { KnowledgeService } from "./knowledge/service";
 import { registerKvRoutes } from "./kv/routes";
 import type { KvService } from "./kv/service";
+import type { MemoryExtractionService } from "./memory/extraction-service";
+import type { MemoryLifecycleService } from "./memory/lifecycle-service";
 import { registerMemoryRoutes } from "./memory/routes";
-import type { WorkingMemoryService } from "./memory/service";
+import type { MemoryService } from "./memory/service";
 import type { ObservabilityConfig } from "./observability/config";
 import { registerObservabilityRoutes } from "./observability/routes";
 import type { ObservabilityService } from "./observability/service";
@@ -133,7 +135,11 @@ export interface AppOptions {
   feedbackRepo?: FeedbackRepo;
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
-  workingMemoryService?: WorkingMemoryService;
+  memoryService?: MemoryService;
+  /** Enables the Memory confirmation queue. Absent leaves `/api/v1/memory/pending` unregistered. */
+  memoryExtractionService?: MemoryExtractionService;
+  /** Enables procedural correction, forget-by-Assertion, and hard erasure routes. */
+  memoryLifecycleService?: MemoryLifecycleService;
   kvService?: KvService;
   /** Caller-initiated invocation of manual / internal-API Triggers. */
   triggerInvoke?: TriggerInvokeDeps;
@@ -465,8 +471,14 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }
-    if (opts.workingMemoryService) {
-      registerMemoryRoutes(app, opts.workingMemoryService, requireAuth);
+    if (opts.memoryService) {
+      registerMemoryRoutes(
+        app,
+        opts.memoryService,
+        requireAuth,
+        opts.memoryExtractionService,
+        opts.memoryLifecycleService
+      );
     }
     if (opts.observabilityService) {
       registerObservabilityRoutes(
@@ -581,7 +593,10 @@ export async function buildApp(opts: AppOptions = {}) {
       const toolRegistry =
         opts.toolRegistry ??
         buildToolRegistry({
-          workingMemory: opts.workingMemoryService,
+          memory: opts.memoryService,
+          ...(opts.memoryLifecycleService === undefined
+            ? {}
+            : { memoryLifecycle: opts.memoryLifecycleService }),
           kv: opts.kvService,
           knowledge: opts.knowledgeService,
         });
@@ -590,7 +605,7 @@ export async function buildApp(opts: AppOptions = {}) {
         {
           repo: opts.conversationRepo,
           messageRepo: opts.messageRepo,
-          workingMemory: opts.workingMemoryService,
+          memory: opts.memoryService,
           knowledge: opts.knowledgeService,
           soulLoader: opts.soulLoader,
           toolRegistry,

@@ -6,7 +6,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
 import { MAX_HISTORY_TOKENS } from "../memory/limits";
-import type { WorkingMemoryService } from "../memory/service";
+import type { MemoryRecallService } from "../memory/recall-service";
+import type { MemoryService } from "../memory/service";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import type { BundledSkill } from "../soul/skills/bundled";
 import {
@@ -65,6 +66,7 @@ function makeResolver(
     now?: () => Date;
     skills?: readonly SoulSkill[];
     bundledSkills?: Record<string, BundledSkill>;
+    memoryRecall?: MemoryRecallService;
   } = {},
   channelDeliveries?: ChannelDeliveryReader
 ) {
@@ -97,11 +99,12 @@ function makeResolver(
       ...(options.now ? { now: options.now } : {}),
       ...(options.memory
         ? {
-            workingMemory: {
+            memory: {
               list: async () => options.memory,
-            } as unknown as WorkingMemoryService,
+            } as unknown as MemoryService,
           }
         : {}),
+      ...(options.memoryRecall ? { memoryRecall: options.memoryRecall } : {}),
       ...(channelDeliveries ? { channelDeliveries } : {}),
       ...(soulLoader ? { soulLoader } : {}),
       ...(bundledSkills ? { bundledSkills } : {}),
@@ -300,5 +303,115 @@ describe("ChatTurnContextResolver", () => {
     expect(context.skillToolScopes).toEqual({
       "routine-forge": ["routine_forge", "agent_list"],
     });
+  });
+});
+
+describe("ChatTurnContextResolver — the retrieved memory tier", () => {
+  function recaller(
+    impl: (userId: string, query: string, limit: number, agentId?: string) => Promise<unknown>
+  ): MemoryRecallService {
+    return { recall: impl } as unknown as MemoryRecallService;
+  }
+
+  function assertion(subject: string, statement: string) {
+    return { subject, statement };
+  }
+
+  it("renders recalled memories into the system prompt", async () => {
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => [assertion("acme renewal", "moved to Q3")]),
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.content).toContain("<recalled-memory>");
+    expect(context.messages[0]?.content).toContain("- acme renewal: moved to Q3");
+  });
+
+  it("scores against the newest user message, not the agent's own last words", async () => {
+    const seen: { query: string; limit: number; agentId?: string; userId: string }[] = [];
+    const { resolver } = makeResolver({
+      messages: [
+        message({ id: "m1", role: "user", content: "when is the acme renewal?" }),
+        message({ id: "m2", role: "assistant", content: "let me check the pipeline", attempt: 1 }),
+      ],
+      memoryRecall: recaller(async (userId, query, limit, agentId) => {
+        seen.push({ userId, query, limit, agentId });
+        return [];
+      }),
+    });
+
+    await resolver.resolve(AUTHORITY);
+
+    expect(seen).toEqual([
+      {
+        userId: "user-1",
+        query: "when is the acme renewal?",
+        limit: 5,
+        agentId: DEFAULT_ASSISTANT_NAME,
+      },
+    ]);
+  });
+
+  it("recalls nothing for a Run that is not acting as a person", async () => {
+    let called = false;
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        called = true;
+        return [assertion("acme renewal", "moved to Q3")];
+      }),
+    });
+
+    const context = await resolver.resolve({
+      ...AUTHORITY,
+      subject: { kind: "agent", id: "agent-1" },
+    });
+
+    expect(called).toBe(false);
+    expect(context.messages[0]?.content).not.toContain("<recalled-memory>");
+  });
+
+  it("does not query when there is no user message to score against", async () => {
+    let called = false;
+    const { resolver } = makeResolver({
+      messages: [message({ id: "m1", role: "assistant", content: "hi", attempt: 1 })],
+      memoryRecall: recaller(async () => {
+        called = true;
+        return [];
+      }),
+    });
+
+    await resolver.resolve(AUTHORITY);
+
+    expect(called).toBe(false);
+  });
+
+  it("degrades the prompt rather than failing the turn when recall throws", async () => {
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+      memoryRecall: recaller(async () => {
+        throw new Error("index unavailable");
+      }),
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.role).toBe("system");
+    expect(context.messages[0]?.content).not.toContain("<recalled-memory>");
+    expect(context.messages.slice(1)).toEqual([
+      { role: "user", content: "when is the acme renewal?" },
+    ]);
+  });
+
+  it("omits the block entirely when no recall service is wired", async () => {
+    const { resolver } = makeResolver({
+      messages: [message({ content: "when is the acme renewal?" })],
+    });
+
+    const context = await resolver.resolve(AUTHORITY);
+
+    expect(context.messages[0]?.content).not.toContain("<recalled-memory>");
   });
 });

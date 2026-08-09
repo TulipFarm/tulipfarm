@@ -9,6 +9,7 @@ function hit(over: Partial<QueryKnowledgeHit>): QueryKnowledgeHit {
     title: "Page",
     snippet: "body",
     source: "authored",
+    origin: "okf",
     score: 1,
     ...over,
   };

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@tulipfarm/audit": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*"
   },
   "devDependencies": {

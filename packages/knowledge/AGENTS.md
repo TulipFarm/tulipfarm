@@ -20,6 +20,12 @@ invalidation, and deletion propagation. tsconfig extends `@tulipfarm/tsconfig/ba
   single failure denies the whole conclusion.
 - `test/security/` — source/role/revoke/delete/cache/provider matrices plus side-channel
   assertions (nothing about a withheld source reaches candidates, citations, or audit payloads).
+- Confluence sources enter through the same `knowledge_source_*` ports as Slack. Their captured
+  Confluence account ACLs are snapshot records with short TTLs; missing/stale ACLs deny in
+  `decideSourceAccess`, and re-sync/deletion removes indexed chunks before content can reappear.
+- Notion, Google Docs, and Google Drive use the same ACL-preserving path. Link-shared Google
+  content is not a wildcard grant; domain shares require explicit mappings; Notion pages without
+  verifiable reader data are `unverifiable`.
 
 May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`, `@tulipfarm/storage`,
 `@tulipfarm/observability`. See

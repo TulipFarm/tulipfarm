@@ -24,5 +24,7 @@ export interface Span {
 export interface TelemetryPort {
   startSpan(name: string, attributes?: Attributes): Span;
   counter(name: string, value?: number, attributes?: Attributes): void;
+  histogram?(name: string, value: number, attributes?: Attributes): void;
+  gauge?(name: string, value: number, attributes?: Attributes): void;
   log(level: LogLevel, message: string, attributes?: Attributes): void;
 }

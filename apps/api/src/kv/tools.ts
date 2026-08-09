@@ -88,7 +88,7 @@ function firstError(errors: typeof validateGet.errors): string {
 const GUIDANCE =
   "This is the agent's own private key-value scratch space — isolated from other agents and from " +
   "users. Use it for durable state across turns (cached lookups, counters, working notes). Store " +
-  "small, stable user facts in working memory and business documents in knowledge instead.";
+  "small, stable user facts in Memory and business documents in knowledge instead.";
 
 export const kvSetTool: PlatformTool = {
   name: "kv_set",

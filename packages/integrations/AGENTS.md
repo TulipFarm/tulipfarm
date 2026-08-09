@@ -24,6 +24,14 @@ delivery, source ACL adapters, sync checkpoints, and identity mapping. tsconfig 
 - `src/google-drive/` — Drive change-feed sync into Knowledge: per-file permissions become the ACL,
   unreadable permissions emit `unverifiable`, sensitive classifications use live authorization, and
   checkpoints advance only after a change is fully committed.
+- `src/google-docs/` — Google Docs sync into Knowledge: Drive permissions become the snapshot ACL,
+  link-sharing grants no principal, domain-sharing grants only through explicit identity mappings,
+  and unreadable permissions remove content.
+- `src/notion/` — Notion page sync into Knowledge: pages require a verifiable reader set (for
+  example an admin-managed People/email property); missing ACL data emits `unverifiable`.
+- `src/confluence/` — Confluence page sync into Knowledge: effective page readers are captured as
+  mapped Confluence account ACLs, unreadable permissions remove content, stale ACLs are revalidated,
+  and checkpoints advance only after a page change fully commits.
 - `src/slack/knowledge/` — Slack channels as sources and messages as chunks. Non-public channels are
   restricted + live-authorized; archived channels are revoked and their content removed; deleted
   messages remove their chunk; one failing channel never stalls the others.

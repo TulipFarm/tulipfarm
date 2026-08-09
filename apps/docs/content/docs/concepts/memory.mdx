@@ -1,27 +1,83 @@
 ---
 title: Memory
-description: Per-user working memory, system-prompt facts, and Agent-scoped KV scratch space.
+description: Durable, scoped facts an assistant recalls across chats — and what belongs elsewhere.
 ---
 
-Memory is per-user working context that helps future turns adapt to the person asking. It is for
-preferences and recurring user-specific facts, not for static business identity or durable business
-Records.
+Memory is what an assistant durably recalls about you across chats. It is for preferences and
+recurring user-specific facts, not for static business identity or durable business Records.
 
-## Working memory
+Memory is made of **Assertions** — one scoped, versioned statement each, carrying where it came
+from and how far it is trusted. An Assertion belongs to a **Memory Scope** that decides who may
+use it; a personal preference lives in your private scope and is never readable by another user.
 
-Agents can update memory with `update_memory` and remove it with `delete_memory`. Users can inspect
-and edit their entries at `/settings/memory`, backed by `GET /api/v1/memory`,
-`PUT /api/v1/memory/{key}`, and `DELETE /api/v1/memory/{key}`.
+## How Memory reaches an answer
 
-Good memory entries are facts like preferred tone, recurring formatting choices, or personal role
-context. They should be small, useful across turns, and safe to show to the user who owns them.
+Two tiers, and they behave differently:
+
+- The **Core Block** is the always-on set rendered into every turn. It is small on purpose.
+- **Recalled Memory** is fetched per turn by relevance to what you just asked. It is context for
+  that answer only, never a standing instruction.
+
+When an assistant needs something it cannot see in either tier — an older preference or a past
+decision — it searches with `recall_memory`.
+
+## Saving and removing
+
+Assistants save with `update_memory` and remove with `delete_memory`. You can inspect and edit
+your own Memory at `/settings/memory`, backed by `GET /api/v1/memory`, `PUT /api/v1/memory/{key}`,
+and `DELETE /api/v1/memory/{key}`.
+
+Good Memory is small, useful across turns, and safe to show the person who owns it — preferred
+tone, recurring formatting choices, personal role context.
+
+## Suggested memories are proposed, never assumed
+
+After a chat finishes, TulipFarm mines it for durable facts. Nothing inferred is saved silently:
+each one becomes a **Pending Memory** that waits for you. Suggested memories appear at
+`/settings/memory` for you to confirm or deny, and denying one persists nothing.
+
+Only things you state directly are stored without asking.
+
+## Correcting how an Agent behaves
+
+Memory normally holds statements of fact, never instructions. That ban is deliberate: text that
+arrives from a document or a third party must never come back as an order the Agent follows.
+
+Your own corrections are the one exception. When you tell an Agent "when I ask for the weekly
+report, always include the churn number", it records that with `remember_correction` as a
+**procedural** Assertion, and applies it on future turns. The engine only accepts a procedural
+write that is explicit and stated by you — an Agent cannot infer a standing instruction from your
+behaviour, or lift one out of a document it read. `POST /api/v1/memory/corrections` records the
+same thing directly.
+
+## Changing your mind
+
+Memory keeps time. When a newer Assertion contradicts an older one, the old statement is not
+overwritten — its validity is closed at the moment the new fact became true, so the record of what
+was true, and when, survives. Asking what was true at a past moment returns the answer that held
+then.
+
+## Forgetting and erasing
+
+Two different things, deliberately:
+
+- **Forget** soft-removes an Assertion. The statement text is cleared but the row remains, so the
+  lineage of what happened stays auditable.
+- **Erase** hard-purges it, along with its evidence, any Pending Memory referencing it, its recall
+  rows, and derived Episodes. Audit keeps counts only.
+
+## Episodes
+
+Beyond individual facts, TulipFarm keeps **Episodes** — durable summaries of what happened, what
+was decided, and how it turned out, derived from a chat or a Run. Episodes are recallable from
+other chats, which is what lets an assistant refer back to work you did somewhere else.
 
 ## What belongs in the system prompt
 
-Static business facts belong in the system prompt, not working memory. The configured business name
-and description from `soul.yaml` (`businessName`, `businessDescription`) identify the instance and
-are rendered into the prompt as business context. They are not user preferences and should not be
-stored as memory just because onboarding collected them.
+Static business facts belong in the system prompt, not Memory. The configured business name and
+description from `soul.yaml` (`businessName`, `businessDescription`) identify the instance and are
+rendered into the prompt as business context. They are not user preferences and should not be
+stored as Memory just because onboarding collected them.
 
 ## What belongs in Records or Knowledge
 
@@ -29,9 +85,9 @@ Business state belongs in [Records](/docs/concepts/resources). Policies, procedu
 reference material belong in [Knowledge](/docs/concepts/knowledge) spaces and pages. Memory should
 not become a hidden database of customers, tickets, policies, or operating rules.
 
-## Agent scratch space is KV, not memory
+## Agent scratch space is KV, not Memory
 
 TulipFarm also exposes an Agent-scoped key-value store through `kv_get`, `kv_set`, `kv_delete`, and
 `kv_list`, plus REST routes under `/api/v1/kv/{namespace}`. KV is durable scratch space for an
-Agent or workflow namespace. It is not per-user working memory and is not automatically rendered as
-user preference context.
+Agent or workflow namespace. It is not personal Memory and is not automatically rendered as user
+preference context.

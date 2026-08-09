@@ -40,7 +40,8 @@ describe("knowledge tools", () => {
     expect(hybridSearchPages).toHaveBeenCalledWith(
       "sla",
       expect.objectContaining({ spaceId: uuid }),
-      expect.any(Number)
+      expect.any(Number),
+      expect.objectContaining({ principalId: "u1" })
     );
   });
 
@@ -54,7 +55,8 @@ describe("knowledge tools", () => {
     expect(hybridSearchPages).toHaveBeenCalledWith(
       "pooling",
       { spaceId: undefined, domain: undefined, tags: undefined },
-      expect.any(Number)
+      expect.any(Number),
+      expect.objectContaining({ principalId: "u1" })
     );
     // No throw, and the dropped spaceId is surfaced as a debuggable warning.
     expect(res).toMatchObject({ success: true });
@@ -213,11 +215,19 @@ describe("knowledge tools", () => {
         title: "France",
         snippet: "Paris is the capital",
         source: "authored",
+        origin: "okf",
         score: 0.9,
         path: "geo/france",
         spaceId: "b1",
       },
-      { pageId: "d2", title: "Memo", snippet: "flat page", source: "conversation", score: 0.5 },
+      {
+        pageId: "d2",
+        title: "Memo",
+        snippet: "flat page",
+        source: "conversation",
+        origin: "okf",
+        score: 0.5,
+      },
     ];
     const hybridSearchPages = vi.fn(async () => ({ results: hits, warnings: [] }));
     const t = getTool("query_knowledge");

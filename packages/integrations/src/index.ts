@@ -1,7 +1,9 @@
 export * from "./channels";
+export * from "./confluence";
 export * from "./external-protocol";
 export * from "./generic";
 export * from "./github";
+export * from "./google-docs";
 export * from "./google-drive";
 export * from "./grants";
 export * from "./http";
@@ -10,6 +12,7 @@ export * from "./ingress";
 export * from "./jira";
 export * from "./knowledge";
 export * from "./model";
+export * from "./notion";
 export * from "./postgres";
 export * from "./slack";
 export * from "./telegram";

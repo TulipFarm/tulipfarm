@@ -3,6 +3,7 @@ import {
   type ContextCandidate,
   DEFAULT_GUARDRAILS,
   type GuardrailsService,
+  type RecalledMemory,
 } from "@tulipfarm/agent-runtime";
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import {
@@ -22,7 +23,8 @@ import { availableToolsFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import type { KnowledgeService } from "../knowledge/service";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "../memory/limits";
-import type { WorkingMemoryService } from "../memory/service";
+import type { MemoryRecallService } from "../memory/recall-service";
+import type { MemoryService } from "../memory/service";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
@@ -92,6 +94,26 @@ export interface ChatRequestPayload {
   readonly llmDecision?: boolean;
 }
 
+/**
+ * How many durable memories the retrieved tier may add to a prompt. Deliberately small: this tier
+ * is speculative — nothing asked for it — so it earns only a handful of lines. The agent reaches
+ * for `recall_memory` when it needs more.
+ */
+const RECALLED_MEMORY_LIMIT = 5;
+
+/**
+ * The text the retrieved tier is scored against: the newest user message in the conversation.
+ * Assistant turns are excluded — scoring against the agent's own words would let it recall in
+ * circles, reinforcing whatever it last said rather than what the user actually asked.
+ */
+function latestUserMessage(history: readonly { role: string; content: string }[]): string {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const message = history[i];
+    if (message !== undefined && message.role === "user") return message.content;
+  }
+  return "";
+}
+
 /** Which Run source states its turn parameters directly, rather than through a derived Artifact. */
 const CHAT_SOURCE = "chat";
 
@@ -130,7 +152,9 @@ export interface ChatTurnContextResolverOptions {
   readonly store: ConversationStore;
   readonly soulLoader?: SoulLoader;
   readonly toolRegistry?: ToolRegistry;
-  readonly workingMemory?: WorkingMemoryService;
+  readonly memory?: MemoryService;
+  /** Durable relevance recall. Absent leaves the `<recalled-memory>` tier empty. */
+  readonly memoryRecall?: MemoryRecallService;
   readonly knowledge?: KnowledgeService;
   readonly guardrails?: GuardrailsService;
   readonly bundledSkills?: ReadonlyMap<string, BundledSkill>;
@@ -166,17 +190,20 @@ export class ChatTurnContextResolver implements TurnContextResolver {
           ...(await githubDisabledSkillNames(this.options.githubStatus)),
         ])
       : this.options.disabledBundledSkills;
+    // History is read before the prompt because the prompt now depends on it: the retrieved memory
+    // tier is scored against what the user just said. Nothing in the read depends on the prompt.
+    const history = await this.options.store.listMessages(
+      authority.businessId,
+      authority.turn.conversationId
+    );
     const system = await this.buildSystemPrompt(
       authority,
       agent,
       platformAgent,
       presentationContext,
       excludedTools,
-      disabledSkills
-    );
-    const history = await this.options.store.listMessages(
-      authority.businessId,
-      authority.turn.conversationId
+      disabledSkills,
+      latestUserMessage(history)
     );
 
     // Every Turn now resolves a presentation target (Channel destination, or the web chat surface
@@ -252,20 +279,51 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     };
   }
 
+  /**
+   * Recall is best-effort: a retrieval failure degrades the prompt, it does not fail the turn. The
+   * always-on `<memory>` block and the `recall_memory` tool both still work without it.
+   */
+  private async recallFor(
+    userId: string,
+    query: string,
+    agentId: string
+  ): Promise<readonly RecalledMemory[]> {
+    try {
+      const assertions = await this.options.memoryRecall?.recall(
+        userId,
+        query,
+        RECALLED_MEMORY_LIMIT,
+        agentId
+      );
+      return (assertions ?? []).map((a) => ({ subject: a.subject, statement: a.statement }));
+    } catch {
+      return [];
+    }
+  }
+
   private async buildSystemPrompt(
     authority: TurnAuthority,
     agent: ReturnType<typeof resolveAgent>,
     platformAgent: ReturnType<typeof getDefaultAssistant>,
     presentationContext: PresentationContext,
     excludedTools?: ReadonlySet<string>,
-    disabledSkills?: ReadonlySet<string>
+    disabledSkills?: ReadonlySet<string>,
+    recallQuery?: string
   ): Promise<string> {
-    const { soulLoader, workingMemory, knowledge, bundledSkills } = this.options;
+    const { soulLoader, memory, knowledge, bundledSkills } = this.options;
     const disabledBundledSkills = disabledSkills ?? this.options.disabledBundledSkills;
-    // Working memory is a person's, so a Run acting as an Integration or an Agent has none to read.
-    const memory =
-      workingMemory && authority.subject.kind === "user"
-        ? await workingMemory.list(authority.subject.id)
+    // Memory is a person's, so a Run acting as an Integration or an Agent has none to read.
+    const memoryAssertions =
+      memory && authority.subject.kind === "user" ? await memory.list(authority.subject.id) : [];
+    // Same subject rule as the always-on block: durable memory belongs to a person, so a Run acting
+    // as an Integration or an Agent recalls nothing. The engine re-authorizes regardless; this
+    // avoids asking it a question with no principal to answer for.
+    const recalledMemory =
+      this.options.memoryRecall &&
+      authority.subject.kind === "user" &&
+      recallQuery !== undefined &&
+      recallQuery.length > 0
+        ? await this.recallFor(authority.subject.id, recallQuery, agent.name)
         : [];
     const governancePages = knowledge ? await knowledge.governancePages() : [];
     const manifest = soulLoader?.manifest;
@@ -283,7 +341,8 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         website:
           typeof manifest?.businessWebsite === "string" ? manifest.businessWebsite : undefined,
       },
-      memory,
+      memory: memoryAssertions,
+      recalledMemory,
       governancePages,
       availableSkills: listAvailableSkills(soulLoader, bundledSkills, disabledBundledSkills),
       bundledSkills,
@@ -298,13 +357,13 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         excludedTools
       ),
       surfaceCatalog: surfaceCatalogPromptFor(presentationContext.target, surfaceComponents),
-      temporal: { now: this.now(), timezone: timezoneFrom(memory) },
+      temporal: { now: this.now(), timezone: timezoneFrom(memoryAssertions) },
     });
   }
 }
 
 /**
- * The user's preferred zone, read off the working memory already loaded for the prompt. `timezone`
+ * The user's preferred zone, read off the Memory already loaded for the prompt. `timezone`
  * is the well-known key `MEMORY_GUIDANCE` tells the model to store and the Settings → Memory UI
  * offers as a preset, so this is the one place it is written. The value is whatever the user typed;
  * validating it is the renderer's job, which falls back to UTC rather than failing the turn.

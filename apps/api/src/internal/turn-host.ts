@@ -156,12 +156,34 @@ export interface TurnApprovalRegistrar {
   ): Promise<{ waitId: string }>;
 }
 
+/**
+ * The seam the memory extractor is supplied through.
+ *
+ * Narrow on purpose. The host must not be able to read a candidate, a confirmation, or anything
+ * else about memory — it hands over a finished turn and learns nothing back, so a change in how
+ * memory is inferred can never change how a turn completes.
+ */
+export interface TurnMemoryExtractor {
+  extractFromTurn(request: {
+    userId: string;
+    agentId?: string;
+    runId?: string;
+    outcome?: string;
+    messages: readonly { role: string; content: string }[];
+  }): Promise<unknown>;
+}
+
 export interface InternalTurnHostOptions {
   readonly runs: HostedRunReader;
   readonly store: ConversationStore;
   readonly context: TurnContextResolver;
   readonly tools: TurnToolDispatcher;
   readonly approvals?: TurnApprovalRegistrar;
+  /**
+   * Where a completed turn goes to be mined for durable memory. Optional: absent simply means no
+   * memory is ever inferred, which is the correct behaviour for a deployment that has not opted in.
+   */
+  readonly memory?: TurnMemoryExtractor;
   newId?(): string;
   now?(): Date;
 }
@@ -311,6 +333,39 @@ export class InternalTurnHost {
       // ended asks for what follows this attempt rather than replaying it.
       cursor: input.cursor,
       updatedAt: this.now(),
+    });
+    this.mineForMemory(input.status, turn, input.runId);
+  }
+
+  /**
+   * Mine the finished turn for durable memory, off the critical path.
+   *
+   * Three deliberate constraints:
+   *
+   * - **Only successful turns.** A turn that failed part-way is an unreliable record of what the
+   *   user actually meant, and inferring durable facts from it is how a memory store fills with
+   *   things nobody said.
+   * - **Only turns acting for a user.** Memory here is `user_private`, so a Run whose subject is a
+   *   service or an Agent has no owner to attribute it to. Silence is the right answer.
+   * - **Never awaited, never able to throw.** Extraction costs an LLM call. Blocking the turn on it
+   *   would put that latency in front of the user, and letting it reject would fail a turn that has
+   *   already succeeded — so the promise is detached and its rejection swallowed.
+   */
+  private mineForMemory(status: TurnCompletionStatus, turn: PersistedTurn, runId: string): void {
+    const memory = this.options.memory;
+    if (memory === undefined || status !== "succeeded") return;
+    void (async () => {
+      const { subject } = await this.authority(turn.businessId, runId);
+      if (subject.kind !== "user") return;
+      const messages = await this.options.store.listMessages(turn.businessId, turn.conversationId);
+      await memory.extractFromTurn({
+        userId: subject.id,
+        runId,
+        outcome: status,
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
+      });
+    })().catch(() => {
+      // Inferring memory is best-effort; the turn it came from is already answered.
     });
   }
 }

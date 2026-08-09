@@ -16,7 +16,7 @@ lazily fetched) makes the rendered prefix deterministic and therefore prompt-cac
 <agent-identity>          agentId / domain / tenantId lines
 <agent-personality>       AGENT.md body
 <memory-instructions>     static preamble: apply preference facts (language/tone/tz) — renders only with <memory>
-<memory>                  per-user working memory, ≤ MAX_TOTAL_CHARS (drop whole on overflow)
+<memory>                  per-user Core Block, ≤ MAX_TOTAL_CHARS (drop whole on overflow)
 <governance-knowledge>    alwaysLoadForAgents docs (reuses knowledge/governance.ts, 4k/16k caps)
 <skills>                  eager skill bodies — `## name` + body per `eager: true` skill, 32k cap, drop-whole
 <available-skills>        lazy skill L1 — one `- name: description` per soul skill, 8k cap, drop-whole
@@ -89,5 +89,5 @@ no Tools — which is why the block's own text never mentions it.
 
 `assemble.test.ts` — pure unit coverage (order, determinism, skip, omit-empty, budgets,
 no-typed-state, plus the `<soul-context>` and `<available-tools>` blocks). The catalogue projection
-is covered in `../soul/catalogue.test.ts`, and the wiring in `chat/routes.test.ts` (working memory,
-the lazy `<available-skills>` list, and the eager `<skills>` block).
+is covered in `../soul/catalogue.test.ts`, and the wiring in `chat/routes.test.ts` (the Memory Core
+Block, the lazy `<available-skills>` list, and the eager `<skills>` block).

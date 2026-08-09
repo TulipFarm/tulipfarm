@@ -3,6 +3,7 @@ export type {
   AvailableSkill,
   EagerSkill,
   MemoryEntry,
+  RecalledMemory,
   SoulCatalogue,
   SoulCatalogueEntry,
   TemporalContext,

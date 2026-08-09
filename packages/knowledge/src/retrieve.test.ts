@@ -98,6 +98,54 @@ describe("retrieve", () => {
     expect(result.candidates.map((c) => c.sourceId)).toEqual(["public-handbook"]);
   });
 
+  it("fills the limit after authorization when a withheld source would have ranked first", async () => {
+    const sources = new InMemoryKnowledgeSourceStore([
+      source("slack-secret", ["slack-member"], {
+        provider: "slack",
+        externalId: "C-secret",
+        classification: ["restricted"],
+      }),
+      source("public-handbook", ["user-1"]),
+    ]);
+    const rankFirstIfAllowed: KnowledgeIndexPort = {
+      async search(query) {
+        const globallyRanked = [
+          {
+            sourceId: "slack-secret",
+            chunkId: "slack-secret#0",
+            revision: "r1",
+            score: 100,
+            classification: ["restricted"],
+            digest: "s".repeat(64),
+            snippet: "slack-only merger codeword",
+          },
+          {
+            sourceId: "public-handbook",
+            chunkId: "public-handbook#0",
+            revision: "r1",
+            score: 1,
+            classification: ["internal"],
+            digest: "h".repeat(64),
+            snippet: "handbook salary review process",
+          },
+        ];
+        return globallyRanked
+          .filter((candidate) => query.allowedSourceIds.has(candidate.sourceId))
+          .slice(0, query.limit);
+      },
+    };
+
+    const result = await retrieve(
+      { sources, index: rankFirstIfAllowed, now },
+      { ...request, query: "salary", limit: 1 }
+    );
+
+    expect(result.candidates.map((candidate) => candidate.sourceId)).toEqual(["public-handbook"]);
+    expect(result.candidates).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain("slack-secret");
+    expect(JSON.stringify(result)).not.toContain("merger codeword");
+  });
+
   it("leaks no id, text, or digest of an unauthorized source anywhere in the result", async () => {
     const { sources, index } = fixture();
     const result = await retrieve({ sources, index, now }, request);

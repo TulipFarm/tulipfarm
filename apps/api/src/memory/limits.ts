@@ -1,5 +1,5 @@
 /**
- * Working-memory caps (MEM-V1-003). Working memory is a tiny, always-injected, per-user
+ * Memory caps (MEM-V1-003). Memory is a tiny, always-injected, per-user
  * store of stable personal facts — these bounds keep the `<memory>` block small. The two
  * binding caps are the entry COUNT and the per-entry VALUE length; `MAX_TOTAL_CHARS` is
  * derived from them as the aggregate ceiling the render path enforces.

@@ -1,4 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import type { KnowledgePrincipalRef, RetrievalDeps } from "@tulipfarm/knowledge";
+import { retrieve } from "@tulipfarm/knowledge";
 import { EMBEDDING_UNAVAILABLE_WARNING } from "@tulipfarm/llm";
 import { EmbeddingUnavailableError } from "@tulipfarm/schema";
 import type { PaginatedResult } from "../pagination";
@@ -140,6 +143,18 @@ export interface KnowledgeServiceDeps {
   spaces?: KnowledgeSpaceRepo;
   links?: KnowledgeLinksRepo;
   overrides?: KnowledgeSpaceOverrideRepo;
+  /** ACL-first source retrieval (`knowledge_source_*`) fused into `query_knowledge` when present. */
+  sourceRetrieval?: RetrievalDeps;
+}
+
+export interface HybridSearchContext {
+  readonly principalId: string;
+  readonly principals: readonly KnowledgePrincipalRef[];
+  readonly guardrailEpoch: string;
+  readonly contextEpoch: string;
+  readonly correlationId: string;
+  readonly agentId?: string;
+  readonly runId?: string;
 }
 
 /**
@@ -313,6 +328,21 @@ export class KnowledgeService {
   async hybridSearchPages(
     query: string,
     filters: SearchFilters,
+    limit: number,
+    context?: HybridSearchContext
+  ): Promise<{ results: QueryKnowledgeHit[]; warnings: string[] }> {
+    const okf = await this.hybridSearchOkfPages(query, filters, limit);
+    const sourceResults = await this.searchKnowledgeSources(query, filters, limit, context);
+    if (sourceResults.results.length === 0) return okf;
+
+    const fused = this.fuseUnifiedResults(okf.results, sourceResults.results, limit);
+    const results = await resolveRerank().rerank(query, fused, limit);
+    return { results, warnings: [...okf.warnings, ...sourceResults.warnings] };
+  }
+
+  private async hybridSearchOkfPages(
+    query: string,
+    filters: SearchFilters,
     limit: number
   ): Promise<{ results: QueryKnowledgeHit[]; warnings: string[] }> {
     const N = Math.max(limit * 4, 20);
@@ -375,6 +405,7 @@ export class KnowledgeService {
         title: page.title,
         snippet,
         source: page.source,
+        origin: "okf",
         score: fused.get(page._id) ?? 0,
         spaceId: page.spaceId ?? undefined,
         path: page.spaceId ? (page.path ?? undefined) : undefined,
@@ -384,6 +415,93 @@ export class KnowledgeService {
     // ── rerank seam: default identity; the NotImplemented stub (when enabled) throws by design ──
     const results = await resolveRerank().rerank(query, hits, limit);
     return { results, warnings };
+  }
+
+  private async searchKnowledgeSources(
+    query: string,
+    filters: SearchFilters,
+    limit: number,
+    context?: HybridSearchContext
+  ): Promise<{ results: QueryKnowledgeHit[]; warnings: string[] }> {
+    if (this.deps.sourceRetrieval === undefined || context === undefined) {
+      return { results: [], warnings: [] };
+    }
+    if (this.hasOkfOnlyFilter(filters)) return { results: [], warnings: [] };
+
+    const result = await retrieve(this.deps.sourceRetrieval, {
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      principalId: context.principalId,
+      principals: context.principals,
+      query,
+      limit: Math.max(limit * 4, 20),
+      guardrailEpoch: context.guardrailEpoch,
+      contextEpoch: context.contextEpoch,
+      correlationId: context.correlationId,
+      ...(context.agentId === undefined ? {} : { agentId: context.agentId }),
+      ...(context.runId === undefined ? {} : { runId: context.runId }),
+    });
+
+    return {
+      results: result.candidates.map((candidate) => ({
+        pageId: `knowledge-source:${candidate.sourceId}:${candidate.chunkId}`,
+        title:
+          candidate.provider === "slack"
+            ? "Slack conversation"
+            : candidate.provider === "confluence"
+              ? "Confluence page"
+              : candidate.provider === "notion"
+                ? "Notion page"
+                : candidate.provider === "google-docs"
+                  ? "Google Doc"
+                  : candidate.provider === "google-drive"
+                    ? "Google Drive file"
+                    : `${candidate.provider} knowledge source`,
+        snippet: candidate.snippet,
+        source: candidate.provider === "slack" ? "conversation" : "resource",
+        origin: "knowledge_source",
+        provider: candidate.provider,
+        sourceId: candidate.sourceId,
+        chunkId: candidate.chunkId,
+        classification: candidate.classification,
+        revision: candidate.revision,
+        score: candidate.score,
+      })),
+      warnings: [],
+    };
+  }
+
+  private hasOkfOnlyFilter(filters: SearchFilters): boolean {
+    return (
+      filters.domain !== undefined ||
+      filters.source !== undefined ||
+      filters.tags !== undefined ||
+      filters.spaceId !== undefined ||
+      filters.type !== undefined
+    );
+  }
+
+  private fuseUnifiedResults(
+    okf: readonly QueryKnowledgeHit[],
+    sources: readonly QueryKnowledgeHit[],
+    limit: number
+  ): QueryKnowledgeHit[] {
+    const K = 60;
+    const hitsById = new Map<string, QueryKnowledgeHit>();
+    const scores = new Map<string, number>();
+    for (const list of [okf, sources]) {
+      list.forEach((hit, rank) => {
+        const id = `${hit.origin}:${hit.pageId}`;
+        hitsById.set(id, hit);
+        scores.set(id, (scores.get(id) ?? 0) + 1 / (K + rank));
+      });
+    }
+    return [...scores.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, limit)
+      .flatMap(([id, score]) => {
+        const hit = hitsById.get(id);
+        return hit === undefined ? [] : [{ ...hit, score }];
+      });
   }
 
   governancePages(): Promise<KnowledgePage[]> {

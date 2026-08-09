@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
+import { assertValidAssertion, type MemoryAssertionView, type MemoryRepo } from "./assertion-view";
 import { MAX_ENTRIES, MAX_TOTAL_CHARS, MAX_VALUE_CHARS } from "./limits";
-import { WorkingMemoryService } from "./service";
-import { assertValidEntry, type WorkingMemoryDoc, type WorkingMemoryRepo } from "./working-memory";
+import { MemoryService } from "./service";
 
 // In-memory repo mirroring the store's semantics (upsert by {userId,key}; list oldest-written first).
-class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
-  docs: WorkingMemoryDoc[] = [];
+class FakeMemoryRepo implements MemoryRepo {
+  docs: MemoryAssertionView[] = [];
 
-  async upsert(doc: WorkingMemoryDoc): Promise<void> {
-    assertValidEntry(doc);
+  async upsert(doc: MemoryAssertionView): Promise<void> {
+    assertValidAssertion(doc);
     const i = this.docs.findIndex((d) => d.userId === doc.userId && d.key === doc.key);
     if (i >= 0) this.docs[i] = { ...doc };
     else this.docs.push({ ...doc });
@@ -20,7 +20,7 @@ class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
     return this.docs.length < before;
   }
 
-  async listByUser(userId: string): Promise<WorkingMemoryDoc[]> {
+  async listByUser(userId: string): Promise<MemoryAssertionView[]> {
     return this.docs
       .filter((d) => d.userId === userId)
       .sort((a, b) => a.lastWrittenAt.getTime() - b.lastWrittenAt.getTime())
@@ -31,10 +31,10 @@ class FakeWorkingMemoryRepo implements WorkingMemoryRepo {
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 const U = "u1";
 
-describe("WorkingMemoryService.update", () => {
+describe("MemoryService.update", () => {
   it("stores a new key", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
 
     await expect(svc.update(U, "plan", "enterprise")).resolves.toEqual({ kind: "ok" });
     const entries = await repo.listByUser(U);
@@ -43,8 +43,8 @@ describe("WorkingMemoryService.update", () => {
   });
 
   it("upsert of an existing key replaces value, preserves createdAt, advances lastWrittenAt", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
 
     await svc.update(U, "plan", "free");
     const first = (await repo.listByUser(U))[0];
@@ -59,15 +59,15 @@ describe("WorkingMemoryService.update", () => {
   });
 
   it("records the writing agent for attribution", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
     await svc.update(U, "plan", "enterprise", "agent-a");
     expect((await repo.listByUser(U))[0].writtenByAgentId).toBe("agent-a");
   });
 
   it("rejects an oversized value and writes nothing", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
 
     const outcome = await svc.update(U, "bio", "x".repeat(1025));
     expect(outcome).toEqual({ kind: "rejected_oversize" });
@@ -75,8 +75,8 @@ describe("WorkingMemoryService.update", () => {
   });
 
   it("LRU-evicts the oldest entry once over the entry-count cap, keeping the just-written key", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
 
     // Short values so the COUNT cap binds (not the total-char cap).
     for (let i = 0; i < MAX_ENTRIES; i++) await svc.update(U, `k${i}`, `v${i}`);
@@ -90,8 +90,8 @@ describe("WorkingMemoryService.update", () => {
   });
 
   it("LRU-evicts to keep within both the count and total-char caps", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
     const big = "x".repeat(MAX_VALUE_CHARS); // max-size values → keys push the sum over the total cap
 
     for (let i = 0; i <= MAX_ENTRIES; i++) await svc.update(U, `k${i}`, big);
@@ -106,8 +106,8 @@ describe("WorkingMemoryService.update", () => {
   });
 
   it("re-writing an existing key while at the entry cap does not evict", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
 
     for (let i = 0; i < MAX_ENTRIES; i++) await svc.update(U, `k${i}`, `v${i}`);
     await svc.update(U, "k5", "updated");
@@ -119,18 +119,18 @@ describe("WorkingMemoryService.update", () => {
   });
 });
 
-describe("WorkingMemoryService.delete", () => {
+describe("MemoryService.delete", () => {
   it("returns true when a present key is removed", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
     await svc.update(U, "plan", "enterprise");
     await expect(svc.delete(U, "plan")).resolves.toBe(true);
     expect(await repo.listByUser(U)).toHaveLength(0);
   });
 
   it("returns false (idempotent no-op) when the key is absent", async () => {
-    const repo = new FakeWorkingMemoryRepo();
-    const svc = new WorkingMemoryService(repo);
+    const repo = new FakeMemoryRepo();
+    const svc = new MemoryService(repo);
     await expect(svc.delete(U, "never-set")).resolves.toBe(false);
   });
 });

@@ -1,3 +1,4 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
@@ -540,6 +541,272 @@ const ROUTINE_SCHEDULE_STATE_STATEMENTS: string[] = [
     ON routine_schedule_state (business_id, next_due_at_ms)`,
 ];
 
+/** Durable per-Confluence-tenant resume position for `syncConfluenceKnowledge`. */
+const CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS confluence_knowledge_checkpoints (
+    integration_id text PRIMARY KEY,
+    cursor         text,
+    updated_at     timestamptz NOT NULL
+  )`,
+];
+
+/** Durable resume positions for K3 Knowledge sync providers. */
+// The legacy `working_memory` table is deliberately NOT dropped here. Migration v33 carried every
+// row across as a confirmed `user_private` preference Assertion and nothing has read or written the
+// table since — `EngineMemoryRepo` serves the KV surface off `memory_assertions` — so it is dead
+// weight. But it is also the only cheap recovery path if the backfill turns out to be wrong in
+// production, which is why `memory/backfill.pg.test.ts` asserts "leaves the legacy table intact so
+// the cutover stays recoverable". Dropping it in the same release as the cutover would destroy that
+// path. It should retire one release later, once the cutover has been proven live.
+
+const KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS knowledge_sync_checkpoints (
+    provider       text NOT NULL,
+    integration_id text NOT NULL,
+    cursor         text,
+    updated_at     timestamptz NOT NULL,
+    PRIMARY KEY (provider, integration_id)
+  )`,
+];
+
+/**
+ * Memory storage (MEM-V1). Replaces the flat `working_memory` key/value table with scoped,
+ * versioned Assertions.
+ *
+ * Two properties the shape has to guarantee:
+ * - **Nothing is overwritten.** An edit writes a new row and marks the prior one `superseded`, so
+ *   what was believed and when stays reconstructable. `created_at`/`recorded_until` carry
+ *   transaction time and `valid_from`/`valid_to` carry valid time — the bi-temporal pair.
+ * - **Scope ownership is columnar, not inferred.** `subject_principal_id`, `agent_id`, `role_id`,
+ *   and `run_id` are the owner identities `authorizeMemoryScope` matches against; a lookup can
+ *   filter on them, but authorization still runs on every row a query returns.
+ *
+ * `memory_pending` deliberately holds the whole request as jsonb rather than sharing the assertion
+ * table: an inferred statement that was never confirmed must not be reachable by any query that
+ * reads Assertions, and keeping it in a different table makes that structural instead of a
+ * `WHERE` clause someone can forget.
+ */
+const MEMORY_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS memory_assertions (
+    business_id          text NOT NULL,
+    assertion_id         text NOT NULL,
+    scope                text NOT NULL,
+    subject_principal_id text,
+    agent_id             text,
+    role_id              text,
+    run_id               text,
+    subject              text NOT NULL,
+    statement            text NOT NULL,
+    memory_type          text NOT NULL,
+    trust_tier           text NOT NULL,
+    confidence           double precision NOT NULL,
+    importance           double precision NOT NULL,
+    origin               text NOT NULL,
+    author_principal_id  text NOT NULL,
+    author_agent_id      text,
+    provenance_run_id    text,
+    confirmation         text NOT NULL,
+    status               text NOT NULL,
+    version              integer NOT NULL,
+    created_at           timestamptz NOT NULL,
+    updated_at           timestamptz NOT NULL,
+    recorded_until       timestamptz,
+    valid_from           timestamptz NOT NULL,
+    valid_to             timestamptz,
+    expires_at           timestamptz,
+    supersedes_id        text,
+    superseded_by_id     text,
+    entities             text[] NOT NULL DEFAULT '{}',
+    access_count         integer NOT NULL DEFAULT 0,
+    last_accessed_at     timestamptz,
+    PRIMARY KEY (business_id, assertion_id)
+  )`,
+  // The scope-owner lookup every read starts from: "active memory owned by this scope".
+  `CREATE INDEX IF NOT EXISTS memory_assertions_scope_idx
+     ON memory_assertions (business_id, scope, subject_principal_id, agent_id, role_id, run_id)
+     WHERE status = 'active'`,
+  // Upsert-by-subject: the adapter resolves a key to the assertion it supersedes.
+  `CREATE INDEX IF NOT EXISTS memory_assertions_subject_idx
+     ON memory_assertions (business_id, scope, subject_principal_id, subject)
+     WHERE status = 'active'`,
+  "CREATE INDEX IF NOT EXISTS memory_assertions_entities_gin ON memory_assertions USING gin (entities)",
+  `CREATE TABLE IF NOT EXISTS memory_evidence (
+    business_id  text NOT NULL,
+    assertion_id text NOT NULL,
+    position     integer NOT NULL,
+    kind         text NOT NULL,
+    ref          text NOT NULL,
+    source_id    text,
+    revision     text,
+    PRIMARY KEY (business_id, assertion_id, position),
+    FOREIGN KEY (business_id, assertion_id)
+      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
+  )`,
+  "CREATE INDEX IF NOT EXISTS memory_evidence_source_idx ON memory_evidence (business_id, source_id)",
+  `CREATE TABLE IF NOT EXISTS memory_pending (
+    business_id  text NOT NULL,
+    pending_id   text NOT NULL,
+    request      jsonb NOT NULL,
+    requested_at timestamptz NOT NULL,
+    expires_at   timestamptz NOT NULL,
+    PRIMARY KEY (business_id, pending_id)
+  )`,
+  "CREATE INDEX IF NOT EXISTS memory_pending_expiry_idx ON memory_pending (business_id, expires_at)",
+];
+
+/**
+ * Carry every `working_memory` row over as a confirmed `user_private` preference Assertion.
+ *
+ * The old table is left in place rather than dropped: it is the only copy of this data, and a
+ * failed cutover has to be recoverable. A later migration retires it once the adapter has run in
+ * production. `ON CONFLICT DO NOTHING` plus the `NOT EXISTS` guard make a re-run a no-op, so an
+ * interrupted baseline can safely replay.
+ */
+/**
+ * Recall index columns on `memory_assertions` (M2).
+ *
+ * Assertions are indexed in place rather than in a chunk table: an assertion is one short
+ * statement (the KV surface caps values at 256 chars), so chunking would add a join and a
+ * consistency problem to split text that never needs splitting. Episodes are long-form and do get
+ * their own chunk table when they land.
+ *
+ * `tsv` is a generated column so the lexical arm cannot drift from the statement it indexes —
+ * there is no write path that could forget to refresh it. The embedding is nullable and carries
+ * its own model/dim, matching `knowledge_chunks`: a deployment with no embedding provider runs the
+ * lexical and entity arms alone rather than failing.
+ */
+const MEMORY_RECALL_INDEX_STATEMENTS: string[] = [
+  `ALTER TABLE memory_assertions
+     ADD COLUMN IF NOT EXISTS tsv tsvector
+     GENERATED ALWAYS AS (to_tsvector('english', subject || ' ' || statement)) STORED`,
+  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding vector",
+  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding_model text",
+  "ALTER TABLE memory_assertions ADD COLUMN IF NOT EXISTS embedding_dim integer",
+  `CREATE INDEX IF NOT EXISTS memory_assertions_tsv_idx
+     ON memory_assertions USING gin (tsv)`,
+];
+
+/**
+ * Episodic Memory storage (M5).
+ *
+ * Episodes are longer than Assertions and may need several recall handles, so their searchable
+ * text lives in `memory_chunks`. Each chunk points at an episodic Assertion projection; that lets
+ * the existing M2 recall pipeline keep returning authorized `MemoryAssertion`s while the new table
+ * supplies the retrieval arms. Scope owner columns are duplicated onto both tables so operational
+ * queries can stay narrow, but authorization still runs through `authorizeMemoryScope` after every
+ * recall candidate.
+ */
+const MEMORY_EPISODE_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS memory_episodes (
+    business_id          text NOT NULL,
+    episode_id           text NOT NULL,
+    assertion_id         text NOT NULL,
+    scope                text NOT NULL,
+    subject_principal_id text,
+    agent_id             text,
+    role_id              text,
+    run_id               text,
+    source_type          text NOT NULL,
+    source_id            text NOT NULL,
+    summary              text NOT NULL,
+    decisions            text[] NOT NULL DEFAULT '{}',
+    outcome              text NOT NULL DEFAULT '',
+    author_principal_id  text NOT NULL,
+    author_agent_id      text,
+    provenance_run_id    text,
+    evidence             jsonb NOT NULL DEFAULT '[]',
+    started_at           timestamptz,
+    ended_at             timestamptz,
+    created_at           timestamptz NOT NULL,
+    updated_at           timestamptz NOT NULL,
+    PRIMARY KEY (business_id, episode_id),
+    UNIQUE (business_id, source_type, source_id),
+    FOREIGN KEY (business_id, assertion_id)
+      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
+  )`,
+  `CREATE INDEX IF NOT EXISTS memory_episodes_scope_idx
+     ON memory_episodes (business_id, scope, subject_principal_id, agent_id, role_id, run_id)`,
+  `CREATE INDEX IF NOT EXISTS memory_episodes_assertion_idx
+     ON memory_episodes (business_id, assertion_id)`,
+  `CREATE TABLE IF NOT EXISTS memory_chunks (
+    business_id          text NOT NULL,
+    chunk_id             text NOT NULL,
+    episode_id           text NOT NULL,
+    assertion_id         text NOT NULL,
+    scope                text NOT NULL,
+    subject_principal_id text,
+    agent_id             text,
+    role_id              text,
+    run_id               text,
+    chunk_type           text NOT NULL,
+    position             integer NOT NULL,
+    text                 text NOT NULL,
+    tsv                  tsvector
+      GENERATED ALWAYS AS (to_tsvector('english', text)) STORED,
+    embedding            vector,
+    embedding_model      text,
+    embedding_dim        integer,
+    created_at           timestamptz NOT NULL,
+    PRIMARY KEY (business_id, chunk_id),
+    FOREIGN KEY (business_id, episode_id)
+      REFERENCES memory_episodes (business_id, episode_id) ON DELETE CASCADE,
+    FOREIGN KEY (business_id, assertion_id)
+      REFERENCES memory_assertions (business_id, assertion_id) ON DELETE CASCADE
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS memory_chunks_episode_position_idx
+     ON memory_chunks (business_id, episode_id, position)`,
+  `CREATE INDEX IF NOT EXISTS memory_chunks_assertion_idx
+     ON memory_chunks (business_id, assertion_id)`,
+  `CREATE INDEX IF NOT EXISTS memory_chunks_scope_idx
+     ON memory_chunks (business_id, scope, subject_principal_id, agent_id, role_id, run_id)`,
+  "CREATE INDEX IF NOT EXISTS memory_chunks_tsv_idx ON memory_chunks USING gin (tsv)",
+];
+
+/**
+ * M6 erasure helpers.
+ *
+ * Hard erasure deletes rows, so the schema already has the important part: `ON DELETE CASCADE`
+ * from evidence, Episodes, and chunks. This migration adds the only missing lookup shape for
+ * pending candidates that explicitly reference an Assertion through `supersedesId`; the erase
+ * write path also does an exact-content scan so copied summaries cannot survive.
+ */
+const MEMORY_ERASURE_STATEMENTS: string[] = [
+  `CREATE INDEX IF NOT EXISTS memory_pending_supersedes_idx
+     ON memory_pending (business_id, ((request ->> 'supersedesId')))`,
+];
+
+async function backfillWorkingMemory(q: Queryable, businessId: string): Promise<void> {
+  // A database that never created the legacy table has nothing to carry across — and must still
+  // migrate. Skipping is not merely defensive: migrations run against databases reconstructed from
+  // an arbitrary recorded version, where earlier tables may legitimately be absent.
+  const { rows } = await q.query("SELECT to_regclass('public.working_memory') AS table_name");
+  if ((rows[0] as { table_name: string | null } | undefined)?.table_name == null) return;
+
+  await q.query(
+    `INSERT INTO memory_assertions (
+       business_id, assertion_id, scope, subject_principal_id, subject, statement,
+       memory_type, trust_tier, confidence, importance, origin,
+       author_principal_id, author_agent_id, confirmation, status, version,
+       created_at, updated_at, valid_from, entities, access_count
+     )
+     SELECT
+       $1, gen_random_uuid()::text, 'user_private', wm.user_id::text, wm.key, wm.value,
+       'preference', 'user_stated', 1, 1, 'explicit',
+       wm.user_id::text, wm.written_by_agent_id, 'confirmed', 'active', 1,
+       wm.created_at, wm.last_written_at, wm.created_at, '{}', 0
+     FROM working_memory wm
+     WHERE NOT EXISTS (
+       SELECT 1 FROM memory_assertions a
+       WHERE a.business_id = $1
+         AND a.scope = 'user_private'
+         AND a.subject_principal_id = wm.user_id::text
+         AND a.subject = wm.key
+     )
+     ON CONFLICT DO NOTHING`,
+    [businessId]
+  );
+}
+
 async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
     handle              text PRIMARY KEY,
@@ -955,6 +1222,66 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "routine_schedule_state: cron/interval/datetime Routine trigger fire-state",
     up: async (q) => {
       for (const sql of ROUTINE_SCHEDULE_STATE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    // 32 is deliberately left unused: this branch reserved a gap while main's numbering was still
+    // moving, and closing it now would be worse than leaving it. `pg-migrate` filters
+    // `version > currentVersion`, so renumbering 33+ downward would silently skip these on any
+    // deployment already past 33. A gap is harmless; a reused number is not.
+    version: 33,
+    description:
+      "memory_assertions / memory_evidence / memory_pending: scoped, versioned, bi-temporal Memory",
+    up: async (q) => {
+      for (const sql of MEMORY_STATEMENTS) {
+        await q.query(sql);
+      }
+      await backfillWorkingMemory(q, DEPLOYMENT_BUSINESS_ID);
+    },
+  },
+  {
+    version: 34,
+    description: "memory_assertions: lexical + vector recall index columns",
+    up: async (q) => {
+      for (const sql of MEMORY_RECALL_INDEX_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 35,
+    description: "memory_episodes / memory_chunks: episodic Memory recall index",
+    up: async (q) => {
+      for (const sql of MEMORY_EPISODE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 36,
+    description: "memory erasure helper indexes",
+    up: async (q) => {
+      for (const sql of MEMORY_ERASURE_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 37,
+    description: "confluence_knowledge_checkpoints: durable Confluence Knowledge sync cursor",
+    up: async (q) => {
+      for (const sql of CONFLUENCE_KNOWLEDGE_CHECKPOINT_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 38,
+    description: "knowledge_sync_checkpoints: durable K3 Knowledge sync cursors",
+    up: async (q) => {
+      for (const sql of KNOWLEDGE_SYNC_CHECKPOINT_STATEMENTS) {
         await q.query(sql);
       }
     },
