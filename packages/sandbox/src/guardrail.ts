@@ -16,6 +16,10 @@ export interface SandboxGuardrail {
   readonly maxCompute: SandboxComputeLimits;
   readonly allowedEgressDestinationIds?: readonly string[];
   readonly maxEgressBytes?: number;
+  /** Exact profile id and image digest pairs accepted for broker-authorized Tool execution. */
+  readonly allowedRuntimeProfiles?: Readonly<Record<string, string>>;
+  readonly maxCredentialBindings?: number;
+  readonly maxFileOutputs?: number;
 }
 
 function isPositiveSafeInteger(value: number): boolean {
@@ -34,7 +38,12 @@ function assertGuardrail(
     !isPositiveSafeInteger(guardrail.maxCompute.memoryBytes) ||
     !isPositiveSafeInteger(guardrail.maxCompute.outputBytes) ||
     (guardrail.maxEgressBytes !== undefined &&
-      (!Number.isSafeInteger(guardrail.maxEgressBytes) || guardrail.maxEgressBytes < 0))
+      (!Number.isSafeInteger(guardrail.maxEgressBytes) || guardrail.maxEgressBytes < 0)) ||
+    (guardrail.maxCredentialBindings !== undefined &&
+      (!Number.isSafeInteger(guardrail.maxCredentialBindings) ||
+        guardrail.maxCredentialBindings < 0)) ||
+    (guardrail.maxFileOutputs !== undefined &&
+      (!Number.isSafeInteger(guardrail.maxFileOutputs) || guardrail.maxFileOutputs < 0))
   ) {
     throw new SandboxProtocolError("guardrail_missing");
   }
@@ -77,6 +86,18 @@ export function authorizeSandboxExecutionRequest(
   }
   if (exceedsComputeLimit(request.compute, guardrail.maxCompute)) {
     throw new SandboxProtocolError("compute_limit_exceeded");
+  }
+
+  if (request.operation === "tool") {
+    const profile = request.runtimeProfile;
+    if (
+      profile === undefined ||
+      guardrail.allowedRuntimeProfiles?.[profile.id] !== profile.imageDigest ||
+      (request.credentialBindings?.length ?? 0) > (guardrail.maxCredentialBindings ?? 0) ||
+      (request.outputs?.files.length ?? 0) > (guardrail.maxFileOutputs ?? 0)
+    ) {
+      throw new SandboxProtocolError("guardrail_missing");
+    }
   }
 
   const allowedDestinations = new Set(guardrail.allowedEgressDestinationIds ?? []);

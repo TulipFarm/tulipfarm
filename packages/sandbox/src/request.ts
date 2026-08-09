@@ -62,14 +62,38 @@ export interface SandboxComputeLimits {
   readonly outputBytes: number;
 }
 
+export interface SandboxCredentialBinding {
+  readonly slot: string;
+  /** Opaque one-use Secret lease reference; never credential plaintext. */
+  readonly leaseRef: string;
+  readonly injectAs: {
+    readonly kind: "file" | "environment";
+    readonly name: string;
+  };
+}
+
+export interface SandboxFileOutputDeclaration {
+  readonly name: string;
+  readonly path: string;
+  readonly mediaTypes: readonly string[];
+  readonly maxBytes: number;
+}
+
+export interface SandboxPublishedFileOutput {
+  readonly name: string;
+  readonly artifactRef: string;
+  readonly mediaType: string;
+  readonly bytes: number;
+}
+
 export interface SandboxExecutionRequest {
   readonly requestId: string;
   /** One-use value bound into the backend attestation and result. */
   readonly nonce: string;
   readonly issuedAtMs: number;
   readonly expiresAtMs: number;
-  /** Sandboxes produce data only. Business effects must enter through the Tool Broker. */
-  readonly operation: "compute";
+  /** `tool` means the Tool Broker authorized and reserved this execution before dispatch. */
+  readonly operation: "compute" | "tool";
   readonly workspace: {
     readonly kind: "ephemeral";
     readonly maxBytes: number;
@@ -86,6 +110,15 @@ export interface SandboxExecutionRequest {
     readonly destinationIds: readonly string[];
     readonly maxBytes: number;
   };
+  readonly runtimeProfile?: {
+    readonly id: string;
+    readonly imageDigest: string;
+  };
+  readonly credentialBindings?: readonly SandboxCredentialBinding[];
+  readonly outputs?: {
+    readonly jsonPath: string;
+    readonly files: readonly SandboxFileOutputDeclaration[];
+  };
 }
 
 export interface SandboxExecutionResult {
@@ -96,6 +129,10 @@ export interface SandboxExecutionResult {
   /** Captured output is scanned and published separately; plaintext never enters this result. */
   readonly stdoutArtifactRef: string;
   readonly stderrArtifactRef: string;
+  readonly outputs?: {
+    readonly jsonArtifactRef: string;
+    readonly files: readonly SandboxPublishedFileOutput[];
+  };
   readonly usage: {
     readonly cpuMillis: number;
     readonly maxMemoryBytes: number;
@@ -161,6 +198,21 @@ function assertExactKeys(
   }
 }
 
+function assertKeysWithOptional(
+  value: UnknownRecord,
+  required: readonly string[],
+  optional: readonly string[],
+  code: SandboxProtocolErrorCode
+): void {
+  const allowed = new Set([...required, ...optional]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) {
+    throw new SandboxProtocolError(code);
+  }
+  if (required.some((key) => !(key in value))) {
+    throw new SandboxProtocolError(code);
+  }
+}
+
 function requireString(value: unknown, code: SandboxProtocolErrorCode): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512) {
     throw new SandboxProtocolError(code);
@@ -192,22 +244,23 @@ function requireStringArray(value: unknown, code: SandboxProtocolErrorCode): rea
 export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRequest {
   const code = "unsafe_request_shape";
   const body = assertRecord(input, code);
-  assertExactKeys(
-    body,
-    [
-      "requestId",
-      "nonce",
-      "issuedAtMs",
-      "expiresAtMs",
-      "operation",
-      "workspace",
-      "entrypoint",
-      "inputArtifactRefs",
-      "compute",
-      "egress",
-    ],
-    code
-  );
+  const baseKeys = [
+    "requestId",
+    "nonce",
+    "issuedAtMs",
+    "expiresAtMs",
+    "operation",
+    "workspace",
+    "entrypoint",
+    "inputArtifactRefs",
+    "compute",
+    "egress",
+  ] as const;
+  if (body.operation === "tool") {
+    assertExactKeys(body, [...baseKeys, "runtimeProfile", "credentialBindings", "outputs"], code);
+  } else {
+    assertExactKeys(body, baseKeys, code);
+  }
 
   const workspace = assertRecord(body.workspace, code);
   assertExactKeys(workspace, ["kind", "maxBytes"], code);
@@ -228,8 +281,90 @@ export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRe
     throw new SandboxProtocolError(code);
   }
 
-  if (body.operation !== "compute") {
+  if (body.operation !== "compute" && body.operation !== "tool") {
     throw new SandboxProtocolError(code);
+  }
+
+  let toolFields:
+    | Pick<SandboxExecutionRequest, "runtimeProfile" | "credentialBindings" | "outputs">
+    | undefined;
+  if (body.operation === "tool") {
+    const runtimeProfile = assertRecord(body.runtimeProfile, code);
+    assertExactKeys(runtimeProfile, ["id", "imageDigest"], code);
+    const imageDigest = requireString(runtimeProfile.imageDigest, code);
+    if (!/^sha256:[0-9a-f]{64}$/.test(imageDigest)) throw new SandboxProtocolError(code);
+
+    if (!Array.isArray(body.credentialBindings) || body.credentialBindings.length > 16) {
+      throw new SandboxProtocolError(code);
+    }
+    const slots = new Set<string>();
+    const credentialBindings = body.credentialBindings.map((value) => {
+      const binding = assertRecord(value, code);
+      assertExactKeys(binding, ["slot", "leaseRef", "injectAs"], code);
+      const injectAs = assertRecord(binding.injectAs, code);
+      assertExactKeys(injectAs, ["kind", "name"], code);
+      let kind: "file" | "environment";
+      if (injectAs.kind === "file" || injectAs.kind === "environment") {
+        kind = injectAs.kind;
+      } else {
+        throw new SandboxProtocolError(code);
+      }
+      const slot = requireString(binding.slot, code);
+      if (!/^[a-z][a-z0-9_]*$/.test(slot) || slots.has(slot)) {
+        throw new SandboxProtocolError(code);
+      }
+      slots.add(slot);
+      return {
+        slot,
+        leaseRef: requireString(binding.leaseRef, code),
+        injectAs: {
+          kind,
+          name: requireString(injectAs.name, code),
+        },
+      };
+    });
+
+    const outputs = assertRecord(body.outputs, code);
+    assertExactKeys(outputs, ["jsonPath", "files"], code);
+    if (!Array.isArray(outputs.files) || outputs.files.length > 32) {
+      throw new SandboxProtocolError(code);
+    }
+    const outputNames = new Set<string>();
+    const outputPaths = new Set<string>();
+    const files = outputs.files.map((value) => {
+      const file = assertRecord(value, code);
+      assertExactKeys(file, ["name", "path", "mediaTypes", "maxBytes"], code);
+      const name = requireString(file.name, code);
+      const path = requireSafeRelativePath(file.path, code);
+      const mediaTypes = requireStringArray(file.mediaTypes, code);
+      if (
+        mediaTypes.length === 0 ||
+        outputNames.has(name) ||
+        outputPaths.has(path) ||
+        !/^[a-z][a-z0-9_]*$/.test(name)
+      ) {
+        throw new SandboxProtocolError(code);
+      }
+      outputNames.add(name);
+      outputPaths.add(path);
+      return {
+        name,
+        path,
+        mediaTypes,
+        maxBytes: requireInteger(file.maxBytes, code, 1),
+      };
+    });
+    toolFields = {
+      runtimeProfile: {
+        id: requireString(runtimeProfile.id, code),
+        imageDigest,
+      },
+      credentialBindings,
+      outputs: {
+        jsonPath: requireSafeRelativePath(outputs.jsonPath, code),
+        files,
+      },
+    };
   }
 
   return {
@@ -237,7 +372,7 @@ export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRe
     nonce: requireString(body.nonce, code),
     issuedAtMs: requireInteger(body.issuedAtMs, code),
     expiresAtMs: requireInteger(body.expiresAtMs, code),
-    operation: "compute",
+    operation: body.operation,
     workspace: {
       kind: "ephemeral",
       maxBytes: requireInteger(workspace.maxBytes, code, 1),
@@ -257,13 +392,27 @@ export function parseSandboxExecutionRequest(input: unknown): SandboxExecutionRe
       destinationIds,
       maxBytes: requireInteger(egress.maxBytes, code),
     },
+    ...toolFields,
   };
+}
+
+function requireSafeRelativePath(value: unknown, code: SandboxProtocolErrorCode): string {
+  const path = requireString(value, code);
+  const segments = path.split("/");
+  if (
+    path.startsWith("/") ||
+    path.includes("\\") ||
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new SandboxProtocolError(code);
+  }
+  return path;
 }
 
 export function parseSandboxExecutionResult(input: unknown): SandboxExecutionResult {
   const code = "invalid_result_shape";
   const body = assertRecord(input, code);
-  assertExactKeys(
+  assertKeysWithOptional(
     body,
     [
       "requestId",
@@ -277,6 +426,7 @@ export function parseSandboxExecutionResult(input: unknown): SandboxExecutionRes
       "startedAtMs",
       "completedAtMs",
     ],
+    ["outputs"],
     code
   );
 
@@ -288,6 +438,28 @@ export function parseSandboxExecutionResult(input: unknown): SandboxExecutionRes
     throw new SandboxProtocolError(code);
   }
 
+  let outputs: SandboxExecutionResult["outputs"];
+  if (body.outputs !== undefined) {
+    const output = assertRecord(body.outputs, code);
+    assertExactKeys(output, ["jsonArtifactRef", "files"], code);
+    if (!Array.isArray(output.files) || output.files.length > 32) {
+      throw new SandboxProtocolError(code);
+    }
+    outputs = {
+      jsonArtifactRef: requireString(output.jsonArtifactRef, code),
+      files: output.files.map((value) => {
+        const file = assertRecord(value, code);
+        assertExactKeys(file, ["name", "artifactRef", "mediaType", "bytes"], code);
+        return {
+          name: requireString(file.name, code),
+          artifactRef: requireString(file.artifactRef, code),
+          mediaType: requireString(file.mediaType, code),
+          bytes: requireInteger(file.bytes, code),
+        };
+      }),
+    };
+  }
+
   return {
     requestId: requireString(body.requestId, code),
     nonce: requireString(body.nonce, code),
@@ -295,6 +467,7 @@ export function parseSandboxExecutionResult(input: unknown): SandboxExecutionRes
     timedOut: requireBoolean(body.timedOut, code),
     stdoutArtifactRef: requireString(body.stdoutArtifactRef, code),
     stderrArtifactRef: requireString(body.stderrArtifactRef, code),
+    ...(outputs === undefined ? {} : { outputs }),
     usage: {
       cpuMillis: requireInteger(usage.cpuMillis, code),
       maxMemoryBytes: requireInteger(usage.maxMemoryBytes, code),

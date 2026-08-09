@@ -100,8 +100,10 @@ function bundle(documents: readonly { kind: string; document: unknown }[]): Runt
     changesetId: "changeset-1",
     commitSha: "d".repeat(40),
     definitions,
+    assets: [],
     get: (kind, slug) => definitions.find((d) => d.kind === kind && d.slug === slug),
     getById: (id) => definitions.find((d) => d.id === id),
+    asset: () => undefined,
   };
 }
 
@@ -145,6 +147,23 @@ describe("BrokerRoutineToolPort", () => {
     expect(effect?.runId).toBe(RUN_ID);
     expect(effect?.stateId).toBe(STATE_KEY);
     expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolves bundle-scoped adapters from the exact Routine request", async () => {
+    const adaptersFor = vi.fn(
+      (_input: RoutineToolRequest): ReadonlyMap<string, ToolAdapter> =>
+        new Map([["github", { dispatch }]])
+    );
+    const dynamic = new BrokerRoutineToolPort({
+      effects,
+      adapters: new Map(),
+      adaptersFor,
+    });
+
+    const input = request();
+    expect(await dynamic.execute(input)).toEqual({ kind: "succeeded" });
+    expect(adaptersFor).toHaveBeenCalledWith(input);
+    expect(dispatch).toHaveBeenCalledOnce();
   });
 
   it("records the pinned bundle digest as the guardrail revision the effect was decided under", async () => {

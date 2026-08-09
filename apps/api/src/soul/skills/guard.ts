@@ -501,8 +501,27 @@ export const THREAT_PATTERNS: readonly ThreatPattern[] = [
     "obfuscation",
     "chain of unicode escapes"
   ),
-  // TulipFarm Skills are prose-only today, so destructive and network command patterns remain
-  // intentionally absent until script execution is wired. The categories stay part of the API.
+  threatPattern(
+    /\b(?:npm|pnpm|yarn)\s+(?:add|install)\b|\b(?:pip|pip3)\s+install\b|\bapt(?:-get)?\s+install\b/i,
+    "runtime_install",
+    "high",
+    "persistence",
+    "attempts to install a dependency at execution time instead of using a pinned runtime profile"
+  ),
+  threatPattern(
+    /\bcurl\b[^\n]*(?:-X\s*(?:POST|PUT|PATCH|DELETE)|--request\s+(?:POST|PUT|PATCH|DELETE)|--data(?:-raw|-binary|-urlencode)?\b)/i,
+    "direct_network_mutation",
+    "high",
+    "network",
+    "performs a network mutation that requires a declared destination and mutating Tool approval"
+  ),
+  threatPattern(
+    /\b(?:env|printenv|set)\b[^\n]*(?:curl|wget)|\b(?:curl|wget)\b[^\n]*\$\{?(?:TOKEN|SECRET|PASSWORD|API_KEY)/i,
+    "environment_exfiltration",
+    "critical",
+    "exfiltration",
+    "sends environment or credential material over the network"
+  ),
   threatPattern(
     /(update|modify|edit|write|change|append|add\s+to)\s+[^\n]{0,2048}(?:AGENTS\.md|soul\.yaml|guardrails\.yaml|soul\/(?:agents|guardrails)\/)/i,
     "agent_config_mod",

@@ -1,7 +1,9 @@
 import type {
   SandboxComputeLimits,
+  SandboxCredentialBinding,
   SandboxExecutionRequest,
   SandboxExecutionResult,
+  SandboxFileOutputDeclaration,
 } from "./request";
 
 export type SkillExecutionErrorCode =
@@ -70,6 +72,8 @@ export interface SkillExecutionInput {
   readonly expiresAtMs: number;
   readonly bundle: PinnedSkillBundle;
   readonly requestedAssetPaths: readonly string[];
+  /** Immutable Run input Artifacts, including the broker-serialized JSON Tool arguments. */
+  readonly inputArtifactRefs?: readonly string[];
   readonly argv: readonly string[];
   readonly compute: SandboxComputeLimits;
   readonly workspaceMaxBytes: number;
@@ -78,6 +82,16 @@ export interface SkillExecutionInput {
     readonly maxBytes: number;
   };
   readonly gitTargets: readonly SkillGitTarget[];
+  /** Present only after a sandbox ToolContract has been authorized and its effect reserved. */
+  readonly runtimeProfile?: {
+    readonly id: string;
+    readonly imageDigest: string;
+  };
+  readonly credentialBindings?: readonly SandboxCredentialBinding[];
+  readonly outputs?: {
+    readonly jsonPath: string;
+    readonly files: readonly SandboxFileOutputDeclaration[];
+  };
 }
 
 export type SkillScanFinding = "direct_network_mutation";
@@ -117,6 +131,7 @@ export interface SkillOutputScanner {
     readonly requestId: string;
     readonly stdoutArtifactRef: string;
     readonly stderrArtifactRef: string;
+    readonly outputArtifactRefs?: readonly string[];
   }): Promise<SkillOutputScan>;
 }
 
@@ -131,6 +146,8 @@ export interface SkillOutputPublisher {
     readonly scanId: string;
     readonly stdoutArtifactRef: string;
     readonly stderrArtifactRef: string;
+    readonly jsonArtifactRef?: string;
+    readonly fileArtifactRefs?: readonly string[];
   }): Promise<PublishedSkillOutput>;
 }
 
@@ -165,7 +182,9 @@ export interface SkillExecutionOutcome {
   readonly outputArtifact: PublishedSkillOutput;
 }
 
-const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+// Execution Bundles and their assets use the repository-wide raw SHA-256 hex form; backend image
+// identities use the OCI `sha256:` prefix. Both are immutable SHA-256 identities.
+const DIGEST_PATTERN = /^(?:sha256:)?[0-9a-f]{64}$/;
 const GIT_REVISION_PATTERN = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 const DESTINATION_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 const ARTIFACT_REF_PATTERN =
@@ -239,7 +258,11 @@ function assertGitTarget(bundle: PinnedSkillBundle, target: SkillGitTarget): voi
   }
 }
 
-function assertResolvedArtifact(artifact: ResolvedSkillArtifact, expectedDigest: string): void {
+function assertResolvedArtifact(
+  artifact: ResolvedSkillArtifact,
+  expectedDigest: string,
+  allowDeclaredNetwork: boolean
+): void {
   if (!ARTIFACT_REF_PATTERN.test(artifact.artifactRef)) {
     throw new SkillExecutionError("unsafe_artifact_ref");
   }
@@ -249,7 +272,7 @@ function assertResolvedArtifact(artifact: ResolvedSkillArtifact, expectedDigest:
   if (artifact.scan.verdict !== "clean") {
     throw new SkillExecutionError("asset_not_scanned");
   }
-  if (artifact.scan.findings.includes("direct_network_mutation")) {
+  if (!allowDeclaredNetwork && artifact.scan.findings.includes("direct_network_mutation")) {
     throw new SkillExecutionError("direct_network_forbidden");
   }
 }
@@ -291,16 +314,26 @@ export class SkillExecutionCoordinator {
       path: input.bundle.entrypoint.path,
       expectedDigest: input.bundle.entrypoint.digest,
     });
-    assertResolvedArtifact(entrypoint, input.bundle.entrypoint.digest);
+    assertResolvedArtifact(
+      entrypoint,
+      input.bundle.entrypoint.digest,
+      input.web.destinationIds.length > 0
+    );
 
     const inputArtifactRefs: string[] = [];
+    for (const artifactRef of input.inputArtifactRefs ?? []) {
+      if (!ARTIFACT_REF_PATTERN.test(artifactRef)) {
+        throw new SkillExecutionError("unsafe_artifact_ref");
+      }
+      inputArtifactRefs.push(artifactRef);
+    }
     for (const declaration of requestedDeclarations) {
       const artifact = await this.deps.assets.resolve({
         bundleDigest: input.bundle.digest,
         path: declaration.path,
         expectedDigest: declaration.digest,
       });
-      assertResolvedArtifact(artifact, declaration.digest);
+      assertResolvedArtifact(artifact, declaration.digest, false);
       inputArtifactRefs.push(artifact.artifactRef);
     }
 
@@ -327,12 +360,20 @@ export class SkillExecutionCoordinator {
 
       let sandboxResult: SandboxExecutionResult;
       try {
+        const toolFields =
+          input.runtimeProfile === undefined
+            ? {}
+            : {
+                runtimeProfile: input.runtimeProfile,
+                credentialBindings: input.credentialBindings ?? [],
+                outputs: input.outputs ?? { jsonPath: "outputs/result.json", files: [] },
+              };
         sandboxResult = await this.deps.sandbox.execute({
           requestId: input.requestId,
           nonce: input.nonce,
           issuedAtMs: input.issuedAtMs,
           expiresAtMs: input.expiresAtMs,
-          operation: "compute",
+          operation: input.runtimeProfile === undefined ? "compute" : "tool",
           workspace: {
             kind: "ephemeral",
             maxBytes: input.workspaceMaxBytes,
@@ -344,15 +385,23 @@ export class SkillExecutionCoordinator {
           inputArtifactRefs,
           compute: input.compute,
           egress: input.web,
+          ...toolFields,
         });
       } catch {
         throw new SkillExecutionError("sandbox_execution_failed");
       }
 
+      const outputArtifactRefs = sandboxResult.outputs
+        ? [
+            sandboxResult.outputs.jsonArtifactRef,
+            ...sandboxResult.outputs.files.map((file) => file.artifactRef),
+          ]
+        : undefined;
       const scan = await this.deps.outputScanner.scan({
         requestId: input.requestId,
         stdoutArtifactRef: sandboxResult.stdoutArtifactRef,
         stderrArtifactRef: sandboxResult.stderrArtifactRef,
+        ...(outputArtifactRefs === undefined ? {} : { outputArtifactRefs }),
       });
       if (scan.verdict !== "clean") {
         throw new SkillExecutionError("output_rejected");
@@ -362,6 +411,12 @@ export class SkillExecutionCoordinator {
         scanId: scan.scanId,
         stdoutArtifactRef: sandboxResult.stdoutArtifactRef,
         stderrArtifactRef: sandboxResult.stderrArtifactRef,
+        ...(sandboxResult.outputs === undefined
+          ? {}
+          : {
+              jsonArtifactRef: sandboxResult.outputs.jsonArtifactRef,
+              fileArtifactRefs: sandboxResult.outputs.files.map((file) => file.artifactRef),
+            }),
       });
       execution = {
         succeeded: true,

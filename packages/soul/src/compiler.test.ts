@@ -92,7 +92,47 @@ describe("compileExecutionBundle", () => {
       "ModelProfile:b@1",
     ]);
     expect(bundle.commitSha).toBe("c0ffee");
-    expect(bundle.bundleVersion).toBe(1);
+    expect(bundle.bundleVersion).toBe(2);
+  });
+
+  it("pins declared Skill companion files into the signed runtime snapshot", () => {
+    const bundle = compileExecutionBundle({
+      ...request([
+        def("Skill", "issue-triage", {
+          instructions: { path: "SKILL.md" },
+          scripts: ["scripts/classify.py"],
+          trustTier: "first_party",
+        }),
+      ]),
+      files: [
+        { path: "skills/issue-triage/SKILL.md", content: "Classify issues." },
+        {
+          path: "skills/issue-triage/scripts/classify.py",
+          content: "print('ok')\n",
+        },
+      ],
+    });
+
+    expect(bundle.assets.map((asset) => asset.path)).toEqual(["scripts/classify.py", "SKILL.md"]);
+    expect(bundle.assets[0]?.digest).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.isFrozen(bundle.assets)).toBe(true);
+  });
+
+  it("rejects a declared Skill companion file missing from the committed tree", () => {
+    const error = failure(() =>
+      compileExecutionBundle({
+        ...request([
+          def("Skill", "issue-triage", {
+            instructions: { path: "SKILL.md" },
+            scripts: ["scripts/missing.py"],
+            trustTier: "first_party",
+          }),
+        ]),
+        files: [{ path: "skills/issue-triage/SKILL.md", content: "Classify issues." }],
+      })
+    );
+    expect(error.code).toBe("INVALID_DEFINITION");
+    expect(error.subject).toBe("Skill:issue-triage");
   });
 
   it("detaches and deeply freezes authored documents", () => {

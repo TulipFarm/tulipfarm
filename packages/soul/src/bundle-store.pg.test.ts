@@ -13,11 +13,12 @@ function transactions(database: PGlite): TransactionPort {
 
 function signed(signature = "signature-1"): SignedExecutionBundle {
   const bundle: ExecutionBundle = {
-    bundleVersion: 1,
+    bundleVersion: 2,
     businessId: "business-1",
     changesetId: "changeset-1",
     commitSha: "commit-1",
     definitions: [],
+    assets: [],
   };
   return {
     bundle,

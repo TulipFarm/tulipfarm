@@ -90,6 +90,33 @@ test("detail renders the SKILL.md body and provenance/source", () => {
   expect(screen.getByText("owner/repo")).toBeInTheDocument();
 });
 
+test("detail shows executable Tools, runtime blockers, and package files", () => {
+  renderWithData(<SkillDetail />, {
+    skill: {
+      name: "reporting",
+      provenance: "marketplace",
+      body: "# Reporting",
+      commands: [
+        {
+          name: "generate",
+          toolRef: "report.generate",
+          runtimeProfile: "shell-ts-python-v1",
+          entrypoint: "scripts/report.py",
+          requiredCommands: ["python3", "gws"],
+          runtimeAvailable: false,
+          blocker: "runtime_requirement_unavailable:shell-ts-python-v1:gws",
+        },
+      ],
+      files: [{ path: "scripts/report.py", size: 120 }],
+    },
+  });
+
+  expect(screen.getByText("Executable Tools")).toBeInTheDocument();
+  expect(screen.getByText("publication blocked")).toBeInTheDocument();
+  expect(screen.getByText(/python3, gws/)).toBeInTheDocument();
+  expect(screen.getByText("scripts/report.py")).toBeInTheDocument();
+});
+
 test("detail Remove requires a second confirming click before deleting", async () => {
   const user = userEvent.setup();
   vi.mocked(removeSkill).mockResolvedValue(undefined);

@@ -7,4 +7,5 @@ export * from "./credential-dispatch";
 export * from "./effects";
 export * from "./intent";
 export * from "./risk";
+export * from "./sandbox-adapter";
 export * from "./search";

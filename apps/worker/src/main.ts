@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import {
   ArtifactService,
   DurableWaitManager,
@@ -22,6 +23,7 @@ import {
   ArtifactStore,
   BudgetStore,
   EventStore,
+  FileSystemBlobPort,
   IntegrationStore,
   RunEventStore,
   RunStore,
@@ -30,7 +32,7 @@ import {
 import { PgEffectStore } from "@tulipfarm/tool-broker";
 import { config as loadEnv } from "dotenv";
 import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config";
-import { waitForDataDirEnv } from "./data-dir";
+import { resolveDataDir, waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
 import { EventOutboxDispatcher } from "./event-dispatcher";
@@ -52,6 +54,7 @@ import { HttpRoutineApprovalPort } from "./routine/approval-port";
 import { WorkerRoutineDefinitionLoader } from "./routine/definition-loader";
 import { createRoutineExecutor } from "./routine/executor";
 import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
+import { buildBundleSandboxAdapters } from "./routine/sandbox-tooling";
 import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
 import { type DrainableLoop, drain } from "./shutdown";
@@ -162,9 +165,11 @@ export async function main(): Promise<void> {
   const eventStore = new EventStore(transactions, randomUUID);
   const runEventStore = new RunEventStore(transactions);
   const budgetStore = new BudgetStore(transactions);
+  const blobDirectory = join(resolveDataDir() ?? ".tulipfarm", "blobs");
   const artifactService = new ArtifactService(
     new ArtifactStore(transactions),
-    new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS)
+    new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS),
+    new FileSystemBlobPort(blobDirectory)
   );
 
   const leases = new RunLeaseManager(runStore);
@@ -210,6 +215,11 @@ export async function main(): Promise<void> {
     secrets,
     log: logger,
   });
+  // The local container backend is a development convenience, never a production isolation
+  // boundary. Production leaves this undefined and published sandbox Tools fail closed on the
+  // normal `adapter_not_found` path until an attested remote backend is composed.
+  const sandboxRuntimeImage =
+    process.env.NODE_ENV === "production" ? undefined : process.env.SANDBOX_RUNTIME_IMAGE;
 
   const chatExecutor = createChatExecutor({
     host: turnHost,
@@ -273,6 +283,11 @@ export async function main(): Promise<void> {
       tools: new BrokerRoutineToolPort({
         effects: new PgEffectStore(transactions),
         adapters: githubTooling.adapters,
+        adaptersFor: (request) =>
+          buildBundleSandboxAdapters(request, {
+            artifacts: artifactService,
+            ...(sandboxRuntimeImage === undefined ? {} : { runtimeImage: sandboxRuntimeImage }),
+          }),
         credentials: githubTooling.credentials,
       }),
       // An `approval` State parks on a durable wait registered by the API, in the same transaction

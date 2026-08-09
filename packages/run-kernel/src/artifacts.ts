@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { canonicalize } from "@tulipfarm/schema";
 import type {
   AppendArtifactLineageInput,
@@ -22,6 +23,8 @@ export interface ArtifactStorePort {
 
 export type ArtifactStorageMode = "inline" | "blob";
 
+export const FILE_ARTIFACT_SCHEMA_REF = "tulipfarm.artifact/file/v1";
+
 export interface PublishArtifactInput {
   readonly id: string;
   readonly businessId: string;
@@ -43,6 +46,38 @@ export interface PublishedArtifact {
   readonly id: string;
   readonly contentHash: string;
   readonly blob: BlobRef | null;
+}
+
+export interface PublishFileArtifactInput {
+  readonly id: string;
+  readonly businessId: string;
+  readonly bytes: Uint8Array;
+  readonly mediaType: string;
+  readonly fileName: string;
+  readonly classification: readonly string[];
+  readonly acl: ArtifactAcl;
+  readonly retention: ArtifactRetention;
+  readonly redaction: ArtifactRedaction;
+  readonly producer: ArtifactProducer;
+  readonly createdAt: string;
+  readonly derivedFrom?: readonly string[];
+}
+
+export interface PublishedFileArtifact {
+  readonly outcome: PutArtifactResult["outcome"];
+  readonly id: string;
+  readonly contentHash: string;
+  readonly blob: BlobRef;
+  readonly mediaType: string;
+  readonly fileName: string;
+  readonly bytes: number;
+}
+
+export interface FileArtifactContent {
+  readonly mediaType: string;
+  readonly fileName: string;
+  readonly bytes: Uint8Array;
+  readonly contentHash: string;
 }
 
 export interface ArtifactReadRequest {
@@ -160,6 +195,107 @@ export class ArtifactService {
       id: input.id,
       contentHash: validated.contentHash,
       blob,
+    };
+  }
+
+  /** Publish immutable raw bytes while keeping the existing typed-JSON Artifact path unchanged. */
+  async publishFile(input: PublishFileArtifactInput): Promise<PublishedFileArtifact> {
+    if (!this.blobs) throw new ArtifactAccessError("artifact_blob_unavailable", input.id);
+    if (
+      input.mediaType.length === 0 ||
+      input.mediaType.length > 256 ||
+      input.fileName.length === 0 ||
+      input.fileName.length > 512 ||
+      input.fileName.includes("/") ||
+      input.fileName.includes("\\") ||
+      input.redaction.redactedPaths.length > 0
+    ) {
+      throw new ArtifactAccessError("artifact_schema_invalid", input.id);
+    }
+
+    const blob = await this.blobs.put(input.bytes, input.mediaType);
+    const rawHash = createHash("sha256").update(input.bytes).digest("hex");
+    if (blob.hash !== rawHash) {
+      throw new ArtifactAccessError("artifact_tampered", input.id);
+    }
+    const content = {
+      blob: { key: blob.key, hash: blob.hash },
+      mediaType: input.mediaType,
+      fileName: input.fileName,
+      bytes: input.bytes.byteLength,
+    };
+    const result = await this.store.put({
+      id: input.id,
+      businessId: input.businessId,
+      schemaRef: FILE_ARTIFACT_SCHEMA_REF,
+      content,
+      blob: null,
+      contentHash: rawHash,
+      classification: input.classification,
+      acl: input.acl,
+      retention: input.retention,
+      redaction: input.redaction,
+      producer: input.producer,
+      createdAt: input.createdAt,
+    });
+    for (const sourceArtifactId of input.derivedFrom ?? []) {
+      await this.store.appendLineage({
+        businessId: input.businessId,
+        artifactId: input.id,
+        sourceArtifactId,
+        relation: "derived_from",
+        createdAt: input.createdAt,
+      });
+    }
+    return {
+      outcome: result.outcome,
+      id: input.id,
+      contentHash: rawHash,
+      blob,
+      mediaType: input.mediaType,
+      fileName: input.fileName,
+      bytes: input.bytes.byteLength,
+    };
+  }
+
+  async openFile(request: ArtifactReadRequest): Promise<FileArtifactContent> {
+    const artifact = await this.store.find(request.businessId, request.artifactId);
+    if (!artifact) throw new ArtifactAccessError("artifact_not_found", request.artifactId);
+    this.authorize(artifact, request);
+    if (
+      artifact.schemaRef !== FILE_ARTIFACT_SCHEMA_REF ||
+      artifact.contentKind !== "inline" ||
+      !isJsonObject(artifact.content)
+    ) {
+      throw new ArtifactAccessError("artifact_schema_invalid", artifact.id);
+    }
+    const manifest = artifact.content;
+    const blob = isJsonObject(manifest.blob) ? manifest.blob : undefined;
+    if (
+      !this.blobs ||
+      blob === undefined ||
+      typeof blob.key !== "string" ||
+      typeof blob.hash !== "string" ||
+      typeof manifest.mediaType !== "string" ||
+      typeof manifest.fileName !== "string" ||
+      typeof manifest.bytes !== "number"
+    ) {
+      throw new ArtifactAccessError("artifact_tampered", artifact.id);
+    }
+    const bytes = await this.blobs.get({ key: blob.key, hash: blob.hash });
+    const rawHash = createHash("sha256").update(bytes).digest("hex");
+    if (
+      rawHash !== blob.hash ||
+      rawHash !== artifact.contentHash ||
+      bytes.byteLength !== manifest.bytes
+    ) {
+      throw new ArtifactAccessError("artifact_tampered", artifact.id);
+    }
+    return {
+      mediaType: manifest.mediaType,
+      fileName: manifest.fileName,
+      bytes,
+      contentHash: rawHash,
     };
   }
 

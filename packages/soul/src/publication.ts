@@ -12,6 +12,7 @@ import {
   type RuntimeBundle,
   type SignedExecutionBundle,
 } from "./bundle";
+import type { BundleSourceFile } from "./compiler";
 import { compileExecutionBundle } from "./compiler";
 import { type BundleSigner, verifyExecutionBundle } from "./signatures";
 import type { Logger } from "./types";
@@ -80,6 +81,7 @@ export interface SoulPublishRequest {
 /** Reads the authored definitions of a Soul commit — the Git side of a projection rebuild. */
 export interface SoulTreeReader {
   readDefinitions(commitSha: string): Promise<readonly VersionedSchemaDocument[]>;
+  readFiles?(commitSha: string): Promise<readonly BundleSourceFile[]>;
 }
 
 export interface SoulPublicationOutcome {
@@ -234,11 +236,13 @@ export class SoulPublicationCoordinator {
       return found;
     });
     const documents = await reader.readDefinitions(record.commitSha);
+    const files = await reader.readFiles?.(record.commitSha);
     const bundle = compileExecutionBundle({
       businessId,
       changesetId: record.changesetId,
       commitSha: record.commitSha,
       documents,
+      ...(files === undefined ? {} : { files }),
     });
     const digest = computeBundleDigest(bundle);
     if (digest !== record.digest) {

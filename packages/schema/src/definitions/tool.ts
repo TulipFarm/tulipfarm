@@ -42,6 +42,7 @@ const toolSpecSchema = {
   properties: {
     toolId: { type: "string", minLength: 1, maxLength: 256 },
     toolVersion: { type: "string", minLength: 1, maxLength: 64 },
+    description: { type: "string", minLength: 1, maxLength: 2_000 },
     action: { type: "string", minLength: 1, maxLength: 128 },
     inputSchema: embeddedJsonSchema,
     outputSchema: embeddedJsonSchema,
@@ -126,6 +127,7 @@ export const TOOL_CONTRACT_DEFINITION = definitionRegistration(KIND, ToolContrac
 export interface ToolContractSpec {
   toolId: string;
   toolVersion: string;
+  description?: string;
   action: string;
   inputSchema: Record<string, unknown>;
   outputSchema: Record<string, unknown>;

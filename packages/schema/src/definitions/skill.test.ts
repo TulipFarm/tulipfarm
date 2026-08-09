@@ -42,6 +42,30 @@ const full = {
     schemas: ["schemas/input.json"],
     assets: ["logo.png"],
     scripts: ["scripts/classify.ts"],
+    commands: [
+      {
+        name: "classify_issue",
+        toolRef: "issue.classify",
+        runtimeProfile: "shell-ts-python-v1",
+        entrypoint: "scripts/classify.ts",
+        staticArgs: ["--format", "json"],
+        integrationBindings: [
+          {
+            slot: "github",
+            integrationKinds: ["github"],
+            injectAs: { kind: "environment", name: "GITHUB_TOKEN" },
+          },
+        ],
+        fileOutputs: [
+          {
+            name: "report",
+            path: "outputs/report.json",
+            mediaTypes: ["application/json"],
+            maxBytes: 1_000_000,
+          },
+        ],
+      },
+    ],
     dependencies: ["shared-utils"],
     requiredToolAbilities: ["github.issue.label"],
     trustTier: "first_party",
@@ -64,6 +88,28 @@ describe("Skill definition schema", () => {
   it("allows required Tool abilities as a declaration of need", () => {
     const doc = { ...minimal, spec: { ...minimal.spec, requiredToolAbilities: ["mailer.send"] } };
     expect(() => registry().validate(doc)).not.toThrow();
+  });
+
+  it("rejects command entrypoints that escape the Skill directory", () => {
+    const doc = {
+      ...full,
+      spec: {
+        ...full.spec,
+        commands: [{ ...full.spec.commands[0], entrypoint: "../outside.py" }],
+      },
+    };
+    expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
+  });
+
+  it("rejects command names that cannot be exposed as Tools", () => {
+    const doc = {
+      ...full,
+      spec: {
+        ...full.spec,
+        commands: [{ ...full.spec.commands[0], name: "Classify Issue" }],
+      },
+    };
+    expect(() => registry().validate(doc)).toThrow(SchemaValidationError);
   });
 
   // Invariant 4: a Skill never contains a permission grant.

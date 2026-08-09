@@ -72,6 +72,9 @@ export interface BrokerRoutineToolPortOptions {
   /** Keyed by `ToolContract.adapter.ref`, exactly as `EffectDispatcher` resolves them. */
   readonly adapters: ReadonlyMap<string, ToolAdapter>;
   readonly credentials?: CredentialDispatcher;
+  /** Bundle-scoped adapters are built only from the Run's verified immutable package. */
+  readonly adaptersFor?: (request: RoutineToolRequest) => ReadonlyMap<string, ToolAdapter>;
+  readonly credentialsFor?: (request: RoutineToolRequest) => CredentialDispatcher | undefined;
   readonly now?: () => Date;
 }
 
@@ -178,13 +181,16 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     });
     if (reserved.outcome === "duplicate") return replayed(reserved.effect.state);
 
+    const adapters = new Map(this.options.adapters);
+    for (const [ref, adapter] of this.options.adaptersFor?.(request) ?? []) {
+      adapters.set(ref, adapter);
+    }
+    const credentials = this.options.credentialsFor?.(request) ?? this.options.credentials;
     const dispatcher = new EffectDispatcher({
       store: this.options.effects,
       catalog,
-      adapters: this.options.adapters,
-      ...(this.options.credentials === undefined
-        ? {}
-        : { credentialDispatcher: this.options.credentials }),
+      adapters,
+      ...(credentials === undefined ? {} : { credentialDispatcher: credentials }),
       now: () => this.now().toISOString(),
     });
     try {

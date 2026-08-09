@@ -71,7 +71,9 @@ export function authorizeToolIntent(
     return { outcome: "denied", reason: "destination_denied" };
   }
 
-  let approvalRequired = false;
+  // A sandbox script may perform an opaque provider mutation. Its source and exact intent must be
+  // approved even when a broader Guardrail would normally allow unattended low-risk execution.
+  let approvalRequired = contract.adapter.kind === "sandbox" && contract.mutating;
   for (const request of protectedRequests(intent, contract)) {
     const authz = decideEffectivePermission(context.authorityLayers, request, context.now);
     if (!authz.allowed) return { outcome: "denied", reason: "authorization_denied" };

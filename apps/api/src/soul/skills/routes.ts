@@ -7,6 +7,7 @@ import {
   readFile,
   readlink,
   realpath,
+  rename,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -14,8 +15,16 @@ import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
 import type { LlmService } from "@tulipfarm/llm";
-import { LlmNotConfiguredError, validateSkill } from "@tulipfarm/schema";
+import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
 import {
+  DEFINITION_REGISTRATIONS,
+  LlmNotConfiguredError,
+  SchemaRegistry,
+  type SkillDefinition,
+  validateSkill,
+} from "@tulipfarm/schema";
+import {
+  convertLegacySkill,
   type GitSyncService,
   parseFrontmatter,
   type SoulLoader,
@@ -74,6 +83,7 @@ interface ScanEntry {
 // In-memory scan cache so audit/install reuse the cloned content instead of re-cloning. Single-process
 // only (V1). Entries expire after SCAN_TTL_MS and are pruned lazily on each scan.
 const scans = new Map<string, ScanEntry>();
+const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
 function pruneScans(now: number): void {
   for (const [id, entry] of scans) {
@@ -89,6 +99,177 @@ function pruneScans(now: number): void {
 
 function asString(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+const STRUCTURAL_INSTALL_BLOCKERS = new Set([
+  "binary_file",
+  "oversized_file",
+  "oversized_skill",
+  "symlink_escape",
+  "too_many_files",
+]);
+
+function skillDirectoryHash(files: readonly SkillScanFile[]): string {
+  const hash = createHash("sha256");
+  for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+    hash.update(file.path);
+    hash.update("\0");
+    hash.update(file.content);
+    hash.update("\0");
+  }
+  return hash.digest("hex");
+}
+
+function generatedSkillDefinition(skill: DiscoveredSkill): string | undefined {
+  if (skill.files.some((file) => file.path === "skill.yaml" || file.path === "skill.yml")) {
+    return undefined;
+  }
+  const { frontmatter, body } = parseFrontmatter(skill.content);
+  const paths = skill.files.map((file) => file.path);
+  const result = convertLegacySkill({
+    name: skill.name,
+    body,
+    frontmatter: {
+      ...frontmatter,
+      trustTier: frontmatter.trustTier ?? "third_party",
+      references: paths.filter((path) => path.startsWith("references/")),
+      assets: paths.filter((path) => path.startsWith("assets/")),
+      schemas: paths.filter((path) => path.startsWith("schemas/")),
+      scripts: paths.filter((path) => path.startsWith("scripts/")),
+    },
+  });
+  const definition = result.files.find((file) => file.path.endsWith("/skill.yaml"));
+  return definition?.operation === "upsert" ? definition.content : undefined;
+}
+
+async function installSkillDirectory(root: string, skill: DiscoveredSkill): Promise<void> {
+  const skillsRoot = join(root, "skills");
+  const destination = join(skillsRoot, skill.name);
+  const staging = join(skillsRoot, `.install-${skill.name}-${randomUUID()}`);
+  await mkdir(staging, { recursive: true });
+  try {
+    for (const file of skill.files) {
+      if (file.symlinkTarget !== undefined) continue;
+      const target = join(staging, file.path);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, file.content, "utf8");
+    }
+    const generated = generatedSkillDefinition(skill);
+    if (generated !== undefined) {
+      await writeFile(join(staging, "skill.yaml"), generated, "utf8");
+    }
+    await rm(destination, { recursive: true, force: true });
+    await rename(staging, destination);
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+interface SkillPackageDetail {
+  readonly files: readonly { path: string; size: number }[];
+  readonly commands: readonly {
+    name: string;
+    toolRef: string;
+    runtimeProfile: string;
+    entrypoint: string;
+    requiredCommands: readonly string[];
+    runtimeAvailable: boolean;
+    blocker?: string;
+  }[];
+}
+
+function runtimeStatus(
+  runtimeProfile: string,
+  requiredCommands: readonly string[]
+): { runtimeAvailable: boolean; blocker?: string } {
+  if (process.env.NODE_ENV === "production") {
+    return {
+      runtimeAvailable: false,
+      blocker: "an attested production sandbox backend is not configured",
+    };
+  }
+  const configuredImage = process.env.SANDBOX_RUNTIME_IMAGE;
+  const digest =
+    process.env.SANDBOX_RUNTIME_IMAGE_DIGEST ??
+    configuredImage?.match(/@(sha256:[0-9a-f]{64})$/)?.[1];
+  if (!digest || !/^sha256:[0-9a-f]{64}$/.test(digest)) {
+    return {
+      runtimeAvailable: false,
+      blocker: "sandbox runtime image digest is not configured",
+    };
+  }
+  const registry = new SandboxRuntimeProfileRegistry([shellTsPythonV1(digest)]);
+  try {
+    registry.require(runtimeProfile, requiredCommands);
+    return { runtimeAvailable: true };
+  } catch (error) {
+    return {
+      runtimeAvailable: false,
+      blocker: error instanceof Error ? error.message : "sandbox runtime is unavailable",
+    };
+  }
+}
+
+async function skillPackageDetail(directory: string | undefined): Promise<SkillPackageDetail> {
+  if (directory === undefined) return { files: [], commands: [] };
+  let files: SkillScanFile[];
+  try {
+    files = await collectSkillFiles(directory);
+  } catch {
+    return { files: [], commands: [] };
+  }
+  const definitionFile = files.find(
+    (file) => file.path === "skill.yaml" || file.path === "skill.yml"
+  );
+  let definition: SkillDefinition | undefined;
+  if (definitionFile !== undefined) {
+    try {
+      definition = definitionRegistry.validateYaml(definitionFile.content)
+        .document as unknown as SkillDefinition;
+    } catch {
+      // Invalid canonical definitions are publication blockers, not a reason to hide SKILL.md.
+    }
+  }
+  return {
+    files: files.map((file) => ({ path: file.path, size: file.size ?? 0 })),
+    commands: (definition?.spec.commands ?? []).map((command) => ({
+      name: command.name,
+      toolRef: command.toolRef,
+      runtimeProfile: command.runtimeProfile,
+      entrypoint: command.entrypoint,
+      requiredCommands: command.requiredCommands ?? [],
+      ...runtimeStatus(command.runtimeProfile, command.requiredCommands ?? []),
+    })),
+  };
+}
+
+function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
+  const definitionFile = skill.files.find(
+    (file) => file.path === "skill.yaml" || file.path === "skill.yml"
+  );
+  if (definitionFile === undefined) return undefined;
+  let definition: SkillDefinition;
+  try {
+    definition = definitionRegistry.validateYaml(definitionFile.content)
+      .document as unknown as SkillDefinition;
+  } catch (error) {
+    return error instanceof Error ? error.message : "invalid skill definition";
+  }
+  const paths = new Set(skill.files.map((file) => file.path));
+  for (const command of definition.spec.commands ?? []) {
+    if (!paths.has(command.entrypoint)) {
+      return `command ${command.name} entrypoint is not present in the Skill package`;
+    }
+    const status = runtimeStatus(command.runtimeProfile, command.requiredCommands ?? []);
+    if (!status.runtimeAvailable) {
+      return `command ${command.name}: ${status.blocker ?? "sandbox runtime is unavailable"}`;
+    }
+    if ((command.integrationBindings?.length ?? 0) > 1) {
+      return `command ${command.name} declares more than one Integration credential`;
+    }
+  }
+  return undefined;
 }
 
 // A source may carry an optional "#<ref>" suffix (branch or tag name — not a commit SHA) so
@@ -270,9 +451,9 @@ function toSkillSummary(
 }
 
 // Cross-reference a discovered skill against what is installed: `installed` is true when the soul
-// repo already holds it, `updateAvailable` when its lock hash (sha256 of the installed SKILL.md,
-// recorded on install) differs from the freshly-cloned content. User-authored skills have no lock
-// hash, so update status is unknowable for them and reported as false.
+// repo already holds it, `updateAvailable` when its lock hash differs from the freshly-cloned
+// package. New installs hash the complete Skill directory; an existing V1 lock may contain the
+// legacy SKILL.md-only hash, which remains accepted until that Skill is updated.
 function installStatus(
   skill: DiscoveredSkill,
   lock: Awaited<ReturnType<typeof readLock>>,
@@ -282,10 +463,12 @@ function installStatus(
 ): { installed: boolean; updateAvailable: boolean } {
   const installed = mergedSkills(soulLoader, bundledSkills, disabledBundledSkills).has(skill.name);
   const lockedHash = lock.skills[skill.name]?.hash;
+  const legacyContentHash = createHash("sha256").update(skill.content).digest("hex");
   const updateAvailable =
     installed &&
     !!lockedHash &&
-    lockedHash !== createHash("sha256").update(skill.content).digest("hex");
+    lockedHash !== skillDirectoryHash(skill.files) &&
+    lockedHash !== legacyContentHash;
   return { installed, updateAvailable };
 }
 
@@ -575,8 +758,42 @@ export function registerSkillRoutes(
         response: {
           200: {
             type: "object",
-            required: ["name", "provenance", "body", "pendingAudit"],
-            properties: { ...SummaryProps, body: { type: "string" } },
+            required: ["name", "provenance", "body", "pendingAudit", "files", "commands"],
+            properties: {
+              ...SummaryProps,
+              body: { type: "string" },
+              files: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: ["path", "size"],
+                  properties: { path: { type: "string" }, size: { type: "integer" } },
+                },
+              },
+              commands: {
+                type: "array",
+                items: {
+                  type: "object",
+                  required: [
+                    "name",
+                    "toolRef",
+                    "runtimeProfile",
+                    "entrypoint",
+                    "requiredCommands",
+                    "runtimeAvailable",
+                  ],
+                  properties: {
+                    name: { type: "string" },
+                    toolRef: { type: "string" },
+                    runtimeProfile: { type: "string" },
+                    entrypoint: { type: "string" },
+                    requiredCommands: { type: "array", items: { type: "string" } },
+                    runtimeAvailable: { type: "boolean" },
+                    blocker: { type: "string" },
+                  },
+                },
+              },
+            },
           },
           401: ErrorSchema,
           404: ErrorSchema,
@@ -588,9 +805,14 @@ export function registerSkillRoutes(
       const skill = resolveSkill(name, soulLoader, bundledSkills, disabledBundledSkills);
       if (!skill) return reply.code(404).send({ error: `skill not found: ${name}` });
       const lock = await readLock(gitSync.path);
+      const bundled = bundledSkills.get(name);
+      const directory = soulLoader.skills.has(name)
+        ? join(gitSync.path, "skills", name)
+        : bundled?.directory;
       return {
         ...toSkillSummary(skill, lock, !soulLoader.skills.has(name)),
         body: skill.body,
+        ...(await skillPackageDetail(directory)),
       };
     }
   );
@@ -850,13 +1072,27 @@ export function registerSkillRoutes(
             .code(400)
             .send({ error: `invalid Skill "${skill.name}": ${validation.error}` });
         }
+        const blockers = scanSkill(skill.files).findings.filter((finding) =>
+          STRUCTURAL_INSTALL_BLOCKERS.has(finding.patternId)
+        );
+        if (blockers.length > 0) {
+          return reply.code(400).send({
+            error: `Skill "${skill.name}" contains unsupported package files: ${[
+              ...new Set(blockers.map((finding) => finding.patternId)),
+            ].join(", ")}`,
+          });
+        }
+        const executableBlocker = executablePackageBlocker(skill);
+        if (executableBlocker !== undefined) {
+          return reply.code(400).send({
+            error: `Skill "${skill.name}" cannot be published: ${executableBlocker}`,
+          });
+        }
       }
 
       const installed: string[] = [];
       for (const skill of chosen as DiscoveredSkill[]) {
-        const dir = join(gitSync.path, "skills", skill.name);
-        await mkdir(dir, { recursive: true });
-        await writeFile(join(dir, "SKILL.md"), skill.content, "utf8");
+        await installSkillDirectory(gitSync.path, skill);
         installed.push(skill.name);
       }
 
@@ -868,7 +1104,7 @@ export function registerSkillRoutes(
           sourceType: sourceType(entry.source),
           skillPath: skill.skillPath,
           ref: entry.ref,
-          hash: createHash("sha256").update(skill.content).digest("hex"),
+          hash: skillDirectoryHash(skill.files),
         };
       }
       await writeFile(

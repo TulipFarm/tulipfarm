@@ -14,6 +14,7 @@ const SKILL_FRONTMATTER_ALLOWLIST = [
   "schemas",
   "assets",
   "scripts",
+  "commands",
   "dependencies",
   "requiredToolAbilities",
   "trustTier",
@@ -48,6 +49,7 @@ export function convertLegacySkill(skill: SoulSkill): ConversionResult {
   if (mapped.schemas !== undefined) spec.schemas = mapped.schemas;
   if (mapped.assets !== undefined) spec.assets = mapped.assets;
   if (mapped.scripts !== undefined) spec.scripts = mapped.scripts;
+  if (mapped.commands !== undefined) spec.commands = mapped.commands;
   if (mapped.dependencies !== undefined) spec.dependencies = mapped.dependencies;
   if (mapped.requiredToolAbilities !== undefined) {
     spec.requiredToolAbilities = mapped.requiredToolAbilities;

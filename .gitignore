@@ -16,6 +16,7 @@ references
 !/.agents/skills/tulipfarm-design-system/references/
 !/.agents/skills/tulipfarm-design-system/references/design-system.md
 .absolute-work
+.codex/
 .claude/logs
 .playwright-mcp
 .auth/

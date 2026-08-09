@@ -105,8 +105,10 @@ function bundle(
     changesetId: "changeset-1",
     commitSha: "d".repeat(40),
     definitions,
+    assets: [],
     get: (kind, slug) => definitions.find((d) => d.kind === kind && d.slug === slug),
     getById: (id) => definitions.find((d) => d.id === id),
+    asset: () => undefined,
   };
 }
 
