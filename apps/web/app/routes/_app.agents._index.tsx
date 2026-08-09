@@ -27,7 +27,7 @@ export default function AgentsIndex() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "agents" }]}>
+    <ResourcePanel crumbs={[{ label: "Agents" }]}>
       <p className="text-xs text-muted-foreground">
         {agents.length} {agents.length === 1 ? "agent" : "agents"}
       </p>

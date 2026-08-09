@@ -30,9 +30,18 @@ Preflight always runs. It is the only playbook that aborts the run on failure.
 | 10 | Settings | [`settings.md`](settings.md) | `/settings/{llm,secrets,security,observability,soul,activities,memory,about}` | smoke, full | S1, S8 | **restore-after required** on any change | 15m |
 | 11 | Admin & RBAC | [`admin-rbac.md`](admin-rbac.md) | `/admin/users`, `/admin/roles`, `/admin/guardrails` | full | — | **admin session**; skipped with a note otherwise | 10m |
 | 12 | A11y & hygiene | [`a11y-console-hygiene.md`](a11y-console-hygiene.md) | all top-level routes | smoke, full | S1, S2 | preflight baseline captured | 12m |
+| 13 | Surface Protocol | [`dev-surfaces.md`](dev-surfaces.md) | `/dev/surfaces` | smoke, full | S1 | — | 10m |
+| 14 | Channel Linking | [`channel-linking.md`](channel-linking.md) | `/link-channel` | smoke, full | S1 | integration-worker running | 8m |
+| 15 | Operations & Dispatch | [`operations-monitoring.md`](operations-monitoring.md) | `/operations` | smoke, full | S1 | worker running | 8m |
+| 16 | Audit & Compliance | [`audit-compliance.md`](audit-compliance.md) | `/settings/activities` | smoke, full | S1 | — | 10m |
+| 17 | Design System | [`design-system.md`](design-system.md) | `/design-guide` | smoke, full | S1 | — | 8m |
+| 18 | Setup & Onboarding | [`onboarding-setup.md`](onboarding-setup.md) | `/setup`, `/onboarding` | smoke, full | S1 | fresh incognito context available | 8m |
+| 19 | Guardrails & Governance | [`guardrails-governance.md`](guardrails-governance.md) | `/admin/guardrails` | smoke, full | S1 | **admin session** | 10m |
+| 20 | Memory Lifecycle | [`memory-lifecycle.md`](memory-lifecycle.md) | `/settings/memory` | smoke, full | S1 | — | 10m |
+| 21 | Soul Git Operations | [`soul-git-operations.md`](soul-git-operations.md) | `/settings/soul` | smoke, full | S1 | — | 10m |
+| 22 | LLM Fallback Resilience | [`llm-fallback-resilience.md`](llm-fallback-resilience.md) | `/settings/llm` | smoke, full | S1 | LLM provider configured | 10m |
 
-Playbooks 01 and 03–12 are pending; 00 and 02 exist. See `docs/plans/2026-08-09-qa-agent-playbooks.md`
-for build order.
+All 23 playbooks (00 through 22) are fully implemented and ready for execution across every route, state machine, and subsystem. See `docs/plans/2026-08-09-qa-agent-playbooks.md` for background and architecture decisions.
 
 ## Ordering
 
