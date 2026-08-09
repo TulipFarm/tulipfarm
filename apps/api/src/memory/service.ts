@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
+import type { MemoryAssertionView, MemoryRepo } from "./assertion-view";
 import { MAX_ENTRIES, MAX_TOTAL_CHARS, MAX_VALUE_CHARS } from "./limits";
-import type { WorkingMemoryDoc, WorkingMemoryRepo } from "./working-memory";
 
 export type UpdateOutcome = { kind: "ok" } | { kind: "rejected_oversize" };
 
 /**
- * Owns the working-memory write policy (MEM-V1-003): oversize rejection, last-write LRU, and the
+ * Owns the Memory write policy (MEM-V1-003): oversize rejection, last-write LRU, and the
  * dual cap (≤ MAX_ENTRIES and ≤ MAX_TOTAL_CHARS). The repo stays a dumb CRUD store; all the
  * "should this be kept?" judgement lives here so it is testable against an in-memory fake.
  */
-export class WorkingMemoryService {
-  constructor(private readonly repo: WorkingMemoryRepo) {}
+export class MemoryService {
+  constructor(private readonly repo: MemoryRepo) {}
 
   async update(
     userId: string,
@@ -34,7 +34,7 @@ export class WorkingMemoryService {
       lastWrittenAt: now, // last-write recency
     });
 
-    await this.evict(userId, key);
+    await this.enforceCaps(userId, key);
     return { kind: "ok" };
   }
 
@@ -43,14 +43,22 @@ export class WorkingMemoryService {
   }
 
   /** A user's entries, oldest-written first — the order the `<memory>` block renders. */
-  list(userId: string): Promise<WorkingMemoryDoc[]> {
+  list(userId: string): Promise<MemoryAssertionView[]> {
     return this.repo.listByUser(userId);
   }
 
-  /** Drop oldest-written entries until BOTH caps hold; never evict the just-written key. */
-  private async evict(userId: string, keepKey: string): Promise<void> {
+  /**
+   * Drop oldest-written entries until BOTH caps hold; never evict `keepKey`.
+   *
+   * Public because this service is not the only writer that lands in the `<memory>` projection:
+   * a procedural correction is written through `MemoryLifecycleService`, straight to the engine.
+   * Leaving that path uncapped would let the block grow past `MAX_TOTAL_CHARS`, and the prompt
+   * assembler drops the block *whole* on overflow — so an uncapped write does not degrade Memory,
+   * it silently removes all of it from the turn.
+   */
+  async enforceCaps(userId: string, keepKey: string): Promise<void> {
     let entries = await this.repo.listByUser(userId); // oldest-first
-    const totalChars = (es: WorkingMemoryDoc[]): number =>
+    const totalChars = (es: MemoryAssertionView[]): number =>
       es.reduce((sum, e) => sum + e.key.length + e.value.length, 0);
 
     while (entries.length > MAX_ENTRIES || totalChars(entries) > MAX_TOTAL_CHARS) {

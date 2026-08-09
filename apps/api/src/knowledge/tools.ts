@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ajv } from "@tulipfarm/schema";
 import { err, ok, type ToolCallResult } from "../tools/types";
 import type { KnowledgeService } from "./service";
@@ -7,6 +8,9 @@ export interface KnowledgeToolContext {
   userId: string;
   service: KnowledgeService;
   agentId?: string;
+  guardrailRevision?: string;
+  runId?: string;
+  conversationId?: string;
 }
 
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
@@ -92,7 +96,7 @@ const validateCreatePage = ajv.compile(CREATE_PAGE_SCHEMA);
 const queryKnowledge: KnowledgeTool = {
   name: "query_knowledge",
   description:
-    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked pages, each with a matching snippet for orientation — read the whole page with `get_page` before answering. Use to ground answers in stored pages. Pass `spaceId` to scope the search to a single space (wiki).",
+    "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked OKF wiki pages and authorized indexed source snippets, each labelled with its origin. Read OKF pages with `get_page` before answering; source snippets are already the retrievable excerpt. Pass `spaceId` to scope the search to a single space (wiki only).",
   mutating: false,
   inputSchema: QUERY_SCHEMA,
   handler: async (args, ctx) => {
@@ -115,7 +119,16 @@ const queryKnowledge: KnowledgeTool = {
       const res = await ctx.service.hybridSearchPages(
         a.query,
         { domain, tags, spaceId },
-        Math.min(Math.max(a.limit ?? 10, 1), 50)
+        Math.min(Math.max(a.limit ?? 10, 1), 50),
+        {
+          principalId: ctx.userId,
+          principals: [{ kind: "user", id: ctx.userId }],
+          guardrailEpoch: ctx.guardrailRevision ?? "none",
+          contextEpoch: ctx.runId ?? ctx.conversationId ?? "none",
+          correlationId: ctx.runId ?? randomUUID(),
+          ...(ctx.agentId === undefined ? {} : { agentId: ctx.agentId }),
+          ...(ctx.runId === undefined ? {} : { runId: ctx.runId }),
+        }
       );
       return ok({ results: res.results, warnings: [...filterWarnings, ...res.warnings] });
     } catch (e) {
@@ -165,7 +178,7 @@ const citeSources: KnowledgeTool = {
 const createKnowledgePage: KnowledgeTool = {
   name: "create_knowledge_page",
   description:
-    "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds working memory. Returns the new page id.",
+    "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds Memory. Returns the new page id.",
   mutating: true,
   inputSchema: CREATE_PAGE_SCHEMA,
   handler: async (args, ctx) => {

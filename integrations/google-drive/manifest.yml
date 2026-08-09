@@ -1,0 +1,16 @@
+name: google-drive
+version: "1.0.0"
+description: Index Google Drive files into TulipFarm Knowledge with per-user ACL fidelity.
+maintainer: TulipFarm
+egress:
+  type: none
+required_env:
+  - name: GOOGLE_WORKSPACE_ID
+    label: Google Workspace ID
+    description: Workspace/customer identifier used for sync checkpoints.
+    secret: false
+  - name: GOOGLE_DRIVE_ACCESS_TOKEN
+    label: Google Drive OAuth Access Token
+    description: OAuth bearer token with Drive metadata, permissions, and export read scopes.
+    secret: true
+setup_guide_path: setup-guide.md

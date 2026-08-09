@@ -64,7 +64,7 @@ contract; they do not reimplement its decisions.
 | Tool effects and approvals | `packages/tool-broker` | Catalog and intent/effect orchestration that consumes authorization decisions, credential leases, audit appends, exact approvals, and reconciliation |
 | Agent and model behavior | `packages/agent-runtime` | Context assembly, model profiles, bounded Tool loop, budgets, delegation |
 | Knowledge authorization | `packages/knowledge` | Source ACL ingestion, retrieval, provenance, invalidation, deletion |
-| Durable Memory | `packages/memory` | Scoped assertions, confirmation, provenance, supersession, expiry |
+| Durable Memory | `packages/memory` | Scoped Assertions, Pending Memory confirmation, provenance, recall reauthorization, Contradictions, Episodes, Forget, and Erase |
 | Tulip Surface Protocol and forms | `packages/surface` | Safe presentation schemas, Artifacts, signed actions, form contracts |
 | Integrations | `packages/integrations` | Adapter contracts, event normalization, delivery, identity mapping, checkpoints |
 | Isolated execution | `packages/sandbox` | Execution request, backend ports, workspace, egress and resource controls |
@@ -107,6 +107,7 @@ add stricter checks but cannot bypass or broaden the owner's decision.
 | I-14 | Published definitions and evidence are immutable versions | `packages/storage` | Versioned/append-only repository APIs reject update/delete of protected rows and digests |
 | I-15 | Audit evidence is append-only, hash-linked, separately sealed, and supports cryptographic erasure | `packages/audit` | Append API links prior hash; verifier and sealed segment detect removal, reorder, or mutation; authorized key destruction erases protected payloads while retaining tombstone and chain-integrity evidence, and legal holds block erasure |
 | I-16 | Optional infrastructure is never required for correctness | `packages/storage` | Provider ports declare capabilities; PostgreSQL fallback remains authoritative under adapter loss |
+| I-17 | Memory content never leaks through recall side channels or telemetry | `packages/memory` | Recall authorizes scope and Knowledge evidence before truncation; exclusions are reason counts only; metrics/spans use bounded enums and counts, never statements, subjects, entities, queries, or ids |
 
 ## Durable failure contract
 

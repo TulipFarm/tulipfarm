@@ -58,6 +58,9 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | An installation's account + selected repos + granted permissions | **Installation scope** | `GitHubInstallationScope` | — | — | `packages/integrations/src/github/scope.ts` |
 | Which repos an installation/access grant covers | **Repository grant** | `AccessGrant` (`externalTargets: {type: "github.repository", ids[]}`) | — | "Connected repositories" | maps onto `integration_access_grants` |
 | A channel sender bound to a TulipFarm account | **Channel link** | `ChannelLink` | `/api/v1/identity/channel-links/*`, `/link-channel` | "Link channel" | stored in external_identity_mappings, provider = integration slug; ⛔ "channel identity" as the *link* — that names the sender side only |
+| A Confluence-side user identity used for Knowledge ACLs | **Confluence account** | `ConfluenceAccount` | — | "Confluence account" | Atlassian `accountId`; maps explicitly through `external_identity_mappings` with provider `confluence`; unmapped accounts grant no Knowledge access |
+| A Notion-side user identity used for Knowledge ACLs | **Notion user** | `NotionUser` | — | "Notion user" | Notion user id or email from a verifiable reader property; maps through `external_identity_mappings` with provider `notion`; unmapped users grant no Knowledge access |
+| A Google permission subject used for Drive/Docs Knowledge ACLs | **Google permission subject** | `GooglePermissionSubject` | — | "Google permission subject" | User email, group email, or explicitly mapped domain from Drive permissions; link-sharing (`anyone`) grants no Knowledge access |
 | The single-use invitation that creates one | **Bind link** | `ChannelBind*` | — | "Link your account" | HMAC-signed, 15 min, nonce consumed on redemption; a credential — never logged, never in a query string |
 | The single-use link that gives a TulipFarm account its password | **Invite link** | `Invite`, `UserInvite*` | `/api/v1/users/:id/invite`, `/api/v1/auth/invites/*`, `/accept-invite` | "Invite link", "Reset password link" | Random secret, hash-only storage, 7 days, consumed on redemption; re-issuing revokes the outstanding one and is also the password recovery path. ⛔ "temporary password" — none is ever minted. Distinct from a **Bind link**, which links a channel sender, not an account |
 | Auth material for a provider/integration | **Credential** | `Credential` | — | "Credentials" | API key/token/login; *backed by* a Secret |
@@ -74,6 +77,23 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | A policy constraining agent/tool behavior | **Guardrail** | `Guardrail` | `/api/v1/guardrails` | "Guardrails" | `policy`/`rule` are subordinate parts, not the concept |
 | A callable function exposed to agents | **Tool** | `Tool` | — | "Tool" | includes MCP tools |
 | Durable recalled facts across chats | **Memory** | `Memory` | `/api/v1/memory` | "Memory" | ≠ Context |
+| The owner boundary that decides who can use Memory | **Memory Scope** | `MemoryScopeTarget` | — | — | scopes are `user_private`, `user_agent`, `agent_private`, `team_role`, `business`, `run`; authorization is identity-to-owner, not broad capability |
+| The category of an Assertion | **Memory Type** | `MemoryType` | — | — | `preference`, `fact`, `procedural`, `episodic`; drives recall/rendering semantics; ⛔ "kind" |
+| One durable, scoped, versioned Memory statement | **Assertion** | `MemoryAssertion` | `/api/v1/memory/assertions/:id` | "Memory" (not surfaced as its own noun) | the unit Memory is made of; carries scope owner, provenance, evidence, confidence, validity interval; ⛔ "memory entry", "memory item", "fact row" |
+| The source reference supporting an Assertion | **Memory Evidence** | `MemoryEvidenceRef` | — | — | message, Knowledge source, or Tool result reference; Knowledge source evidence is reauthorized on every recall; ⛔ "citation" when it gates recall |
+| The time interval during which an Assertion was true | **Validity Interval** | `validFrom` / `validTo` | — | — | half-open valid time used by Point-in-time Recall; separate from transaction time (`createdAt` / `recordedUntil`) |
+| A durable summary of what happened, what was decided, and the outcome | **Episode** | `MemoryEpisode` | — | "History" | derived from a Conversation or a Run; indexed via `memory_chunks`; recallable across chats; ⛔ "event" (that is a Run event), "summary" (that is compaction output) |
+| An inferred Assertion awaiting its scope owner's confirmation | **Pending Memory** | `PendingMemory` | `/api/v1/memory/pending/:id` | "Suggested memories" | lives outside the Assertion store; deny/expiry deletes it and persists nothing; ⛔ "draft memory", "candidate" in user-facing copy |
+| How much an Assertion's origin is trusted | **Trust Tier** | `MemoryTrustTier` | — | — | `user_stated` > `agent_inferred` > `external_derived`; drives whether confirmation is required; ⛔ "trust level", "source rank" |
+| An explicit human correction saved as behavior-shaping Memory | **Procedural Correction** | `rememberProceduralCorrection` | `/api/v1/memory/corrections` | "Correction" | creates a `procedural` Assertion with `user_stated` Trust Tier; never produced by Memory Extraction; ⛔ "learned instruction" |
+| Soft-removing an Assertion while keeping lineage | **Forget** | `forgetMemory` | `/api/v1/memory/assertions/:id/forget` | "Forget" | sets `status = forgotten` and clears statement text; row remains for audit; ⛔ "delete" when a tombstone remains |
+| Hard-purging an Assertion and derived Memory copies | **Erase** | `eraseMemory` | `/api/v1/memory/assertions/:id` | "Erase" | removes Assertion, evidence, Pending Memory references, recall rows, Episodes, and chunks; audit keeps counts only; ⛔ "forget" |
+| The always-on Memory rendered into every turn's Context | **Core Block** | `MemoryCoreBlock` | — | — | the pinned tier; the rest of Memory reaches the model by retrieval; ⛔ "working memory" (retired), "pinned memory" |
+| Memory retrieved by relevance to the current turn, alongside the Core Block | **Recalled Memory** | `RecalledMemory` | — | — | rendered as `<recalled-memory>`; per-turn and speculative, so it is context and never a standing instruction; ⛔ "retrieved memory", "relevant memory" |
+| Mining a finished Turn for durable facts | **Memory Extraction** | `MemoryExtractionService` | — | — | runs after the Turn answers, never inside it; only ever produces Pending Memory; ⛔ "memory learning", "auto-save" |
+| One inferred statement before it is screened and parked | **Memory Candidate** | `MemoryCandidate` | — | — | internal to extraction; becomes a Pending Memory only if it passes screening; ⛔ "suggestion" in code |
+| Closing a stored Assertion's validity because a newer one replaced it | **Contradiction** | `MemoryContradictionPort` | — | — | closes `valid_to`, never deletes; scoped, trust-ranked, and offered-ids-only; ⛔ "overwrite", "conflict resolution" |
+| Asking what was true at a past moment | **Point-in-time Recall** | `validAt` | — | — | includes superseded Assertions whose valid interval covers the moment; ⛔ "time travel", "history query" |
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
 | First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
@@ -107,6 +127,8 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | tier (meaning model routing) | ModelProfile | retiring — accepted as a deprecated wire alias for one release |
 | quick / standard / complex | Effort Preset (Auto/Fast/Balanced/Thorough) | retiring — deprecated wire aliases for one release |
 | model (meaning the user-facing choice) | effort preset | clean — a user picks effort, never a model |
+| working memory | Core Block (the pinned tier) or Assertion (one stored fact) | code clean — every `WorkingMemory*` identifier retired (`MemoryService`, `MemoryAssertionView`, `MemoryRepo`, `EngineMemoryRepo`); the legacy `working_memory` **table** intentionally survives one more release as the cutover's recovery path (see `memory/backfill.pg.test.ts`), then drops |
+| memory entry / memory item | assertion | code clean — `InvalidMemoryAssertionError`, `assertValidAssertion`; `MAX_ENTRIES`/`MAX_TOTAL_CHARS` keep their names as cap constants, not as a term for an Assertion |
 
 ## Completed Renames (done 2026-06-27)
 

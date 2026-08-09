@@ -17,6 +17,7 @@ export function assembleAgentSystemPrompt(args: {
   platformAgent: PlatformAgent | undefined;
   business?: AssembleContext["business"];
   memory: AssembleContext["memory"];
+  recalledMemory?: AssembleContext["recalledMemory"];
   governancePages: AssembleContext["governancePages"];
   availableSkills: AvailableSkill[];
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
@@ -35,6 +36,7 @@ export function assembleAgentSystemPrompt(args: {
     platformAgent,
     business,
     memory,
+    recalledMemory,
     governancePages,
     availableSkills,
     bundledSkills,
@@ -73,6 +75,7 @@ export function assembleAgentSystemPrompt(args: {
     business,
     personality: agent.body,
     memory,
+    recalledMemory,
     governancePages,
     availableSkills: [...mergedAvailable.values()],
     eagerSkills,

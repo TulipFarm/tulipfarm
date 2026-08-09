@@ -1,5 +1,5 @@
 /**
- * Generic KV caps (KV-V1). Unlike working memory (tiny, always-injected, char-capped), KV holds
+ * Generic KV caps (KV-V1). Unlike Memory (tiny, always-injected, char-capped), KV holds
  * arbitrary JSON, so the value cap is a generous BYTE budget on the serialized value — measured with
  * `Buffer.byteLength`, never `String.length`, since a multibyte value can blow the byte cap while
  * staying under its character count. Namespace and key share one charset so they are safe to embed

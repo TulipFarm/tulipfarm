@@ -1,11 +1,18 @@
 import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
-import { Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { ErrorState } from "~/components/states";
 import { Button } from "~/components/ui/button";
 import { ConfirmModal } from "~/components/ui/modal";
 import { ApiError } from "~/lib/api";
-import { deleteMemoryEntry, listMemory, updateMemoryEntry } from "~/lib/memory";
+import {
+  deleteMemoryEntry,
+  listMemory,
+  listPendingMemory,
+  type PendingMemory,
+  resolvePendingMemory,
+  updateMemoryEntry,
+} from "~/lib/memory";
 import { cn } from "~/lib/utils";
 
 const fieldClass =
@@ -21,7 +28,13 @@ const PRESETS: { key: string; example: string }[] = [
 ];
 
 export async function clientLoader() {
-  return listMemory();
+  // The queue is optional: a deployment with extraction turned off does not register the route,
+  // and an empty review section is the right way to render that — not a failed page.
+  const [memory, pending] = await Promise.all([
+    listMemory(),
+    listPendingMemory().catch(() => [] as PendingMemory[]),
+  ]);
+  return { ...memory, pending };
 }
 
 function errorMessage(err: unknown): string {
@@ -34,7 +47,7 @@ function errorMessage(err: unknown): string {
 }
 
 export default function SettingsMemory() {
-  const { entries, maxValueChars } = useLoaderData<typeof clientLoader>();
+  const { entries, maxValueChars, pending } = useLoaderData<typeof clientLoader>();
   const revalidator = useRevalidator();
 
   // Per-key draft edits. Absent key → show the saved value (loader is the source of truth).
@@ -87,6 +100,63 @@ export default function SettingsMemory() {
         >
           {error}
         </p>
+      ) : null}
+
+      {/* The confirmation gate. Nothing here is remembered yet — that is the entire point of the
+          section, so it sits above the saved list rather than below it. */}
+      {pending.length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-sm font-medium text-foreground">
+              Suggested memories
+              <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                ({pending.length})
+              </span>
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Noticed while chatting. Not remembered until you keep them.
+            </p>
+          </div>
+          <ul className="flex flex-col divide-y divide-border rounded-sm border border-primary/40 bg-primary/[0.03]">
+            {pending.map((item) => (
+              <li key={item.pendingId} className="flex items-center gap-2.5 px-3 py-2">
+                <span
+                  className="w-28 shrink-0 truncate text-sm font-medium text-foreground sm:w-40"
+                  title={item.subject}
+                >
+                  {item.subject}
+                </span>
+                <span
+                  className="min-w-0 flex-1 truncate text-sm text-foreground"
+                  title={item.statement}
+                >
+                  {item.statement}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 cursor-pointer text-muted-foreground hover:text-destructive"
+                  disabled={busy}
+                  aria-label={`Discard suggested memory: ${item.subject}`}
+                  onClick={() => void run(() => resolvePendingMemory(item.pendingId, "deny"))}
+                >
+                  <X aria-hidden /> Discard
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="shrink-0 cursor-pointer"
+                  disabled={busy}
+                  aria-label={`Keep suggested memory: ${item.subject}`}
+                  onClick={() => void run(() => resolvePendingMemory(item.pendingId, "confirm"))}
+                >
+                  <Check aria-hidden /> Keep
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       {/* One-tap suggestions fill the key field of the add row below. */}

@@ -2,7 +2,7 @@ import type { Attributes, Span, TelemetryPort } from "./ports";
 
 const REDACTED = "[redacted]";
 const PROTECTED_KEY =
-  /(authorization|cookie|credential|secret|token|password|prompt|content|body|args|result|payload)/i;
+  /(authorization|cookie|credential|secret|token|password|prompt|content|body|args|result|payload)|(^|[._-])(statement|subject|query|entity|entities)($|[._-])/i;
 
 export type TelemetryBoundary =
   | "request"

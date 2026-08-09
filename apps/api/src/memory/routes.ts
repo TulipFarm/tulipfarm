@@ -1,16 +1,20 @@
+import type { PendingMemory } from "@tulipfarm/memory";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import type { MemoryAssertionView } from "./assertion-view";
+import type { MemoryExtractionService } from "./extraction-service";
+import type { MemoryLifecycleService } from "./lifecycle-service";
 import { MAX_KEY_CHARS, MAX_VALUE_CHARS } from "./limits";
-import type { WorkingMemoryService } from "./service";
-import type { WorkingMemoryDoc } from "./working-memory";
+import type { MemoryService } from "./service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const MemoryEntrySchema = {
   type: "object",
-  required: ["key", "value", "writtenByAgentId", "createdAt", "lastWrittenAt"],
+  required: ["assertionId", "key", "value", "writtenByAgentId", "createdAt", "lastWrittenAt"],
   properties: {
+    assertionId: { type: "string" },
     key: { type: "string" },
     value: { type: "string" },
     writtenByAgentId: { type: "string", nullable: true },
@@ -19,8 +23,9 @@ const MemoryEntrySchema = {
   },
 } as const;
 
-function toApiEntry(e: WorkingMemoryDoc): Record<string, unknown> {
+function toApiEntry(e: MemoryAssertionView): Record<string, unknown> {
   return {
+    assertionId: e._id,
     key: e.key,
     value: e.value,
     writtenByAgentId: e.writtenByAgentId ?? null,
@@ -30,22 +35,27 @@ function toApiEntry(e: WorkingMemoryDoc): Record<string, unknown> {
 }
 
 /**
- * User-facing CRUD over the caller's own working memory (the `<memory>` facts the assistant
+ * User-facing CRUD over the caller's own Memory (the `<memory>` facts the assistant
  * saves, plus preferences the user sets). List + upsert (`PUT` creates or replaces by key) +
  * delete. The per-entry caps (`MAX_KEY_CHARS`, `MAX_VALUE_CHARS`) are enforced on writes, same
  * as the agent write path; everything is scoped to the authenticated user.
  */
 export function registerMemoryRoutes(
   app: FastifyInstance,
-  service: WorkingMemoryService,
-  requireAuth: PreHandler
+  service: MemoryService,
+  requireAuth: PreHandler,
+  extraction?: MemoryExtractionService,
+  lifecycle?: MemoryLifecycleService
 ): void {
+  if (extraction !== undefined) registerPendingMemoryRoutes(app, extraction, requireAuth);
+  if (lifecycle !== undefined) registerMemoryLifecycleRoutes(app, lifecycle, service, requireAuth);
+
   app.get(
     "/api/v1/memory",
     {
       preHandler: requireAuth,
       schema: {
-        description: "List the current user's saved working-memory entries.",
+        description: "List the current user's saved Memory.",
         tags: ["memory"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -161,6 +171,263 @@ export function registerMemoryRoutes(
         return reply.code(404).send({ error: "memory entry not found" });
       }
       return reply.code(204).send();
+    }
+  );
+}
+
+const ProceduralCorrectionSchema = {
+  type: "object",
+  required: ["subject", "statement"],
+  additionalProperties: false,
+  properties: {
+    subject: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_KEY_CHARS,
+      description: "Stable name for the correction, such as a behavior or request pattern.",
+    },
+    statement: {
+      type: "string",
+      minLength: 1,
+      maxLength: MAX_VALUE_CHARS,
+      description: "The explicit human correction to apply in future turns.",
+    },
+  },
+} as const;
+
+function isHiddenLifecycleResult(result: { outcome: string; reason?: string }): boolean {
+  return (
+    result.outcome === "not_found" || (result.outcome === "denied" && result.reason !== undefined)
+  );
+}
+
+function registerMemoryLifecycleRoutes(
+  app: FastifyInstance,
+  lifecycle: MemoryLifecycleService,
+  service: MemoryService,
+  requireAuth: PreHandler
+): void {
+  app.post(
+    "/api/v1/memory/corrections",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Record an explicit human correction as procedural Memory for future turns.",
+        tags: ["memory"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: ProceduralCorrectionSchema,
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome", "assertionId"],
+            properties: {
+              outcome: { type: "string" },
+              assertionId: { type: "string" },
+            },
+          },
+          401: ErrorSchema,
+          422: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = (req.user as UserDoc)._id;
+      const { subject, statement } = req.body as { subject: string; statement: string };
+      const result = await lifecycle.rememberCorrection({ userId, subject, statement });
+      if (result.outcome !== "saved") {
+        return reply.code(422).send({ error: "procedural correction could not be saved" });
+      }
+      // Same cap the KV write path applies — see `MemoryService.enforceCaps`.
+      await service.enforceCaps(userId, subject);
+      return reply.send({ outcome: "saved", assertionId: result.assertion.assertionId });
+    }
+  );
+
+  app.post(
+    "/api/v1/memory/assertions/:assertionId/forget",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Forget one of the current user's Memory Assertions, leaving an auditable tombstone.",
+        tags: ["memory"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["assertionId"],
+          properties: { assertionId: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome"],
+            properties: { outcome: { type: "string" } },
+          },
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = (req.user as UserDoc)._id;
+      const { assertionId } = req.params as { assertionId: string };
+      const result = await lifecycle.forget(userId, assertionId);
+      if (isHiddenLifecycleResult(result)) {
+        return reply.code(404).send({ error: "memory assertion not found" });
+      }
+      return reply.send({ outcome: result.outcome });
+    }
+  );
+
+  app.delete(
+    "/api/v1/memory/assertions/:assertionId",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Erase one of the current user's Memory Assertions and every derived Memory copy.",
+        tags: ["memory"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["assertionId"],
+          properties: { assertionId: { type: "string" } },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome"],
+            properties: { outcome: { type: "string" } },
+          },
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = (req.user as UserDoc)._id;
+      const { assertionId } = req.params as { assertionId: string };
+      const result = await lifecycle.erase(userId, assertionId);
+      if (isHiddenLifecycleResult(result)) {
+        return reply.code(404).send({ error: "memory assertion not found" });
+      }
+      return reply.send({ outcome: result.outcome });
+    }
+  );
+}
+
+const PendingMemorySchema = {
+  type: "object",
+  required: ["pendingId", "subject", "statement", "memoryType", "requestedAt", "expiresAt"],
+  properties: {
+    pendingId: { type: "string" },
+    subject: { type: "string" },
+    statement: { type: "string" },
+    memoryType: { type: "string" },
+    confidence: { type: "number" },
+    requestedAt: { type: "string" },
+    expiresAt: { type: "string" },
+  },
+} as const;
+
+/**
+ * What the review queue shows. Deliberately not the stored record: `target` names the scope owner
+ * and `provenance` names the Run and the evidence, none of which the reviewer needs and all of
+ * which is internal.
+ */
+function toApiPending(p: PendingMemory): Record<string, unknown> {
+  return {
+    pendingId: p.pendingId,
+    subject: p.request.subject,
+    statement: p.request.statement,
+    memoryType: p.request.memoryType ?? "fact",
+    confidence: p.request.confidence,
+    requestedAt: p.requestedAt,
+    expiresAt: p.expiresAt,
+  };
+}
+
+/**
+ * The confirmation gate's user-facing half (Settings -> Memory).
+ *
+ * Nothing extraction infers is memory until it comes through here. Both routes are scoped to the
+ * authenticated user by the engine, not by this layer: `listPending` filters on the scope owner in
+ * SQL, and `resolve` reauthorizes the deciding principal — so guessing another user's `pendingId`
+ * neither confirms nor reveals anything.
+ */
+function registerPendingMemoryRoutes(
+  app: FastifyInstance,
+  extraction: MemoryExtractionService,
+  requireAuth: PreHandler
+): void {
+  app.get(
+    "/api/v1/memory/pending",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "List memories inferred for the current user that await confirmation.",
+        tags: ["memory"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: {
+            type: "object",
+            required: ["pending"],
+            properties: { pending: { type: "array", items: PendingMemorySchema } },
+          },
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = (req.user as UserDoc)._id;
+      const pending = await extraction.listPending(userId);
+      return reply.send({ pending: pending.map(toApiPending) });
+    }
+  );
+
+  app.post(
+    "/api/v1/memory/pending/:pendingId",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description: "Confirm or deny one inferred memory. Denial deletes it, storing nothing.",
+        tags: ["memory"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        params: {
+          type: "object",
+          required: ["pendingId"],
+          properties: { pendingId: { type: "string" } },
+        },
+        body: {
+          type: "object",
+          required: ["decision"],
+          additionalProperties: false,
+          properties: { decision: { type: "string", enum: ["confirm", "deny"] } },
+        },
+        response: {
+          200: {
+            type: "object",
+            required: ["outcome"],
+            properties: { outcome: { type: "string" } },
+          },
+          401: ErrorSchema,
+          404: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      const userId = (req.user as UserDoc)._id;
+      const { pendingId } = req.params as { pendingId: string };
+      const { decision } = req.body as { decision: "confirm" | "deny" };
+      const result = await extraction.resolve(userId, pendingId, decision);
+      // A refusal carries a reason; a decision the user actually made does not. Both a missing
+      // record and one belonging to someone else answer 404, because distinguishing them would
+      // confirm that a guessed pendingId exists.
+      const refused = result.outcome === "denied" && result.reason !== undefined;
+      if (result.outcome === "not_found" || refused) {
+        return reply.code(404).send({ error: "pending memory not found" });
+      }
+      return reply.send({ outcome: result.outcome });
     }
   );
 }

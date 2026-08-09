@@ -7,6 +7,8 @@ export type ToolErrorCode =
   | "oversize_value"
   | "not_found"
   | "internal_error"
+  /** Well-formed request, refused by policy. The reason stays server-side — see `err`'s callers. */
+  | "write_denied"
   | "audit_required";
 
 export type ToolCallResult =

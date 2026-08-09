@@ -96,6 +96,18 @@ export interface CompactHistoryArgs {
   messageRepo: MessageRepo;
   /** Summarize a transcript via the LLM quick tier. */
   summarize: (transcript: string) => Promise<string>;
+  /**
+   * Optional M5 Episode sink. The summary was already created for compaction; recording it here
+   * must never trigger a second summarization call and must never decide whether the turn runs.
+   */
+  episodeRecorder?: {
+    recordConversationEpisode(input: {
+      readonly conversationId: string;
+      readonly summary: string;
+      readonly decisions?: readonly string[];
+      readonly outcome?: string;
+    }): Promise<void>;
+  };
   log: { error: (obj: unknown, msg?: string) => void };
 }
 
@@ -126,6 +138,18 @@ export async function compactHistory(args: CompactHistoryArgs): Promise<MessageD
       _id: last._id,
     });
     await messageRepo.create(summary);
+    try {
+      await args.episodeRecorder?.recordConversationEpisode({
+        conversationId,
+        summary: text,
+        outcome: "history compacted",
+      });
+    } catch (err) {
+      log.error(
+        { err, conversationId },
+        "history compaction: episode persist failed; keeping compacted summary"
+      );
+    }
     return [summary, ...verbatim];
   } catch (err) {
     log.error(

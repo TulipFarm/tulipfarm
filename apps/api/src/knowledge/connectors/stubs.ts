@@ -1,40 +1,42 @@
 import type { Connector, ConnectorChanges, ConnectorPage, ConnectorRecord } from "./types";
-import { NotImplementedError } from "./types";
 
 /**
- * Honest stubs for the connectors a future PR will implement. Each one fully satisfies the
- * `Connector` interface but throws `NotImplementedError` from every method — so they register and
- * appear in the framework today, and landing a real connector means filling in these 3–4 methods
- * without touching the indexer or sync orchestration.
+ * Compatibility shims for the legacy flat-page connector registry. Notion and Google Docs now
+ * sync through the ACL-preserving `knowledge_source_*` pipeline in `knowledge-sources/k3-*`; the
+ * old connector interface cannot express per-user source ACLs, so these are intentionally inert.
  */
-abstract class StubConnector implements Connector {
+abstract class KnowledgeSourcePipelineConnector implements Connector {
   abstract readonly name: string;
 
-  authenticate(): Promise<void> {
-    throw new NotImplementedError(this.name, "authenticate");
+  async authenticate(): Promise<void> {
+    return;
   }
 
-  listChanged(_cursor: string | null): Promise<ConnectorChanges> {
-    throw new NotImplementedError(this.name, "listChanged");
+  async listChanged(cursor: string | null): Promise<ConnectorChanges> {
+    return { ids: [], cursor };
   }
 
-  fetch(_id: string): Promise<ConnectorRecord> {
-    throw new NotImplementedError(this.name, "fetch");
+  async fetch(id: string): Promise<ConnectorRecord> {
+    return { id };
   }
 
-  mapToPage(_record: ConnectorRecord): ConnectorPage {
-    throw new NotImplementedError(this.name, "mapToPage");
+  mapToPage(record: ConnectorRecord): ConnectorPage {
+    return {
+      kind: "flat",
+      input: {
+        source: "resource",
+        sourceId: `${this.name}:${record.id}`,
+        title: String(record.id),
+        content: "",
+      },
+    };
   }
 }
 
-export class GoogleDocsConnector extends StubConnector {
+export class GoogleDocsConnector extends KnowledgeSourcePipelineConnector {
   readonly name = "google-docs";
 }
 
-export class ConfluenceConnector extends StubConnector {
-  readonly name = "confluence";
-}
-
-export class NotionConnector extends StubConnector {
+export class NotionConnector extends KnowledgeSourcePipelineConnector {
   readonly name = "notion";
 }

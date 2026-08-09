@@ -20,12 +20,12 @@
 import type { GuardrailRule } from "@tulipfarm/authz";
 import { canonicalHash } from "@tulipfarm/schema";
 import type {
-  EmittedPrincipalRef,
   KnowledgeEmissionSink,
   KnowledgeIdentityMapPort,
   KnowledgeSourceEmission,
 } from "../knowledge/source";
 import { knowledgeSourceId } from "../knowledge/source";
+import { mapExternalPrincipals } from "../knowledge/sync-helpers";
 import { decideDriveExtraction } from "./extract";
 import type { DriveApiPort, DriveFile, DrivePermission, DriveSyncCheckpointStore } from "./ports";
 
@@ -50,6 +50,7 @@ export interface DriveKnowledgeSyncOptions {
   readonly aclMaximumAgeSeconds?: number;
   readonly liveMaximumAgeSeconds?: number;
   readonly extraction: { readonly rules: readonly GuardrailRule[] };
+  readonly revalidateFileIds?: readonly string[];
 }
 
 export type DriveSyncFailureCode = "list_failed" | "emit_failed";
@@ -60,6 +61,7 @@ export interface DriveKnowledgeSyncResult {
   readonly deleted: number;
   readonly unverifiable: number;
   readonly extractionDenied: number;
+  readonly revalidated: number;
   readonly cursor?: string;
   readonly failures: readonly { readonly code: DriveSyncFailureCode }[];
 }
@@ -76,27 +78,18 @@ async function mapPrincipals(
   permissions: readonly DrivePermission[],
   identity: KnowledgeIdentityMapPort,
   businessId: string
-): Promise<EmittedPrincipalRef[]> {
-  const principals: EmittedPrincipalRef[] = [];
-  const seen = new Set<string>();
-  for (const permission of permissions) {
-    // Link sharing names no principal, so it grants no principal. A Drive document shared with
-    // "anyone with the link" is reachable in Drive but not through Tulip Knowledge until someone
-    // is actually granted.
-    if (permission.type === "anyone") continue;
-    const resolved = await identity.resolve({
-      businessId,
-      provider: DRIVE_PROVIDER,
-      externalSubject: permission.externalSubject,
-    });
-    for (const principal of resolved ?? []) {
-      const key = `${principal.kind}:${principal.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      principals.push(principal);
-    }
-  }
-  return principals;
+): ReturnType<typeof mapExternalPrincipals> {
+  // Link sharing names no principal, so it grants no principal. A Drive document shared with
+  // "anyone with the link" is reachable in Drive but not through Tulip Knowledge until someone
+  // is actually granted.
+  return mapExternalPrincipals({
+    subjects: permissions
+      .filter((permission) => permission.type !== "anyone")
+      .map((permission) => permission.externalSubject),
+    identity,
+    businessId,
+    provider: DRIVE_PROVIDER,
+  });
 }
 
 function deletionEmission(
@@ -143,6 +136,7 @@ export async function syncDriveKnowledge(
   let deleted = 0;
   let unverifiable = 0;
   let extractionDenied = 0;
+  let revalidated = 0;
 
   let changes: Awaited<ReturnType<DriveApiPort["listChanges"]>>["changes"];
   try {
@@ -158,6 +152,7 @@ export async function syncDriveKnowledge(
       deleted,
       unverifiable,
       extractionDenied,
+      revalidated,
       cursor,
       failures: [{ code: "list_failed" }],
     };
@@ -195,7 +190,45 @@ export async function syncDriveKnowledge(
     });
   }
 
-  return { processed, emitted, deleted, unverifiable, extractionDenied, cursor, failures };
+  if (failures.length === 0) {
+    const changed = new Set(changes.map((change) => change.fileId));
+    for (const fileId of (options.revalidateFileIds ?? []).filter((id) => !changed.has(id))) {
+      const capturedAt = deps.now().toISOString();
+      try {
+        const file = await deps.api.getFile(fileId);
+        if (file === undefined || file.trashed) {
+          await deps.sink.emitSource(
+            deletionEmission(fileId, options, capturedAt, cursor ?? "revalidate")
+          );
+          await deps.sink.removeSourceContent(
+            options.businessId,
+            knowledgeSourceId(DRIVE_PROVIDER, fileId)
+          );
+          deleted += 1;
+        } else {
+          const outcome = await syncFile(deps, options, file, capturedAt, cursor ?? "revalidate");
+          if (outcome === "unverifiable") unverifiable += 1;
+          else emitted += 1;
+          if (outcome === "extraction_denied") extractionDenied += 1;
+        }
+        revalidated += 1;
+      } catch {
+        failures.push({ code: "emit_failed" });
+        break;
+      }
+    }
+  }
+
+  return {
+    processed,
+    emitted,
+    deleted,
+    unverifiable,
+    extractionDenied,
+    revalidated,
+    cursor,
+    failures,
+  };
 }
 
 type FileOutcome = "unverifiable" | "indexed" | "extraction_denied";

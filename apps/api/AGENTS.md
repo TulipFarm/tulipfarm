@@ -17,7 +17,7 @@ src/
   hooks/          # this app's grant to the @tulipfarm/sandbox isolate (worker entrypoint + factory)
   knowledge/      # RAG: pages, chunks, pgvector + tsvector search; governance block
   kv/             # generic scoped key-value store (system/user/agent) — see kv/README.md
-  memory/         # per-user working memory
+  memory/         # per-user Memory (Assertions)
   secrets/        # secret storage
   soul/           # soul git ops (commit, push) + agents/, skills/, resource-types/ CRUD
   runs/           # persisted Run event SSE stream (GET /api/v1/runs/:id/events, cursor recovery) + cancellation

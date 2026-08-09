@@ -35,6 +35,7 @@ Detailed contracts:
 | ADR-018 | Current behavior is replaced beside existing behavior and cut over by capability | No users require DB compatibility; old routes/workers are removed only after target acceptance proves replacements | Application owners |
 | ADR-019 | V1 ships no public customer CLI, general SDK, native app, or desktop app | Focuses security and product support on responsive browser and approved HTTP/Integration surfaces | `apps/api`, `apps/web` |
 | ADR-020 | Applications compose; packages own domain decisions; packages never import applications | Prevents cycles, hidden ownership, and duplicated business rules | Dependency rules |
+| ADR-026 | Memory is scoped Assertions plus Pending Memory, Episodes, and content-free telemetry | Preserves user control, history, Point-in-time Recall, and operator visibility without leaking statements, subjects, entities, queries, or high-cardinality ids | `packages/memory` |
 
 ## Terminology decisions
 

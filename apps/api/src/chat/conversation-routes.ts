@@ -5,7 +5,7 @@ import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { KnowledgeService } from "../knowledge/service";
-import type { WorkingMemoryService } from "../memory/service";
+import type { MemoryService } from "../memory/service";
 import { parsePaginationQuery } from "../pagination";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
@@ -39,7 +39,7 @@ async function findOwnedConversation(
 export interface ConversationRoutesDeps {
   repo: ConversationRepo;
   messageRepo: MessageRepo;
-  workingMemory?: WorkingMemoryService;
+  memory?: MemoryService;
   knowledge?: KnowledgeService;
   soulLoader?: SoulLoader;
   toolRegistry?: ToolRegistry;
@@ -58,7 +58,7 @@ export function registerConversationRoutes(
   const {
     repo,
     messageRepo,
-    workingMemory,
+    memory,
     knowledge,
     soulLoader,
     toolRegistry,
@@ -313,7 +313,7 @@ export function registerConversationRoutes(
   // Dev-only raw-state inspector backing the chat debug drawer. Returns the full persisted rows (all
   // roles incl. system/summary, tool-call/tool-result parts, metadata) PLUS the system prompt the LLM
   // receives — reconstructed via the same `assembleAgentSystemPrompt` the chat turn uses, so it cannot
-  // drift from reality. The assembled prompt embeds user working-memory + governance docs, so the route
+  // drift from reality. The assembled prompt embeds user Memory + governance docs, so the route
   // is registered only outside production; the web app's `import.meta.env.DEV` gate does not protect an API.
   if (process.env.NODE_ENV !== "production") {
     app.get(
@@ -358,7 +358,7 @@ export function registerConversationRoutes(
         // is the conversation owner's, so the prompt matches what the LLM actually saw for this chat.
         const agent = resolveAgent(soulLoader, convo.agentId);
         const platformAgent = getDefaultAssistant(agent.name);
-        const memory = workingMemory && convo.userId ? await workingMemory.list(convo.userId) : [];
+        const memoryAssertions = memory && convo.userId ? await memory.list(convo.userId) : [];
         const governancePages = knowledge ? await knowledge.governancePages() : [];
         const presentationContext = presentationContextFor(
           { channel: "web", surface: "chat" },
@@ -383,7 +383,7 @@ export function registerConversationRoutes(
         const systemPrompt = assembleAgentSystemPrompt({
           agent,
           platformAgent,
-          memory,
+          memory: memoryAssertions,
           governancePages,
           availableSkills: listAvailableSkills(soulLoader, bundledSkills, skillsDisabled),
           bundledSkills,

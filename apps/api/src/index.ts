@@ -99,23 +99,37 @@ import { KnowledgeService } from "./knowledge/service";
 import { PgKnowledgeSpaceOverrideRepo } from "./knowledge/space-overrides-repo";
 import { PgKnowledgeSpaceRepo } from "./knowledge/spaces-repo";
 import { PgSlackKnowledgeCheckpointStore } from "./knowledge-sources/checkpoint-store";
+import { PgConfluenceKnowledgeCheckpointStore } from "./knowledge-sources/confluence-checkpoint-store";
+import { registerConfluenceKnowledgeSync } from "./knowledge-sources/confluence-sync-schedule";
 import { PgKnowledgeEmissionSink } from "./knowledge-sources/emission-sink";
 import { PgKnowledgeIndexStore } from "./knowledge-sources/index-store";
-import { SlackTenantLiveAuthorization } from "./knowledge-sources/live-authorization";
+import { registerK3KnowledgeSync } from "./knowledge-sources/k3-sync-schedule";
+import {
+  CompositeLiveSourceAuthorization,
+  GoogleDriveTenantLiveAuthorization,
+  SlackTenantLiveAuthorization,
+} from "./knowledge-sources/live-authorization";
 import { registerSlackKnowledgeSync } from "./knowledge-sources/slack-sync-schedule";
 import { PgKnowledgeSourceStore } from "./knowledge-sources/source-store";
-import { buildSearchSlackConversationsTool } from "./knowledge-sources/tools";
+import { PgProviderKnowledgeCheckpointStore } from "./knowledge-sources/sync-checkpoint-store";
 import { PgKvRepo } from "./kv/repo";
 import { KvService } from "./kv/service";
 import { registerLlmReload } from "./llm-reload";
-import { WorkingMemoryService } from "./memory/service";
-import { PgWorkingMemoryRepo } from "./memory/working-memory";
+import { LlmContradictionJudge } from "./memory/contradiction-judge";
+import { EngineMemoryRepo } from "./memory/engine-repo";
+import { PgMemoryEpisodeStore } from "./memory/episode-store";
+import { MemoryExtractionService } from "./memory/extraction-service";
+import { LlmMemoryExtractor } from "./memory/extractor";
+import { MemoryLifecycleService } from "./memory/lifecycle-service";
+import { MemoryRecallService } from "./memory/recall-service";
+import { MemoryService } from "./memory/service";
 import { parseObservabilityConfig } from "./observability/config";
 import { subscribeObservability } from "./observability/events";
 import { OtlpMetricsExporter } from "./observability/metrics";
 import { registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
 import { ObservabilityService } from "./observability/service";
+import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
@@ -340,10 +354,39 @@ async function boot() {
     const feedbackRepo = new FeedbackRepo(pool);
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
-    const workingMemoryService = new WorkingMemoryService(new PgWorkingMemoryRepo(pool));
+    const observabilityService = new ObservabilityService(new PgObsRepo(pool));
+    const memoryTelemetry = createObservabilityTelemetryPort(observabilityService);
+    // `embeddingService` is initialized later (it needs the Soul LLM config), and both memory
+    // consumers only call it at request time — so passing it here wires the dense recall arm
+    // without forcing the boot order to change.
+    const memoryService = new MemoryService(
+      new EngineMemoryRepo(pool, undefined, embeddingService, memoryTelemetry)
+    );
+    const memoryRecallService = new MemoryRecallService(pool, embeddingService, memoryTelemetry);
+    const memoryEpisodeStore = new PgMemoryEpisodeStore(
+      pool,
+      embeddingService,
+      undefined,
+      memoryTelemetry
+    );
+    const memoryLifecycleService = new MemoryLifecycleService(
+      pool,
+      () => new Date(),
+      embeddingService,
+      memoryTelemetry
+    );
+    const memoryExtractionService = new MemoryExtractionService(
+      pool,
+      new LlmMemoryExtractor(() => llmService.effortModel("fast")),
+      guardrailsService,
+      embeddingService,
+      () => new Date(),
+      new LlmContradictionJudge(() => llmService.effortModel("fast")),
+      memoryEpisodeStore,
+      memoryTelemetry
+    );
     const kvService = new KvService(new PgKvRepo(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
-    const observabilityService = new ObservabilityService(new PgObsRepo(pool));
     const obsConfig = parseObservabilityConfig(soulLoader.observabilityConfig);
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
@@ -353,6 +396,11 @@ async function boot() {
     const domainEventEmitter = new EventEmitter();
     const boss = new PgBoss({ connectionString: process.env.DATABASE_URL as string });
     await boss.start();
+
+    // Shared with registerSlackKnowledgeSync below — one store instance per process, not one per
+    // caller, so ingestion and unified retrieval never disagree about what's indexed.
+    const knowledgeSourceStore = new PgKnowledgeSourceStore(pool);
+    const knowledgeIndexStore = new PgKnowledgeIndexStore(pool, embeddingService);
 
     const knowledgeService = new KnowledgeService({
       pages: new PgKnowledgePageRepo(pool),
@@ -364,6 +412,15 @@ async function boot() {
       embeddings: embeddingService,
       enqueueIndex: (pageId) => enqueueIndex(boss, { kind: "page", pageId }).then(() => undefined),
       indexQueueStats: makeIndexQueueStats(boss, pool),
+      sourceRetrieval: {
+        sources: knowledgeSourceStore,
+        index: knowledgeIndexStore,
+        live: new CompositeLiveSourceAuthorization([
+          new SlackTenantLiveAuthorization(integrationStore, secretsService, externalIdentityRepo),
+          new GoogleDriveTenantLiveAuthorization(soulLoader, secretsService, externalIdentityRepo),
+        ]),
+        now: () => new Date(),
+      },
     });
 
     const approvalsRepo = new ApprovalsRepo(pool);
@@ -392,21 +449,6 @@ async function boot() {
       repo: externalIdentityRepo,
       signingKey: channelBindKeyResolver(secretsService),
     };
-
-    // Shared with registerSlackKnowledgeSync below — one store instance per process, not one per
-    // caller, so the sync job and the search tool never disagree about what's indexed.
-    const knowledgeSourceStore = new PgKnowledgeSourceStore(pool);
-    const knowledgeIndexStore = new PgKnowledgeIndexStore(pool, embeddingService);
-    const slackKnowledgeSearchTool = buildSearchSlackConversationsTool({
-      sources: knowledgeSourceStore,
-      index: knowledgeIndexStore,
-      live: new SlackTenantLiveAuthorization(
-        integrationStore,
-        secretsService,
-        externalIdentityRepo
-      ),
-      now: () => new Date(),
-    });
 
     // GitHub chat tool family: registered unconditionally (each tool's own effect dispatch fails
     // closed with no installation), visibility gated live per turn on install status elsewhere
@@ -441,7 +483,9 @@ async function boot() {
     // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
     // (which tools each agent may actually call) are applied per-turn in the chat route.
     const toolRegistry = buildToolRegistry({
-      workingMemory: workingMemoryService,
+      memory: memoryService,
+      memoryRecall: memoryRecallService,
+      memoryLifecycle: memoryLifecycleService,
       kv: kvService,
       knowledge: knowledgeService,
       surfaceComponents: { gitSync, surfaceSupport: surfaceRendererRegistry },
@@ -461,7 +505,6 @@ async function boot() {
         bundledSkills,
         disabledBundledSkills,
       },
-      slackKnowledgeSearch: slackKnowledgeSearchTool,
       github: githubTools,
       slack: slackTools,
       platform: {
@@ -493,12 +536,14 @@ async function boot() {
       host: new InternalTurnHost({
         runs: runStore,
         store: conversationStore,
+        memory: memoryExtractionService,
         context: new ChatTurnContextResolver({
           artifacts: runArtifacts,
           store: conversationStore,
           soulLoader,
           toolRegistry,
-          workingMemory: workingMemoryService,
+          memory: memoryService,
+          memoryRecall: memoryRecallService,
           knowledge: knowledgeService,
           guardrails: guardrailsService,
           bundledSkills,
@@ -611,7 +656,9 @@ async function boot() {
       feedbackRepo,
       surfaceArtifactStore,
       surfaceActionStore,
-      workingMemoryService,
+      memoryService,
+      memoryExtractionService,
+      memoryLifecycleService,
       kvService,
       knowledgeService,
       toolRegistry,
@@ -801,6 +848,24 @@ async function boot() {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
       service: knowledgeService,
+      activity: activityService,
+    });
+    await registerConfluenceKnowledgeSync(boss, {
+      soulLoader,
+      secrets: secretsService,
+      checkpoints: new PgConfluenceKnowledgeCheckpointStore(pool),
+      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+      sources: knowledgeSourceStore,
+      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
+      activity: activityService,
+    });
+    await registerK3KnowledgeSync(boss, {
+      soulLoader,
+      secrets: secretsService,
+      checkpoints: (provider) => new PgProviderKnowledgeCheckpointStore(pool, provider),
+      sink: new PgKnowledgeEmissionSink(knowledgeSourceStore, knowledgeIndexStore),
+      sources: knowledgeSourceStore,
+      identity: new ExternalLinkKnowledgeIdentityMap(externalIdentityRepo),
       activity: activityService,
     });
     await registerSlackKnowledgeSync(boss, {

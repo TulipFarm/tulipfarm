@@ -36,10 +36,10 @@ const SYSTEM_OWNER = "";
 const NOT_EXPIRED = "(expires_at IS NULL OR expires_at > now())";
 
 /**
- * Write-time hard floor (mirrors working memory's `assertValidEntry`): the structural invariants no
+ * Write-time hard floor (mirrors Memory's `assertValidAssertion`): the structural invariants no
  * row may break. Charset/length live here; the value byte-cap is a softer service-layer policy.
  */
-export function assertValidEntry(doc: KvEntry): void {
+export function assertValidAssertion(doc: KvEntry): void {
   ownerColumn(doc.scope, doc.ownerId); // throws if a user/agent entry is missing an owner
   if (doc.scope === "system" && doc.ownerId !== undefined && doc.ownerId !== "") {
     throw new InvalidKvEntryError("system-scoped entry must not carry an ownerId");
@@ -110,7 +110,7 @@ export class PgKvRepo implements KvRepo {
   constructor(private readonly q: Queryable) {}
 
   async upsert(doc: KvEntry): Promise<void> {
-    assertValidEntry(doc);
+    assertValidAssertion(doc);
     // `created_at` is deliberately omitted from the DO UPDATE set, so it is preserved on conflict
     // (only INSERTs use the supplied created_at). Last-write-wins on value + expiry.
     await this.q.query(

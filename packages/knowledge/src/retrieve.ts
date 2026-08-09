@@ -59,6 +59,7 @@ export interface RetrievalCitation {
 
 export interface RetrievedCandidate {
   readonly sourceId: string;
+  readonly provider: string;
   readonly chunkId: string;
   readonly revision: string;
   readonly score: number;
@@ -136,11 +137,11 @@ async function authorizeAll(
   deps: RetrievalDeps,
   request: RetrievalRequest
 ): Promise<{
-  allowed: Map<string, RetrievalCitation>;
+  allowed: Map<string, { citation: RetrievalCitation; provider: string }>;
   reasons: RetrievalExclusionReason[];
 }> {
   const now = deps.now();
-  const allowed = new Map<string, RetrievalCitation>();
+  const allowed = new Map<string, { citation: RetrievalCitation; provider: string }>();
   const reasons: RetrievalExclusionReason[] = [];
   for (const source of await deps.sources.list(request.businessId)) {
     const decision = await decideSourceAccess(
@@ -154,9 +155,12 @@ async function authorizeAll(
       continue;
     }
     allowed.set(source.sourceId, {
-      sourceId: source.sourceId,
-      revision: source.revision,
-      aclRevision: decision.aclRevision,
+      citation: {
+        sourceId: source.sourceId,
+        revision: source.revision,
+        aclRevision: decision.aclRevision,
+      },
+      provider: source.provider,
     });
   }
   return { allowed, reasons };
@@ -248,15 +252,19 @@ export async function retrieve(
 
   const candidates: RetrievedCandidate[] = [];
   for (const candidate of ranked) {
-    const citation = allowed.get(candidate.sourceId);
+    const authorized = allowed.get(candidate.sourceId);
     // Defence in depth: an index adapter that ignores `allowedSourceIds` (a bug, or a swapped
     // implementation) cannot turn into a disclosure. The candidate is dropped whole — its id is
     // not echoed back in the exclusion list either.
-    if (citation === undefined) {
+    if (authorized === undefined) {
       reasons.push("index_filter_violation");
       continue;
     }
-    candidates.push({ ...candidate, citation });
+    candidates.push({
+      ...candidate,
+      provider: authorized.provider,
+      citation: authorized.citation,
+    });
   }
 
   const result: RetrievalResult = {
@@ -270,7 +278,7 @@ export async function retrieve(
     const entry: CachedRetrieval = {
       candidates: result.candidates,
       exclusions: result.exclusions,
-      sourceVersions: [...allowed.values()].map((citation) => ({
+      sourceVersions: [...allowed.values()].map(({ citation }) => ({
         sourceId: citation.sourceId,
         revision: citation.revision,
         aclRevision: citation.aclRevision,

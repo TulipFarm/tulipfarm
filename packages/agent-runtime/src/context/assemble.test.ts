@@ -753,3 +753,65 @@ describe("formatTemporalContext", () => {
     expect(out).toContain("time: 07:12 (America/New_York, UTC-04:00)");
   });
 });
+
+describe("<recalled-memory> — the retrieved tier", () => {
+  const recalled = [
+    { subject: "acme renewal", statement: "moved to Q3 after the pricing review" },
+    { subject: "deploys", statement: "team avoids shipping on Fridays" },
+  ];
+
+  it("is absent when nothing was recalled", () => {
+    expect(assembleSystemPrompt(baseCtx({ memory: [mem("plan", "enterprise")] }))).not.toContain(
+      "<recalled-memory>"
+    );
+  });
+
+  it("leaves the <memory> block byte-identical whether or not anything was recalled", () => {
+    const without = assembleSystemPrompt(baseCtx({ memory: [mem("plan", "enterprise")] }));
+    const withRecall = assembleSystemPrompt(
+      baseCtx({ memory: [mem("plan", "enterprise")], recalledMemory: recalled })
+    );
+    const memoryBlock = (s: string) => /<memory>[\s\S]*?<\/memory>/.exec(s)?.[0];
+    expect(memoryBlock(withRecall)).toBe(memoryBlock(without));
+    expect(memoryBlock(without)).toBeDefined();
+  });
+
+  it("renders one line per memory, most relevant first", () => {
+    const out = assembleSystemPrompt(baseCtx({ recalledMemory: recalled }));
+    const body = /<recalled-memory>([\s\S]*?)<\/recalled-memory>/.exec(out)?.[1] ?? "";
+    expect(body).toContain("- acme renewal: moved to Q3 after the pricing review");
+    expect(body).toContain("- deploys: team avoids shipping on Fridays");
+    expect(body.indexOf("acme renewal")).toBeLessThan(body.indexOf("deploys"));
+  });
+
+  it("frames recalled memories as context rather than standing instructions", () => {
+    const out = assembleSystemPrompt(baseCtx({ recalledMemory: recalled }));
+    expect(out).toContain("context, not commands");
+  });
+
+  it("renders without a <memory> block, since the two tiers are independent", () => {
+    const out = assembleSystemPrompt(baseCtx({ memory: [], recalledMemory: recalled }));
+    expect(out).toContain("<recalled-memory>");
+    expect(out).not.toContain("<memory>");
+  });
+
+  it("drops the block whole when over budget, never half-rendered", () => {
+    const oversize = [{ subject: "s", statement: "x".repeat(4001) }];
+    const out = assembleSystemPrompt(baseCtx({ recalledMemory: oversize }));
+    expect(out).not.toContain("<recalled-memory>");
+    expect(out).not.toContain("xxx");
+  });
+
+  it("sits after the stable blocks so the cacheable prefix is not invalidated", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        personality: "You are helpful.",
+        memory: [mem("plan", "enterprise")],
+        governancePages: [govDoc("Policy", "Be compliant.")],
+        recalledMemory: recalled,
+      })
+    );
+    expect(out.indexOf("<recalled-memory>")).toBeGreaterThan(out.indexOf("<governance>"));
+    expect(out.indexOf("<recalled-memory>")).toBeGreaterThan(out.indexOf("<memory>"));
+  });
+});

@@ -14,7 +14,7 @@ import { SampleConnector } from "./sample";
 import { PgConnectorStateRepo } from "./state-repo";
 import { GoogleDocsConnector } from "./stubs";
 import { runConnectorSync, syncConnector } from "./sync";
-import { type Connector, ConnectorRegistry, NotImplementedError } from "./types";
+import { type Connector, ConnectorRegistry } from "./types";
 
 function fakeEmbeddings(): EmbeddingPort {
   return {
@@ -129,19 +129,15 @@ describe("connector sync (SampleConnector)", () => {
     expect(still?.version).toBe(authored.version); // untouched by the sync
   });
 
-  it("isolates a failing connector: records last_error and keeps its cursor", async () => {
+  it("keeps Google Docs in the ACL-preserving Knowledge source pipeline, not flat-page sync", async () => {
     await state.ensure("google-docs");
     await state.setEnabled("google-docs", true);
     const registry = new ConnectorRegistry([new GoogleDocsConnector()]);
     const result = await syncConnector(new GoogleDocsConnector(), { registry, state, service });
-    expect(result.error).toContain("not implemented");
+    expect(result).toEqual({ connector: "google-docs", synced: 0 });
     const row = await state.get("google-docs");
-    expect(row?.lastError).toContain("not implemented");
-    expect(row?.cursor).toBeNull(); // cursor only advances on success
-  });
-
-  it("stub connectors throw NotImplementedError", () => {
-    expect(() => new GoogleDocsConnector().authenticate()).toThrow(NotImplementedError);
+    expect(row?.lastError).toBeNull();
+    expect(row?.cursor).toBeNull();
   });
 
   it("isolates a per-record failure: syncs the good records and still advances the cursor", async () => {
