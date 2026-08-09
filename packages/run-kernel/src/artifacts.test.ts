@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { BlobPort, BlobRef, PersistedArtifact } from "@tulipfarm/storage";
 import { MemoryArtifactStore } from "@tulipfarm/storage";
@@ -27,7 +28,7 @@ class MemoryBlobStore implements BlobPort {
   private readonly bytes = new Map<string, Uint8Array>();
 
   async put(bytes: Uint8Array): Promise<BlobRef> {
-    const hash = canonicalHash(new TextDecoder().decode(bytes));
+    const hash = createHash("sha256").update(bytes).digest("hex");
     this.bytes.set(hash, bytes);
     return { key: hash, hash };
   }
@@ -277,6 +278,56 @@ describe("ArtifactService", () => {
       await expect(
         blindService.publish(publishInput({ id: "artifact-blob", storage: "blob" }))
       ).rejects.toMatchObject({ code: "artifact_blob_unavailable" });
+    });
+  });
+
+  describe("file output", () => {
+    it("publishes and opens immutable raw file bytes", async () => {
+      const bytes = new TextEncoder().encode("report contents");
+      const published = await service.publishFile({
+        id: "artifact-file",
+        businessId: "business-1",
+        bytes,
+        mediaType: "text/plain",
+        fileName: "report.txt",
+        classification: ["internal"],
+        acl: { readers: ["agent:agent-1"] },
+        retention: { policy: "standard", expiresAt: null },
+        redaction: { redactedPaths: [] },
+        producer: { runId: RUN_ID, stateKey: "classify", attempt: 1 },
+        createdAt: CREATED_AT,
+      });
+
+      expect(published.contentHash).toBe(createHash("sha256").update(bytes).digest("hex"));
+      await expect(service.openFile(readRequest({ artifactId: "artifact-file" }))).resolves.toEqual(
+        {
+          mediaType: "text/plain",
+          fileName: "report.txt",
+          bytes,
+          contentHash: published.contentHash,
+        }
+      );
+    });
+
+    it("denies tampered raw file bytes", async () => {
+      const published = await service.publishFile({
+        id: "artifact-file",
+        businessId: "business-1",
+        bytes: new TextEncoder().encode("original"),
+        mediaType: "text/plain",
+        fileName: "report.txt",
+        classification: ["internal"],
+        acl: { readers: ["agent:agent-1"] },
+        retention: { policy: "standard", expiresAt: null },
+        redaction: { redactedPaths: [] },
+        producer: { runId: RUN_ID, stateKey: "classify", attempt: 1 },
+        createdAt: CREATED_AT,
+      });
+      blobs.corrupt(published.blob.key, "tampered");
+
+      await expect(
+        service.openFile(readRequest({ artifactId: "artifact-file" }))
+      ).rejects.toMatchObject({ code: "artifact_tampered" });
     });
   });
 });

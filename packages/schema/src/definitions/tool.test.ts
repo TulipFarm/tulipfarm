@@ -23,6 +23,7 @@ const minimal = {
   spec: {
     toolId: "github.issue.label",
     toolVersion: "1.0.0",
+    description: "Apply a label to a GitHub issue.",
     action: "label",
     inputSchema: { type: "object", properties: { issue: { type: "number" } } },
     outputSchema: { type: "object" },

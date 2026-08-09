@@ -22,6 +22,10 @@ export type SoulSemanticIssueCode =
   | "ROUTINE_START_UNKNOWN"
   | "ROUTINE_TRANSITION_UNKNOWN"
   | "ROUTINE_DUPLICATE_STATE"
+  | "SKILL_DUPLICATE_COMMAND"
+  | "SKILL_ENTRYPOINT_UNDECLARED"
+  | "SKILL_TOOL_ADAPTER_INVALID"
+  | "SKILL_TOOL_BINDING_INVALID"
   | "INHERITANCE_CYCLE"
   | "FALLBACK_CYCLE"
   | "RISK_EXCEEDS_CEILING"
@@ -301,6 +305,20 @@ export function collectReferenceEdges(def: AuthoredDefinition): ReferenceEdge[] 
     if (def.kind === kind) {
       edges.push(...plainEdges(stringList(def.spec[field]), target, `/spec/${field}`));
     }
+  }
+
+  if (def.kind === "Skill") {
+    const commands = Array.isArray(def.spec.commands) ? def.spec.commands : [];
+    commands.forEach((command, index) => {
+      if (isRecord(command) && typeof command.toolRef === "string") {
+        edges.push({
+          kind: "ToolContract",
+          field: `/spec/commands/${index}/toolRef`,
+          value: command.toolRef,
+          form: "plain",
+        });
+      }
+    });
   }
 
   if (def.kind === "Trigger") {

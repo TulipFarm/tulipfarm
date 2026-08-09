@@ -195,4 +195,20 @@ describe("ToolBroker authorization", () => {
       guardrailRevision: "guardrail-v3",
     });
   });
+
+  it("always requires Approval for a mutating sandbox Tool", () => {
+    const sandboxContract: ToolContractDefinition = {
+      ...contract,
+      metadata: { ...contract.metadata, id: "44444444-4444-4444-8444-444444444444" },
+      spec: {
+        ...contract.spec,
+        adapter: { kind: "sandbox", ref: "skill:issue-triage/label_issue" },
+      },
+    };
+    const sandboxBroker = new ToolBroker(ToolCatalog.load([sandboxContract]));
+
+    expect(sandboxBroker.authorize(intent(), context())).toMatchObject({
+      outcome: "awaiting_approval",
+    });
+  });
 });

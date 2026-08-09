@@ -12,6 +12,7 @@
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
+    "@tulipfarm/sandbox": "workspace:*",
     "@tulipfarm/secrets": "workspace:*",
     "@tulipfarm/storage": "workspace:*"
   },

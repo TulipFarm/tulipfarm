@@ -8,6 +8,7 @@ export type {
 } from "./agent-publication";
 export { AgentPublicationError, publishAgentVersion } from "./agent-publication";
 export type {
+  BundleAsset,
   BundleDefinition,
   BundleErrorCode,
   BundleSignature,
@@ -54,7 +55,7 @@ export {
   createHmacCommitSigner,
   verifyCommitSignature,
 } from "./commit-signing";
-export type { BundleCompileRequest } from "./compiler";
+export type { BundleCompileRequest, BundleSourceFile } from "./compiler";
 export { compileExecutionBundle } from "./compiler";
 export type {
   ConversionResult,
@@ -103,8 +104,17 @@ export {
   signExecutionBundle,
   verifyExecutionBundle,
 } from "./signatures";
+export type {
+  RuntimeSkillCommand,
+  RuntimeSkillCommandErrorCode,
+} from "./skill-commands";
+export {
+  RuntimeSkillCommandError,
+  resolveRuntimeSkillCommands,
+} from "./skill-commands";
 export { runSoulMigrations } from "./soul-migrations";
 export { resolveSoulPath } from "./soul-path";
+export { GitSoulTreeReader } from "./tree-reader";
 export type {
   BodyMatch,
   ChatIngressConfig,

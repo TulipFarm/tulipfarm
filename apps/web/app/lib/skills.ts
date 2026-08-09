@@ -3,8 +3,8 @@ import { apiDelete, apiGet, apiWrite } from "./api";
 /*
  * Client for the skills API (SKILLS / SKL-V1-001..003). Skills are SKILL.md files in the soul repo.
  * Read endpoints (list/get) plus the install-from-git flow: scan a git repo, run an advisory
- * SkillAudit on a discovered skill, then explicitly confirm the install. The audit is advisory only —
- * a skill cannot be sandboxed, so the operator confirms install regardless of the rating.
+ * SkillAudit on a discovered Skill, then explicitly confirm the install. Executable commands are
+ * published only when their package and pinned runtime requirements pass the server-side gates.
  */
 
 export type SkillProvenance = "builtin" | "marketplace" | "user";
@@ -17,7 +17,21 @@ export type SkillSummary = {
   source?: string;
 };
 
-export type SkillDetail = SkillSummary & { body: string };
+export type SkillCommandDetail = {
+  name: string;
+  toolRef: string;
+  runtimeProfile: string;
+  entrypoint: string;
+  requiredCommands: string[];
+  runtimeAvailable: boolean;
+  blocker?: string;
+};
+
+export type SkillDetail = SkillSummary & {
+  body: string;
+  files: { path: string; size: number }[];
+  commands: SkillCommandDetail[];
+};
 
 // `installed` / `updateAvailable` come from the server cross-referencing the discovered SKILL.md
 // against the soul repo + skills-lock hash, so the UI can badge already-installed and stale skills.

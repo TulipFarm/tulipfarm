@@ -22,7 +22,8 @@ import {
 
 /**
  * Production implementations must allocate a fresh workspace inside `execute`, enforce the signed
- * limits, destroy the workspace before returning, and never expose Credential or host-mount APIs.
+ * limits, destroy the workspace before returning, and expose only the request's scoped one-use
+ * credential bindings. Host mounts and ambient worker credentials are never available.
  */
 export interface SandboxBackend {
   readonly backendId: string;
@@ -130,6 +131,8 @@ export class SandboxProtocolExecutor {
           backendId: this.deps.backend.backendId,
           challenge,
           nowMs,
+          requiresCredentialInjection:
+            request.operation === "tool" && (request.credentialBindings?.length ?? 0) > 0,
         }
       );
 

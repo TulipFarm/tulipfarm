@@ -215,8 +215,46 @@ describe("SkillExecutionCoordinator", () => {
   it("rejects a scanned direct curl mutation before sandbox dispatch", async () => {
     const { coordinator, sandbox } = setup({ finding: "direct_network_mutation" });
 
-    await expectCode(coordinator.execute(input()), "direct_network_forbidden");
+    await expectCode(
+      coordinator.execute(input({ web: { destinationIds: [], maxBytes: 0 } })),
+      "direct_network_forbidden"
+    );
     expect(sandbox.execute).not.toHaveBeenCalled();
+  });
+
+  it("dispatches credentialed network work only as a pinned sandbox Tool operation", async () => {
+    const { coordinator, sandbox } = setup({ finding: "direct_network_mutation" });
+    const runtimeProfile = {
+      id: "shell-ts-python-v1",
+      imageDigest: `sha256:${"e".repeat(64)}`,
+    };
+    await coordinator.execute(
+      input({
+        runtimeProfile,
+        credentialBindings: [
+          {
+            slot: "github",
+            leaseRef: "lease:one-use",
+            injectAs: { kind: "environment", name: "GITHUB_TOKEN" },
+          },
+        ],
+        outputs: { jsonPath: "outputs/result.json", files: [] },
+      })
+    );
+
+    expect(sandbox.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: "tool",
+        runtimeProfile,
+        credentialBindings: [
+          {
+            slot: "github",
+            leaseRef: "lease:one-use",
+            injectAs: { kind: "environment", name: "GITHUB_TOKEN" },
+          },
+        ],
+      })
+    );
   });
 
   it("scans persistent output and never publishes malicious output", async () => {

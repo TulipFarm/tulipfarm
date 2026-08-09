@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { canonicalHash, type VersionedSchemaDocument } from "@tulipfarm/schema";
 import {
+  type BundleAsset,
   type BundleDefinition,
   BundleError,
   EXECUTION_BUNDLE_VERSION,
@@ -33,6 +35,13 @@ export interface BundleCompileRequest {
   readonly commitSha: string;
   /** The validated authored definitions of the tree being published. */
   readonly documents: readonly VersionedSchemaDocument[];
+  /** Exact UTF-8 companion files read from the same committed tree as `documents`. */
+  readonly files?: readonly BundleSourceFile[];
+}
+
+export interface BundleSourceFile {
+  readonly path: string;
+  readonly content: string;
 }
 
 // ── Secret exclusion (SPEC §8.1: Soul stores only opaque secret identifiers) ─────
@@ -196,6 +205,65 @@ function compileDefinition(
   });
 }
 
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function skillAssetPaths(definition: AuthoredDefinition): string[] {
+  const paths = new Set<string>();
+  const instructions = definition.spec.instructions;
+  if (
+    typeof instructions === "object" &&
+    instructions !== null &&
+    !Array.isArray(instructions) &&
+    typeof (instructions as Record<string, unknown>).path === "string"
+  ) {
+    paths.add((instructions as Record<string, unknown>).path as string);
+  }
+  for (const field of ["references", "templates", "examples", "schemas", "assets", "scripts"]) {
+    for (const path of stringList(definition.spec[field])) paths.add(path);
+  }
+  return [...paths].sort();
+}
+
+function compileAssets(
+  definitions: readonly AuthoredDefinition[],
+  files: readonly BundleSourceFile[] | undefined
+): readonly BundleAsset[] {
+  if (files === undefined) return Object.freeze([]);
+  const byPath = new Map(files.map((file) => [file.path, file.content]));
+  const assets: BundleAsset[] = [];
+  for (const definition of definitions.filter((candidate) => candidate.kind === "Skill")) {
+    for (const path of skillAssetPaths(definition)) {
+      const fullPath = `skills/${definition.slug}/${path}`;
+      const content = byPath.get(fullPath);
+      if (content === undefined) {
+        throw new BundleError(
+          "INVALID_DEFINITION",
+          `Execution bundle: ${definition.subject} is missing declared companion file ${path}`,
+          { subject: definition.subject, field: "/spec" }
+        );
+      }
+      assertNoSecretMaterial(definition.subject, content, `/assets/${path}`);
+      assets.push(
+        Object.freeze({
+          ownerDefinitionId: definition.id,
+          path,
+          digest: createHash("sha256").update(content, "utf8").digest("hex"),
+          content,
+        })
+      );
+    }
+  }
+  assets.sort((left, right) => {
+    const owner = left.ownerDefinitionId.localeCompare(right.ownerDefinitionId);
+    return owner === 0 ? left.path.localeCompare(right.path) : owner;
+  });
+  return Object.freeze(assets);
+}
+
 /**
  * Compile the immutable execution bundle for a published tree. Throws {@link BundleError} — always
  * payload-safe — on the first deterministic failure; nothing partial is ever returned.
@@ -220,6 +288,10 @@ export function compileExecutionBundle(request: BundleCompileRequest): Execution
         ? left.slug.localeCompare(right.slug)
         : left.kind.localeCompare(right.kind)
     );
+  const assets = compileAssets(
+    authored.map(({ def }) => def),
+    request.files
+  );
 
   return Object.freeze({
     bundleVersion: EXECUTION_BUNDLE_VERSION,
@@ -227,5 +299,6 @@ export function compileExecutionBundle(request: BundleCompileRequest): Execution
     changesetId: request.changesetId,
     commitSha: request.commitSha,
     definitions: Object.freeze(definitions),
+    assets,
   });
 }

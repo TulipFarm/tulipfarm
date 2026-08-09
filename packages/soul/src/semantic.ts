@@ -109,6 +109,74 @@ function checkRoutineGraphs(index: DefinitionIndex): SoulSemanticIssue[] {
   return index.ofKind("Routine").flatMap(checkRoutineGraph);
 }
 
+// ── Skill command bindings ─────────────────────────────────────────────────────
+
+function resolvePlain(
+  index: DefinitionIndex,
+  ref: string,
+  kind: string
+): AuthoredDefinition | undefined {
+  const byId = index.get(ref);
+  if (byId?.kind === kind) return byId;
+  return index.candidates(ref, kind)[0];
+}
+
+function checkSkillCommands(index: DefinitionIndex): SoulSemanticIssue[] {
+  const issues: SoulSemanticIssue[] = [];
+  for (const skill of index.ofKind("Skill")) {
+    const scripts = new Set(stringList(skill.spec.scripts));
+    const commands = Array.isArray(skill.spec.commands) ? skill.spec.commands : [];
+    const names = new Set<string>();
+    commands.forEach((value, commandIndex) => {
+      if (!isRecord(value)) return;
+      const base = `/spec/commands/${commandIndex}`;
+      const { name, entrypoint, toolRef } = value;
+      if (typeof name === "string") {
+        if (names.has(name)) {
+          issues.push({
+            code: "SKILL_DUPLICATE_COMMAND",
+            subject: skill.subject,
+            ref: name,
+            field: `${base}/name`,
+          });
+        }
+        names.add(name);
+      }
+      if (typeof entrypoint === "string" && !scripts.has(entrypoint)) {
+        issues.push({
+          code: "SKILL_ENTRYPOINT_UNDECLARED",
+          subject: skill.subject,
+          ref: entrypoint,
+          field: `${base}/entrypoint`,
+        });
+      }
+      if (typeof toolRef !== "string" || typeof name !== "string") return;
+      const tool = resolvePlain(index, toolRef, "ToolContract");
+      if (!tool) return; // The reference layer reports the unresolved ToolContract.
+      const adapter = tool.spec.adapter;
+      if (!isRecord(adapter) || adapter.kind !== "sandbox") {
+        issues.push({
+          code: "SKILL_TOOL_ADAPTER_INVALID",
+          subject: skill.subject,
+          ref: toolRef,
+          field: `${base}/toolRef`,
+        });
+        return;
+      }
+      const expected = `skill:${skill.slug}/${name}`;
+      if (adapter.ref !== expected) {
+        issues.push({
+          code: "SKILL_TOOL_BINDING_INVALID",
+          subject: skill.subject,
+          ref: typeof adapter.ref === "string" ? adapter.ref : toolRef,
+          field: `${base}/toolRef`,
+        });
+      }
+    });
+  }
+  return issues;
+}
+
 // ── Reference cycles (Role inheritance, ModelProfile fallbacks) ─────────────────
 
 /**
@@ -202,6 +270,7 @@ export function validateSoulSemantics(documents: readonly VersionedSchemaDocumen
     ...resolveReferences(index),
     ...checkStableIdVersions(index),
     ...checkRoutineGraphs(index),
+    ...checkSkillCommands(index),
     ...checkCycles(index),
     ...analyzeCapabilities(index),
   ]);

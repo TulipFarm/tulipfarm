@@ -43,6 +43,9 @@ export * from "./settings";
 export {
   SKILL_DEFINITION,
   SKILL_FORBIDDEN_GRANT_KEYS,
+  type SkillCommand,
+  type SkillCommandFileOutput,
+  type SkillCommandIntegrationBinding,
   type SkillDefinition,
   SkillDefinitionSchema,
   type SkillSpec,

@@ -12,7 +12,7 @@ import { canonicalHash, type VersionedSchemaDocument } from "@tulipfarm/schema";
  * signature, and executes. No live repository, checkout, or network fetch is involved.
  */
 
-export const EXECUTION_BUNDLE_VERSION = 1 as const;
+export const EXECUTION_BUNDLE_VERSION = 2 as const;
 
 export type BundleErrorCode =
   | "INVALID_DEFINITION"
@@ -22,6 +22,15 @@ export type BundleErrorCode =
   | "DIGEST_MISMATCH"
   | "SIGNATURE_INVALID"
   | "DIGEST_CONFLICT";
+
+export interface BundleAsset {
+  readonly ownerDefinitionId: string;
+  /** Path relative to the owning Skill directory. */
+  readonly path: string;
+  /** SHA-256 of the exact UTF-8 bytes. */
+  readonly digest: string;
+  readonly content: string;
+}
 
 /**
  * Deterministic, payload-safe bundle failure. Carries only authored identifiers and JSON pointers
@@ -76,6 +85,8 @@ export interface ExecutionBundle {
   readonly commitSha: string;
   /** Sorted by `kind` then `slug`, so the digest is order-independent. */
   readonly definitions: readonly BundleDefinition[];
+  /** Sorted immutable companion files required by published Skill commands. */
+  readonly assets: readonly BundleAsset[];
 }
 
 export interface BundleSignature {
@@ -117,8 +128,10 @@ export interface RuntimeBundle {
   readonly changesetId: string;
   readonly commitSha: string;
   readonly definitions: readonly BundleDefinition[];
+  readonly assets: readonly BundleAsset[];
   get(kind: string, slug: string): BundleDefinition | undefined;
   getById(id: string): BundleDefinition | undefined;
+  asset(ownerDefinitionId: string, path: string): BundleAsset | undefined;
 }
 
 /**
@@ -129,14 +142,20 @@ export function createRuntimeBundle(bundle: ExecutionBundle, digest: string): Ru
   const snapshot = immutableSnapshot(bundle);
   const byId = new Map(snapshot.definitions.map((d) => [d.id, d]));
   const byKindSlug = new Map(snapshot.definitions.map((d) => [`${d.kind} ${d.slug}`, d]));
+  const byAsset = new Map(
+    snapshot.assets.map((asset) => [`${asset.ownerDefinitionId}\u0000${asset.path}`, asset])
+  );
   return Object.freeze({
     digest,
     businessId: snapshot.businessId,
     changesetId: snapshot.changesetId,
     commitSha: snapshot.commitSha,
     definitions: snapshot.definitions,
+    assets: snapshot.assets,
     get: (kind: string, slug: string) => byKindSlug.get(`${kind} ${slug}`),
     getById: (id: string) => byId.get(id),
+    asset: (ownerDefinitionId: string, path: string) =>
+      byAsset.get(`${ownerDefinitionId}\u0000${path}`),
   });
 }
 

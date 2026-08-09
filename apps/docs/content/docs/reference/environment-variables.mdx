@@ -103,6 +103,7 @@ files are only a fallback for container installs sharing the data volume.
 | `MARKETPLACE_SOURCE` | No | `tulipfarm/skills` | Skills marketplace source repository. |
 | `BUNDLED_SKILLS_DIR` | No | Image/repo bundled skills directory | Overrides where bundled Skills are read from. |
 | `BUNDLED_INTEGRATIONS_DIR` | No | Image/repo bundled integrations directory | Overrides where bundled Integrations are read from. |
+| `SANDBOX_RUNTIME_IMAGE` | Development only | Off | Exact `repository@sha256:...` image used for published Skill shell, TypeScript, and Python Tools. Ignored as an execution backend in production. |
 | `TULIPFARM_VERSION` | No | `dev` | Version reported by the update-check endpoint. |
 | `env://<NAME>` LLM refs | Only when referenced | — | LLM config escape hatch; the named environment variable must be set at model creation time. |
 

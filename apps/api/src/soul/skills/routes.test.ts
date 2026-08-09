@@ -309,6 +309,62 @@ describe("skills routes", () => {
       });
     });
 
+    it("returns package files and executable command runtime status", async () => {
+      const directory = join(soulPath, "skills", "reporting");
+      await mkdir(join(directory, "scripts"), { recursive: true });
+      await writeFile(join(directory, "SKILL.md"), "# Reporting", "utf8");
+      await writeFile(join(directory, "scripts", "report.py"), "print('ok')\n", "utf8");
+      await writeFile(
+        join(directory, "skill.yaml"),
+        `apiVersion: tulipfarm.ai/v1
+kind: Skill
+metadata:
+  id: 22222222-2222-2222-2222-222222222222
+  slug: reporting
+  schemaVersion: 1
+  authoredVersion: 1
+  lifecycle: draft
+spec:
+  instructions:
+    path: SKILL.md
+  scripts:
+    - scripts/report.py
+  commands:
+    - name: generate
+      toolRef: report.generate
+      runtimeProfile: shell-ts-python-v1
+      entrypoint: scripts/report.py
+      requiredCommands:
+        - python3
+  trustTier: first_party
+`,
+        "utf8"
+      );
+      soulLoader.skills.set("reporting", skill("reporting", "Reports."));
+      const previous = process.env.SANDBOX_RUNTIME_IMAGE_DIGEST;
+      process.env.SANDBOX_RUNTIME_IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
+      try {
+        const res = await app.inject({
+          method: "GET",
+          url: "/api/v1/skills/reporting",
+          cookies: auth(),
+          headers,
+        });
+        expect(res.statusCode).toBe(200);
+        expect(res.json().files).toContainEqual({ path: "scripts/report.py", size: 12 });
+        expect(res.json().commands).toEqual([
+          expect.objectContaining({
+            name: "generate",
+            runtimeProfile: "shell-ts-python-v1",
+            runtimeAvailable: true,
+          }),
+        ]);
+      } finally {
+        if (previous === undefined) delete process.env.SANDBOX_RUNTIME_IMAGE_DIGEST;
+        else process.env.SANDBOX_RUNTIME_IMAGE_DIGEST = previous;
+      }
+    });
+
     it("returns 404 for an unknown skill", async () => {
       const res = await app.inject({
         method: "GET",
@@ -444,6 +500,11 @@ describe("skills routes", () => {
     it("scans a local repo, audits a discovered skill (advisory), then installs on confirm", async () => {
       const remote = await makeRemoteRepo();
       temps.push(remote);
+      const scripts = join(remote, "skills", "demo-skill", "scripts");
+      await mkdir(scripts, { recursive: true });
+      await writeFile(join(scripts, "run.py"), "print('ok')\n", "utf8");
+      await execFileP("git", ["add", "-A"], { cwd: remote });
+      await execFileP("git", ["commit", "-q", "-m", "add Skill script"], { cwd: remote });
       // Cloned via a file:// URL so the source guard allows it (bare local paths are rejected).
       const fileUrl = `file://${remote}`;
 
@@ -503,6 +564,16 @@ describe("skills routes", () => {
 
       const written = await readFile(join(soulPath, "skills", "demo-skill", "SKILL.md"), "utf8");
       expect(written).toContain("Do the demo.");
+      const definition = await readFile(
+        join(soulPath, "skills", "demo-skill", "skill.yaml"),
+        "utf8"
+      );
+      expect(definition).toContain("kind: Skill");
+      expect(definition).toContain("trustTier: third_party");
+      expect(definition).toContain("scripts/run.py");
+      await expect(
+        readFile(join(soulPath, "skills", "demo-skill", "scripts", "run.py"), "utf8")
+      ).resolves.toBe("print('ok')\n");
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
       // Spec SKL-V1-001: provenance is recorded as (sourceUrl, ref, hash).
       expect(lock.skills["demo-skill"]).toMatchObject({

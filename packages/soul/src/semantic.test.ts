@@ -224,6 +224,57 @@ describe("validateSoulSemantics", () => {
     expect(c).toContain("ROUTINE_DUPLICATE_STATE");
   });
 
+  it("accepts a Skill command bound to a sandbox ToolContract", () => {
+    const docs = [
+      tool("classify", {
+        adapter: { kind: "sandbox", ref: "skill:issue-triage/classify_issue" },
+      }),
+      def("Skill", "issue-triage", {
+        instructions: { path: "SKILL.md" },
+        scripts: ["scripts/classify.ts"],
+        commands: [
+          {
+            name: "classify_issue",
+            toolRef: "classify",
+            runtimeProfile: "shell-ts-python-v1",
+            entrypoint: "scripts/classify.ts",
+          },
+        ],
+        trustTier: "first_party",
+      }),
+    ];
+    expect(() => validateSoulSemantics(docs)).not.toThrow();
+  });
+
+  it("rejects unsafe or inconsistent Skill command bindings", () => {
+    const docs = [
+      tool("classify"),
+      def("Skill", "issue-triage", {
+        instructions: { path: "SKILL.md" },
+        scripts: ["scripts/other.ts"],
+        commands: [
+          {
+            name: "classify_issue",
+            toolRef: "classify",
+            runtimeProfile: "shell-ts-python-v1",
+            entrypoint: "scripts/classify.ts",
+          },
+          {
+            name: "classify_issue",
+            toolRef: "classify",
+            runtimeProfile: "shell-ts-python-v1",
+            entrypoint: "scripts/classify.ts",
+          },
+        ],
+        trustTier: "first_party",
+      }),
+    ];
+    const c = codes(() => validateSoulSemantics(docs));
+    expect(c).toContain("SKILL_DUPLICATE_COMMAND");
+    expect(c).toContain("SKILL_ENTRYPOINT_UNDECLARED");
+    expect(c).toContain("SKILL_TOOL_ADAPTER_INVALID");
+  });
+
   it("detects role inheritance and model fallback cycles", () => {
     const docs = [
       def("Role", "a", { principalTypes: ["agent"], inherits: ["b"], grants: [] }),

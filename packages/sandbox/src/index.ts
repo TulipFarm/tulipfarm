@@ -16,6 +16,18 @@ export type {
   SandboxReplayGuard,
 } from "./backend";
 export { SandboxProtocolExecutor } from "./backend";
+export type {
+  DevelopmentContainerCommandResult,
+  DevelopmentContainerCommandRunner,
+  DevelopmentContainerSandboxOptions,
+  DevelopmentSandboxArtifact,
+  DevelopmentSandboxArtifactReader,
+  DevelopmentSandboxCredentialReader,
+  DevelopmentSandboxEgress,
+  DevelopmentSandboxEgressPort,
+  DevelopmentSandboxOutputPublisher,
+} from "./development-container";
+export { DevelopmentContainerSandboxExecutor } from "./development-container";
 export type { SandboxGuardrail } from "./guardrail";
 export {
   assertSandboxResultWithinRequest,
@@ -39,9 +51,12 @@ export { handleHookRequest, serveHookRequests } from "./hooks/worker-host";
 export * from "./ports";
 export type {
   SandboxComputeLimits,
+  SandboxCredentialBinding,
   SandboxExecutionRequest as IsolatedSandboxExecutionRequest,
   SandboxExecutionResult as IsolatedSandboxExecutionResult,
+  SandboxFileOutputDeclaration,
   SandboxProtocolErrorCode,
+  SandboxPublishedFileOutput,
   SandboxSignature,
   SandboxSignatureSigner,
   SandboxSignatureVerifier,
@@ -57,6 +72,17 @@ export {
   verifySandboxExecutionRequest,
   verifySandboxExecutionResult,
 } from "./request";
+export type {
+  SandboxRuntimeLanguage,
+  SandboxRuntimeProfile,
+  SandboxRuntimeProfileErrorCode,
+} from "./runtime-profile";
+export {
+  SANDBOX_RUNTIME_LANGUAGES,
+  SandboxRuntimeProfileError,
+  SandboxRuntimeProfileRegistry,
+  shellTsPythonV1,
+} from "./runtime-profile";
 export type {
   PinnedSkillBundle,
   PublishedSkillOutput,

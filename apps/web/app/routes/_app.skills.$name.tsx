@@ -69,6 +69,54 @@ export default function SkillDetail() {
         ) : null}
       </dl>
 
+      {(skill.commands ?? []).length > 0 ? (
+        <section className="flex flex-col gap-2">
+          <h2 className="text-sm font-medium text-foreground">Executable Tools</h2>
+          <div className="flex flex-col rounded-sm border border-border">
+            {(skill.commands ?? []).map((command) => (
+              <div
+                key={command.name}
+                className="grid gap-1 border-b border-border px-3 py-2 last:border-b-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-foreground">{command.name}</span>
+                  <span className={command.runtimeAvailable ? "text-success" : "text-destructive"}>
+                    {command.runtimeAvailable ? "runtime ready" : "publication blocked"}
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {command.runtimeProfile} · {command.entrypoint}
+                </p>
+                {command.requiredCommands.length > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    CLIs: {command.requiredCommands.join(", ")}
+                  </p>
+                ) : null}
+                {command.blocker ? (
+                  <p className="text-xs text-destructive">{command.blocker}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {(skill.files ?? []).length > 0 ? (
+        <details className="rounded-sm border border-border px-3 py-2">
+          <summary className="cursor-pointer text-sm text-foreground">
+            Package files ({(skill.files ?? []).length})
+          </summary>
+          <ul className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+            {(skill.files ?? []).map((file) => (
+              <li key={file.path} className="flex justify-between gap-3">
+                <span className="min-w-0 break-all">{file.path}</span>
+                <span>{file.size} B</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+
       <Button
         size="sm"
         variant={confirming ? "destructive" : "outline"}

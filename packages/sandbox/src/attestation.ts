@@ -144,6 +144,7 @@ export interface ProductionAttestationExpectation {
   readonly backendId: string;
   readonly challenge: string;
   readonly nowMs: number;
+  readonly requiresCredentialInjection?: boolean;
 }
 
 export async function verifyProductionSandboxAttestation(
@@ -178,7 +179,7 @@ export async function verifyProductionSandboxAttestation(
     !body.capabilities.ephemeralWorkspace ||
     !body.capabilities.computeLimits ||
     !body.capabilities.egressAllowlist ||
-    body.capabilities.credentialInjection ||
+    (expected.requiresCredentialInjection === true && !body.capabilities.credentialInjection) ||
     body.capabilities.hostMounts ||
     body.capabilities.directBusinessMutation
   ) {
