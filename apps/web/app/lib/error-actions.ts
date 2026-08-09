@@ -12,6 +12,9 @@ export function errorAction(message: string | null | undefined): ErrorAction | n
   if (m.includes("not configured")) {
     return { label: "Configure LLM", to: "/settings/llm" };
   }
+  if (m.includes("configured model is unavailable") || m.includes("modelprofile")) {
+    return { label: "Configure LLM", to: "/settings/llm" };
+  }
   // LlmCredentialError — a stored provider key is missing or can't be decrypted.
   if (m.includes("credential") || m.includes("/secrets/") || m.includes("api key")) {
     return { label: "Manage secrets", to: "/settings/secrets" };

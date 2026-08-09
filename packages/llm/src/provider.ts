@@ -12,6 +12,7 @@ import {
   type SecretsService,
   SecretUnavailableError,
 } from "@tulipfarm/secrets";
+import { ClassifiedLanguageModel } from "./provider-error";
 
 export async function resolveApiKey(
   api_key_ref: string | undefined,
@@ -93,25 +94,25 @@ export async function createModel(
   switch (entry.provider) {
     case "anthropic": {
       const p = createAnthropic({ apiKey });
-      return p(entry.model);
+      return new ClassifiedLanguageModel(p(entry.model));
     }
     case "openai": {
       const p = createOpenAI({ apiKey });
-      return p(entry.model);
+      return new ClassifiedLanguageModel(p(entry.model));
     }
     case "openai-compatible": {
       if (!baseUrl) {
         throw new LlmConfigValidationError("openai-compatible provider requires base_url");
       }
       const p = createOpenAICompatible({ baseURL: baseUrl, name: "openai-compatible", apiKey });
-      return p(entry.model);
+      return new ClassifiedLanguageModel(p(entry.model));
     }
     case "azure": {
       if (!resourceName && !baseUrl) {
         throw new LlmConfigValidationError("azure provider requires resource_name or base_url");
       }
       const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
-      return p(entry.model);
+      return new ClassifiedLanguageModel(p(entry.model));
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);

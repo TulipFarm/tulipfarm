@@ -63,12 +63,12 @@ reload the model service without restarting the app.
   <Step>
     Optionally set the **effort preset** mapping. By default `fast`, `balanced`, and `thorough`
     resolve to the like-named chains, and `auto` resolves to the declared default. Point a preset
-    at a different ModelProfile to change what participants get without changing the chains
-    themselves. A preset naming a profile that does not exist is rejected on save rather than
+    at a different derived ModelProfile to change which configured chain participants get. A
+    preset naming a profile that does not exist is rejected on save rather than
     failing later at the first turn that needs it.
   </Step>
   <Step>
-    Choose **Save**. The settings page writes `llm.config.yaml` in the Soul, commits it,
+    Choose **Save**. The settings page writes the `llm` block in `soul.yaml`, commits it,
     and reloads the LLM service live.
   </Step>
 </Steps>
@@ -81,6 +81,6 @@ row. Do not use invalid credentials for this test: credential failures are hard 
 and intentionally stop fallback.
 
 <Callout type="warn">
-If there is no `llm.config.yaml`, LLM features are disabled. The app does not invent a
+If there is no `soul.yaml#llm` configuration, LLM features are disabled. The app does not invent a
 model or silently call an unconfigured provider.
 </Callout>

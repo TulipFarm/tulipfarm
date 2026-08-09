@@ -1357,4 +1357,62 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "secrets: move GitHub App credentials onto integration.github.* keys",
     up: renameGitHubAppSecretKeys,
   },
+  {
+    version: 41,
+    description: "conversation deletion cascades through owned Chat data",
+    up: async (q) => {
+      const foreignKeys = [
+        ["messages", "messages_conversation_id_fkey", "conversation_id", "conversations", "id"],
+        ["message_feedback", "message_feedback_message_id_fkey", "message_id", "messages", "id"],
+        [
+          "message_feedback",
+          "message_feedback_conversation_id_fkey",
+          "conversation_id",
+          "conversations",
+          "id",
+        ],
+        [
+          "pending_interactions",
+          "pending_interactions_conversation_id_fkey",
+          "conversation_id",
+          "conversations",
+          "id",
+        ],
+        [
+          "conversation_turns",
+          "conversation_turns_conversation_id_fkey",
+          "conversation_id",
+          "conversations",
+          "id",
+        ],
+        [
+          "turn_completions",
+          "turn_completions_turn_id_fkey",
+          "turn_id",
+          "conversation_turns",
+          "id",
+        ],
+        [
+          "surface_actions",
+          "surface_actions_conversation_id_fkey",
+          "conversation_id",
+          "conversations",
+          "id",
+        ],
+      ] as const;
+      for (const [table, constraint, column, target, targetColumn] of foreignKeys) {
+        const present = await q.query(
+          `SELECT table_name FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2`,
+          [table, column]
+        );
+        if (present.rows.length === 0) continue;
+        await q.query(`ALTER TABLE ${table} DROP CONSTRAINT IF EXISTS ${constraint}`);
+        await q.query(
+          `ALTER TABLE ${table} ADD CONSTRAINT ${constraint} FOREIGN KEY (${column}) ` +
+            `REFERENCES ${target}(${targetColumn}) ON DELETE CASCADE`
+        );
+      }
+    },
+  },
 ];

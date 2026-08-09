@@ -11,6 +11,7 @@ coverage/
 specs
 docs/plans
 docs/uat
+docs/qa/runs/
 cookies.txt
 references
 !/.agents/skills/tulipfarm-design-system/references/

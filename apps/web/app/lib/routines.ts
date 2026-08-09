@@ -7,22 +7,18 @@ import { API_BASE, apiGet, apiWrite } from "./api";
  * `runEventsUrl` builds the EventSource URL (cookies ride along via withCredentials).
  */
 
-export type RoutineTrigger =
-  | { type: "manual" }
-  | { type: "cron"; schedule: string; timezone?: string }
-  | { type: "webhook"; secret_ref: string }
-  | { type: "event"; event: string; filter?: string }
-  | { type: "agent" };
+export type RoutineTrigger = {
+  slug: string;
+  type: string;
+  summary: string;
+};
 
 export type RoutineSummary = {
+  id: string;
   slug: string;
-  valid: boolean;
-  name?: string | null;
-  description?: string | null;
-  triggers?: RoutineTrigger[];
-  inputs?: RoutineInputsSchema | null;
-  hasHooks?: boolean;
-  loadError?: string | null;
+  displayName: string | null;
+  authoredVersion: number;
+  triggers: RoutineTrigger[];
 };
 
 export type RoutineDetail =

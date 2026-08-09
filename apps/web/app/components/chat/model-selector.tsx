@@ -1,4 +1,4 @@
-import { asEffortPreset } from "@tulipfarm/schema";
+import { asEffortPreset } from "@tulipfarm/schema/model-catalog";
 import { Check, ChevronDown } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useEffect, useRef, useState } from "react";

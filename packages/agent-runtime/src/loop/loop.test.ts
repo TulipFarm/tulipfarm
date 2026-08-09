@@ -5,6 +5,7 @@ import type {
   ModelPort,
   ModelStreamChunk,
 } from "../ports";
+import { ModelInvocationError } from "../ports";
 import { InMemoryLoopCheckpointStore } from "./checkpoint";
 import {
   AgentLoop,
@@ -509,6 +510,27 @@ describe("AgentLoop", () => {
 
     // A truncated stream is a broken adapter, not an empty answer — never completed with "partial".
     expect(outcome).toMatchObject({ status: "failed", reason: "model_error" });
+  });
+
+  it("preserves a participant-safe provider failure reason", async () => {
+    const providerError = new Error("provider response must remain operator-only");
+    const model: ModelPort = {
+      invoke: async () => {
+        throw new ModelInvocationError("model_billing_inactive", providerError);
+      },
+    };
+    const warn = vi.fn();
+
+    const outcome = await loop({ model, log: { warn } }).run(input());
+
+    expect(outcome).toMatchObject({ status: "failed", reason: "model_billing_inactive" });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "model_billing_inactive",
+        error: "provider response must remain operator-only",
+      }),
+      "model call failed"
+    );
   });
 
   it("numbers deltas continuously across iterations", async () => {

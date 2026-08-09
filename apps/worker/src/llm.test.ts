@@ -46,7 +46,7 @@ describe("SoulLlm", () => {
   });
 
   it("re-reads the configuration each call but rebuilds only when it changed", async () => {
-    // An operator editing llm.config.yaml must not have to restart every worker — and an unchanged
+    // An operator editing soul.yaml#llm must not have to restart every worker — and an unchanged
     // Soul must not cost a provider rebuild per turn.
     const { llm, reads, opens } = soul({ sources: [UNCONFIGURED] });
 

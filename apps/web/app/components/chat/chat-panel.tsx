@@ -183,7 +183,7 @@ export function ChatPanel({
           className="mx-auto mb-2 w-[calc(100%-2rem)] max-w-4xl rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive sm:w-[calc(100%-3rem)]"
         >
           <span className="font-medium">Response failed.</span>{" "}
-          {error ?? "The stream ended unexpectedly."} Try again.
+          {error ?? "The stream ended unexpectedly. Try again."}
           {errorCta ? (
             <>
               {" "}

@@ -88,6 +88,21 @@ export interface SpecResolution {
   candidates: string[];
 }
 
+/** Resolve an explicit LiteLLM candidate selected by an administrator. */
+export function resolveModelSpecCandidate(
+  key: string,
+  catalog: LiteLlmCatalog,
+  fetchedAt: string
+): SpecResolution {
+  const entry = catalog[key];
+  if (!entry) return { spec: null, matchedKey: null, candidates: [] };
+  const spec = curate(key, entry, fetchedAt);
+  if (typeof spec.max_input_tokens !== "number" || spec.max_input_tokens <= 0) {
+    return { spec: null, matchedKey: null, candidates: [] };
+  }
+  return { spec, matchedKey: key, candidates: [] };
+}
+
 /**
  * Resolve a TulipFarm (provider, model[, base_url]) to a pinned ModelSpec from the LiteLLM catalog.
  * Tries provider-prefixed + bare keys (exact, then case-insensitive), then a suffix search across the

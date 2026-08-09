@@ -1,5 +1,10 @@
 import { afterEach, expect, test, vi } from "vitest";
-import { createRunEventMapper, parseSseFrames, postChat } from "~/lib/chat/sse-client";
+import {
+  createRunEventMapper,
+  modelFailureMessage,
+  parseSseFrames,
+  postChat,
+} from "~/lib/chat/sse-client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -197,6 +202,29 @@ test("accepts older turn.finished events without receipt fields", () => {
   expect(
     map({ seq: 1, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
   ).toEqual([{ type: "finish", data: { reason: "stop", messageId: "msg-1" } }]);
+});
+
+test("turns allowlisted model failures into actionable participant-safe messages", () => {
+  const map = createRunEventMapper();
+
+  expect(
+    map({
+      seq: 1,
+      type: "turn.finished",
+      data: { status: "failed", reason: "model_billing_inactive" },
+    })
+  ).toEqual([
+    {
+      type: "error",
+      data: {
+        message:
+          "The model provider's API billing is inactive. Activate billing or use another Provider Credential.",
+      },
+    },
+  ]);
+  expect(modelFailureMessage("untrusted_provider_detail")).toBe(
+    "The model request failed. Try again."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {

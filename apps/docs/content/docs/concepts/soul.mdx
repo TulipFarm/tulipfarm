@@ -36,11 +36,13 @@ Settings.
     <Folder name="integrations/{name}" />
     <Folder name="surface-components/{name}" />
     <File name="soul.yaml" />
-    <File name="llm.config.yaml" />
     <File name="guardrails.yaml" />
     <File name="skills-lock.json" />
   </Folder>
 </Files>
+
+Provider chains, Effort Presets, and model specifications live under `llm` in `soul.yaml`. The
+Soul has no separate model configuration file or `models/` directory.
 
 Records, Knowledge pages, chats, Runs, Approvals, memory, secrets, audit, and identity live in
 PostgreSQL, not in the Soul. The Soul defines how the system behaves; the datastore records what

@@ -57,7 +57,7 @@ export class LlmService {
     logger: FallbackLogger = console
   ): Promise<void> {
     if (!rawConfig) {
-      console.warn("[llm] no llm.config.yaml found — LLM features disabled");
+      console.warn("[llm] no soul.yaml#llm config found — LLM features disabled");
       return;
     }
 
@@ -70,8 +70,8 @@ export class LlmService {
     const entryByModelId = new Map<string, ResolvedModelEntry>();
 
     for (const tier of TIERS) {
-      // A Soul that has migrated to authored ModelProfiles publishes no tiers; there is simply
-      // nothing for this loop to build, and that is a valid configuration rather than a fault.
+      // The schema requires every chain, but the optional access keeps this boundary defensive
+      // when called with unchecked JavaScript.
       const providers = config.tiers?.[tier].providers ?? [];
       if (providers.length === 0) continue;
 

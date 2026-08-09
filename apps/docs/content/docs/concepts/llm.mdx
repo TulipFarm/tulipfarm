@@ -48,15 +48,13 @@ modalities, context window), and the terms it may be used under (data residency,
 whether prompts may train the provider's models, and cost, token, and latency ceilings). It also
 names its own ordered fallbacks.
 
-Profiles come from one of two places, and the router does not care which:
+Profiles have one authored source: the provider chains in `soul.yaml#llm`. TulipFarm derives
+ModelProfiles deterministically from that block for both live Chat and bundle publication.
+Capability is read from the model spec pinned in the same config rather than guessed.
 
-- **Authored** — `soul/models/*.yaml`, published into a bundle and version-pinned. A Run is routed
-  against the profiles it was minted with, not whichever ones are live when it finally executes.
-- **Derived** — for a Soul that has not authored any, profiles are derived from the provider lists
-  in `llm.config.yaml`. Capability is read from the pinned model spec rather than guessed.
-
-There is one router either way. A deployment without published profiles is not dropped onto a
-second, weaker selection path.
+Publication writes those derived profiles into the immutable bundle, not back into a `models/`
+directory. A Run is therefore routed against the profiles it was minted with, while Settings and
+new publications can never disagree about which configuration is current.
 
 ## Denials
 
@@ -133,5 +131,5 @@ The escalation is a new turn: the original reply is left in place to compare aga
 Agent, Skills, Resources, and Knowledge pages are carried over so only the effort changes.
 Escalation is always the participant's choice — TulipFarm never silently upgrades a turn.
 
-With no `llm.config.yaml`, LLM features are disabled until an admin configures providers. Use
+With no `soul.yaml#llm` configuration, LLM features are disabled until an admin configures providers. Use
 [Configure LLM providers](/docs/guides/configure-llm-providers) for the UI flow.

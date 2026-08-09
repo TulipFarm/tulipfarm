@@ -6,7 +6,7 @@ import type { Logger, SoulLoader } from "@tulipfarm/soul";
 /**
  * Reload the LLM config on every `soul.synced` event without restarting.
  *
- * Reloads the soul (re-reads `llm.config.yaml`) then re-initialises the
+ * Reloads the soul (re-reads `soul.yaml#llm`) then re-initialises the
  * LlmService and EmbeddingService, which re-validate and rebuild from the new
  * config. Both `SoulLoader.reload` and the service `init`s validate/build before
  * mutating their own state, so a failed reload leaves the running server on its

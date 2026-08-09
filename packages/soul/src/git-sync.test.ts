@@ -277,6 +277,41 @@ describe("GitSyncService", () => {
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await expect(svc.commit("chore: update soul")).rejects.toThrow("cannot commit");
     });
+
+    it("commits only changed migration-owned paths", async () => {
+      mockGit.raw.mockImplementation(async (args: string[]) =>
+        args.at(-1) === "models" ? " D models/balanced.yaml\n" : " M soul.yaml\n"
+      );
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+
+      await svc.commitPaths("chore(soul): migrate format", ["soul.yaml", "models"]);
+
+      expect(mockGit.add).toHaveBeenCalledWith(["-A", "--", "soul.yaml"]);
+      expect(mockGit.add).toHaveBeenCalledWith(["-A", "--", "models"]);
+      expect(mockGit.commit).toHaveBeenCalledWith("chore(soul): migrate format", [
+        "soul.yaml",
+        "models",
+      ]);
+    });
+
+    it("does not pass an absent retired directory as a Git pathspec", async () => {
+      mockGit.raw.mockImplementation(async (args: string[]) =>
+        args.at(-1) === "models" ? "" : " M soul.yaml\n"
+      );
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+
+      await svc.commitPaths("chore(soul): migrate format", ["soul.yaml", "models"]);
+
+      expect(mockGit.add).not.toHaveBeenCalledWith(["-A", "--", "models"]);
+      expect(mockGit.commit).toHaveBeenCalledWith("chore(soul): migrate format", ["soul.yaml"]);
+    });
+
+    it("rejects traversal and empty scoped commits", async () => {
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+
+      await expect(svc.commitPaths("bad", [])).rejects.toThrow("relative paths");
+      await expect(svc.commitPaths("bad", ["../outside"])).rejects.toThrow("relative paths");
+    });
   });
 
   describe("push (tool)", () => {

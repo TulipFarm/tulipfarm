@@ -19,7 +19,7 @@ import { modelBudgetEvidence } from "./model-budget";
  * The Soul's configured providers, kept current without a restart.
  *
  * The configuration lives in the Soul repository, which this app cannot read — it arrives over the
- * internal host. Reading it once at boot would mean an operator who edits `llm.config.yaml` has to
+ * internal host. Reading it once at boot would mean an operator who edits `soul.yaml#llm` has to
  * restart every worker before the change takes effect, and would leave workers disagreeing about
  * which model a turn ran on in the meantime.
  *

@@ -25,9 +25,10 @@ describe("validateLlmConfig", () => {
     expect(() => validateLlmConfig({})).toThrow(LlmConfigValidationError);
   });
 
-  it("accepts a config that declares presets instead of tiers", () => {
-    // Either side of the ModelProfile migration must validate; only naming neither is an error.
-    expect(() => validateLlmConfig({ presets: { default: "balanced" } })).not.toThrow();
+  it("rejects Effort Presets without provider chains", () => {
+    expect(() => validateLlmConfig({ presets: { default: "balanced" } })).toThrow(
+      LlmConfigValidationError
+    );
   });
 
   it("rejects empty providers array", () => {

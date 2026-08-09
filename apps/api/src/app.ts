@@ -79,6 +79,8 @@ import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
 import { registerRoutineAuthoringRoutes } from "./routines/authoring-routes";
+import type { RoutineCatalog } from "./routines/catalog";
+import { registerRoutineCatalogRoutes } from "./routines/catalog-routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
@@ -173,6 +175,8 @@ export interface AppOptions {
   observabilityConfig?: ObservabilityConfig;
   /** Canonical proposal-only Routine authoring and simulation boundary. */
   routineAuthoring?: CanonicalRoutineAuthoringService;
+  /** Published Routine browser catalogue from the verified active bundle. */
+  routineCatalog?: RoutineCatalog;
   /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
   routineApprovals?: RoutineApprovalService;
@@ -480,6 +484,9 @@ export async function buildApp(opts: AppOptions = {}) {
     }
     if (opts.routineAuthoring) {
       registerRoutineAuthoringRoutes(app, opts.routineAuthoring, requireAuth);
+    }
+    if (opts.routineCatalog) {
+      registerRoutineCatalogRoutes(app, opts.routineCatalog, requireAuth);
     }
 
     if (opts.kvService) {

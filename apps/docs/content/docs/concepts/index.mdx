@@ -9,7 +9,8 @@ Agent to take over a focused job. Underneath that simple surface is a deliberate
 
 **Soul** is the git-backed definition store. It lives at `~/.tulipfarm/soul` by default and holds
 Resource type schemas, Agents, Skills, Routines, Integrations, Surface components, `soul.yaml`,
-`llm.config.yaml`, `guardrails.yaml`, and `skills-lock.json`. Soul writes commit immediately and
+`guardrails.yaml`, and `skills-lock.json`. Model configuration is the `llm` block in `soul.yaml`.
+Soul writes commit immediately and
 reconcile live, so a newly built Resource type or Agent is available without restarting.
 
 **The datastore** is PostgreSQL 17 with pgvector. It holds Records, Knowledge spaces and pages,

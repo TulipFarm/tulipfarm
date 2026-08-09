@@ -5,12 +5,10 @@ import type { LlmConfig, ModelSpec, ProviderConnection, ProviderEntry } from "./
 /**
  * The catalog bridge that makes ModelProfile routing the *only* routing path.
  *
- * SPEC §17 routes on Soul-authored ModelProfiles, but a deployment that has not published any must
- * still run — and must not fall back to a second, weaker selection mechanism, which is exactly the
- * split this module exists to close. So an unmigrated `llm.config` is *derived* into the same
- * `ModelProfileSpec` shape the published bundle yields. One router, two sources: authored profiles
- * win when present, derived ones keep an unmigrated Soul working, and neither bypasses the
- * constraint checks.
+ * SPEC §17 routes on ModelProfiles. The sole authored source is `soul.yaml#llm`; this module
+ * derives that config into the same `ModelProfileSpec` shape used by live Chat and immutable
+ * publication bundles. One router and one source means Settings cannot update one representation
+ * while durable Runs pin another.
  *
  * Capability is read from the pinned LiteLLM `spec` rather than guessed: it already carries
  * `supports_function_calling`, `supports_vision`, and `max_input_tokens`. Where the spec is silent
@@ -51,7 +49,7 @@ export function isEffortPreset(value: string): value is EffortPreset {
 
 /**
  * Translate a wire selector into an effort preset. Returns `undefined` for anything else — a raw
- * model id or an authored ModelProfile ref, which the caller resolves directly.
+ * model id or ModelProfile ref, which the caller resolves directly.
  */
 export function asEffortPreset(value: string | undefined): EffortPreset | undefined {
   if (value === undefined) return undefined;

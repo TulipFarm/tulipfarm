@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchLiteLlmCatalog, type LiteLlmCatalog, resolveModelSpec } from "./model-spec";
+import {
+  fetchLiteLlmCatalog,
+  type LiteLlmCatalog,
+  resolveModelSpec,
+  resolveModelSpecCandidate,
+} from "./model-spec";
 
 const FETCHED = "2026-06-28";
 
@@ -66,6 +71,16 @@ describe("resolveModelSpec", () => {
     expect(r.spec).toBeNull();
     expect(r.candidates).toContain("azure_ai/kimi-k2.5");
     expect(r.candidates).toContain("openrouter/moonshotai/kimi-k2.5");
+  });
+
+  it("pins the explicit candidate without changing the provider model id", () => {
+    const resolution = resolveModelSpecCandidate("azure_ai/kimi-k2.5", CATALOG, FETCHED);
+
+    expect(resolution).toMatchObject({
+      matchedKey: "azure_ai/kimi-k2.5",
+      candidates: [],
+      spec: { max_input_tokens: 256000, litellm_key: "azure_ai/kimi-k2.5" },
+    });
   });
 
   it("returns no match + loose candidates for an unknown model", () => {

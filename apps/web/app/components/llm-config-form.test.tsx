@@ -2,7 +2,12 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import { LlmConfigForm } from "~/components/llm-config-form";
-import { getModelOptions, type LlmConfig, type LlmProviderInfo } from "~/lib/settings";
+import {
+  getModelOptions,
+  type LlmConfig,
+  type LlmProviderInfo,
+  resolveModelSpec,
+} from "~/lib/settings";
 
 vi.mock("~/lib/settings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("~/lib/settings")>();
@@ -60,6 +65,11 @@ const initial: LlmConfig = {
 afterEach(() => {
   vi.clearAllMocks();
   vi.mocked(getModelOptions).mockResolvedValue({ models: [], source: "unavailable" });
+  vi.mocked(resolveModelSpec).mockResolvedValue({
+    spec: null,
+    matchedKey: null,
+    candidates: [],
+  });
 });
 
 test("renders Effort Preset mappings and the ordered provider chains", () => {
@@ -202,6 +212,11 @@ test("blocks save when a row's Provider Connection is not fully configured", asy
 });
 
 test("adding a provider row adds a fallback profile option and submits the chain", async () => {
+  vi.mocked(resolveModelSpec).mockResolvedValueOnce({
+    spec: { max_input_tokens: 200000 },
+    matchedKey: "anthropic/claude-3-5-haiku",
+    candidates: [],
+  });
   const onSubmit = vi.fn();
   render(
     <LlmConfigForm
@@ -219,13 +234,18 @@ test("adding a provider row adds a fallback profile option and submits the chain
   await userEvent.type(screen.getByLabelText("Fast provider 2 model"), "claude-3-5-haiku");
   expect(screen.getByText("fast-fallback-1")).toBeInTheDocument();
   await userEvent.selectOptions(screen.getByLabelText("Fast ModelProfile"), "fast-fallback-1");
+  await screen.findByText("200k ctx");
   await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
 
   const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
   expect(submitted.presets?.fast).toBe("fast-fallback-1");
   expect(submitted.tiers?.quick.providers).toEqual([
     { provider: "anthropic", model: "claude-haiku-4-5" },
-    { provider: "anthropic", model: "claude-3-5-haiku" },
+    {
+      provider: "anthropic",
+      model: "claude-3-5-haiku",
+      spec: { max_input_tokens: 200000 },
+    },
   ]);
 });
 
@@ -319,4 +339,71 @@ test("a pinned spec renders as metadata badges", () => {
   expect(screen.getByText("$0.80 / $4.00 per Mtok")).toBeInTheDocument();
   expect(screen.getByText("200k ctx")).toBeInTheDocument();
   expect(screen.getByText("tools")).toBeInTheDocument();
+});
+
+test("lets an admin pin one LiteLLM candidate for an ambiguous model", async () => {
+  vi.mocked(resolveModelSpec)
+    .mockResolvedValueOnce({
+      spec: null,
+      matchedKey: null,
+      candidates: ["azure_ai/kimi-k2.5", "openrouter/moonshotai/kimi-k2.5"],
+    })
+    .mockResolvedValueOnce({
+      spec: {
+        litellm_key: "azure_ai/kimi-k2.5",
+        max_input_tokens: 256000,
+        input_cost_per_token: 0.00000057,
+      },
+      matchedKey: "azure_ai/kimi-k2.5",
+      candidates: [],
+    });
+  const onSubmit = vi.fn();
+  render(
+    <LlmConfigForm
+      initial={initial}
+      providers={PROVIDERS}
+      secretKeys={ALL_SECRETS}
+      onSubmit={onSubmit}
+      submitting={false}
+    />
+  );
+
+  const model = screen.getByLabelText("Fast provider 1 model");
+  await userEvent.clear(model);
+  await userEvent.type(model, "kimi-k2.5");
+  await userEvent.tab();
+  await userEvent.click(await screen.findByRole("button", { name: "azure_ai/kimi-k2.5" }));
+  await screen.findByText("256k ctx");
+  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+  const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
+  expect(submitted.tiers?.quick.providers[0]?.model).toBe("kimi-k2.5");
+  expect(submitted.tiers?.quick.providers[0]?.spec).toMatchObject({
+    litellm_key: "azure_ai/kimi-k2.5",
+    max_input_tokens: 256000,
+  });
+});
+
+test("accepts a manual context window when the model catalogue has no match", async () => {
+  const onSubmit = vi.fn();
+  render(
+    <LlmConfigForm
+      initial={initial}
+      providers={PROVIDERS}
+      secretKeys={ALL_SECRETS}
+      onSubmit={onSubmit}
+      submitting={false}
+    />
+  );
+
+  const model = screen.getByLabelText("Fast provider 1 model");
+  await userEvent.clear(model);
+  await userEvent.type(model, "private-model");
+  await userEvent.tab();
+  const context = await screen.findByLabelText("Fast provider 1 max input tokens");
+  await userEvent.type(context, "131072");
+  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+
+  const submitted = onSubmit.mock.calls[0][0] as LlmConfig;
+  expect(submitted.tiers?.quick.providers[0]?.spec).toEqual({ max_input_tokens: 131072 });
 });

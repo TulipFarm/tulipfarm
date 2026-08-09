@@ -2,6 +2,7 @@ import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provid
 import { APICallError, LoadAPIKeyError } from "ai";
 import { describe, expect, it, vi } from "vitest";
 import { FallbackModel, isHardFailure } from "./fallback";
+import { LlmProviderError } from "./provider-error";
 
 const opts = {} as LanguageModelV4CallOptions;
 
@@ -244,6 +245,9 @@ describe("isHardFailure", () => {
   it("classifies abort and credential errors as hard", () => {
     expect(isHardFailure(new DOMException("aborted", "AbortError"))).toBe(true);
     expect(isHardFailure(new LoadAPIKeyError({ message: "no key" }))).toBe(true);
+    expect(
+      isHardFailure(new LlmProviderError("model_billing_inactive", new Error("provider response")))
+    ).toBe(true);
   });
 
   it("classifies non-retryable API errors (401/404/400) as hard", () => {

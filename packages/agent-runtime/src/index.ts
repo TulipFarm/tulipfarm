@@ -5,6 +5,7 @@ export * from "./guardrails";
 export * from "./loop";
 export * from "./models";
 export type {
+  ModelInvocationFailureReason,
   ModelInvocationRequest,
   ModelInvocationResult,
   ModelMessage,
@@ -12,4 +13,5 @@ export type {
   ModelPort,
   ModelStreamChunk,
 } from "./ports";
+export { ModelInvocationError } from "./ports";
 export * from "./skills";

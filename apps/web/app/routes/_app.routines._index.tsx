@@ -11,14 +11,7 @@ export async function clientLoader() {
 }
 
 function triggerLabel(trigger: RoutineTrigger): string {
-  switch (trigger.type) {
-    case "cron":
-      return `cron ${trigger.schedule}`;
-    case "event":
-      return `on ${trigger.event}`;
-    default:
-      return trigger.type;
-  }
+  return trigger.summary;
 }
 
 export default function RoutinesIndex() {
@@ -29,7 +22,7 @@ export default function RoutinesIndex() {
       <EmptyState
         section="routines"
         title="Routines"
-        hint="No routines yet. Ask the assistant to forge one, or add soul/routines/<slug>/routine.yaml."
+        hint="No published Routines yet. Ask the assistant to create and publish one."
       />
     );
   }
@@ -42,41 +35,30 @@ export default function RoutinesIndex() {
       <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
         {routines.map((routine) => (
           <li key={routine.slug}>
-            {routine.valid ? (
-              <Link
-                to={`/routines/${encodeURIComponent(routine.slug)}`}
-                className="group flex items-center gap-2.5 px-3 py-2 transition-colors hover:bg-accent"
-              >
-                <span className="font-medium text-foreground">{routine.name ?? routine.slug}</span>
-                {routine.description ? (
-                  <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                    {routine.description}
-                  </span>
-                ) : (
-                  <span className="flex-1" />
-                )}
-                <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  {(routine.triggers ?? []).map((t, i) => (
-                    <span
-                      key={`${t.type}-${i.toString()}`}
-                      className="rounded-sm bg-muted px-1.5 py-0.5 uppercase tracking-[0.15em]"
-                    >
-                      {triggerLabel(t)}
-                    </span>
-                  ))}
-                </span>
-              </Link>
-            ) : (
-              <div className="flex items-center gap-2.5 px-3 py-2">
-                <span className="font-medium text-foreground">{routine.slug}</span>
-                <span
-                  className="min-w-0 flex-1 truncate text-destructive text-xs"
-                  title={routine.loadError ?? undefined}
-                >
-                  invalid: {routine.loadError}
-                </span>
+            <div className="flex items-center gap-2.5 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-foreground">{routine.displayName ?? routine.slug}</p>
+                <p className="text-xs text-muted-foreground">
+                  {routine.slug} · version {routine.authoredVersion}
+                </p>
               </div>
-            )}
+              <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                {routine.triggers.map((trigger) => (
+                  <span
+                    key={trigger.slug}
+                    className="rounded-sm bg-muted px-1.5 py-0.5 uppercase tracking-[0.15em]"
+                  >
+                    {triggerLabel(trigger)}
+                  </span>
+                ))}
+              </span>
+              <Link
+                to={`/routines/${encodeURIComponent(routine.slug)}/edit`}
+                className="text-xs text-primary hover:underline"
+              >
+                author
+              </Link>
+            </div>
           </li>
         ))}
       </ul>

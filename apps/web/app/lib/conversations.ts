@@ -1,4 +1,4 @@
-import { apiGet, apiWrite } from "./api";
+import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
  * Read-only client for persisted chats (UUID-chat persistence). The API auto-creates a conversation
@@ -70,6 +70,11 @@ export function setConversationStarred(id: string, starred: boolean): Promise<Co
   return apiWrite<ConversationSummary>("PUT", `/api/v1/chats/${encodeURIComponent(id)}`, {
     starred,
   });
+}
+
+/** Permanently delete an owned conversation and its persisted Chat data. */
+export function deleteConversation(id: string): Promise<void> {
+  return apiDelete(`/api/v1/chats/${encodeURIComponent(id)}`);
 }
 
 export async function getConversation(id: string): Promise<Conversation> {

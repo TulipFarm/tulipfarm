@@ -41,7 +41,7 @@ describe("runSoulMigrations", () => {
     it("no-ops when SOUL_MIGRATIONS is empty", async () => {
       await writeSoulYaml("soulFormatVersion: 0\n");
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(false);
       expect(logger.info).not.toHaveBeenCalled();
       expect(await readSoulYaml()).toContain("soulFormatVersion: 0");
     });
@@ -50,7 +50,7 @@ describe("runSoulMigrations", () => {
       setMigrations([{ version: 1, description: "v1", up: vi.fn().mockResolvedValue(undefined) }]);
       await writeSoulYaml("soulFormatVersion: 1\n");
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(false);
       expect(logger.info).not.toHaveBeenCalled();
     });
   });
@@ -60,7 +60,7 @@ describe("runSoulMigrations", () => {
       const up = vi.fn().mockResolvedValue(undefined);
       setMigrations([{ version: 1, description: "add field", up }]);
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(true);
       expect(up).toHaveBeenCalledWith(TMP);
       const yaml = await readSoulYaml();
       expect(yaml).toContain("soulFormatVersion: 1");
@@ -73,7 +73,7 @@ describe("runSoulMigrations", () => {
       const up = vi.fn().mockResolvedValue(undefined);
       setMigrations([{ version: 1, description: "add field", up }]);
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(true);
       expect(up).toHaveBeenCalledWith(TMP);
       expect(logger.info).toHaveBeenCalledWith(expect.stringContaining("v1"));
       const yaml = await readSoulYaml();
@@ -106,6 +106,24 @@ describe("runSoulMigrations", () => {
       expect(yaml).toContain("soulFormatVersion: 2");
     });
 
+    it("preserves soul.yaml changes made by a migration before recording its version", async () => {
+      await writeSoulYaml("soulFormatVersion: 0\nname: before\n");
+      setMigrations([
+        {
+          version: 1,
+          description: "change manifest",
+          up: async () => writeSoulYaml("soulFormatVersion: 0\nname: after\nadded: true\n"),
+        },
+      ]);
+
+      expect(await runSoulMigrations(TMP, makeLogger())).toBe(true);
+
+      const yaml = await readSoulYaml();
+      expect(yaml).toContain("name: after");
+      expect(yaml).toContain("added: true");
+      expect(yaml).toContain("soulFormatVersion: 1");
+    });
+
     it("skips already-applied migrations", async () => {
       await writeSoulYaml("soulFormatVersion: 1\n");
       const v1 = vi.fn().mockResolvedValue(undefined);
@@ -115,7 +133,7 @@ describe("runSoulMigrations", () => {
         { version: 2, description: "v2", up: v2 },
       ]);
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(true);
       expect(v1).not.toHaveBeenCalled();
       expect(v2).toHaveBeenCalled();
     });
@@ -128,7 +146,7 @@ describe("runSoulMigrations", () => {
         { version: 1, description: "bad", up: vi.fn().mockRejectedValue(new Error("boom")) },
       ]);
       const logger = makeLogger();
-      await expect(runSoulMigrations(TMP, logger)).resolves.toBeUndefined();
+      await expect(runSoulMigrations(TMP, logger)).resolves.toBe(false);
       expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("boom"));
       const yaml = await readSoulYaml();
       expect(yaml).toContain("soulFormatVersion: 0");
@@ -142,7 +160,7 @@ describe("runSoulMigrations", () => {
         { version: 2, description: "v2", up: v2 },
       ]);
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(false);
       expect(v2).not.toHaveBeenCalled();
       const yaml = await readSoulYaml();
       expect(yaml).toContain("soulFormatVersion: 0");
@@ -156,7 +174,7 @@ describe("runSoulMigrations", () => {
         { version: 3, description: "v3", up: vi.fn().mockResolvedValue(undefined) },
       ]);
       const logger = makeLogger();
-      await runSoulMigrations(TMP, logger);
+      expect(await runSoulMigrations(TMP, logger)).toBe(true);
       const yaml = await readSoulYaml();
       expect(yaml).toContain("soulFormatVersion: 1");
     });

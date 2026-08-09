@@ -1,7 +1,11 @@
 import { createRemixStub } from "@remix-run/testing";
-import { render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
+
+afterEach(() => {
+  cleanup();
+});
 
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
@@ -149,7 +153,7 @@ test("inspects a repository before anything is written, then installs the chosen
   renderCatalog([integration()]);
 
   await user.click(await screen.findByRole("button", { name: /install from git/i }));
-  await user.type(screen.getByLabelText(/repository/i), "acme/repo");
+  await user.type(screen.getByLabelText("Repository"), "acme/repo");
   await user.click(screen.getByRole("button", { name: /read repository/i }));
 
   expect(await screen.findByText("Track issues.")).toBeInTheDocument();
@@ -178,7 +182,7 @@ test("names why a repo's integration was refused instead of just disabling it", 
   renderCatalog([integration()]);
 
   await user.click(await screen.findByRole("button", { name: /install from git/i }));
-  await user.type(screen.getByLabelText(/repository/i), "acme/repo");
+  await user.type(screen.getByLabelText("Repository"), "acme/repo");
   await user.click(screen.getByRole("button", { name: /read repository/i }));
 
   expect(await screen.findByText(/runs a handler module in the host process/)).toBeInTheDocument();

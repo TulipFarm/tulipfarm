@@ -30,5 +30,5 @@ test("detail ErrorBoundary renders 404 not found for a missing integration", () 
 test("detail ErrorBoundary surfaces a non-404 API failure generically", () => {
   renderError(<DetailErrorBoundary />, new ApiError(500, "boom"));
   expect(screen.getByText(/error: 500/i)).toBeInTheDocument();
-  expect(screen.getByText(/could not be reached/i)).toBeInTheDocument();
+  expect(screen.getByText(/could not complete this request/i)).toBeInTheDocument();
 });
