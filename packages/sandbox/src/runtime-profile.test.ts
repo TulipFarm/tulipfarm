@@ -16,7 +16,7 @@ describe("SandboxRuntimeProfileRegistry", () => {
   it("blocks a command that is not present in the pinned image", () => {
     const registry = new SandboxRuntimeProfileRegistry([shellTsPythonV1(digest)]);
     expect(() => registry.require("shell-ts-python-v1", ["gws"])).toThrow(
-      expect.objectContaining<SandboxRuntimeProfileError>({
+      expect.objectContaining<Partial<SandboxRuntimeProfileError>>({
         code: "runtime_requirement_unavailable",
         profileId: "shell-ts-python-v1",
         requirement: "gws",
@@ -36,7 +36,9 @@ describe("SandboxRuntimeProfileRegistry", () => {
           },
         ])
     ).toThrow(
-      expect.objectContaining<SandboxRuntimeProfileError>({ code: "invalid_runtime_profile" })
+      expect.objectContaining<Partial<SandboxRuntimeProfileError>>({
+        code: "invalid_runtime_profile",
+      })
     );
   });
 });
