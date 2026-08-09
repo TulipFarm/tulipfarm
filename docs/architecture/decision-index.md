@@ -10,6 +10,7 @@ Detailed contracts:
 
 - [Boundaries and owners](boundaries.md)
 - [Dependency rules](dependency-rules.md)
+- [Building an Integration](building-an-integration.md)
 
 ## Accepted decisions
 

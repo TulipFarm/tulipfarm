@@ -807,6 +807,59 @@ async function backfillWorkingMemory(q: Queryable, businessId: string): Promise<
   );
 }
 
+/**
+ * One-use authorization requests for the Integration auth broker
+ * (`integrations/auth-broker.ts`). Mirrors `oidc_auth_requests`: the PKCE verifier is held here
+ * rather than in the `state` the provider echoes back, so a captured callback URL cannot be
+ * replayed and a code obtained in one browser cannot be redeemed in another.
+ */
+const INTEGRATION_AUTH_REQUEST_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS integration_auth_requests (
+    state             text PRIMARY KEY,
+    integration_slug  text NOT NULL,
+    step_index        integer NOT NULL,
+    code_verifier     text,
+    created_at        timestamptz NOT NULL,
+    expires_at        timestamptz NOT NULL,
+    consumed_at       timestamptz
+  )`,
+  `CREATE INDEX IF NOT EXISTS integration_auth_requests_expires_idx
+    ON integration_auth_requests (expires_at)`,
+];
+
+/*
+ * GitHub App credentials moved from bespoke flat keys to the same `integration.<slug>.<ENV>` space
+ * every other integration's credentials live in, so the declarative auth flow writes exactly what
+ * the token-minting code reads. Renaming the key is safe: the key is not authenticated data in the
+ * AES-GCM envelope, so the ciphertext still decrypts unchanged.
+ *
+ * `WHERE NOT EXISTS` keeps this idempotent and non-destructive — if a deployment has already
+ * connected GitHub through the new flow, the newer value wins and the stale row is dropped rather
+ * than overwriting it.
+ */
+const GITHUB_APP_SECRET_KEY_RENAMES: ReadonlyArray<readonly [string, string]> = [
+  ["github-app-id", "integration.github.GITHUB_APP_ID"],
+  ["github-app-slug", "integration.github.GITHUB_APP_SLUG"],
+  ["github-app-private-key", "integration.github.GITHUB_APP_PRIVATE_KEY"],
+  ["github-app-webhook-secret", "integration.github.GITHUB_WEBHOOK_SECRET"],
+];
+
+async function renameGitHubAppSecretKeys(q: Queryable): Promise<void> {
+  // A database restored without a `secrets` table has no App credentials to carry over; the
+  // pg-migrate suite exercises exactly that shape.
+  const present = await q.query("SELECT to_regclass('public.secrets') IS NOT NULL AS exists");
+  if (present.rows[0]?.exists !== true) return;
+
+  for (const [from, to] of GITHUB_APP_SECRET_KEY_RENAMES) {
+    await q.query(
+      `UPDATE secrets SET key = $2 WHERE key = $1
+         AND NOT EXISTS (SELECT 1 FROM secrets existing WHERE existing.key = $2)`,
+      [from, to]
+    );
+    await q.query("DELETE FROM secrets WHERE key = $1", [from]);
+  }
+}
+
 async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   await q.query(`CREATE TABLE IF NOT EXISTS surface_actions (
     handle              text PRIMARY KEY,
@@ -1285,5 +1338,23 @@ export const PG_MIGRATIONS: PgMigration[] = [
         await q.query(sql);
       }
     },
+  },
+  {
+    // Renumbered from 31 on merge with main: main had already shipped 31-38, and
+    // `pg-migrate` filters `version > currentVersion`, so keeping 31 would make every
+    // deployment already past 38 skip this migration silently.
+    version: 39,
+    description: "integration_auth_requests: one-use state + PKCE verifier for the auth broker",
+    up: async (q) => {
+      for (const sql of INTEGRATION_AUTH_REQUEST_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    // Renumbered from 32 on merge with main — same reason as 39 above.
+    version: 40,
+    description: "secrets: move GitHub App credentials onto integration.github.* keys",
+    up: renameGitHubAppSecretKeys,
   },
 ];

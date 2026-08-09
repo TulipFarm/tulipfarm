@@ -3,6 +3,100 @@ version: "1.0.0"
 description: Let TulipFarm agents triage issues, review and merge pull requests, and commit code
   in your GitHub repos — installed as a GitHub App scoped to the repos you choose.
 maintainer: TulipFarm
+icon: github
+capabilities:
+  - Triage issues — read, search, comment, label, assign, and close
+  - Review pull requests, leave reviews, and merge them
+  - Read repository files and push commits
+  - Report check run results back onto a commit
+# Mirrors the app_manifest step's `default_permissions` below. Kept by hand because that block is
+# GitHub's own schema, which TulipFarm does not parse — `bundled-auth.test.ts` fails if the two
+# drift, so an added permission cannot ship without appearing here first.
+grants:
+  - label: contents
+    access: write
+    description: Read files and push commits on the repositories you select.
+  - label: issues
+    access: write
+    description: Read issues and post comments, labels, and assignees.
+  - label: pull_requests
+    access: write
+    description: Open, review, and merge pull requests.
+  - label: checks
+    access: read
+    description: Read check run results to see whether CI passed.
+  - label: metadata
+    access: read
+    description: Read repository names and settings. GitHub requires this for any App.
 egress:
   type: none
+auth:
+  # 1. GitHub creates the App from this definition and hands back every credential for a one-time
+  #    code, so nothing is copied by hand. There is no TulipFarm-owned App: the App this creates
+  #    belongs to whoever runs this deployment, which is why the private key and webhook secret
+  #    never leave it.
+  - kind: app_manifest
+    title: Create the GitHub App
+    description: GitHub builds the App from a definition we send, so there is nothing to fill in
+      by hand. The App belongs to this deployment, not to TulipFarm.
+    create_url: https://github.com/settings/apps/new?state={state}
+    manifest_param: manifest
+    delivery: form_post
+    manifest:
+      name: TulipFarm
+      url: "{web_url}"
+      # GitHub redirects here after creation with `?code=`, which the exchange below redeems.
+      redirect_url: "{callback_url}"
+      hook_attributes:
+        url: "{api_url}/api/v1/integrations/github/webhook"
+        active: true
+      public: false
+      # Mirrors the locked base-install set in docs/architecture/github-app-manifest.md.
+      # `administration` is deliberately absent: it is requested later as an incremental re-auth
+      # only if the operator opts into "create the Soul repo for me".
+      default_permissions:
+        contents: write
+        issues: write
+        pull_requests: write
+        checks: read
+        metadata: read
+      default_events:
+        - issues
+        - issue_comment
+        - pull_request
+        - pull_request_review
+        - push
+        - check_run
+        - check_suite
+        - installation
+        - installation_repositories
+    exchange:
+      url: https://api.github.com/app-manifests/{code}/conversions
+      map:
+        id: GITHUB_APP_ID
+        slug: GITHUB_APP_SLUG
+        pem: GITHUB_APP_PRIVATE_KEY
+        webhook_secret: GITHUB_WEBHOOK_SECRET
+        client_id: GITHUB_CLIENT_ID
+        client_secret: GITHUB_CLIENT_SECRET
+      # All of these are sealed rather than just the obvious two: the App id and slug are read back
+      # by the token-minting code through the secrets store, so they must live there too.
+      secret_envs:
+        - GITHUB_APP_ID
+        - GITHUB_APP_SLUG
+        - GITHUB_APP_PRIVATE_KEY
+        - GITHUB_WEBHOOK_SECRET
+        - GITHUB_CLIENT_ID
+        - GITHUB_CLIENT_SECRET
+
+  # 2. Creating an App does not grant access to anything. Installing it is where the operator picks
+  #    which repos TulipFarm may touch, and the installation id is what every later API call is
+  #    scoped to.
+  - kind: install
+    title: Install it on your repositories
+    description: Creating the App grants no access on its own. Installing it is where you choose
+      which repositories TulipFarm may read and write.
+    url: https://github.com/apps/{GITHUB_APP_SLUG}/installations/new?state={state}
+    capture:
+      installation_id: GITHUB_INSTALLATION_ID
 setup_guide_path: setup-guide.md

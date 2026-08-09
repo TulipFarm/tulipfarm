@@ -27,6 +27,8 @@ export interface RemoteDelivery {
   readonly hasThreadMapping: boolean;
   readonly chatEnabled: boolean;
   readonly eventsEnabled: boolean;
+  /** Manifest-declared, non-secret connection env — how a classifier recognises its own bot. */
+  readonly env: Record<string, string>;
 }
 
 export type RemoteAttachResult =

@@ -1,11 +1,16 @@
 ---
 title: Integrations
-description: The bundled GitHub and Slack integrations, what they enable, and current limits.
+description: The bundled integrations, what they enable, and current limits.
 ---
 
-Integrations connect TulipFarm to external systems. In the shipped product, exactly two bundled
-integrations are available: **GitHub** and **Slack**. Both appear in the Integrations UI, store their
-configuration through the Soul and secrets store, and create durable Runs when inbound work arrives.
+Integrations connect TulipFarm to external systems. Seven ship bundled: **GitHub**, **Slack**,
+**Telegram**, **Notion**, **Confluence**, **Google Drive**, and **Google Docs**. All appear in the
+Integrations UI and store their configuration through the Soul and secrets store.
+
+You are not limited to those. An integration is a data file — a manifest describing how to
+connect and which provider API calls Agents may make — so one can be installed from any git
+repository, and nothing that installs runs code. See
+[Connect an integration](/docs/guides/connect-an-integration#install-from-a-git-repository).
 
 ## GitHub
 
@@ -32,11 +37,42 @@ cursor.
 
 Use [Connect Slack](/docs/guides/connect-slack) for setup.
 
+## Telegram
+
+The Telegram integration lets your team talk to Agents from Telegram — direct messages, group
+chats, and forum topics. Each forum topic and each reply chain is its own chat, so several
+conversations can run in one group without merging.
+
+It ships no provider-specific code. The manifest names the API calls to publish and describes how
+an inbound update becomes a chat, including how TulipFarm registers the webhook with Telegram and
+generates the secret that proves a delivery is genuine.
+
+Use [Connect Telegram](/docs/guides/connect-telegram) for setup.
+
+## Notion
+
+The Notion integration lets Agents search the workspace, read page properties and body content,
+create and update pages, append content, and read and query databases. Access is per-page: the
+integration reaches only what you explicitly share with it in Notion.
+
+It ships no provider-specific code. The manifest names the operations to publish and the runtime
+compiles them into Tools — the same path any integration installed from a git repository takes.
+
+Use [Connect Notion](/docs/guides/connect-notion) for setup.
+
+## Confluence, Google Drive, and Google Docs
+
+These three are read-only. Agents can search Confluence and read a page, search Drive and read a
+file's details, and read a Google Doc's body. There are no write Tools: the scopes they ask for are
+read scopes, and a write Tool against a read token would report an edit that never happened.
+
+All three also index into Knowledge, and that path preserves per-user access rather than flattening
+it — a page you cannot see in Confluence is not one an Agent will cite to you. Access is resolved
+through external identity mappings, so an unmapped account grants nothing. Link-sharing in Drive is
+not treated as everyone.
+
 ## Current limits
 
 Per-Agent tool restriction is not yet available. Once an integration is connected, its eligible
 Tools are broadly available to Agents on turns with the right authority. Do not rely on per-Agent
 integration allowlists today.
-
-Telegram is not a connectable integration in the bundled product. `@tulipfarm/surface-telegram` is
-a renderer package only.

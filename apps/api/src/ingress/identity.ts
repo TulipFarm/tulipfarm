@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { PrincipalDeniedError } from "@tulipfarm/authz";
 import type { ChatIngressConfig } from "@tulipfarm/soul";
 import type { FastifyBaseLogger } from "fastify";
@@ -111,7 +112,16 @@ export class IngressIdentityResolver {
 
     let matched: UserDoc | null = null;
     try {
-      const result = await executeToolBinding(registry, slug, identity, { sender });
+      // A fresh toolCallId every time, unlike a reply: the Effect store replays a duplicate
+      // reservation, so a stable id here would answer every future lookup with the email this
+      // sender had the first time they spoke — surviving any later change on the provider side.
+      const result = await executeToolBinding(
+        registry,
+        slug,
+        identity,
+        { sender },
+        { runId: `ingress-identity:${slug}`, toolCallId: randomUUID() }
+      );
       if (result.success) {
         const email = extractFromToolResult(result.data, identity.email_path);
         if (typeof email === "string" && email) {

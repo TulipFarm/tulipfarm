@@ -9,6 +9,7 @@ import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
+import { ensureGitHubInstallation } from "./github-install";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -190,150 +191,47 @@ describe("GitHub App install routes", () => {
     });
   });
 
-  describe("GET /api/v1/integrations/github/install/start", () => {
-    it("401s without auth", async () => {
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-      });
-      expect(res.statusCode).toBe(401);
-    });
+  /** Puts the business in the state a completed manifest+install auth flow leaves it in. */
+  async function installGitHubApp(): Promise<void> {
+    await secretsService.set("integration.github.GITHUB_APP_SLUG", "tulipfarm-bot");
+    await secretsService.set("integration.github.GITHUB_APP_ID", "app-123");
+    await secretsService.set("integration.github.GITHUB_APP_PRIVATE_KEY", privateKeyPem);
 
-    it("400s when the App isn't configured", async () => {
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(400);
-    });
-
-    it("redirects to github.com with a signed state once the App slug is set", async () => {
-      await secretsService.set("github-app-slug", "tulipfarm-bot");
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(302);
-      const location = new URL(res.headers.location as string);
-      expect(location.origin + location.pathname).toBe(
-        "https://github.com/apps/tulipfarm-bot/installations/new"
-      );
-      expect(location.searchParams.get("state")).toBeTruthy();
-    });
-  });
-
-  describe("GET /api/v1/integrations/github/install/callback", () => {
-    async function issuedState(): Promise<string> {
-      await secretsService.set("github-app-slug", "tulipfarm-bot");
-      const start = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      const location = new URL(start.headers.location as string);
-      const state = location.searchParams.get("state");
-      if (!state) throw new Error("no state issued");
-      return state;
-    }
-
-    it("401s on a forged or expired state", async () => {
-      const res = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/callback?setup_action=install&installation_id=1&state=bogus",
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(401);
-    });
-
-    it("200s pending_approval when an org member requested install without admin approval", async () => {
-      const state = await issuedState();
-      const res = await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=request&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ status: "pending_approval" });
-    });
-
-    it("400s when the App credentials aren't configured", async () => {
-      const state = await issuedState();
-      const res = await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=install&installation_id=99&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
-      expect(res.statusCode).toBe(400);
-    });
-
-    it("records the installation and redirects back into the web app on success", async () => {
-      const state = await issuedState();
-      await secretsService.set("github-app-id", "app-123");
-      await secretsService.set("github-app-private-key", privateKeyPem);
-
-      http = fakeGitHubHttp((request) => {
-        if (request.path === "/app/installations/99") {
-          return {
-            status: 200,
-            body: {
-              account: { login: "acme-corp" },
-              permissions: { issues: "write", metadata: "read" },
-            },
-          };
-        }
-        if (request.path === "/app/installations/99/access_tokens") {
-          return {
-            status: 201,
-            body: { token: "ghs_abc", expires_at: "2026-08-06T13:00:00Z" },
-          };
-        }
-        if (request.path === "/installation/repositories") {
-          return {
-            status: 200,
-            body: { repositories: [{ full_name: "acme-corp/widgets" }] },
-          };
-        }
-        throw new Error(`unexpected request: ${request.method} ${request.path}`);
-      });
-
-      const res = await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=install&installation_id=99&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
-
-      expect(res.statusCode).toBe(302);
-      expect(res.headers.location).toContain("/integrations/github?installed=1");
-      expect(integrationStore.apps).toHaveLength(1);
-      expect(integrationStore.integrations).toEqual([
-        expect.objectContaining({
-          id: "github:99",
-          appId: "github-app",
-          externalTenantId: "99",
-          externalAccountId: "acme-corp",
-          status: "active",
-        }),
-      ]);
-      expect(integrationStore.accessGrants).toEqual([
-        expect.objectContaining({
-          integrationId: "github:99",
-          definition: {
-            externalTargets: { type: "github.repository", ids: ["acme-corp/widgets"] },
+    http = fakeGitHubHttp((request) => {
+      if (request.path === "/app/installations/99") {
+        return {
+          status: 200,
+          body: {
+            account: { login: "acme-corp" },
             permissions: { issues: "write", metadata: "read" },
           },
-        }),
-      ]);
+        };
+      }
+      if (request.path === "/app/installations/99/access_tokens") {
+        return {
+          status: 201,
+          body: { token: "ghs_abc", expires_at: "2026-08-06T13:00:00Z" },
+        };
+      }
+      if (request.path === "/installation/repositories") {
+        return {
+          status: 200,
+          body: { repositories: [{ full_name: "acme-corp/widgets" }] },
+        };
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.path}`);
     });
-  });
+
+    await ensureGitHubInstallation(
+      {
+        integrations: integrationStore as never,
+        secretsService: secretsService as never,
+        businessId: "biz-1",
+        http: { send: (...args) => http.send(...args) },
+      },
+      "99"
+    );
+  }
 
   describe("GET /api/v1/integrations/github/status", () => {
     it("401s without auth", async () => {
@@ -356,50 +254,7 @@ describe("GitHub App install routes", () => {
     });
 
     it("200s the installation and its repos after a successful install", async () => {
-      await secretsService.set("github-app-slug", "tulipfarm-bot");
-      const start = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      const state = new URL(start.headers.location as string).searchParams.get("state");
-      if (!state) throw new Error("no state issued");
-
-      await secretsService.set("github-app-id", "app-123");
-      await secretsService.set("github-app-private-key", privateKeyPem);
-
-      http = fakeGitHubHttp((request) => {
-        if (request.path === "/app/installations/99") {
-          return {
-            status: 200,
-            body: {
-              account: { login: "acme-corp" },
-              permissions: { issues: "write", metadata: "read" },
-            },
-          };
-        }
-        if (request.path === "/app/installations/99/access_tokens") {
-          return {
-            status: 201,
-            body: { token: "ghs_abc", expires_at: "2026-08-06T13:00:00Z" },
-          };
-        }
-        if (request.path === "/installation/repositories") {
-          return {
-            status: 200,
-            body: { repositories: [{ full_name: "acme-corp/widgets" }] },
-          };
-        }
-        throw new Error(`unexpected request: ${request.method} ${request.path}`);
-      });
-
-      await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=install&installation_id=99&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
+      await installGitHubApp();
 
       const res = await app.inject({
         method: "GET",
@@ -417,53 +272,6 @@ describe("GitHub App install routes", () => {
   });
 
   describe("POST /api/v1/integrations/github/installations/:installationId/disconnect", () => {
-    async function installGitHubApp(): Promise<void> {
-      await secretsService.set("github-app-slug", "tulipfarm-bot");
-      const start = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      const state = new URL(start.headers.location as string).searchParams.get("state");
-      if (!state) throw new Error("no state issued");
-
-      await secretsService.set("github-app-id", "app-123");
-      await secretsService.set("github-app-private-key", privateKeyPem);
-
-      http = fakeGitHubHttp((request) => {
-        if (request.path === "/app/installations/99") {
-          return {
-            status: 200,
-            body: {
-              account: { login: "acme-corp" },
-              permissions: { issues: "write", metadata: "read" },
-            },
-          };
-        }
-        if (request.path === "/app/installations/99/access_tokens") {
-          return {
-            status: 201,
-            body: { token: "ghs_abc", expires_at: "2026-08-06T13:00:00Z" },
-          };
-        }
-        if (request.path === "/installation/repositories") {
-          return {
-            status: 200,
-            body: { repositories: [{ full_name: "acme-corp/widgets" }] },
-          };
-        }
-        throw new Error(`unexpected request: ${request.method} ${request.path}`);
-      });
-
-      await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=install&installation_id=99&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
-    }
-
     it("401s without auth", async () => {
       const res = await app.inject({
         method: "POST",
@@ -523,18 +331,9 @@ describe("GitHub App install routes", () => {
 
   describe("Soul repo pick/create", () => {
     async function installWithPermissions(permissions: Record<string, string>): Promise<void> {
-      await secretsService.set("github-app-slug", "tulipfarm-bot");
-      const start = await app.inject({
-        method: "GET",
-        url: "/api/v1/integrations/github/install/start",
-        cookies: auth(),
-        headers,
-      });
-      const state = new URL(start.headers.location as string).searchParams.get("state");
-      if (!state) throw new Error("no state issued");
-
-      await secretsService.set("github-app-id", "app-123");
-      await secretsService.set("github-app-private-key", privateKeyPem);
+      await secretsService.set("integration.github.GITHUB_APP_SLUG", "tulipfarm-bot");
+      await secretsService.set("integration.github.GITHUB_APP_ID", "app-123");
+      await secretsService.set("integration.github.GITHUB_APP_PRIVATE_KEY", privateKeyPem);
 
       http = fakeGitHubHttp((request) => {
         if (request.path === "/app/installations/99") {
@@ -560,12 +359,15 @@ describe("GitHub App install routes", () => {
         throw new Error(`unexpected request: ${request.method} ${request.path}`);
       });
 
-      await app.inject({
-        method: "GET",
-        url: `/api/v1/integrations/github/install/callback?setup_action=install&installation_id=99&state=${encodeURIComponent(state)}`,
-        cookies: auth(),
-        headers,
-      });
+      await ensureGitHubInstallation(
+        {
+          integrations: integrationStore as never,
+          secretsService: secretsService as never,
+          businessId: "biz-1",
+          http: { send: (...args) => http.send(...args) },
+        },
+        "99"
+      );
     }
 
     it("200s null when no Soul repo is selected yet", async () => {

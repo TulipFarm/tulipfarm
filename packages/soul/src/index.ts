@@ -68,14 +68,25 @@ export {
   convertLegacyDefinitions,
   convertLegacySkill,
 } from "./converters/legacy-definitions";
-export type {
-  SoulCommitRequest,
-  SoulCommitResult,
-  SoulGitStoreErrorCode,
-} from "./git-store";
+export type { SoulCommitRequest, SoulCommitResult, SoulGitStoreErrorCode } from "./git-store";
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
 export type { CredentialProvider } from "./git-sync";
 export { GitSyncService } from "./git-sync";
+export {
+  authEnvNames,
+  authFlowSatisfied,
+  authSecretEnvNames,
+  authStepProducesEnv,
+  authStepSatisfied,
+  nextAuthStep,
+  oauth2ExpiresAtEnv,
+  oauth2RefreshTokenEnv,
+  resolveAuthSteps,
+  resolveGrants,
+  validateAuthSteps,
+  validateIngressContextEnv,
+} from "./integration-auth";
+export { validateThirdPartyManifest } from "./integration-trust";
 export type { SoulMigration } from "./migrations/index";
 export type { PinnedDefinition, PinnedDefinitionRef } from "./pinned-definition";
 export { PinnedDefinitionLoader } from "./pinned-definition";
@@ -116,17 +127,29 @@ export { runSoulMigrations } from "./soul-migrations";
 export { resolveSoulPath } from "./soul-path";
 export { GitSoulTreeReader } from "./tree-reader";
 export type {
+  AuthAppManifestStep,
+  AuthExchange,
+  AuthFieldsStep,
+  AuthInstallStep,
+  AuthOAuth2Step,
+  AuthStep,
+  AuthWebhookStep,
   BodyMatch,
   ChatIngressConfig,
+  EgressAuth,
   EgressConfig,
+  EgressOperation,
+  HmacWebhookSecurity,
   IngressConfig,
   IntegrationConnection,
+  IntegrationGrant,
   IntegrationManifest,
   Logger,
   McpEntry,
   OAuthConfig,
   OAuthFlowConfig,
   RequiredEnvVar,
+  SharedSecretWebhookSecurity,
   SoulAgent,
   SoulIntegration,
   SoulResource,

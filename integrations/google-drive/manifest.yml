@@ -1,16 +1,66 @@
 name: google-drive
-version: "1.0.0"
-description: Index Google Drive files into TulipFarm Knowledge with per-user ACL fidelity.
+version: "1.1.0"
+description: Let TulipFarm agents search Google Drive and read file details — and index files into
+  Knowledge with per-user ACL fidelity — using one OAuth token.
 maintainer: TulipFarm
+icon: googledrive
+capabilities:
+  - Search Drive by name, type, owner, or modification date
+  - Read a file's metadata, owners, and link
+  - Index files into Knowledge with per-user ACL fidelity
+grants:
+  - label: files
+    access: read
+    description: List and read metadata for the files the token's scopes cover. File contents are
+      not read by these Tools — use Google Docs for document bodies.
+  - label: permissions
+    access: read
+    description: Read who may see each file, which is what lets Knowledge preserve per-user access
+      rather than flattening it.
+
+# Read-only by design: the declared scope below is read, and a write Tool against a read token
+# would 403 at runtime — worse than no Tool, because an agent would report an edit that never
+# happened.
 egress:
-  type: none
-required_env:
-  - name: GOOGLE_WORKSPACE_ID
-    label: Google Workspace ID
-    description: Workspace/customer identifier used for sync checkpoints.
-    secret: false
-  - name: GOOGLE_DRIVE_ACCESS_TOKEN
-    label: Google Drive OAuth Access Token
-    description: OAuth bearer token with Drive metadata, permissions, and export read scopes.
-    secret: true
+  type: openapi
+  spec: openapi.json
+  base_url: https://www.googleapis.com/drive/v3
+  auth:
+    token_env: GOOGLE_DRIVE_ACCESS_TOKEN
+  operations:
+    - operation: listFiles
+      name: search_files
+      description: Search Drive. Use this first when you know a file by name but not by id — every
+        other Drive tool needs an id. Example q values are "name contains 'roadmap'" and
+        "mimeType = 'application/vnd.google-apps.document' and modifiedTime > '2026-01-01T00:00:00'".
+    - operation: getFile
+      name: read_file
+      description: Read one file's metadata — name, type, owners, and link — by id. This does NOT
+        return file contents; for a Google Doc's body use the Google Docs integration.
+
+auth:
+  # `auth` fully supersedes `required_env` (see resolveAuthSteps), so the Knowledge-sync workspace
+  # id is re-declared here. Dropping it would silently stop indexing Drive into Knowledge.
+  - kind: fields
+    title: Connect Google Drive
+    description: One OAuth token serves both the agent Tools and Knowledge indexing.
+    fields:
+      - name: GOOGLE_WORKSPACE_ID
+        label: Google Workspace ID
+        description: Workspace/customer identifier used for sync checkpoints. Needed only if you
+          want Drive files indexed into Knowledge; agent Tools work without it.
+        secret: false
+      - name: GOOGLE_DRIVE_ACCESS_TOKEN
+        label: Google Drive OAuth Access Token
+        description: OAuth bearer token with Drive metadata, permissions, and export read scopes.
+        secret: true
+        setup_url: https://console.cloud.google.com/apis/credentials
+        steps:
+          - In Google Cloud Console, open the project serving this deployment and enable the Google
+            Drive API.
+          - Create an OAuth client (or a service account with domain-wide delegation for a whole
+            workspace) and grant the drive.metadata.readonly and drive.readonly scopes. The
+            permissions scope is what lets Knowledge preserve per-user access.
+          - Copy a current access token and paste it below.
+
 setup_guide_path: setup-guide.md

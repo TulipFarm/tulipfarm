@@ -6,32 +6,41 @@ import {
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { useEffect, useState } from "react";
+import { ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
+import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { MarkdownView } from "~/components/markdown-view";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
+import { StatusBadge } from "~/components/status-badge";
 import { Button } from "~/components/ui/button";
+import { CopyField } from "~/components/ui/copy-field";
 import { Modal } from "~/components/ui/modal";
-import { Sheet } from "~/components/ui/sheet";
-import { API_BASE, ApiError } from "~/lib/api";
-import { copyText } from "~/lib/clipboard";
+import { ApiError } from "~/lib/api";
 import {
-  connectIntegration,
   deleteIntegration,
   disconnectGitHubInstallation,
   disconnectIntegration,
   type GitHubInstallation,
   getGitHubStatus,
   getIntegration,
+  type IntegrationDetail,
+  type IntegrationGrant,
   listSlackRoutes,
-  type McpConnectionStatus,
-  type OAuthConfig,
-  type RequiredEnvVar,
-  startOAuth,
 } from "~/lib/integrations";
-import { putSecret } from "~/lib/settings";
-import { highlight } from "~/lib/shiki";
-import { randomUUID } from "~/lib/uuid";
+
+/*
+ * One integration, as a document rather than a settings form (mirrors knowledge/page-detail.tsx):
+ * identity, then what it does and what it costs you to say yes, then the connect flow, then the
+ * provider-shaped state only some integrations have.
+ *
+ * What is deliberately NOT here: the old `type` / `transport` metadata box. Those describe how
+ * TulipFarm reaches the provider — `egress.type` reads "none" for both bundled integrations — and
+ * answer a question no operator has. What they actually want to know before connecting is what
+ * agents will be able to do and what authority they are handing over, so those are the two
+ * sections that replaced it.
+ */
 
 export const meta: MetaFunction = () => [{ title: "Integration · tulipfarm" }];
 
@@ -50,9 +59,9 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
       routesError = errMessage(err);
     }
   }
-  // GitHub is App-install-driven, not soul connection.yaml-driven (Phase 2's install callback
-  // writes straight to IntegrationStore) — its own status route is the source of truth, not
-  // integration.connected/status above.
+  // Which accounts and repositories the App is installed on is GitHub-shaped state held in the
+  // API's own store, not connection env — the declarative auth flow above establishes the
+  // credential, this reports what that credential currently reaches.
   let githubInstallations: GitHubInstallation[] = [];
   if (name === "github") {
     try {
@@ -64,590 +73,194 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return { integration, routesError, githubInstallations };
 }
 
-const inputClass =
-  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50";
-
-const STATUS_LABEL: Record<McpConnectionStatus, string> = {
-  connected: "Connected",
-  connecting: "Connecting…",
-  error: "Error",
-  disconnected: "Not connected",
+/*
+ * The auth broker reports a failed provider round trip as a reason code on the redirect back, so
+ * the operator lands on this page rather than on a raw JSON body. Each one needs a sentence saying
+ * what to do next; the codes are the closed set in `AuthBrokerError`.
+ */
+const CALLBACK_REASON: Record<string, string> = {
+  unknown_step: "That setup step no longer exists. Reload the page and start again.",
+  invalid_state: "This setup link expired or was already used. Start the step again.",
+  missing_credentials:
+    "A credential from an earlier step is missing. Complete the earlier steps first.",
+  exchange_failed: "The provider rejected the request. Start the step again.",
 };
-
-const STATUS_CLASS: Record<McpConnectionStatus, string> = {
-  connected: "text-muted-foreground",
-  connecting: "text-primary",
-  error: "text-destructive",
-  disconnected: "text-muted-foreground",
-};
-
-function readTheme(): "light" | "dark" {
-  if (typeof document === "undefined") return "light";
-  return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
-}
 
 function errMessage(e: unknown): string {
   if (e instanceof ApiError) return e.message;
   return e instanceof Error ? e.message : "request failed";
 }
 
-function FieldHints({ field }: { field: RequiredEnvVar }) {
-  if (!field.steps?.length && !field.setup_url) return null;
+function displayName(integration: IntegrationDetail): string {
+  return integration.title ?? integration.name;
+}
+
+function Dot() {
   return (
-    <details className="mt-0.5">
-      <summary className="cursor-pointer select-none text-xs text-muted-foreground hover:text-foreground">
-        How to get this
-      </summary>
-      <div className="mt-1.5 flex flex-col gap-1 pl-3 text-xs text-muted-foreground">
-        {field.steps?.map((step, i) => (
-          <p key={step}>
-            {i + 1}. {step}
-          </p>
-        ))}
-        {field.setup_url && (
-          <a
-            href={field.setup_url}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-0.5 text-primary underline underline-offset-2 hover:opacity-80"
-          >
-            Open docs →
-          </a>
-        )}
-      </div>
-    </details>
+    <span aria-hidden className="opacity-40">
+      ·
+    </span>
   );
 }
 
-// Mirrors packages/secrets/src/integration-registry.ts's INTEGRATION_APPS["github"].fields — kept
-// in sync by hand since there's no API route exposing that registry (GitHub is already
-// special-cased end-to-end in this file, unlike the generic required_env-driven integrations).
-const GITHUB_APP_FIELDS = [
-  {
-    key: "github-app-id",
-    label: "App ID",
-    hint: "Shown near the top of the App's page on GitHub.",
-  },
-  {
-    key: "github-app-slug",
-    label: "App slug",
-    hint: "The last segment of the App's URL: github.com/settings/apps/<slug>.",
-  },
-  {
-    key: "github-app-private-key",
-    label: "Private key",
-    hint: "Private keys → Generate a private key on the App's page downloads a .pem file — paste its full contents, BEGIN/END lines included. It can't be re-downloaded, only regenerated.",
-    multiline: true,
-  },
-  {
-    key: "github-app-webhook-secret",
-    label: "Webhook secret",
-    hint: "Reserved for webhook verification, not read yet — a random value is fine.",
-  },
-] as const;
-
-type GitHubWizardStep =
-  | { kind: "info" }
-  | { kind: "field"; field: (typeof GITHUB_APP_FIELDS)[number] };
-
-function GitHubConnectWizard({
-  values,
-  setField,
-  onSubmit,
-  saving,
-  actionError,
-  onViewGuide,
-}: {
-  values: Record<string, string>;
-  setField: (key: string) => (v: string) => void;
-  onSubmit: () => void;
-  saving: boolean;
-  actionError?: string;
-  onViewGuide: () => void;
-}) {
-  const steps: GitHubWizardStep[] = [
-    { kind: "info" },
-    ...GITHUB_APP_FIELDS.map((field) => ({ kind: "field" as const, field })),
-  ];
-  const [step, setStep] = useState(0);
-  const current = steps[step];
-  const isLast = step === steps.length - 1;
-  const [copied, setCopied] = useState<string | null>(null);
-  const homepageUrl = typeof window !== "undefined" ? window.location.origin : "";
-  const setupUrl = `${API_BASE}/api/v1/integrations/github/install/callback`;
-
-  function copy(label: string, text: string) {
-    void copyText(text).then(() => {
-      setCopied(label);
-      setTimeout(() => setCopied((c) => (c === label ? null : c)), 1500);
-    });
-  }
-
-  const currentFieldFilled =
-    current.kind === "field" ? (values[current.field.key] ?? "").trim() !== "" : true;
-
+function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-muted-foreground">
-        Step {step + 1} of {steps.length}
-      </p>
+    <h2 className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+      {children}
+    </h2>
+  );
+}
 
-      {current.kind === "info" && (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm text-foreground">
-            Open{" "}
-            <a
-              href="https://github.com/settings/apps/new"
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline underline-offset-2 hover:opacity-80"
-            >
-              GitHub → New GitHub App
-            </a>{" "}
-            (use your org's settings page instead for an org-owned App) and fill in:
-          </p>
-          <div className="flex flex-col gap-2 rounded-sm border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-            <div className="flex flex-col gap-1">
-              <span>
-                <span className="font-medium text-foreground">Homepage URL</span> —
-              </span>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1 text-foreground">
-                  {homepageUrl}
-                </code>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => copy("homepage", homepageUrl)}
-                >
-                  {copied === "homepage" ? "Copied" : "Copy"}
-                </Button>
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <span>
-                <span className="font-medium text-foreground">Setup URL</span> (under "Post
-                installation") — check <span className="font-medium">Redirect on update</span>. In
-                local dev the API runs on its own port, separate from the web app — use this exact
-                URL, not the address bar's origin:
-              </span>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1 text-foreground">
-                  {setupUrl}
-                </code>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => copy("setup", setupUrl)}
-                >
-                  {copied === "setup" ? "Copied" : "Copy"}
-                </Button>
-              </div>
-            </div>
-            <p>
-              <span className="font-medium text-foreground">Callback URL</span>: leave blank, and
-              leave "Request user authorization (OAuth) during installation" unchecked.
-            </p>
-            <p>
-              <span className="font-medium text-foreground">Webhook → Active</span>: leave
-              unchecked.
-            </p>
-            <p>
-              <span className="font-medium text-foreground">Permissions</span>: Contents (Read and
-              write), Issues (Read and write), Pull requests (Read and write), Checks (Read-only).
-            </p>
-            <p>
-              <span className="font-medium text-foreground">
-                Where can this GitHub App be installed?
-              </span>{" "}
-              "Only on this account" unless you specifically want it installable across other orgs.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onViewGuide}
-            className="self-start text-xs text-primary underline underline-offset-2 hover:opacity-80"
-          >
-            View full guide as text →
-          </button>
-        </div>
-      )}
-
-      {current.kind === "field" && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm font-medium text-foreground">{current.field.label}</p>
-          <p className="text-xs text-muted-foreground">{current.field.hint}</p>
-          {"multiline" in current.field && current.field.multiline ? (
-            <textarea
-              className={`${inputClass} min-h-32 font-mono text-xs`}
-              placeholder={current.field.key}
-              value={values[current.field.key] ?? ""}
-              onChange={(e) => setField(current.field.key)(e.target.value)}
-              autoComplete="off"
-            />
-          ) : (
-            <input
-              className={inputClass}
-              type="password"
-              placeholder={current.field.key}
-              value={values[current.field.key] ?? ""}
-              onChange={(e) => setField(current.field.key)(e.target.value)}
-              autoComplete="off"
-            />
+/**
+ * What connecting hands over, in the provider's own words.
+ *
+ * Deliberately rendered even after connecting: an operator auditing what a deployment can reach
+ * should not have to disconnect to find out.
+ */
+function GrantList({ grants }: { grants: IntegrationGrant[] }) {
+  return (
+    <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+      {grants.map((grant) => (
+        <li key={`${grant.label}:${grant.access ?? ""}`} className="flex gap-3 px-3 py-2">
+          <code className="shrink-0 text-xs text-foreground">{grant.label}</code>
+          {grant.access && (
+            <span className="shrink-0 text-xs uppercase tracking-wider text-muted-foreground">
+              {grant.access}
+            </span>
           )}
-        </div>
-      )}
-
-      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={step === 0}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
-        >
-          Back
-        </Button>
-        {isLast ? (
-          <Button type="button" size="sm" disabled={saving} onClick={onSubmit}>
-            {saving ? "Saving…" : "Save & Install →"}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            disabled={!currentFieldFilled}
-            onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
-          >
-            Next
-          </Button>
-        )}
-      </div>
-    </div>
+          {grant.description && (
+            <span className="ml-auto text-right text-xs text-muted-foreground">
+              {grant.description}
+            </span>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-type WizardStep =
-  | { kind: "manifest"; installManifest: string }
-  | { kind: "field"; field: RequiredEnvVar };
-
-function ConnectWizard({
-  integrationName,
-  installManifest,
-  requiredEnv,
-  envValues,
-  setField,
-  onSubmit,
-  connecting,
-  actionError,
-}: {
-  integrationName: string;
-  installManifest?: string;
-  requiredEnv: RequiredEnvVar[];
-  envValues: Record<string, string>;
-  setField: (name: string) => (v: string) => void;
-  onSubmit: () => void;
-  connecting: boolean;
-  actionError?: string;
-}) {
-  const steps: WizardStep[] = [
-    ...(installManifest ? [{ kind: "manifest" as const, installManifest }] : []),
-    ...requiredEnv.map((field) => ({ kind: "field" as const, field })),
-  ];
-  const [step, setStep] = useState(0);
-  const current = steps[step];
-  const isLast = step === steps.length - 1;
-  const [copied, setCopied] = useState(false);
-  const [manifestHtml, setManifestHtml] = useState<string | null>(null);
-  const [theme, setTheme] = useState<"light" | "dark">(readTheme);
+// Removing an integration is rare, irreversible-ish, and shares a page with the setup flow, so it
+// lives behind `⋯` with a two-step confirm rather than in a permanent red panel — the old page
+// shouted "danger zone" at everyone who came to connect. Mirrors knowledge/page-detail.tsx.
+function MoreMenu({ onDelete, deleting }: { onDelete: () => void; deleting: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const read = () => setTheme(readTheme());
-    window.addEventListener("themechange", read);
-    return () => window.removeEventListener("themechange", read);
-  }, []);
-
-  useEffect(() => {
-    if (current?.kind !== "manifest") return;
-    let cancelled = false;
-    highlight(current.installManifest, "json", theme)
-      .then((out) => {
-        if (!cancelled) setManifestHtml(out);
-      })
-      .catch(() => {
-        if (!cancelled) setManifestHtml(null);
-      });
-    return () => {
-      cancelled = true;
+    if (!open) return;
+    const close = () => {
+      setOpen(false);
+      setConfirming(false);
     };
-  }, [current, theme]);
+    const onPointer = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
-  const currentFieldFilled =
-    current?.kind === "field" ? (envValues[current.field.name] ?? "").trim() !== "" : true;
+  const itemClass =
+    "flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm disabled:cursor-default disabled:opacity-50";
 
   return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-muted-foreground">
-        Step {step + 1} of {steps.length}
-      </p>
-
-      {current?.kind === "manifest" && (
-        <div className="flex flex-col gap-2">
-          <p className="text-sm text-foreground">
-            Open{" "}
-            <a
-              href="https://api.slack.com/apps"
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline underline-offset-2 hover:opacity-80"
-            >
-              Slack → Create New App → From a manifest
-            </a>
-            , paste this JSON, pick your workspace, and create the app.
-          </p>
-          {manifestHtml ? (
-            <div
-              className="max-h-64 overflow-auto rounded-sm border border-border text-xs [&_pre]:p-2"
-              // biome-ignore lint/security/noDangerouslySetInnerHtml: Shiki output is static, HTML-escaped source from this integration's own manifest.yml.
-              dangerouslySetInnerHTML={{ __html: manifestHtml }}
-            />
-          ) : (
-            <pre className="max-h-64 overflow-auto rounded-sm border border-border bg-muted p-2 text-xs text-foreground">
-              {current.installManifest}
-            </pre>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="self-start"
-            onClick={() => {
-              void copyText(current.installManifest).then(() => {
-                setCopied(true);
-                setTimeout(() => setCopied(false), 1500);
-              });
-            }}
-          >
-            {copied ? "Copied" : "Copy manifest"}
-          </Button>
-        </div>
-      )}
-
-      {current?.kind === "field" && (
-        <div className="flex flex-col gap-2">
-          <div>
-            <p className="text-sm font-medium text-foreground">{current.field.label}</p>
-            {current.field.description && (
-              <p className="text-xs text-muted-foreground">{current.field.description}</p>
-            )}
-          </div>
-          {current.field.steps && current.field.steps.length > 0 && (
-            <div className="flex flex-col gap-2 rounded-sm border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-              {current.field.steps.map((s) => (
-                <p key={s}>{s}</p>
-              ))}
-            </div>
-          )}
-          {current.field.setup_url && (
-            <a
-              href={current.field.setup_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
-            >
-              Open {integrationName} →
-            </a>
-          )}
-          <input
-            className={inputClass}
-            type={current.field.secret ? "password" : "text"}
-            placeholder={current.field.name}
-            value={envValues[current.field.name] ?? ""}
-            onChange={(e) => setField(current.field.name)(e.target.value)}
-            autoComplete={current.field.secret ? "off" : undefined}
-          />
-        </div>
-      )}
-
-      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          disabled={step === 0}
-          onClick={() => setStep((s) => Math.max(0, s - 1))}
+    <div ref={ref} className="relative">
+      <Button
+        variant="outline"
+        size="icon"
+        className="size-8 cursor-pointer"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <MoreHorizontal aria-hidden />
+      </Button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1 flex min-w-56 flex-col gap-0.5 rounded-sm border border-border bg-card p-1 shadow-md"
         >
-          Back
-        </Button>
-        {isLast ? (
-          <Button type="button" size="sm" disabled={connecting} onClick={onSubmit}>
-            {connecting ? "Connecting…" : "Connect"}
-          </Button>
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            disabled={!currentFieldFilled}
-            onClick={() => setStep((s) => Math.min(steps.length - 1, s + 1))}
-          >
-            Next
-          </Button>
-        )}
-      </div>
+          {confirming ? (
+            <>
+              <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                Removes it from the soul repo and disconnects it first.
+              </p>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={deleting}
+                onClick={onDelete}
+                className={`${itemClass} text-destructive hover:bg-destructive/10`}
+              >
+                <Trash2 className="size-4" aria-hidden />
+                {deleting ? "Removing…" : "Confirm remove"}
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={deleting}
+                onClick={() => setConfirming(false)}
+                className={`${itemClass} text-muted-foreground hover:bg-accent`}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => setConfirming(true)}
+              className={`${itemClass} text-destructive hover:bg-destructive/10`}
+            >
+              <Trash2 className="size-4" aria-hidden />
+              Remove integration
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
-}
-
-function EnvField({
-  field,
-  value,
-  onChange,
-}: {
-  field: RequiredEnvVar;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-medium text-foreground" htmlFor={field.name}>
-        {field.label}
-        {field.description && (
-          <span className="ml-1 font-normal text-muted-foreground">— {field.description}</span>
-        )}
-      </label>
-      <input
-        id={field.name}
-        className={inputClass}
-        type={field.secret ? "password" : "text"}
-        placeholder={field.name}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        autoComplete={field.secret ? "off" : undefined}
-      />
-      <FieldHints field={field} />
-    </div>
-  );
-}
-
-/** Split required_env into shared / oauth-only / token (direct-only) groups. */
-function splitFields(
-  fields: RequiredEnvVar[],
-  oauth: OAuthConfig | undefined
-): {
-  shared: RequiredEnvVar[];
-  oauthOnly: RequiredEnvVar[];
-  directOnly: RequiredEnvVar[];
-} {
-  if (!oauth) return { shared: fields, oauthOnly: [], directOnly: [] };
-  const oauthKeys = new Set([oauth.client_id_env, oauth.client_secret_env]);
-  const tokenKey = oauth.token_env;
-  return {
-    shared: fields.filter((f) => !oauthKeys.has(f.name) && f.name !== tokenKey),
-    oauthOnly: fields.filter((f) => oauthKeys.has(f.name)),
-    directOnly: fields.filter((f) => f.name === tokenKey),
-  };
 }
 
 export default function IntegrationDetailPage() {
   const { integration, routesError, githubInstallations } = useLoaderData<typeof clientLoader>();
-  const isGitHub = integration.name === "github";
   const revalidator = useRevalidator();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const requiredEnv = integration.manifest.required_env ?? [];
-  const oauthConfig = integration.manifest.oauth;
-  const { shared, oauthOnly, directOnly } = splitFields(requiredEnv, oauthConfig);
-  const useGuidedWizard = Boolean(integration.setupGuide) && !oauthConfig;
-
-  const [envValues, setEnvValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(requiredEnv.map((e) => [e.name, ""]))
-  );
-  const [connecting, setConnecting] = useState(false);
-  const [oauthPending, setOauthPending] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectingInstallId, setDisconnectingInstallId] = useState<string>();
+  const [addingInstall, setAddingInstall] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [actionError, setActionError] = useState<string>();
+  const [callbackError, setCallbackError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
-  const [wizardOpen, setWizardOpen] = useState(false);
-  const [githubWizardOpen, setGithubWizardOpen] = useState(false);
-  const [githubValues, setGithubValues] = useState<Record<string, string>>(() => ({
-    "github-app-webhook-secret": randomUUID(),
-  }));
-  const [githubSaving, setGithubSaving] = useState(false);
 
-  const setField = (name: string) => (v: string) =>
-    setEnvValues((prev) => ({ ...prev, [name]: v }));
-  const setGithubField = (key: string) => (v: string) =>
-    setGithubValues((prev) => ({ ...prev, [key]: v }));
+  const authSteps = integration.auth ?? [];
+  const isConnected = integration.connected;
+  const installStep = authSteps.find((step) => step.kind === "install");
+  const name = displayName(integration);
 
-  async function handleGithubSave() {
-    setGithubSaving(true);
-    setActionError(undefined);
-    try {
-      await Promise.all(
-        GITHUB_APP_FIELDS.map((f) => putSecret(f.key, (githubValues[f.key] ?? "").trim()))
-      );
-      window.location.href = `${API_BASE}/api/v1/integrations/github/install/start`;
-    } catch (err) {
-      setActionError(errMessage(err));
-      setGithubSaving(false);
-    }
-  }
-
-  // Handle OAuth callback redirect: ?connected=true or ?error=...
+  // The single auth callback returns here with the outcome of the step the operator just left for.
   useEffect(() => {
-    const connected = searchParams.get("connected");
-    const error = searchParams.get("error");
-    if (connected === "true") {
-      setOauthPending(false);
-      setSearchParams({}, { replace: true });
+    const status = searchParams.get("status");
+    if (!status) return;
+    if (status === "error") {
+      const reason = searchParams.get("reason") ?? "";
+      setCallbackError(CALLBACK_REASON[reason] ?? "That setup step did not complete.");
+    } else {
+      setCallbackError(undefined);
       revalidator.revalidate();
-    } else if (error) {
-      setOauthPending(false);
-      setActionError(decodeURIComponent(error));
-      setSearchParams({}, { replace: true });
     }
+    setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams, revalidator]);
-
-  async function handleConnect(e?: React.FormEvent) {
-    e?.preventDefault();
-    setConnecting(true);
-    setActionError(undefined);
-    // Exclude oauth-only fields (client_id / client_secret) from direct connect env
-    const oauthKeys = new Set(
-      oauthConfig ? [oauthConfig.client_id_env, oauthConfig.client_secret_env] : []
-    );
-    const directEnv = Object.fromEntries(
-      Object.entries(envValues).filter(([k]) => !oauthKeys.has(k))
-    );
-    try {
-      await connectIntegration(integration.name, directEnv);
-      revalidator.revalidate();
-    } catch (err) {
-      setActionError(errMessage(err));
-    } finally {
-      setConnecting(false);
-    }
-  }
-
-  async function handleOAuth() {
-    setActionError(undefined);
-    setOauthPending(true);
-    try {
-      const { authUrl } = await startOAuth(integration.name, envValues);
-      window.open(authUrl, "_blank", "noopener,noreferrer");
-    } catch (err) {
-      setActionError(errMessage(err));
-      setOauthPending(false);
-    }
-  }
 
   async function handleDisconnect() {
     setDisconnecting(true);
@@ -675,8 +288,23 @@ export default function IntegrationDetailPage() {
     }
   }
 
+  async function handleAddInstall() {
+    if (!installStep) return;
+    setAddingInstall(true);
+    setActionError(undefined);
+    try {
+      const outcome = await startHandoff(integration.name, installStep.index);
+      if (outcome === "completed") {
+        revalidator.revalidate();
+        setAddingInstall(false);
+      }
+    } catch (err) {
+      setActionError(errMessage(err));
+      setAddingInstall(false);
+    }
+  }
+
   async function handleDelete() {
-    if (!window.confirm(`Remove integration "${integration.name}"?`)) return;
     setDeleting(true);
     setActionError(undefined);
     try {
@@ -688,110 +316,152 @@ export default function IntegrationDetailPage() {
     }
   }
 
-  const isConnected = isGitHub
-    ? githubInstallations.length > 0
-    : integration.status === "connected";
-  const entry = integration.manifest.egress?.entry ?? {};
-
   return (
-    <ResourcePanel
-      crumbs={[{ label: "integrations", to: "/integrations" }, { label: integration.name }]}
-    >
-      <div className="flex flex-col gap-4">
-        {/* Header */}
-        <div className="flex items-start gap-3">
-          <div className="flex flex-col gap-1">
-            <h1 className="text-lg font-semibold text-foreground">{integration.name}</h1>
-            {integration.description && (
-              <p className="text-sm text-muted-foreground">{integration.description}</p>
-            )}
+    <ResourcePanel crumbs={[{ label: "integrations", to: "/integrations" }, { label: name }]}>
+      <div className="flex flex-col gap-6">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 gap-3">
+            <IntegrationIcon label={name} iconPath={integration.iconPath} size="lg" />
+            <div className="flex min-w-0 flex-col gap-1.5">
+              <h1 className="text-2xl font-bold tracking-tight text-foreground">{name}</h1>
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
+                {/* The slug is what every URL, log line, and manifest calls it, so it stays
+                    visible even once the brand name is the headline. */}
+                <code>{integration.name}</code>
+                {integration.category && (
+                  <>
+                    <Dot />
+                    <span className="capitalize">{integration.category}</span>
+                  </>
+                )}
+                {integration.version && (
+                  <>
+                    <Dot />
+                    <span>v{integration.version}</span>
+                  </>
+                )}
+                {integration.maintainer && (
+                  <>
+                    <Dot />
+                    <span>by {integration.maintainer}</span>
+                  </>
+                )}
+                {integration.homepage && (
+                  <>
+                    <Dot />
+                    <a
+                      href={integration.homepage}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 text-primary underline underline-offset-2 hover:opacity-80"
+                    >
+                      Website
+                      <ExternalLink className="size-3" aria-hidden />
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
-          <div className="ml-auto flex items-center gap-2">
-            <span
-              className={`text-sm ${STATUS_CLASS[isGitHub ? (isConnected ? "connected" : "disconnected") : integration.status]}`}
-            >
-              {isGitHub
-                ? isConnected
-                  ? "Connected"
-                  : "Not connected"
-                : STATUS_LABEL[integration.status]}
-            </span>
-            {integration.errorMessage && (
-              <span className="text-xs text-destructive">{integration.errorMessage}</span>
-            )}
-          </div>
-        </div>
 
-        {/* Manifest details */}
-        <div className="flex flex-col gap-1 rounded-sm border border-border p-3 text-sm">
-          <div className="flex gap-2">
-            <span className="w-24 text-muted-foreground">type</span>
-            <span className="text-foreground">{integration.type}</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <StatusBadge
+              label={isConnected ? "Connected" : "Not connected"}
+              tone={isConnected ? "success" : "neutral"}
+            />
+            <MoreMenu onDelete={handleDelete} deleting={deleting} />
           </div>
-          {integration.version && (
-            <div className="flex gap-2">
-              <span className="w-24 text-muted-foreground">version</span>
-              <span className="text-foreground">{integration.version}</span>
-            </div>
-          )}
-          {integration.maintainer && (
-            <div className="flex gap-2">
-              <span className="w-24 text-muted-foreground">maintainer</span>
-              <span className="text-foreground">{integration.maintainer}</span>
-            </div>
-          )}
-          {typeof entry.transport === "string" && (
-            <div className="flex gap-2">
-              <span className="w-24 text-muted-foreground">transport</span>
-              <span className="text-foreground">{entry.transport}</span>
-            </div>
-          )}
-        </div>
+        </header>
 
-        {/* Inbound webhook URL (integrations that declare ingress, e.g. Slack events) */}
-        {integration.ingress?.enabled && integration.ingress.webhookUrl && (
-          <div className="flex flex-col gap-2 rounded-sm border border-border p-3">
-            <h2 className="text-sm font-medium text-foreground">Webhook URL</h2>
-            <p className="text-xs text-muted-foreground">
-              Paste this into the provider's event subscription settings (Slack: Event Subscriptions
-              → Request URL). Connect the integration first — the URL only verifies once a signing
-              secret is saved.
-            </p>
-            <div className="flex items-center gap-2">
-              <code className="flex-1 overflow-x-auto rounded-sm bg-muted px-2 py-1 text-xs text-foreground">
-                {integration.ingress.webhookUrl}
-              </code>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  void copyText(integration.ingress?.webhookUrl ?? "");
-                }}
-              >
-                Copy
-              </Button>
-            </div>
-          </div>
+        {integration.description && (
+          <p className="max-w-prose text-sm text-muted-foreground">{integration.description}</p>
         )}
 
-        {/* GitHub: App-install flow, no env/OAuth form — installation itself is the credential. */}
-        {isGitHub && (
-          <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
-            <h2 className="text-sm font-medium text-foreground">
-              {isConnected ? "Installations" : "Connect"}
-            </h2>
+        {integration.errorMessage && (
+          <p className="text-sm text-destructive">{integration.errorMessage}</p>
+        )}
+
+        {/* Connect — every step comes from the manifest, so there is nothing per-integration here. */}
+        {!isConnected && (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <SectionHeading>Connect</SectionHeading>
+              {integration.setupGuide && (
+                <button
+                  type="button"
+                  onClick={() => setGuideOpen(true)}
+                  className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
+                >
+                  Setup guide →
+                </button>
+              )}
+            </div>
+            {authSteps.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                This integration declares no credentials. Nothing to set up.
+              </p>
+            ) : (
+              <IntegrationAuthFlow
+                slug={integration.name}
+                providerLabel={name}
+                steps={authSteps}
+                onAdvance={() => revalidator.revalidate()}
+                calloutError={callbackError}
+              />
+            )}
+          </section>
+        )}
+
+        {integration.capabilities && integration.capabilities.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <SectionHeading>What agents can do</SectionHeading>
+            <ul className="flex flex-col gap-1.5">
+              {integration.capabilities.map((capability) => (
+                <li key={capability} className="flex gap-2 text-sm text-foreground">
+                  <span aria-hidden className="text-muted-foreground">
+                    —
+                  </span>
+                  <span>{capability}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {integration.grants.length > 0 && (
+          <section className="flex flex-col gap-2">
+            <SectionHeading>Access you grant</SectionHeading>
+            <p className="max-w-prose text-xs text-muted-foreground">
+              {isConnected
+                ? "What this integration can reach today."
+                : "What connecting asks the provider for. These are the provider's own terms — they should match what its consent screen shows you."}
+            </p>
+            <GrantList grants={integration.grants} />
+          </section>
+        )}
+
+        {/* Where the GitHub App currently reaches. Provider-shaped state, not part of connecting. */}
+        {integration.name === "github" && isConnected && (
+          <section className="flex flex-col gap-2">
+            <SectionHeading>Installations</SectionHeading>
             {routesError && <p className="text-sm text-destructive">{routesError}</p>}
-            {isConnected ? (
-              <div className="flex flex-col gap-2">
+            {githubInstallations.length === 0 && !routesError && (
+              <p className="text-xs text-muted-foreground">
+                The App is not installed on any account yet.
+              </p>
+            )}
+            {githubInstallations.length > 0 && (
+              <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
                 {githubInstallations.map((install) => (
-                  <div
+                  <li
                     key={install.installationId}
-                    className="flex items-center justify-between gap-2 rounded-sm border border-border p-2 text-sm"
+                    className="flex items-center justify-between gap-3 px-3 py-2.5"
                   >
-                    <div className="flex flex-col gap-1">
-                      <span className="font-medium text-foreground">{install.account}</span>
-                      <span className="text-xs text-muted-foreground">
+                    <div className="flex min-w-0 flex-col gap-0.5">
+                      <span className="truncate text-sm font-medium text-foreground">
+                        {install.account}
+                      </span>
+                      <span className="line-clamp-1 text-xs text-muted-foreground">
                         {install.repositories.length === 0
                           ? "No repositories yet"
                           : `${install.repositories.length} repo${install.repositories.length === 1 ? "" : "s"}: ${install.repositories.join(", ")}`}
@@ -807,277 +477,84 @@ export default function IntegrationDetailPage() {
                         ? "Disconnecting…"
                         : "Disconnect"}
                     </Button>
-                  </div>
+                  </li>
                 ))}
-                {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-                <div className="flex items-center gap-2">
-                  <Button size="sm" asChild>
-                    <a href={`${API_BASE}/api/v1/integrations/github/install/start`}>
-                      Add another install
-                    </a>
-                  </Button>
-                  <a
-                    href="https://github.com/settings/installations"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
-                  >
-                    Manage repos on GitHub →
-                  </a>
-                </div>
-              </div>
-            ) : (
-              <>
-                <p className="text-xs text-muted-foreground">
-                  Register a GitHub App for this deployment, then install it — a one-time setup step
-                  per deployment.
-                </p>
-                {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-                <Button
-                  type="button"
-                  size="sm"
-                  className="self-start"
-                  onClick={() => setGithubWizardOpen(true)}
-                >
-                  Set up GitHub App →
-                </Button>
-              </>
+              </ul>
             )}
-          </div>
-        )}
-
-        {/* Connect form (only when not connected) */}
-        {!isGitHub && !isConnected && useGuidedWizard && (
-          <div className="flex flex-col gap-3">
-            <h2 className="text-sm font-medium text-foreground">Connect</h2>
-            <p className="text-xs text-muted-foreground">
-              Step-by-step setup: create the app, then paste each credential as you go.
-            </p>
-            <Button
-              type="button"
-              size="sm"
-              className="self-start"
-              onClick={() => setWizardOpen(true)}
-            >
-              Guided setup →
-            </Button>
-          </div>
-        )}
-
-        {!isGitHub && !isConnected && !useGuidedWizard && (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-medium text-foreground">Connect</h2>
-              {integration.setupGuide && (
-                <button
-                  type="button"
-                  onClick={() => setGuideOpen(true)}
-                  className="text-xs text-primary underline underline-offset-2 hover:opacity-80"
-                >
-                  Setup guide →
-                </button>
+            <div className="flex items-center gap-3">
+              {installStep && (
+                <Button size="sm" disabled={addingInstall} onClick={handleAddInstall}>
+                  {addingInstall ? "Opening…" : "Add another install"}
+                </Button>
               )}
-            </div>
-
-            {/* Shared fields (e.g. Team ID) — only meaningful when OAuth splits the form into two
-                paths below; with no OAuth the simple layout already renders every field once. */}
-            {oauthConfig &&
-              shared.map((field) => (
-                <EnvField
-                  key={field.name}
-                  field={field}
-                  value={envValues[field.name] ?? ""}
-                  onChange={setField(field.name)}
-                />
-              ))}
-
-            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-            {oauthPending && (
-              <p className="text-xs text-muted-foreground">
-                Waiting for authorization in the new tab…
-              </p>
-            )}
-
-            {oauthConfig ? (
-              /* Two-path layout when OAuth is available */
-              <div className="flex flex-col gap-4">
-                {/* OAuth path */}
-                <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
-                  <p className="text-xs font-medium text-foreground">
-                    Option A — Connect with OAuth
-                  </p>
-                  {oauthOnly.map((field) => (
-                    <EnvField
-                      key={field.name}
-                      field={field}
-                      value={envValues[field.name] ?? ""}
-                      onChange={setField(field.name)}
-                    />
-                  ))}
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={oauthPending || connecting}
-                    onClick={handleOAuth}
-                  >
-                    {oauthPending ? "Authorizing…" : "Connect with OAuth"}
-                  </Button>
-                </div>
-
-                {/* Direct token path */}
-                <div className="flex flex-col gap-3 rounded-sm border border-border p-3">
-                  <p className="text-xs font-medium text-foreground">
-                    Option B — Paste token directly
-                  </p>
-                  {directOnly.map((field) => (
-                    <EnvField
-                      key={field.name}
-                      field={field}
-                      value={envValues[field.name] ?? ""}
-                      onChange={setField(field.name)}
-                    />
-                  ))}
-                  <form onSubmit={handleConnect}>
-                    <Button
-                      type="submit"
-                      size="sm"
-                      variant="outline"
-                      disabled={connecting || oauthPending}
-                    >
-                      {connecting ? "Connecting…" : "Connect"}
-                    </Button>
-                  </form>
-                </div>
-              </div>
-            ) : (
-              /* Simple layout when no OAuth */
-              <form onSubmit={handleConnect} className="flex flex-col gap-3">
-                {requiredEnv.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    No configuration required. Click Connect to start the MCP server.
-                  </p>
-                ) : (
-                  requiredEnv.map((field) => (
-                    <EnvField
-                      key={field.name}
-                      field={field}
-                      value={envValues[field.name] ?? ""}
-                      onChange={setField(field.name)}
-                    />
-                  ))
-                )}
-                <Button type="submit" size="sm" disabled={connecting}>
-                  {connecting ? "Connecting…" : "Connect"}
-                </Button>
-              </form>
-            )}
-          </div>
-        )}
-
-        {/* Disconnect */}
-        {!isGitHub && isConnected && (
-          <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-medium text-foreground">Connection</h2>
-            <p className="text-xs text-muted-foreground">
-              MCP server is running. Disconnect to stop it.
-            </p>
-            {actionError && <p className="text-sm text-destructive">{actionError}</p>}
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={disconnecting}
-                onClick={handleDisconnect}
+              <a
+                href="https://github.com/settings/installations"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-primary underline underline-offset-2 hover:opacity-80"
               >
-                {disconnecting ? "Disconnecting…" : "Disconnect"}
-              </Button>
+                Manage repos on GitHub
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
             </div>
-          </div>
+          </section>
         )}
 
         {/* Slack routing status */}
         {integration.name === "slack" && isConnected && (
-          <div className="flex flex-col gap-2 rounded-sm border border-border p-3">
-            <h2 className="text-sm font-medium text-foreground">Routing</h2>
+          <section className="flex flex-col gap-2">
+            <SectionHeading>Routing</SectionHeading>
             {routesError ? (
               <>
                 <p className="text-sm text-destructive">
                   Couldn't confirm channel routing: {routesError}
                 </p>
-                <p className="text-xs text-muted-foreground">
-                  This usually means the stored Slack bot token is invalid or was revoked. Get a
-                  fresh Bot User OAuth Token (starts with <code>xoxb-</code>) from your Slack app's
-                  OAuth & Permissions page — reinstalling the app there mints a new one — then
-                  disconnect and reconnect this integration with it above.
+                <p className="max-w-prose text-xs text-muted-foreground">
+                  This usually means the stored Slack bot token is invalid or was revoked.
+                  Disconnect and reconnect to run the install step again and mint a fresh one.
                 </p>
               </>
             ) : (
-              <p className="text-xs text-muted-foreground">
+              <p className="max-w-prose text-xs text-muted-foreground">
                 All Slack DMs and channel messages go to the default TulipFarm assistant.
               </p>
             )}
-          </div>
+          </section>
         )}
 
-        {/* Danger zone */}
-        {!isGitHub && (
-          <div className="flex flex-col gap-2 rounded-sm border border-destructive/30 p-3">
-            <h2 className="text-sm font-medium text-destructive">Remove</h2>
-            <p className="text-xs text-muted-foreground">
-              Removes the integration from the soul repo. Disconnects first if connected.
+        {/* Inbound webhook URL (integrations that declare ingress, e.g. Slack events) */}
+        {integration.ingress?.enabled && integration.ingress.webhookUrl && (
+          <section className="flex flex-col gap-2">
+            <SectionHeading>Webhook URL</SectionHeading>
+            <p className="max-w-prose text-xs text-muted-foreground">
+              Paste this into the provider's event subscription settings (Slack: Event Subscriptions
+              → Request URL). Connect the integration first — the URL only verifies once a signing
+              secret is saved.
+            </p>
+            <CopyField value={integration.ingress.webhookUrl} label="webhook URL" />
+          </section>
+        )}
+
+        {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+
+        {isConnected && (
+          <section className="flex flex-col gap-2 border-t border-border pt-5">
+            <SectionHeading>Connection</SectionHeading>
+            <p className="max-w-prose text-xs text-muted-foreground">
+              Stored credentials are kept, so reconnecting does not repeat setup.
             </p>
             <Button
               size="sm"
               variant="outline"
-              className="self-start border-destructive text-destructive hover:bg-destructive/10"
-              disabled={deleting}
-              onClick={handleDelete}
+              className="self-start"
+              disabled={disconnecting}
+              onClick={handleDisconnect}
             >
-              {deleting ? "Removing…" : "Remove integration"}
+              {disconnecting ? "Disconnecting…" : "Disconnect"}
             </Button>
-          </div>
+          </section>
         )}
       </div>
-
-      {/* Guided connect wizard */}
-      {useGuidedWizard && (
-        <Sheet
-          open={wizardOpen}
-          onClose={() => setWizardOpen(false)}
-          title={`Connect ${integration.name}`}
-          className="max-w-lg"
-        >
-          <ConnectWizard
-            integrationName={integration.name}
-            installManifest={integration.manifest.install_manifest}
-            requiredEnv={requiredEnv}
-            envValues={envValues}
-            setField={setField}
-            onSubmit={() => handleConnect()}
-            connecting={connecting}
-            actionError={actionError}
-          />
-        </Sheet>
-      )}
-
-      {/* GitHub App setup wizard */}
-      {isGitHub && (
-        <Sheet
-          open={githubWizardOpen}
-          onClose={() => setGithubWizardOpen(false)}
-          title="Set up GitHub App"
-          className="max-w-lg"
-        >
-          <GitHubConnectWizard
-            values={githubValues}
-            setField={setGithubField}
-            onSubmit={handleGithubSave}
-            saving={githubSaving}
-            actionError={actionError}
-            onViewGuide={() => setGuideOpen(true)}
-          />
-        </Sheet>
-      )}
 
       {/* Setup guide modal */}
       {integration.setupGuide && (

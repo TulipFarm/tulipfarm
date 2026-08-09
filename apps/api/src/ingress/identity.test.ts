@@ -3,6 +3,7 @@ import type { IngressUserLookup, UserDoc } from "../auth/users";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { ChannelBindDeps } from "../identity/channel-link";
 import { MemoryExternalIdentityRepo } from "../identity/fakes";
+import { declarativeToolName } from "../tools/declarative/tools";
 import type { ToolDef } from "../tools/types";
 import { IngressIdentityResolver } from "./identity";
 
@@ -41,7 +42,11 @@ function makeUsers(overrides: Partial<IngressUserLookup> = {}): IngressUserLooku
 function makeRegistry(execute: ToolDef["execute"]): ToolRegistry {
   return {
     getAll: () => [
-      { name: "integration_chatapp_get_user_profile", tier: "integration", execute } as ToolDef,
+      {
+        name: declarativeToolName("chatapp", "get_user_profile"),
+        tier: "integration",
+        execute,
+      } as ToolDef,
     ],
   } as unknown as ToolRegistry;
 }

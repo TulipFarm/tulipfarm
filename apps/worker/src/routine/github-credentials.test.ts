@@ -55,7 +55,7 @@ describe("GitHubInstallationTokenProvider", () => {
     const provider = new GitHubInstallationTokenProvider({
       http,
       installations: directoryOf([INSTALLATION]),
-      secrets: secretsServiceWith({ "github-app-private-key": PRIVATE_KEY_PEM }),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
       now,
     });
 
@@ -74,7 +74,7 @@ describe("GitHubInstallationTokenProvider", () => {
     const provider = new GitHubInstallationTokenProvider({
       http,
       installations: directoryOf([INSTALLATION]),
-      secrets: secretsServiceWith({ "github-app-private-key": PRIVATE_KEY_PEM }),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
       now,
     });
 
@@ -108,7 +108,7 @@ describe("GitHubInstallationTokenProvider", () => {
     const provider = new GitHubInstallationTokenProvider({
       http: fakeHttp(() => ({})),
       installations: directoryOf([]),
-      secrets: secretsServiceWith({ "github-app-private-key": PRIVATE_KEY_PEM }),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
       now: () => new Date(),
     });
     expect(await provider.resolveCurrent(GITHUB_INSTALLATION_SECRET_REF)).toBeNull();
@@ -124,7 +124,7 @@ describe("GitHubInstallationTokenProvider", () => {
     const provider = new GitHubInstallationTokenProvider({
       http: fakeHttp(() => ({})),
       installations: directoryOf([INSTALLATION, second]),
-      secrets: secretsServiceWith({ "github-app-private-key": PRIVATE_KEY_PEM }),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
       now: () => new Date(),
     });
     expect(await provider.resolveCurrent(GITHUB_INSTALLATION_SECRET_REF)).toBeNull();
@@ -149,7 +149,7 @@ describe("GitHubInstallationTokenProvider", () => {
     const provider = new GitHubInstallationTokenProvider({
       http,
       installations: directoryOf([INSTALLATION]),
-      secrets: secretsServiceWith({ "github-app-private-key": PRIVATE_KEY_PEM }),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
       now: () => new Date(),
     });
     expect(await provider.resolveCurrent(GITHUB_INSTALLATION_SECRET_REF)).toBeNull();

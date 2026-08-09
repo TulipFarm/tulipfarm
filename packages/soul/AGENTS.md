@@ -38,12 +38,17 @@ agents/<name>/AGENT.md            # markdown + optional YAML frontmatter
 skills/<name>/SKILL.md
 resources/<name>/schema.yml       # + optional hooks.ts (SHA256-hashed for integrity)
 routines/<name>/routine.yaml      # + optional hooks.ts
-integrations/<name>/config.yaml
+integrations/<name>/manifest.yml   # + connection.yaml once connected, + the egress spec if declared
 soul.yaml   guardrails.yaml   # repo-root manifests (optional); soul.yaml's `llm:` key holds LLM config
 ```
 
 Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/schema`) on load.
 Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stays up.
+
+That tolerance has a sharp edge for integrations: a manifest that declares `egress.spec` but whose
+spec file is missing is skipped, so the integration **silently disappears from the catalog** rather
+than failing loudly. Any code path that writes an integration into a soul repo must copy the spec
+alongside `manifest.yml` — see `apps/api/src/integrations/install.ts`.
 
 ## File map
 
@@ -53,6 +58,14 @@ Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stay
   divergence, but **un-pushed local commits are preserved** (retry push, don't blind-reset).
   Commits use `BOT_GIT_NAME` / `BOT_GIT_EMAIL` from `@tulipfarm/constants`.
 - `migrations/index.ts` — the `SOUL_MIGRATIONS` array; `soul-migrations.ts` runs pending ones.
+- `types.ts` — the Integration manifest authoring contract (`EgressConfig`, `EgressAuth`,
+  `EgressOperation`). Widening these types widens what every third-party integration may declare,
+  so change them together with `integration-trust.ts`.
+- `integration-trust.ts` — what a *third-party* manifest may contain. `ts-code` and `stdio` egress
+  are rejected outright (they are code, and installing a repo must not mean executing its code);
+  `base_url` must be https with a literal host. Bundled integrations are exempt.
+- `integration-auth.ts` — validates the declared connect flow, so a manifest whose auth steps
+  cannot complete is rejected at load rather than halfway through an operator's setup.
 
 ## How to extend
 
@@ -60,6 +73,9 @@ Parsing is fault-tolerant: a bad file is logged and skipped, and the loader stay
   in a map, and export its interface from `types.ts`.
 - **New migration:** append to `SOUL_MIGRATIONS` with a monotonic `version`, a `description`, and
   an async `up(soulPath)`.
+- **New integration:** nothing changes here — write a manifest
+  ([`docs/architecture/building-an-integration.md`](../../docs/architecture/building-an-integration.md)).
+  Touch this package only when a provider needs a manifest capability that does not exist yet.
 
 ## Tests
 

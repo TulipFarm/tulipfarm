@@ -1,24 +1,84 @@
 name: confluence
-version: "1.0.0"
-description: Index Confluence pages into TulipFarm Knowledge with per-user ACL fidelity.
+version: "1.1.0"
+description: Let TulipFarm agents search Confluence, read pages, and list spaces — and index pages
+  into Knowledge with per-user ACL fidelity — using one Atlassian OAuth token.
 maintainer: TulipFarm
+icon: confluence
+capabilities:
+  - Search page and blog content across the site with CQL
+  - Read a page's metadata and body
+  - List the spaces the integration can see
+  - Index pages into Knowledge with per-user ACL fidelity
+grants:
+  - label: content
+    access: read
+    description: Read pages, blog posts, and their bodies in the spaces the token's scopes cover.
+  - label: spaces and restrictions
+    access: read
+    description: List spaces and read the restrictions that decide who may see a page — which is
+      what lets Knowledge preserve per-user access rather than flattening it.
+
+# Read-only by design: the declared scopes below grant reads, and publishing write Tools against a
+# read token would produce Tools that 403 at runtime — worse than no Tools, because an agent would
+# report having made an edit that never happened.
 egress:
-  type: none
-required_env:
-  - name: CONFLUENCE_CLOUD_ID
-    label: Cloud ID
-    description: Atlassian Cloud ID for the Confluence site.
-    secret: false
-    setup_url: https://admin.atlassian.com
-    steps:
-      - Open Atlassian Admin for the site and copy the Cloud ID. This becomes the Confluence
-        tenant identifier used for sync checkpoints and citations.
-  - name: CONFLUENCE_ACCESS_TOKEN
-    label: OAuth Access Token
-    description: OAuth bearer token with read access to Confluence pages, spaces, groups, and users.
-    secret: true
-    setup_url: https://developer.atlassian.com/console/myapps/
-    steps:
-      - Create or open an Atlassian OAuth app with Confluence read scopes for content, spaces,
-        restrictions, groups, and users. Copy a current access token and paste it here.
+  type: openapi
+  spec: openapi.json
+  # Atlassian addresses each site by cloud id rather than by hostname, so the id is a path segment
+  # filled from connection env at compile time. The host stays literal, so the egress destination
+  # allow-list still pins one origin.
+  base_url: https://api.atlassian.com/ex/confluence/{CONFLUENCE_CLOUD_ID}/wiki
+  auth:
+    token_env: CONFLUENCE_ACCESS_TOKEN
+  operations:
+    - operation: search
+      name: search
+      description: Search Confluence with CQL. Use this first when you know a page by name or
+        subject but not by id — read_page needs an id. Example cql values are
+        'text ~ "onboarding"', 'title ~ "runbook" AND space = ENG', and 'type = page AND
+        lastmodified > now("-7d")'.
+    - operation: getPageById
+      name: read_page
+      description: Read one page by id. Pass body-format=storage to get the page body back;
+        without it you get metadata only. Get the id from search.
+    - operation: getSpaces
+      name: list_spaces
+      description: List the spaces the integration can see, with their keys. Use this to find the
+        space key a CQL query needs.
+
+auth:
+  # `auth` fully supersedes `required_env` (see resolveAuthSteps), so both Knowledge-sync variables
+  # are re-declared here. Dropping either would silently stop indexing Confluence into Knowledge,
+  # with nothing failing loudly.
+  - kind: fields
+    title: Connect your Atlassian site
+    description: One OAuth token serves both the agent Tools and Knowledge indexing — issuing two
+      would mean two things to rotate.
+    fields:
+      - name: CONFLUENCE_CLOUD_ID
+        label: Cloud ID
+        description: Atlassian Cloud ID for the Confluence site. Also forms part of the API
+          address, so agent Tools do not work without it.
+        secret: false
+        setup_url: https://admin.atlassian.com
+        steps:
+          - Open Atlassian Admin for the site and copy the Cloud ID. If you cannot find it there,
+            visit https://<your-site>.atlassian.net/_edge/tenant_info while signed in — the
+            cloudId field in that response is the value.
+          - Paste it below. It is also used as the tenant identifier for sync checkpoints and
+            Knowledge citations.
+      - name: CONFLUENCE_ACCESS_TOKEN
+        label: OAuth Access Token
+        description: OAuth bearer token with read access to Confluence content, spaces,
+          restrictions, groups, and users.
+        secret: true
+        setup_url: https://developer.atlassian.com/console/myapps/
+        steps:
+          - Open developer.atlassian.com/console/myapps and create (or open) an OAuth 2.0
+            integration for your site.
+          - Under Permissions, add the Confluence API read scopes for content, spaces,
+            restrictions, groups, and users. The restriction scopes are what let Knowledge
+            preserve per-user access instead of flattening it.
+          - Copy a current access token and paste it below.
+
 setup_guide_path: setup-guide.md

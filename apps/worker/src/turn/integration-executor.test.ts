@@ -37,6 +37,7 @@ const DELIVERY: RemoteDelivery = {
   headers: { "x-sig": "v0=abc" },
   classifier: { source: "({ classify() {} })", hash: "hash-1" },
   hasThreadMapping: false,
+  env: {},
   chatEnabled: true,
   eventsEnabled: true,
 };
@@ -139,6 +140,9 @@ describe("createIntegrationExecutor", () => {
 
     await execute();
 
+    // `env` is what the manifest's `ingress.context_env` forwards — how a classifier knows which
+    // bot it is. Empty here because this fixture declares none; asserted so it cannot quietly
+    // stop being forwarded.
     expect(recorded.classified).toEqual([
       {
         source: DELIVERY.classifier.source,
@@ -147,6 +151,7 @@ describe("createIntegrationExecutor", () => {
           body: DELIVERY.body,
           headers: DELIVERY.headers,
           hasThreadMapping: false,
+          env: {},
         },
       },
     ]);

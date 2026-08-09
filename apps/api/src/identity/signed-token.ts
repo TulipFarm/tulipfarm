@@ -1,13 +1,11 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 /**
- * The signed short-lived token codec shared by `channel-link.ts` (bind offers) and
- * `integrations/github-install-state.ts` (install-redirect CSRF state): provision/memoize an
+ * The signed short-lived token codec used by `channel-link.ts` (bind offers): provision/memoize an
  * HMAC signing key in the secret store, then sign and verify `base64url(JSON claims).hex(hmac)`
  * tokens with a constant-time comparison. What the claims mean, how long they're valid, and
- * whether they're also checked against a database row (channel-link's nonce spend; install-state
- * has none) stays with each caller — this module only proves a token was issued by this
- * deployment and decodes intact.
+ * whether they're also checked against a database row (channel-link's nonce spend) stays with each
+ * caller — this module only proves a token was issued by this deployment and decodes intact.
  */
 
 /** Just enough of `SecretsService` to hold one key, so callers need not carry the whole service. */

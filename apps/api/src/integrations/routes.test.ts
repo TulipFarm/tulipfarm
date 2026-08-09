@@ -192,9 +192,21 @@ describe("integrations routes", () => {
           manifest: {
             name: "slack",
             egress: { type: "none" },
-            required_env: [
-              { name: "SLACK_BOT_TOKEN", label: "Bot Token", secret: true },
-              { name: "SLACK_TEAM_ID", label: "Team ID", secret: false },
+            // No `grants`: this fixture proves they are derived from the oauth2 step's scopes,
+            // which is what spares an OAuth author from writing the same list twice.
+            auth: [
+              {
+                kind: "oauth2",
+                token_url: "https://slack.example/token",
+                client_id_env: "SLACK_CLIENT_ID",
+                client_secret_env: "SLACK_CLIENT_SECRET",
+                token_env: "SLACK_BOT_TOKEN",
+                scopes: ["chat:write", "channels:read", "chat:write"],
+              },
+              {
+                kind: "fields",
+                fields: [{ name: "SLACK_TEAM_ID", label: "Team ID", secret: false }],
+              },
             ],
           },
           setupGuide: "# Connect Slack",
@@ -203,7 +215,15 @@ describe("integrations routes", () => {
       [
         "github",
         {
-          manifest: { name: "github", egress: { type: "none" } },
+          manifest: {
+            name: "github",
+            egress: { type: "none" },
+            capabilities: ["Review and merge pull requests"],
+            grants: [
+              { label: "contents", access: "write", description: "Push commits." },
+              { label: "metadata", access: "read", description: "Read repository names." },
+            ],
+          },
         },
       ],
     ]);
@@ -258,10 +278,35 @@ describe("integrations routes", () => {
       });
       expect(res.statusCode).toBe(200);
       const { integrations } = res.json();
-      expect(integrations).toEqual([
-        expect.objectContaining({ name: "slack", status: "disconnected" }),
-        expect.objectContaining({ name: "github", status: "disconnected" }),
-      ]);
+      // Asserted by subject rather than as an exact list: the catalog also carries curated
+      // listings from registry.yml, and every integration added there would otherwise break a
+      // test that is about bundled discovery.
+      expect(integrations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "github", status: "disconnected", installed: true }),
+          expect.objectContaining({ name: "slack", status: "disconnected", installed: true }),
+        ])
+      );
+      // Sorted by name: the catalog is one list an operator scans, so its base order has to be
+      // stable and predictable rather than however discovery happened to merge.
+      const names = integrations.map((entry: { name: string }) => entry.name);
+      expect(names).toEqual([...names].sort());
+    });
+
+    it("carries the brand mark of an integration whose manifest names one", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations",
+        cookies: auth(),
+        headers,
+      });
+      const byName = new Map(
+        res.json().integrations.map((entry: { name: string }) => [entry.name, entry])
+      );
+      expect(byName.get("github")).toMatchObject({ iconPath: expect.stringMatching(/^M/) });
+      // Slack asked to be removed from Simple Icons, so it has no mark and the catalog must still
+      // list it — the absence is projected as absence, not as an error or a placeholder path.
+      expect(byName.get("slack")).not.toHaveProperty("iconPath");
     });
 
     it("reflects GitHub App install status from IntegrationStore, not soul connection.yaml", async () => {
@@ -278,6 +323,52 @@ describe("integrations routes", () => {
       expect(integrations).toEqual(
         expect.arrayContaining([expect.objectContaining({ name: "github", status: "connected" })])
       );
+    });
+  });
+
+  describe("GET /api/v1/integrations/:name", () => {
+    async function detail(name: string) {
+      const res = await app.inject({
+        method: "GET",
+        url: `/api/v1/integrations/${name}`,
+        cookies: auth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(200);
+      return res.json();
+    }
+
+    it("carries the same brand identity the catalog row showed", async () => {
+      // Landing on a detail page that drops back to a bare slug reads as a different product
+      // than the one that was clicked.
+      expect(await detail("github")).toMatchObject({
+        title: "GitHub",
+        iconPath: expect.stringMatching(/^M/),
+      });
+    });
+
+    it("reports the authority a manifest declares by hand", async () => {
+      const { grants } = await detail("github");
+      expect(grants).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ label: "contents", access: "write" }),
+          expect.objectContaining({ label: "metadata", access: "read" }),
+        ])
+      );
+    });
+
+    it("derives authority from declared OAuth scopes when the manifest states none", async () => {
+      // Slack authors no `grants`; its bot scopes are real declared data on the oauth2 step, so
+      // deriving them costs the author nothing and cannot drift from what is requested.
+      const { grants } = await detail("slack");
+      const labels = grants.map((grant: { label: string }) => grant.label);
+      expect(labels).toContain("chat:write");
+      expect(new Set(labels).size).toBe(labels.length);
+    });
+
+    it("reports what agents can do once connected", async () => {
+      const { capabilities } = await detail("github");
+      expect(capabilities.join(" ")).toMatch(/pull request/i);
     });
   });
 
@@ -319,6 +410,55 @@ describe("integrations routes", () => {
         headers,
       });
       expect(detail.json().status).toBe("connected");
+    });
+
+    // The secrets API deliberately never returns values. Connect must not become the way around
+    // that: env values are resolved and templated into the URLs the auth broker hands back, so a
+    // reference to someone else's key would come straight back to the caller in a redirect.
+    it("refuses a value referencing a secret this integration does not own", async () => {
+      await secretsService.set("soul-git-credential", "ghp_the_operators_git_token");
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: {
+          env: {
+            SLACK_BOT_TOKEN: "xoxb-secret",
+            SLACK_TEAM_ID: "secret://soul-git-credential",
+          },
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain("may not reference another secret");
+      await expect(
+        readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
+      ).rejects.toThrow();
+    });
+
+    // Reconnect resubmits the stored form, so an integration's own reference must still pass.
+    it("accepts a resubmitted reference to its own sealed value", async () => {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_TEAM_ID: "T123" } },
+      });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: {
+          env: {
+            SLACK_BOT_TOKEN: "secret://integration.slack.SLACK_BOT_TOKEN",
+            SLACK_TEAM_ID: "T999",
+          },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(await secretsService.get("integration.slack.SLACK_BOT_TOKEN")).toBe("xoxb-secret");
     });
   });
 
@@ -374,10 +514,12 @@ describe("integrations routes", () => {
         cookies: auth(),
         headers,
       });
-      expect(list.json().integrations).toEqual([
-        expect.objectContaining({ name: "slack", status: "disconnected" }),
-        expect.objectContaining({ name: "github", status: "disconnected" }),
-      ]);
+      expect(list.json().integrations).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "github", status: "disconnected" }),
+          expect.objectContaining({ name: "slack", status: "disconnected" }),
+        ])
+      );
     });
   });
 

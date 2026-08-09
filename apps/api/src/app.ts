@@ -42,10 +42,14 @@ import { type FormsRoutesDeps, registerFormRoutes } from "./forms/routes";
 import { type HookIngressDeps, registerHookIngressRoutes } from "./hooks/routes";
 import type { IdentityRouteDeps } from "./identity/routes";
 import { type IngressRoutesDeps, registerIngressRoutes } from "./ingress/routes";
+import { type IntegrationAuthRequestRepo, resolveAuthEndpoints } from "./integrations/auth-broker";
+import { registerIntegrationAuthRoutes } from "./integrations/auth-routes";
+import { ensureGitHubInstallation } from "./integrations/github-install";
 import {
   type GitHubInstallDeps,
   registerGitHubInstallRoutes,
 } from "./integrations/github-install-routes";
+import { registerIntegrationMarketplaceRoutes } from "./integrations/marketplace-routes";
 import { registerIntegrationRoutes } from "./integrations/routes";
 import {
   ensureDefaultSlackRoute,
@@ -124,6 +128,14 @@ export interface AppOptions {
   >;
   /** Live GitHub-install check backing per-turn tool visibility on the conversation debug route. */
   githubStatus?: { integrations: IntegrationStore; businessId: string };
+  /**
+   * Generic Integration auth broker. Absent in tests that never exercise a provider round trip;
+   * `fetchImpl` lets those that do avoid real network calls.
+   */
+  integrationAuth?: {
+    repo: IntegrationAuthRequestRepo;
+    fetchImpl?: typeof globalThis.fetch;
+  };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
@@ -147,6 +159,12 @@ export interface AppOptions {
   forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
+  /**
+   * Reconciles manifest-declared egress Tools against `toolRegistry` when an integration connects,
+   * disconnects, or is removed. Composed in `index.ts`, where the effect ledger and secrets service
+   * live; absent in tests that never exercise integration Tools.
+   */
+  declarativeTools?: { sync: () => number; countFor: (slug: string) => number };
   guardrailsService?: GuardrailsService;
   surfaceArtifactStore?: SurfaceArtifactStore;
   surfaceActionStore?: SurfaceActionStore;
@@ -501,6 +519,7 @@ export async function buildApp(opts: AppOptions = {}) {
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
         if (opts.secretsService) {
+          const soulLoader = opts.soulLoader;
           const slackBindDeps: SlackBindDeps | undefined = opts.slackBind
             ? {
                 soulLoader: opts.soulLoader,
@@ -511,6 +530,35 @@ export async function buildApp(opts: AppOptions = {}) {
                 requireAuth,
               }
             : undefined;
+          // Shared by the connect route and the auth broker's callback: an integration is wired the
+          // same way whether its credentials were pasted or came back from a provider redirect.
+          const onConnected = async (name: string) => {
+            // Manifest-declared Tools become callable the moment credentials land, whichever way
+            // they arrived — a paste or an OAuth redirect. Runs first so a provider-specific step
+            // below cannot leave an integration connected but toolless.
+            opts.declarativeTools?.sync();
+            if (name === "slack" && slackBindDeps) {
+              await ensureDefaultSlackRoute(slackBindDeps);
+            }
+            if (name === "github" && opts.githubInstall) {
+              // Written by the manifest's `install` step; without it there is no installation to
+              // record, which is the pre-install state rather than a failure.
+              const installationId =
+                soulLoader.integrations.get("github")?.connection?.env?.GITHUB_INSTALLATION_ID;
+              if (installationId) {
+                await ensureGitHubInstallation(
+                  {
+                    integrations: opts.githubInstall.integrations,
+                    secretsService: opts.githubInstall.secretsService,
+                    businessId: opts.githubInstall.businessId,
+                    http: opts.githubInstall.http,
+                    log: app.log,
+                  },
+                  installationId
+                );
+              }
+            }
+          };
           registerIntegrationRoutes(
             app,
             opts.soulLoader,
@@ -518,20 +566,40 @@ export async function buildApp(opts: AppOptions = {}) {
             opts.secretsService,
             opts.bundledIntegrations ?? new Map(),
             requireAuth,
-            async (name) => {
-              if (name === "slack" && slackBindDeps) {
-                await ensureDefaultSlackRoute(slackBindDeps);
-              }
-            },
+            onConnected,
             opts.githubInstall
               ? {
                   integrations: opts.githubInstall.integrations,
                   businessId: opts.githubInstall.businessId,
                 }
-              : undefined
+              : undefined,
+            opts.declarativeTools
+          );
+          registerIntegrationMarketplaceRoutes(
+            app,
+            opts.soulLoader,
+            opts.gitSync,
+            opts.bundledIntegrations ?? new Map(),
+            requireAuth
           );
           if (slackBindDeps) {
             registerSlackBindRoute(app, slackBindDeps);
+          }
+          if (opts.integrationAuth && opts.secretsService) {
+            registerIntegrationAuthRoutes(
+              app,
+              {
+                soulLoader: opts.soulLoader,
+                gitSync: opts.gitSync,
+                secrets: opts.secretsService,
+                repo: opts.integrationAuth.repo,
+                bundled: opts.bundledIntegrations ?? new Map(),
+                endpoints: resolveAuthEndpoints(),
+                fetchImpl: opts.integrationAuth.fetchImpl,
+                onConnected,
+              },
+              requireAuth
+            );
           }
         }
         const knowledgeService = opts.knowledgeService;

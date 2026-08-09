@@ -87,6 +87,8 @@ export function createIntegrationExecutor(options: IntegrationExecutorOptions): 
           body: delivery.body,
           headers: delivery.headers,
           hasThreadMapping: delivery.hasThreadMapping,
+          // Declared configuration only — never credentials. See `ingress.context_env`.
+          env: delivery.env ?? {},
         },
         null,
         `ingress:${delivery.slug}`,

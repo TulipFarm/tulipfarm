@@ -1,9 +1,16 @@
 # GitHub App — Registration Manifest
 
-Locked decision for the single, TulipFarm-owned GitHub App (see [`GitHub App`](../../metadata/terminologies.md)
-in the terminology glossary). This is the manifest registered once on GitHub, not the
-per-customer connect flow (that's `integrations/github/manifest.yml`, a separate artifact —
-see Phase 8 of the GitHub integration build).
+Locked decision for the GitHub App a deployment registers for itself (see
+[`GitHub App`](../../metadata/terminologies.md) in the terminology glossary).
+
+**There is no TulipFarm-owned App.** Each deployment creates its own through GitHub's App
+Manifest flow, so the App — and its private key and webhook secret — belong to whoever runs that
+deployment. Nothing is shared between deployments, and TulipFarm never holds a credential that
+could reach a customer's repositories.
+
+This is not a separate artifact from the connect flow: the `app_manifest` step in
+[`integrations/github/manifest.yml`](../../integrations/github/manifest.yml) *is* this manifest.
+The permissions and events below are the contract that file must match — change them together.
 
 ## Permissions requested (base install)
 
@@ -35,12 +42,25 @@ the locked contract-scope decision.
 
 ## Auth model
 
-Installation-based (not OAuth-user-token, not a shared bot-account PAT). One App
-definition; each customer installs it into their own GitHub org/repos, picking which
-repos are in scope at install time. App JWT (RS256, signed with the App's private key)
-exchanges for a short-lived (~1hr) installation access token, scoped only to that
-customer's selected repos. See Phase 1 (`packages/integrations/src/github/credentials.ts`)
-for the minting implementation.
+Installation-based (not OAuth-user-token, not a shared bot-account PAT). App JWT (RS256, signed
+with the App's private key) exchanges for a short-lived (~1hr) installation access token, scoped
+only to the repos selected at install time. See
+`packages/integrations/src/github/credentials.ts` for the minting implementation.
+
+Both halves are declarative and run on the generic Integration auth broker
+(`apps/api/src/integrations/auth-broker.ts`), the same one every other integration uses:
+
+1. **`app_manifest`** — GitHub creates the App from the definition above and returns the App id,
+   slug, private key, webhook secret, and OAuth client credentials in exchange for a one-time
+   code. Nothing is copied by hand.
+2. **`install`** — the operator picks which org and repos the App may touch; the callback carries
+   the `installation_id`.
+
+The credentials are sealed under `integration.github.*`, which is exactly where
+`INTEGRATION_APPS` (`packages/secrets/src/integration-registry.ts`) resolves each role, so the
+token-minting code reads what the flow wrote with no bridging step.
+`ensureGitHubInstallation` (`apps/api/src/integrations/github-install.ts`) then records the
+`integration_apps` / `integrations` / `integration_access_grants` rows.
 
 ## Why App over PAT / OAuth-user-token
 
@@ -48,6 +68,8 @@ for the minting implementation.
 - Granular, customer-visible permission grant at install time.
 - Native per-install webhook delivery, no manual per-repo webhook setup.
 - Short-lived tokens vs. a long-lived PAT sitting in a secrets store.
+- The App Manifest flow removes the setup step entirely: no operator ever transcribes an App ID,
+  a slug, a `.pem`, or a webhook secret.
 - Matches the existing `GitHubInstallationScope` code (`packages/integrations/src/github/scope.ts`)
   and the multi-tenant storage model (`integration_apps` → `integrations` →
   `integration_access_grants`) already built for install-based providers.

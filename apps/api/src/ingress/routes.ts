@@ -3,7 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { isSecretRef } from "../integrations/connection-env";
 import type { IngressDeliveriesRepo } from "./repo";
-import { verifyHmacSignature } from "./signature";
+import { verifyWebhookRequest } from "./signature";
 import { dotPath, matchesBody, renderBodyTemplate } from "./template";
 
 /** One verified delivery handed to the persist-first invocation gateway. */
@@ -81,9 +81,9 @@ export async function registerIngressRoutes(
         if (!connection?.enabled) return reply.code(404).send(NOT_FOUND);
 
         const security = ingress.webhook.security;
-        if (security?.type !== "hmac_sha256") {
-          // V1 posture matches the routines webhook: never open. An ingress block without
-          // hmac security is a manifest bug, not a reason to accept unsigned traffic.
+        if (security?.type !== "hmac_sha256" && security?.type !== "shared_secret") {
+          // V1 posture matches the routines webhook: never open. An ingress block without a
+          // recognised security scheme is a manifest bug, not a reason to accept unsigned traffic.
           return reply.code(401).send({ error: "webhook security not configured" });
         }
         let secret = connection.env?.[security.secret_env];
@@ -93,7 +93,7 @@ export async function registerIngressRoutes(
         if (!secret) return reply.code(401).send({ error: "webhook secret not configured" });
 
         const raw = req.body as Buffer;
-        const check = verifyHmacSignature(raw, req.headers, security, secret);
+        const check = verifyWebhookRequest(raw, req.headers, security, secret);
         if (!check.ok) {
           req.log.warn({ integration: name, reason: check.reason }, "ingress signature rejected");
           return reply.code(401).send({ error: "invalid signature" });

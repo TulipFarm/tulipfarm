@@ -80,7 +80,7 @@ function fakeSecretsService(): () => Promise<SecretsService> {
   return async () =>
     ({
       get: async (key: string) => {
-        if (key === "github-app-private-key") return APP_PRIVATE_KEY_PEM;
+        if (key === "integration.github.GITHUB_APP_PRIVATE_KEY") return APP_PRIVATE_KEY_PEM;
         throw new Error(`no secret ${key}`);
       },
       // biome-ignore lint/suspicious/noExplicitAny: only `get` is exercised

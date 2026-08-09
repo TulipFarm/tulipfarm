@@ -2,70 +2,126 @@ name: slack
 version: "1.0.0"
 description: Talk to TulipFarm agents from Slack via Socket Mode — DM or @mention in a channel.
 maintainer: TulipFarm
+# No `icon`: Slack asked Simple Icons to remove its mark, so there is none to name. The UI derives
+# a monogram instead — do not point this at a lookalike slug.
+capabilities:
+  - Answer DMs and @mentions from your workspace
+  - Post messages and replies into channels it has been added to
+  - Read channel history to follow a conversation before replying
+# No `grants`: the oauth2 step below declares the bot scopes, and those are resolved automatically.
 egress:
   type: none
-install_manifest:
-  display_information:
-    name: TulipFarm
-  features:
-    bot_user:
-      display_name: TulipFarm
-      always_online: true
-    assistant_view: {}
-  oauth_config:
+auth:
+  # 1. Slack pre-fills its "create an app from a manifest" form straight from the query string, so
+  #    the operator never copies JSON by hand. Slack has no manifest-to-credentials API (unlike
+  #    GitHub), so there is no exchange here — the app exists, but we hold nothing yet.
+  - kind: app_manifest
+    title: Create the Slack app
+    description: Slack pre-fills its "create an app from a manifest" form from a link we build, so
+      there is no JSON to copy by hand.
+    create_url: https://api.slack.com/apps
+    manifest_param: manifest_json
+    delivery: query_param
+    manifest:
+      display_information:
+        name: TulipFarm
+      features:
+        bot_user:
+          display_name: TulipFarm
+          always_online: true
+        assistant_view: {}
+      oauth_config:
+        redirect_urls:
+          - "{callback_url}"
+        scopes:
+          bot:
+            - chat:write
+            - app_mentions:read
+            - channels:read
+            - channels:history
+            - groups:read
+            - groups:history
+            - im:read
+            - im:history
+            - mpim:read
+            - mpim:history
+            - users:read
+            - users:read.email
+            - assistant:write
+      settings:
+        event_subscriptions:
+          bot_events:
+            - message.channels
+            - message.im
+            - app_mention
+        interactivity:
+          is_enabled: false
+        org_deploy_enabled: false
+        socket_mode_enabled: true
+        token_rotation_enabled: false
+
+  # 2. Three values that all live on one page. The app-level token is here rather than acquired by
+  #    OAuth because Slack only ever issues it from the app settings UI — Socket Mode has no
+  #    programmatic equivalent.
+  - kind: fields
+    title: Copy the app credentials
+    description: All three values sit on the new app's Basic Information page. Slack only ever
+      issues the app-level token from that page, so it cannot be obtained by OAuth.
+    fields:
+      - name: SLACK_CLIENT_ID
+        label: Client ID
+        description: From Settings → Basic Information → App Credentials.
+        secret: false
+        setup_url: https://api.slack.com/apps
+        steps:
+          - Open the app you just created and go to Settings → Basic Information. Under App
+            Credentials, copy the Client ID and paste it below.
+      - name: SLACK_CLIENT_SECRET
+        label: Client Secret
+        description: From Settings → Basic Information → App Credentials.
+        secret: true
+        setup_url: https://api.slack.com/apps
+        steps:
+          - On the same Basic Information page, click Show next to Client Secret, then copy it
+            and paste it below.
+      - name: SLACK_APP_TOKEN
+        label: App-Level Token
+        description: App-level token with the connections:write scope (starts with xapp-).
+        secret: true
+        setup_url: https://api.slack.com/apps
+        steps:
+          - Still on Basic Information, scroll to App-Level Tokens and click Generate Token and
+            Scopes. Name it "TulipFarm", add the connections:write scope, and click Generate.
+            Copy the token (it starts with xapp-) and paste it below.
+
+  # 3. One click replaces the two values that used to be pasted by hand: installing the app yields
+  #    the bot token, and the same response carries the workspace id that channel routing needs.
+  #    Slack's OAuth v2 does not accept PKCE, so it is disabled rather than silently rejected.
+  - kind: oauth2
+    title: Install to your workspace
+    description: Installing the app yields the bot token and the workspace id that channel routing
+      needs, replacing two values that would otherwise be pasted by hand.
+    authorization_url: https://slack.com/oauth/v2/authorize
+    token_url: https://slack.com/api/oauth.v2.access
+    pkce: false
+    client_id_env: SLACK_CLIENT_ID
+    client_secret_env: SLACK_CLIENT_SECRET
+    token_env: SLACK_BOT_TOKEN
+    scope_separator: ","
+    map:
+      team.id: SLACK_TEAM_ID
     scopes:
-      bot:
-        - chat:write
-        - app_mentions:read
-        - channels:read
-        - channels:history
-        - groups:read
-        - groups:history
-        - im:read
-        - im:history
-        - mpim:read
-        - mpim:history
-        - users:read
-        - users:read.email
-        - assistant:write
-  settings:
-    event_subscriptions:
-      bot_events:
-        - message.channels
-        - message.im
-        - app_mention
-    interactivity:
-      is_enabled: false
-    org_deploy_enabled: false
-    socket_mode_enabled: true
-    token_rotation_enabled: false
-required_env:
-  - name: SLACK_APP_TOKEN
-    label: App-Level Token
-    description: App-level token with the connections:write scope (starts with xapp-).
-    secret: true
-    setup_url: https://api.slack.com/apps
-    steps:
-      - Open your new app and go to Settings → Basic Information, then scroll down to App-Level
-        Tokens. Click Generate Token and Scopes, name it "TulipFarm", add the connections:write
-        scope, and click Generate. Copy the token (it starts with xapp-) and paste it below.
-  - name: SLACK_BOT_TOKEN
-    label: Bot Token
-    description: Bot User OAuth Token (starts with xoxb-).
-    secret: true
-    setup_url: https://api.slack.com/apps
-    steps:
-      - Go to Settings → Install App → Install to Workspace and approve the requested scopes.
-        Once installed, copy the Bot User OAuth Token (it starts with xoxb-) from OAuth &
-        Permissions and paste it below.
-  - name: SLACK_TEAM_ID
-    label: Team ID
-    description: Slack workspace ID (starts with T).
-    secret: false
-    setup_url: https://app.slack.com
-    steps:
-      - This one isn't in the app settings — it belongs to your workspace, not the app. Open
-        your workspace at app.slack.com in a browser; the URL looks like
-        app.slack.com/client/T0XXXXXXX/..., and that "T"-prefixed segment is your Team ID.
-        Copy it and paste it below.
+      - chat:write
+      - app_mentions:read
+      - channels:read
+      - channels:history
+      - groups:read
+      - groups:history
+      - im:read
+      - im:history
+      - mpim:read
+      - mpim:history
+      - users:read
+      - users:read.email
+      - assistant:write
 setup_guide_path: setup-guide.md

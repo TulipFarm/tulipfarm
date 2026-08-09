@@ -81,6 +81,7 @@ import {
   IntegrationConversationsRepo,
   IntegrationEventsRepo,
 } from "./ingress/repo";
+import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
 import { IngressDeliveryHost } from "./internal/delivery-host";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
@@ -169,6 +170,8 @@ import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
 import { PgSurfaceArtifactStore } from "./surfaces/artifact-store";
 import { surfaceRendererRegistry } from "./surfaces/renderer-registry";
+import { FetchEgressHttp } from "./tools/declarative/http";
+import { DeclarativeToolSync } from "./tools/declarative/sync";
 import { buildGitHubTooling } from "./tools/github/compose";
 import { buildGitHubTools } from "./tools/github/tools";
 import { buildToolRegistry } from "./tools/setup";
@@ -524,6 +527,19 @@ async function boot() {
       },
     });
 
+    // Manifest-declared integrations publish their Tools here rather than through
+    // `buildToolRegistry`: what they publish depends on which are connected *now*, and an operator
+    // who connects a provider expects its Tools without an API restart.
+    const declarativeTools = new DeclarativeToolSync({
+      registry: toolRegistry,
+      integrations: () => soulLoader.integrations.values(),
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      effects: slackEffects,
+      secrets: async () => secretsService,
+      http: new FetchEgressHttp(),
+      logger: () => app.log,
+    });
+
     // What the Worker calls back into while the history, the Soul artifacts, and the Tool catalog
     // still live here. Every operation names a Run and acts as the subject that Run was minted
     // with, so a worker credential is a key to a Run rather than a principal of its own.
@@ -644,6 +660,7 @@ async function boot() {
         soulRepositories: soulRepositoryStore,
       },
       githubStatus: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
+      integrationAuth: { repo: new PgIntegrationAuthRequestRepo(pool) },
       hookExecutor,
       resourceRepoFactory,
       counterStore,
@@ -662,6 +679,7 @@ async function boot() {
       kvService,
       knowledgeService,
       toolRegistry,
+      declarativeTools,
       activityService,
       observabilityService,
       observabilityConfig: obsConfig,
@@ -760,6 +778,7 @@ async function boot() {
     });
 
     // Init after buildApp so fallback events log through Fastify's Pino logger.
+    declarativeTools.sync();
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
     guardrailsService.init(soulLoader.guardrailsConfig, app.log);
     await embeddingService.init(soulLoader.llmConfig, secretsService, app.log);
