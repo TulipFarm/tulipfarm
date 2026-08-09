@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/TulipFarm/tulipfarm/compare/v0.7.0...v0.8.0) (2026-08-09)
+
+### Features
+
+* **integrations:** make integrations declarative and redesign the UI ([#344](https://github.com/TulipFarm/tulipfarm/issues/344)) ([5e501aa](https://github.com/TulipFarm/tulipfarm/commit/5e501aad97e4946e4176fc0659d81c525e215c19))
+* **memory:** promote packages/memory to the live memory engine ([#342](https://github.com/TulipFarm/tulipfarm/issues/342)) ([67e6481](https://github.com/TulipFarm/tulipfarm/commit/67e648191977951d3ba24acd64d164dbdc12b06a))
+* **skills:** add sandboxed script and CLI execution ([#343](https://github.com/TulipFarm/tulipfarm/issues/343)) ([2ba5886](https://github.com/TulipFarm/tulipfarm/commit/2ba588691c914f75f0e69dcfce3b65974ba5d219))
+
+### Bug Fixes
+
+* qa and multiple smoke fixes ([#346](https://github.com/TulipFarm/tulipfarm/issues/346)) ([400fde3](https://github.com/TulipFarm/tulipfarm/commit/400fde36861a53b754bd73fb093f2617ff8aac06))
+
 ## [0.7.0](https://github.com/TulipFarm/tulipfarm/compare/v0.6.1...v0.7.0) (2026-08-08)
 
 ### Features
