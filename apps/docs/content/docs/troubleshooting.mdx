@@ -240,8 +240,13 @@ has not been completed on this instance.
 
 <Accordion title="I want an integration that is not listed">
 
-GitHub and Slack are the two integrations that ship in the box. Anything else is a skill —
-see [Install a skill](/docs/guides/install-a-skill).
+Seven integrations ship in the box, but you are not limited to them. An integration is a
+data file — a manifest describing how to connect and which provider API calls Agents may make — so
+you can install one from any git repository: on **Integrations**, choose **Install from git**. See
+[Connect an integration](/docs/guides/connect-an-integration#install-from-a-git-repository).
+
+If no manifest exists for the provider yet, writing one needs no TypeScript. The authoring
+reference is `docs/architecture/building-an-integration.md` in the repository.
 
 </Accordion>
 

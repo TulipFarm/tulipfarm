@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { analyzeHook, HookAnalysisError } from "./analyzer";
+import { hookExpression } from "./isolate";
 
 describe("analyzeHook", () => {
   describe("banned patterns", () => {
@@ -49,5 +50,18 @@ describe("analyzeHook", () => {
       const source = "({ async before(ctx) { ctx.patch({ id: ctx.uuid(), ts: ctx.now }); } })";
       expect(() => analyzeHook(source)).not.toThrow();
     });
+  });
+});
+
+describe("hookExpression", () => {
+  it("tolerates the trailing semicolon a formatter adds", () => {
+    // A hook file is also a syntactically valid TypeScript module, so `biome check --write` will
+    // terminate the expression statement. Without this, formatting a shipped classifier would
+    // break every delivery to its integration.
+    expect(hookExpression("({ classify() {} });\n")).toBe("({ classify() {} })");
+  });
+
+  it("leaves an unterminated expression exactly as authored", () => {
+    expect(hookExpression("({ classify() {} })\n")).toBe("({ classify() {} })\n");
   });
 });

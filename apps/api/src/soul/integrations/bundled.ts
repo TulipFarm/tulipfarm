@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { IntegrationManifest, Logger } from "@tulipfarm/soul";
 import { parse as parseYaml } from "yaml";
 
@@ -10,6 +10,20 @@ const REPO_INTEGRATIONS_DIR = resolve(__dirname, "../../../../../integrations");
 export interface BundledIntegration {
   manifest: IntegrationManifest;
   setupGuide?: string;
+  /** Parsed OpenAPI document (present when manifest.egress.spec is declared and readable). */
+  egressSpec?: unknown;
+  /**
+   * The same document verbatim, plus the filename the manifest names it by. Installing a bundled
+   * integration copies this into the operator's soul repo; without it the installed manifest would
+   * point at a spec that isn't there.
+   */
+  egressSpecFile?: { file: string; raw: string };
+  /**
+   * The sandboxed ingress classifier named by `manifest.ingress.handler`, verbatim. Carried for
+   * the same reason as the egress spec: the Soul loader treats a declared-but-missing handler as
+   * fatal, so installing a bundled channel must copy it alongside the manifest.
+   */
+  ingressHandlerFile?: { file: string; raw: string };
 }
 
 export function bundledIntegrationsDir(): string {
@@ -23,6 +37,38 @@ function isNotFound(error: unknown): boolean {
   return (
     error instanceof Error && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT"
   );
+}
+
+/**
+ * Reads the OpenAPI document an `egress: { type: "openapi" }` manifest names. Mirrors the soul
+ * loader's `loadEgressSpec`, including the `basename()` confinement, so a bundled and a
+ * soul-installed integration publish Tools from the same input.
+ */
+async function loadEgressSpec(
+  dir: string,
+  manifest: IntegrationManifest
+): Promise<{ parsed: unknown; file: { file: string; raw: string } } | undefined> {
+  if (manifest.egress?.type !== "openapi") return undefined;
+  const specFile = basename(manifest.egress.spec);
+  const raw = await readFile(join(dir, specFile), "utf8");
+  // JSON is valid YAML, so one parser covers both the .json and .yaml specs providers publish.
+  return { parsed: parseYaml(raw), file: { file: specFile, raw } };
+}
+
+/**
+ * Reads the sandboxed ingress classifier an `ingress.handler` manifest names. `basename()`
+ * confinement mirrors the Soul loader's, so a bundled and a soul-installed channel run the same
+ * source. A declared-but-missing handler throws: the Soul loader would reject it on install
+ * anyway, and failing here names the integration instead of the install.
+ */
+async function loadIngressHandler(
+  dir: string,
+  manifest: IntegrationManifest
+): Promise<{ file: string; raw: string } | undefined> {
+  const declared = manifest.ingress?.handler;
+  if (!declared) return undefined;
+  const file = basename(declared);
+  return { file, raw: await readFile(join(dir, file), "utf8") };
 }
 
 /**
@@ -72,7 +118,14 @@ export async function loadBundledIntegrations(
         // setup-guide.md is optional
       }
 
-      integrations.set(slug, { manifest, setupGuide });
+      const spec = await loadEgressSpec(dir, manifest);
+      integrations.set(slug, {
+        manifest,
+        setupGuide,
+        egressSpec: spec?.parsed,
+        egressSpecFile: spec?.file,
+        ingressHandlerFile: await loadIngressHandler(dir, manifest),
+      });
     } catch (error) {
       logger.error(
         `Bundled Integration "${slug}" skipped: ${

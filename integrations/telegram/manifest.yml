@@ -1,0 +1,166 @@
+name: telegram
+version: "1.0.0"
+description: Talk to TulipFarm agents from Telegram — DM the bot, or @mention it in a group. Replies
+  land in the same chat, thread, or forum topic the message came from.
+maintainer: TulipFarm
+icon: telegram
+capabilities:
+  - Answer direct messages sent to the bot
+  - Answer @mentions and replies in groups the bot has been added to
+  - Keep forum topics as separate conversations
+  - Look up chat and member details to address people by name
+# Telegram has no scope system for bots: a bot can do exactly what the Bot API allows, in the chats
+# it has been added to. Access is therefore described in those terms rather than as invented scopes.
+grants:
+  - label: chats the bot is in
+    access: write
+    description: Read messages addressed to the bot and send messages in any chat it has been
+      added to. Telegram's default privacy mode keeps other group chatter out of reach.
+  - label: chat and member lookup
+    access: read
+    description: Read a chat's title and type, and a member's display name, to address people by
+      name instead of by numeric id.
+
+# Fully declarative — the generic OpenAPI runtime executes these, so this integration ships no
+# TypeScript beyond its sandboxed ingress classifier.
+egress:
+  type: openapi
+  spec: openapi.json
+  # Telegram puts the credential in the path rather than a header, so the base URL is templated.
+  # `{token}` is only ever substituted into a path segment — the host is literal, which keeps the
+  # destination allow-list pinned to one origin.
+  base_url: https://api.telegram.org/bot{token}
+  auth:
+    token_env: TELEGRAM_BOT_TOKEN
+    in: base_url
+  operations:
+    - operation: sendMessage
+      name: send_message
+      description: Send a message to a Telegram chat. Pass the numeric chat id, or @channelusername
+        for a public channel. To answer inside an existing exchange, set reply_to_message_id; to
+        post into a forum topic, set message_thread_id.
+      mutating: true
+    - operation: getChat
+      name: read_chat
+      description: Read a chat's title, type, and description by id. Use this to find out whether
+        you are in a private chat, a group, or a channel before deciding how to address people.
+      # Telegram models every method as a POST, including its reads. Without this the
+      # method-derived default would ask an operator to approve looking up a chat's title.
+      mutating: false
+    - operation: getChatMember
+      name: read_chat_member
+      description: Read one member of a chat — their display name, username, and status. Use this
+        to turn the numeric sender id on a message into a name worth addressing.
+      # Also a POST-shaped read, and one the ingress identity binding makes on every inbound
+      # message — an approval gate here would stall every conversation on its first reply.
+      mutating: false
+
+auth:
+  # 1. BotFather is the only way to create a Telegram bot; there is no API for it. Its creation
+  #    message contains both values collected here, so this is one copy from one screen.
+  - kind: fields
+    title: Create the bot with BotFather
+    description: Telegram bots are created by chatting with @BotFather. Its reply carries both
+      values below — there is no API that can do this step for you.
+    fields:
+      - name: TELEGRAM_BOT_TOKEN
+        label: Bot Token
+        description: The token BotFather issues, in the form 123456789:AAE...
+        secret: true
+        setup_url: https://t.me/BotFather
+        steps:
+          - Open @BotFather in Telegram and send /newbot. Give the bot a display name, then a
+            username ending in "bot" (for example tulipfarm_bot).
+          - BotFather replies with a token that looks like 123456789:AAEhBOweik6ad. Copy it and
+            paste it below. Treat it as a password — anyone holding it controls the bot.
+      - name: TELEGRAM_BOT_USERNAME
+        label: Bot Username
+        description: The bot's @username, without the @. Used to recognise mentions in groups.
+        secret: false
+        setup_url: https://t.me/BotFather
+        steps:
+          - Copy the username you chose in the previous step — the one ending in "bot" — and paste
+            it below without the leading @.
+          - To let the bot answer @mentions in groups, send /setprivacy to BotFather, pick your
+            bot, and choose Disable. Leaving privacy enabled means Telegram only ever forwards
+            commands, and plain @mentions will never reach TulipFarm.
+
+  # 2. Telegram delivers nothing until a webhook is registered, and the registration call is the
+  #    only place the delivery secret can be set. Doing it here means no operator ever runs curl,
+  #    and the secret is generated rather than invented — it never transits a clipboard.
+  - kind: webhook
+    title: Point Telegram at this deployment
+    description: Registers this deployment's ingress URL with Telegram and generates the shared
+      secret that proves a delivery really came from Telegram.
+    url: https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/setWebhook
+    secret_env: TELEGRAM_WEBHOOK_SECRET
+    body:
+      url: "{webhook_url}"
+      secret_token: "{TELEGRAM_WEBHOOK_SECRET}"
+      # Only messages. Subscribing to everything would spend a delivery on every edit, reaction,
+      # and membership change, all of which the classifier immediately ignores.
+      allowed_updates:
+        - message
+      # Telegram queues undelivered updates while a deployment is down; on a fresh connect that
+      # backlog is a stranger's conversation from before the bot existed, so it is dropped.
+      drop_pending_updates: true
+
+ingress:
+  handler: ingress.ts
+  webhook:
+    # Telegram does not sign its deliveries. It echoes back the secret registered above, in a
+    # header, which the host compares in constant time.
+    security:
+      type: shared_secret
+      header: X-Telegram-Bot-Api-Secret-Token
+      secret_env: TELEGRAM_WEBHOOK_SECRET
+    # Telegram retries an unacknowledged update with the same update_id, so this collapses a retry
+    # into the delivery it repeats rather than answering the same message twice.
+    dedup_key: update_id
+  # A Telegram update names no bot, so the classifier cannot tell whether a mention is of *this*
+  # bot without being told its own username. Non-secret by construction: it is the public @handle.
+  context_env:
+    - TELEGRAM_BOT_USERNAME
+  chat:
+    # Three axes, narrowest first: a forum topic is its own conversation, a reply chain continues
+    # the message it answers, and everything else is the chat itself. Without message_thread_id
+    # every topic in a forum would collapse into one conversation.
+    thread_key: "{message.chat.id}/{message.message_thread_id|message.reply_to_message.message_id|message.message_id}"
+    identity:
+      tool: read_chat_member
+      args:
+        body:
+          chat_id: "{chat}"
+          user_id: "{sender}"
+      # Telegram never exposes a user's email, so this path resolves nothing and senders stay
+      # unlinked until they bind an account. Declared so the failure is the documented
+      # "unlinked sender" path with its bind link, rather than a missing binding.
+      email_path: result.user.email
+    reply:
+      # A DM: nothing to disambiguate, so the reply is a plain message in the chat.
+      default:
+        tool: send_message
+        args:
+          body:
+            chat_id: "{chat}"
+            text: "{text}"
+      # A group: replying to the message keeps the answer attached to the question, in a room
+      # where a bare message would read as an interruption.
+      reply:
+        tool: send_message
+        args:
+          body:
+            chat_id: "{chat}"
+            text: "{text}"
+            reply_to_message_id: "{message}"
+      # A forum topic: the answer must be posted into the topic, or Telegram puts it in General.
+      topic:
+        tool: send_message
+        args:
+          body:
+            chat_id: "{chat}"
+            text: "{text}"
+            message_thread_id: "{topic}"
+            reply_to_message_id: "{message}"
+
+setup_guide_path: setup-guide.md

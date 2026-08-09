@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
+import { declarativeToolName } from "../tools/declarative/tools";
 import type { ToolDef } from "../tools/types";
 import { postReply } from "./responder";
+
+const RUN = { runId: "run-1", toolCallId: "ingress-reply:1:default" };
 
 const REPLY = {
   default: { tool: "send_message", args: { channel_id: "{channel}", text: "{text}" } },
@@ -16,7 +19,7 @@ function makeRegistry(tools: Record<string, ToolDef["execute"]>): ToolRegistry {
     getAll: () =>
       Object.entries(tools).map(
         ([name, execute]) =>
-          ({ name: `integration_chatapp_${name}`, tier: "integration", execute }) as ToolDef
+          ({ name: declarativeToolName("chatapp", name), tier: "integration", execute }) as ToolDef
       ),
   } as unknown as ToolRegistry;
 }
@@ -37,6 +40,7 @@ describe("postReply", () => {
         binding: "thread",
         vars: { channel: "C1", thread: "1.1" },
         text: "the answer",
+        run: RUN,
       }
     );
     expect(execute).toHaveBeenCalledWith(
@@ -50,7 +54,14 @@ describe("postReply", () => {
     const execute = vi.fn(async () => ({ success: true as const, data: {} }));
     await postReply(
       { registry: makeRegistry({ send_message: execute }), log: makeLog() },
-      { slug: "chatapp", reply: REPLY, binding: "nonexistent", vars: { channel: "C1" }, text: "t" }
+      {
+        slug: "chatapp",
+        reply: REPLY,
+        binding: "nonexistent",
+        vars: { channel: "C1" },
+        text: "t",
+        run: RUN,
+      }
     );
     expect(execute).toHaveBeenCalledWith({ channel_id: "C1", text: "t" }, expect.anything());
   });
@@ -59,7 +70,7 @@ describe("postReply", () => {
     const log = makeLog();
     await postReply(
       { registry: makeRegistry({}), log },
-      { slug: "chatapp", reply: {}, binding: "thread", vars: {}, text: "t" }
+      { slug: "chatapp", reply: {}, binding: "thread", vars: {}, text: "t", run: RUN }
     );
     expect(log.error).toHaveBeenCalledWith(expect.anything(), expect.stringContaining("dropped"));
   });
@@ -76,7 +87,14 @@ describe("postReply", () => {
         }),
         log,
       },
-      { slug: "chatapp", reply: REPLY, binding: "default", vars: { channel: "C1" }, text: "t" }
+      {
+        slug: "chatapp",
+        reply: REPLY,
+        binding: "default",
+        vars: { channel: "C1" },
+        text: "t",
+        run: RUN,
+      }
     );
     expect(log.error).toHaveBeenCalledTimes(1);
 
@@ -90,7 +108,14 @@ describe("postReply", () => {
           }),
           log,
         },
-        { slug: "chatapp", reply: REPLY, binding: "default", vars: { channel: "C1" }, text: "t" }
+        {
+          slug: "chatapp",
+          reply: REPLY,
+          binding: "default",
+          vars: { channel: "C1" },
+          text: "t",
+          run: RUN,
+        }
       )
     ).resolves.toBeUndefined();
   });
@@ -99,7 +124,7 @@ describe("postReply", () => {
     const log = makeLog();
     await postReply(
       { registry: undefined, log },
-      { slug: "chatapp", reply: REPLY, binding: "default", vars: {}, text: "t" }
+      { slug: "chatapp", reply: REPLY, binding: "default", vars: {}, text: "t", run: RUN }
     );
     expect(log.error).toHaveBeenCalled();
   });

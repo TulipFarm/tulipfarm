@@ -206,6 +206,9 @@ importers:
       pg-boss:
         specifier: ^12.23.0
         version: 12.23.0
+      simple-icons:
+        specifier: ^16.28.0
+        version: 16.28.0
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -755,6 +758,9 @@ importers:
       '@tulipfarm/schema':
         specifier: workspace:*
         version: link:../schema
+      '@tulipfarm/soul':
+        specifier: workspace:*
+        version: link:../soul
       '@tulipfarm/tool-broker':
         specifier: workspace:*
         version: link:../tool-broker
@@ -7017,6 +7023,10 @@ packages:
 
   simple-git@3.36.0:
     resolution: {integrity: sha512-cGQjLjK8bxJw4QuYT7gxHw3/IouVESbhahSsHrX97MzCL1gu2u7oy38W6L2ZIGECEfIBG4BabsWDPjBxJENv9Q==}
+
+  simple-icons@16.28.0:
+    resolution: {integrity: sha512-sQPR5AtK/ijRjou7zw7mlLp08oB6FH7i0lOy5XJ2zp9mJs/yejgiOn7KvQoe2q4YJIx6VmgUSW5AOefebPt5kg==}
+    engines: {node: '>=0.12.18'}
 
   slice-ansi@7.1.2:
     resolution: {integrity: sha512-iOBWFgUX7caIZiuutICxVgX1SdxwAVFFKwt1EvMYYec/NWO5meOJ6K5uQxhrYBdQJne4KxiqZc+KptFOWFSI9w==}
@@ -14155,6 +14165,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  simple-icons@16.28.0: {}
 
   slice-ansi@7.1.2:
     dependencies:

@@ -1,0 +1,174 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Confluence Cloud (TulipFarm subset)",
+    "version": "1.0.0",
+    "description": "The read operations TulipFarm publishes as agent Tools. A deliberate subset of Atlassian's spec, not a vendored copy: the full document carries hundreds of operations, most of them writes this integration's declared scopes do not cover. Every path is relative to the site's /wiki root, which is why v2 and the older CQL search endpoint can share one base URL."
+  },
+  "servers": [{ "url": "https://api.atlassian.com/ex/confluence/{cloud_id}/wiki" }],
+  "paths": {
+    "/rest/api/search": {
+      "get": {
+        "operationId": "search",
+        "summary": "Search content with CQL.",
+        "parameters": [
+          {
+            "name": "cql",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Confluence Query Language, e.g. text ~ \"onboarding\" or title ~ \"runbook\" AND space = ENG. Quote phrases."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 25 },
+            "description": "Maximum results to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching content.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "content": {
+                            "type": "object",
+                            "properties": {
+                              "id": { "type": "string" },
+                              "type": { "type": "string" },
+                              "title": { "type": "string" },
+                              "status": { "type": "string" }
+                            }
+                          },
+                          "title": { "type": "string" },
+                          "excerpt": { "type": "string" },
+                          "url": { "type": "string" },
+                          "lastModified": { "type": "string" }
+                        }
+                      }
+                    },
+                    "size": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/pages/{id}": {
+      "get": {
+        "operationId": "getPageById",
+        "summary": "Read one page, optionally including its body.",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Numeric page id, as a string. Search first if you only know the title."
+          },
+          {
+            "name": "body-format",
+            "in": "query",
+            "schema": { "type": "string", "enum": ["storage", "atlas_doc_format", "view"] },
+            "description": "Omit for metadata only. Pass storage to get the page body back."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "status": { "type": "string" },
+                    "spaceId": { "type": "string" },
+                    "parentId": { "type": "string" },
+                    "version": {
+                      "type": "object",
+                      "properties": {
+                        "number": { "type": "integer" },
+                        "createdAt": { "type": "string" }
+                      }
+                    },
+                    "body": {
+                      "type": "object",
+                      "properties": {
+                        "storage": {
+                          "type": "object",
+                          "properties": {
+                            "value": { "type": "string" },
+                            "representation": { "type": "string" }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/spaces": {
+      "get": {
+        "operationId": "getSpaces",
+        "summary": "List the spaces the integration can see.",
+        "parameters": [
+          {
+            "name": "keys",
+            "in": "query",
+            "schema": { "type": "string" },
+            "description": "Comma-separated space keys to filter by, e.g. ENG,DESIGN."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 25 },
+            "description": "Maximum spaces to return."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The spaces.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string" },
+                          "key": { "type": "string" },
+                          "name": { "type": "string" },
+                          "type": { "type": "string" },
+                          "homepageId": { "type": "string" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

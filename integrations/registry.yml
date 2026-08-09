@@ -1,0 +1,64 @@
+# Curated integration catalog — the "marketplace" an operator browses.
+#
+# Bundled integrations (a directory next to this file) are discovered automatically; an entry here
+# only adds the presentation metadata discovery cannot infer — display title, category, homepage.
+# An entry with a `source` is a curated third-party integration: nothing ships in the image, and
+# installing it clones that repo. Operators can also install any repo by URL without it being
+# listed here; this file is curation, not an allowlist.
+#
+# Third-party integrations must be purely declarative. A manifest that runs code — `ts-code`
+# egress, a stdio MCP server, or an `ingress.handler` — is rejected at install
+# (packages/soul/src/integration-trust.ts).
+
+version: 1
+
+integrations:
+  - name: slack
+    title: Slack
+    # No `icon`: Slack asked to be removed from Simple Icons, so there is no mark to name and the
+    # catalog falls back to a monogram. Do not point this at a lookalike slug.
+    category: chat
+    homepage: https://slack.com
+    description: Chat with your agents in channels and DMs, and let them post back.
+
+  - name: github
+    title: GitHub
+    icon: github
+    category: code
+    homepage: https://github.com
+    description: Read and write repositories, issues, and pull requests.
+
+  - name: notion
+    title: Notion
+    icon: notion
+    category: docs
+    homepage: https://notion.so
+    description: Search the workspace, read and write pages, and query databases.
+
+  - name: telegram
+    title: Telegram
+    icon: telegram
+    category: chat
+    homepage: https://telegram.org
+    description: Chat with your agents by DM, or @mention them in a group or forum topic.
+
+  - name: confluence
+    title: Confluence
+    icon: confluence
+    category: docs
+    homepage: https://www.atlassian.com/software/confluence
+    description: Search the wiki, read pages, and index them into Knowledge with ACLs intact.
+
+  - name: google-drive
+    title: Google Drive
+    icon: googledrive
+    category: docs
+    homepage: https://drive.google.com
+    description: Search files and read their details, and index them into Knowledge with ACLs intact.
+
+  - name: google-docs
+    title: Google Docs
+    icon: googledocs
+    category: docs
+    homepage: https://docs.google.com
+    description: Read documents, and index them into Knowledge with Drive-backed ACLs intact.

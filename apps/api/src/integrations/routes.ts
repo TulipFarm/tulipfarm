@@ -1,19 +1,27 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type {
-  GitSyncService,
-  IntegrationManifest,
-  SoulIntegration,
-  SoulLoader,
+import {
+  authStepProducesEnv,
+  authStepSatisfied,
+  type GitSyncService,
+  type IntegrationManifest,
+  resolveAuthSteps,
+  resolveGrants,
+  type SoulIntegration,
+  type SoulLoader,
 } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../auth/schemas";
 import type { BundledIntegration } from "../soul/integrations/bundled";
-import { deleteConnectionSecrets, sealConnectionEnv } from "./connection-env";
+import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
+import { brandIconPath } from "./brand-icon";
+import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env";
+import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
+import { readIntegrationLock, writeIntegrationLock } from "./install";
 
 /*
  * Generic connect/disconnect backend for Soul-declared integrations (manifest.yml + optional
@@ -42,7 +50,7 @@ interface MergedIntegration {
 // itself always comes from the bundled template so a code update reaches installed integrations
 // without reinstalling. Soul's own manifest.yml copy is kept only as an install-time record, not
 // read back.
-function mergeIntegrations(
+export function mergeIntegrations(
   soulLoader: SoulLoader,
   bundled: ReadonlyMap<string, BundledIntegration>
 ): Map<string, MergedIntegration> {
@@ -75,15 +83,71 @@ function toSummary(entry: MergedIntegration) {
     description: entry.manifest.description,
     version: entry.manifest.version,
     maintainer: entry.manifest.maintainer,
+    installed: true,
     status: (entry.connected ? "connected" : "disconnected") as ConnectionStatus,
   };
 }
 
-function toDetail(entry: MergedIntegration) {
+/**
+ * The catalog an operator browses: everything present in this deployment, plus the curated
+ * third-party entries that are not installed yet.
+ *
+ * These are one list rather than two pages because "installed" is not a distinction an operator
+ * makes — every bundled integration is installed by virtue of shipping in the image, so a tab
+ * labelled that way showed things nobody installed and hid things they were looking for. What
+ * matters is whether an integration is connected, which is a property of an entry, not a page.
+ */
+async function toCatalog(
+  merged: Map<string, MergedIntegration>,
+  registry: ReadonlyMap<string, RegistryEntry>
+) {
+  const names = [...new Set([...merged.keys(), ...registry.keys()])].sort();
+  return await Promise.all(
+    names.map(async (name) => {
+      const entry = merged.get(name);
+      const listing = registry.get(name);
+      // A curated entry that is not installed has no manifest yet — nothing has been cloned — so
+      // the registry's own copy is all there is to show until it is.
+      const base = entry
+        ? toSummary(entry)
+        : {
+            name,
+            type: "none",
+            description: undefined as string | undefined,
+            version: undefined as string | undefined,
+            maintainer: undefined as string | undefined,
+            installed: false,
+            status: "disconnected" as ConnectionStatus,
+          };
+      return {
+        ...base,
+        title: listing?.title,
+        description: base.description ?? listing?.description,
+        category: listing?.category,
+        homepage: listing?.homepage,
+        source: listing?.source,
+        iconPath: (await brandIconPath(entry?.manifest.icon ?? listing?.icon)) ?? undefined,
+      };
+    })
+  );
+}
+
+async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
+  const steps = resolveAuthSteps(entry.manifest);
   return {
     ...toSummary(entry),
+    // The same brand identity the catalog row showed. Landing on a detail page that drops back to
+    // a bare slug reads as a different product than the one that was clicked.
+    title: listing?.title,
+    category: listing?.category,
+    homepage: listing?.homepage,
+    iconPath: (await brandIconPath(entry.manifest.icon ?? listing?.icon)) ?? undefined,
+    capabilities: entry.manifest.capabilities,
+    grants: resolveGrants(entry.manifest),
     manifest: {
-      required_env: entry.manifest.required_env,
+      // Derived from the resolved flow, not read from the manifest: a manifest that declares
+      // `auth` has no `required_env`, and every consumer must see one shape.
+      required_env: steps.flatMap((step) => (step.kind === "fields" ? step.fields : [])),
       egress: entry.manifest.egress,
       setup_guide_path: entry.manifest.setup_guide_path,
       oauth: entry.manifest.oauth,
@@ -91,6 +155,17 @@ function toDetail(entry: MergedIntegration) {
         ? JSON.stringify(entry.manifest.install_manifest, null, 2)
         : undefined,
     },
+    auth: steps.map((step, index) => ({
+      index,
+      kind: step.kind,
+      title: step.title,
+      description: step.description,
+      satisfied: authStepSatisfied(step, entry.connectionEnv ?? {}),
+      // Whether finishing this step is observable at all. `satisfied` alone cannot drive a setup
+      // walkthrough: a step that writes nothing is satisfied before it is started.
+      producesEnv: authStepProducesEnv(step),
+      fields: step.kind === "fields" ? step.fields : undefined,
+    })),
     connected: entry.connected,
     setupGuide: entry.setupGuide,
   };
@@ -98,13 +173,21 @@ function toDetail(entry: MergedIntegration) {
 
 const IntegrationSummarySchema = {
   type: "object",
-  required: ["name", "type", "status"],
+  required: ["name", "type", "status", "installed"],
   properties: {
     name: { type: "string" },
+    title: { type: "string" },
     type: { type: "string" },
     description: { type: "string" },
+    category: { type: "string" },
+    homepage: { type: "string" },
+    /** Simple Icons path data for the brand mark; absent when the brand has none. */
+    iconPath: { type: "string" },
     version: { type: "string" },
     maintainer: { type: "string" },
+    /** Git source of a curated third-party integration; absent when it ships in the image. */
+    source: { type: "string" },
+    installed: { type: "boolean" },
     status: { type: "string", enum: ["connected", "disconnected"] },
   },
 };
@@ -117,7 +200,13 @@ export function registerIntegrationRoutes(
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler,
   onConnected?: (name: string) => Promise<void>,
-  githubStatus?: { integrations: IntegrationStore; businessId: string }
+  githubStatus?: { integrations: IntegrationStore; businessId: string },
+  /**
+   * Reconciles manifest-declared Tools against the live registry. Connect syncs through
+   * `onConnected` (shared with the OAuth callback); disconnect and uninstall sync here, so
+   * revoking an integration also revokes the Tools it published.
+   */
+  declarativeTools?: { sync: () => number; countFor: (slug: string) => number }
 ): void {
   async function materializeIfBundledOnly(slug: string): Promise<void> {
     if (soulLoader.integrations.has(slug)) return;
@@ -128,6 +217,24 @@ export function registerIntegrationRoutes(
     await writeFile(join(dir, "manifest.yml"), stringifyYaml(bundledEntry.manifest), "utf8");
     if (bundledEntry.setupGuide) {
       await writeFile(join(dir, "setup-guide.md"), bundledEntry.setupGuide, "utf8");
+    }
+    // The manifest names this file, and the Soul loader treats a declared-but-missing spec as
+    // fatal — so it must land with the manifest, not after it.
+    if (bundledEntry.egressSpecFile) {
+      await writeFile(
+        join(dir, bundledEntry.egressSpecFile.file),
+        bundledEntry.egressSpecFile.raw,
+        "utf8"
+      );
+    }
+    // Same contract for the ingress classifier: the manifest names it and the loader hashes it,
+    // so a channel installed without its handler would fail to load rather than run unclassified.
+    if (bundledEntry.ingressHandlerFile) {
+      await writeFile(
+        join(dir, bundledEntry.ingressHandlerFile.file),
+        bundledEntry.ingressHandlerFile.raw,
+        "utf8"
+      );
     }
   }
 
@@ -140,7 +247,8 @@ export function registerIntegrationRoutes(
     {
       preHandler: requireAuth,
       schema: {
-        description: "List Soul and bundled integrations.",
+        description:
+          "Browse the integration catalog: everything present in this deployment, plus curated third-party entries that are not installed yet.",
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         response: {
@@ -161,7 +269,7 @@ export function registerIntegrationRoutes(
       if (githubEntry && githubStatus) {
         githubEntry.connected = await isGitHubInstalled(githubStatus);
       }
-      return { integrations: [...merged.values()].map(toSummary) };
+      return { integrations: await toCatalog(merged, await loadIntegrationRegistry(app.log)) };
     }
   );
 
@@ -188,7 +296,7 @@ export function registerIntegrationRoutes(
       if (name === "github" && githubStatus) {
         entry.connected = await isGitHubInstalled(githubStatus);
       }
-      return toDetail(entry);
+      return await toDetail(entry, (await loadIntegrationRegistry(app.log)).get(name));
     }
   );
 
@@ -229,26 +337,46 @@ export function registerIntegrationRoutes(
         return reply.code(404).send({ error: `integration not found: ${name}` });
       }
 
-      const missing = (entry.manifest.required_env ?? [])
-        .filter((field) => !env[field.name])
-        .map((field) => field.name);
+      // Connect completes exactly one fields step: the first one not already satisfied. All of
+      // that step's fields must end up present; anything else in the payload is merged but not
+      // demanded, which is what lets a multi-step flow be filled in one step at a time.
+      const existingEnv = soulLoader.integrations.get(name)?.connection?.env ?? {};
+      const merged = { ...existingEnv, ...env };
+      const target = resolveAuthSteps(entry.manifest).find(
+        (step) => step.kind === "fields" && !authStepSatisfied(step, merged)
+      );
+      const missing =
+        target?.kind === "fields"
+          ? target.fields.filter((field) => !merged[field.name]).map((field) => field.name)
+          : [];
       if (missing.length > 0) {
         return reply.code(400).send({ error: `missing required env: ${missing.join(", ")}` });
       }
 
       await materializeIfBundledOnly(name);
-      const sealed = await sealConnectionEnv(name, entry.manifest, env, secretsService);
-      const dir = join(gitSync.path, "integrations", name);
-      await mkdir(dir, { recursive: true });
-      await writeFile(
-        join(dir, "connection.yaml"),
-        stringifyYaml({ enabled: true, env: sealed }),
-        "utf8"
-      );
-      await gitSync.withSync(`soul: connect integration ${name}`);
-      await soulLoader.reload();
-      await onConnected?.(name);
-      return { status: "connected", toolCount: 0 };
+      let enabled: boolean;
+      let connectedNow: boolean;
+      try {
+        ({ enabled, connectedNow } = await mergeConnectionEnv(
+          { gitSync, soulLoader, secrets: secretsService },
+          {
+            slug: name,
+            manifest: entry.manifest,
+            patch: env,
+            commitMessage: `soul: connect integration ${name}`,
+          }
+        ));
+      } catch (error) {
+        if (error instanceof ForeignSecretRefError) {
+          return reply.code(400).send({ error: error.message });
+        }
+        throw error;
+      }
+      if (connectedNow) await onConnected?.(name);
+      return {
+        status: enabled ? "connected" : "pending",
+        toolCount: declarativeTools?.countFor(name) ?? 0,
+      };
     }
   );
 
@@ -288,6 +416,8 @@ export function registerIntegrationRoutes(
       );
       await gitSync.withSync(`soul: disconnect integration ${name}`);
       await soulLoader.reload();
+      // An agent must not keep calling a provider whose credential the operator just revoked.
+      declarativeTools?.sync();
       return { status: "disconnected" };
     }
   );
@@ -311,8 +441,16 @@ export function registerIntegrationRoutes(
       }
       await rm(join(gitSync.path, "integrations", name), { recursive: true, force: true });
       await deleteConnectionSecrets(name, secretsService);
+      // Drop the provenance record too, so a later reinstall from a different source is not
+      // reported against the old one.
+      const lock = await readIntegrationLock(gitSync.path);
+      if (name in lock.integrations) {
+        delete lock.integrations[name];
+        await writeIntegrationLock(gitSync.path, lock);
+      }
       await gitSync.withSync(`soul: remove integration ${name}`);
       await soulLoader.reload();
+      declarativeTools?.sync();
       return reply.code(204).send();
     }
   );

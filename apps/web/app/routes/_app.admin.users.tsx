@@ -1,8 +1,8 @@
 import { useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { type FormEvent, useState } from "react";
 import { Button } from "~/components/ui/button";
+import { CopyField } from "~/components/ui/copy-field";
 import { ApiError } from "~/lib/api";
-import { copyText } from "~/lib/clipboard";
 import {
   createUser,
   type Invite,
@@ -82,7 +82,6 @@ function InvitePanel({
   invite: Invite;
   onDismiss: () => void;
 }) {
-  const [copied, setCopied] = useState(false);
   const url = inviteUrl(invite);
 
   return (
@@ -92,16 +91,7 @@ function InvitePanel({
         it expires {new Date(invite.expiresAt).toLocaleDateString()}.
       </p>
       <div className="flex items-center gap-2">
-        <code className="min-w-0 flex-1 truncate rounded-sm border border-border bg-background px-2 py-1 font-mono text-xs">
-          {url}
-        </code>
-        <button
-          type="button"
-          className="shrink-0 rounded-sm border border-border px-2 py-1 text-xs"
-          onClick={async () => setCopied(await copyText(url))}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
+        <CopyField value={url} label="invite link" className="min-w-0 flex-1" />
         <button
           type="button"
           className="shrink-0 text-xs text-muted-foreground"

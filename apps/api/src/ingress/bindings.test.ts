@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ToolRegistry } from "../broker/tool-adapter";
+import { declarativeToolName } from "../tools/declarative/tools";
 import type { ToolDef } from "../tools/types";
 import { executeToolBinding, extractFromToolResult, INGRESS_ACTOR } from "./bindings";
 
@@ -7,35 +8,39 @@ function makeRegistry(tools: Partial<ToolDef>[]): ToolRegistry {
   return { getAll: () => tools as ToolDef[] } as unknown as ToolRegistry;
 }
 
+const RUN = { runId: "run-1", toolCallId: "call-1" };
+
 describe("executeToolBinding", () => {
   it("resolves the slug-namespaced tool and passes templated args", async () => {
     const execute = vi.fn(async () => ({ success: true as const, data: { ok: 1 } }));
     const registry = makeRegistry([
-      { name: "integration_chatapp_send_message", tier: "integration", execute },
-      { name: "integration_other_send_message", tier: "integration", execute: vi.fn() },
+      { name: declarativeToolName("chatapp", "send_message"), tier: "integration", execute },
+      { name: declarativeToolName("other", "send_message"), tier: "integration", execute: vi.fn() },
     ]);
     const result = await executeToolBinding(
       registry,
       "chatapp",
       { tool: "send_message", args: { channel_id: "{channel}", text: "{text}" } },
-      { channel: "C1", text: "hello" }
+      { channel: "C1", text: "hello" },
+      RUN
     );
     expect(result.success).toBe(true);
     expect(execute).toHaveBeenCalledWith(
       { channel_id: "C1", text: "hello" },
-      { userId: INGRESS_ACTOR, autonomy: "full" }
+      { userId: INGRESS_ACTOR, autonomy: "full", ...RUN }
     );
   });
 
   it("cannot bind another integration's tools (slug scoping)", async () => {
     const registry = makeRegistry([
-      { name: "integration_other_send_message", tier: "integration", execute: vi.fn() },
+      { name: declarativeToolName("other", "send_message"), tier: "integration", execute: vi.fn() },
     ]);
     const result = await executeToolBinding(
       registry,
       "chatapp",
       { tool: "send_message", args: {} },
-      {}
+      {},
+      RUN
     );
     expect(result).toMatchObject({ success: false, error: { code: "not_found" } });
   });
@@ -45,7 +50,8 @@ describe("executeToolBinding", () => {
       makeRegistry([]),
       "chatapp",
       { tool: "send_message", args: {} },
-      {}
+      {},
+      RUN
     );
     expect(result.success).toBe(false);
   });

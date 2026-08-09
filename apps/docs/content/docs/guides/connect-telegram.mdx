@@ -1,0 +1,95 @@
+---
+title: Connect Telegram
+description: Create a Telegram bot, paste its token, and let your team talk to Agents from Telegram.
+---
+
+This guide connects the bundled `telegram` Integration. It lets your team reach TulipFarm Agents
+from Telegram — direct messages, group chats, and forum topics.
+
+Telegram ships no provider-specific code. The manifest names the API calls to publish and describes
+how inbound messages become chats; the runtime does the rest. It is the same path an integration
+installed from a git repository takes.
+
+## Outcome
+
+At the end, Telegram shows as connected, messages to your bot arrive as chats with the Agent you
+route them to, and its replies come back in the same thread.
+
+## Create the bot
+
+<Steps>
+  <Step>
+    In Telegram, open a chat with [@BotFather](https://t.me/BotFather) and send `/newbot`.
+  </Step>
+  <Step>
+    Give it a display name and a username. The username must end in `bot` — for example
+    `acme_tulip_bot`.
+  </Step>
+  <Step>
+    BotFather replies with an **HTTP API token** that looks like `123456789:AAF...`. Keep the chat
+    open; you need one more setting from it.
+  </Step>
+</Steps>
+
+## Let the bot read group messages
+
+By default a bot in a group only sees messages that start with a command or mention it. That is
+Telegram's privacy mode, and with it on your Agents will look like they are ignoring most of a
+conversation.
+
+<Steps>
+  <Step>
+    In BotFather, send `/setprivacy`, choose your bot, and select **Disable**.
+  </Step>
+  <Step>
+    Leave privacy mode **enabled** instead if you would rather the bot only respond when explicitly
+    addressed. Direct messages are unaffected either way.
+  </Step>
+</Steps>
+
+## Connect it to TulipFarm
+
+<Steps>
+  <Step>
+    Open **Integrations → telegram** and paste the API token into **Bot Token**
+    (`TELEGRAM_BOT_TOKEN`). It is encrypted in the Secrets store.
+  </Step>
+  <Step>
+    Enter the bot's **username** without the `@` (`TELEGRAM_BOT_USERNAME`). TulipFarm uses it to
+    recognize when someone mentions the bot in a group.
+  </Step>
+  <Step>
+    Save. TulipFarm registers the webhook with Telegram for you and generates the shared secret that
+    proves each incoming request really came from Telegram.
+  </Step>
+</Steps>
+
+Your TulipFarm deployment must be reachable from the internet for this step — Telegram delivers
+updates by calling you, not the other way around.
+
+## Verify
+
+Message your bot directly:
+
+```prompt
+Who are you and what can you help me with?
+```
+
+Then add it to a group and mention it by name. In a group, TulipFarm answers as a reply to the
+message that addressed it, so several conversations can run side by side without merging. Forum
+topics stay separate the same way.
+
+## Link Telegram accounts to TulipFarm users
+
+A Telegram account is not a TulipFarm user until you say it is, so an unlinked sender reaches only
+what an unlinked visitor may reach. When TulipFarm sends a bind link, open `/link-channel` while
+signed in to the TulipFarm account that Telegram user should be. The page previews the sender and
+confirms the single-use Channel link; from then on their messages resolve to that user.
+
+## If the bot never answers
+
+- **In a group, but fine in DMs** — privacy mode is still on. Re-run `/setprivacy` above.
+- **Nowhere** — Telegram could not reach your deployment when the webhook was registered. Confirm
+  the deployment is publicly reachable over HTTPS, then disconnect and reconnect to re-register.
+- **It answered once and stopped** — a second bot cannot share a token. Registering the same bot
+  from another deployment moves the webhook away from this one.

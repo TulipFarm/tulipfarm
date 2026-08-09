@@ -1,18 +1,31 @@
 import { apiDelete, apiGet, apiWrite } from "./api";
 
 /*
- * Client for the integrations API (INT-V1 / MCP-V1-001). V1 supports type=mcp only.
- * Lifecycle: scan a git repo → install → connect (write env + start MCP server) → disconnect → delete.
+ * Client for the integrations API.
+ *
+ * `listIntegrations` is the whole catalog — what this deployment ships, what has been cloned into
+ * the soul repo, and the curated entries that are neither yet. Installing is a separate step only
+ * for the last group: inspect a git repo, then install from it.
  */
 
 export type McpConnectionStatus = "connected" | "connecting" | "error" | "disconnected";
 
 export type IntegrationSummary = {
   name: string;
+  /** Brand name from the curated registry; falls back to the slug when uncurated. */
+  title?: string;
   type: string;
   description?: string;
+  category?: string;
+  homepage?: string;
+  /** Simple Icons path data, resolved server-side. Absent when the brand has no mark. */
+  iconPath?: string;
   version?: string;
   maintainer?: string;
+  /** Git source of a curated third-party entry; absent when it ships in the image. */
+  source?: string;
+  /** False for a curated entry that has not been cloned into the soul repo yet. */
+  installed: boolean;
   status: McpConnectionStatus;
   errorMessage?: string;
 };
@@ -36,7 +49,19 @@ export type OAuthConfig = {
   token_response_path?: string;
 };
 
+export type IntegrationGrant = {
+  /** What is reached, in the provider's own words: `issues`, `chat:write`. */
+  label: string;
+  /** Level of access, where the provider separates it from the label. */
+  access?: string;
+  description?: string;
+};
+
 export type IntegrationDetail = IntegrationSummary & {
+  /** Authored summary of what agents can do once connected. Not enforced — see `grants`. */
+  capabilities?: string[];
+  /** The authority connecting hands over. Derived from declared OAuth scopes where possible. */
+  grants: IntegrationGrant[];
   manifest: {
     required_env?: RequiredEnvVar[];
     egress?: { type?: string; entry?: Record<string, unknown> };
@@ -44,36 +69,69 @@ export type IntegrationDetail = IntegrationSummary & {
     oauth?: OAuthConfig;
     install_manifest?: string;
   };
+  /** The manifest's declared auth flow, resolved and ordered. Drives the whole connect UI. */
+  auth: AuthStepSummary[];
   connected: boolean;
   setupGuide?: string;
   ingress?: { enabled: boolean; webhookUrl: string | null };
 };
 
-export type ScannedIntegration = {
-  name: string;
-  type: string;
+export type AuthStepKind = "fields" | "app_manifest" | "oauth2" | "install" | "webhook";
+
+export type AuthStepSummary = {
+  index: number;
+  kind: AuthStepKind;
+  title?: string;
   description?: string;
-  installed: boolean;
-  updateAvailable: boolean;
+  /** Whether the connection env this step produces is already stored. */
+  satisfied: boolean;
+  /**
+   * Whether finishing this step writes any connection env. A step that writes nothing — Slack's
+   * "create the app" — is `satisfied` before it is ever started, so a setup walkthrough must use
+   * this to tell "nothing left to prove" apart from "nothing to prove in the first place".
+   */
+  producesEnv: boolean;
+  /** Present only for `fields` steps. */
+  fields?: RequiredEnvVar[];
 };
 
-export type ScanResult = { scanId: string; integrations: ScannedIntegration[] };
+/**
+ * What the browser must do to advance one step, as decided by the API's auth broker. The UI
+ * switches on `action` and never on the integration, which is what keeps the connect flow free of
+ * per-provider branches.
+ */
+export type AuthStartAction =
+  | { action: "collect_fields"; fields: RequiredEnvVar[] }
+  | { action: "redirect"; url: string }
+  | { action: "form_post"; url: string; field: string; value: string }
+  /** The server already did the work — there is no handoff, only a refresh. */
+  | { action: "completed" };
 
-export type MarketplaceIntegration = {
+export async function startAuthStep(name: string, step: number): Promise<AuthStartAction> {
+  return apiWrite<AuthStartAction>(
+    "POST",
+    `/api/v1/integrations/${encodeURIComponent(name)}/auth/start/${step}`,
+    {}
+  );
+}
+
+/** One integration offered by a git repo, as reported by inspect. */
+export type InspectedIntegration = {
   name: string;
   description?: string;
-  verified?: boolean;
+  version?: string;
+  maintainer?: string;
   installed: boolean;
-  updateAvailable: boolean;
+  /** False when the manifest declares something a third-party integration may not. */
+  installable: boolean;
+  issues: string[];
 };
 
-export type MarketplaceCatalog = {
-  scanId: string;
+export type InspectResult = {
   source: string;
-  integrations: MarketplaceIntegration[];
+  ref: string;
+  integrations: InspectedIntegration[];
 };
-
-export type IntegrationInstallStatus = { installed: boolean; updateAvailable: boolean };
 
 export async function listIntegrations(): Promise<IntegrationSummary[]> {
   const body = await apiGet<{ integrations: IntegrationSummary[] }>("/api/v1/integrations");
@@ -84,18 +142,20 @@ export async function getIntegration(name: string): Promise<IntegrationDetail> {
   return apiGet<IntegrationDetail>(`/api/v1/integrations/${encodeURIComponent(name)}`);
 }
 
-export async function scanIntegrations(source: string): Promise<ScanResult> {
-  return apiWrite<ScanResult>("POST", "/api/v1/integrations/scan", { source });
+/** Clone a git repo and report what it offers, without installing anything. */
+export async function inspectIntegrationSource(source: string): Promise<InspectResult> {
+  return apiWrite<InspectResult>("POST", "/api/v1/integrations/inspect", { source });
 }
 
-export async function installIntegrations(
-  scanId: string,
-  names: string[]
-): Promise<{ installed: string[] }> {
-  return apiWrite<{ installed: string[] }>("POST", "/api/v1/integrations/install", {
-    scanId,
-    names,
-  });
+export async function installIntegration(
+  source: string,
+  name?: string
+): Promise<{ name: string; source: string; ref: string }> {
+  return apiWrite<{ name: string; source: string; ref: string }>(
+    "POST",
+    "/api/v1/integrations/install",
+    name ? { source, name } : { source }
+  );
 }
 
 export async function connectIntegration(
@@ -119,10 +179,6 @@ export async function disconnectIntegration(name: string): Promise<{ status: str
 
 export async function deleteIntegration(name: string): Promise<void> {
   return apiDelete(`/api/v1/integrations/${encodeURIComponent(name)}`);
-}
-
-export async function marketplaceIntegrations(): Promise<MarketplaceCatalog> {
-  return apiGet<MarketplaceCatalog>("/api/v1/integrations/marketplace");
 }
 
 export type SlackRoute = {
@@ -178,16 +234,5 @@ export async function disconnectGitHubInstallation(
     "POST",
     `/api/v1/integrations/github/installations/${encodeURIComponent(installationId)}/disconnect`,
     {}
-  );
-}
-
-export async function startOAuth(
-  name: string,
-  env: Record<string, string>
-): Promise<{ authUrl: string }> {
-  return apiWrite<{ authUrl: string }>(
-    "POST",
-    `/api/v1/integrations/${encodeURIComponent(name)}/oauth/start`,
-    { env }
   );
 }

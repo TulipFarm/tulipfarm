@@ -1,5 +1,6 @@
 export * from "./channels";
 export * from "./confluence";
+export * from "./egress";
 export * from "./external-protocol";
 export * from "./generic";
 export * from "./github";

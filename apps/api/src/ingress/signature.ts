@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { WebhookSecurity } from "@tulipfarm/soul";
+import type { HmacWebhookSecurity, WebhookSecurity } from "@tulipfarm/soul";
 
 /** Default replay window when the manifest sets a timestamp_header without tolerance_seconds. */
 const DEFAULT_TOLERANCE_SECONDS = 5 * 60;
@@ -28,7 +28,7 @@ export interface SignatureCheck {
 export function verifyHmacSignature(
   rawBody: Buffer | string,
   headers: Record<string, string | string[] | undefined>,
-  security: WebhookSecurity,
+  security: HmacWebhookSecurity,
   secret: string,
   nowSeconds: number = Math.floor(Date.now() / 1000)
 ): SignatureCheck {
@@ -60,7 +60,7 @@ export function verifyHmacSignature(
  */
 export function computeHmacSignature(
   rawBody: Buffer | string,
-  security: Pick<WebhookSecurity, "signing" | "format">,
+  security: Pick<HmacWebhookSecurity, "signing" | "format">,
   secret: string,
   timestamp?: string
 ): string {
@@ -83,4 +83,25 @@ function headerValue(
 ): string | undefined {
   const value = headers[name.toLowerCase()] ?? headers[name];
   return Array.isArray(value) ? value[0] : value;
+}
+
+/**
+ * Authenticate one delivery against whichever scheme the manifest declared.
+ *
+ * The route calls only this, so adding a scheme is a change here and in the manifest type — never
+ * a new branch on the hot path where a missed `else` means accepting unsigned traffic.
+ */
+export function verifyWebhookRequest(
+  rawBody: Buffer | string,
+  headers: Record<string, string | string[] | undefined>,
+  security: WebhookSecurity,
+  secret: string,
+  nowSeconds: number = Math.floor(Date.now() / 1000)
+): SignatureCheck {
+  if (security.type === "shared_secret") {
+    const presented = headerValue(headers, security.header);
+    if (!presented) return { ok: false, reason: "missing_headers" };
+    return constantTimeEquals(presented, secret) ? { ok: true } : { ok: false, reason: "mismatch" };
+  }
+  return verifyHmacSignature(rawBody, headers, security, secret, nowSeconds);
 }

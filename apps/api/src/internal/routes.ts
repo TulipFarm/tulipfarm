@@ -615,7 +615,7 @@ export function registerInternalTurnRoutes(
         response: {
           200: {
             type: "object",
-            required: ["slug", "body", "headers", "classifier", "hasThreadMapping"],
+            required: ["slug", "body", "headers", "classifier", "hasThreadMapping", "env"],
             properties: {
               slug: { type: "string" },
               body: { type: "object", additionalProperties: true },
@@ -628,6 +628,7 @@ export function registerInternalTurnRoutes(
               hasThreadMapping: { type: "boolean" },
               chatEnabled: { type: "boolean" },
               eventsEnabled: { type: "boolean" },
+              env: { type: "object", additionalProperties: { type: "string" } },
             },
           },
           400: ErrorSchema,

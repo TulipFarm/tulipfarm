@@ -1,6 +1,6 @@
 import type { ChatIngressConfig } from "@tulipfarm/soul";
 import type { ToolRegistry } from "../broker/tool-adapter";
-import { executeToolBinding } from "./bindings";
+import { executeToolBinding, type IngressRunContext } from "./bindings";
 
 type ResponderLogger = {
   warn: (obj: unknown, msg?: string) => void;
@@ -22,6 +22,7 @@ export async function postReply(
     binding: string;
     vars: Record<string, string>;
     text: string;
+    run: IngressRunContext;
   }
 ): Promise<void> {
   const binding = opts.reply[opts.binding] ?? opts.reply.default;
@@ -37,10 +38,13 @@ export async function postReply(
     return;
   }
   try {
-    const result = await executeToolBinding(deps.registry, opts.slug, binding, {
-      ...opts.vars,
-      text: opts.text,
-    });
+    const result = await executeToolBinding(
+      deps.registry,
+      opts.slug,
+      binding,
+      { ...opts.vars, text: opts.text },
+      opts.run
+    );
     if (!result.success) {
       deps.log.error(
         { slug: opts.slug, tool: binding.tool, error: result.error },

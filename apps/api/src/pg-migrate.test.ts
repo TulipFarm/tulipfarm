@@ -202,4 +202,60 @@ describe("runPgMigrations", () => {
       ).rejects.toThrow();
     });
   });
+
+  describe("migration 32", () => {
+    it("moves GitHub App credentials onto integration.github.* without touching ciphertext", async () => {
+      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
+      await db.query(`CREATE TABLE secrets (
+        key             text PRIMARY KEY,
+        type            text NOT NULL,
+        encrypted_value text NOT NULL,
+        iv              text NOT NULL,
+        auth_tag        text NOT NULL,
+        dek_id          uuid,
+        created_at      timestamptz NOT NULL,
+        updated_at      timestamptz NOT NULL
+      )`);
+      const seed = async (key: string, value: string) =>
+        db.query(
+          `INSERT INTO secrets (key, type, encrypted_value, iv, auth_tag, created_at, updated_at)
+           VALUES ($1, 'generic', $2, 'iv', 'tag', now(), now())`,
+          [key, value]
+        );
+      await seed("github-app-id", "cipher-app-id");
+      await seed("github-app-private-key", "cipher-pem");
+      // Already reconnected through the new flow: the newer value must survive the rename.
+      await seed("github-app-slug", "cipher-old-slug");
+      await seed("integration.github.GITHUB_APP_SLUG", "cipher-new-slug");
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
+
+      await runPgMigrations(db, undefined, () => {});
+
+      const rows = await db.query<{ key: string; encrypted_value: string }>(
+        "SELECT key, encrypted_value FROM secrets ORDER BY key"
+      );
+      expect(rows.rows).toEqual([
+        { key: "integration.github.GITHUB_APP_ID", encrypted_value: "cipher-app-id" },
+        { key: "integration.github.GITHUB_APP_PRIVATE_KEY", encrypted_value: "cipher-pem" },
+        { key: "integration.github.GITHUB_APP_SLUG", encrypted_value: "cipher-new-slug" },
+      ]);
+    });
+
+    it("is a no-op on a database with no secrets table", async () => {
+      await db.query("CREATE EXTENSION IF NOT EXISTS vector");
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
+
+      await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
+    });
+  });
 });

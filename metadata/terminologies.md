@@ -52,7 +52,11 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | How a routine starts | **Trigger** | `Trigger` | — | "Trigger" | event·manual·cron·webhook·agent |
 | A step in a routine | **State** | `State` | — | "State" | CNCF Serverless Workflow term |
 | A connected third-party | **Integration** | `Integration` | `/integrations`, `/api/v1/integrations` | "Integrations" | `connection`/`connector` → retired |
-| TulipFarm's single registered GitHub App definition | **GitHub App** | — | — | "GitHub App" | one App, owned by TulipFarm; every customer installs *this same App* — never a per-customer App |
+| The data file that fully defines an Integration | **Integration manifest** | `IntegrationManifest` | — | — | `integrations/<slug>/manifest.yml`; identity + `auth` + `egress` (+ optional `ingress`). Authoring reference: `docs/architecture/building-an-integration.md`; ⛔ "integration config"/"connector definition" |
+| What an Integration lets agents *do* to the provider | **Egress** | `EgressConfig` | — | — | `openapi` \| `mcp` \| `ts-code` \| `none`; ⛔ "outbound"/"actions" as the block's name |
+| One provider API operation published as an agent Tool | **Egress operation** | `EgressOperation` | — | — | an explicit allowlist entry under `egress.operations`; compiles to a `ToolContractSpec`; ⛔ publishing a whole spec |
+| What an Integration lets the provider *send* TulipFarm | **Ingress** | `IngressConfig` | — | — | webhooks and event normalization; ⛔ "inbound"/"listener" as the block's name |
+| The GitHub App a deployment registered for itself | **GitHub App** | — | — | "GitHub App" | one App per *deployment*, created by that deployment via GitHub's App Manifest flow and owned by whoever runs it; ⛔ "the TulipFarm GitHub App" — there is no vendor-owned App every customer installs |
 | A customer's install of the GitHub App into their org/repos | **GitHub App installation** | maps to an `Integration` row (`external_tenant_id` = GitHub `installation_id`) | `/api/v1/integrations/github/installations/:id` | "GitHub Install" | one per customer connect; ⛔ "GitHub connection"/"GitHub OAuth" — this is App-install, not OAuth |
 | Short-lived (~1hr) bearer credential minted per installation | **Installation access token** | — | — | — | minted via App JWT exchange, refreshed before expiry; never persisted long-term, never logged |
 | An installation's account + selected repos + granted permissions | **Installation scope** | `GitHubInstallationScope` | — | — | `packages/integrations/src/github/scope.ts` |

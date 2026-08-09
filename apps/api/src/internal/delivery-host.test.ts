@@ -26,6 +26,7 @@ import type {
   IntegrationEventsRepo,
 } from "../ingress/repo";
 import { BUSINESS_ID, FakeConversationStore, fakeRuns, RUN_ID } from "../test/turn-host-fixtures";
+import { declarativeToolName } from "../tools/declarative/tools";
 import type { ToolDef } from "../tools/types";
 import { DeliveryDeniedError, IngressDeliveryHost } from "./delivery-host";
 import type { HostedRunReader } from "./turn-host";
@@ -57,7 +58,13 @@ function user(id: string): UserDoc {
 
 /** One installed Integration, varying only what a test is about. */
 function integration(
-  options: { chat?: boolean; events?: string[] | false; enabled?: boolean } = {}
+  options: {
+    chat?: boolean;
+    events?: string[] | false;
+    enabled?: boolean;
+    contextEnv?: string[];
+    env?: Record<string, string>;
+  } = {}
 ): SoulIntegration {
   return {
     slug: SLUG,
@@ -71,6 +78,7 @@ function integration(
           security: { type: "hmac_sha256", header: "X-Sig", secret_env: "SECRET" },
           dedup_key: "delivery_id",
         },
+        ...(options.contextEnv === undefined ? {} : { context_env: options.contextEnv }),
         ...(options.chat === false
           ? {}
           : {
@@ -89,7 +97,10 @@ function integration(
           : { events: { types: options.events ?? ["member_joined"] } }),
       },
     },
-    connection: { enabled: options.enabled ?? true, env: { SECRET: "s" } },
+    connection: {
+      enabled: options.enabled ?? true,
+      env: { SECRET: "s", ...(options.env ?? {}) },
+    },
     ingressHandler: HANDLER,
   } as SoulIntegration;
 }
@@ -160,7 +171,7 @@ async function harness(
   const registry = {
     getAll: () => [
       {
-        name: `integration_${SLUG}_send_message`,
+        name: declarativeToolName(SLUG, "send_message"),
         tier: "integration",
         execute: async (args: Record<string, unknown>) => {
           sent.push(args);
@@ -247,7 +258,32 @@ describe("IngressDeliveryHost.describe", () => {
       hasThreadMapping: false,
       chatEnabled: true,
       eventsEnabled: true,
+      env: {},
     });
+  });
+
+  it("forwards the context_env a classifier needs to recognise its own integration", async () => {
+    const { host } = await harness({
+      integration: integration({
+        contextEnv: ["BOT_USERNAME"],
+        env: { BOT_USERNAME: "tulipbot", UNDECLARED: "nope" },
+      }),
+    });
+
+    await expect(host.describe(BUSINESS_ID, RUN_ID)).resolves.toMatchObject({
+      env: { BOT_USERNAME: "tulipbot" },
+    });
+  });
+
+  it("never forwards an unresolved secret reference to untrusted classifier code", async () => {
+    const { host } = await harness({
+      integration: integration({
+        contextEnv: ["BOT_USERNAME"],
+        env: { BOT_USERNAME: "secret://ref/1" },
+      }),
+    });
+
+    await expect(host.describe(BUSINESS_ID, RUN_ID)).resolves.toMatchObject({ env: {} });
   });
 
   it("computes hasThreadMapping, which the isolate cannot look up for itself", async () => {

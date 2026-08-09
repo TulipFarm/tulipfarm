@@ -1,8 +1,6 @@
-import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   readlink,
@@ -11,9 +9,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
-import { promisify } from "node:util";
 import type { LlmService } from "@tulipfarm/llm";
 import { SandboxRuntimeProfileRegistry, shellTsPythonV1 } from "@tulipfarm/sandbox";
 import {
@@ -33,6 +29,12 @@ import {
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
 import { ErrorSchema } from "../../auth/schemas";
+import {
+  ALLOWED_SOURCE_HINT,
+  cloneToTemp as cloneSourceToTemp,
+  isAllowedSource,
+  sourceType,
+} from "../git-source";
 import { buildAudit, SKILL_AUDIT_REPORT_SCHEMA } from "./audit";
 import { type BundledSkill, persistDisabledBundledSkills } from "./bundled";
 import { type SkillScanFile, scanSkill, skillTrustLevel } from "./guard";
@@ -48,13 +50,10 @@ import { mergedSkills, resolveSkill } from "./registry";
  * explicit operator action.
  */
 
-const execFileP = promisify(execFile);
-
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SCAN_TTL_MS = 10 * 60 * 1000;
-const CLONE_TIMEOUT_MS = 60_000;
 const MAX_SCANS = 25;
 
 export interface DiscoveredSkill {
@@ -271,39 +270,6 @@ function executablePackageBlocker(skill: DiscoveredSkill): string | undefined {
   }
   return undefined;
 }
-
-// A source may carry an optional "#<ref>" suffix (branch or tag name — not a commit SHA) so
-// pre-merge branches can be scanned and tested: "owner/repo#my-branch". No "#" ⇒ default branch.
-function splitSourceRef(source: string): { base: string; ref?: string } {
-  const idx = source.indexOf("#");
-  return idx === -1 ? { base: source } : { base: source.slice(0, idx), ref: source.slice(idx + 1) };
-}
-
-// Leading dash forbidden so a ref can never be mistaken for a git flag.
-const REF_RE = /^[\w][\w./-]*$/;
-
-// Only allow sources we are willing to hand to `git clone`: a bare "owner/repo" slug, or an
-// http(s)/file URL, each with an optional "#<ref>" suffix. ssh:// and scp-style (git@host:path)
-// sources are rejected to avoid the operator's clone reaching internal hosts (SSRF). Single-trust
-// V1; a tighter allowlist is a post-V1 hardening.
-function isAllowedSource(source: string): boolean {
-  const { base, ref } = splitSourceRef(source);
-  if (ref !== undefined && !REF_RE.test(ref)) return false;
-  return /^[\w.-]+\/[\w.-]+$/.test(base) || /^(https?|file):\/\//.test(base);
-}
-
-// Normalize an allowed source (ref already split off) into something `git clone` accepts. A bare
-// "owner/repo" becomes a GitHub https URL; an http(s)/file URL is used as-is.
-function normalizeGitUrl(base: string): string {
-  if (/^[\w.-]+\/[\w.-]+$/.test(base)) return `https://github.com/${base}.git`;
-  return base;
-}
-
-function sourceType(source: string): "github" | "git" {
-  const { base } = splitSourceRef(source);
-  return /github\.com|^[\w.-]+\/[\w.-]+$/.test(base) ? "github" : "git";
-}
-
 function categoryFromSkillPath(skillPath: string): string | undefined {
   const parts = skillPath.split(/[\\/]/).slice(0, -2);
   if (parts[0] === "skills") parts.shift();
@@ -384,22 +350,6 @@ export async function discoverSkills(root: string): Promise<DiscoveredSkill[]> {
   }
   await walk(root, 0);
   return out;
-}
-
-async function cloneToTemp(source: string): Promise<{ dir: string; ref: string }> {
-  const { base, ref } = splitSourceRef(source);
-  const dir = await mkdtemp(join(tmpdir(), "skill-scan-"));
-  // --branch accepts branch or tag names (not commit SHAs) and still works with --depth 1.
-  await execFileP(
-    "git",
-    ["clone", "--depth", "1", ...(ref ? ["--branch", ref] : []), normalizeGitUrl(base), dir],
-    {
-      timeout: CLONE_TIMEOUT_MS,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    }
-  );
-  const { stdout } = await execFileP("git", ["rev-parse", "HEAD"], { cwd: dir });
-  return { dir, ref: stdout.trim() };
 }
 
 // Per-skill lock entries follow spec SKL-V1-001: provenance is (sourceUrl, ref, hash), plus
@@ -561,7 +511,7 @@ async function loadMarketplace(
 
   let dir: string | undefined;
   try {
-    const clone = await cloneToTemp(source);
+    const clone = await cloneSourceToTemp(source, "skill-scan-");
     dir = clone.dir;
     const discovered = await discoverSkills(dir);
     const manifest = await readManifest(dir);
@@ -902,14 +852,11 @@ export function registerSkillRoutes(
     async (req, reply) => {
       const { source } = req.body as { source: string };
       if (!isAllowedSource(source)) {
-        return reply.code(400).send({
-          error:
-            "source must be a github owner/repo slug or an http(s)/file URL, with an optional #branch suffix",
-        });
+        return reply.code(400).send({ error: ALLOWED_SOURCE_HINT });
       }
       let dir: string | undefined;
       try {
-        const clone = await cloneToTemp(source);
+        const clone = await cloneSourceToTemp(source, "skill-scan-");
         dir = clone.dir;
         const discovered = await discoverSkills(dir);
         if (discovered.length === 0) {

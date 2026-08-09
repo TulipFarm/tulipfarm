@@ -9,6 +9,7 @@ import {
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse as parseYaml } from "yaml";
+import { validateAuthSteps, validateIngressContextEnv } from "./integration-auth";
 import type {
   IntegrationConnection,
   IntegrationManifest,
@@ -59,6 +60,29 @@ async function fileExists(path: string): Promise<boolean> {
 function artifactLoadError(kind: string, name: string, err: unknown): Error {
   const detail = err instanceof Error ? err.message : String(err);
   return new Error(`Soul: failed to load published ${kind} "${name}": ${detail}`);
+}
+
+/**
+ * Reads the OpenAPI document an `egress: { type: "openapi" }` manifest names, so the Tool compiler
+ * never touches the filesystem itself. `basename()` confines the read to the integration's own
+ * directory, exactly as `ingress.handler` is confined below.
+ *
+ * A declared-but-unreadable spec is fatal: the alternative is an integration that loads, appears
+ * connectable, and silently publishes no Tools.
+ */
+async function loadEgressSpec(dir: string, manifest: IntegrationManifest): Promise<unknown> {
+  if (manifest.egress?.type !== "openapi") return undefined;
+  const specFile = basename(manifest.egress.spec);
+  try {
+    // JSON is valid YAML, so one parser covers both the .json and .yaml specs providers publish.
+    return parseYaml(await readFile(join(dir, specFile), "utf8"));
+  } catch (err) {
+    throw new Error(
+      `declares egress.spec "${specFile}" but it could not be loaded: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
 }
 
 export class SoulLoader {
@@ -260,6 +284,18 @@ export class SoulLoader {
           throw new Error("manifest.egress.entry.transport missing");
         }
 
+        // Same posture as the egress check: a connect flow that can't complete is rejected at
+        // load, not halfway through an operator's setup.
+        const authIssues = validateAuthSteps(manifestRaw);
+        if (authIssues.length > 0) {
+          throw new Error(`invalid auth flow — ${authIssues.join("; ")}`);
+        }
+
+        const contextIssues = validateIngressContextEnv(manifestRaw);
+        if (contextIssues.length > 0) {
+          throw new Error(`invalid ingress context — ${contextIssues.join("; ")}`);
+        }
+
         let connection: IntegrationConnection | undefined;
         try {
           const connRaw = (parseYaml(await readFile(join(dir, "connection.yaml"), "utf8")) ??
@@ -306,6 +342,7 @@ export class SoulLoader {
           connection,
           setupGuide,
           ingressHandler,
+          egressSpec: await loadEgressSpec(dir, manifestRaw),
         });
       } catch (err) {
         throw artifactLoadError("integration", slug, err);

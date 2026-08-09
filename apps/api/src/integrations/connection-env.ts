@@ -1,4 +1,5 @@
 import type { IntegrationManifest } from "@tulipfarm/soul";
+import { authSecretEnvNames } from "@tulipfarm/soul";
 
 /**
  * Secret env handling for integration connections. connection.yaml lives in the soul git repo
@@ -26,25 +27,25 @@ export function isSecretRef(value: string): boolean {
   return value.startsWith(SECRET_REF_PREFIX);
 }
 
-/** Env var names the manifest declares as secret (required_env `secret: true` + the OAuth token). */
-function secretEnvNames(manifest: IntegrationManifest): Set<string> {
-  const names = new Set<string>();
-  for (const field of manifest.required_env ?? []) {
-    if (field.secret) names.add(field.name);
+/** Raised when a submitted value is a reference to a secret this integration does not own. */
+export class ForeignSecretRefError extends Error {
+  constructor(envName: string) {
+    super(`${envName} may not reference another secret`);
+    this.name = "ForeignSecretRefError";
   }
-  // The OAuth access token is always a secret, whether or not it is listed in required_env.
-  const tf = manifest.oauth?.["x-tulipfarm"];
-  if (tf) {
-    names.add(tf.token_env);
-    names.add(tf.client_secret_env);
-  }
-  return names;
 }
 
 /**
  * Replace secret-flagged env values with `secret://` references, persisting each value to the
  * secrets store. Values that are already references pass through untouched (reconnect flows
  * resubmit the stored form). Returns a new object safe to write to connection.yaml.
+ *
+ * A reference is only honoured when it names *this* integration's own key for *that* env var,
+ * which is the only reference a legitimate resubmission can carry. Accepting any other one would
+ * turn connect into a read primitive for the whole secrets store: env values are resolved and
+ * templated into the URLs the auth broker hands back (`{GITHUB_APP_SLUG}` and friends), so
+ * `secret://some-other-key` would come straight back to the caller in a redirect. The secrets API
+ * deliberately never returns values, and this must not become the way around that.
  */
 export async function sealConnectionEnv(
   integrationName: string,
@@ -52,14 +53,21 @@ export async function sealConnectionEnv(
   env: Record<string, string>,
   secrets: ConnectionSecretStore
 ): Promise<Record<string, string>> {
-  const secretNames = secretEnvNames(manifest);
+  const secretNames = authSecretEnvNames(manifest);
   const sealed: Record<string, string> = {};
   for (const [name, value] of Object.entries(env)) {
-    if (!secretNames.has(name) || isSecretRef(value) || value === "") {
+    const key = integrationSecretKey(integrationName, name);
+    if (isSecretRef(value)) {
+      if (value.slice(SECRET_REF_PREFIX.length) !== key) {
+        throw new ForeignSecretRefError(name);
+      }
       sealed[name] = value;
       continue;
     }
-    const key = integrationSecretKey(integrationName, name);
+    if (!secretNames.has(name) || value === "") {
+      sealed[name] = value;
+      continue;
+    }
     await secrets.set(key, value);
     sealed[name] = `${SECRET_REF_PREFIX}${key}`;
   }

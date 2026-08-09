@@ -1,6 +1,6 @@
 ---
 title: Connect GitHub
-description: Register a GitHub App, install it into repositories, and enable Soul backup.
+description: Create a GitHub App in two clicks, install it into repositories, and enable Soul backup.
 ---
 
 GitHub uses a GitHub App installation flow. After it is connected, Agents can work with
@@ -12,59 +12,42 @@ GitHub can also hold a remote backup of the Soul.
 At the end, TulipFarm has a GitHub App installation scoped to selected repositories, and
 optionally a GitHub repository configured as the Soul remote.
 
-## Register the GitHub App
+## Create the GitHub App
+
+TulipFarm registers the App for you through GitHub's App Manifest flow. You do not copy an
+App ID, a private key, or a webhook secret by hand.
 
 <Steps>
   <Step>
-    Open **Integrations → github** and choose **Set up GitHub App**.
+    Open **Integrations → github** and choose **Create the GitHub App**.
   </Step>
   <Step>
-    Create a new GitHub App under your personal account or organization.
+    GitHub opens with the name, permissions, callback, and webhook URL already filled in.
+    Choose the account or organization that should own the App, then confirm.
   </Step>
   <Step>
-    Set **Homepage URL** to your deployment URL.
-  </Step>
-  <Step>
-    Set **Setup URL** to your API callback:
-    `<PUBLIC_URL>/api/v1/integrations/github/install/callback`. Enable **Redirect on
-    update**.
-  </Step>
-  <Step>
-    Leave the OAuth callback blank and leave **Request user authorization during
-    installation** unchecked. TulipFarm authenticates as the GitHub App installation, not
-    as a GitHub user's OAuth token.
-  </Step>
-  <Step>
-    Leave GitHub webhooks inactive. TulipFarm does not process GitHub webhook events yet.
-  </Step>
-  <Step>
-    Grant these permissions: Contents read/write, Issues read/write, Pull requests
-    read/write, and Checks read-only. Metadata read-only is automatic.
+    GitHub redirects back. TulipFarm has stored the App ID, slug, private key, webhook
+    secret, and OAuth client credentials automatically.
   </Step>
 </Steps>
 
-## Store the App credentials
+<Callout>
+  The App belongs to your deployment, not to TulipFarm. There is no shared vendor-owned App,
+  and the private key GitHub generates never leaves your installation.
+</Callout>
 
-Generate a private key on the GitHub App page, then store these values in **Settings →
-Secrets** or in the GitHub setup wizard:
-
-| Key | Value |
-| --- | --- |
-| `github-app-id` | The App ID from GitHub |
-| `github-app-slug` | The last segment of the App URL |
-| `github-app-private-key` | The full `.pem` private key, including BEGIN/END lines |
-| `github-app-webhook-secret` | A random value reserved for future webhook verification |
-
-Secret values are write-only.
+The App requests Contents read/write, Issues read/write, Pull requests read/write, Checks
+read-only, and Metadata read-only. Repository administration is deliberately not requested
+up front — TulipFarm asks for it separately only if you choose to have it create the Soul
+repository for you.
 
 ## Install into repositories
 
+Creating an App grants nothing on its own. Installing it is where you choose scope.
+
 <Steps>
   <Step>
-    Return to **Integrations → github**.
-  </Step>
-  <Step>
-    Choose **Install**. GitHub opens its install screen.
+    Choose **Install it on your repositories**. GitHub opens its install screen.
   </Step>
   <Step>
     Pick the account or organization, then choose all repositories or selected
@@ -76,8 +59,8 @@ Secret values are write-only.
   </Step>
 </Steps>
 
-To add another account or organization, choose **Add another install**. To change which
-repositories are granted, use GitHub's installation settings.
+To change which repositories are granted, use GitHub's installation settings, then reconnect
+from the Integration page so TulipFarm picks up the new list.
 
 ## Verify in chat
 

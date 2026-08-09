@@ -5,117 +5,228 @@ import {
   useRevalidator,
   useRouteError,
 } from "@remix-run/react";
-import { useState } from "react";
-import { IntegrationsTabs } from "~/components/integrations-tabs";
+import { ChevronRight, Search } from "lucide-react";
+import { type ReactNode, useId, useMemo, useState } from "react";
+import { InstallFromSource } from "~/components/integrations/install-from-source";
+import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
-import { StatusBadge, type StatusTone } from "~/components/status-badge";
-import { Button } from "~/components/ui/button";
+import { StatusBadge } from "~/components/status-badge";
+import { Input } from "~/components/ui/input";
 import { ApiError } from "~/lib/api";
-import {
-  disconnectIntegration,
-  type IntegrationSummary,
-  listIntegrations,
-  type McpConnectionStatus,
-} from "~/lib/integrations";
+import { type IntegrationSummary, listIntegrations } from "~/lib/integrations";
+import { cn } from "~/lib/utils";
+
+/*
+ * The integration catalog: one list of everything an operator can connect.
+ *
+ * Deliberately not the Installed/Marketplace tabs this replaces. Every bundled integration is
+ * "installed" by virtue of shipping in the image, so that tab listed things nobody installed while
+ * hiding the ones they came to find. What an operator actually asks is whether something is
+ * connected — a property of a row, not a page — so connection is what groups this list, and
+ * installing is just the extra step the not-yet-cloned entries need.
+ */
 
 export const meta: MetaFunction = () => [{ title: "Integrations · tulipfarm" }];
 
 export async function clientLoader() {
-  const integrations = await listIntegrations();
-  return { integrations };
+  return { integrations: await listIntegrations() };
 }
 
-const STATUS_TONE: Record<McpConnectionStatus, StatusTone> = {
-  connected: "success",
-  connecting: "info",
-  error: "danger",
-  disconnected: "neutral",
-};
-
-function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const revalidator = useRevalidator();
-
-  async function handleDisconnect(e: React.MouseEvent) {
-    e.preventDefault();
-    setBusy(true);
-    setError(undefined);
-    try {
-      await disconnectIntegration(integration.name);
-      revalidator.revalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "disconnect failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <li className="flex flex-col">
-      <div className="group flex items-baseline gap-2 px-3 py-2">
-        <span aria-hidden className="text-primary">
-          ▸
-        </span>
-        <Link
-          to={`/integrations/${encodeURIComponent(integration.name)}`}
-          className="font-medium text-foreground hover:underline"
-        >
-          {integration.name}
-        </Link>
-        {integration.description ? (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground">
-            {integration.description}
-          </span>
-        ) : (
-          <span className="flex-1" />
-        )}
-        <StatusBadge label={integration.status} tone={STATUS_TONE[integration.status]} />
-        {integration.status === "connected" ? (
-          <Button size="sm" variant="outline" disabled={busy} onClick={handleDisconnect}>
-            {busy ? "Disconnecting…" : "Disconnect"}
-          </Button>
-        ) : (
-          <Button asChild size="sm">
-            <Link to={`/integrations/${encodeURIComponent(integration.name)}`}>Connect</Link>
-          </Button>
-        )}
-      </div>
-      {integration.errorMessage && (
-        <p className="px-3 pb-2 text-xs text-destructive">{integration.errorMessage}</p>
-      )}
-      {error && <p className="px-3 pb-2 text-xs text-destructive">{error}</p>}
-    </li>
-  );
+/** Uncurated entries carry no registry title, so the slug is the honest display name. */
+function displayName(integration: IntegrationSummary): string {
+  return integration.title ?? integration.name;
 }
 
 export default function IntegrationsIndex() {
   const { integrations } = useLoaderData<typeof clientLoader>();
+  const revalidator = useRevalidator();
+  const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string>();
+  const searchId = useId();
+
+  const categories = useMemo(() => {
+    const found = integrations.map((i) => i.category).filter((c): c is string => Boolean(c));
+    return [...new Set(found)].sort();
+  }, [integrations]);
+
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return integrations.filter((i) => {
+      if (category && i.category !== category) return false;
+      if (!needle) return true;
+      // Slug included alongside the title: an operator who knows an integration as "github" should
+      // not have to guess that it is listed as "GitHub".
+      return [displayName(i), i.name, i.description, i.category]
+        .filter((field): field is string => Boolean(field))
+        .some((field) => field.toLowerCase().includes(needle));
+    });
+  }, [integrations, query, category]);
+
+  // Connected first: it is the smaller group and the one an operator returns to check on. Within a
+  // group the server's alphabetical order stands, so rows do not move as connections change.
+  const connected = visible.filter((i) => i.status === "connected");
+  const rest = visible.filter((i) => i.status !== "connected");
 
   return (
     <ResourcePanel crumbs={[{ label: "integrations" }]}>
-      <IntegrationsTabs />
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground">
-          {integrations.length} {integrations.length === 1 ? "integration" : "integrations"}
-        </p>
-        <Button asChild size="sm">
-          <Link to="/integrations/marketplace">Browse marketplace</Link>
-        </Button>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <label className="sr-only" htmlFor={searchId}>
+              Search integrations
+            </label>
+            <Search
+              aria-hidden
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              id={searchId}
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search integrations"
+              className="pl-8"
+            />
+          </div>
+          <InstallFromSource onInstalled={() => revalidator.revalidate()} />
+        </div>
+
+        {categories.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1">
+            <CategoryChip active={!category} onClick={() => setCategory(undefined)}>
+              All
+            </CategoryChip>
+            {categories.map((name) => (
+              <CategoryChip
+                key={name}
+                active={category === name}
+                onClick={() => setCategory(category === name ? undefined : name)}
+              >
+                {name}
+              </CategoryChip>
+            ))}
+          </div>
+        )}
       </div>
-      {integrations.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No integrations installed yet — browse the marketplace to add one.
+
+      {visible.length === 0 ? (
+        <p className="py-8 text-center text-sm text-muted-foreground">
+          {integrations.length === 0
+            ? "No integrations are available yet. Install one from a git repository to get started."
+            : "Nothing matches that search."}
         </p>
       ) : (
-        <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
-          {integrations.map((i) => (
-            <IntegrationRow key={i.name} integration={i} />
-          ))}
-        </ul>
+        <div className="flex flex-col gap-5">
+          {connected.length > 0 && <Section title="Connected" items={connected} />}
+          {rest.length > 0 && (
+            <Section title={connected.length > 0 ? "Available" : "All integrations"} items={rest} />
+          )}
+        </div>
       )}
     </ResourcePanel>
+  );
+}
+
+function CategoryChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-sm border px-2 py-1 text-xs capitalize transition-colors",
+        active
+          ? "border-border bg-muted text-foreground"
+          : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Section({ title, items }: { title: string; items: IntegrationSummary[] }) {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
+        {title} <span className="opacity-60">({items.length})</span>
+      </h2>
+      <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+        {items.map((integration) => (
+          <IntegrationRow key={integration.name} integration={integration} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function RowBody({ integration }: { integration: IntegrationSummary }) {
+  const name = displayName(integration);
+  return (
+    <>
+      <IntegrationIcon label={name} iconPath={integration.iconPath} />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="flex items-baseline gap-2">
+          <span className="truncate font-medium text-foreground">{name}</span>
+          {integration.category && (
+            <span className="hidden shrink-0 text-xs capitalize text-muted-foreground sm:inline">
+              {integration.category}
+            </span>
+          )}
+        </span>
+        {integration.description && (
+          <span className="line-clamp-1 text-xs text-muted-foreground">
+            {integration.description}
+          </span>
+        )}
+      </span>
+    </>
+  );
+}
+
+function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
+  // A curated entry that has not been cloned has no detail page to open — linking there would 404.
+  // It is a row about a repository, not about an integration this deployment has.
+  if (!integration.installed) {
+    return (
+      <li className="flex items-center gap-3 px-3 py-2.5">
+        <RowBody integration={integration} />
+        <span className="shrink-0 text-xs text-muted-foreground">Not installed</span>
+      </li>
+    );
+  }
+
+  return (
+    <li className="flex flex-col">
+      {/* The row is the link. A catalog is scanned and clicked, so the target should be the row
+          the pointer is already over, not the few characters of its title. */}
+      <Link
+        to={`/integrations/${encodeURIComponent(integration.name)}`}
+        className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-accent"
+      >
+        <RowBody integration={integration} />
+        <span className="flex shrink-0 items-center gap-2">
+          {integration.status === "connected" ? (
+            <StatusBadge label="connected" tone="success" />
+          ) : (
+            <span className="text-xs text-muted-foreground">Set up</span>
+          )}
+          <ChevronRight aria-hidden className="size-4 text-muted-foreground" />
+        </span>
+      </Link>
+      {integration.errorMessage && (
+        <p className="px-3 pb-2 text-xs text-destructive">{integration.errorMessage}</p>
+      )}
+    </li>
   );
 }
 

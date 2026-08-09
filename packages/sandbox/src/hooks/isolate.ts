@@ -20,6 +20,19 @@ const MEMORY_LIMIT_MB = 128;
  * that passes nothing gets a sandbox with no reach out of the isolate at all — which is what the
  * classifier and expression paths want.
  */
+/**
+ * A hook module is an object-literal *expression*, and it is interpolated inside parentheses —
+ * so a trailing `;`, which any formatter adds to a file that is also valid TypeScript, turns the
+ * wrapper into a syntax error.
+ *
+ * Normalised here rather than forbidden in authoring, because the failure it causes is both
+ * remote from its cause and total: every delivery to that integration fails to parse, and the
+ * author's only clue is a column number inside generated code they never wrote.
+ */
+export function hookExpression(source: string): string {
+  return source.replace(/;\s*$/, "");
+}
+
 export type ResourceLookup = (
   resourceType: string,
   resourceId: string
@@ -112,7 +125,7 @@ export async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerRes
     hash: __hash__,
     uuid: __uuid__,
   });
-  const __hookDef__ = (${hookSource});
+  const __hookDef__ = (${hookExpression(hookSource)});
   const __fn__ = __hookDef__[${JSON.stringify(fnName)}];
   if (typeof __fn__ !== 'function') {
     if (${optional === true}) return null;
@@ -194,7 +207,7 @@ export async function runResourceHook(
     uuid: __uuid__,
     now: ${now},
   });
-  const __hookDef__ = (${hookSource});
+  const __hookDef__ = (${hookExpression(hookSource)});
   const __hookFn__ = __hookDef__[${JSON.stringify(hookType)}];
   if (typeof __hookFn__ === 'function') {
     await __hookFn__(ctx);

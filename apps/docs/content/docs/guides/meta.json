@@ -20,6 +20,8 @@
     "connect-an-integration",
     "connect-github",
     "connect-slack",
+    "connect-telegram",
+    "connect-notion",
     "---Operate---",
     "approve-agent-work",
     "watch-a-run",

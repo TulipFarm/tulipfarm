@@ -18,6 +18,7 @@ import type { IngressIdentityResolver } from "../ingress/identity";
 import type { IntegrationConversationsRepo, IntegrationEventsRepo } from "../ingress/repo";
 import { postReply } from "../ingress/responder";
 import { dotPath, renderBodyTemplate } from "../ingress/template";
+import { isSecretRef } from "../integrations/connection-env";
 import type { HostedRunReader } from "./turn-host";
 
 /**
@@ -80,6 +81,8 @@ interface DeliveryAuthority {
   readonly dedupKey?: string;
   /** The external thread this delivery belongs to; absent when the manifest declares no chat. */
   readonly threadKey?: string;
+  /** Manifest-declared, non-secret connection env the classifier is entitled to see. */
+  readonly env: Record<string, string>;
 }
 
 /** What the Worker needs before it can classify one delivery. */
@@ -97,6 +100,12 @@ export interface DeliveryDescription {
   readonly hasThreadMapping: boolean;
   readonly chatEnabled: boolean;
   readonly eventsEnabled: boolean;
+  /**
+   * The `ingress.context_env` values, so a classifier can recognise its own integration — a
+   * Telegram update names no bot. Secret vars are rejected at load and skipped again here, so
+   * this can only ever carry configuration.
+   */
+  readonly env: Record<string, string>;
 }
 
 export type AttachChatResult =
@@ -150,6 +159,7 @@ export class IngressDeliveryHost {
       hasThreadMapping: await this.hasThreadMapping(delivery),
       chatEnabled: delivery.chat !== undefined,
       eventsEnabled: delivery.eventTypes !== undefined,
+      env: delivery.env,
     };
   }
 
@@ -356,6 +366,9 @@ export class IngressDeliveryHost {
         binding: input.binding,
         vars: input.vars ?? {},
         text: await this.replyText(businessId, turn, input.attempt, input.outcome),
+        // Stable per (run, attempt, binding): a provider redelivering the webhook reserves the
+        // same Effect and replays instead of posting the answer a second time.
+        run: { runId, toolCallId: `ingress-reply:${input.attempt}:${input.binding}` },
       }
     );
     return { delivered: true };
@@ -406,6 +419,7 @@ export class IngressDeliveryHost {
         reply: chat.reply,
         binding: decision.reply.binding,
         vars: decision.reply.vars ?? {},
+        run: { runId: delivery.runId, toolCallId: `ingress-bind-offer:${decision.reply.binding}` },
         text:
           "I don't know who you are yet. Open this link while signed in to TulipFarm to " +
           `connect this account: ${this.options.bindLinkUrl(offer.token)} — it works once and ` +
@@ -469,10 +483,30 @@ export class IngressDeliveryHost {
       body: envelope.body,
       headers: envelope.headers ?? {},
       classifier: handler,
+      env: classifierEnv(ingress.context_env, integration.connection.env),
       ...(ingress.chat === undefined ? {} : { chat: ingress.chat }),
       ...(ingress.events === undefined ? {} : { eventTypes: ingress.events.types ?? [] }),
       ...(typeof dedupValue === "string" ? { dedupKey: dedupValue } : {}),
       ...(threadKey === undefined ? {} : { threadKey }),
     };
   }
+}
+
+/**
+ * The manifest-declared, non-secret slice of connection env a classifier is entitled to see.
+ *
+ * Secret vars are already rejected at soul load, so this is the second of two gates rather than
+ * the only one: unresolved `secret://` references are skipped here too, so a var that becomes
+ * secret later degrades to absent instead of leaking a reference into untrusted code.
+ */
+function classifierEnv(
+  declared: readonly string[] | undefined,
+  env: Record<string, string> | undefined
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of declared ?? []) {
+    const value = env?.[name];
+    if (value !== undefined && !isSecretRef(value)) out[name] = value;
+  }
+  return out;
 }
