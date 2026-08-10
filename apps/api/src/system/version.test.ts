@@ -31,4 +31,11 @@ describe("runningVersion", () => {
     expect(runningVersion()).toBe("dev");
     if (prev !== undefined) process.env.TULIPFARM_VERSION = prev;
   });
+
+  it("handles latest TULIPFARM_VERSION env correctly", () => {
+    const prev = process.env.TULIPFARM_VERSION;
+    process.env.TULIPFARM_VERSION = "latest";
+    expect(runningVersion()).toBe("latest");
+    if (prev !== undefined) process.env.TULIPFARM_VERSION = prev;
+  });
 });
