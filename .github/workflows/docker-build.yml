@@ -61,7 +61,7 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=gha,scope=tulipfarm-${{ matrix.arch }}
-          cache-to: type=gha,mode=max,scope=tulipfarm-${{ matrix.arch }}
+          cache-to: type=gha,mode=min,ignore-error=true,scope=tulipfarm-${{ matrix.arch }}
 
   docker-success:
     name: Docker build
