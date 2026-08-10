@@ -80,13 +80,15 @@ export function createObservabilityTelemetryPort(obs: ObservabilityService): Tel
     gauge(name, value, attributes) {
       recordMetric("gauge", name, value, attributes);
     },
-    log(level) {
+    log(level, message, attributes) {
       fireAndForget(
         obs.record({
           type: "job",
           status: level === "error" ? "error" : "ok",
           toolName: "telemetry.log",
-          attributes: { level },
+          // The message is the whole point of a log line. Persisting only the level (as this did)
+          // recorded that something happened while discarding what it was.
+          attributes: { level, message, ...safe(attributes) },
         })
       );
     },

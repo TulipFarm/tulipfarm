@@ -2,10 +2,13 @@ import { useLoaderData, useRouteError } from "@remix-run/react";
 import { useRef, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { ChartCanvas } from "~/components/observability/chart-canvas";
+import { LogsPanel } from "~/components/observability/logs-panel";
+import { ResourcesPanel } from "~/components/observability/resources-panel";
 import { ErrorState } from "~/components/states";
 import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { Sheet } from "~/components/ui/sheet";
 import { ApiError } from "~/lib/api";
+import { getLogs, type LogPage } from "~/lib/logs";
 import {
   formatTokens,
   formatUsd,
@@ -20,6 +23,7 @@ import {
   type SummaryRange,
   type TraceEvent,
 } from "~/lib/observability";
+import { EMPTY_RESOURCE_USAGE, getResources, type ResourceUsage } from "~/lib/resources";
 import { cn } from "~/lib/utils";
 
 const RANGES: { key: SummaryRange; label: string }[] = [
@@ -37,16 +41,21 @@ function bucketLabel(iso: string, range: SummaryRange): string {
 }
 
 export async function clientLoader() {
-  const [initial, config, recent] = await Promise.all([
+  const [initial, config, recent, logs, resources] = await Promise.all([
     getObservabilitySummary("7d"),
     getObservabilityConfig(),
     getRecentTurns(25),
+    // Tolerated rather than awaited strictly: the log spine is the newest surface here, and a
+    // failure to read it must not blank the cost dashboard the page primarily exists to show.
+    getLogs({ limit: 50 }).catch((): LogPage => ({ items: [], nextCursor: null })),
+    // Same tolerance, same reason: resource samples are supplementary to the cost view.
+    getResources("1h").catch((): ResourceUsage => EMPTY_RESOURCE_USAGE),
   ]);
-  return { initial, config, recent };
+  return { initial, config, recent, logs, resources };
 }
 
 export default function SettingsObservability() {
-  const { initial, config, recent } = useLoaderData<typeof clientLoader>();
+  const { initial, config, recent, logs, resources } = useLoaderData<typeof clientLoader>();
   const [summary, setSummary] = useState<ObsSummary>(initial);
   const [range, setRange] = useState<SummaryRange>("7d");
   const [loading, setLoading] = useState(false);
@@ -205,6 +214,10 @@ export default function SettingsObservability() {
           </table>
         )}
       </Panel>
+
+      <ResourcesPanel initial={resources} />
+
+      <LogsPanel initial={logs} />
 
       <RecentTurnsPanel recent={recent} />
 

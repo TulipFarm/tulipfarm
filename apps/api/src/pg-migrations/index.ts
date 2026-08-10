@@ -31,6 +31,58 @@ export interface PgMigration {
 }
 
 /**
+ * Diagnostic log spine. Separate from `obs_event` on purpose: that table's columns are AI-shaped
+ * (model, tokens, cost) and its aggregates sum cost across every row, so log volume there would
+ * degrade the dashboard it exists to serve. Only `error`/`fatal` records are captured, so the
+ * trigram index on `message` stays cheap enough to make substring search interactive.
+ */
+const LOG_EVENT_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS log_event (
+    id              uuid PRIMARY KEY,
+    ts              timestamptz NOT NULL,
+    level           text NOT NULL,
+    service         text NOT NULL,
+    message         text NOT NULL,
+    stack           text,
+    request_id      text,
+    run_id          text,
+    conversation_id text,
+    attributes      jsonb NOT NULL DEFAULT '{}',
+    created_at      timestamptz NOT NULL
+  )`,
+  // (ts DESC, id DESC) matches the keyset pagination order exactly, so a cursor read is an
+  // index-only range scan rather than a sort of the whole window.
+  "CREATE INDEX IF NOT EXISTS log_event_ts_idx ON log_event (ts DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS log_event_level_ts_idx ON log_event (level, ts DESC, id DESC)",
+  "CREATE INDEX IF NOT EXISTS log_event_service_ts_idx ON log_event (service, ts DESC, id DESC)",
+  // Message search is deliberately left to a scan. A GIN/trigram index would tax every insert on
+  // the error path — when the system is least healthy and writing most — to speed up an occasional
+  // admin search over a retention-pruned table that the time and level indexes already narrow.
+];
+
+/**
+ * Process resource samples: one fixed-cadence row per service instance per minute. Separate from
+ * `obs_event` (AI-shaped, event-driven) and `log_event` (failure-driven) because this is a gauge —
+ * rows arrive on a clock whether or not anything happened, and are aggregated by time bucket rather
+ * than paginated. `instance` is retained so a replicated deployment can still be averaged honestly
+ * instead of double-counting one service's samples as if they came from one process.
+ */
+const RESOURCE_SAMPLE_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS resource_sample (
+    id         uuid PRIMARY KEY,
+    ts         timestamptz NOT NULL,
+    service    text NOT NULL,
+    instance   text NOT NULL,
+    cpu_pct    real NOT NULL,
+    rss_bytes  bigint NOT NULL
+  )`,
+  // Every read is "one window, grouped by service", so the service-leading index serves the query
+  // directly; the ts-only index covers the retention sweep.
+  "CREATE INDEX IF NOT EXISTS resource_sample_ts_idx ON resource_sample (ts DESC)",
+  "CREATE INDEX IF NOT EXISTS resource_sample_service_ts_idx ON resource_sample (service, ts DESC)",
+];
+
+/**
  * Greenfield schema baseline. Development databases from before this baseline must be reset;
  * TulipFarm does not preserve compatibility with the pre-rebuild development schema.
  *
@@ -320,6 +372,8 @@ const BASELINE_STATEMENTS: string[] = [
   "CREATE INDEX IF NOT EXISTS obs_event_type_ts_idx ON obs_event (type, ts DESC)",
   "CREATE INDEX IF NOT EXISTS obs_event_agent_ts_idx ON obs_event (agent_id, ts DESC)",
   "CREATE INDEX IF NOT EXISTS obs_event_model_ts_idx ON obs_event (model, ts DESC)",
+  ...LOG_EVENT_STATEMENTS,
+  ...RESOURCE_SAMPLE_STATEMENTS,
   `CREATE TABLE IF NOT EXISTS routine_runs (
     id                  uuid PRIMARY KEY,
     routine_slug        text NOT NULL,
@@ -1424,6 +1478,24 @@ export const PG_MIGRATIONS: PgMigration[] = [
       // backfilling the local part of the address, because a derived name is a guess and a guess
       // that looks authored is worse than an honest absence — readers fall back to the email.
       await q.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS name text");
+    },
+  },
+  {
+    version: 43,
+    description: "log_event: durable error/fatal log spine for the observability UI",
+    up: async (q) => {
+      for (const sql of LOG_EVENT_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 44,
+    description: "resource_sample: per-process CPU and memory samples",
+    up: async (q) => {
+      for (const sql of RESOURCE_SAMPLE_STATEMENTS) {
+        await q.query(sql);
+      }
     },
   },
 ];

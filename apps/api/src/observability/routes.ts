@@ -1,10 +1,79 @@
+import {
+  isLogEventLevel,
+  isLogService,
+  LOG_EVENT_LEVELS,
+  LOG_SERVICES,
+  RESOURCE_SERVICES,
+} from "@tulipfarm/observability";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
 import type { ObservabilityConfig } from "./config";
+import type { LogRepo } from "./log-repo";
+import {
+  isResourceWindow,
+  RESOURCE_WINDOW_KEYS,
+  type ResourceRepo,
+  type ResourceWindow,
+} from "./resource-repo";
 import { isSummaryRange, type ObservabilityService } from "./service";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
+
+/** Page size ceiling for the log reader — a runaway `limit` must not scan the whole table. */
+const LOG_LIMIT_MAX = 200;
+const LOG_LIMIT_DEFAULT = 50;
+
+const LogsSchema = {
+  type: "object",
+  required: ["items", "nextCursor"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "ts", "level", "service", "message"],
+        properties: {
+          id: { type: "string" },
+          ts: { type: "string" },
+          level: { type: "string", enum: [...LOG_EVENT_LEVELS] },
+          service: { type: "string", enum: [...LOG_SERVICES] },
+          message: { type: "string" },
+          stack: { type: "string", nullable: true },
+          requestId: { type: "string", nullable: true },
+          runId: { type: "string", nullable: true },
+          conversationId: { type: "string", nullable: true },
+          attributes: { type: "object", additionalProperties: true },
+        },
+      },
+    },
+    nextCursor: { type: "string", nullable: true },
+  },
+} as const;
+
+const ResourcesSchema = {
+  type: "object",
+  required: ["window", "bucketSeconds", "buckets", "series"],
+  properties: {
+    window: { type: "string", enum: [...RESOURCE_WINDOW_KEYS] },
+    bucketSeconds: { type: "number" },
+    buckets: { type: "array", items: { type: "string" } },
+    series: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["service", "cpuPct", "rssBytes"],
+        properties: {
+          service: { type: "string", enum: [...RESOURCE_SERVICES] },
+          // Nullable entries are load-bearing: a null is a bucket the service produced no sample
+          // for, and the chart must draw that as a gap rather than interpolate across an outage.
+          cpuPct: { type: "array", items: { type: "number", nullable: true } },
+          rssBytes: { type: "array", items: { type: "number", nullable: true } },
+        },
+      },
+    },
+  },
+} as const;
 
 const ConfigStatusSchema = {
   type: "object",
@@ -100,7 +169,9 @@ export function registerObservabilityRoutes(
   app: FastifyInstance,
   service: ObservabilityService,
   requireAuth: PreHandler,
-  config?: ObservabilityConfig
+  config?: ObservabilityConfig,
+  logs?: LogRepo,
+  resources?: ResourceRepo
 ): void {
   // GET /api/v1/observability/config — Grafana-export status (admin). Never returns the OTLP token.
   app.get(
@@ -207,6 +278,93 @@ export function registerObservabilityRoutes(
       const q = req.query as Record<string, unknown>;
       const range = isSummaryRange(q.range) ? q.range : "7d";
       return reply.send(await service.summary(range));
+    }
+  );
+
+  // GET /api/v1/observability/resources — per-service CPU/RSS over a time window (admin).
+  if (resources) {
+    app.get(
+      "/api/v1/observability/resources",
+      {
+        preHandler: requireAuth,
+        schema: {
+          description:
+            "Bucketed CPU and memory usage per service over a time window (admin only). " +
+            "CPU is percent of a single core, so a process saturating two cores reads 200.",
+          tags: ["observability"],
+          security: [{ sessionCookie: [] }, { bearerToken: [] }],
+          querystring: {
+            type: "object",
+            properties: {
+              window: { type: "string", enum: [...RESOURCE_WINDOW_KEYS] },
+            },
+          },
+          response: { 200: ResourcesSchema, 400: ErrorSchema, 401: ErrorSchema, 403: ErrorSchema },
+        },
+      },
+      async (req, reply) => {
+        const actor = req.user as UserDoc;
+        if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+        const raw = (req.query as { window?: string }).window;
+        // The querystring enum already rejects an unknown value with 400; this covers the parameter
+        // being absent, which is the ordinary first load.
+        const window: ResourceWindow = isResourceWindow(raw) ? raw : "1h";
+        return reply.send(await resources.usage(window));
+      }
+    );
+  }
+
+  // GET /api/v1/observability/logs — durable error/fatal records across all services (admin).
+  // Only registered when a repo is wired: a route that always returns [] would read as "nothing
+  // is failing" when the truth is "nothing is being captured".
+  if (!logs) return;
+  app.get(
+    "/api/v1/observability/logs",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Durable error/fatal log records across api, worker, and integration-worker (admin only).",
+        tags: ["observability"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        querystring: {
+          type: "object",
+          properties: {
+            level: { type: "string", enum: [...LOG_EVENT_LEVELS] },
+            service: { type: "string", enum: [...LOG_SERVICES] },
+            since: { type: "string", description: "ISO timestamp; only records at or after it." },
+            q: { type: "string", description: "Case-insensitive substring match on the message." },
+            limit: { type: "number", minimum: 1, maximum: LOG_LIMIT_MAX },
+            cursor: { type: "string", description: "Opaque cursor from a previous page." },
+          },
+        },
+        response: { 200: LogsSchema, 401: ErrorSchema, 403: ErrorSchema },
+      },
+    },
+    async (req, reply) => {
+      const actor = req.user as UserDoc;
+      if (actor.role !== "admin") return reply.code(403).send({ error: "forbidden" });
+      const q = req.query as {
+        level?: string;
+        service?: string;
+        since?: string;
+        q?: string;
+        limit?: number;
+        cursor?: string;
+      };
+      // An unparseable `since` is ignored rather than 400'd: the filter is a convenience, and a
+      // stale bookmark should still show the operator their logs.
+      const since = q.since ? new Date(q.since) : undefined;
+      return reply.send(
+        await logs.query({
+          level: isLogEventLevel(q.level) ? q.level : undefined,
+          service: isLogService(q.service) ? q.service : undefined,
+          since: since && !Number.isNaN(since.getTime()) ? since : undefined,
+          q: q.q?.trim() || undefined,
+          limit: Math.min(Math.max(Math.floor(q.limit ?? LOG_LIMIT_DEFAULT), 1), LOG_LIMIT_MAX),
+          cursor: q.cursor,
+        })
+      );
     }
   );
 }
