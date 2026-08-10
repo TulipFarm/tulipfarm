@@ -18,7 +18,9 @@ composition patterns over route-local styling.
    feature component.
 5. Implement all applicable states: default, hover, active, focus-visible, disabled, loading,
    empty, error, and responsive.
-6. Use semantic tokens and canonical product terms. Never encode meaning with color alone.
+6. Use semantic tokens and canonical product terms. For data, status, run state, Tool identity, and
+   inspect panes, route through the token families in the reference. Never encode meaning with color
+   alone.
 7. Add or update the matching `/design-guide` example whenever the public component vocabulary
    changes.
 8. Colocate focused Vitest coverage and run the repository verification required by `AGENTS.md`.
@@ -26,6 +28,8 @@ composition patterns over route-local styling.
 ## Guardrails
 
 - Keep the coral primary disciplined and destructive color danger-only.
+- Keep content `status-*` tones separate from execution `run-*` tones; use `data-*` only for data
+  encoding and `code-*` only for inspect/code viewers.
 - Let the top bar own page identity, derive shell chrome from the shared mode map, and do not
   repeat either in the page body.
 - Use Inter for interface copy and JetBrains Mono for code, identifiers, logs, and technical data.

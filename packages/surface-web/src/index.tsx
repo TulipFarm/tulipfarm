@@ -7,7 +7,7 @@ import {
   targetKey,
   validateSurfaceArtifact,
 } from "@tulipfarm/surface";
-import type { ChangeEvent, FormEvent, ReactElement, ReactNode } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent, ReactElement, ReactNode } from "react";
 import { useId, useState } from "react";
 import { surfaceWebManifest } from "./manifest";
 
@@ -27,6 +27,49 @@ export interface SurfaceCompositionProps extends SurfaceWebProps {
 interface ChartSeries {
   readonly label: string;
   readonly values: readonly number[];
+}
+
+interface MetricCell {
+  readonly label: string;
+  readonly value: number | string;
+  readonly unit?: string;
+  readonly delta?: {
+    readonly value: number | string;
+    readonly direction: "up" | "down" | "flat";
+    readonly label?: string;
+  };
+  readonly caption?: string;
+}
+
+interface TimelineEntry {
+  readonly label: string;
+  readonly timestamp?: string;
+  readonly description?: string;
+  readonly status?: string;
+}
+
+interface ComparisonOption {
+  readonly id: string;
+  readonly label: string;
+  readonly recommended?: boolean;
+}
+
+interface ComparisonCriterion {
+  readonly id: string;
+  readonly label: string;
+  readonly description?: string;
+}
+
+interface ComparisonCell {
+  readonly option: string;
+  readonly criterion: string;
+  readonly value: number | string | boolean;
+  readonly note?: string;
+}
+
+interface BreakdownSegment {
+  readonly label: string;
+  readonly value: number;
 }
 
 interface GraphNode {
@@ -54,6 +97,17 @@ function humanize(value: string): string {
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatMeasure(value: number | string, unit?: string, currency?: string): string {
+  const formatted = typeof value === "number" ? formatNumber(value) : value;
+  if (currency) return `${currency} ${formatted}`;
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function ratio(value: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return 0;
+  return Math.min(1, Math.max(0, value / max));
 }
 
 function SurfacePanel({
@@ -484,6 +538,208 @@ function ChartGrid({
   );
 }
 
+function SurfaceMetric({ props }: { readonly props: Record<string, unknown> }) {
+  const cells = props.cells as MetricCell[];
+  return (
+    <SurfacePanel
+      kind="metric"
+      eyebrow="Metrics"
+      meta={`${cells.length} ${cells.length === 1 ? "metric" : "metrics"}`}
+    >
+      <div data-surface-metric-grid>
+        {cells.map((cell) => (
+          <article key={cell.label} data-surface-metric-cell>
+            <span data-surface-metric-label>{cell.label}</span>
+            <strong data-surface-metric-value data-surface-mono>
+              {formatMeasure(cell.value, cell.unit)}
+            </strong>
+            {cell.delta ? (
+              <span data-surface-metric-delta data-delta-direction={cell.delta.direction}>
+                <span data-surface-mono>{formatMeasure(cell.delta.value)}</span>
+                {cell.delta.label ? <span>{cell.delta.label}</span> : null}
+              </span>
+            ) : null}
+            {cell.caption ? <p data-surface-metric-caption>{cell.caption}</p> : null}
+          </article>
+        ))}
+      </div>
+    </SurfacePanel>
+  );
+}
+
+function SurfaceTimeline({ props }: { readonly props: Record<string, unknown> }) {
+  const entries = props.entries as TimelineEntry[];
+  return (
+    <SurfacePanel
+      kind="timeline"
+      eyebrow="Timeline"
+      meta={`${entries.length} ${entries.length === 1 ? "event" : "events"}`}
+    >
+      <ol data-surface-timeline>
+        {entries.map((entry, index) => (
+          <li key={`${entry.label}-${index}`}>
+            <div data-surface-timeline-marker aria-hidden="true" />
+            <div data-surface-timeline-content>
+              <header>
+                <div>
+                  {entry.timestamp ? <time>{entry.timestamp}</time> : null}
+                  <strong>{entry.label}</strong>
+                </div>
+                {entry.status ? (
+                  <span data-surface-status data-tone="neutral">
+                    {entry.status}
+                  </span>
+                ) : null}
+              </header>
+              {entry.description ? <p>{entry.description}</p> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </SurfacePanel>
+  );
+}
+
+function SurfaceComparison({ props }: { readonly props: Record<string, unknown> }) {
+  const options = props.options as ComparisonOption[];
+  const criteria = props.criteria as ComparisonCriterion[];
+  const cells = props.cells as ComparisonCell[];
+  const cellMap = new Map(cells.map((cell) => [`${cell.criterion}:${cell.option}`, cell]));
+  return (
+    <SurfacePanel
+      kind="comparison"
+      eyebrow="Comparison"
+      meta={`${options.length} options · ${criteria.length} criteria`}
+    >
+      <div data-surface-table-scroll>
+        <table data-surface-comparison>
+          <thead>
+            <tr>
+              <th scope="col">Criteria</th>
+              {options.map((option) => (
+                <th key={option.id} scope="col">
+                  <span>{option.label}</span>
+                  {option.recommended ? <span data-surface-recommended>Recommended</span> : null}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {criteria.map((criterion) => (
+              <tr key={criterion.id}>
+                <th scope="row">
+                  <span>{criterion.label}</span>
+                  {criterion.description ? <small>{criterion.description}</small> : null}
+                </th>
+                {options.map((option) => {
+                  const cell = cellMap.get(`${criterion.id}:${option.id}`);
+                  return (
+                    <td key={option.id}>
+                      <span>{cell ? string(cell.value) : "—"}</span>
+                      {cell?.note ? <small>{cell.note}</small> : null}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </SurfacePanel>
+  );
+}
+
+function SurfaceBreakdown({ props }: { readonly props: Record<string, unknown> }) {
+  const segments = props.segments as BreakdownSegment[];
+  const sum = segments.reduce((total, segment) => total + segment.value, 0);
+  const explicitTotal = typeof props.total === "number" ? props.total : undefined;
+  const total = explicitTotal ?? sum;
+  const unit = typeof props.unit === "string" ? props.unit : undefined;
+  const currency = typeof props.currency === "string" ? props.currency : undefined;
+  return (
+    <SurfacePanel
+      kind="breakdown"
+      eyebrow="Breakdown"
+      meta={`Total ${formatMeasure(total, unit, currency)}`}
+    >
+      <div data-surface-breakdown>
+        <div data-surface-breakdown-bar aria-hidden="true">
+          {segments.map((segment, index) => (
+            <span
+              key={segment.label}
+              data-series-color={index % 8}
+              style={{ width: `${ratio(segment.value, total) * 100}%` }}
+            />
+          ))}
+        </div>
+        <dl data-surface-breakdown-list>
+          {segments.map((segment, index) => {
+            const percent = ratio(segment.value, total) * 100;
+            return (
+              <div key={segment.label}>
+                <dt>
+                  <i data-series-color={index % 8} />
+                  <span>{segment.label}</span>
+                </dt>
+                <dd>
+                  <span data-surface-mono>{formatMeasure(segment.value, unit, currency)}</span>
+                  <span>{formatNumber(percent)}%</span>
+                </dd>
+              </div>
+            );
+          })}
+        </dl>
+      </div>
+    </SurfacePanel>
+  );
+}
+
+function SurfaceGauge({ props }: { readonly props: Record<string, unknown> }) {
+  const value = typeof props.value === "number" ? props.value : 0;
+  const max = typeof props.max === "number" ? props.max : 1;
+  const target = typeof props.target === "number" ? props.target : undefined;
+  const unit = typeof props.unit === "string" ? props.unit : undefined;
+  const progress = ratio(value, max);
+  const targetPosition = target === undefined ? undefined : ratio(target, max);
+  const progressStyle: CSSProperties = { width: `${progress * 100}%` };
+  const targetStyle: CSSProperties | undefined =
+    targetPosition === undefined ? undefined : { left: `${targetPosition * 100}%` };
+
+  return (
+    <SurfacePanel
+      kind="gauge"
+      eyebrow="Gauge"
+      title={typeof props.label === "string" ? props.label : "Progress"}
+      meta={`${formatMeasure(value, unit)} / ${formatMeasure(max, unit)}`}
+    >
+      <div data-surface-gauge>
+        <meter
+          data-surface-sr-only
+          min={0}
+          max={max}
+          value={value}
+          aria-label={typeof props.label === "string" ? props.label : "Progress"}
+        />
+        <div data-surface-gauge-track aria-hidden="true">
+          <span data-surface-gauge-fill style={progressStyle} />
+          {targetStyle ? (
+            <span
+              data-surface-gauge-target
+              style={targetStyle}
+              title={`Target ${formatMeasure(target ?? 0, unit)}`}
+            />
+          ) : null}
+        </div>
+        <div data-surface-gauge-labels>
+          <span data-surface-mono>{formatMeasure(value, unit)}</span>
+          {target !== undefined ? <span>Target {formatMeasure(target, unit)}</span> : null}
+          <span data-surface-mono>{formatMeasure(max, unit)}</span>
+        </div>
+      </div>
+    </SurfacePanel>
+  );
+}
+
 function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
   const kind = props.kind === "line" ? "line" : "bar";
   const labels = props.labels as string[];
@@ -516,7 +772,7 @@ function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
       <figure data-surface-visual>
         <div data-surface-legend>
           {series.map((item, index) => (
-            <span key={item.label} data-series-color={index % 7}>
+            <span key={item.label} data-series-color={index % 8}>
               <i />
               {item.label}
             </span>
@@ -552,7 +808,7 @@ function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
                   return (
                     <rect
                       key={`${label}-${item.label}`}
-                      data-series-color={seriesIndex % 7}
+                      data-series-color={seriesIndex % 8}
                       x={groupStart + seriesIndex * barWidth}
                       y={Math.min(valueY, baseline)}
                       width={Math.max(1, barWidth - 2)}
@@ -573,7 +829,7 @@ function SurfaceChart({ props }: { readonly props: Record<string, unknown> }) {
                   .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
                   .join(" ");
                 return (
-                  <g key={item.label} data-series-color={seriesIndex % 7}>
+                  <g key={item.label} data-series-color={seriesIndex % 8}>
                     <path d={path} data-surface-chart-line />
                     {points.length <= 24
                       ? points.map((point) => (
@@ -689,7 +945,7 @@ function SurfaceForceGraph({ props }: { readonly props: Record<string, unknown> 
                 <g
                   key={node.id}
                   transform={`translate(${point.x} ${point.y})`}
-                  data-series-color={index % 7}
+                  data-series-color={index % 8}
                 >
                   <circle r={nodes.length > 40 ? 5 : 8}>
                     <title>{node.label ?? node.id}</title>
@@ -923,6 +1179,16 @@ function renderSurfaceContent({
           actionHandleFor={actionHandleFor}
         />
       );
+    case "Metric":
+      return <SurfaceMetric props={props} />;
+    case "Timeline":
+      return <SurfaceTimeline props={props} />;
+    case "Comparison":
+      return <SurfaceComparison props={props} />;
+    case "Breakdown":
+      return <SurfaceBreakdown props={props} />;
+    case "Gauge":
+      return <SurfaceGauge props={props} />;
     case "Chart":
       return <SurfaceChart props={props} />;
     case "ForceGraph":

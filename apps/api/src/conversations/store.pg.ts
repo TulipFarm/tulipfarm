@@ -39,6 +39,7 @@ interface MessageRow {
   turn_id: string;
   role: string;
   content: string;
+  metadata: Record<string, unknown> | null;
   attempt: number | null;
   created_at: Date;
 }
@@ -81,6 +82,7 @@ function toMessage(row: MessageRow): PersistedMessage {
     turnId: row.turn_id,
     role: row.role as PersistedMessage["role"],
     content: row.content,
+    ...(row.metadata === null ? {} : { metadata: row.metadata }),
     ...(row.attempt === null ? {} : { attempt: row.attempt }),
     createdAt: row.created_at,
   };
@@ -145,14 +147,15 @@ export class PgConversationStore implements ConversationStore {
     // `content` is jsonb, and a Turn message is always text — `JSON.stringify` makes it a JSON
     // string, matching what `PgMessageRepo` writes for a user message.
     await this.q.query(
-      `INSERT INTO messages (id, conversation_id, turn_id, role, content, attempt, created_at)
-       VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)`,
+      `INSERT INTO messages (id, conversation_id, turn_id, role, content, metadata, attempt, created_at)
+       VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8)`,
       [
         message.id,
         message.conversationId,
         message.turnId,
         message.role,
         JSON.stringify(message.content),
+        message.metadata === undefined ? null : JSON.stringify(message.metadata),
         message.attempt ?? null,
         message.createdAt,
       ]
@@ -202,7 +205,7 @@ export class PgConversationStore implements ConversationStore {
     // under a new attempt — replaying both would show the conversation answering itself twice.
     const { rows } = await this.q.query(
       `SELECT m.id, m.conversation_id, m.turn_id, m.role,
-              m.content #>> '{}' AS content, m.attempt, m.created_at
+              m.content #>> '{}' AS content, m.metadata, m.attempt, m.created_at
          FROM messages m
         WHERE m.conversation_id = $1
           AND m.turn_id IS NOT NULL

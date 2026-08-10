@@ -1,6 +1,7 @@
 import type { AgentLoopEvent, AgentLoopEventSink } from "@tulipfarm/agent-runtime";
 import {
   ajv,
+  type ParticipantToolCall,
   type RunEventAudience,
   type RunEventPayloads,
   type RunEventType,
@@ -109,12 +110,28 @@ function validatorFor(type: RunEventType, schema: Record<string, unknown>): Comp
 export class TurnEventWriter implements AgentLoopEventSink {
   private cursorSequence = 0;
   private lastLoopSequence = 0;
+  private readonly toolCallOrder: string[] = [];
+  private readonly toolCallsById = new Map<string, ParticipantToolCall>();
 
   constructor(private readonly options: TurnEventWriterOptions) {}
 
   /** Highest Run event sequence this writer appended; readers resume strictly after it. */
   get cursor(): number {
     return this.cursorSequence;
+  }
+
+  /**
+   * Participant-visible Tool timeline emitted during this turn.
+   *
+   * Persist exactly what was already streamed to the participant: redaction-aware previews and
+   * receipts, never verbatim Tool arguments or outputs. If it was safe to show live, it is safe to
+   * show after a refresh.
+   */
+  get toolCalls(): readonly ParticipantToolCall[] {
+    return this.toolCallOrder.flatMap((callId) => {
+      const call = this.toolCallsById.get(callId);
+      return call === undefined ? [] : [{ ...call }];
+    });
   }
 
   /**
@@ -147,6 +164,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
       occurredAt: (this.options.now?.() ?? new Date()).toISOString(),
     });
     this.cursorSequence = Math.max(this.cursorSequence, appended.sequence);
+    this.recordToolEvent(type, payload);
   }
 
   /** `AgentLoopEventSink`. Loop events that have no participant-visible counterpart are dropped. */
@@ -173,6 +191,34 @@ export class TurnEventWriter implements AgentLoopEventSink {
         key
       );
       return;
+    }
+  }
+
+  private recordToolEvent<T extends RunEventType>(type: T, payload: RunEventPayloads[T]): void {
+    if (type === "tool.call") {
+      const call = payload as RunEventPayloads["tool.call"];
+      const existing = this.toolCallsById.get(call.callId);
+      if (existing === undefined) this.toolCallOrder.push(call.callId);
+      this.toolCallsById.set(call.callId, {
+        ...(existing ?? { callId: call.callId, name: call.name }),
+        name: call.name,
+        ...(call.argsDigest === undefined ? {} : { argsDigest: call.argsDigest }),
+        ...(call.argsPreview === undefined ? {} : { argsPreview: call.argsPreview }),
+      });
+      return;
+    }
+
+    if (type === "tool.result") {
+      const result = payload as RunEventPayloads["tool.result"];
+      const existing = this.toolCallsById.get(result.callId);
+      if (existing === undefined) return;
+      this.toolCallsById.set(result.callId, {
+        ...existing,
+        outcome: result.status,
+        ...(result.resultPreview === undefined ? {} : { resultPreview: result.resultPreview }),
+        ...(result.durationMs === undefined ? {} : { durationMs: result.durationMs }),
+        ...(result.errorCode === undefined ? {} : { errorCode: result.errorCode }),
+      });
     }
   }
 }

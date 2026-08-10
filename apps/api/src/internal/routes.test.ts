@@ -288,9 +288,38 @@ describe("/api/v1/internal/turns", () => {
       method: "POST",
       url: `/api/v1/internal/turns/${RUN_ID}/messages`,
       headers: asWorker(),
-      payload: { attempt: 1, content: "the answer" },
+      payload: {
+        attempt: 1,
+        content: "the answer",
+        metadata: {
+          toolCalls: [
+            {
+              callId: "call-1",
+              name: "record_create",
+              argsDigest: "sha256:args",
+              argsPreview: { json: '{"title":"x"}', bytes: 13 },
+              resultPreview: { json: '{"ok":true}', bytes: 11 },
+              durationMs: 25,
+              outcome: "ok",
+            },
+          ],
+        },
+      },
     });
     expect(appended.json()).toEqual({ messageId: "message-1" });
+    expect(store.messages[0]?.metadata).toEqual({
+      toolCalls: [
+        {
+          callId: "call-1",
+          name: "record_create",
+          argsDigest: "sha256:args",
+          argsPreview: { json: '{"title":"x"}', bytes: 13 },
+          resultPreview: { json: '{"ok":true}', bytes: 11 },
+          durationMs: 25,
+          outcome: "ok",
+        },
+      ],
+    });
 
     const completed = await app.inject({
       method: "POST",

@@ -7,7 +7,7 @@
  * starts emitting them. No Zod: validate by hand at the parse boundary.
  */
 
-import type { EffortPreset, EffortRung } from "@tulipfarm/schema";
+import type { EffortPreset, EffortRung, RunEventToolPreview } from "@tulipfarm/schema";
 
 // ----- Wire: SSE events ------------------------------------------------------------------------
 
@@ -31,6 +31,34 @@ export type ChatEventType =
 export type ApprovalOutcome = "approved" | "denied" | "timeout";
 export type StepStatus = "pending" | "running" | "done" | "error";
 
+/** Which layer a Tool belongs to. Mirrors the registry's tiering, not a rendering hint. */
+export type ToolTier = "system" | "platform" | "integration";
+
+/**
+ * The bounded, redaction-aware view of a Tool's arguments or output that the wire carries.
+ *
+ * `json` is already redacted and already truncated when it arrives; the client never un-redacts it.
+ * `redactedPaths` names each withheld leaf so the UI can show an explicit gap instead of a hole it
+ * cannot explain, and `bytes` is the size of the original so "truncated" can say how much is
+ * missing. The full value is fetched on demand, never streamed.
+ */
+export type ToolPreview = RunEventToolPreview;
+
+/** Identity and timing for one Tool call. Says which kind of Tool ran, not what it operated on. */
+export type ToolMeta = {
+  /** Hash of the verbatim arguments. Stays the authority after a preview redacts or truncates. */
+  argsDigest?: string;
+  tier?: ToolTier;
+  mutating?: boolean;
+  agentId?: string;
+  /** The State the call belonged to — real grouping data, not adjacency guessed by the client. */
+  stepId?: string;
+  startedAt?: string;
+  durationMs?: number;
+  errorCode?: string;
+  summary?: string;
+};
+
 export type PlanStep = { id: string; label: string; status: StepStatus };
 // `ref` is the inline citation number the agent wrote (`[ref]`); it ties a source to its `[n]` marker.
 export type SourceRef = { id?: string; title?: string; url?: string; ref?: number; path?: string };
@@ -39,8 +67,26 @@ export type SourceRef = { id?: string; title?: string; url?: string; ref?: numbe
 export type ChatEvent =
   | { type: "text"; data: { delta: string } }
   | { type: "reasoning"; data: { delta: string } }
-  | { type: "tool-call"; data: { toolCallId: string; toolName: string; args: unknown } }
-  | { type: "tool-result"; data: { toolCallId: string; toolName: string; result: unknown } }
+  | {
+      type: "tool-call";
+      data: {
+        toolCallId: string;
+        toolName: string;
+        args: unknown;
+        preview?: ToolPreview;
+        meta?: ToolMeta;
+      };
+    }
+  | {
+      type: "tool-result";
+      data: {
+        toolCallId: string;
+        toolName: string;
+        result: unknown;
+        preview?: ToolPreview;
+        meta?: ToolMeta;
+      };
+    }
   | {
       type: "approval-request";
       data: {
@@ -150,6 +196,12 @@ export type TimelinePart =
       result?: unknown;
       status: ToolStatus;
       approval?: ApprovalState;
+      /** Redacted, bounded views of the call's input and output; absent on a legacy stream. */
+      argsPreview?: ToolPreview;
+      resultPreview?: ToolPreview;
+      meta?: ToolMeta;
+      /** `error` is distinct from `done`: a call that ran and failed is not a call that worked. */
+      outcome?: "ok" | "error";
     }
   | { kind: "reasoning"; text: string }
   | { kind: "plan"; planId: string; title?: string; steps: PlanStep[] }

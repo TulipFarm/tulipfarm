@@ -21,6 +21,11 @@ export const surfaceWebManifest: SurfaceRendererManifest = Object.freeze({
     Divider: ["1.0"],
     Image: ["1.0"],
     MultiChoice: ["1.0"],
+    Metric: ["1.0"],
+    Timeline: ["1.0"],
+    Comparison: ["1.0"],
+    Breakdown: ["1.0"],
+    Gauge: ["1.0"],
   },
   providerLimits: { artifactBytes: 256_000, tableRows: 100 },
   interactionCapabilities: [

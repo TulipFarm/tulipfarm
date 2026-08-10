@@ -1,13 +1,14 @@
-import type { ChatMessage, SourceRef, TimelinePart } from "~/lib/chat/types";
+import type { ChatMessage, SourceRef, TimelinePart, ToolPreview } from "~/lib/chat/types";
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 import { randomUUID } from "~/lib/uuid";
 
 /*
  * Rehydrate a restored conversation's persisted messages into the renderable timeline the chat
  * reducer would have produced live. Text is the fidelity bar (every user/assistant turn round-trips);
- * tool calls are reconstructed best-effort — an assistant `tool-call` part pairs with the result in
- * the following `tool` turn (matched by `toolCallId`). System/summary rows are internal to the prompt
- * and never rendered, so they are dropped. Every message is `sealed` (no further deltas).
+ * tool calls are reconstructed best-effort from assistant metadata (new agentic turns) or by pairing
+ * an assistant `tool-call` part with the following `tool` turn (legacy rows, matched by `toolCallId`).
+ * System/summary rows are internal to the prompt and never rendered, so they are dropped. Every
+ * message is `sealed` (no further deltas).
  */
 
 function newId(): string {
@@ -32,6 +33,86 @@ function assistantParts(content: string | WireMessagePart[]): TimelinePart[] {
     }
   }
   return parts;
+}
+
+type PersistedToolCall = {
+  callId: string;
+  name: string;
+  argsDigest?: string;
+  argsPreview?: ToolPreview;
+  resultPreview?: ToolPreview;
+  durationMs?: number;
+  outcome?: "ok" | "error";
+  errorCode?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function previewFrom(value: unknown): ToolPreview | undefined {
+  if (!isRecord(value) || typeof value.json !== "string") return undefined;
+  return {
+    json: value.json,
+    ...(Array.isArray(value.redactedPaths)
+      ? { redactedPaths: value.redactedPaths.filter((path) => typeof path === "string") }
+      : {}),
+    ...(typeof value.truncated === "boolean" ? { truncated: value.truncated } : {}),
+    ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
+  };
+}
+
+function persistedToolCallFrom(value: unknown): PersistedToolCall | undefined {
+  if (!isRecord(value) || typeof value.callId !== "string" || typeof value.name !== "string") {
+    return undefined;
+  }
+  const argsPreview = previewFrom(value.argsPreview);
+  const resultPreview = previewFrom(value.resultPreview);
+  return {
+    callId: value.callId,
+    name: value.name,
+    ...(typeof value.argsDigest === "string" ? { argsDigest: value.argsDigest } : {}),
+    ...(argsPreview === undefined ? {} : { argsPreview }),
+    ...(resultPreview === undefined ? {} : { resultPreview }),
+    ...(typeof value.durationMs === "number" ? { durationMs: value.durationMs } : {}),
+    ...(value.outcome === "ok" || value.outcome === "error" ? { outcome: value.outcome } : {}),
+    ...(typeof value.errorCode === "string" ? { errorCode: value.errorCode } : {}),
+  };
+}
+
+function toolPartsFromMetadata(metadata: Record<string, unknown> | undefined): TimelinePart[] {
+  const rawToolCalls = metadata?.toolCalls;
+  if (!Array.isArray(rawToolCalls)) return [];
+  return rawToolCalls.flatMap((raw): TimelinePart[] => {
+    const tool = persistedToolCallFrom(raw);
+    if (tool === undefined) return [];
+    const meta = {
+      ...(tool.argsDigest === undefined ? {} : { argsDigest: tool.argsDigest }),
+      ...(tool.durationMs === undefined ? {} : { durationMs: tool.durationMs }),
+      ...(tool.errorCode === undefined ? {} : { errorCode: tool.errorCode }),
+    };
+    return [
+      {
+        kind: "tool",
+        toolCallId: tool.callId,
+        toolName: tool.name,
+        args: tool.argsDigest === undefined ? {} : { argsDigest: tool.argsDigest },
+        status: "done",
+        ...(tool.argsPreview === undefined ? {} : { argsPreview: tool.argsPreview }),
+        ...(tool.resultPreview === undefined ? {} : { resultPreview: tool.resultPreview }),
+        ...(Object.keys(meta).length === 0 ? {} : { meta }),
+        ...(tool.outcome === undefined ? {} : { outcome: tool.outcome }),
+        ...(tool.outcome === undefined
+          ? {}
+          : {
+              result: {
+                status: tool.outcome,
+                ...(tool.errorCode === undefined ? {} : { errorCode: tool.errorCode }),
+              },
+            }),
+      },
+    ];
+  });
 }
 
 // Pull the SourceRef[] out of a persisted cite_sources tool-result (`{ data: { sources } }`), so a
@@ -101,7 +182,7 @@ export function messagesToTimeline(
         id: newId(),
         serverId: doc._id,
         role: "assistant",
-        parts: assistantParts(doc.content),
+        parts: [...toolPartsFromMetadata(doc.metadata), ...assistantParts(doc.content)],
         sealed: true,
         feedback: votes?.get(doc._id),
       };

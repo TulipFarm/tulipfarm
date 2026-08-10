@@ -201,6 +201,64 @@ describe("PgConversationStore", () => {
     ]);
   });
 
+  it("round-trips assistant Message metadata without changing text content", async () => {
+    await store.saveTurn(turn());
+    await store.appendMessage({
+      id: REPLY_ID,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      conversationId: CONVERSATION_ID,
+      turnId: TURN_ID,
+      role: "assistant",
+      content: "the answer",
+      metadata: {
+        toolCalls: [
+          {
+            callId: "call-1",
+            name: "record_create",
+            argsDigest: "sha256:args",
+            argsPreview: { json: '{"title":"x"}', bytes: 13 },
+            outcome: "ok",
+          },
+        ],
+      },
+      attempt: 1,
+      createdAt: CREATED_AT,
+    });
+    await store.saveCompletion({
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      turnId: TURN_ID,
+      attempt: 1,
+      status: "succeeded",
+      messageId: REPLY_ID,
+      cursor: 4,
+      createdAt: CREATED_AT,
+    });
+
+    await expect(store.listMessages(DEPLOYMENT_BUSINESS_ID, CONVERSATION_ID)).resolves.toEqual([
+      {
+        id: REPLY_ID,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        conversationId: CONVERSATION_ID,
+        turnId: TURN_ID,
+        role: "assistant",
+        content: "the answer",
+        metadata: {
+          toolCalls: [
+            {
+              callId: "call-1",
+              name: "record_create",
+              argsDigest: "sha256:args",
+              argsPreview: { json: '{"title":"x"}', bytes: 13 },
+              outcome: "ok",
+            },
+          ],
+        },
+        attempt: 1,
+        createdAt: CREATED_AT,
+      },
+    ]);
+  });
+
   it("refuses a businessId this deployment does not own", async () => {
     await expect(store.findTurn("other-business", TURN_ID)).rejects.toThrow(
       "conversation_store_business_mismatch:other-business"

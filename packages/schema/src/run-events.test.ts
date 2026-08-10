@@ -90,6 +90,53 @@ describe("run event vocabulary", () => {
     expect(runEventDefinition("text.token")).toBeUndefined();
   });
 
+  it("accepts a Tool call carrying a redacted preview alongside its digest", () => {
+    expect(
+      accepts("tool.call", {
+        callId: "c1",
+        name: "send_slack_message",
+        argsDigest: "sha",
+        argsPreview: {
+          json: '{"channel":"#ops","token":"[redacted]"}',
+          redactedPaths: ["token"],
+          truncated: false,
+          bytes: 62,
+        },
+        tier: "integration",
+        mutating: true,
+        agentId: "assistant",
+        stepId: "state-1",
+        startedAt: "2026-01-01T00:00:00.000Z",
+      })
+    ).toBe(true);
+
+    expect(
+      accepts("tool.result", {
+        callId: "c1",
+        status: "ok",
+        summary: "posted to #ops",
+        resultPreview: { json: '{"ts":"1730.4"}' },
+        durationMs: 412,
+      })
+    ).toBe(true);
+  });
+
+  it("refuses a preview shape a reader was never built to parse", () => {
+    // `json` is the only required field, and it is text: a reader parses it or shows it raw.
+    expect(
+      accepts("tool.call", { callId: "c1", name: "n", argsDigest: "d", argsPreview: {} })
+    ).toBe(false);
+    // An unknown tier would let a writer invent a Tool layer the UI has no vocabulary for.
+    expect(
+      accepts("tool.call", { callId: "c1", name: "n", argsDigest: "d", tier: "external" })
+    ).toBe(false);
+    // A negative duration is not a slow call, it is a broken clock.
+    expect(accepts("tool.result", { callId: "c1", status: "ok", durationMs: -1 })).toBe(false);
+    expect(
+      accepts("tool.call", { callId: "c1", name: "n", argsDigest: "d", argsPreview: { json: 12 } })
+    ).toBe(false);
+  });
+
   it("accepts the payloads a turn actually emits", () => {
     expect(accepts("turn.started", { turnId: "t1", attempt: 0, agentId: "assistant" })).toBe(true);
     expect(accepts("text.delta", { text: "hello there", index: 0 })).toBe(true);

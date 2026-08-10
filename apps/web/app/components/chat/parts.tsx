@@ -1,138 +1,51 @@
 import { Link } from "@remix-run/react";
-import { BookOpen } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  BookOpen,
+  Brain,
+  Check,
+  ChevronRight,
+  Circle,
+  ExternalLink,
+  Loader2,
+} from "lucide-react";
+import { useState } from "react";
 import { SurfaceArtifact } from "~/components/surface-artifact";
 import type { PlanStep, SourceRef, StepStatus, TimelinePart } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
-import { ApprovalCard } from "./approval-card";
 import { Response } from "./response";
-
-const STEP_MARK: Record<StepStatus, string> = {
-  pending: "[ ]",
-  running: "[~]",
-  done: "[x]",
-  error: "[!]",
-};
-
-function Label({ text }: { text: string }) {
-  return <span className="font-mono text-xs font-medium text-muted-foreground">{text}</span>;
-}
-
-// Lightweight JSON syntax highlight tuned to the terminal palette: ruby keys, foreground values; the
-// structure (braces/commas/colons/whitespace) inherits the <pre>'s muted base. No tokenizer dep — a
-// single regex matches strings/numbers/literals, and a key is a string immediately followed by `:`.
-const JSON_TOKEN = /"(?:\\.|[^"\\])*"|\b(?:true|false|null)\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
-
-function highlightJson(json: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  let last = 0;
-  let key = 0;
-  JSON_TOKEN.lastIndex = 0;
-  for (let m = JSON_TOKEN.exec(json); m !== null; m = JSON_TOKEN.exec(json)) {
-    if (m.index > last) out.push(json.slice(last, m.index));
-    const token = m[0];
-    const isKey = token.startsWith('"') && /^\s*:/.test(json.slice(m.index + token.length));
-    out.push(
-      <span key={key++} className={isKey ? "text-primary" : "text-foreground"}>
-        {token}
-      </span>
-    );
-    last = m.index + token.length;
-  }
-  if (last < json.length) out.push(json.slice(last));
-  return out;
-}
-
-function Json({ value }: { value: unknown }) {
-  return (
-    <pre className="overflow-x-auto rounded-sm border border-border bg-muted p-2 text-xs text-muted-foreground">
-      {highlightJson(JSON.stringify(value, null, 2))}
-    </pre>
-  );
-}
+import { ToolCallRow } from "./tool-call";
+import { isHiddenToolPart } from "./tool-summary";
 
 /**
- * One tool call, collapsed by default. While the call is in-flight (no result yet, message still
- * streaming) the header shows a pulsing dot + "running…"; once it resolves it becomes a click-to-
- * expand accordion exposing the args + result. An attached approval card stays always-visible
- * (outside the collapse) because it needs the user to act.
+ * The model's private reasoning, collapsed by default.
+ *
+ * No duration is shown: the wire carries no reasoning timing, and inventing one would be a
+ * fake-precise number attached to the one part a reader is least able to verify.
  */
-function ToolPart({
-  toolName,
-  args,
-  result,
-  approval,
-  streaming,
-  onApprove,
-}: {
-  toolName: string;
-  args: unknown;
-  result: unknown;
-  approval: Extract<TimelinePart, { kind: "tool" }>["approval"];
-  streaming?: boolean;
-  onApprove: (approvalId: string, decision: "approve" | "deny") => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const running = result === undefined && !!streaming;
-  const hasDetails = args != null || result !== undefined;
-
-  return (
-    <div className="space-y-1.5">
-      <button
-        type="button"
-        onClick={() => hasDetails && setOpen((o) => !o)}
-        aria-expanded={hasDetails ? open : undefined}
-        disabled={!hasDetails}
-        className="flex w-full items-center gap-2 text-left disabled:cursor-default"
-      >
-        <span
-          aria-hidden
-          className={cn(
-            "size-1.5 rounded-full",
-            running ? "bg-status-info motion-safe:animate-pulse" : "bg-muted-foreground"
-          )}
-        />
-        <Label text={`[tool: ${toolName}]`} />
-        {running ? (
-          <span className="text-xs text-muted-foreground">running…</span>
-        ) : hasDetails ? (
-          <span aria-hidden className="text-xs text-muted-foreground">
-            {open ? "▾" : "▸"}
-          </span>
-        ) : null}
-      </button>
-      {open && hasDetails ? (
-        <div className="space-y-1.5">
-          {args != null ? <Json value={args} /> : null}
-          {result !== undefined ? <Json value={result} /> : null}
-        </div>
-      ) : null}
-      {approval ? (
-        <ApprovalCard
-          toolName={toolName}
-          approval={approval}
-          onDecide={(d) => onApprove(approval.approvalId, d)}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function ReasoningPart({ text }: { text: string }) {
+function ReasoningPart({ text, streaming }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded-sm border border-border bg-muted/40">
+    <div className="rounded-md border border-run-border bg-run-surface">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left font-mono text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-run-surface-hover hover:text-foreground focus-visible:-outline-offset-2 focus-visible:rounded-md"
       >
-        <span aria-hidden>{open ? "▾" : "▸"}</span>
-        [reasoning]
+        <Brain aria-hidden className="size-3.5 shrink-0" />
+        <span className="flex-1">{streaming === true ? "Thinking" : "Thought process"}</span>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "size-3.5 transition-transform duration-150 ease-snappy",
+            open && "rotate-90"
+          )}
+        />
       </button>
       {open ? (
-        <div className="whitespace-pre-wrap border-t border-border px-2 py-1.5 text-xs text-muted-foreground">
+        <div className="whitespace-pre-wrap border-t border-run-border px-2.5 py-2 text-xs leading-relaxed text-muted-foreground">
           {text}
         </div>
       ) : null}
@@ -140,82 +53,169 @@ function ReasoningPart({ text }: { text: string }) {
   );
 }
 
+const STEP_TONE: Record<StepStatus, string> = {
+  pending: "text-run-pending",
+  running: "text-run-active",
+  done: "text-run-ok",
+  error: "text-run-error",
+};
+
+/** The status glyph on a step rail. Shape carries the state, so colour is never the only signal. */
+function StepGlyph({ status }: { status: StepStatus }) {
+  const tone = STEP_TONE[status];
+  if (status === "running") {
+    return (
+      <Loader2
+        aria-hidden
+        className={cn("size-3.5 motion-safe:animate-spin motion-reduce:opacity-70", tone)}
+      />
+    );
+  }
+  if (status === "done") return <Check aria-hidden className={cn("size-3.5", tone)} />;
+  if (status === "error") return <AlertTriangle aria-hidden className={cn("size-3.5", tone)} />;
+  return <Circle aria-hidden className={cn("size-3.5", tone)} />;
+}
+
+/**
+ * A plan as a vertical step rail.
+ *
+ * Replaces `[ ] [~] [x] [!]` ASCII marks. The rail gives a multi-step turn a spine to read down,
+ * which a flat list of bracketed marks never did.
+ */
 function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
+  const done = steps.filter((step) => step.status === "done").length;
+
   return (
-    <div className="space-y-1 text-sm">
-      <div className="flex items-center gap-2">
-        <Label text="[plan]" />
-        {title ? <span className="text-foreground">{title}</span> : null}
+    <div className="rounded-md border border-run-border bg-run-surface px-2.5 py-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-medium text-foreground">{title ?? "Plan"}</h3>
+        <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+          {done}/{steps.length}
+        </span>
       </div>
-      <ul className="space-y-0.5">
-        {steps.map((s) => (
-          <li key={s.id} className="flex items-baseline gap-2">
+      <ol className="mt-1.5">
+        {steps.map((step, index) => (
+          <li key={step.id} className="flex gap-2.5">
+            <span className="flex flex-col items-center">
+              <span className="flex h-6 shrink-0 items-center">
+                <StepGlyph status={step.status} />
+              </span>
+              {index < steps.length - 1 ? (
+                <span aria-hidden className="w-px flex-1 bg-run-rail" />
+              ) : null}
+            </span>
             <span
-              aria-hidden
               className={cn(
-                "tabular-nums",
-                s.status === "done"
-                  ? "text-status-success"
-                  : s.status === "error"
-                    ? "text-destructive"
-                    : "text-muted-foreground"
+                "text-sm leading-6",
+                index < steps.length - 1 && "pb-2",
+                step.status === "pending" ? "text-muted-foreground" : "text-foreground"
               )}
             >
-              {STEP_MARK[s.status]}
-            </span>
-            <span className={cn(s.status === "done" && "text-muted-foreground line-through")}>
-              {s.label}
+              {step.label}
             </span>
           </li>
         ))}
-      </ul>
+      </ol>
     </div>
   );
 }
 
-const SOURCE_LINK_CLASS =
-  "text-primary underline underline-offset-2 hover:opacity-80 cursor-pointer";
-const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
-
-function toolSucceeded(result: unknown): boolean {
+/** A single step outside a plan. Same vocabulary as a rail row so the two read as one system. */
+function TaskPart({ label, status }: { label: string; status: StepStatus }) {
   return (
-    typeof result === "object" &&
-    result !== null &&
-    "success" in result &&
-    (result as { success?: unknown }).success === true
+    <p className="flex items-center gap-2.5 rounded-md border border-run-border bg-run-surface px-2.5 py-1.5 text-sm">
+      <StepGlyph status={status} />
+      <span className={cn(status === "pending" ? "text-muted-foreground" : "text-foreground")}>
+        {label}
+      </span>
+    </p>
   );
 }
 
+/** The host a source came from, so a card can say where it is without printing a raw URL. */
+function sourceHost(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  if (url.startsWith("/")) return "Knowledge";
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Cited sources as cards.
+ *
+ * A citation is evidence, and evidence should be inspectable at a glance: where it came from, what
+ * it was called, and whether it is reachable. A bare bullet list gave none of that.
+ */
 function SourcesPart({ sources }: { sources: SourceRef[] }) {
   return (
-    <div className="text-sm">
-      <Label text="[sources]" />
-      <ul className="mt-1 space-y-0.5">
-        {sources.map((s, i) => {
-          const label = s.title ?? s.url ?? "Source";
-          // Internal wiki citations (`/knowledge/…`) navigate in-app; external links open a new tab;
-          // an unlinked source (no resolvable wiki page) renders as muted text.
-          return (
-            <li key={s.id ?? s.url ?? `${s.title ?? "source"}-${i}`}>
-              {s.url ? (
-                s.url.startsWith("/") ? (
-                  <Link to={s.url} className={SOURCE_LINK_CLASS}>
-                    <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
-                    {label}
-                  </Link>
+    <div>
+      <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        Sources
+      </h3>
+      <ul className="grid gap-1.5 sm:grid-cols-2">
+        {sources.map((source, index) => {
+          const label = source.title ?? source.url ?? "Source";
+          const host = sourceHost(source.url);
+          const internal = source.url?.startsWith("/") === true;
+
+          const body = (
+            <>
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-background/60 text-tool-tier-platform">
+                {internal ? (
+                  <BookOpen className="size-3.5" />
                 ) : (
-                  <a href={s.url} target="_blank" rel="noreferrer" className={SOURCE_LINK_CLASS}>
-                    <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
-                    {label}
-                  </a>
-                )
-              ) : (
-                <span className="text-muted-foreground">
-                  <BookOpen aria-hidden className="mr-1.5 inline size-3.5" />
-                  {label}
+                  <ExternalLink className="size-3.5" />
+                )}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  {source.ref === undefined ? null : (
+                    <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                      [{source.ref}]
+                    </span>
+                  )}
+                  <span className="truncate text-sm text-foreground">{label}</span>
                 </span>
+                {host === undefined && source.path === undefined ? null : (
+                  <span className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground">
+                    {source.path ?? host}
+                  </span>
+                )}
+              </span>
+            </>
+          );
+
+          const cardClass =
+            "flex items-center gap-2 rounded-md border border-run-border bg-run-surface px-2 py-1.5 transition-colors";
+          const key = source.id ?? source.url ?? `${source.title ?? "source"}-${index}`;
+
+          if (source.url === undefined) {
+            return (
+              <li key={key} className={cn(cardClass, "opacity-70")}>
+                {body}
+              </li>
+            );
+          }
+
+          return (
+            <li key={key}>
+              {internal ? (
+                <Link to={source.url} className={cn(cardClass, "hover:bg-run-surface-hover")}>
+                  {body}
+                </Link>
+              ) : (
+                <a
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={cn(cardClass, "hover:bg-run-surface-hover")}
+                >
+                  {body}
+                </a>
               )}
-              {s.path ? <div className="text-xs text-muted-foreground">{s.path}</div> : null}
             </li>
           );
         })}
@@ -246,53 +246,32 @@ export function MessagePartView({
     case "text":
       return <Response text={part.text} streaming={streaming} citations={citations} />;
     case "reasoning":
-      return <ReasoningPart text={part.text} />;
+      return <ReasoningPart text={part.text} streaming={streaming} />;
     case "tool":
-      // cite_sources is citation plumbing — its output already renders as the source chips and the
-      // inline [n] links, so its tool row is noise. Hide it (it never needs approval).
-      // Successful presentation Tools are equally redundant once their native Surface renders.
-      // Failed calls stay visible so the user can inspect the error rather than seeing a blank gap.
-      if (
-        part.toolName === "cite_sources" ||
-        (PRESENTATION_TOOL_NAMES.has(part.toolName) && toolSucceeded(part.result))
-      ) {
-        return null;
-      }
-      return (
-        <ToolPart
-          toolName={part.toolName}
-          args={part.args}
-          result={part.result}
-          approval={part.approval}
-          streaming={streaming}
-          onApprove={onApprove}
-        />
-      );
+      // A Tool whose output already renders as something else has no row of its own; the rule lives
+      // in `tool-summary.ts` so the transcript's grouping and this switch cannot drift apart.
+      if (isHiddenToolPart(part)) return null;
+      return <ToolCallRow part={part} streaming={streaming} onApprove={onApprove} />;
     case "plan":
       return <PlanPart title={part.title} steps={part.steps} />;
     case "task":
-      return (
-        <p className="flex items-baseline gap-2 text-sm">
-          <Label text="[task]" />
-          <span>
-            {STEP_MARK[part.status]} {part.label}
-          </span>
-        </p>
-      );
+      return <TaskPart label={part.label} status={part.status} />;
     case "sources":
       return <SourcesPart sources={part.sources} />;
     case "agent-handoff":
       return (
-        <p className="text-sm text-muted-foreground">
-          <span className="text-primary">→</span> handing off to{" "}
-          <span className="text-foreground">{part.to}</span>
-          {part.reason ? <span> · {part.reason}</span> : null}
+        <p className="flex items-center gap-2 rounded-md border border-run-border bg-run-surface px-2.5 py-1.5 text-sm">
+          <ArrowRightLeft aria-hidden className="size-3.5 shrink-0 text-run-active" />
+          <span className="text-muted-foreground">
+            Handed off to <span className="text-foreground">{part.to}</span>
+            {part.reason ? <span> · {part.reason}</span> : null}
+          </span>
         </p>
       );
     case "guardrail":
       return (
-        <div className="rounded-sm border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-sm">
-          <span className="font-mono text-xs font-medium text-status-warning">[guardrail]</span>{" "}
+        <div className="rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-sm">
+          <span className="font-mono text-xs font-medium text-status-warning">Blocked</span>{" "}
           <span className="text-foreground">{part.message ?? part.reason}</span>
         </div>
       );

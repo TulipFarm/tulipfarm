@@ -1,4 +1,5 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
+import { MESSAGE_METADATA_SCHEMA, type ParticipantToolCall } from "@tulipfarm/schema";
 import type { FastifyBaseLogger, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import {
@@ -503,6 +504,7 @@ export function registerInternalTurnRoutes(
           properties: {
             attempt: { type: "integer", minimum: 1 },
             content: { type: "string", minLength: 1 },
+            metadata: MESSAGE_METADATA_SCHEMA,
           },
         },
         response: {
@@ -520,13 +522,18 @@ export function registerInternalTurnRoutes(
     },
     async (req, reply) => {
       const { runId } = req.params as { runId: string };
-      const body = req.body as { attempt: number; content: string };
+      const body = req.body as {
+        attempt: number;
+        content: string;
+        metadata?: { toolCalls?: ParticipantToolCall[] };
+      };
       const appended = await guard(reply, () =>
         deps.host.appendAssistantMessage({
           businessId: DEPLOYMENT_BUSINESS_ID,
           runId,
           attempt: body.attempt,
           content: body.content,
+          ...(body.metadata === undefined ? {} : { metadata: body.metadata }),
         })
       );
       if (appended === undefined) return;

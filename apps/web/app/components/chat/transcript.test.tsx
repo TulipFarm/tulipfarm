@@ -37,7 +37,7 @@ describe("Transcript renders each part from its SSE event", () => {
     expect(screen.getByText("Hello")).toBeInTheDocument();
   });
 
-  it("a tool call and its result (collapsed by default, expandable)", async () => {
+  it("a tool call and its result, separated into Input and Output panes", async () => {
     const user = userEvent.setup();
     renderTranscript(
       fold([
@@ -48,25 +48,67 @@ describe("Transcript renders each part from its SSE event", () => {
         },
       ])
     );
-    expect(screen.getByText("[tool: write_thing]")).toBeInTheDocument();
-    // The args/result JSON is syntax-highlighted — split across spans — so match the <pre>'s text.
-    const inPre = (text: string) => (_: string, el: Element | null) =>
-      el?.tagName === "PRE" && (el.textContent ?? "").includes(text);
-    // Collapsed: args + result are hidden until the accordion is expanded.
-    expect(screen.queryByText(inPre('"x": 1'))).toBeNull();
-    expect(screen.queryByText(inPre('"ok": true'))).toBeNull();
-    await user.click(screen.getByRole("button", { name: /tool: write_thing/i }));
-    expect(screen.getByText(inPre('"x": 1'))).toBeInTheDocument();
-    expect(screen.getByText(inPre('"ok": true'))).toBeInTheDocument();
+    expect(screen.getByText("write_thing")).toBeInTheDocument();
+    // Collapsed: the panes and their contents are hidden until the row is expanded.
+    expect(screen.queryByText("Input")).toBeNull();
+    expect(screen.queryByText("Output")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /write_thing/i }));
+
+    // Input and Output are labelled and distinct — the old row printed the same JSON twice.
+    expect(screen.getByText("Input")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+    expect(screen.getByText('"x"')).toBeInTheDocument();
+    expect(screen.getByText('"ok"')).toBeInTheDocument();
+    expect(screen.getByText("true")).toBeInTheDocument();
+  });
+
+  it("shows a Tool's redacted preview and names what was withheld", async () => {
+    const user = userEvent.setup();
+    renderTranscript(
+      fold([
+        {
+          type: "tool-call",
+          data: {
+            toolCallId: "c1",
+            toolName: "github_issue_comment",
+            args: { argsDigest: "sha256:abc" },
+            preview: {
+              json: JSON.stringify({ repo: "maddhruv/tulipfarm", token: "[redacted]" }),
+              redactedPaths: ["token"],
+            },
+            meta: { tier: "integration", mutating: true, durationMs: 1240 },
+          },
+        },
+      ])
+    );
+
+    await user.click(screen.getByRole("button", { name: /github_issue_comment/i }));
+
+    expect(screen.getByText('"maddhruv/tulipfarm"')).toBeInTheDocument();
+    // A withheld field is shown as an explicit gap, never silently dropped.
+    expect(screen.getByText("redacted")).toBeInTheDocument();
+    expect(screen.getByText("1 field withheld")).toBeInTheDocument();
+    expect(screen.getByLabelText("This tool can write")).toBeInTheDocument();
   });
 
   it("a reasoning panel (expandable)", async () => {
     const user = userEvent.setup();
-    renderTranscript(fold([{ type: "reasoning", data: { delta: "weighing options" } }]));
-    const toggle = screen.getByRole("button", { name: /reasoning/i });
+    renderTranscript(
+      fold([
+        { type: "reasoning", data: { delta: "weighing options" } },
+        { type: "finish", data: { reason: "stop" } },
+      ])
+    );
+    const toggle = screen.getByRole("button", { name: /thought process/i });
     expect(toggle).toBeInTheDocument();
     await user.click(toggle);
     expect(screen.getByText("weighing options")).toBeInTheDocument();
+  });
+
+  it("labels reasoning as in progress while the turn is still live", () => {
+    renderTranscript(fold([{ type: "reasoning", data: { delta: "weighing options" } }]));
+    expect(screen.getByRole("button", { name: /thinking/i })).toBeInTheDocument();
   });
 
   it("an approval confirmation, and fires the decision", async () => {
@@ -131,8 +173,9 @@ describe("Transcript renders each part from its SSE event", () => {
         },
       ])
     );
-    expect(screen.getByText("[plan]")).toBeInTheDocument();
     expect(screen.getByText("Onboard lead")).toBeInTheDocument();
+    // The step rail reports progress as a count, replacing the old `[ ] [x]` ASCII marks.
+    expect(screen.getByText("1/2")).toBeInTheDocument();
     expect(screen.getByText("Create record")).toBeInTheDocument();
     expect(screen.getByText("Notify owner")).toBeInTheDocument();
   });
@@ -177,6 +220,21 @@ describe("Transcript message actions", () => {
     // The user turn keeps its copy/edit toolbar, but the assistant controls stay hidden until sealed.
     expect(screen.queryByRole("button", { name: "regenerate" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Bad response" })).toBeNull();
+  });
+
+  it("shows an in-flight tool call as running, not skipped", () => {
+    // The running state was unreachable in the real transcript because the streaming flag was
+    // gated on `part.kind === "text"`, so every live tool call rendered as blocked.
+    const state = fold(
+      [{ type: "tool-call", data: { toolCallId: "c1", toolName: "write_thing", args: { x: 1 } } }],
+      "hi"
+    );
+    const { container } = render(
+      <Transcript messages={state.messages} status={state.status} onApprove={vi.fn()} />
+    );
+
+    expect(state.status).toBe("streaming");
+    expect(container.querySelector(".run-rail-active")).not.toBeNull();
   });
 
   // A sealed assistant reply with its server id attached — the prerequisite for rendering thumbs.
@@ -445,5 +503,55 @@ describe("Transcript message actions", () => {
     );
 
     expect(screen.queryByRole("button", { name: /Try harder/i })).toBeNull();
+  });
+});
+
+describe("Transcript folds a long run of tool calls", () => {
+  // Three settled successes in a row, on a finished turn.
+  const clusterEvents: ChatEvent[] = ["a", "b", "c"].flatMap((id): ChatEvent[] => [
+    { type: "tool-call", data: { toolCallId: id, toolName: `search_${id}`, args: {} } },
+    {
+      type: "tool-result",
+      data: { toolCallId: id, toolName: `search_${id}`, result: { success: true } },
+    },
+  ]);
+
+  it("collapses them into one 'Ran N tools' row and expands back to the individual calls", async () => {
+    const user = userEvent.setup();
+    renderTranscript(fold([...clusterEvents, { type: "finish", data: { reason: "completed" } }]));
+
+    expect(screen.getByText("Ran 3 tools")).toBeInTheDocument();
+    // The individual rows are folded away until asked for.
+    expect(screen.queryByText("search_a")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /Ran 3 tools/ }));
+
+    expect(screen.getByText("search_a")).toBeInTheDocument();
+    expect(screen.getByText("search_c")).toBeInTheDocument();
+  });
+
+  it("keeps every row on screen when the run contains a failure", () => {
+    renderTranscript(
+      fold([
+        ...clusterEvents,
+        { type: "tool-call", data: { toolCallId: "d", toolName: "write_thing", args: {} } },
+        {
+          type: "tool-result",
+          data: {
+            toolCallId: "d",
+            toolName: "write_thing",
+            result: { status: "error" },
+            meta: { errorCode: "tool_failed" },
+          },
+        },
+        { type: "finish", data: { reason: "completed" } },
+      ])
+    );
+
+    // A failure anywhere in the run keeps every row on screen, fold header included.
+    expect(screen.queryByText(/Ran \d+ tools/)).toBeNull();
+    expect(screen.getByText("write_thing")).toBeInTheDocument();
+    expect(screen.getByText("search_a")).toBeInTheDocument();
+    expect(screen.getByText("tool_failed")).toBeInTheDocument();
   });
 });

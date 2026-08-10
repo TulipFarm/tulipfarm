@@ -98,14 +98,19 @@ export {
   validateRoutineDefinition,
 } from "./routine";
 export type {
+  ParticipantToolCall,
   RunEventAudience,
   RunEventDefinition,
   RunEventGuardrailStage,
   RunEventPayloads,
   RunEventSchema,
+  RunEventToolPreview,
+  RunEventToolTier,
   RunEventType,
 } from "./run-events";
 export {
+  MESSAGE_METADATA_SCHEMA,
+  PARTICIPANT_TOOL_CALL_SCHEMA,
   RUN_EVENT_DEFINITIONS,
   RUN_EVENT_SCHEMAS,
   RUN_EVENT_TYPES,

@@ -254,6 +254,7 @@ export class TurnDriver {
       attempt: request.attempt,
       cursor: events.cursor,
       outcome: await this.guardOutput(turnOutcome(result), events),
+      ...(events.toolCalls.length === 0 ? {} : { metadata: { toolCalls: events.toolCalls } }),
       ...(request.latestAttempt === undefined ? {} : { latestAttempt: request.latestAttempt }),
     });
 

@@ -45,6 +45,10 @@
 Use semantic variables from `apps/web/app/tokens.css`; never use raw hex or Tailwind palette colors
 inside components.
 
+New token families are mirrored into Tailwind utilities through `@theme inline`, so utilities stay
+semantic too: `bg-run-surface`, `text-run-ok`, `border-run-border`, `text-data-3`, and
+`text-code-key` are valid; raw palette classes are not.
+
 | Family | Tokens | Contract |
 | --- | --- | --- |
 | Canvas | `background`, `foreground` | White/neutral-black work surface and readable ink |
@@ -52,7 +56,11 @@ inside components.
 | Structure | `border`, `input`, `ring` | Hairlines, controls, and coral focus |
 | Brand | `primary`, `primary-foreground` | Existing TulipFarm coral; use sparingly |
 | Danger | `destructive`, `destructive-foreground` | Destructive actions and failures only |
-| Status | `status-neutral/info/success/warning/danger` | Feedback independent of brand color |
+| Status | `status-neutral/info/success/warning/danger` | Content feedback independent of brand color |
+| Data | `data-1` … `data-8` | Categorical data encoding only |
+| Run | `run-pending`, `run-active`, `run-ok`, `run-error`, `run-blocked`, `run-skipped`, `run-surface`, `run-surface-hover`, `run-border`, `run-rail` | Execution step state and Tool-run chrome |
+| Tool | `tool-tier-system`, `tool-tier-platform`, `tool-tier-integration`, `tool-mutating` | Tool identity and write marker |
+| Code | `code-surface`, `code-border`, `code-key`, `code-string`, `code-number`, `code-boolean`, `code-null`, `code-redacted` | Inspect panes and JSON/code viewers |
 | Shell | `sidebar-*` | Rail and context panel layers |
 
 Light uses a white canvas, near-black ink, a subtly gray sidebar, 0.96–0.99 neutral surfaces, and
@@ -81,12 +89,57 @@ the top bar does not already say.
 
 ## 5. Status & Priority Systems
 
+### 5.1 Content status and priority
+
 Status is domain-owned and maps explicitly to one semantic tone: `neutral`, `info`, `success`,
 `warning`, or `danger`. Do not infer important meaning with broad regex matching. Pair color with a
 label and, when compact context is ambiguous, an icon.
 
 Priority is closed: `low` → neutral, `medium` → info, `high` → warning, `critical` → danger.
 Priority describes urgency; status describes lifecycle. Neither uses the coral primary.
+
+Content status and run status are separate axes. The five `status-*` tones report the state of
+content: a record, form, message, policy, sync, or user-visible lifecycle. The `run-*` tones report
+the state of an execution step. Do not substitute one for the other. A Tool call that failed uses
+`--run-error`, not `--status-danger`; a dangerous content state uses `--status-danger`, not
+`--run-error`.
+
+### 5.2 Categorical data palette
+
+The categorical data palette is closed: `--data-1`, `--data-2`, `--data-3`, `--data-4`,
+`--data-5`, `--data-6`, `--data-7`, and `--data-8`. Tailwind maps these as `--color-data-1` …
+`--color-data-8`. Use them only for data encoding: chart series, category chips, and proportional
+splits such as budget breakdowns or expense splits. The sequence is ordered so adjacent pairs stay
+separable.
+
+Never use `data-*` for chrome, status, brand, selection, focus, links, or decoration. If the color
+is communicating state, use `status-*` or `run-*`; if it is communicating brand or primary action,
+use `primary`.
+
+### 5.3 Tool-run vocabulary
+
+Tool-run state is closed: `--run-pending`, `--run-active`, `--run-ok`, `--run-error`,
+`--run-blocked`, and `--run-skipped`. Tool-run surfaces are `--run-surface`,
+`--run-surface-hover`, `--run-border`, and `--run-rail`. Use them for Tool rows, step timelines,
+execution receipts, and other places where the UI is reporting what happened while a Tool or Run
+step executed.
+
+### 5.4 Tool identity and inspect surfaces
+
+Tool identity is also tokenized. `--tool-tier-system`, `--tool-tier-platform`, and
+`--tool-tier-integration` tint the Tool glyph chip from the server-side `ToolDef.tier` value
+(`"system"`, `"platform"`, or `"integration"`); `--tool-mutating` marks a Tool whose
+`ToolDef.mutating` value is `true`. Tier says what kind of Tool this is. Mutating says the Tool
+writes. Neither replaces run state.
+
+Inspect surfaces use `--code-surface`, `--code-border`, `--code-key`, `--code-string`,
+`--code-number`, `--code-boolean`, `--code-null`, and `--code-redacted`. These tokens own Tool Input
+and Output panes and JSON/code viewers. Do not reintroduce raw hex or Tailwind palette classes
+inside a JSON highlighter. Use `--code-redacted` only for fields deliberately withheld from the
+participant.
+
+Agent identity does not get a parallel color scale. Continue to use `--glyph-hue-0` …
+`--glyph-hue-6` for Agent glyphs.
 
 ## 6. Component Hierarchy
 
@@ -133,6 +186,40 @@ safer. Keep domain fetching and mutations out of primitives.
   the answer. When Auto answered, name the rung it resolved to (`Auto → Balanced`); reporting only
   "Auto" hides the choice made on the participant's behalf, and reporting only the rung hides that
   they never picked it. Cost is operator evidence and stays off this row.
+- **Chat Tool row:** collapsed rows show Tool identity, tier, mutating marker when present, current
+  or final run state, and duration when known. Expanded rows reveal labelled Input and Output panes;
+  never show two unlabelled raw dumps. The state tone comes from `run-*`, the glyph chip comes from
+  `tool-tier-*`, and deliberate withholding uses `code-redacted`.
+- **Chat Tool run (trace block, not a card stack):** consecutive Tool rows are always drawn as **one**
+  bordered container with `divide-y` separators, never as a column of individually bordered cards.
+  Repeating a card border per call is the single most common way this surface goes wrong: it costs a
+  border, a radius, and a gap per call, and turns a nine-lookup turn into a wall of identical boxes.
+  One block reads as one trace.
+  - Status **leads** the row, so a reader scans a column of outcomes rather than hunting a trailing
+    glyph at a ragged x-position.
+  - The row is a single line: status, tier glyph, human summary, Tool name in mono, then a right
+    aligned `tabular-nums` group carrying the result hint and duration.
+  - Carry one fact from the output on the collapsed row (`4 documents`, `2 assertions`) so the
+    reader learns something without opening every call. Derive it from the payload or say nothing;
+    never estimate a count.
+  - Every row summary is **past tense and names its object**: `Listed agents`, `Read github pull
+    request`, `Created space Ops`. Two failure modes to write against, both of which shipped once:
+    a bare verb (`Listed`) makes two different calls in a run indistinguishable, and an imperative
+    (`List resource types`) sits wrong next to the past-tense rows around it. Tool names lead with
+    the verb (`list_spaces`) or trail it (`agent_list`); `tool-summary.ts` handles both, and the
+    other half of the name supplies the object.
+  - The disclosure chevron stays dimmed until row hover. An always-dark chevron per row reads as
+    chrome noise at list length.
+  - A long settled run folds to one `Ran N tools` line naming its members. A run containing a
+    failure, a live call, or a pending approval never folds.
+- **Chat step timeline:** use a vertical rail to connect ordered execution steps. The rail reports
+  real execution state, not decoration. While a Tool call is running, `.run-rail-active` may show an
+  indeterminate sweep; under `prefers-reduced-motion: reduce`, it collapses to a static tinted rail.
+  Motion in this system is permitted only when it reports real state.
+- **Chat inspect pane:** separate Tool Input from Tool Output with explicit labels, independent
+  borders, and JSON/code coloring from `code-*` tokens. Preserve order, whitespace where it matters,
+  redaction markers, empty states, error states, and long-value wrapping without horizontal page
+  scroll.
 - **Try harder:** offered beside the receipt on the latest finished reply, escalating one rung from
   the effort actually applied. It is an Action, not an Auto action — the person starts it. Offer no
   step when the applied rung is unknown or already the highest, rather than a guessed one.
@@ -160,6 +247,11 @@ safer. Keep domain fetching and mutations out of primitives.
 - Use 150–240ms color/opacity/transform transitions and respect `prefers-reduced-motion`.
 - Focus is global: `app.css` sets one `:focus-visible` outline for the whole app. Do not stack
   per-component ring utilities on top of it.
+- That global halo is **outset**, so a full-bleed row inside a clipping container loses it: the
+  parent's `overflow-hidden` eats every side and leaves one stray line that reads as a divider. On
+  a row that spans its container edge-to-edge, turn the halo inward with
+  `focus-visible:-outline-offset-2 focus-visible:rounded-md` — this is the one sanctioned override,
+  and it changes where the ring is drawn, never its color or weight.
 - Mark a selected navigation item with a shape cue as well as tone, and keep that marker clear of
   the global focus outline.
 - Close off-canvas navigation with `inert`, which also drops its links from the tab order.
@@ -189,8 +281,9 @@ safer. Keep domain fetching and mutations out of primitives.
 The authenticated route exists only in development. Link it from Settings in development; return
 the normal not-found state in production. It must render real shared components and cover tokens,
 type, spacing, radii, icons, status, priority, primitive variants, feedback states, composition,
-the Chat composer and transcript (effort control, receipt, Try harder), shell dimensions, keyboard
-focus, and both themes. Update it in the same change as a public component contract.
+the Chat composer and transcript (effort control, receipt, Try harder, Tool row, timeline, inspect
+pane), shell dimensions, keyboard focus, and both themes. Update it in the same change as a public
+component contract.
 
 ## 11. Component Index
 
@@ -200,7 +293,7 @@ focus, and both themes. Update it in the same change as a public component contr
 | Shell | AppShell, AppSidebar, and the `modeForPath`/`titleForPath`/`iconForPath` helpers, all in `components/app-sidebar.tsx` |
 | Feedback | StatusBadge, PriorityBadge, LoadingState, EmptyState, ErrorState |
 | Data/forms | Panel, Field, SchemaTable, ResourceForm, LinkCombobox |
-| Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Knowledge editor |
+| Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Chat Tool row/timeline/inspect pane, Knowledge editor |
 
 The rail, context panel, breadcrumb, and account chip are internal to `app-sidebar.tsx` rather than
 exported primitives. Promote one into `components/ui` only when a second surface needs it, and add
@@ -231,6 +324,23 @@ Prefer the index and source search over guessing component names.
 
 - Raw hex, `text-white`, or framework palette colors inside feature components.
 - Using coral for status, counts, large fills, or decoration; using destructive red for emphasis.
+- Encoding run state with the content `status-*` tones, or encoding content state with `run-*`
+  tones.
+- Drawing a run of Tool calls as a column of separately bordered cards. Consecutive Tool rows are
+  one bordered block with `divide-y` rows; a border per call is per-row chrome tax and reads as a
+  wall of boxes.
+- Trailing the status glyph at the end of a Tool row, where a ragged summary length pushes it to a
+  different x-position on every row. Status leads.
+- A Tool row that reports only that a call succeeded. Carry one fact from the output, or stay quiet
+  — but never fabricate or client-side estimate a count to fill the space.
+- A Tool row whose summary is a bare verb (`Listed`, `Read`) or an imperative (`List resource
+  types`). Say what happened, in past tense, naming the object: `Listed agents`.
+- Letting the global outset focus halo be clipped by a container's `overflow-hidden`. A full-bleed
+  row needs `focus-visible:-outline-offset-2`, or keyboard users get one stray line that looks like
+  a divider.
+- Using the categorical data palette for chrome, status, brand, selection, focus, or decoration.
+- Reintroducing raw hex or Tailwind palette colors inside a JSON/code viewer instead of the
+  `code-*` tokens.
 - Rebuilding buttons, badges, fields, panels, or headers with route-local class strings.
 - Hardcoding one mode's icon or label into shared shell chrome instead of reading the mode map.
 - A route header that repeats the top bar, so the page names itself twice.

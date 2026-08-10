@@ -2,6 +2,8 @@ import type { MetaFunction } from "@remix-run/react";
 import { Check, Copy, Search, Settings } from "lucide-react";
 import type { ReactNode } from "react";
 import { Composer } from "~/components/chat/composer";
+import { MessagePartView } from "~/components/chat/parts";
+import { ToolRun } from "~/components/chat/tool-call";
 import { Transcript } from "~/components/chat/transcript";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
@@ -12,7 +14,7 @@ import { Input } from "~/components/ui/input";
 import { Select } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import { Textarea } from "~/components/ui/textarea";
-import type { ChatMessage } from "~/lib/chat/types";
+import type { ChatMessage, PlanStep, TimelinePart } from "~/lib/chat/types";
 
 export const meta: MetaFunction = () => [{ title: "Design guide · tulipfarm" }];
 
@@ -57,6 +59,137 @@ const TOKENS = [
   ["Destructive", "bg-destructive"],
 ] as const;
 
+/**
+ * Execution state, which is a different axis from content status.
+ *
+ * A Run that failed and a Record marked "blocked" are unrelated facts, so they never share a tone.
+ */
+const RUN_TOKENS = [
+  ["run-pending", "bg-run-pending"],
+  ["run-active", "bg-run-active"],
+  ["run-ok", "bg-run-ok"],
+  ["run-error", "bg-run-error"],
+  ["run-blocked", "bg-run-blocked"],
+  ["run-skipped", "bg-run-skipped"],
+] as const;
+
+/** Categorical encoding for charts and series. Never chrome, never status, never brand. */
+const DATA_TOKENS = [
+  ["data-1", "bg-data-1"],
+  ["data-2", "bg-data-2"],
+  ["data-3", "bg-data-3"],
+  ["data-4", "bg-data-4"],
+  ["data-5", "bg-data-5"],
+  ["data-6", "bg-data-6"],
+  ["data-7", "bg-data-7"],
+  ["data-8", "bg-data-8"],
+] as const;
+
+/** Which layer a Tool belongs to. Tints the glyph so a system call never reads as an outbound one. */
+const TIER_TOKENS = [
+  ["system", "bg-tool-tier-system"],
+  ["platform", "bg-tool-tier-platform"],
+  ["integration", "bg-tool-tier-integration"],
+  ["mutating", "bg-tool-mutating"],
+] as const;
+
+/** One Tool row per state, so every state is inspectable side by side rather than only in a live Run. */
+const TOOL_SPECIMENS: { caption: string; part: Extract<TimelinePart, { kind: "tool" }> }[] = [
+  {
+    caption: "Running",
+    part: {
+      kind: "tool",
+      toolCallId: "call_01J8M7Q2AA",
+      toolName: "search_docs",
+      args: { argsDigest: "sha256:9f1c" },
+      status: "running",
+      argsPreview: { json: JSON.stringify({ query: "pgvector migration", limit: 5 }) },
+      meta: { tier: "platform", stepId: "state-1" },
+    },
+  },
+  {
+    caption: "Succeeded, with a redacted argument",
+    part: {
+      kind: "tool",
+      toolCallId: "call_01J8M7Q2BB",
+      toolName: "github_issue_comment",
+      args: { argsDigest: "sha256:4b7e" },
+      status: "done",
+      outcome: "ok",
+      argsPreview: {
+        json: JSON.stringify({ repo: "maddhruv/tulipfarm", issue: 412, token: "[redacted]" }),
+        redactedPaths: ["token"],
+        bytes: 184,
+      },
+      resultPreview: { json: JSON.stringify({ success: true, commentId: 9_912_004 }) },
+      meta: { tier: "integration", mutating: true, durationMs: 1_240, agentId: "SupportTriage" },
+    },
+  },
+  {
+    caption: "Failed",
+    part: {
+      kind: "tool",
+      toolCallId: "call_01J8M7Q2CC",
+      toolName: "slack_post_message",
+      args: { argsDigest: "sha256:1d02" },
+      status: "done",
+      outcome: "error",
+      argsPreview: { json: JSON.stringify({ channel: "#ops" }), truncated: true, bytes: 12_400 },
+      resultPreview: { json: JSON.stringify({ error: "channel_not_found" }) },
+      meta: {
+        tier: "integration",
+        mutating: true,
+        durationMs: 320,
+        errorCode: "channel_not_found",
+      },
+    },
+  },
+];
+
+/** Three settled successes, the shape the transcript folds into one row. */
+const CLUSTER_SPECIMEN: Extract<TimelinePart, { kind: "tool" }>[] = [
+  {
+    kind: "tool",
+    toolCallId: "call_cluster_1",
+    toolName: "search_docs",
+    args: { argsDigest: "sha256:aa01" },
+    status: "done",
+    outcome: "ok",
+    argsPreview: { json: JSON.stringify({ query: "refund policy" }) },
+    resultPreview: { json: JSON.stringify({ success: true, matches: 4 }) },
+    meta: { tier: "platform", durationMs: 210 },
+  },
+  {
+    kind: "tool",
+    toolCallId: "call_cluster_2",
+    toolName: "recall_memory",
+    args: { argsDigest: "sha256:aa02" },
+    status: "done",
+    outcome: "ok",
+    argsPreview: { json: JSON.stringify({ scope: "customer:4120" }) },
+    resultPreview: { json: JSON.stringify({ success: true, assertions: 2 }) },
+    meta: { tier: "platform", durationMs: 90 },
+  },
+  {
+    kind: "tool",
+    toolCallId: "call_cluster_3",
+    toolName: "kv_get",
+    args: { argsDigest: "sha256:aa03" },
+    status: "done",
+    outcome: "ok",
+    argsPreview: { json: JSON.stringify({ key: "billing:tier" }) },
+    resultPreview: { json: JSON.stringify({ success: true, value: "pro" }) },
+    meta: { tier: "system", durationMs: 40 },
+  },
+];
+
+/** The step rail, shown with one step in each state. */
+const PLAN_SPECIMEN: PlanStep[] = [
+  { id: "s1", label: "Read the overdue invoices", status: "done" },
+  { id: "s2", label: "Draft the reminder", status: "running" },
+  { id: "s3", label: "Send to each owner", status: "pending" },
+];
+
 // The GitHub mark, copied from Simple Icons (CC0) so this showcase renders without an API
 // call. Real pages get this from the integration payload — never hardcode marks in features.
 const GITHUB_MARK =
@@ -66,8 +199,10 @@ const GUIDE_LINKS = [
   ["principles", "Design principles"],
   ["stack", "Tech stack"],
   ["tokens", "Design tokens"],
+  ["run-tokens", "Run & data palettes"],
   ["typography", "Typography scale"],
   ["status-priority", "Status & priority systems"],
+  ["agent-run", "Agent run vocabulary"],
   ["brand-marks", "Brand marks"],
   ["copy-field", "Copyable values"],
   ["hierarchy", "Component hierarchy"],
@@ -180,6 +315,48 @@ export default function DesignGuideRoute() {
       </GuideSection>
 
       <GuideSection
+        id="run-tokens"
+        title="Run & data palettes"
+        description="Execution state and categorical data are separate token families. Run tones report what a Run did; data tones encode series and never appear in chrome, status, or brand."
+      >
+        <h3 className="mb-2 text-sm font-medium">Run state</h3>
+        <div className="mb-6 grid gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          {RUN_TOKENS.map(([label, color]) => (
+            <div key={label} className="overflow-hidden rounded-md border border-border">
+              <div className={`h-10 ${color}`} />
+              <div className="border-t border-border bg-background px-2 py-1.5 font-mono text-xs">
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="mb-2 text-sm font-medium">Tool identity</h3>
+        <div className="mb-6 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {TIER_TOKENS.map(([label, color]) => (
+            <div key={label} className="overflow-hidden rounded-md border border-border">
+              <div className={`h-10 ${color}`} />
+              <div className="border-t border-border bg-background px-2 py-1.5 font-mono text-xs">
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <h3 className="mb-2 text-sm font-medium">Categorical data</h3>
+        <div className="grid gap-2 sm:grid-cols-4 lg:grid-cols-8">
+          {DATA_TOKENS.map(([label, color]) => (
+            <div key={label} className="overflow-hidden rounded-md border border-border">
+              <div className={`h-10 ${color}`} />
+              <div className="border-t border-border bg-background px-2 py-1.5 font-mono text-xs">
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </GuideSection>
+
+      <GuideSection
         id="typography"
         title="Typography scale"
         description="Inter carries product UI while JetBrains Mono identifies technical content."
@@ -239,6 +416,70 @@ export default function DesignGuideRoute() {
           <PriorityBadge priority="medium" />
           <PriorityBadge priority="high" />
           <PriorityBadge priority="critical" />
+        </div>
+      </GuideSection>
+
+      <GuideSection
+        id="agent-run"
+        title="Agent run vocabulary"
+        description="A Tool row carries the whole call on one line: which kind of Tool ran, what it did in words, how long it took, and how it ended. Expanding separates Input from Output and names every withheld field. Parts tagged contract-only are typed, reduced and rendered, but no backend event emits them yet."
+      >
+        <div className="mb-6 space-y-4">
+          {TOOL_SPECIMENS.map(({ caption, part }) => (
+            <div key={part.toolCallId}>
+              <p className="mb-1.5 text-xs text-muted-foreground">{caption}</p>
+              <MessagePartView
+                part={part}
+                streaming={part.status === "running"}
+                onApprove={() => undefined}
+              />
+            </div>
+          ))}
+
+          <div>
+            <p className="mb-1.5 text-xs text-muted-foreground">
+              Consecutive settled calls, folded
+            </p>
+            <ToolRun parts={CLUSTER_SPECIMEN} foldable onApprove={() => undefined} />
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <p className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+              Step rail
+              <span className="rounded border border-border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide">
+                contract-only
+              </span>
+            </p>
+            <MessagePartView
+              part={{
+                kind: "plan",
+                planId: "plan-1",
+                title: "Chase overdue invoices",
+                steps: PLAN_SPECIMEN,
+              }}
+              onApprove={() => undefined}
+            />
+          </div>
+          <div>
+            <p className="mb-1.5 text-xs text-muted-foreground">Sources</p>
+            <MessagePartView
+              part={{
+                kind: "sources",
+                sources: [
+                  { id: "s1", ref: 1, title: "Billing runbook", url: "/knowledge/billing-runbook" },
+                  {
+                    id: "s2",
+                    ref: 2,
+                    title: "pgvector indexing",
+                    url: "https://github.com/pgvector/pgvector",
+                  },
+                ],
+              }}
+              onApprove={() => undefined}
+            />
+          </div>
         </div>
       </GuideSection>
 

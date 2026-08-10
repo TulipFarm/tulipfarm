@@ -6,8 +6,11 @@ import { cn } from "~/lib/utils";
 
 // Minimal, dependency-free JSON syntax highlighter. Tokenizes strings (key vs value), numbers, and
 // literals into React spans — text content is React-escaped, so there is no innerHTML/XSS surface.
-// Colors use the `dark:` variant (wired to [data-theme="dark"] in app.css); structural chars (braces,
-// commas, colons) inherit the <pre>'s muted color so the values pop.
+// Structural chars (braces, commas, colons) inherit the <pre>'s muted color so the values pop.
+//
+// This drawer deliberately keeps a flat <pre> rather than reusing `json-view.tsx`: that viewer
+// auto-collapses below depth 2, which is right for a bounded Tool preview and wrong for a raw dump
+// a dev reads top to bottom and copies whole. Only the token colours are shared, through `--code-*`.
 const JSON_TOKEN =
   /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b/g;
 
@@ -22,13 +25,13 @@ function highlightJson(json: string): ReactNode[] {
     let cls: string;
     if (tok[0] === '"') {
       // A string immediately followed by `:` is an object key.
-      cls = /^\s*:/.test(json.slice(m.index + tok.length))
-        ? "text-sky-700 dark:text-sky-300"
-        : "text-emerald-700 dark:text-emerald-400";
-    } else if (tok === "true" || tok === "false" || tok === "null") {
-      cls = "text-fuchsia-700 dark:text-fuchsia-300";
+      cls = /^\s*:/.test(json.slice(m.index + tok.length)) ? "text-code-key" : "text-code-string";
+    } else if (tok === "true" || tok === "false") {
+      cls = "text-code-boolean";
+    } else if (tok === "null") {
+      cls = "text-code-null";
     } else {
-      cls = "text-amber-700 dark:text-amber-300";
+      cls = "text-code-number tabular-nums";
     }
     out.push(
       <span key={key} className={cls}>

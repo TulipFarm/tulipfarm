@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { InvocationPrincipal } from "@tulipfarm/run-kernel";
+import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type {
   ConversationStore,
   PersistedTurn,
@@ -288,6 +289,7 @@ export class InternalTurnHost {
     runId: string;
     attempt: number;
     content: string;
+    metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
   }): Promise<{ messageId: string }> {
     const { turn } = await this.authority(input.businessId, input.runId);
     const messageId = this.newId();
@@ -298,6 +300,7 @@ export class InternalTurnHost {
       turnId: turn.id,
       role: "assistant",
       content: input.content,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
       attempt: input.attempt,
       createdAt: this.now(),
     });

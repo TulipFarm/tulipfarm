@@ -33,6 +33,21 @@ function actionHandle(action: SurfaceAction, context: SurfaceRenderContext): str
   return handle;
 }
 
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatMeasure(value: number | string, unit?: unknown, currency?: unknown): string {
+  const formatted = typeof value === "number" ? formatNumber(value) : value;
+  if (typeof currency === "string") return `${currency} ${formatted}`;
+  return typeof unit === "string" ? `${formatted} ${unit}` : formatted;
+}
+
+function ratio(value: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return 0;
+  return Math.min(1, Math.max(0, value / max));
+}
+
 function blocksFor(
   artifact: SurfaceArtifact,
   context: SurfaceRenderContext
@@ -163,6 +178,128 @@ function blocksFor(
               text: { type: "plain_text", text: choice.label },
               value: choice.value,
             })),
+          },
+        },
+      ];
+    }
+    case "Metric":
+      return [
+        {
+          type: "section",
+          fields: (
+            props.cells as Array<{
+              label: string;
+              value: number | string;
+              unit?: string;
+              delta?: { value: number | string; direction: string; label?: string };
+              caption?: string;
+            }>
+          ).map((cell) => ({
+            type: "mrkdwn",
+            text: [
+              `*${cell.label}*`,
+              `\`${formatMeasure(cell.value, cell.unit)}\``,
+              cell.delta
+                ? `${cell.delta.direction}: ${formatMeasure(cell.delta.value)}${cell.delta.label ? ` ${cell.delta.label}` : ""}`
+                : undefined,
+              cell.caption,
+            ]
+              .filter((line): line is string => typeof line === "string" && line.length > 0)
+              .join("\n"),
+          })),
+        },
+      ];
+    case "Timeline":
+      return [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: (
+              props.entries as Array<{
+                label: string;
+                timestamp?: string;
+                description?: string;
+                status?: string;
+              }>
+            )
+              .map((entry) =>
+                [
+                  `*${entry.label}*${entry.timestamp ? ` — ${entry.timestamp}` : ""}`,
+                  entry.description,
+                  entry.status ? `_${entry.status}_` : undefined,
+                ]
+                  .filter((line): line is string => typeof line === "string" && line.length > 0)
+                  .join("\n")
+              )
+              .join("\n\n"),
+          },
+        },
+      ];
+    case "Comparison": {
+      const options = props.options as Array<{ id: string; label: string; recommended?: boolean }>;
+      const criteria = props.criteria as Array<{ id: string; label: string }>;
+      const cells = props.cells as Array<{
+        option: string;
+        criterion: string;
+        value: number | string | boolean;
+      }>;
+      const cellMap = new Map(cells.map((cell) => [`${cell.criterion}:${cell.option}`, cell]));
+      return [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: criteria
+              .map((criterion) =>
+                [
+                  `*${criterion.label}*`,
+                  ...options.map((option) => {
+                    const marker = option.recommended ? " (recommended)" : "";
+                    return `• ${option.label}${marker}: ${String(cellMap.get(`${criterion.id}:${option.id}`)?.value ?? "—")}`;
+                  }),
+                ].join("\n")
+              )
+              .join("\n\n"),
+          },
+        },
+      ];
+    }
+    case "Breakdown": {
+      const segments = props.segments as Array<{ label: string; value: number }>;
+      const sum = segments.reduce((total, segment) => total + segment.value, 0);
+      const total = typeof props.total === "number" ? props.total : sum;
+      return [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: segments
+              .map(
+                (segment) =>
+                  `• *${segment.label}:* ${formatMeasure(segment.value, props.unit, props.currency)} (${formatNumber(ratio(segment.value, total) * 100)}%)`
+              )
+              .join("\n"),
+          },
+        },
+      ];
+    }
+    case "Gauge": {
+      const value = typeof props.value === "number" ? props.value : 0;
+      const max = typeof props.max === "number" ? props.max : 1;
+      const target = typeof props.target === "number" ? props.target : undefined;
+      return [
+        {
+          type: "section",
+          text: {
+            type: "mrkdwn",
+            text: [
+              props.label ? `*${String(props.label)}*` : "*Progress*",
+              `${formatMeasure(value, props.unit)} / ${formatMeasure(max, props.unit)} (${formatNumber(ratio(value, max) * 100)}%)`,
+              target !== undefined ? `Target: ${formatMeasure(target, props.unit)}` : undefined,
+            ]
+              .filter((line): line is string => typeof line === "string")
+              .join("\n"),
           },
         },
       ];
