@@ -65,7 +65,7 @@ grep -qx "compose-project=${COMPOSE_PROJECT_NAME}" "${INSTALL_DIR}/.tulipfarm-in
 
 # 3. Re-assert /health on the host port (the installer already gates on this).
 log "asserting /health on :${PORT}…"
-curl -fsS --retry 5 --retry-connrefused --retry-delay 2 \
+curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 2 \
   "http://localhost:${PORT}/health" >/dev/null \
   || fail "/health did not return 200 on :${PORT}"
 
@@ -94,7 +94,7 @@ grep -qx "HOST_PORT=${UPDATED_PORT}" "${INSTALL_DIR}/.env" \
   "$(grep -E '^(POSTGRES_PASSWORD|ENCRYPTION_KEY|JWT_SECRET|WEBHOOK_SIGNING_SECRET)=' \
     "${INSTALL_DIR}/.env")" ] \
   || fail "port override changed generated secrets"
-curl -fsS --retry 5 --retry-connrefused --retry-delay 2 \
+curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 2 \
   "http://localhost:${UPDATED_PORT}/health" >/dev/null \
   || fail "/health did not move to :${UPDATED_PORT}"
 
