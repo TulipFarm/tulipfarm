@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.1](https://github.com/TulipFarm/tulipfarm/compare/v0.8.0...v0.8.1) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** improve release pipeline reliability, speed, and ancestry checks ([#349](https://github.com/TulipFarm/tulipfarm/issues/349)) ([26bbf18](https://github.com/TulipFarm/tulipfarm/commit/26bbf1865a933b4f39afca4565557c611e672c1f))
+
+### Documentation
+
+* **qa:** expand QA playbooks to 23 playbooks and fix agents list heading ([#348](https://github.com/TulipFarm/tulipfarm/issues/348)) ([3b611f6](https://github.com/TulipFarm/tulipfarm/commit/3b611f63c4384349ab0ce9d999887b1e00239507))
+
 ## [0.8.0](https://github.com/TulipFarm/tulipfarm/compare/v0.7.0...v0.8.0) (2026-08-09)
 
 ### Features
