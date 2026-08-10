@@ -67,6 +67,33 @@ function fakeIntegrationStore(): IntegrationStore {
   } as any;
 }
 
+function snapshotWithAdministration(): PersistedRoutingSnapshot {
+  return {
+    ...snapshot(),
+    accessGrants: [
+      {
+        id: "grant-1",
+        businessId: BUSINESS_ID,
+        integrationId: "integration-1",
+        definition: {
+          externalTargets: { ids: ["tulip/farm"] },
+          permissions: { issues: "write", metadata: "read", administration: "write" },
+        },
+        status: "active",
+      },
+    ],
+  };
+}
+
+function fakeIntegrationStoreWithAdministration(): IntegrationStore {
+  return {
+    async loadProviderSnapshot() {
+      return snapshotWithAdministration();
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: only `loadProviderSnapshot` is exercised
+  } as any;
+}
+
 function fakeSecretsService(): () => Promise<SecretsService> {
   return async () =>
     ({
@@ -116,6 +143,73 @@ function fakeHttp(issue: { number: number; title: string; state: string }) {
             html_url: `https://github.com/tulip/farm/issues/${issue.number}`,
             labels: [],
             assignees: [],
+          },
+        };
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.path}`);
+    },
+  };
+}
+
+function fakeIssueCreateHttp() {
+  return {
+    async send(request: IntegrationHttpRequest) {
+      if (request.path.endsWith("/access_tokens")) {
+        return {
+          status: 201,
+          headers: {},
+          body: { token: "ghs_minted", expires_at: "2026-08-06T01:00:00.000Z" },
+        };
+      }
+      if (request.path === "/repos/tulip/farm/issues" && request.method === "GET") {
+        return { status: 200, headers: {}, body: [] };
+      }
+      if (request.path === "/repos/tulip/farm/issues" && request.method === "POST") {
+        return {
+          status: 201,
+          headers: {},
+          body: {
+            number: 99,
+            title: "New bug",
+            body: "steps",
+            state: "open",
+            html_url: "https://github.com/tulip/farm/issues/99",
+            labels: [],
+            assignees: [],
+          },
+        };
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.path}`);
+    },
+  };
+}
+
+function fakeRepositoryCreateHttp(hasAdministration: boolean) {
+  return {
+    async send(request: IntegrationHttpRequest) {
+      if (request.path.endsWith("/access_tokens")) {
+        return {
+          status: 201,
+          headers: {},
+          body: { token: "ghs_minted", expires_at: "2026-08-06T01:00:00.000Z" },
+        };
+      }
+      if (
+        hasAdministration &&
+        request.path === "/repos/tulip/new-repo" &&
+        request.method === "GET"
+      ) {
+        return { status: 404, headers: {}, body: {} };
+      }
+      if (hasAdministration && request.path === "/orgs/tulip/repos" && request.method === "POST") {
+        return {
+          status: 201,
+          headers: {},
+          body: {
+            full_name: "tulip/new-repo",
+            html_url: "https://github.com/tulip/new-repo",
+            private: true,
+            default_branch: "main",
           },
         };
       }
@@ -281,6 +375,68 @@ describe("buildGitHubTools", () => {
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.code).toBe("internal_error");
+    }
+  });
+
+  it("opens a new issue via github_issue_create", async () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeIssueCreateHttp(),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((t) => t.name === "github_issue_create");
+    if (tool === undefined) throw new Error("github_issue_create not registered");
+    expect(tool.mutating).toBe(true);
+
+    const result = await tool.execute(
+      { repository: "tulip/farm", title: "New bug", body: "steps" },
+      context()
+    );
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({ number: 99, title: "New bug" });
+    }
+  });
+
+  it("creates a new repo via github_repository_create when administration:write is granted", async () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStoreWithAdministration(),
+      secrets: fakeSecretsService(),
+      http: fakeRepositoryCreateHttp(true),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((t) => t.name === "github_repository_create");
+    if (tool === undefined) throw new Error("github_repository_create not registered");
+    expect(tool.mutating).toBe(true);
+
+    const result = await tool.execute({ owner: "tulip", name: "new-repo" }, context());
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toMatchObject({ repository: "tulip/new-repo", private: true });
+    }
+  });
+
+  it("returns a clear message when repo creation lacks administration:write", async () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeRepositoryCreateHttp(false),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((t) => t.name === "github_repository_create");
+    if (tool === undefined) throw new Error("github_repository_create not registered");
+
+    const result = await tool.execute({ owner: "tulip", name: "new-repo" }, context());
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.message).toContain("administration:write");
     }
   });
 });

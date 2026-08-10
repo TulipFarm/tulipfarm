@@ -19,11 +19,13 @@ import {
   type IntegrationHttpResponse,
 } from "../http";
 import {
+  GITHUB_ORGANIZATION_TARGET,
   GITHUB_RECONCILIATION_OPERATIONS,
   GITHUB_REPOSITORY_TARGET,
   GITHUB_TOOL_IDS,
 } from "./contracts";
 import {
+  assertAccountInScope,
   assertRepositoryInScope,
   type GitHubInstallationScope,
   GitHubScopeDeniedError,
@@ -166,6 +168,7 @@ const MARKER_SEARCH_PER_PAGE = 100;
 const MARKER_SEARCH_MAX_PAGES = 5;
 
 const MUTATING_TOOLS = new Set<string>([
+  GITHUB_TOOL_IDS.issueCreate,
   GITHUB_TOOL_IDS.issueComment,
   GITHUB_TOOL_IDS.issueLabel,
   GITHUB_TOOL_IDS.issueAssign,
@@ -175,6 +178,7 @@ const MUTATING_TOOLS = new Set<string>([
   GITHUB_TOOL_IDS.pullRequestReview,
   GITHUB_TOOL_IDS.pullRequestMerge,
   GITHUB_TOOL_IDS.repoPush,
+  GITHUB_TOOL_IDS.repositoryCreate,
 ]);
 
 /** Repository slug from a search result's `repository_url`. */
@@ -215,6 +219,17 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
       return this.searchPullRequests(repositories, source, credential);
     }
 
+    // Creating a repo targets an org, not an existing repo — it cannot go through the
+    // per-repository `authorize()` below, since the target does not exist at authorization time.
+    if (intent.action === GITHUB_TOOL_IDS.repositoryCreate) {
+      const owner = stringArg(source, "owner");
+      await this.authorizeAccount(intent, owner);
+      if (credential === undefined || credential.length === 0) {
+        throw new AdapterDispatchError("before_dispatch", "credential_missing", false);
+      }
+      return this.createRepository(source, credential);
+    }
+
     const repository = stringArg(source, "repository");
 
     await this.authorize(intent, repository, mutating);
@@ -226,6 +241,8 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     switch (intent.action) {
       case GITHUB_TOOL_IDS.issueRead:
         return this.readIssue(repository, numberArg(source, "issueNumber"), credential);
+      case GITHUB_TOOL_IDS.issueCreate:
+        return this.createIssue(repository, source, request.idempotencyKey, credential);
       case GITHUB_TOOL_IDS.issueComment:
         return this.comment(repository, source, request.idempotencyKey, credential);
       case GITHUB_TOOL_IDS.issueLabel:
@@ -304,6 +321,48 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
   }
 
   /**
+   * Authorizes an org-level action whose target repo does not exist yet (repo creation): the
+   * installation scope check is against the account, not a specific repository, and the
+   * AccessGrant target is the org rather than a repository.
+   */
+  private async authorizeAccount(intent: ToolIntent, owner: string): Promise<void> {
+    const context = await this.deps.context.resolve(intent);
+    if (context === undefined) {
+      throw new AdapterDispatchError("before_dispatch", "integration_context_unresolved", false);
+    }
+
+    try {
+      assertAccountInScope(context.installation, owner, {
+        permission: "administration",
+        level: "write",
+      });
+    } catch (error) {
+      if (error instanceof GitHubScopeDeniedError) {
+        throw new AdapterDispatchError("before_dispatch", "installation_scope_denied", false);
+      }
+      throw error;
+    }
+
+    try {
+      assertIntegrationAccess(
+        context.grants,
+        {
+          integrationId: context.integrationId,
+          principals: context.principals,
+          action: intent.action,
+          target: { type: GITHUB_ORGANIZATION_TARGET, id: owner },
+        },
+        this.deps.now()
+      );
+    } catch (error) {
+      if (error instanceof IntegrationAccessDeniedError) {
+        throw new AdapterDispatchError("before_dispatch", "integration_access_denied", false);
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Resolves which repositories a search spans, authorizing each one exactly as a single-repo call
    * would: `authorize()` already re-checks installation scope and the AccessGrant per repository,
    * so looping it here means a multi-repo search widens nothing an equivalent series of single-repo
@@ -358,17 +417,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return response;
   }
 
-  private async readIssue(
-    repository: string,
-    issueNumber: number,
-    credential: string
-  ): Promise<unknown> {
-    const response = await this.call(
-      { method: "GET", path: `/repos/${repository}/issues/${issueNumber}` },
-      credential,
-      false
-    );
-    const issue = record(response.body);
+  private issueOutput(repository: string, issue: Record<string, unknown>): unknown {
     return {
       repository,
       number: Number(issue.number),
@@ -379,6 +428,19 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
       assignees: logins(issue.assignees),
       htmlUrl: String(issue.html_url),
     };
+  }
+
+  private async readIssue(
+    repository: string,
+    issueNumber: number,
+    credential: string
+  ): Promise<unknown> {
+    const response = await this.call(
+      { method: "GET", path: `/repos/${repository}/issues/${issueNumber}` },
+      credential,
+      false
+    );
+    return this.issueOutput(repository, record(response.body));
   }
 
   private async searchIssues(
@@ -435,6 +497,26 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return list(response.body)
       .map((entry) => record(entry))
       .find((comment) => String(comment.body ?? "").includes(marker));
+  }
+
+  /** GitHub's `/issues` list endpoint also returns pull requests, but the marker is unique. */
+  private async findMarkedIssue(
+    repository: string,
+    marker: string,
+    credential: string
+  ): Promise<Record<string, unknown> | undefined> {
+    const response = await this.call(
+      {
+        method: "GET",
+        path: `/repos/${repository}/issues`,
+        query: { state: "all", per_page: "100" },
+      },
+      credential,
+      false
+    );
+    return list(response.body)
+      .map((entry) => record(entry))
+      .find((issue) => String(issue.body ?? "").includes(marker));
   }
 
   private commentOutput(comment: Record<string, unknown>): unknown {
@@ -521,6 +603,38 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
       state: String(issue.state),
       stateReason: String(issue.state_reason),
     };
+  }
+
+  private async createIssue(
+    repository: string,
+    source: Arguments,
+    idempotencyKey: string,
+    credential: string
+  ): Promise<unknown> {
+    const marker = githubEffectMarker(idempotencyKey);
+
+    // Read before write: a redelivered effect must return the issue it already opened.
+    const existing = await this.findMarkedIssue(repository, marker, credential);
+    if (existing !== undefined) return this.issueOutput(repository, existing);
+
+    const body = typeof source.body === "string" ? source.body : "";
+    const response = await this.call(
+      {
+        method: "POST",
+        path: `/repos/${repository}/issues`,
+        body: {
+          title: stringArg(source, "title"),
+          body: `${body}\n\n${marker}`,
+          labels: Array.isArray(source.labels) ? stringListArg(source, "labels") : undefined,
+          assignees: Array.isArray(source.assignees)
+            ? stringListArg(source, "assignees")
+            : undefined,
+        },
+      },
+      credential,
+      true
+    );
+    return this.issueOutput(repository, record(response.body));
   }
 
   private pullRequestOutput(repository: string, pr: Record<string, unknown>): unknown {
@@ -954,6 +1068,58 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return this.pushOutput(repository, branch, newCommit);
   }
 
+  private repositoryOutput(owner: string, name: string, repo: Record<string, unknown>): unknown {
+    return {
+      repository: `${owner}/${name}`,
+      htmlUrl: String(repo.html_url),
+      private: repo.private === true,
+      defaultBranch: String(repo.default_branch ?? "main"),
+    };
+  }
+
+  /**
+   * A repo may or may not exist yet, so this reads the provider directly rather than through
+   * `call()` — a 404 here is the expected "not created" case, not a failure to surface.
+   */
+  private async lookupRepository(
+    owner: string,
+    name: string,
+    credential: string
+  ): Promise<Record<string, unknown> | undefined> {
+    const response = await this.deps.http.send(
+      { method: "GET", path: `/repos/${owner}/${name}` },
+      credential
+    );
+    if (response.status === 404) return undefined;
+    const failure = classifyHttpFailure(response, false);
+    if (failure !== null)
+      throw new AdapterDispatchError(failure.phase, failure.code, failure.retryable);
+    return record(response.body);
+  }
+
+  private async createRepository(source: Arguments, credential: string): Promise<unknown> {
+    const owner = stringArg(source, "owner");
+    const name = stringArg(source, "name");
+
+    // Read before write: a redelivered effect must return the repo it already created.
+    const existing = await this.lookupRepository(owner, name, credential);
+    if (existing !== undefined) return this.repositoryOutput(owner, name, existing);
+
+    const description = typeof source.description === "string" ? source.description : undefined;
+    const isPrivate = source.private !== false;
+
+    const response = await this.call(
+      {
+        method: "POST",
+        path: `/orgs/${owner}/repos`,
+        body: { name, description, private: isPrivate },
+      },
+      credential,
+      true
+    );
+    return this.repositoryOutput(owner, name, record(response.body));
+  }
+
   /**
    * Resolve an ambiguous effect against provider state. The credential is optional because
    * reconciliation may run long after the leasing dispatch: with no way to read GitHub, the honest
@@ -968,10 +1134,23 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     }
 
     const source = args(request.intent);
+
+    // Repo creation has no `repository` argument (it's `owner`/`name`, the repo doesn't exist at
+    // dispatch time) — handle it before the generic extraction below throws on a missing field.
+    if (request.operation === GITHUB_RECONCILIATION_OPERATIONS.repositoryCreate) {
+      try {
+        return await this.reconcileRepositoryCreate(source, credential);
+      } catch {
+        return { outcome: "ambiguous", evidenceRef: "github:lookup_failed" };
+      }
+    }
+
     const repository = stringArg(source, "repository");
 
     try {
       switch (request.operation) {
+        case GITHUB_RECONCILIATION_OPERATIONS.issueCreate:
+          return await this.reconcileIssueCreate(repository, request, credential);
         case GITHUB_RECONCILIATION_OPERATIONS.comment:
           return await this.reconcileComment(
             repository,
@@ -1111,6 +1290,34 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return applied
       ? { outcome: "confirmed", evidenceRef }
       : { outcome: "not_applied", evidenceRef };
+  }
+
+  private async reconcileIssueCreate(
+    repository: string,
+    request: ToolReconciliationRequest,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const issue = await this.findMarkedIssue(
+      repository,
+      githubEffectMarker(request.idempotencyKey),
+      credential
+    );
+    return issue === undefined
+      ? { outcome: "not_applied", evidenceRef: `github:issue:create:absent:${repository}` }
+      : { outcome: "confirmed", evidenceRef: `github:issue:${String(issue.number)}` };
+  }
+
+  private async reconcileRepositoryCreate(
+    source: Arguments,
+    credential: string
+  ): Promise<ToolReconciliationOutcome> {
+    const owner = stringArg(source, "owner");
+    const name = stringArg(source, "name");
+    const existing = await this.lookupRepository(owner, name, credential);
+    const evidenceRef = `github:repository:${owner}/${name}`;
+    return existing === undefined
+      ? { outcome: "not_applied", evidenceRef }
+      : { outcome: "confirmed", evidenceRef };
   }
 
   private async reconcilePullRequestCreate(

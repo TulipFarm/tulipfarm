@@ -39,6 +39,10 @@ const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
     name: "github_issue_search",
     description: "Search a GitHub repository's issues by query and state.",
   },
+  [GITHUB_TOOL_IDS.issueCreate]: {
+    name: "github_issue_create",
+    description: "Open a new GitHub issue, optionally with labels and assignees.",
+  },
   [GITHUB_TOOL_IDS.issueComment]: {
     name: "github_issue_comment",
     description: "Post a comment on a GitHub issue.",
@@ -87,6 +91,13 @@ const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
     name: "github_repo_push",
     description: "Commit one or more files to a GitHub branch.",
   },
+  [GITHUB_TOOL_IDS.repositoryCreate]: {
+    name: "github_repository_create",
+    description:
+      "Create a new GitHub repository under an org this installation covers. Requires the App's " +
+      "administration:write permission, which is not granted by default — if this fails, ask an " +
+      "org admin to upgrade the GitHub App's permissions from the installation's settings page.",
+  },
   [GITHUB_TOOL_IDS.contentRead]: {
     name: "github_content_read",
     description: "Read a file's contents from a GitHub repository.",
@@ -111,7 +122,7 @@ function derivedId(...parts: readonly string[]): string {
   ].join("-");
 }
 
-function mapDispatchError(error: ToolDispatchError): ToolCallResult {
+function mapDispatchError(error: ToolDispatchError, toolId: GitHubToolId): ToolCallResult {
   if (error.code === "invalid_output")
     return err("internal_error", "GitHub returned an unexpected response shape");
   if (error.detail === "integration_context_unresolved") {
@@ -119,6 +130,14 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
       "not_found",
       "No active GitHub installation covers that repository. Call github_repository_list to see " +
         "which repositories are installed, then retry with one of those."
+    );
+  }
+  if (error.detail === "installation_scope_denied" && toolId === GITHUB_TOOL_IDS.repositoryCreate) {
+    return err(
+      "not_found",
+      "Creating this repository needs the GitHub App's administration:write permission, which " +
+        "isn't granted by default. Ask an org admin to upgrade the App's permissions from its " +
+        "GitHub installation settings page, then retry."
     );
   }
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
@@ -211,7 +230,7 @@ function buildToolDef(
         const output = await dispatcher.dispatch(businessId, reserved.effect.effectId);
         return ok(output);
       } catch (error) {
-        if (error instanceof ToolDispatchError) return mapDispatchError(error);
+        if (error instanceof ToolDispatchError) return mapDispatchError(error, toolId);
         throw error;
       }
     },

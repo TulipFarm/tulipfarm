@@ -65,4 +65,34 @@ describe("InstallationScopeGitHubContextResolver", () => {
     );
     expect(await resolver.resolve(intentFor({}))).toBeUndefined();
   });
+
+  it("resolves a repository-create intent by account, not by repository", async () => {
+    const resolver = new InstallationScopeGitHubContextResolver(
+      BUSINESS_ID,
+      directoryOf([INSTALLATION])
+    );
+    const intent: ToolIntent = {
+      ...intentFor({ owner: "tulip", name: "new-repo" }),
+      toolId: "github.repository.create",
+      action: "github.repository.create",
+    };
+    const context = await resolver.resolve(intent);
+    expect(context?.integrationId).toBe("integration-1");
+    expect(context?.grants[0]?.spec.externalTargets).toEqual([
+      { type: "github.organization", ids: ["tulip"] },
+    ]);
+  });
+
+  it("returns undefined for a repository-create intent when no installation covers the owner", async () => {
+    const resolver = new InstallationScopeGitHubContextResolver(
+      BUSINESS_ID,
+      directoryOf([INSTALLATION])
+    );
+    const intent: ToolIntent = {
+      ...intentFor({ owner: "other-org", name: "new-repo" }),
+      toolId: "github.repository.create",
+      action: "github.repository.create",
+    };
+    expect(await resolver.resolve(intent)).toBeUndefined();
+  });
 });

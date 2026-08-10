@@ -11,6 +11,7 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
       [
         GITHUB_TOOL_IDS.issueRead,
         GITHUB_TOOL_IDS.issueSearch,
+        GITHUB_TOOL_IDS.issueCreate,
         GITHUB_TOOL_IDS.issueComment,
         GITHUB_TOOL_IDS.issueLabel,
         GITHUB_TOOL_IDS.issueAssign,
@@ -23,6 +24,7 @@ describe("GITHUB_TOOL_CONTRACTS", () => {
         GITHUB_TOOL_IDS.pullRequestMerge,
         GITHUB_TOOL_IDS.checkRunRead,
         GITHUB_TOOL_IDS.repoPush,
+        GITHUB_TOOL_IDS.repositoryCreate,
         GITHUB_TOOL_IDS.contentRead,
         GITHUB_TOOL_IDS.contentList,
       ].sort()
