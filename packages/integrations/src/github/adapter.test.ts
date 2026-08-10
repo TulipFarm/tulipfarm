@@ -3,7 +3,12 @@ import { AdapterDispatchError, type ToolIntent } from "@tulipfarm/tool-broker";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { IntegrationHttpRequest, IntegrationHttpResponse } from "../http";
 import { GitHubAdapter, type GitHubEffectContext, githubEffectMarker } from "./adapter";
-import { GITHUB_ISSUE_TARGET, GITHUB_REPOSITORY_TARGET, GITHUB_TOOL_IDS } from "./contracts";
+import {
+  GITHUB_ISSUE_TARGET,
+  GITHUB_ORGANIZATION_TARGET,
+  GITHUB_REPOSITORY_TARGET,
+  GITHUB_TOOL_IDS,
+} from "./contracts";
 
 const BUSINESS_ID = "biz-1";
 const INTEGRATION_ID = "11111111-1111-4111-8111-111111111111";
@@ -31,9 +36,20 @@ function grant(actions: string[]): AccessGrantDefinition {
   };
 }
 
+function orgGrant(actions: string[]): AccessGrantDefinition {
+  return {
+    ...grant(actions),
+    spec: {
+      ...grant(actions).spec,
+      externalTargets: [{ type: GITHUB_ORGANIZATION_TARGET, ids: ["tulip"] }],
+    },
+  };
+}
+
 const ALL_ACTIONS = [
   GITHUB_TOOL_IDS.issueRead,
   GITHUB_TOOL_IDS.issueSearch,
+  GITHUB_TOOL_IDS.issueCreate,
   GITHUB_TOOL_IDS.issueComment,
   GITHUB_TOOL_IDS.issueLabel,
   GITHUB_TOOL_IDS.issueAssign,
@@ -1127,5 +1143,207 @@ describe("GitHubAdapter pull request reconciliation", () => {
       outcome: "confirmed",
       evidenceRef: "github:pull_request:tulip/farm#12:merged",
     });
+  });
+});
+
+describe("GitHubAdapter issue create", () => {
+  const createIntent = intent(GITHUB_TOOL_IDS.issueCreate, {
+    repository: "tulip/farm",
+    title: "New bug",
+    body: "steps to repro",
+  });
+  const marker = githubEffectMarker("idem-1");
+
+  it("opens a new issue, stamping the effect marker in the body", async () => {
+    http.route("GET", "/repos/tulip/farm/issues", { status: 200, headers: {}, body: [] });
+    http.route("POST", "/repos/tulip/farm/issues", { status: 201, headers: {}, body: ISSUE_BODY });
+    const output = await dispatch(createIntent);
+    const posted = http.calls.find((call) => call.method === "POST");
+    expect(String((posted?.body as { body: string }).body)).toContain(marker);
+    expect(String((posted?.body as { body: string }).body)).toContain("steps to repro");
+    expect(output).toMatchObject({ number: 41, title: "Crash on save" });
+  });
+
+  it("returns the existing issue on a duplicate delivery instead of opening a second one", async () => {
+    http.route("GET", "/repos/tulip/farm/issues", {
+      status: 200,
+      headers: {},
+      body: [{ ...ISSUE_BODY, body: `already opened\n\n${marker}` }],
+    });
+    const output = await dispatch(createIntent);
+    expect(http.calls.some((call) => call.method === "POST")).toBe(false);
+    expect(output).toMatchObject({ number: 41 });
+  });
+
+  it("denies creating an issue when the installation only holds read permission", async () => {
+    resolved = context({
+      installation: { ...context().installation, permissions: { issues: "read" } },
+    });
+    await expect(dispatch(createIntent)).rejects.toMatchObject({
+      code: "installation_scope_denied",
+    });
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe("GitHubAdapter issue create reconciliation", () => {
+  const createIntent = intent(GITHUB_TOOL_IDS.issueCreate, {
+    repository: "tulip/farm",
+    title: "New bug",
+  });
+
+  function reconcileWith(credential: string | undefined = CREDENTIAL) {
+    return adapter.reconcile(
+      {
+        intent: createIntent,
+        idempotencyKey: createIntent.idempotencyKey,
+        operation: "github.issue.create.lookup",
+      },
+      credential
+    );
+  }
+
+  it("confirms when the marked issue is present", async () => {
+    http.route("GET", "/repos/tulip/farm/issues", {
+      status: 200,
+      headers: {},
+      body: [{ ...ISSUE_BODY, body: githubEffectMarker("idem-1") }],
+    });
+    await expect(reconcileWith()).resolves.toEqual({
+      outcome: "confirmed",
+      evidenceRef: "github:issue:41",
+    });
+  });
+
+  it("reports not_applied when no issue carries the marker", async () => {
+    http.route("GET", "/repos/tulip/farm/issues", { status: 200, headers: {}, body: [] });
+    await expect(reconcileWith()).resolves.toEqual({
+      outcome: "not_applied",
+      evidenceRef: "github:issue:create:absent:tulip/farm",
+    });
+  });
+
+  it("stays ambiguous rather than guessing when the lookup itself fails", async () => {
+    http.route("GET", "/repos/tulip/farm/issues", { status: 503, headers: {}, body: {} });
+    await expect(reconcileWith()).resolves.toMatchObject({ outcome: "ambiguous" });
+  });
+});
+
+describe("GitHubAdapter repository create", () => {
+  const repoCreateIntent = intent(GITHUB_TOOL_IDS.repositoryCreate, {
+    owner: "tulip",
+    name: "new-repo",
+  });
+
+  function withAdministration(): void {
+    resolved = context({
+      installation: {
+        ...context().installation,
+        permissions: { ...context().installation.permissions, administration: "write" },
+      },
+      grants: [grant(ALL_ACTIONS), orgGrant([GITHUB_TOOL_IDS.repositoryCreate])],
+    });
+  }
+
+  it("creates a repo under the org", async () => {
+    withAdministration();
+    http.route("GET", "/repos/tulip/new-repo", { status: 404, headers: {}, body: {} });
+    http.route("POST", "/orgs/tulip/repos", {
+      status: 201,
+      headers: {},
+      body: {
+        full_name: "tulip/new-repo",
+        html_url: "https://github.com/tulip/new-repo",
+        private: true,
+        default_branch: "main",
+      },
+    });
+    const output = await dispatch(repoCreateIntent);
+    expect(output).toEqual({
+      repository: "tulip/new-repo",
+      htmlUrl: "https://github.com/tulip/new-repo",
+      private: true,
+      defaultBranch: "main",
+    });
+  });
+
+  it("returns the existing repo on a duplicate delivery instead of creating twice", async () => {
+    withAdministration();
+    http.route("GET", "/repos/tulip/new-repo", {
+      status: 200,
+      headers: {},
+      body: {
+        html_url: "https://github.com/tulip/new-repo",
+        private: true,
+        default_branch: "main",
+      },
+    });
+    const output = await dispatch(repoCreateIntent);
+    expect(http.calls.some((call) => call.method === "POST")).toBe(false);
+    expect(output).toMatchObject({ repository: "tulip/new-repo" });
+  });
+
+  it("denies repo creation when the installation lacks administration:write", async () => {
+    await expect(dispatch(repoCreateIntent)).rejects.toMatchObject({
+      phase: "before_dispatch",
+      code: "installation_scope_denied",
+    });
+    expect(http.calls).toHaveLength(0);
+  });
+
+  it("denies repo creation outside the installation's account", async () => {
+    withAdministration();
+    const otherOwnerIntent = intent(GITHUB_TOOL_IDS.repositoryCreate, {
+      owner: "other-org",
+      name: "new-repo",
+    });
+    await expect(dispatch(otherOwnerIntent)).rejects.toMatchObject({
+      phase: "before_dispatch",
+      code: "installation_scope_denied",
+    });
+    expect(http.calls).toHaveLength(0);
+  });
+});
+
+describe("GitHubAdapter repository create reconciliation", () => {
+  const repoCreateIntent = intent(GITHUB_TOOL_IDS.repositoryCreate, {
+    owner: "tulip",
+    name: "new-repo",
+  });
+
+  function reconcileWith(credential: string | undefined = CREDENTIAL) {
+    return adapter.reconcile(
+      {
+        intent: repoCreateIntent,
+        idempotencyKey: repoCreateIntent.idempotencyKey,
+        operation: "github.repository.create.lookup",
+      },
+      credential
+    );
+  }
+
+  it("confirms when the repo now exists", async () => {
+    http.route("GET", "/repos/tulip/new-repo", { status: 200, headers: {}, body: {} });
+    await expect(reconcileWith()).resolves.toEqual({
+      outcome: "confirmed",
+      evidenceRef: "github:repository:tulip/new-repo",
+    });
+  });
+
+  it("reports not_applied when the repo was never created", async () => {
+    http.route("GET", "/repos/tulip/new-repo", { status: 404, headers: {}, body: {} });
+    await expect(reconcileWith()).resolves.toEqual({
+      outcome: "not_applied",
+      evidenceRef: "github:repository:tulip/new-repo",
+    });
+  });
+
+  it("stays ambiguous rather than guessing when the lookup itself fails", async () => {
+    http.route("GET", "/repos/tulip/new-repo", { status: 503, headers: {}, body: {} });
+    await expect(reconcileWith()).resolves.toMatchObject({ outcome: "ambiguous" });
+  });
+
+  it("stays ambiguous when reconciliation is attempted without a credential", async () => {
+    await expect(reconcileWith(undefined)).resolves.toMatchObject({ outcome: "ambiguous" });
   });
 });

@@ -22,10 +22,13 @@ export const GITHUB_REPOSITORY_TARGET = "github.repository";
 export const GITHUB_ISSUE_TARGET = "github.issue";
 export const GITHUB_PULL_REQUEST_TARGET = "github.pull_request";
 export const GITHUB_CHECK_RUN_TARGET = "github.check_run";
+/** AccessGrant target for an org-level action whose repository does not exist yet. */
+export const GITHUB_ORGANIZATION_TARGET = "github.organization";
 
 export const GITHUB_TOOL_IDS = {
   issueRead: "github.issue.read",
   issueSearch: "github.issue.search",
+  issueCreate: "github.issue.create",
   issueComment: "github.issue.comment",
   issueLabel: "github.issue.label",
   issueAssign: "github.issue.assign",
@@ -38,6 +41,7 @@ export const GITHUB_TOOL_IDS = {
   pullRequestMerge: "github.pull_request.merge",
   checkRunRead: "github.check_run.read",
   repoPush: "github.repo.push",
+  repositoryCreate: "github.repository.create",
   contentRead: "github.content.read",
   contentList: "github.content.list",
 } as const;
@@ -50,11 +54,13 @@ export const GITHUB_RECONCILIATION_OPERATIONS = {
   labels: "github.issue.labels.lookup",
   assignees: "github.issue.assignees.lookup",
   state: "github.issue.state.lookup",
+  issueCreate: "github.issue.create.lookup",
   pullRequestCreate: "github.pull_request.create.lookup",
   pullRequestComment: "github.pull_request.comment.lookup",
   pullRequestReview: "github.pull_request.review.lookup",
   pullRequestMerge: "github.pull_request.merge.lookup",
   repoPush: "github.repo.push.lookup",
+  repositoryCreate: "github.repository.create.lookup",
 } as const;
 
 const TOOL_VERSION = "1.0.0";
@@ -223,6 +229,51 @@ const issueSearch = publish(
   },
   "aaaaaaaa-0002-4000-8000-000000000002",
   "github-issue-search"
+);
+
+const issueCreate = publish(
+  {
+    toolId: GITHUB_TOOL_IDS.issueCreate,
+    toolVersion: TOOL_VERSION,
+    action: GITHUB_TOOL_IDS.issueCreate,
+    inputSchema: issueInput(
+      {
+        title: { type: "string", minLength: 1, maxLength: 256 },
+        body: { type: "string", maxLength: 65_536 },
+        labels: {
+          type: "array",
+          minItems: 1,
+          maxItems: 20,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: 50 },
+        },
+        assignees: {
+          type: "array",
+          minItems: 1,
+          maxItems: 10,
+          uniqueItems: true,
+          items: { type: "string", minLength: 1, maxLength: 39 },
+        },
+      },
+      ["title"]
+    ),
+    outputSchema: issueOutputSchema,
+    riskClass: "medium",
+    mutating: true,
+    dataClasses: ISSUE_DATA_CLASSES,
+    allowedDestinations: [GITHUB_DESTINATION],
+    idempotency: { strategy: "reconcile" },
+    timeout: { wallClockMs: 15_000 },
+    retry: { maxAttempts: 1, safeToRetry: false },
+    dryRun: true,
+    compensation: {
+      operation: "github.issue.close",
+      reconciliation: GITHUB_RECONCILIATION_OPERATIONS.issueCreate,
+    },
+    adapter: { kind: "integration", ref: GITHUB_ADAPTER_REF },
+  },
+  "aaaaaaaa-0011-4000-8000-000000000011",
+  "github-issue-create"
 );
 
 const issueComment = publish(
@@ -738,6 +789,72 @@ const repoPush = publish(
   "github-repo-push"
 );
 
+const repositoryOwnerProperty = {
+  type: "string",
+  minLength: 1,
+  maxLength: 39,
+  pattern: "^[A-Za-z0-9-]+$",
+} as const;
+
+const repositoryNameProperty = {
+  type: "string",
+  minLength: 1,
+  maxLength: 100,
+  pattern: "^[A-Za-z0-9._-]+$",
+} as const;
+
+const repositoryCreate = publish(
+  {
+    toolId: GITHUB_TOOL_IDS.repositoryCreate,
+    toolVersion: TOOL_VERSION,
+    action: GITHUB_TOOL_IDS.repositoryCreate,
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["owner", "name"],
+      properties: {
+        owner: repositoryOwnerProperty,
+        name: repositoryNameProperty,
+        description: { type: "string", maxLength: 350 },
+        private: {
+          type: "boolean",
+          description: "Defaults to true (private) when omitted.",
+        },
+      },
+    },
+    outputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["repository", "htmlUrl", "private", "defaultBranch"],
+      properties: {
+        repository: repositoryProperty,
+        htmlUrl: { type: "string" },
+        private: { type: "boolean" },
+        defaultBranch: { type: "string" },
+      },
+    },
+    // Creates a new asset under the org and consumes seats/quota — as consequential as pushing to
+    // an existing repo's history.
+    riskClass: "high",
+    mutating: true,
+    dataClasses: PR_DATA_CLASSES,
+    allowedDestinations: [GITHUB_DESTINATION],
+    idempotency: { strategy: "reconcile" },
+    timeout: { wallClockMs: 20_000 },
+    retry: { maxAttempts: 1, safeToRetry: false },
+    dryRun: true,
+    // Detect-only: reconciliation reports whether the repo now exists after an ambiguous write,
+    // it never calls a delete API — repo deletion is too destructive to automate.
+    compensation: {
+      operation: "github.repository.create.report_duplicate",
+      reconciliation: GITHUB_RECONCILIATION_OPERATIONS.repositoryCreate,
+    },
+    adapter: { kind: "integration", ref: GITHUB_ADAPTER_REF },
+  },
+  "aaaaaaaa-0012-4000-8000-000000000012",
+  "github-repository-create"
+);
+
 const contentPathProperty = { type: "string", minLength: 1, maxLength: 1024 } as const;
 const contentRefProperty = { type: "string", minLength: 1, maxLength: 250 } as const;
 
@@ -821,6 +938,7 @@ const contentList = publish(
 export const GITHUB_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   issueRead,
   issueSearch,
+  issueCreate,
   issueComment,
   issueLabel,
   issueAssign,
@@ -833,6 +951,7 @@ export const GITHUB_TOOL_CONTRACTS: readonly ToolContractDefinition[] = [
   pullRequestMerge,
   checkRunRead,
   repoPush,
+  repositoryCreate,
   contentRead,
   contentList,
 ];

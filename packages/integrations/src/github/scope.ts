@@ -85,6 +85,30 @@ export function assertRepositoryInScope(
   }
 }
 
+/**
+ * Throws unless `scope` covers `owner` at the required permission level. Unlike
+ * `assertRepositoryInScope`, this does not check repository membership: it authorizes an
+ * account-level action (e.g. creating a repo) whose target does not exist yet, so it cannot be
+ * checked against the installation's already-selected repository list.
+ */
+export function assertAccountInScope(
+  scope: GitHubInstallationScope | undefined,
+  owner: string,
+  need: GitHubPermissionNeed
+): asserts scope is GitHubInstallationScope {
+  if (scope === undefined) throw new GitHubScopeDeniedError("installation_unknown");
+
+  if (owner !== scope.accountLogin) {
+    throw new GitHubScopeDeniedError("account_out_of_scope");
+  }
+
+  const held = scope.permissions[need.permission];
+  if (held === undefined) throw new GitHubScopeDeniedError("permission_missing");
+  if (need.level === "write" && held !== "write") {
+    throw new GitHubScopeDeniedError("permission_insufficient");
+  }
+}
+
 /** Provider-qualified subject for a GitHub user id, as stored on the identity mapping. */
 export function githubExternalSubject(externalId: string): string {
   return `github:user:${externalId}`;

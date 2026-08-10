@@ -3,7 +3,11 @@ import type {
   GitHubEffectContext,
   GitHubInstallationScope,
 } from "@tulipfarm/integrations";
-import { GITHUB_REPOSITORY_TARGET, GITHUB_TOOL_IDS } from "@tulipfarm/integrations";
+import {
+  GITHUB_ORGANIZATION_TARGET,
+  GITHUB_REPOSITORY_TARGET,
+  GITHUB_TOOL_IDS,
+} from "@tulipfarm/integrations";
 import type { AccessGrantDefinition } from "@tulipfarm/schema";
 import type { ToolIntent } from "@tulipfarm/tool-broker";
 import type { GitHubInstallationDirectory } from "./installation";
@@ -30,6 +34,14 @@ function repositoryArgument(intent: ToolIntent): string | undefined {
   return typeof repository === "string" ? repository : undefined;
 }
 
+/** Repo creation has no `repository` argument yet — the repo doesn't exist — only `owner`. */
+function ownerArgument(intent: ToolIntent): string | undefined {
+  const args = intent.arguments;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const owner = (args as Record<string, unknown>).owner;
+  return typeof owner === "string" ? owner : undefined;
+}
+
 function syntheticGrant(integrationId: string, repository: string): AccessGrantDefinition {
   return {
     apiVersion: "tulipfarm.ai/v1",
@@ -51,6 +63,27 @@ function syntheticGrant(integrationId: string, repository: string): AccessGrantD
   };
 }
 
+function syntheticOrgGrant(integrationId: string, owner: string): AccessGrantDefinition {
+  return {
+    apiVersion: "tulipfarm.ai/v1",
+    kind: "AccessGrant",
+    metadata: {
+      id: "00000000-0000-4000-8000-000000000003",
+      slug: "github-chat-installation-account-scope",
+      schemaVersion: 1,
+      authoredVersion: 1,
+      lifecycle: "active",
+    },
+    spec: {
+      integrationId,
+      principals: [SYNTHETIC_PRINCIPAL],
+      actions: [...GITHUB_ACTIONS],
+      externalTargets: [{ type: GITHUB_ORGANIZATION_TARGET, ids: [owner] }],
+      delegable: false,
+    },
+  };
+}
+
 /**
  * Resolves a Tool intent's repository against this business's active GitHub installations
  * (`GitHubInstallationDirectory`) and builds the scope + synthesized grant `GitHubAdapter` needs.
@@ -65,6 +98,10 @@ export class InstallationScopeGitHubContextResolver implements GitHubContextReso
   ) {}
 
   async resolve(intent: ToolIntent): Promise<GitHubEffectContext | undefined> {
+    if (intent.action === GITHUB_TOOL_IDS.repositoryCreate) {
+      return this.resolveForAccount(intent);
+    }
+
     const repository = repositoryArgument(intent);
     if (repository === undefined) return undefined;
 
@@ -95,6 +132,41 @@ export class InstallationScopeGitHubContextResolver implements GitHubContextReso
       installation: scope,
       principals: [SYNTHETIC_PRINCIPAL],
       grants: [syntheticGrant(installation.integrationId, repository)],
+    };
+  }
+
+  /** Repo creation targets an account, not an existing repository — matched by `accountLogin`. */
+  private async resolveForAccount(intent: ToolIntent): Promise<GitHubEffectContext | undefined> {
+    const owner = ownerArgument(intent);
+    if (owner === undefined) return undefined;
+
+    const installations = await this.installations.list();
+    const matches = installations.filter((entry) => entry.accountLogin === owner);
+    if (matches.length === 0) return undefined;
+    if (matches.length > 1) {
+      this.log?.warn(
+        { event: "github.context.ambiguous_installation", owner, count: matches.length },
+        "multiple active GitHub installations cover the same account; refusing to guess"
+      );
+      return undefined;
+    }
+    const installation = matches[0];
+    if (installation === undefined) return undefined;
+
+    const scope: GitHubInstallationScope = {
+      businessId: this.businessId,
+      integrationId: installation.integrationId,
+      installationId: installation.installationId,
+      accountLogin: installation.accountLogin,
+      repositories: installation.repositories,
+      permissions: installation.permissions,
+    };
+
+    return {
+      integrationId: installation.integrationId,
+      installation: scope,
+      principals: [SYNTHETIC_PRINCIPAL],
+      grants: [syntheticOrgGrant(installation.integrationId, owner)],
     };
   }
 }

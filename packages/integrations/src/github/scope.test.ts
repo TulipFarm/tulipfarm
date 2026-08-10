@@ -1,6 +1,7 @@
 import { ExternalIdentityDeniedError } from "@tulipfarm/authz";
 import { describe, expect, it } from "vitest";
 import {
+  assertAccountInScope,
   assertRepositoryInScope,
   type GitHubInstallationScope,
   GitHubScopeDeniedError,
@@ -96,6 +97,59 @@ describe("assertRepositoryInScope", () => {
     expect(() =>
       assertRepositoryInScope(scope({ permissions: { issues: "read" } }), target, {
         permission: "issues",
+        level: "write",
+      })
+    ).toThrow(expect.objectContaining({ reason: "permission_insufficient" }));
+  });
+});
+
+describe("assertAccountInScope", () => {
+  it("admits the installation's own account with sufficient permission", () => {
+    expect(() =>
+      assertAccountInScope(scope({ permissions: { administration: "write" } }), "tulip", {
+        permission: "administration",
+        level: "write",
+      })
+    ).not.toThrow();
+  });
+
+  it("admits a repository not yet in the installation's selected list, unlike assertRepositoryInScope", () => {
+    // The whole point of this assertion: it authorizes an org-level action (creating a repo) whose
+    // target doesn't exist yet, so it must not require repository membership.
+    expect(() =>
+      assertAccountInScope(
+        scope({ repositories: ["tulip/farm"], permissions: { administration: "write" } }),
+        "tulip",
+        { permission: "administration", level: "write" }
+      )
+    ).not.toThrow();
+  });
+
+  it("denies when no installation was resolved at all", () => {
+    expect(() =>
+      assertAccountInScope(undefined, "tulip", { permission: "administration", level: "write" })
+    ).toThrow(expect.objectContaining({ reason: "installation_unknown" }));
+  });
+
+  it("denies an account other than the one the App was installed on", () => {
+    expect(() =>
+      assertAccountInScope(scope({ permissions: { administration: "write" } }), "other-org", {
+        permission: "administration",
+        level: "write",
+      })
+    ).toThrow(expect.objectContaining({ reason: "account_out_of_scope" }));
+  });
+
+  it("denies a permission the installation does not hold", () => {
+    expect(() =>
+      assertAccountInScope(scope(), "tulip", { permission: "administration", level: "write" })
+    ).toThrow(expect.objectContaining({ reason: "permission_missing" }));
+  });
+
+  it("does not let a read permission satisfy a write need", () => {
+    expect(() =>
+      assertAccountInScope(scope({ permissions: { administration: "read" } }), "tulip", {
+        permission: "administration",
         level: "write",
       })
     ).toThrow(expect.objectContaining({ reason: "permission_insufficient" }));
