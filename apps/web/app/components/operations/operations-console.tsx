@@ -302,7 +302,7 @@ function AuditTable({ items }: { items: readonly OperationalItem[] }) {
               Showing {visibleItems.length} of {items.length} events
             </span>
             <Link
-              to="/settings/activities"
+              to="/business/activities"
               className="ml-auto text-xs text-primary underline-offset-2 hover:underline"
             >
               View all activities

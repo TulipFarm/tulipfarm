@@ -89,7 +89,7 @@ pull/commit/push divergence cases. In route tests that touch soul git config, sp
 - Remote/credential env vars are `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL` (soul-scoped,
   matches `SOUL_PATH`) — not `GIT_REMOTE_URL`/`GIT_CREDENTIALS`. Watch for stale references when
   touching `.env.local.example`, docs mdx, or secret keys.
-- `GitSyncService` reads its remote from env at boot; a remote set later via Settings → Soul UI
+- `GitSyncService` reads its remote from env at boot; a remote set later via Business → Soul UI
   persists to `soul.yaml` + a secret — boot must also read that persisted config, or the UI-set
   remote is silently dropped on restart.
 - `bootSync()` must never throw (a bad/stale remote in `soul.yaml` previously crash-looped the

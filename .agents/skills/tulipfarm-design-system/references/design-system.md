@@ -67,6 +67,31 @@ Light uses a white canvas, near-black ink, a subtly gray sidebar, 0.96–0.99 ne
 0.90–0.92 borders. Dark uses a 0.17 canvas, 0.19–0.23 surfaces, 0.94 ink, and 10–14% white borders.
 Keep radius on an 4/6/8px scale, icon sizes at 14/16/20/24px, and motion at 150–240ms.
 
+### 3.1 External brand color — the one exception
+
+A third party's brand color is the single color that cannot be a token: it belongs to another
+company, arrives as runtime data (an integration registry entry, a Simple Icons hex), and is not
+ours to redefine. Tokenizing it would mean shipping a token per vendor and editing the design
+system every time an integration is added.
+
+The exception is narrow. It applies **only** to marks that identify an external product, and it
+comes with three obligations:
+
+1. **Never render the hex as authored.** Pass it through `brandInk` (`apps/web/app/lib/brand.ts`),
+   which converts to OKLCH and clamps lightness into a legible band per canvas while holding hue
+   and chroma. GitHub's `#181717` and Notion's `#000000` are invisible on the 0.17 dark canvas;
+   a pale brand is invisible on the white one.
+2. **Publish both corrections, switch in CSS.** Write `--brand-light` and `--brand-dark` as inline
+   custom properties and select between them with the `dark:` variant. Reading the theme in
+   JavaScript would repaint after hydration and flash the wrong color.
+3. **Color the whole set or none of it.** If some brands in a list are colored and the rest are
+   gray, the gray ones read as broken images. Where a brand has no mark in the icon set, curate its
+   color in the registry so the monogram still carries it; where nothing is curated at all — an
+   integration installed from a URL — fall back to `muted`/`muted-foreground` for the entire tile.
+
+Everything around the mark stays tokenized. Brand color never becomes a text color, a button, a
+focus ring, or a status signal — `IntegrationIcon` is the only component that uses it.
+
 ## 4. Typography Scale
 
 | Role | Size / line | Weight | Typical use |
@@ -140,6 +165,9 @@ participant.
 
 Agent identity does not get a parallel color scale. Continue to use `--glyph-hue-0` …
 `--glyph-hue-6` for Agent glyphs.
+
+External *product* identity is different again: it is not ours to tokenize, so it follows §3.1 and
+lives only in `IntegrationIcon`.
 
 ## 6. Component Hierarchy
 
@@ -294,6 +322,7 @@ component contract.
 | Feedback | StatusBadge, PriorityBadge, LoadingState, EmptyState, ErrorState |
 | Data/forms | Panel, Field, SchemaTable, ResourceForm, LinkCombobox |
 | Rich content | MarkdownView, SurfaceArtifact, Chat transcript/composer, Chat Tool row/timeline/inspect pane, Knowledge editor |
+| Identity | AgentGlyph (derived from name/domain/autonomy), IntegrationIcon (external brand mark, see §3.1) |
 
 The rail, context panel, breadcrumb, and account chip are internal to `app-sidebar.tsx` rather than
 exported primitives. Promote one into `components/ui` only when a second surface needs it, and add
@@ -339,6 +368,10 @@ Prefer the index and source search over guessing component names.
   row needs `focus-visible:-outline-offset-2`, or keyboard users get one stray line that looks like
   a divider.
 - Using the categorical data palette for chrome, status, brand, selection, focus, or decoration.
+- Rendering an external brand hex as authored. It is not canvas-safe: near-black brands vanish on
+  the dark canvas and pale ones on the light. Correct it per canvas via `brandInk` (§3.1).
+- Coloring some brand marks in a list and leaving the rest gray. A partly branded list reads as
+  failed image loading, not as branding — curate the missing color or drop the whole set to muted.
 - Reintroducing raw hex or Tailwind palette colors inside a JSON/code viewer instead of the
   `code-*` tokens.
 - Rebuilding buttons, badges, fields, panels, or headers with route-local class strings.

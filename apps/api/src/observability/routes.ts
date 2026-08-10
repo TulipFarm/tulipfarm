@@ -94,7 +94,7 @@ const SummarySchema = {
 
 /**
  * GET /api/v1/observability/summary?range=24h|7d|30d — pre-aggregated cost/usage dashboard data.
- * Admin-only (mirrors Settings → Secrets / LLM); the observability dashboard is an admin surface.
+ * Admin-only (mirrors Business → Secrets / Models); the observability dashboard is an admin surface.
  */
 export function registerObservabilityRoutes(
   app: FastifyInstance,

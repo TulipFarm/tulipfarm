@@ -59,11 +59,12 @@ test("groups connected integrations ahead of the rest", async () => {
   ]);
 
   const headings = await screen.findAllByRole("heading", { level: 2 });
-  expect(headings.map((h) => h.textContent?.replace(/\s+/g, " ").trim())).toEqual([
-    "Connected (1)",
-    "Available (1)",
-  ]);
-  expect(within(headings[0].parentElement as HTMLElement).getByText("Slack")).toBeInTheDocument();
+  expect(headings.map((h) => h.textContent)).toEqual(["Connected", "Available"]);
+  const connected = headings[0].closest("section") as HTMLElement;
+  expect(within(connected).getByText("Slack")).toBeInTheDocument();
+  // The group's size is a badge beside its title, so an operator can see how much is connected
+  // without counting rows.
+  expect(within(connected).getByText("1")).toBeInTheDocument();
 });
 
 test("titles the single group plainly when nothing is connected", async () => {

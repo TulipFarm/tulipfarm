@@ -11,10 +11,11 @@ export const PublicUserSchema = {
   properties: {
     id: { type: "string" },
     email: { type: "string", format: "email" },
+    name: { type: ["string", "null"] },
     role: { type: "string", enum: ["admin", "member"] },
     status: { type: "string", enum: ["active", "invited", "disabled"] },
   },
-  required: ["id", "email", "role", "status"],
+  required: ["id", "email", "name", "role", "status"],
 } as const;
 
 /**

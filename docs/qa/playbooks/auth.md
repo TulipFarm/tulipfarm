@@ -2,11 +2,11 @@
 id: auth
 area: Auth
 suites: [smoke, full]
-routes: ["/login", "/setup", "/accept-invite", "/settings/security"]
+routes: ["/login", "/setup", "/accept-invite", "/settings/auth", "/business/people"]
 preconditions: [fresh incognito context available]
 blast_radius: creates at most one qa-<run-id>-* invited user (admin session only); never completes
   that invite's account creation; never enters or changes the operator's real password; never logs
-  the operator out, revokes their session, or touches their tokens
+  the operator out, revokes their session, or touches pre-existing tokens
 est_minutes: 8
 smoke_scenarios: [S1, S2]
 ---
@@ -15,9 +15,8 @@ smoke_scenarios: [S1, S2]
 
 Auth covers sign-in, first-run setup, invite redemption, and self-service password change. Every
 unauthenticated flow (`/login`, the `/setup` gate, `/accept-invite`) runs in a **fresh incognito
-context** — never the operator's signed-in tab. `/settings/security` runs in the operator's own
-signed-in tab, because it is only reachable authenticated, and its only mutating action (changing
-the real password) is deliberately never completed by this playbook.
+context** — never the operator's signed-in tab. `/settings/auth` runs in the operator's own
+signed-in tab, because it is only reachable authenticated, and its real password mutation is deliberately never completed by this playbook. API-token creation is exercised only for a `qa-<run-id>-*` token that is revoked before leaving the scenario.
 
 This is the first playbook in `full` for a reason: a broken session here invalidates every later
 result. Every scenario stands alone — a failure in one does not block the next.
@@ -87,20 +86,20 @@ redirecting correctly *is* the assertion.
 
 ## S4 — Invite creation and the accept-invite preview (admin session only)
 
-Invite links are minted from `/admin/users`, outside this playbook's route list but the only
-product surface that produces one — `/accept-invite` cannot be exercised end-to-end without it.
+Invite links are minted from `/business/people`, the only product surface that produces one —
+`/accept-invite` cannot be exercised end-to-end without it.
 **Skip this scenario with a `note` if the signed-in session is not an admin** (the sidebar hides
-the Users link and the route 403s); S5 covers the invalid/expired-token states without needing a
+the People link and the route shows an admin-only error); S5 covers the invalid/expired-token states without needing a
 fixture, so it still runs.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /admin/users` | Heading `Users`; existing user list renders |
+| 1 | `navigate /business/people` | Heading `People`; existing people list renders |
 | 2 | `type` `email` `qa-<run-id>@example.invalid` | Accepted |
-| 3 | `click` `Invite user` | Button reads "Inviting…", then a panel appears: "Invite link for **qa-<run-id>@example.invalid**. Share it manually — it won't be shown again, and it expires \<date>." with the URL in a code block |
+| 3 | `click` `Send invite` | Button reads "Inviting…", then a panel appears: "Invite link for **qa-<run-id>@example.invalid**. Share it yourself — it is not shown again and it expires \<date>." with the invite link field |
 | 4 | `expect` the URL contains `/accept-invite#token=` (fragment, not `?token=`) | Fragment-only — a token in the query string would land in server logs, a P1 |
-| 5 | `capture` the invite URL as evidence (read the code block; do not rely on `Copy`/clipboard) | Recorded |
-| 6 | `expect` the new row appears in the Users list with status "invite pending" | Present |
+| 5 | `capture` the invite URL as evidence (read the copy field; do not rely on `Copy`/clipboard) | Recorded |
+| 6 | `expect` the new row appears in the People list with status "Invite pending" | Present |
 | 7 | `note` every other row in the list — never click `Disable`, `Enable`, `New invite link`, or `Reset password link` on a user this run did not create | Observed only |
 | 8 | In a **fresh incognito context**, `navigate` to the captured invite URL | `/accept-invite` loads |
 | 9 | `expect` a brief "Checking this link…" loading state, then heading "Choose your password" and text "Setting the password for **qa-<run-id>@example.invalid**." | Renders within 5s |
@@ -129,18 +128,21 @@ A dead-link page that still renders the password form, or that reveals *why* a t
 (expired vs. spent vs. never valid), is a P1 — the product deliberately collapses all three into
 one message so a link holder can't learn anything from the failure shape.
 
-## S6 — `/settings/security`: password-change validation, never completion
+## S6 — `/settings/auth`: password validation and API-token lifecycle
 
 Signed-in tab (the operator's real session). **This is the highest-risk scenario in the
 playbook — read it fully before running it.**
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /settings/security` | Heading "Security"; description "Change your password. The current one is required to set a new one."; fields `current password`, `new password`, `confirm new password`; button `Change password` (disabled while any field is empty) | Renders within 5s |
-| 2 | `type` any value into `current password`, and **mismatched** values into `new password` / `confirm new password`, `click` `Change password` | Inline alert "passwords do not match" — client-side, no API call |
-| 3 | `type` a value into `current password` that is **not** the operator's real password (e.g. `qa-<run-id>-wrong-current`), and a matching pair into `new password` / `confirm new password`, `click` `Change password` | `wait-until` settled (max 10s) — alert "current password is incorrect" (401); no session rotation, no state change |
-| 4 | `expect` the 401 on `/api/v1/auth/change-password` is the only new network entry and is not flagged (this step declares it) | Expected |
-| 5 | `capture` screenshot, console delta, failed requests | — |
+| 1 | `navigate /settings/auth` | Heading "Auth"; panels "Password" and "API tokens" render; fields `Current password`, `New password`, `Confirm new password`; button `Change password` (disabled while any field is empty) | Renders within 5s |
+| 2 | `type` any value into `Current password`, and **mismatched** values into `New password` / `Confirm new password`, `click` `Change password` | Inline alert "These do not match." — client-side, no API call |
+| 3 | `type` a value into `Current password` that is **not** the operator's real password (e.g. `qa-<run-id>-wrong-current`), and a matching pair into `New password` / `Confirm new password`, `click` `Change password` | `wait-until` settled (max 10s) — alert "current password is incorrect" (401); no session rotation, no state change |
+| 4 | `expect` the 401 on `/api/v1/auth/change-password` is expected and not flagged (this step declares it) | Expected |
+| 5 | Type `qa-<run-id>-token` into `New token name`, `click` `Create` | A copy-once panel appears: `Copy “qa-<run-id>-token” now`; the full token is visible only there |
+| 6 | `expect` the token list row shows only the token prefix and created date, never the full token | Secret material is not redisplayed |
+| 7 | `click` `Revoke` on the QA token row | Row is removed; no pre-existing token is touched |
+| 8 | `capture` screenshot, console delta, failed requests | — |
 
 **Never** type the operator's actual current password into this form, and never submit a valid
 current-password + new-password pair — that call succeeds, rotates the session (still valid, per
@@ -158,22 +160,22 @@ regression, not a UI quirk.
 | --- | --- | --- |
 | 1 | On `/login` (incognito), Tab from the top of the page | Order: `email` → `password` → `Sign in`, each with a visible focus ring |
 | 2 | On `/accept-invite` with a dead token (S5), Tab through the page | Focus reaches nothing interactive beyond the alert — no phantom tab stop into a hidden form |
-| 3 | On `/settings/security`, Tab through the form | Order: `current password` → `new password` → `confirm new password` → `Change password`, each focus-visible |
-| 4 | `expect` exactly one `h1` on each page visited this run, and no skipped heading level | `tulipfarm` (login), `Choose your password` (accept-invite), `Security` (settings) |
-| 5 | If S4 ran (admin), Tab through the `/admin/users` invite form and the invite-panel `Copy`/`Dismiss` buttons | Both reachable, both labeled by their visible text — not icon-only |
+| 3 | On `/settings/auth`, Tab through the form | Order: `Current password` → `New password` → `Confirm new password` → `Change password` → `New token name` → `Create` → token row actions, each focus-visible |
+| 4 | `expect` exactly one `h1` on each page visited this run, and no skipped heading level | `tulipfarm` (login), `Choose your password` (accept-invite), `Auth` (settings) |
+| 5 | If S4 ran (admin), Tab through the `/business/people` invite form and the invite-panel `Copy`/`Dismiss` buttons | Both reachable, both labeled by their visible text — not icon-only |
 
 ## S8 — Both themes
 
 Standalone auth pages (`/login`, `/setup`, `/accept-invite`) render outside the app shell and carry
 no theme-toggle control of their own — they only inherit whatever theme is already active for that
-browser context. `/settings/security` is the one route in scope with a working toggle
+browser context. `/settings/auth` is the one route in scope with a working toggle
 (`Toggle dark mode`, in the signed-in app shell).
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Record the current theme on `/settings/security` before touching it | Baseline noted |
+| 1 | Record the current theme on `/settings/auth` before touching it | Baseline noted |
 | 2 | `click` `Toggle dark mode` | Theme flips; persists across a reload |
-| 3 | `expect` all text on `/settings/security` (labels, alert, status message) is legible in the new theme | Legible, no invisible-on-background text |
+| 3 | `expect` all text on `/settings/auth` (labels, alert, status message) is legible in the new theme | Legible, no invisible-on-background text |
 | 4 | `click` `Toggle dark mode` again to restore the recorded baseline | Restored — this is a persisted preference on the operator's real session, so it must not be left flipped |
 | 5 | `note` whatever theme `/login`, `/setup`, and `/accept-invite` happened to render in during S1–S5 (from the incognito context's default) and confirm text was legible there too — no forced toggle is possible on those pages | Recorded |
 
@@ -193,15 +195,10 @@ browser context. `/settings/security` is the one route in scope with a working t
   with known credentials exists (or is created and finished manually, outside this playbook), the
   runner can extend S1 to actually submit a crafted `redirectTo=//evil.com` and confirm the landing
   page is `/`, not `evil.com`. Until then this is a code-reviewed guarantee, not a QA-verified one.
-- **`/settings/security` has no session list or API token management UI.** The task brief this
-  playbook was written against expected "sessions, API tokens" on this page; the actual route
-  (`apps/web/app/routes/_app.settings.security.tsx`) renders only the password-change form. The API
-  fully supports both (`apps/api/src/auth/routes/tokens.ts`, `apps/api/src/auth/routes/session.ts`,
-  also referenced in the repo's curl examples), but there is no product surface to drive them from
-  — per this repo's testing rule, that is a product gap to report, not something to verify with
-  `curl`. If a session/token UI ships later, extend S6 rather than adding a new scenario, and add
-  the routes to this file's frontmatter.
-- Invite creation (S4) lives on `/admin/users`, which belongs to the (not-yet-written) Admin & RBAC
-  playbook. Auth borrows it only as a fixture source and only touches the one row it creates.
+- **`/settings/auth` now has a real API-token UI.** S6 creates one QA token, verifies the copy-once
+  value is not redisplayed in the list, and revokes it immediately. The page still has no session
+  list, so do not invent a session-management step or verify sessions with `curl`.
+- Invite creation (S4) lives on `/business/people`, which belongs to the Admin & RBAC playbook.
+  Auth borrows it only as a fixture source and only touches the one row it creates.
 - If the signed-in session is not an admin, S4 skips with a `note`; every other scenario still runs
   — S5 in particular needs no fixture at all.

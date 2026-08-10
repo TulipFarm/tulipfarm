@@ -15,7 +15,7 @@ assistant writes the Soul artifacts underneath.
 Git makes the system definition readable, diffable, portable, and recoverable. A new Agent or
 Resource type is a committed change. A remote turns the definition store into a backup. Operators
 can inspect history with ordinary git tooling, while everyday users keep working through chat and
-Settings.
+business settings.
 
 ## What lives there
 
@@ -52,12 +52,12 @@ happened and what the business knows.
 
 Soul writes commit immediately and reconcile live. When a tool such as `create_resource_type` writes
 `resources/{name}/schema.yml`, the API reloads the Soul and reconciles the datastore without a
-restart. Guardrails, LLM config, Routines, Resource types, and other registries reload from the same
-`soul.synced` path.
+restart. Guardrails, model configuration, Routines, Resource types, and other registries reload from
+the same `soul.synced` path.
 
-Git backup can be configured during setup or later in Settings. Setting the remote through the UI
-syncs immediately. A manual `POST /api/v1/soul/reload` exists for dev-friendly remote-less Souls
-when hand-edited files need to be re-read.
+Git backup can be configured during setup or later in **Operate → Business → Soul**. Setting the
+remote through the UI syncs immediately. A manual `POST /api/v1/soul/reload` exists for
+dev-friendly remote-less Souls when hand-edited files need to be re-read.
 
 ## Governance boundary
 

@@ -5,6 +5,8 @@ export type { UserStatus };
 export type UserSummary = {
   id: string;
   email: string;
+  // Null until the person sets one in their own profile — admins cannot name someone else.
+  name: string | null;
   role: "admin" | "member";
   status: UserStatus;
 };

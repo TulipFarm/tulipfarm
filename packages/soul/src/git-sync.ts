@@ -120,7 +120,7 @@ export class GitSyncService extends EventEmitter {
     await this.syncWithRemote();
   }
 
-  /** Manual, user-triggered sync (Settings → Soul "Sync now"). Throws on failure — same
+  /** Manual, user-triggered sync (Business → Soul "Sync now"). Throws on failure — same
    * contract as `bootSync`/`configureRemote` — so the route can surface the error. */
   async syncNow(): Promise<void> {
     if (!this.remoteUrl) {
@@ -207,7 +207,7 @@ export class GitSyncService extends EventEmitter {
     await this.bootSync();
   }
 
-  /** Read-only sync status for display (Settings → Soul). Never throws — a fetch failure
+  /** Read-only sync status for display (Business → Soul). Never throws — a fetch failure
    * (offline, bad credential) degrades ahead/behind to 0, but is recorded as `lastSyncError` so
    * the UI can show it rather than silently reporting "up to date". */
   async getStatus(): Promise<{

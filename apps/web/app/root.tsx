@@ -11,6 +11,7 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import { NuqsAdapter } from "nuqs/adapters/remix";
 import { type ReactNode, useEffect } from "react";
+import { readThemePreference, resolveTheme } from "~/lib/theme";
 import "~/app.css";
 
 // Default document title + description; per-route meta overrides the title.
@@ -29,10 +30,10 @@ export const links = (): HtmlLinkDescriptor[] => [
 ];
 
 /*
- * Runs before hydration: reads the persisted theme (or system preference) and sets
- * [data-theme] on <html> so there is no flash of the wrong palette.
+ * Runs before hydration: resolves the stored preference ("system" or absent means follow the OS)
+ * and sets [data-theme] on <html> so there is no flash of the wrong palette.
  */
-const themeInit = `(function(){try{var t=localStorage.getItem("theme");if(!t){t=window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";}document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
+const themeInit = `(function(){try{var p=localStorage.getItem("theme");var t=(p==="light"||p==="dark")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
 
 function Document({ children }: { children: ReactNode }) {
   return (
@@ -60,14 +61,17 @@ export default function App() {
   // Re-assert the persisted theme after hydration: in SPA mode React reconciles <html> and can drop
   // the [data-theme] the pre-hydration script set, silently reverting dark mode on reload.
   useEffect(() => {
-    const stored = localStorage.getItem("theme");
-    const theme =
-      stored === "dark" || stored === "light"
-        ? stored
-        : window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light";
-    document.documentElement.setAttribute("data-theme", theme);
+    const apply = () =>
+      document.documentElement.setAttribute("data-theme", resolveTheme(readThemePreference()));
+    apply();
+
+    // Someone on "system" who flips their OS appearance expects the app to follow without a reload.
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onSystemChange = () => {
+      if (readThemePreference() === "system") apply();
+    };
+    media.addEventListener("change", onSystemChange);
+    return () => media.removeEventListener("change", onSystemChange);
   }, []);
 
   return (

@@ -8,7 +8,11 @@ export type {
   SoulCatalogueEntry,
   TemporalContext,
 } from "./assemble";
-export { assembleSystemPrompt, formatTemporalContext } from "./assemble";
+export {
+  assembleSystemPrompt,
+  formatTemporalContext,
+  MAX_CUSTOM_INSTRUCTIONS_CHARS,
+} from "./assemble";
 export type { GovernancePage } from "./governance";
 export { BLOCK_CHAR_CAP, buildGovernanceBlock, PER_DOC_CHAR_CAP } from "./governance";
 export type {

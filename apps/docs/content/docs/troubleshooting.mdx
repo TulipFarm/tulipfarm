@@ -110,7 +110,7 @@ docker compose up -d --force-recreate app
 <Accordion title="I forgot the admin password">
 
 There is no email-based reset in a fresh instance. Another admin can send an invite or
-manage the account from **Settings → Users**. If you are the only admin and locked out, the
+manage the account from **Operate → Business → People**. If you are the only admin and locked out, the
 recovery path is to restore from a backup — see
 [Back up and restore](/docs/guides/back-up-and-restore).
 
@@ -124,8 +124,8 @@ recovery path is to restore from a backup — see
 
 <Accordion title="[llm] no soul.yaml#llm config found — LLM features disabled">
 
-No model is configured, so no turn can run. Open **Settings → Secrets**, add a provider API
-key, then **Settings → LLM** and assign a model to each tier, so every effort preset resolves.
+No model is configured, so no turn can run. Open **Operate → Business → Secrets**, add a provider
+API key, then **Operate → Business → Models** and assign models behind the effort presets.
 
 Full walkthrough: [Configure LLM providers](/docs/guides/configure-llm-providers).
 
@@ -150,7 +150,7 @@ has already applied.
 
 <Accordion title="The model returns an authentication or quota error">
 
-The key stored in **Settings → Secrets** is rejected by the provider. Secret values are
+The key stored in **Operate → Business → Secrets** is rejected by the provider. Secret values are
 write-only once saved — you cannot read one back to check it, so replace it rather than
 inspect it.
 
@@ -165,7 +165,7 @@ on the same fault.
 
 Not an error. Without an embedding model, knowledge search falls back to lexical matching:
 results are still returned, they are just keyword-based rather than semantic. Configure an
-embedding model in **Settings → LLM** to enable vector search.
+embedding model in **Operate → Business → Models** to enable vector search.
 
 If you later change embedding model, the log will say the dimension changed and a full
 re-index is required — expect existing content to need re-indexing before semantic results

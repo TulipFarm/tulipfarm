@@ -17,7 +17,6 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
  */
 const ADMIN_ONLY_SURFACES: readonly { readonly type: string; readonly enforcedIn: string }[] = [
   { type: "secret", enforcedIn: "secrets/routes.ts" },
-  { type: "api_token", enforcedIn: "auth/routes/tokens.ts" },
   { type: "identity", enforcedIn: "identity/routes.ts" },
   { type: "observability", enforcedIn: "observability/routes.ts" },
   { type: "llm_config", enforcedIn: "soul/llm-config/routes.ts" },
@@ -25,6 +24,28 @@ const ADMIN_ONLY_SURFACES: readonly { readonly type: string; readonly enforcedIn
   { type: "kv_system", enforcedIn: "kv/routes.ts" },
   { type: "setup", enforcedIn: "setup/routes.ts" },
   { type: "operations", enforcedIn: "admin/runtime.ts" },
+];
+
+/**
+ * Surfaces a member owns for their own records, where only crossing to another user's needs an
+ * admin — `auth/routes/tokens.ts` gates on `role !== "admin" && token.userId !== actor._id`, not on
+ * role alone. Listing these alongside {@link ADMIN_ONLY_SURFACES} would tell a member their own
+ * API tokens are off limits while `/settings/auth` visibly lets them mint one.
+ *
+ * The deny is scoped by condition instead: `grantMatches` fails closed on scoped dimensions, so it
+ * skips a self-service request that carries no `subject` and that request falls through to the base
+ * allow, while a request naming another user's token is denied.
+ */
+const OWNER_SCOPED_SURFACES: readonly {
+  readonly type: string;
+  readonly conditions: Readonly<Record<string, string>>;
+  readonly enforcedIn: string;
+}[] = [
+  {
+    type: "api_token",
+    conditions: { subject: "other_user" },
+    enforcedIn: "auth/routes/tokens.ts",
+  },
 ];
 
 const ANY_ACTION_ANY_RESOURCE: AccessGrant = {
@@ -56,6 +77,14 @@ export const DEPLOYMENT_ROLES: readonly Role[] = [
       ...ADMIN_ONLY_SURFACES.map(
         (surface): AccessGrant => ({ action: "*", resourceType: surface.type, effect: "deny" })
       ),
+      ...OWNER_SCOPED_SURFACES.map(
+        (surface): AccessGrant => ({
+          action: "*",
+          resourceType: surface.type,
+          conditions: surface.conditions,
+          effect: "deny",
+        })
+      ),
     ],
   },
 ];
@@ -68,7 +97,14 @@ const ROLE_NAMES: Readonly<Record<string, string>> = {
 function grantLabel(grant: AccessGrant): string {
   const action = grant.action === "*" ? "any action" : grant.action;
   const resource = grant.resourceType === "*" ? "any resource" : grant.resourceType;
-  return `${grant.effect} ${action} on ${resource}`;
+  const scope = Object.entries(grant.conditions ?? {})
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+  // A scoped deny reads as a blanket one without its condition, which is how the Roles view came to
+  // tell members they could not touch their own API tokens.
+  return scope
+    ? `${grant.effect} ${action} on ${resource} when ${scope}`
+    : `${grant.effect} ${action} on ${resource}`;
 }
 
 function conditionLabels(grants: readonly AccessGrant[]): string[] {

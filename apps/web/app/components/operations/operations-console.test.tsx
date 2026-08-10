@@ -39,7 +39,7 @@ function renderConsole(consoleModel: OperationsModel, onCommand = vi.fn()) {
       path: "/",
       Component: () => <OperationsConsole model={consoleModel} onCommand={onCommand} />,
     },
-    { path: "/settings/activities", Component: () => null },
+    { path: "/business/activities", Component: () => null },
   ]);
   return render(<Stub initialEntries={["/"]} />);
 }
@@ -53,6 +53,10 @@ describe("OperationsConsole", () => {
     expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Audit and lineage events" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Event" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all activities" })).toHaveAttribute(
+      "href",
+      "/business/activities"
+    );
     expect(screen.getByText("Cancelled a stalled Run")).toBeInTheDocument();
     expect(screen.getByTitle("0f5a23e8-42d7-7556-88d4-b544f361718b")).toHaveTextContent("0f5a23e8");
     expect(screen.queryByText(/"component":/)).not.toBeInTheDocument();

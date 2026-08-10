@@ -1,17 +1,17 @@
 ---
 id: llm-fallback-resilience
-area: LLM Fallback Chain
+area: Models fallback chain
 suites: [smoke, full]
-routes: ["/settings/llm"]
-preconditions: [LLM provider configured]
-blast_radius: read-only inspection; validation checks only, never submits provider chain writes that break live LLM config
+routes: ["/business/models"]
+preconditions: [model provider configured]
+blast_radius: read-only inspection; validation checks only, never submits provider chain writes that break live model routing config
 est_minutes: 10
 smoke_scenarios: [S1]
 ---
 
-# LLM Fallback Chains & ModelProfile Resilience
+# Models Fallback Chains & ModelProfile Resilience
 
-The LLM Resilience surface (`/settings/llm`, backed by `@tulipfarm/llm` and `@tulipfarm/agent-runtime`) manages ModelProfile resolution, tiered fallback chains (OpenAI, Anthropic, Gemini, Ollama), rate limit handling, effort preset mapping (`Auto`, `Fast`, `Balanced`, `Thorough`), and token cost receipts.
+The Models surface (`/business/models`, backed by `@tulipfarm/llm` and `@tulipfarm/agent-runtime`) manages ModelProfile resolution, fallback chains by effort preset, rate limit handling, effort preset mapping (`Auto`, `Fast`, `Balanced`, `Thorough`), and token cost receipts.
 
 Every scenario stands alone — a failure in one does not block the next.
 
@@ -19,21 +19,21 @@ Every scenario stands alone — a failure in one does not block the next.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /settings/llm` | Page loads within 5s; heading `LLM` |
-| 2 | `expect` configured providers list (e.g. Anthropic, OpenAI, Gemini, Ollama) | Providers rendered |
-| 3 | `expect` for each provider row, API key ref displays short reference name (e.g. `anthropic-api-key`), **never a raw secret string** | Secret masking holds |
-| 4 | `expect` Effort Presets section renders four ModelProfile targets (`Auto default`, `Fast`, `Balanced`, `Thorough`) | Effort presets rendered |
-| 5 | `expect` spec badges (cost per 1k tokens, context window size, modalities supported) render per preset | Model specs present |
+| 1 | `navigate /business/models` | Page loads within 5s; heading `Models` |
+| 2 | `expect` configured fallback rows by provider (e.g. Anthropic, OpenAI, Gemini, Ollama) | Providers rendered |
+| 3 | `expect` for each fallback row and its `Connection overrides`, API key references are short names (e.g. `anthropic-api-key`), **never a raw secret string** | Secret masking holds |
+| 4 | `expect` "What each effort means" section renders four effort preset targets (`Auto resolves to`, `Fast`, `Balanced`, `Thorough`) | Effort presets rendered |
+| 5 | `expect` pricing/limit facts (cost per Mtok, context window size, tool/vision capability) render per row when pinned | Model specs present |
 | 6 | `capture` screenshot, console delta, failed requests | — |
 
-## S2 — Tiered fallback chain ordering and validation
+## S2 — Fallback chain ordering and validation
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Inspect **Provider Chains** section (Fast / Balanced / Thorough fieldsets) | Shows ordered list of primary and secondary fallback providers |
-| 2 | `click` `+ Add provider to fallback chain` on one fieldset | New empty row appears with `provider` select and `model` text field |
-| 3 | Leave `model` field empty and `click` `Save` | Inline validation error surfaces; no network write fired |
-| 4 | `click` `Remove` on the temporary row to cancel out | Form returns to original state; no write committed |
+| 1 | Inspect fallback chain panels (Fast / Balanced / Thorough) | Shows ordered list of primary and secondary fallback providers |
+| 2 | `click` `Add fallback` on one effort panel | A `Model` sheet opens with fields `Provider`, `Model ID`, `Pricing and limits`, and optional `Connection overrides` |
+| 3 | Leave `Model ID` empty, close the sheet, and `click` `Save changes` | Inline validation error surfaces; no network write fired |
+| 4 | `click` the temporary row's remove button to cancel out | Form returns to original state; no write committed |
 | 5 | `expect` live provider chain configuration remains completely untouched | Live config preserved |
 | 6 | `capture` screenshot, console delta, failed requests | — |
 
@@ -51,12 +51,12 @@ Every scenario stands alone — a failure in one does not block the next.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Tab through provider list, effort selectors, and fallback chain controls | Focus rings visible on all elements |
+| 1 | Tab through effort panels, `Add fallback`, the Model sheet fields, effort selectors, and fallback chain controls | Focus rings visible on all elements |
 | 2 | Toggle between Light and Dark themes | Provider badges, spec labels, and model receipt cards remain legible |
 | 3 | Resize viewport to 375px mobile width | Provider cards stack; chain lists scroll cleanly without body overflow |
 | 4 | `capture` screenshot, console delta, failed requests | — |
 
 ## Notes for the runner
 
-- Do not submit modified provider chains on `/settings/llm` during QA runs to prevent breaking live LLM routing.
+- Do not submit modified provider chains on `/business/models` during QA runs to prevent breaking live model routing.
 - Confirm raw secret values are masked on all provider rows.

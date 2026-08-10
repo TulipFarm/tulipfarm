@@ -5,7 +5,7 @@ description: Add provider credentials, assign models behind each effort preset, 
 
 This guide configures the model providers TulipFarm uses for chat, Agents, Skills, and
 Routines. This is one of the few setup tasks that is UI-first instead of prompt-first:
-provider secrets and model assignments are managed by admins in **Settings**. For how a request
+provider secrets and model assignments are managed by admins in **Operate**. For how a request
 becomes a model, see [Model routing](/docs/concepts/llm).
 
 ## Outcome
@@ -15,7 +15,7 @@ reload the model service without restarting the app.
 
 <Steps>
   <Step>
-    Open **Settings → Secrets**.
+    Open **Operate → Business → Secrets**.
   </Step>
   <Step>
     Under **Configure a provider**, choose one of the four shipped provider ids:
@@ -36,16 +36,14 @@ reload the model service without restarting the app.
     on the provider form.
   </Step>
   <Step>
-    Open **Settings → LLM**. Each tier — `quick`, `standard`, and `complex` — is an
-    ordered fallback chain. Add one or more provider rows to each tier.
+    Open **Operate → Business → Models**. The page has three ordered fallback chains:
+    **Fast**, **Balanced**, and **Thorough**. Add one or more provider rows to each chain.
 
-    These three tiers are what the `fast`, `balanced`, and `thorough` effort presets resolve to.
-    Tier is a retired term that survives here only as the authoring shape; nothing selects a model
-    by tier at runtime. See [Model routing](/docs/concepts/llm).
+    See [Model routing](/docs/concepts/llm) for how effort presets resolve to ModelProfiles.
   </Step>
   <Step>
     Pick a provider and model for each row. Models must resolve to priced,
-    chat-capable entries from the LiteLLM catalog. The settings page pins the resolved
+    chat-capable entries from the LiteLLM catalog. The Models page pins the resolved
     pricing, context window, and capability metadata into the Soul.
 
     Provider model ids are accepted as follows:
@@ -61,14 +59,13 @@ reload the model service without restarting the app.
     network error, or a 5xx response, falls through to the next row.
   </Step>
   <Step>
-    Optionally set the **effort preset** mapping. By default `fast`, `balanced`, and `thorough`
-    resolve to the like-named chains, and `auto` resolves to the declared default. Point a preset
-    at a different derived ModelProfile to change which configured chain participants get. A
-    preset naming a profile that does not exist is rejected on save rather than
-    failing later at the first turn that needs it.
+    In **What each effort means**, choose which derived ModelProfile each effort uses. **Auto
+    resolves to** is the default for a turn where nobody picks an effort; **Fast**, **Balanced**,
+    and **Thorough** control explicit choices. Pointing a preset at a profile that does not exist
+    is rejected on save rather than failing later at the first turn that needs it.
   </Step>
   <Step>
-    Choose **Save**. The settings page writes the `llm` block in `soul.yaml`, commits it,
+    Choose **Save changes**. The Models page writes the `llm` block in `soul.yaml`, commits it,
     and reloads the LLM service live.
   </Step>
 </Steps>

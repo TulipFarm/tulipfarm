@@ -163,3 +163,70 @@ export async function putSecret(key: string, value: string): Promise<void> {
 export async function deleteSecret(key: string): Promise<void> {
   await apiDelete(`/api/v1/secrets/${encodeURIComponent(key)}`);
 }
+
+/* ---------------------------------------------------------------------------------------------
+ * Personal access tokens
+ *
+ * The backend has carried these since the auth module landed; nothing in the product ever called
+ * them. `token` comes back exactly once, on create.
+ * ------------------------------------------------------------------------------------------- */
+
+export type ApiToken = {
+  id: string;
+  userId: string;
+  name: string;
+  // The leading characters of the raw token. The only part the server can still show, and enough
+  // to tell two tokens apart when revoking one.
+  prefix: string;
+  createdAt: string;
+};
+
+export async function listApiTokens(): Promise<ApiToken[]> {
+  return (await apiGet<{ tokens: ApiToken[]; nextCursor: string | null }>("/api/v1/auth/tokens"))
+    .tokens;
+}
+
+export async function createApiToken(name: string): Promise<ApiToken & { token: string }> {
+  return apiWrite<ApiToken & { token: string }>("POST", "/api/v1/auth/tokens", { name });
+}
+
+export async function revokeApiToken(id: string): Promise<void> {
+  await apiDelete(`/api/v1/auth/tokens/${encodeURIComponent(id)}`);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Custom instructions — standing guidance prepended to every agent turn for this user.
+ * ------------------------------------------------------------------------------------------- */
+
+export const MAX_CUSTOM_INSTRUCTIONS_CHARS = 4_000;
+
+export async function getCustomInstructions(): Promise<string> {
+  return (await apiGet<{ instructions: string }>("/api/v1/preferences/custom-instructions"))
+    .instructions;
+}
+
+export async function putCustomInstructions(instructions: string): Promise<string> {
+  return (
+    await apiWrite<{ instructions: string }>("PUT", "/api/v1/preferences/custom-instructions", {
+      instructions,
+    })
+  ).instructions;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Business profile — the identity block in soul.yaml, previously writable only during setup.
+ * ------------------------------------------------------------------------------------------- */
+
+export type BusinessProfile = {
+  name: string;
+  description: string;
+  website: string;
+};
+
+export async function getBusinessProfile(): Promise<BusinessProfile> {
+  return apiGet<BusinessProfile>("/api/v1/business");
+}
+
+export async function putBusinessProfile(profile: BusinessProfile): Promise<BusinessProfile> {
+  return apiWrite<BusinessProfile>("PUT", "/api/v1/business", profile);
+}

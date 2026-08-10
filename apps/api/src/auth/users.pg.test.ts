@@ -10,6 +10,7 @@ function makeUser(overrides: Partial<UserDoc> = {}): UserDoc {
     _id: randomUUID(),
     email: `u-${randomUUID().slice(0, 8)}@example.com`,
     passwordHash: "hash",
+    name: null,
     role: "member",
     status: "active" as const,
     createdAt: new Date(),

@@ -5,8 +5,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import * as apiLib from "~/lib/api";
 import { ApiError } from "~/lib/api";
 import * as usersLib from "~/lib/users";
-import UsersAdminRoute from "./_app.admin.users";
-import SecuritySettings from "./_app.settings.security";
+import PeopleRoute from "./_app.business.people";
+import AuthSettings from "./_app.settings.auth";
 import AcceptInvite from "./accept-invite";
 
 /*
@@ -35,6 +35,11 @@ vi.mock("~/lib/api", async () => {
   };
 });
 vi.mock("~/lib/clipboard", () => ({ copyText: vi.fn().mockResolvedValue(true) }));
+// The Auth page also lists API tokens; stub that fetch so it cannot colour the password assertions.
+vi.mock("~/lib/settings", async () => {
+  const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
+  return { ...actual, listApiTokens: vi.fn().mockResolvedValue([]) };
+});
 
 const listUsers = vi.mocked(usersLib.listUsers);
 const createUser = vi.mocked(usersLib.createUser);
@@ -54,6 +59,7 @@ function user(overrides: Partial<usersLib.UserSummary> = {}): usersLib.UserSumma
   return {
     id: "u1",
     email: "member@example.com",
+    name: null,
     role: "member",
     status: "active",
     ...overrides,
@@ -63,12 +69,12 @@ function user(overrides: Partial<usersLib.UserSummary> = {}): usersLib.UserSumma
 function renderAdmin() {
   const Stub = createRemixStub([
     {
-      path: "/admin/users",
-      Component: UsersAdminRoute,
+      path: "/business/people",
+      Component: PeopleRoute,
       loader: async () => ({ users: await listUsers() }),
     },
   ]);
-  return render(<Stub initialEntries={["/admin/users"]} />);
+  return render(<Stub initialEntries={["/business/people"]} />);
 }
 
 test("inviting a user shows a copyable link carrying the token in the fragment", async () => {
@@ -79,8 +85,8 @@ test("inviting a user shows a copyable link carrying the token in the fragment",
   });
 
   renderAdmin();
-  await userEvent.type(await screen.findByLabelText("email"), "new@example.com");
-  await userEvent.click(screen.getByRole("button", { name: "Invite user" }));
+  await userEvent.type(await screen.findByLabelText("Email"), "new@example.com");
+  await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
 
   const link = await screen.findByText(/\/accept-invite#token=tok-123$/);
   expect(link).toBeTruthy();
@@ -95,7 +101,7 @@ test("an invited user offers a new link and an active one offers a reset link", 
   ]);
 
   renderAdmin();
-  expect(await screen.findByText("invite pending")).toBeTruthy();
+  expect(await screen.findByText("Invite pending")).toBeTruthy();
   expect(screen.getByRole("button", { name: "New invite link" })).toBeTruthy();
   expect(screen.getByRole("button", { name: "Reset password link" })).toBeTruthy();
 });
@@ -115,7 +121,7 @@ test("a disabled user offers no invite link", async () => {
   listUsers.mockResolvedValue([user({ status: "disabled" })]);
 
   renderAdmin();
-  expect(await screen.findByText("disabled")).toBeTruthy();
+  expect(await screen.findByText("Disabled")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "New invite link" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Reset password link" })).toBeNull();
   expect(screen.getByRole("button", { name: "Enable" })).toBeTruthy();
@@ -132,6 +138,7 @@ test("accepting an invite reads the token from the fragment and sets the passwor
   acceptInvite.mockResolvedValue({
     id: "u1",
     email: "new@example.com",
+    name: null,
     role: "member",
     status: "active",
   });
@@ -179,14 +186,15 @@ test("changing a password sends the current one alongside the new", async () => 
   changePassword.mockResolvedValue({
     id: "u1",
     email: "member@example.com",
+    name: null,
     role: "member",
     status: "active",
   });
 
-  render(<SecuritySettings />);
-  await userEvent.type(screen.getByLabelText("current password"), "current-password");
-  await userEvent.type(screen.getByLabelText("new password"), "new-strong-password");
-  await userEvent.type(screen.getByLabelText("confirm new password"), "new-strong-password");
+  render(<AuthSettings />);
+  await userEvent.type(screen.getByLabelText("Current password"), "current-password");
+  await userEvent.type(screen.getByLabelText("New password"), "new-strong-password");
+  await userEvent.type(screen.getByLabelText("Confirm new password"), "new-strong-password");
   await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
   await waitFor(() =>
@@ -198,10 +206,10 @@ test("changing a password sends the current one alongside the new", async () => 
 test("a rejected current password surfaces the API error", async () => {
   changePassword.mockRejectedValue(new ApiError(401, "current password is incorrect"));
 
-  render(<SecuritySettings />);
-  await userEvent.type(screen.getByLabelText("current password"), "wrong");
-  await userEvent.type(screen.getByLabelText("new password"), "new-strong-password");
-  await userEvent.type(screen.getByLabelText("confirm new password"), "new-strong-password");
+  render(<AuthSettings />);
+  await userEvent.type(screen.getByLabelText("Current password"), "wrong");
+  await userEvent.type(screen.getByLabelText("New password"), "new-strong-password");
+  await userEvent.type(screen.getByLabelText("Confirm new password"), "new-strong-password");
   await userEvent.click(screen.getByRole("button", { name: "Change password" }));
 
   expect(await screen.findByRole("alert")).toHaveTextContent("current password is incorrect");

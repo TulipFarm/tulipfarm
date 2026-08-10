@@ -2,7 +2,7 @@
 id: a11y-console-hygiene
 area: A11y & hygiene
 suites: [smoke, full]
-routes: ["/", "/chats", "/resources", "/agents", "/skills", "/routines", "/knowledge", "/integrations", "/inbox", "/runs", "/operations", "/settings", "/admin/users", "/admin/roles", "/admin/guardrails", "/design-guide"]
+routes: ["/", "/chats", "/resources", "/agents", "/skills", "/routines", "/knowledge", "/integrations", "/inbox", "/runs", "/operations", "/settings", "/business/profile", "/business/people", "/business/guardrails", "/design-guide"]
 preconditions: [preflight baseline captured]
 blast_radius: none — read-only sweep
 est_minutes: 12
@@ -22,7 +22,7 @@ Every scenario stands alone — a failure in one does not block the next.
 | 1 | `navigate /` | Page loads |
 | 2 | Press `Tab` continuously across main interactive elements | Tab order matches visual reading order (top to bottom, left to right) |
 | 3 | `expect` every focused element displays a distinct, high-contrast `:focus-visible` focus indicator ring | Focus indicator clearly visible |
-| 4 | Open any modal dialog or slide-over sheet (e.g. Command Palette `Cmd+K` or Settings modal) | Dialog opens |
+| 4 | Open any modal dialog or slide-over sheet (e.g. Command Palette `Cmd+K` or Settings or Operate sheet) | Dialog opens |
 | 5 | Press `Tab` inside the open modal | Focus traps inside the modal; cannot tab out to background controls |
 | 6 | Press `Escape` | Modal closes; focus returns to the exact trigger element |
 | 7 | Inspect off-canvas panels/sheets when hidden | Uses `inert` attribute rather than `aria-hidden` when hidden from view |
@@ -30,7 +30,7 @@ Every scenario stands alone — a failure in one does not block the next.
 
 ## S2 — Screen reader ARIA and semantic HTML audit
 
-Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/settings`, `/design-guide`).
+Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/settings`, `/business/profile`, `/design-guide`).
 
 | # | Action | Expected |
 | --- | --- | --- |
@@ -57,7 +57,7 @@ Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`
 | # | Action | Expected |
 | --- | --- | --- |
 | 1 | Resize browser window to 375px width (mobile viewport) | Layout adapts to mobile view |
-| 2 | `navigate` `/`, `/chats`, `/resources`, `/knowledge`, `/inbox`, `/settings` | Each page renders cleanly |
+| 2 | `navigate` `/`, `/chats`, `/resources`, `/knowledge`, `/inbox`, `/settings`, `/business/profile` | Each page renders cleanly |
 | 3 | `expect` no horizontal scrollbar on the `window` or main document body (no clipped content or layout overflow) | 0px horizontal document overflow |
 | 4 | `expect` main navigation collapses to a responsive drawer/hamburger or mobile rail | Mobile navigation accessible |
 | 5 | Resize browser window to 768px width (tablet viewport) | Tablet layout adapts smoothly |
@@ -68,7 +68,7 @@ Sweep across top-level routes (`/`, `/chats`, `/resources`, `/agents`, `/skills`
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/runs`, `/operations`, `/settings`, `/admin/users`, `/admin/roles`, `/admin/guardrails`, `/design-guide` | All routes loaded |
+| 1 | Sequentially visit all top-level routes: `/`, `/chats`, `/resources`, `/agents`, `/skills`, `/routines`, `/knowledge`, `/integrations`, `/inbox`, `/runs`, `/operations`, `/settings`, `/business/profile`, `/business/people`, `/business/guardrails`, `/design-guide` | All routes loaded |
 | 2 | Compare all console messages against `evidence/console-baseline.txt` recorded in Preflight | Zero new uncaught exceptions or error logs |
 | 3 | `expect` no React hydration mismatch warnings (`Hydration failed because...`) | Clean React hydration |
 | 4 | `expect` no unhandled promise rejections | Clean console |

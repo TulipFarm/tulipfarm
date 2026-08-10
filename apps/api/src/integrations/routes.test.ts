@@ -293,7 +293,7 @@ describe("integrations routes", () => {
       expect(names).toEqual([...names].sort());
     });
 
-    it("carries the brand mark of an integration whose manifest names one", async () => {
+    it("carries the brand mark and colour of an integration whose manifest names one", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/api/v1/integrations",
@@ -303,10 +303,17 @@ describe("integrations routes", () => {
       const byName = new Map(
         res.json().integrations.map((entry: { name: string }) => [entry.name, entry])
       );
-      expect(byName.get("github")).toMatchObject({ iconPath: expect.stringMatching(/^M/) });
+      expect(byName.get("github")).toMatchObject({
+        iconPath: expect.stringMatching(/^M/),
+        // GitHub's own hex, unmodified. Making it legible on a dark canvas is the client's job.
+        iconColor: "181717",
+      });
       // Slack asked to be removed from Simple Icons, so it has no mark and the catalog must still
       // list it — the absence is projected as absence, not as an error or a placeholder path.
       expect(byName.get("slack")).not.toHaveProperty("iconPath");
+      // ...but it still carries a colour, from the registry. One grey row among coloured logos
+      // reads as a broken image rather than as a brand without a mark.
+      expect(byName.get("slack")).toMatchObject({ iconColor: "4A154B" });
     });
 
     it("reflects GitHub App install status from IntegrationStore, not soul connection.yaml", async () => {
@@ -344,6 +351,7 @@ describe("integrations routes", () => {
       expect(await detail("github")).toMatchObject({
         title: "GitHub",
         iconPath: expect.stringMatching(/^M/),
+        iconColor: "181717",
       });
     });
 
