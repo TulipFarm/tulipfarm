@@ -24,6 +24,7 @@ jobs:
   prepare:
     name: Open release PR
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
       RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

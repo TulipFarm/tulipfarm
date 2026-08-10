@@ -61,9 +61,9 @@ test ! -f "${TEST_DIR}/.env"
 compose up -d --wait --wait-timeout 180 --pull missing
 
 log "asserting /readyz and /livez on :${PORT}…"
-curl -fsS --retry 5 --retry-connrefused --retry-delay 3 \
+curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 3 \
   "http://localhost:${PORT}/readyz" >/dev/null
-curl -fsS "http://localhost:${PORT}/livez" >/dev/null
+curl -fsS --max-time 15 "http://localhost:${PORT}/livez" >/dev/null
 
 # The worker publishes no port — reach its probes from inside its own container. The `--wait`
 # above already gated on its healthcheck; asserting it here names the failure when the worker is
@@ -71,7 +71,7 @@ curl -fsS "http://localhost:${PORT}/livez" >/dev/null
 log "asserting the worker booted and reports ready…"
 [ "$(compose ps -q worker | wc -l)" -eq 1 ] || fail "the worker service is not running"
 compose exec -T worker node -e \
-  "fetch('http://localhost:4020/readyz').then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})" \
+  "fetch('http://localhost:4020/readyz', { signal: AbortSignal.timeout(10000) }).then(async r=>{console.log(await r.text());process.exit(r.ok?0:1)})" \
   || fail "the worker did not report ready"
 
 # A worker that boots but holds no credential answers nothing, and says so only at the first
@@ -110,7 +110,7 @@ EOF
 compose up -d --wait --wait-timeout 180 --pull missing
 
 log "asserting /health and environment-supplied secret behavior…"
-curl -fsS --retry 5 --retry-connrefused --retry-delay 3 \
+curl -fsS --max-time 15 --retry 5 --retry-connrefused --retry-delay 3 \
   "http://localhost:${PORT}/health" >/dev/null
 compose exec -T app sh -c '! test -f /data/secrets.env' \
   || fail "configured boot wrote /data/secrets.env"
