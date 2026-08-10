@@ -132,26 +132,33 @@ export class SlackHttpKnowledgeApi implements SlackKnowledgeApiPort {
     readonly messages: readonly SlackKnowledgeMessage[];
     readonly nextCursor?: string;
   }> {
-    const raw = await collectPages<SlackHistoryMessage>(
-      async (cursor) => {
-        const page = await this.call<{
-          messages: SlackHistoryMessage[];
-          has_more?: boolean;
-          response_metadata?: { next_cursor?: string };
-        }>("conversations.history", {
-          channel: input.channelId,
-          limit: "200",
-          ...(input.cursor === undefined ? {} : { oldest: input.cursor }),
-          ...(cursor === undefined ? {} : { cursor }),
-        });
-        const nextCursor = page.has_more ? page.response_metadata?.next_cursor : undefined;
-        return {
-          items: page.messages,
-          ...(nextCursor ? { nextCursor } : {}),
-        };
-      },
-      { maxPages: 25, maxItems: 5000 }
-    );
+    // Bounded batch, not an all-or-nothing read: unlike listChannels/listMembers (where an
+    // incomplete answer would be actively wrong), history is consumed through a durable
+    // per-channel checkpoint (`syncChannel` in sync.ts). Stopping early after `maxPages`/
+    // `maxItems` and returning what was gathered lets that checkpoint advance so the next sync
+    // run resumes from where this one stopped, rather than the whole channel wedging forever on
+    // `PaginationBoundError` for having more backlog than one run can fetch (a channel with a
+    // large history would otherwise re-request the same unbounded range and fail every 15
+    // minutes indefinitely).
+    const bounds = { maxPages: 25, maxItems: 5000 };
+    const raw: SlackHistoryMessage[] = [];
+    let pageCursor: string | undefined;
+    for (let page = 0; page < bounds.maxPages && raw.length < bounds.maxItems; page += 1) {
+      const body = await this.call<{
+        messages: SlackHistoryMessage[];
+        has_more?: boolean;
+        response_metadata?: { next_cursor?: string };
+      }>("conversations.history", {
+        channel: input.channelId,
+        limit: "200",
+        ...(input.cursor === undefined ? {} : { oldest: input.cursor }),
+        ...(pageCursor === undefined ? {} : { cursor: pageCursor }),
+      });
+      raw.push(...body.messages);
+      const nextSlackCursor = body.has_more ? body.response_metadata?.next_cursor : undefined;
+      if (nextSlackCursor === undefined) break;
+      pageCursor = nextSlackCursor;
+    }
 
     const messages = raw
       .filter((message): message is SlackHistoryMessage & { user: string; text: string } =>
