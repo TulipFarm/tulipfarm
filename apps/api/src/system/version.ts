@@ -6,10 +6,14 @@
 declare const __TULIPFARM_VERSION__: string | undefined;
 
 export function runningVersion(): string {
+  const envVer = process.env.TULIPFARM_VERSION;
+  if (typeof envVer === "string" && envVer.length > 0 && envVer !== "latest") {
+    return envVer;
+  }
   if (typeof __TULIPFARM_VERSION__ === "string" && __TULIPFARM_VERSION__.length > 0) {
     return __TULIPFARM_VERSION__;
   }
-  return process.env.TULIPFARM_VERSION ?? "dev";
+  return envVer ?? "dev";
 }
 
 /**
