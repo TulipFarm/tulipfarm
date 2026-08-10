@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.0](https://github.com/TulipFarm/tulipfarm/compare/v0.8.2...v0.9.0) (2026-08-10)
+
+### Features
+
+* **chat:** redesign tool calls as trace runs and persist them ([#354](https://github.com/TulipFarm/tulipfarm/issues/354)) ([bd329ae](https://github.com/TulipFarm/tulipfarm/commit/bd329aee10b3de1eab7fed5e4d0f0139fed959b8))
+* **integrations:** add github_issue_create and github_repository_create tools ([#355](https://github.com/TulipFarm/tulipfarm/issues/355)) ([4c20077](https://github.com/TulipFarm/tulipfarm/commit/4c20077dc749f8a970541f92aefa6a1d9f4f4925))
+* **observability:** show error logs and per-service resource usage in the UI ([#358](https://github.com/TulipFarm/tulipfarm/issues/358)) ([4012719](https://github.com/TulipFarm/tulipfarm/commit/401271909ba0a22dafb7e98310c961310f10aa77))
+* **web:** split personal settings from business configuration ([#357](https://github.com/TulipFarm/tulipfarm/issues/357)) ([b350bf3](https://github.com/TulipFarm/tulipfarm/commit/b350bf321d99a6e5b98fcca5cc7dada252c4894d))
+
+### Bug Fixes
+
+* **knowledge:** stop Slack history sync wedging on large channels, fix tool routing ([#356](https://github.com/TulipFarm/tulipfarm/issues/356)) ([1a51313](https://github.com/TulipFarm/tulipfarm/commit/1a51313ddc8fb28e41e92c58b1d2df158251ffad))
+
 ## [0.8.2](https://github.com/TulipFarm/tulipfarm/compare/v0.8.1...v0.8.2) (2026-08-10)
 
 ### Bug Fixes
