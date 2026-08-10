@@ -9,6 +9,7 @@ import swagger from "@fastify/swagger";
 import scalar from "@scalar/fastify-api-reference";
 import type { GuardrailsService } from "@tulipfarm/agent-runtime";
 import type { LlmService } from "@tulipfarm/llm";
+import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
@@ -71,6 +72,9 @@ import type { MemoryLifecycleService } from "./memory/lifecycle-service";
 import { registerMemoryRoutes } from "./memory/routes";
 import type { MemoryService } from "./memory/service";
 import type { ObservabilityConfig } from "./observability/config";
+import type { LogRepo } from "./observability/log-repo";
+import { createLogTeeStream } from "./observability/log-stream";
+import type { ResourceRepo } from "./observability/resource-repo";
 import { registerObservabilityRoutes } from "./observability/routes";
 import type { ObservabilityService } from "./observability/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
@@ -221,6 +225,15 @@ export interface AppOptions {
    * reports ok on process liveness alone.
    */
   readiness?: QueryableProbeTarget;
+  /**
+   * Tees `error`/`fatal` log records into `log_event` so the observability UI can show them.
+   * Absent (tests, partial assemblies) leaves logging on stdout exactly as it was.
+   */
+  logSink?: BatchingLogSink;
+  /** Backs `GET /api/v1/observability/logs`. Absent hides the route rather than serving an empty one. */
+  logRepo?: LogRepo;
+  /** Backs `GET /api/v1/observability/resources`. Absent hides the route for the same reason. */
+  resourceRepo?: ResourceRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
@@ -228,7 +241,13 @@ export async function buildApp(opts: AppOptions = {}) {
   // so `app.close()` frees the port immediately instead of hanging on an open EventSource.
   // maxParamLength: lift the find-my-way default (100) so path params like a memory `:key` (up to
   // MAX_KEY_CHARS=128) route instead of 404ing.
-  const app = Fastify({ logger: true, forceCloseConnections: true, maxParamLength: 512 });
+  const app = Fastify({
+    // A sink tees error/fatal records to Postgres while still writing every line to stdout, so
+    // enabling it never costs the operator output they had before.
+    logger: opts.logSink ? { stream: createLogTeeStream(opts.logSink) } : true,
+    forceCloseConnections: true,
+    maxParamLength: 512,
+  });
 
   // Single-image SPA serving: when the built web client is
   // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
@@ -514,7 +533,9 @@ export async function buildApp(opts: AppOptions = {}) {
         app,
         opts.observabilityService,
         requireAuth,
-        opts.observabilityConfig
+        opts.observabilityConfig,
+        opts.logRepo,
+        opts.resourceRepo
       );
     }
     if (opts.gitSync) {

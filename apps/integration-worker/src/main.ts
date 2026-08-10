@@ -1,3 +1,12 @@
+import { hostname } from "node:os";
+import {
+  BatchingLogSink,
+  describeError,
+  PgLogWriter,
+  PgResourceWriter,
+  processResourceProbe,
+  ResourceSampler,
+} from "@tulipfarm/observability";
 import { config as loadEnv } from "dotenv";
 import { createSlackChannelLoops, watchForSlackChannelCredential } from "./channels";
 import { loadConfig, REQUIRED_SCHEMA_VERSION } from "./config";
@@ -7,11 +16,27 @@ import { waitForSchemaFloor } from "./preflight";
 import { startProbeServer } from "./probe-server";
 import { type DrainableLoop, drain } from "./shutdown";
 
+/**
+ * Attached once the pool is up, since the sink writes through it. Until then — and whenever a write
+ * fails — records still reach stdout, so capture is strictly additive to the output that came before.
+ */
+let logSink: BatchingLogSink | null = null;
+
 const logger = {
   info: (message: string) => console.log(message),
   warn: (message: string) => console.warn(message),
-  error: (message: string, error?: unknown) =>
-    error === undefined ? console.error(message) : console.error(message, error),
+  error: (message: string, error?: unknown) => {
+    if (error === undefined) console.error(message);
+    else console.error(message, error);
+    if (!logSink) return;
+    const detail = error === undefined ? null : describeError(error);
+    logSink.capture({
+      level: "error",
+      // Both halves matter: the call site's message says what was attempted, the error what failed.
+      message: detail && detail.message !== message ? `${message}: ${detail.message}` : message,
+      stack: detail?.stack ?? null,
+    });
+  },
 };
 
 /**
@@ -69,6 +94,24 @@ export async function main(): Promise<void> {
     },
   });
 
+  // Deliberately not gated on REQUIRED_SCHEMA_VERSION. `log_event` arrives in migration 43, but a
+  // missing table only makes a flush fail into stderr — the records still reach stdout either way.
+  // Raising the floor for it would trade that graceful degradation for a refusal to boot, making
+  // telemetry load-bearing for work that does not depend on it.
+  logSink = new BatchingLogSink({
+    service: "integration-worker",
+    writer: new PgLogWriter(pool),
+  });
+  logSink.start();
+
+  const resourceSampler = new ResourceSampler({
+    service: "integration-worker",
+    instance: `${hostname()}:${process.pid}`,
+    probe: processResourceProbe(process),
+    writer: new PgResourceWriter(pool),
+  });
+  resourceSampler.start();
+
   let serving = true;
   const controller = new AbortController();
   const loops: DrainableLoop[] = [];
@@ -120,24 +163,36 @@ export async function main(): Promise<void> {
       timeoutMs: config.drainTimeoutMs,
     });
 
+    if (outcome.status !== "drained") {
+      logger.error(
+        `integration-worker drain timed out after ${config.drainTimeoutMs}ms; ` +
+          `loops still in flight: ${outcome.pending.join(", ")}.`
+      );
+    }
+
+    // Emitted above rather than after the drain below, because a timed-out drain is exactly the
+    // record an operator needs and the sink could not capture it once stopped. Both calls precede
+    // pool.end(): the sink writes through that pool.
+    await resourceSampler.stop();
+    await logSink?.stop();
     await pool.end();
 
     if (outcome.status === "drained") {
       logger.info("integration-worker drained cleanly");
       process.exit(0);
     }
-    logger.error(
-      `integration-worker drain timed out after ${config.drainTimeoutMs}ms; ` +
-        `loops still in flight: ${outcome.pending.join(", ")}.`
-    );
     process.exit(1);
   };
 
   for (const signalName of ["SIGTERM", "SIGINT"] as const) {
     process.on(signalName, () => {
-      shutdown(signalName).catch((error: unknown) => {
+      shutdown(signalName).catch(async (error: unknown) => {
         // A drain that cannot even run is an unsafe shutdown, and must not look like a clean one.
         logger.error("integration-worker shutdown failed", error);
+        // Best-effort: if the pool is already closed this degrades to stderr, which still beats
+        // dropping the record that explains why the process died.
+        await resourceSampler.stop();
+        await logSink?.stop();
         process.exit(1);
       });
     });

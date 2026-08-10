@@ -1,4 +1,10 @@
-import { OBS_RETENTION_MS, PgObservabilityPruner } from "@tulipfarm/observability";
+import {
+  OBS_RETENTION_MS,
+  PgLogPruner,
+  PgObservabilityPruner,
+  PgResourceSamplePruner,
+  RESOURCE_RETENTION_MS,
+} from "@tulipfarm/observability";
 import { type ConstructorOptions, PgBoss } from "pg-boss";
 import type { Queryable } from "./db";
 
@@ -26,12 +32,22 @@ export async function startJobConsumers(options: JobConsumerOptions): Promise<Pg
 
   const now = options.now ?? (() => new Date());
   const pruner = new PgObservabilityPruner(options.database);
+  const logPruner = new PgLogPruner(options.database);
+  const resourcePruner = new PgResourceSamplePruner(options.database);
   await boss.createQueue(OBS_PRUNE_QUEUE);
   await boss.work<ObservabilityPruneJob>(OBS_PRUNE_QUEUE, async (jobs) => {
     const configured = jobs[0]?.data.retentionMs;
     const retentionMs =
       typeof configured === "number" && configured > 0 ? configured : OBS_RETENTION_MS;
-    await pruner.deleteOlderThan(new Date(now().getTime() - retentionMs));
+    const cutoff = new Date(now().getTime() - retentionMs);
+    await pruner.deleteOlderThan(cutoff);
+    // Same window, same sweep: both spines are raw telemetry under one retention policy. Failing
+    // the job on a missing log_event would also strand obs_event, so the delete runs after it.
+    await logPruner.deleteOlderThan(cutoff);
+    // Samples get their own, shorter window. They arrive on a clock rather than on events, so the
+    // 90-day policy above would keep two orders of magnitude more rows than the 24h chart can show.
+    // The job override deliberately does not apply — it configures the event window, not this one.
+    await resourcePruner.deleteOlderThan(new Date(now().getTime() - RESOURCE_RETENTION_MS));
   });
 
   return boss;

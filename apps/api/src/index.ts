@@ -1,8 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { hostname } from "node:os";
 import { GuardrailsService } from "@tulipfarm/agent-runtime";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
+import {
+  BatchingLogSink,
+  PgResourceWriter,
+  processResourceProbe,
+  ResourceSampler,
+} from "@tulipfarm/observability";
 import {
   ArtifactService,
   DurableInvocationGateway,
@@ -126,9 +133,11 @@ import { MemoryRecallService } from "./memory/recall-service";
 import { MemoryService } from "./memory/service";
 import { parseObservabilityConfig } from "./observability/config";
 import { subscribeObservability } from "./observability/events";
+import { PgLogRepo } from "./observability/log-repo";
 import { OtlpMetricsExporter } from "./observability/metrics";
 import { registerObsPruneSchedule } from "./observability/prune-schedule";
 import { PgObsRepo } from "./observability/repo";
+import { PgResourceRepo } from "./observability/resource-repo";
 import { ObservabilityService } from "./observability/service";
 import { createObservabilityTelemetryPort } from "./observability/telemetry-port";
 import { OtlpTracesExporter } from "./observability/traces";
@@ -362,6 +371,20 @@ async function boot() {
     const surfaceArtifactStore = new PgSurfaceArtifactStore(pool);
     const surfaceActionStore = new PgSurfaceActionStore(pool);
     const observabilityService = new ObservabilityService(new PgObsRepo(pool));
+    const logRepo = new PgLogRepo(pool);
+    // Tees error/fatal log records into `log_event` so the observability UI can show them. Started
+    // here (not in buildApp) because the flush timer belongs to the process, not to the app object.
+    const logSink = new BatchingLogSink({ service: "api", writer: logRepo });
+    logSink.start();
+    // Fixed-cadence CPU/RSS samples for the observability dashboard. Started here for the same
+    // reason as the log sink: the interval belongs to the process, not to the app object.
+    const resourceSampler = new ResourceSampler({
+      service: "api",
+      instance: `${hostname()}:${process.pid}`,
+      probe: processResourceProbe(process),
+      writer: new PgResourceWriter(pool),
+    });
+    resourceSampler.start();
     const memoryTelemetry = createObservabilityTelemetryPort(observabilityService);
     // `embeddingService` is initialized later (it needs the Soul LLM config), and both memory
     // consumers only call it at request time — so passing it here wires the dense recall arm
@@ -638,6 +661,9 @@ async function boot() {
 
     const app = await buildApp({
       readiness: pool,
+      logSink,
+      logRepo,
+      resourceRepo: new PgResourceRepo(pool),
       sessionStore,
       userRepo,
       userAdminRepo: userRepo,
@@ -937,9 +963,18 @@ async function boot() {
         await tracesSink?.flush();
         tracesSink?.stop();
         await hookExecutor?.close();
+        // Before pool.end(): the sink writes through this pool, so draining after it closes would
+        // lose exactly the shutdown-path errors an operator most needs to see.
+        await resourceSampler.stop();
+        await logSink.stop();
         await pool.end();
       } catch (err) {
         app.log.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
+        // The throw may have skipped the stop() above, and the next line exits the process. Flush
+        // so the error explaining a failed shutdown is not the one record this feature loses; if
+        // the pool is already closed it degrades to stderr, which still beats dropping it.
+        await resourceSampler.stop().catch(() => {});
+        await logSink.stop().catch(() => {});
       }
       clearTimeout(force);
       process.exit(0);
