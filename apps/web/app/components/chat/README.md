@@ -70,10 +70,106 @@ inline (`PUT /api/v1/chats/:id` → `renameConversation` / `setConversationStarr
 | Component | Driven by |
 |---|---|
 | `parts.tsx` Response (text) | `text` (live) |
-| `parts.tsx` tool block + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
-| `parts.tsx` reasoning / plan / task / sources / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits |
+| `tool-call.tsx` + `json-view.tsx` + `approval-card.tsx` | `tool-call`/`tool-result` + `approval-request`/`approval-resolved` (live) |
+| `tool-call.tsx` `<ToolRun>` via `timeline-groups.ts` | groups consecutive Tool rows into one block, folding a long settled run; emits no events of its own |
+| `parts.tsx` sources | `sources` (live) and restored conversations via `lib/chat/hydrate.ts` |
+| `parts.tsx` reasoning / plan / task / agent-handoff / surface (`<SurfaceFrame>`) | **contract-only** — typed + rendered now, light up when the backend emits. No participant-audience event in `RUN_EVENT_TYPES` produces them today; `/design-guide` tags these specimens `contract-only` so they are not mistaken for shipped behaviour. |
 | `model-selector.tsx` | sets POST `model` to an Effort Preset id — Auto/Fast/Balanced/Thorough in a portalled dropdown with signal-bar intensity icons. Auto is visible as the default path: the system balances effort, latency, and cost unless the participant deliberately overrides it. Fast, Balanced, and Thorough explain the tradeoff directly; the picker does not list provider model names because `GET /api/v1/llm-config` exposes legacy provider chains, not a per-preset display contract. |
 | `autonomy-control.tsx` | sets POST `autonomy`; `approval-required` arms the live tool-approval gate |
+
+## Tool calls (`tool-call.tsx`, `json-view.tsx`, `tool-summary.ts`)
+
+A Tool row is the transcript's execution record, so it has to answer four questions on one line:
+which kind of Tool ran, what it did, how long it took, and how it ended.
+
+- **Collapsed:** a tier-tinted glyph (family chosen from the Tool's name by `toolFamily`), a human
+  summary in verb-object form from `describeToolCall`, the Tool name in mono, a duration, and a
+  status glyph. A `mutating` Tool carries a labelled write marker. A running row shows an
+  indeterminate rail (`.run-rail-active`) rather than a decorative pulsing dot, because the motion
+  reports live state.
+- **Expanded:** separate **Input** and **Output** panes, each with its own copy control. The earlier
+  row printed the same JSON twice and left the reader to guess which was which.
+- **Metadata strip:** tier, agent, `callId`, and `argsDigest`, all copyable and in mono.
+
+An attached approval renders outside the collapse, because it needs the reader to act.
+
+### Grouping a run (`timeline-groups.ts`)
+
+A turn that ran nine lookups should read as one block, not nine free-floating cards.
+`groupTimelineParts` gathers **consecutive** Tool rows into a single `tool-run` node, which
+`ToolRun` draws as one bordered container with `divide-y` rows. Grouping is unconditional: a run is
+always one block, so the transcript never becomes a stack of identical boxes.
+
+Folding is the separate decision. A run collapses to one `Ran N tools` line only when it is
+`foldable`: at least `MIN_CLUSTER_SIZE` (3) members, and every member finished, successful, and
+unattended. Anything that still wants attention keeps the whole run open:
+
+| Never folded | Why |
+|---|---|
+| still running | it is happening now |
+| awaiting an approval | it is an ask, not a record |
+| failed | the error is the evidence |
+| the trailing part while streaming | folding the live edge makes a turn look finished before it is |
+
+Below three rows nothing folds — collapsing two costs a click and saves nothing. A failure does not
+split the run; it keeps the run open, so `ok ok ok · error` renders as one block with four visible
+rows. The folded line's green check is only ever as strong as the rows it hides: `isFoldable`
+mirrors the row's own `runStateOf`, so a call that would show a check standalone is the only kind
+that can be folded under one.
+
+Rows hidden by `isHiddenToolPart` (`cite_sources`, successful presentation Tools) are dropped before
+grouping, so they cannot split a run that should read as one.
+
+### What a participant may see
+
+The verbatim arguments never cross the participant boundary. The wire carries two things instead:
+
+| Field | Meaning |
+|---|---|
+| `argsDigest` | Hash of the verbatim arguments. Stays the authority after redaction and truncation. |
+| `argsPreview` / `resultPreview` | A `ToolPreview`: `{ json, redactedPaths?, truncated?, bytes? }`, already redacted and already bounded server-side. |
+
+The preview is built at the dispatch boundary in `apps/worker/src/turn/tool-preview.ts`, which is
+the only place that holds both the arguments and the authority to decide what a channel may see. The
+agent-loop projection is not widened. Redaction works **by subtraction**: it walks the whole value
+and removes credential material, so an unanticipated field is included by default while an
+unanticipated secret is still caught.
+
+The client never un-redacts. A withheld leaf renders as an explicit `••••••` chip tagged `redacted`,
+and `PreviewNotice` names how many fields were withheld and how much was truncated. A reader who
+cannot see a field is owed the difference between "withheld" and "absent".
+
+A restored conversation is different: persisted messages carry the verbatim `args` and `result`, so
+the same panes render full fidelity without a preview. On a live stream `args` holds only
+`{ argsDigest }`, which is a receipt rather than an argument — it is shown in the metadata strip and
+never rendered as an Input pane.
+
+`json-view.tsx` replaces a regex highlighter that painted tokens with hardcoded palette classes. It
+is collapsible, auto-collapses below depth 2 so a large payload opens as an outline, and takes every
+colour from the `--code-*` token family so both themes work without a second set of rules.
+
+### Why there is no "Load full"
+
+An authorized inspect endpoint was considered and deliberately not built. Verbatim Tool arguments are
+persisted **nowhere**: the operator-audience `tool.dispatched` record carries only `callId`, `name`,
+`idempotencyKey`, `intentId`, `effect` and `outcome`, and no table stores arguments. An endpoint
+would therefore have nothing to return that the preview does not already carry, and giving it
+something would mean persisting secret-bearing arguments — a new retention, redaction-at-rest and
+audit surface that contradicts the standing invariant that verbatim arguments never reach a reader.
+No dead affordance is shipped in the UI.
+
+## Run vocabulary tokens
+
+Execution state is a different axis from content status and never borrows its tones:
+
+- `--run-pending|active|ok|error|blocked|skipped` plus `--run-surface`, `--run-surface-hover`,
+  `--run-border`, `--run-rail` — what a Run did.
+- `--status-*` — what a Record is. Never substituted for the above.
+- `--tool-tier-system|platform|integration`, `--tool-mutating` — which layer a Tool belongs to.
+- `--code-*` — the inspect surface.
+- `--data-1..8` — categorical encoding only; never chrome, status, or brand.
+
+Live specimens of every state live at `/design-guide` under **Agent run vocabulary**.
 
 ## Try harder
 

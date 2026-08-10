@@ -5,6 +5,8 @@ import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
 import { copyText } from "~/lib/clipboard";
 import { MessagePartView } from "./parts";
+import { groupTimelineParts } from "./timeline-groups";
+import { ToolRun } from "./tool-call";
 import type { MentionEntry } from "./use-mention-catalog";
 
 function partKey(part: TimelinePart, i: number): string {
@@ -320,16 +322,26 @@ function Message({
       : undefined;
   return (
     <article aria-label="Assistant response" className="group flex flex-col gap-2">
-      {message.parts.map((part, i) => (
-        <MessagePartView
-          key={partKey(part, i)}
-          part={part}
-          streaming={streaming && i === lastIndex && part.kind === "text"}
-          citations={citations}
-          onApprove={onApprove}
-          onSurfaceInteraction={onSurfaceInteraction}
-        />
-      ))}
+      {groupTimelineParts(message.parts, { streaming }).map((node) =>
+        node.kind === "tool-run" ? (
+          <ToolRun
+            key={`tools-${node.index}`}
+            parts={node.parts}
+            foldable={node.foldable}
+            streaming={streaming}
+            onApprove={onApprove}
+          />
+        ) : (
+          <MessagePartView
+            key={partKey(node.part, node.index)}
+            part={node.part}
+            streaming={streaming && node.index === lastIndex}
+            citations={citations}
+            onApprove={onApprove}
+            onSurfaceInteraction={onSurfaceInteraction}
+          />
+        )
+      )}
       {message.sealed ? (
         <AssistantMetaRow
           receipt={message.receipt}

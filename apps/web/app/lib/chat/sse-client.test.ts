@@ -155,13 +155,51 @@ test("projects Run events onto the timeline vocabulary", () => {
   ).toEqual([
     {
       type: "tool-call",
-      data: { toolCallId: "c1", toolName: "send_email", args: { argsDigest: "d1" } },
+      data: {
+        toolCallId: "c1",
+        toolName: "send_email",
+        args: { argsDigest: "d1" },
+        meta: { argsDigest: "d1" },
+      },
+    },
+  ]);
+  // A stream that carries a preview surfaces the redacted arguments alongside the digest, which
+  // stays the authority over what was really called.
+  expect(
+    map({
+      seq: 4,
+      type: "tool.call",
+      data: {
+        callId: "c2",
+        name: "send_email",
+        argsDigest: "d2",
+        argsPreview: { json: '{"to":"ops@example.com"}', redactedPaths: ["apiKey"] },
+        tier: "integration",
+        mutating: true,
+        stepId: "state-1",
+      },
+    })
+  ).toEqual([
+    {
+      type: "tool-call",
+      data: {
+        toolCallId: "c2",
+        toolName: "send_email",
+        args: { argsDigest: "d2" },
+        preview: { json: '{"to":"ops@example.com"}', redactedPaths: ["apiKey"] },
+        meta: {
+          argsDigest: "d2",
+          tier: "integration",
+          mutating: true,
+          stepId: "state-1",
+        },
+      },
     },
   ]);
   // Operator-audience evidence has no participant counterpart, even when a reader is granted it.
-  expect(map({ seq: 4, type: "tool.dispatched", data: { callId: "c1" } })).toEqual([]);
+  expect(map({ seq: 5, type: "tool.dispatched", data: { callId: "c1" } })).toEqual([]);
   expect(
-    map({ seq: 5, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
+    map({ seq: 6, type: "turn.finished", data: { status: "succeeded", messageId: "msg-1" } })
   ).toEqual([{ type: "finish", data: { reason: "stop", messageId: "msg-1" } }]);
 });
 

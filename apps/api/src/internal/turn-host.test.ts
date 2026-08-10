@@ -140,6 +140,16 @@ describe("InternalTurnHost", () => {
       runId: RUN_ID,
       attempt: 2,
       content: "the answer",
+      metadata: {
+        toolCalls: [
+          {
+            callId: "call-1",
+            name: "record_create",
+            argsDigest: "sha256:args",
+            outcome: "ok",
+          },
+        ],
+      },
     });
 
     // Durable, attributed to the attempt, and not yet part of the conversation any reader replays.
@@ -151,6 +161,16 @@ describe("InternalTurnHost", () => {
         turnId: TURN_ID,
         role: "assistant",
         content: "the answer",
+        metadata: {
+          toolCalls: [
+            {
+              callId: "call-1",
+              name: "record_create",
+              argsDigest: "sha256:args",
+              outcome: "ok",
+            },
+          ],
+        },
         attempt: 2,
         createdAt: NOW,
       },

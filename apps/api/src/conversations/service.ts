@@ -20,6 +20,7 @@ export interface PersistedMessage {
   readonly turnId: string;
   readonly role: "user" | "assistant";
   readonly content: string;
+  readonly metadata?: Record<string, unknown>;
   /**
    * Which Worker attempt wrote this Message. Absent on a user Message — the request belongs to the
    * Turn, not to an attempt at answering it — and on rows written before attempts existed.

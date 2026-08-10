@@ -54,7 +54,7 @@ test("a successful presentation Tool is hidden once its Surface is available", (
     />
   );
 
-  expect(screen.queryByText("[tool: request_input]")).toBeNull();
+  expect(screen.queryByText("request_input")).toBeNull();
 });
 
 test("a failed presentation Tool remains available for diagnosis", () => {
@@ -75,7 +75,7 @@ test("a failed presentation Tool remains available for diagnosis", () => {
     />
   );
 
-  expect(screen.getByText("[tool: request_input]")).toBeInTheDocument();
+  expect(screen.getByText("request_input")).toBeInTheDocument();
 });
 
 test("Choices render as a decision card and lock after selection", async () => {

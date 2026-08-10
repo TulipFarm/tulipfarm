@@ -88,10 +88,66 @@ const TEXT_DELTA_SCHEMA = {
 } as const;
 
 /**
- * A Tool call the participant is allowed to know happened. Arguments are carried as a digest, not
- * verbatim: they routinely hold the protected data the call operates on, and a participant stream
- * is the wrong place to reproduce it. The full arguments live in the operator-audience
- * `tool.dispatched` evidence.
+ * A bounded, redaction-aware view of a Tool's arguments or output.
+ *
+ * The digest alone told a participant that a call happened and nothing about what it did, which
+ * made a Tool row unreadable to the person the Tool acted for. A preview closes that gap without
+ * reopening the one the digest was protecting: it is built where the values already live (the
+ * dispatch boundary), every withheld leaf is replaced rather than dropped, and `redactedPaths`
+ * names each one so a reader can show that something was withheld instead of silently rendering a
+ * hole. `truncated` reports that the preview is not the whole value, so a reader never presents a
+ * partial result as complete.
+ *
+ * `json` is JSON text rather than a nested schema because Tool arguments have no common shape and
+ * a schema permissive enough to hold all of them would constrain nothing.
+ */
+export const TOOL_PREVIEW_SCHEMA = {
+  type: "object",
+  required: ["json"],
+  additionalProperties: false,
+  properties: {
+    json: { type: "string" },
+    redactedPaths: { type: "array", items: { type: "string", minLength: 1 } },
+    truncated: { type: "boolean" },
+    bytes: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+export const PARTICIPANT_TOOL_CALL_SCHEMA = {
+  type: "object",
+  required: ["callId", "name"],
+  additionalProperties: false,
+  properties: {
+    callId: { type: "string", minLength: 1 },
+    name: { type: "string", minLength: 1 },
+    argsDigest: { type: "string", minLength: 1 },
+    argsPreview: TOOL_PREVIEW_SCHEMA,
+    resultPreview: TOOL_PREVIEW_SCHEMA,
+    durationMs: { type: "integer", minimum: 0 },
+    outcome: { type: "string", enum: ["ok", "error"] },
+    errorCode: { type: "string", minLength: 1 },
+  },
+} as const;
+
+export const MESSAGE_METADATA_SCHEMA = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    toolCalls: { type: "array", items: PARTICIPANT_TOOL_CALL_SCHEMA },
+  },
+} as const;
+
+/**
+ * A Tool call the participant is allowed to know happened.
+ *
+ * `argsDigest` stays required and stays the record of what was actually called: it hashes the
+ * verbatim arguments, so it still identifies them exactly after a preview has redacted or
+ * truncated them. `argsPreview` is the readable companion, never the authority. The full verbatim
+ * arguments remain operator-audience only, in `tool.dispatched`.
+ *
+ * `tier`, `mutating`, `agentId` and `stepId` are identity rather than content — they say which
+ * kind of Tool ran, whether it could write, and which Agent and State it belonged to — so a reader
+ * can group and rank calls without being told what the call operated on.
  */
 const TOOL_CALL_SCHEMA = {
   type: "object",
@@ -101,6 +157,12 @@ const TOOL_CALL_SCHEMA = {
     callId: { type: "string", minLength: 1 },
     name: { type: "string", minLength: 1 },
     argsDigest: { type: "string", minLength: 1 },
+    argsPreview: TOOL_PREVIEW_SCHEMA,
+    tier: { type: "string", enum: ["system", "platform", "integration"] },
+    mutating: { type: "boolean" },
+    agentId: { type: "string", minLength: 1 },
+    stepId: { type: "string", minLength: 1 },
+    startedAt: { type: "string", minLength: 1 },
   },
 } as const;
 
@@ -113,6 +175,8 @@ const TOOL_RESULT_SCHEMA = {
     status: { type: "string", enum: ["ok", "error"] },
     summary: { type: "string" },
     errorCode: { type: "string", minLength: 1 },
+    resultPreview: TOOL_PREVIEW_SCHEMA,
+    durationMs: { type: "integer", minimum: 0 },
   },
 } as const;
 
@@ -380,6 +444,34 @@ export const RUN_EVENT_DEFINITIONS: readonly RunEventDefinition[] = [
 /** The three points a guardrail can refuse a turn, shared by the block and decision records. */
 export type RunEventGuardrailStage = "input" | "tool_call" | "output";
 
+/** Which layer a Tool belongs to. Mirrors the registry's own tiering, not a rendering hint. */
+export type RunEventToolTier = "system" | "platform" | "integration";
+
+/**
+ * A bounded, redaction-aware view of a Tool's arguments or output.
+ *
+ * `json` is JSON text, already redacted and already truncated. `redactedPaths` names every leaf
+ * that was withheld so a reader shows an explicit gap rather than an absence it cannot explain,
+ * and `bytes` is the size of the original value, so "truncated" can say how much is missing.
+ */
+export interface RunEventToolPreview {
+  readonly json: string;
+  readonly redactedPaths?: readonly string[];
+  readonly truncated?: boolean;
+  readonly bytes?: number;
+}
+
+export interface ParticipantToolCall {
+  readonly callId: string;
+  readonly name: string;
+  readonly argsDigest?: string;
+  readonly argsPreview?: RunEventToolPreview;
+  readonly resultPreview?: RunEventToolPreview;
+  readonly durationMs?: number;
+  readonly outcome?: "ok" | "error";
+  readonly errorCode?: string;
+}
+
 /**
  * The payload each event type carries, matching its schema field for field.
  *
@@ -400,12 +492,20 @@ export interface RunEventPayloads {
     readonly callId: string;
     readonly name: string;
     readonly argsDigest: string;
+    readonly argsPreview?: RunEventToolPreview;
+    readonly tier?: RunEventToolTier;
+    readonly mutating?: boolean;
+    readonly agentId?: string;
+    readonly stepId?: string;
+    readonly startedAt?: string;
   };
   readonly "tool.result": {
     readonly callId: string;
     readonly status: "ok" | "error";
     readonly summary?: string;
     readonly errorCode?: string;
+    readonly resultPreview?: RunEventToolPreview;
+    readonly durationMs?: number;
   };
   readonly "surface.emitted": { readonly artifactId: string; readonly componentId?: string };
   readonly "approval.requested": {

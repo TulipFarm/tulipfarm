@@ -19,6 +19,8 @@ import type {
   ChatEventType,
   ChatModelSelector,
   ParsedFrame,
+  ToolPreview,
+  ToolTier,
 } from "~/lib/chat/types";
 
 // Terminal events end the stream — the reader stops once one is seen.
@@ -81,6 +83,14 @@ type RunEventData = {
   callId?: string;
   name?: string;
   argsDigest?: string;
+  argsPreview?: ToolPreview;
+  resultPreview?: ToolPreview;
+  tier?: ToolTier;
+  mutating?: boolean;
+  agentId?: string;
+  stepId?: string;
+  startedAt?: string;
+  durationMs?: number;
   status?: string;
   summary?: string;
   errorCode?: string;
@@ -112,6 +122,11 @@ export function modelFailureMessage(reason: string | undefined): string {
   }
 }
 
+/** Drops keys whose value is absent, so an optional field is omitted rather than set to undefined. */
+function compact<T extends object>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
+}
+
 /**
  * Projects the Run event stream onto the timeline's own vocabulary.
  *
@@ -121,9 +136,10 @@ export function modelFailureMessage(reason: string | undefined): string {
  * releases it when that call finally reports. One run event can therefore produce zero, one, or two
  * timeline events.
  *
- * Two things the durable stream deliberately withholds are withheld here too: Tool arguments (a
- * digest stands in) and the identity of a guard that refused. Neither is a rendering gap to be
- * filled in later — they are the reason a participant's stream is safe to show.
+ * Two things the durable stream deliberately withholds are withheld here too: the verbatim Tool
+ * arguments (a digest stands in, alongside a redacted preview built server-side) and the identity
+ * of a guard that refused. Neither is a rendering gap to be filled in later — they are the reason a
+ * participant's stream is safe to show.
  */
 export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
   const heldByCall = new Map<string, string>();
@@ -140,13 +156,24 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         return [
           {
             type: "tool-call",
-            data: {
+            data: compact({
               toolCallId: data.callId ?? "",
               toolName: data.name ?? "tool",
-              // The arguments themselves never reach a participant; the digest is what the stream
-              // carries, and showing it is honest about that.
+              // The verbatim arguments never reach a participant. `args` keeps the digest, which is
+              // what actually crossed the boundary; `preview` is the separate redacted, bounded
+              // view the server built for a reader. Conflating the two would let a preview be
+              // mistaken for the real call.
               args: { argsDigest: data.argsDigest },
-            },
+              preview: data.argsPreview,
+              meta: compact({
+                argsDigest: data.argsDigest,
+                tier: data.tier,
+                mutating: data.mutating,
+                agentId: data.agentId,
+                stepId: data.stepId,
+                startedAt: data.startedAt,
+              }),
+            }),
           },
         ];
 
@@ -155,15 +182,21 @@ export function createRunEventMapper(): (frame: ParsedFrame) => ChatEvent[] {
         const events: ChatEvent[] = [
           {
             type: "tool-result",
-            data: {
+            data: compact({
               toolCallId: callId,
               toolName: "",
-              result: {
+              result: compact({
                 status: data.status,
-                ...(data.summary === undefined ? {} : { summary: data.summary }),
-                ...(data.errorCode === undefined ? {} : { errorCode: data.errorCode }),
-              },
-            },
+                summary: data.summary,
+                errorCode: data.errorCode,
+              }),
+              preview: data.resultPreview,
+              meta: compact({
+                durationMs: data.durationMs,
+                errorCode: data.errorCode,
+                summary: data.summary,
+              }),
+            }),
           },
         ];
         const approvalId = heldByCall.get(callId);

@@ -64,8 +64,19 @@ const REQUEST: ToolDispatchRequest = {
   arguments: { to: "someone@example.com", body: "the quarterly numbers" },
 };
 
+/** Advances 25ms per read, so the announced duration is asserted rather than raced. */
+function clock(): () => number {
+  const start = Date.parse("2026-01-01T00:00:00.000Z");
+  let reads = 0;
+  return () => {
+    const value = start + reads * 25;
+    reads += 1;
+    return value;
+  };
+}
+
 describe("announceToolCalls", () => {
-  it("announces a call and its result without reproducing the arguments", async () => {
+  it("announces a call and its result without reproducing the arguments verbatim", async () => {
     const events = new FakeAppendPort();
     const broker = port((request) => ({
       status: "succeeded",
@@ -73,28 +84,68 @@ describe("announceToolCalls", () => {
       output: { id: "msg-1" },
     }));
 
-    const result = await announceToolCalls(broker.port, writer(events)).dispatch(REQUEST);
+    const result = await announceToolCalls(broker.port, writer(events), {
+      now: clock(),
+    }).dispatch(REQUEST);
 
     expect(result).toEqual({ status: "succeeded", callId: "call-1", output: { id: "msg-1" } });
     expect(broker.calls).toEqual([REQUEST]);
-    // The recipient and the body are what the call is about, and this stream is read by whoever is
-    // in the conversation — so the arguments travel as a digest and nothing else.
     expect(events.appended).toEqual([
       {
         eventType: "tool.call",
         payload: {
           callId: "call-1",
           name: "send_email",
+          // The digest is still the authority on what was called: it hashes the verbatim
+          // arguments, so a redacted or truncated preview cannot quietly change the record.
           argsDigest: canonicalHash(REQUEST.arguments ?? null),
+          argsPreview: {
+            json: JSON.stringify(REQUEST.arguments),
+            bytes: JSON.stringify(REQUEST.arguments).length,
+          },
+          stepId: "state-1",
+          startedAt: "2026-01-01T00:00:00.000Z",
         },
         key: "turn-1:1:tool:call:call-1",
       },
       {
         eventType: "tool.result",
-        payload: { callId: "call-1", status: "ok" },
+        payload: {
+          callId: "call-1",
+          status: "ok",
+          resultPreview: { json: '{"id":"msg-1"}', bytes: 14 },
+          durationMs: 25,
+        },
         key: "turn-1:1:tool:result:call-1",
       },
     ]);
+  });
+
+  it("redacts credential material out of the preview while the digest still covers it", async () => {
+    const events = new FakeAppendPort();
+    const broker = port((request) => ({
+      status: "succeeded",
+      callId: request.callId,
+      output: { ok: true },
+    }));
+    const request: ToolDispatchRequest = {
+      ...REQUEST,
+      arguments: { channel: "#ops", apiKey: "sk-abcdefghijklmnopqrstuvwx" },
+    };
+
+    await announceToolCalls(broker.port, writer(events), { now: clock() }).dispatch(request);
+
+    const call = events.appended[0]?.payload as {
+      argsDigest: string;
+      argsPreview: { json: string; redactedPaths?: string[] };
+    };
+    expect(JSON.parse(call.argsPreview.json)).toEqual({
+      channel: "#ops",
+      apiKey: "[redacted]",
+    });
+    expect(call.argsPreview.redactedPaths).toEqual(["apiKey"]);
+    // The digest is taken before redaction, so the audit record is unchanged by what was shown.
+    expect(call.argsDigest).toBe(canonicalHash(request.arguments ?? null));
   });
 
   it("announces surface.emitted after a present call that rendered a Surface Artifact", async () => {
@@ -109,7 +160,7 @@ describe("announceToolCalls", () => {
     }));
     const request: ToolDispatchRequest = { ...REQUEST, name: "present" };
 
-    await announceToolCalls(broker.port, writer(events)).dispatch(request);
+    await announceToolCalls(broker.port, writer(events), { now: clock() }).dispatch(request);
 
     expect(events.appended.map((event) => event.eventType)).toEqual([
       "tool.call",
@@ -131,7 +182,7 @@ describe("announceToolCalls", () => {
       reason: "tool_blocklist: tool_blocklist:send_email",
     }));
 
-    await announceToolCalls(broker.port, writer(events)).dispatch(REQUEST);
+    await announceToolCalls(broker.port, writer(events), { now: clock() }).dispatch(REQUEST);
 
     expect(events.appended.at(-1)).toEqual({
       eventType: "tool.result",
@@ -140,6 +191,7 @@ describe("announceToolCalls", () => {
         status: "error",
         summary: "tool_blocklist: tool_blocklist:send_email",
         errorCode: "denied",
+        durationMs: 25,
       },
       key: "turn-1:1:tool:result:call-1",
     });
@@ -153,7 +205,9 @@ describe("announceToolCalls", () => {
       approvalId: "appr-1",
     }));
 
-    const result = await announceToolCalls(broker.port, writer(events)).dispatch(REQUEST);
+    const result = await announceToolCalls(broker.port, writer(events), {
+      now: clock(),
+    }).dispatch(REQUEST);
 
     expect(result).toMatchObject({ status: "awaiting_approval", approvalId: "appr-1" });
     // The call is announced, the outcome is not: the driver announces the wait, and a `tool.result`

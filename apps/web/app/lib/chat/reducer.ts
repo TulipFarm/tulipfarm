@@ -167,6 +167,8 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
         toolName: event.data.toolName,
         args: event.data.args,
         status: "running",
+        ...(event.data.preview === undefined ? {} : { argsPreview: event.data.preview }),
+        ...(event.data.meta === undefined ? {} : { meta: event.data.meta }),
       };
       return {
         ...state,
@@ -177,10 +179,16 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
 
     case "tool-result": {
       const { messages, target } = ensureAssistant(state.messages);
+      const resultMeta = event.data.meta;
       const parts = mapTool(target.parts, event.data.toolCallId, (p) => ({
         ...p,
         result: event.data.result,
         status: "done",
+        ...(event.data.preview === undefined ? {} : { resultPreview: event.data.preview }),
+        // The call's own identity (tier, agent, step) is merged with the result's timing and
+        // failure code, so one part carries the whole story of the call.
+        ...(resultMeta === undefined ? {} : { meta: { ...p.meta, ...resultMeta } }),
+        ...(resultMeta?.errorCode === undefined ? {} : { outcome: "error" as const }),
       }));
       return { ...state, status: "streaming", messages: withParts(messages, target, parts) };
     }

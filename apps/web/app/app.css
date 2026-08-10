@@ -55,6 +55,42 @@
   --color-status-success: var(--status-success);
   --color-status-warning: var(--status-warning);
   --color-status-danger: var(--status-danger);
+
+  /* Categorical data palette — chart series and category chips only, never chrome. */
+  --color-data-1: var(--data-1);
+  --color-data-2: var(--data-2);
+  --color-data-3: var(--data-3);
+  --color-data-4: var(--data-4);
+  --color-data-5: var(--data-5);
+  --color-data-6: var(--data-6);
+  --color-data-7: var(--data-7);
+  --color-data-8: var(--data-8);
+
+  /* Tool-run vocabulary — execution state, distinct from the content status-* tones. */
+  --color-run-pending: var(--run-pending);
+  --color-run-active: var(--run-active);
+  --color-run-ok: var(--run-ok);
+  --color-run-error: var(--run-error);
+  --color-run-blocked: var(--run-blocked);
+  --color-run-skipped: var(--run-skipped);
+  --color-run-surface: var(--run-surface);
+  --color-run-surface-hover: var(--run-surface-hover);
+  --color-run-border: var(--run-border);
+  --color-run-rail: var(--run-rail);
+
+  --color-tool-tier-system: var(--tool-tier-system);
+  --color-tool-tier-platform: var(--tool-tier-platform);
+  --color-tool-tier-integration: var(--tool-tier-integration);
+  --color-tool-mutating: var(--tool-mutating);
+
+  --color-code-surface: var(--code-surface);
+  --color-code-border: var(--code-border);
+  --color-code-key: var(--code-key);
+  --color-code-string: var(--code-string);
+  --color-code-number: var(--code-number);
+  --color-code-boolean: var(--code-boolean);
+  --color-code-null: var(--code-null);
+  --color-code-redacted: var(--code-redacted);
 }
 
 @layer base {
@@ -94,6 +130,38 @@
 
 .animate-cursor {
   animation: cursor-blink 1.1s steps(1) infinite;
+}
+
+/*
+ * Indeterminate rail for a tool call that is still running. Motion here reports real execution
+ * state, which is the only thing that justifies a loop. Collapses to a static tinted rail under
+ * reduced motion so the state is still legible without movement.
+ */
+@keyframes run-rail-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+.run-rail-active::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 25%;
+  background: var(--run-active);
+  animation: run-rail-sweep 1.4s var(--ease-snappy) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-rail-active::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.45;
+  }
 }
 
 /*

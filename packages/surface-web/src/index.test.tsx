@@ -323,4 +323,82 @@ describe("surfaceWebRenderer", () => {
     expect(graphMarkup).toContain("data-surface-graph-nodes");
     expect(graphMarkup).not.toContain("<pre");
   });
+
+  it("renders data-display components with native semantic structures", () => {
+    const components = [
+      {
+        id: "metric",
+        component: { name: "Metric", version: "1.0" },
+        props: {
+          cells: [
+            {
+              label: "Revenue",
+              value: 128400,
+              unit: "USD",
+              delta: { value: "12%", direction: "up" },
+            },
+          ],
+        },
+        marker: "data-surface-metric-grid",
+      },
+      {
+        id: "timeline",
+        component: { name: "Timeline", version: "1.0" },
+        props: { entries: [{ label: "Contract sent", timestamp: "2026-08-09", status: "Done" }] },
+        marker: "data-surface-timeline",
+      },
+      {
+        id: "comparison",
+        component: { name: "Comparison", version: "1.0" },
+        props: {
+          options: [
+            { id: "basic", label: "Basic" },
+            { id: "pro", label: "Pro", recommended: true },
+          ],
+          criteria: [{ id: "cost", label: "Cost" }],
+          cells: [
+            { option: "basic", criterion: "cost", value: "$40" },
+            { option: "pro", criterion: "cost", value: "$75" },
+          ],
+        },
+        marker: "data-surface-comparison",
+      },
+      {
+        id: "breakdown",
+        component: { name: "Breakdown", version: "1.0" },
+        props: {
+          segments: [
+            { label: "Payroll", value: 54000 },
+            { label: "Tools", value: 8000 },
+          ],
+          currency: "USD",
+        },
+        marker: "data-surface-breakdown",
+      },
+      {
+        id: "gauge",
+        component: { name: "Gauge", version: "1.0" },
+        props: { label: "Quota", value: 72, max: 100, target: 90, unit: "%" },
+        marker: "data-surface-gauge",
+      },
+    ] as const;
+
+    for (const item of components) {
+      const artifact = createSurfaceArtifact({
+        id: item.id,
+        component: item.component,
+        props: item.props,
+        target: { channel: "web", surface: "chat" },
+        audience: ["user:1"],
+        classification: "internal",
+      });
+      const markup = renderToStaticMarkup(
+        surfaceWebRenderer.render(artifact, { destination: "chat" })
+      );
+
+      expect(markup).toContain(item.marker);
+      expect(markup).toContain(`data-surface-kind="${item.component.name.toLowerCase()}"`);
+      expect(markup).not.toContain("<pre");
+    }
+  });
 });

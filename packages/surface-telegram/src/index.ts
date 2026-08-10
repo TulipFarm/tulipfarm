@@ -30,6 +30,21 @@ function escapeTelegramHtml(value: unknown): string {
   return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 }
 
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatMeasure(value: number | string, unit?: unknown, currency?: unknown): string {
+  const formatted = typeof value === "number" ? formatNumber(value) : value;
+  if (typeof currency === "string") return `${currency} ${formatted}`;
+  return typeof unit === "string" ? `${formatted} ${unit}` : formatted;
+}
+
+function ratio(value: number, max: number): number {
+  if (!Number.isFinite(value) || !Number.isFinite(max) || max <= 0) return 0;
+  return Math.min(1, Math.max(0, value / max));
+}
+
 function renderText(artifact: SurfaceArtifact): string {
   const props = artifact.props as Record<string, unknown>;
   switch (artifact.component.name) {
@@ -69,6 +84,93 @@ function renderText(artifact: SurfaceArtifact): string {
     }
     case "Choices":
       return escapeTelegramHtml(props.question);
+    case "Metric":
+      return (
+        props.cells as Array<{
+          label: string;
+          value: number | string;
+          unit?: string;
+          delta?: { value: number | string; direction: string; label?: string };
+          caption?: string;
+        }>
+      )
+        .map((cell) =>
+          [
+            `<b>${escapeTelegramHtml(cell.label)}</b>: <code>${escapeTelegramHtml(formatMeasure(cell.value, cell.unit))}</code>`,
+            cell.delta
+              ? `${escapeTelegramHtml(cell.delta.direction)} ${escapeTelegramHtml(formatMeasure(cell.delta.value))}${cell.delta.label ? ` ${escapeTelegramHtml(cell.delta.label)}` : ""}`
+              : undefined,
+            cell.caption ? escapeTelegramHtml(cell.caption) : undefined,
+          ]
+            .filter((line): line is string => typeof line === "string")
+            .join("\n")
+        )
+        .join("\n\n");
+    case "Timeline":
+      return (
+        props.entries as Array<{
+          label: string;
+          timestamp?: string;
+          description?: string;
+          status?: string;
+        }>
+      )
+        .map((entry) =>
+          [
+            `<b>${escapeTelegramHtml(entry.label)}</b>${entry.timestamp ? ` — ${escapeTelegramHtml(entry.timestamp)}` : ""}`,
+            entry.description ? escapeTelegramHtml(entry.description) : undefined,
+            entry.status ? `<i>${escapeTelegramHtml(entry.status)}</i>` : undefined,
+          ]
+            .filter((line): line is string => typeof line === "string")
+            .join("\n")
+        )
+        .join("\n\n");
+    case "Comparison": {
+      const options = props.options as Array<{ id: string; label: string; recommended?: boolean }>;
+      const criteria = props.criteria as Array<{ id: string; label: string }>;
+      const cells = props.cells as Array<{
+        option: string;
+        criterion: string;
+        value: number | string | boolean;
+      }>;
+      const cellMap = new Map(cells.map((cell) => [`${cell.criterion}:${cell.option}`, cell]));
+      return criteria
+        .map((criterion) =>
+          [
+            `<b>${escapeTelegramHtml(criterion.label)}</b>`,
+            ...options.map((option) => {
+              const marker = option.recommended ? " (recommended)" : "";
+              return `• ${escapeTelegramHtml(option.label)}${marker}: ${escapeTelegramHtml(cellMap.get(`${criterion.id}:${option.id}`)?.value ?? "—")}`;
+            }),
+          ].join("\n")
+        )
+        .join("\n\n");
+    }
+    case "Breakdown": {
+      const segments = props.segments as Array<{ label: string; value: number }>;
+      const sum = segments.reduce((total, segment) => total + segment.value, 0);
+      const total = typeof props.total === "number" ? props.total : sum;
+      return segments
+        .map(
+          (segment) =>
+            `• <b>${escapeTelegramHtml(segment.label)}:</b> ${escapeTelegramHtml(formatMeasure(segment.value, props.unit, props.currency))} (${formatNumber(ratio(segment.value, total) * 100)}%)`
+        )
+        .join("\n");
+    }
+    case "Gauge": {
+      const value = typeof props.value === "number" ? props.value : 0;
+      const max = typeof props.max === "number" ? props.max : 1;
+      const target = typeof props.target === "number" ? props.target : undefined;
+      return [
+        props.label ? `<b>${escapeTelegramHtml(props.label)}</b>` : "<b>Progress</b>",
+        `${escapeTelegramHtml(formatMeasure(value, props.unit))} / ${escapeTelegramHtml(formatMeasure(max, props.unit))} (${formatNumber(ratio(value, max) * 100)}%)`,
+        target !== undefined
+          ? `Target: ${escapeTelegramHtml(formatMeasure(target, props.unit))}`
+          : undefined,
+      ]
+        .filter((line): line is string => typeof line === "string")
+        .join("\n");
+    }
     default:
       return "Presentation";
   }

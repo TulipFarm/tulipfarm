@@ -5,6 +5,8 @@
  * instead of overwriting the newer one.
  */
 
+import type { ParticipantToolCall } from "@tulipfarm/schema";
+
 export type TurnCompletionStatus = "succeeded" | "failed";
 
 export interface TurnCompletionRecord {
@@ -32,7 +34,11 @@ export interface TurnCompletionRef {
 export interface TurnCompletionStore {
   findCompletion(ref: TurnCompletionRef): Promise<TurnCompletionRecord | undefined>;
   appendAssistantMessage(
-    input: TurnCompletionRef & { conversationId: string; content: string }
+    input: TurnCompletionRef & {
+      conversationId: string;
+      content: string;
+      metadata?: { toolCalls?: readonly ParticipantToolCall[] };
+    }
   ): Promise<{ messageId: string }>;
   completeTurn(
     input: TurnCompletionRef & {
@@ -57,6 +63,7 @@ export interface CompleteTurnInput {
   /** Last Run event sequence for this attempt; readers resume strictly after it. */
   readonly cursor: number;
   readonly outcome: TurnOutcome;
+  readonly metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
   /** Highest attempt the Turn has; a lower attempt arriving late is stale. */
   readonly latestAttempt?: number;
 }
@@ -124,6 +131,7 @@ export class ConversationTurnCompleter {
       ...ref,
       conversationId: input.conversationId,
       content: input.outcome.text,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     });
     await this.options.store.completeTurn({
       ...ref,

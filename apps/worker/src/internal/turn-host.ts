@@ -3,6 +3,7 @@ import type {
   ToolDispatchRequest,
   ToolDispatchResult,
 } from "@tulipfarm/agent-runtime";
+import type { ParticipantToolCall } from "@tulipfarm/schema";
 import type { ApprovalWaitPort } from "../agent-state";
 import type {
   TurnCompletionRecord,
@@ -129,11 +130,15 @@ export class HttpTurnHost
   }
 
   async appendAssistantMessage(
-    input: TurnCompletionRef & { content: string }
+    input: TurnCompletionRef & {
+      content: string;
+      metadata?: { readonly toolCalls?: readonly ParticipantToolCall[] };
+    }
   ): Promise<{ messageId: string }> {
     return this.client.require<{ messageId: string }>("POST", turnPath(input.runId, "/messages"), {
       attempt: input.attempt,
       content: input.content,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
     });
   }
 

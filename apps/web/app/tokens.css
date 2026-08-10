@@ -49,6 +49,51 @@
   --glyph-hue-4: oklch(0.5 0.04 220);
   --glyph-hue-5: oklch(0.5 0.07 130);
   --glyph-hue-6: oklch(0.5 0.09 320);
+
+  /*
+   * Categorical data palette. Data encoding only: chart series, category chips, proportional
+   * splits. Never chrome, never status, never brand. Ordered for adjacent-pair separability.
+   */
+  --data-1: oklch(0.55 0.13 250);
+  --data-2: oklch(0.56 0.13 160);
+  --data-3: oklch(0.6 0.13 65);
+  --data-4: oklch(0.55 0.14 320);
+  --data-5: oklch(0.58 0.12 200);
+  --data-6: oklch(0.56 0.14 30);
+  --data-7: oklch(0.57 0.11 120);
+  --data-8: oklch(0.52 0.1 285);
+
+  /*
+   * Tool-run vocabulary. Reports the state of an execution step, which is a different axis from
+   * the status-* tones that report the state of content. Do not substitute one for the other.
+   */
+  --run-pending: oklch(0.6 0.01 250);
+  --run-active: oklch(0.52 0.14 250);
+  --run-ok: oklch(0.5 0.13 150);
+  --run-error: oklch(0.55 0.2 27);
+  --run-blocked: oklch(0.58 0.14 75);
+  --run-skipped: oklch(0.68 0.01 250);
+
+  --run-surface: oklch(0.985 0 0);
+  --run-surface-hover: oklch(0.965 0 0);
+  --run-border: oklch(0.9 0 0);
+  --run-rail: oklch(0.88 0 0);
+
+  /* Tool identity. Mirrors ToolDef.tier and ToolDef.mutating, both already known server-side. */
+  --tool-tier-system: oklch(0.5 0.04 220);
+  --tool-tier-platform: oklch(0.52 0.08 300);
+  --tool-tier-integration: oklch(0.55 0.08 80);
+  --tool-mutating: oklch(0.58 0.14 75);
+
+  /* Inspect surface. Drives the tool input/output panes and the JSON viewer. */
+  --code-surface: oklch(0.975 0 0);
+  --code-border: oklch(0.91 0 0);
+  --code-key: oklch(0.42 0.09 285);
+  --code-string: oklch(0.45 0.11 150);
+  --code-number: oklch(0.47 0.12 250);
+  --code-boolean: oklch(0.5 0.13 30);
+  --code-null: oklch(0.58 0 0);
+  --code-redacted: oklch(0.6 0.05 75);
 }
 
 [data-theme="dark"] {
@@ -98,4 +143,39 @@
   --glyph-hue-4: oklch(0.63 0.04 220);
   --glyph-hue-5: oklch(0.63 0.07 130);
   --glyph-hue-6: oklch(0.63 0.09 320);
+
+  --data-1: oklch(0.72 0.12 250);
+  --data-2: oklch(0.73 0.12 160);
+  --data-3: oklch(0.78 0.12 65);
+  --data-4: oklch(0.72 0.13 320);
+  --data-5: oklch(0.75 0.11 200);
+  --data-6: oklch(0.72 0.13 30);
+  --data-7: oklch(0.74 0.1 120);
+  --data-8: oklch(0.69 0.1 285);
+
+  --run-pending: oklch(0.6 0.01 250);
+  --run-active: oklch(0.72 0.12 250);
+  --run-ok: oklch(0.7 0.12 150);
+  --run-error: oklch(0.66 0.18 27);
+  --run-blocked: oklch(0.78 0.12 75);
+  --run-skipped: oklch(0.5 0.01 250);
+
+  --run-surface: oklch(0.215 0 0);
+  --run-surface-hover: oklch(0.245 0 0);
+  --run-border: oklch(1 0 0 / 12%);
+  --run-rail: oklch(1 0 0 / 16%);
+
+  --tool-tier-system: oklch(0.63 0.04 220);
+  --tool-tier-platform: oklch(0.65 0.08 300);
+  --tool-tier-integration: oklch(0.68 0.08 80);
+  --tool-mutating: oklch(0.78 0.12 75);
+
+  --code-surface: oklch(0.155 0 0);
+  --code-border: oklch(1 0 0 / 10%);
+  --code-key: oklch(0.76 0.1 285);
+  --code-string: oklch(0.74 0.1 150);
+  --code-number: oklch(0.75 0.11 250);
+  --code-boolean: oklch(0.75 0.12 30);
+  --code-null: oklch(0.6 0 0);
+  --code-redacted: oklch(0.72 0.06 75);
 }

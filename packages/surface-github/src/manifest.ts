@@ -11,6 +11,11 @@ const commonComponents = {
   RecordDetail: ["1.0"],
   RecordTable: ["1.0"],
   Actions: ["1.0"],
+  Metric: ["1.0"],
+  Timeline: ["1.0"],
+  Comparison: ["1.0"],
+  Breakdown: ["1.0"],
+  Gauge: ["1.0"],
 } as const;
 
 export const githubCommentManifest: SurfaceRendererManifest = Object.freeze({

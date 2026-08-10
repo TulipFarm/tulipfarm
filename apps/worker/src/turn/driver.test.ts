@@ -66,7 +66,11 @@ class FakeAppendPort implements RunEventAppendPort {
 }
 
 class FakeCompletionStore implements TurnCompletionStore {
-  readonly messages: { content: string; attempt: number }[] = [];
+  readonly messages: {
+    content: string;
+    attempt: number;
+    metadata?: Record<string, unknown>;
+  }[] = [];
   readonly completed: { status: string; cursor: number; messageId: string | null }[] = [];
 
   async findCompletion(): Promise<TurnCompletionRecord | undefined> {
@@ -76,8 +80,13 @@ class FakeCompletionStore implements TurnCompletionStore {
   async appendAssistantMessage(input: {
     attempt: number;
     content: string;
+    metadata?: Record<string, unknown>;
   }): Promise<{ messageId: string }> {
-    this.messages.push({ content: input.content, attempt: input.attempt });
+    this.messages.push({
+      content: input.content,
+      attempt: input.attempt,
+      ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+    });
     return { messageId: `msg-${this.messages.length}` };
   }
 
@@ -99,6 +108,7 @@ function harness(
   over: {
     context?: Partial<ResolvedTurnContext>;
     onLoop?: (input: AgentLoopInput) => void;
+    onWriter?: (writer: TurnEventWriter) => void;
     receipt?: ModelCallReceipt;
   } = {}
 ) {
@@ -130,15 +140,18 @@ function harness(
     context,
     completer: new ConversationTurnCompleter({ store }),
     guardrails: new TurnGuardrails({ warn: () => {} }),
-    buildEvents: (turn) =>
-      new TurnEventWriter({
+    buildEvents: (turn) => {
+      const writer = new TurnEventWriter({
         events,
         businessId: turn.businessId,
         runId: turn.runId,
         turnId: turn.turnId,
         attempt: turn.attempt,
         now: () => new Date("2026-01-01T00:00:00.000Z"),
-      }),
+      });
+      over.onWriter?.(writer);
+      return writer;
+    },
     ...(over.receipt === undefined ? {} : { modelReceipt: () => over.receipt }),
   });
 
@@ -204,6 +217,59 @@ describe("TurnDriver", () => {
       eventType: "turn.finished",
       payload: { status: "succeeded", messageId: "msg-1" },
     });
+  });
+
+  it("forwards the redacted Tool timeline with the assistant Message", async () => {
+    let writer: TurnEventWriter | undefined;
+    const { driver, store } = harness(
+      async () => {
+        if (writer === undefined) throw new Error("writer was not built before the loop ran");
+        await writer.emit(
+          "tool.call",
+          {
+            callId: "call-1",
+            name: "send_email",
+            argsDigest: "sha256:args",
+            argsPreview: { json: '{"to":"[redacted]"}', redactedPaths: ["to"], bytes: 24 },
+          },
+          "tool:call:call-1"
+        );
+        await writer.emit(
+          "tool.result",
+          {
+            callId: "call-1",
+            status: "ok",
+            resultPreview: { json: '{"id":"msg-1"}', bytes: 14 },
+            durationMs: 25,
+          },
+          "tool:result:call-1"
+        );
+        return { status: "completed", output: "sent", ...counters };
+      },
+      { onWriter: (next) => (writer = next) }
+    );
+
+    await driver.run(request());
+
+    expect(store.messages).toEqual([
+      {
+        content: "sent",
+        attempt: 1,
+        metadata: {
+          toolCalls: [
+            {
+              callId: "call-1",
+              name: "send_email",
+              argsDigest: "sha256:args",
+              argsPreview: { json: '{"to":"[redacted]"}', redactedPaths: ["to"], bytes: 24 },
+              resultPreview: { json: '{"id":"msg-1"}', bytes: 14 },
+              durationMs: 25,
+              outcome: "ok",
+            },
+          ],
+        },
+      },
+    ]);
   });
 
   it("attaches the model receipt to the finished assistant reply", async () => {
