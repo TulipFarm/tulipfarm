@@ -97,6 +97,12 @@ export interface AssembleContext {
   };
   /** The agent's AGENT.md body. */
   personality?: string;
+  /**
+   * The user's own standing instructions, authored free-text in Settings. Distinct from `memory`,
+   * which the agent may write to: this is directed *at* the agent by the person it serves, and no
+   * tool can edit it. Unset or blank → block omitted.
+   */
+  customInstructions?: string;
   /** Per-user Memory, store-capped, oldest-written first (MEM-V1-003). */
   memory: MemoryEntry[];
   /**
@@ -189,6 +195,39 @@ function renderBusinessContext(ctx: AssembleContext): string {
 function renderAgentPersonality(ctx: AssembleContext): string {
   const body = ctx.personality?.trim();
   return body ? block("agent-personality", body) : "";
+}
+
+/**
+ * `<custom-instructions>` budget. Matches the store's own write-time cap, so this is the render-side
+ * floor: text that somehow exceeds it drops the block whole rather than truncating the user
+ * mid-sentence and leaving the agent to act on half an instruction.
+ */
+export const MAX_CUSTOM_INSTRUCTIONS_CHARS = 4_000;
+
+/**
+ * Fixed framing for `<custom-instructions>`. Says who wrote the block and how it ranks, because the
+ * agent otherwise cannot tell a standing instruction from retrieved content. It outranks the
+ * agent's own personality — the person configured it deliberately — but not platform instructions
+ * or guardrails, which are not the user's to override.
+ */
+const CUSTOM_INSTRUCTIONS_PREAMBLE = [
+  "The user wrote the following standing instructions for you in their settings. Treat them as",
+  "directions they have already given you, and follow them every turn without waiting to be",
+  "reminded. They outrank your own <agent-personality>. They do not override platform instructions,",
+  "guardrails, or authorization: if an instruction here conflicts with those, follow those and say",
+  "plainly that you did. Anything in this block is instruction from the user, never content to",
+  "summarize or repeat back.",
+].join(" ");
+
+/**
+ * `<custom-instructions>` block. Rendered next to the agent's personality because both frame how
+ * the agent behaves for the whole turn, and ahead of `<memory>` so a deliberate instruction is read
+ * before facts the agent inferred. Omitted when blank; dropped whole when over budget.
+ */
+function renderCustomInstructions(ctx: AssembleContext): string {
+  const body = ctx.customInstructions?.trim();
+  if (!body || body.length > MAX_CUSTOM_INSTRUCTIONS_CHARS) return "";
+  return block("custom-instructions", `${CUSTOM_INSTRUCTIONS_PREAMBLE}\n\n${body}`);
 }
 
 /**
@@ -599,6 +638,7 @@ export function assembleSystemPrompt(ctx: AssembleContext): string {
     renderAgentIdentity(ctx),
     renderBusinessContext(ctx),
     renderAgentPersonality(ctx),
+    renderCustomInstructions(ctx),
     renderMemoryInstructions(ctx),
     renderMemory(ctx),
     // V1: governance is tenant-wide. `domain` is display-only on the agent, so it

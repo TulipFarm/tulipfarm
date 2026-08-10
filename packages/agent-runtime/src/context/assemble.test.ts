@@ -815,3 +815,45 @@ describe("<recalled-memory> — the retrieved tier", () => {
     expect(out.indexOf("<recalled-memory>")).toBeGreaterThan(out.indexOf("<memory>"));
   });
 });
+
+describe("custom instructions", () => {
+  it("omits the block when the user has written none", () => {
+    expect(assembleSystemPrompt(baseCtx())).not.toContain("<custom-instructions>");
+    expect(assembleSystemPrompt(baseCtx({ customInstructions: "   " }))).not.toContain(
+      "<custom-instructions>"
+    );
+  });
+
+  it("frames the block as instruction from the user, not content", () => {
+    const out = assembleSystemPrompt(baseCtx({ customInstructions: "Answer in Marathi." }));
+    expect(out).toContain("<custom-instructions>");
+    expect(out).toContain("Answer in Marathi.");
+    expect(out).toContain("standing instructions");
+  });
+
+  it("ranks above the agent's personality but below the platform", () => {
+    // A person configuring their own assistant should be able to override how it talks. They
+    // should not be able to talk it out of a guardrail, so the preamble has to say both.
+    const out = assembleSystemPrompt(baseCtx({ customInstructions: "Be terse." }));
+    expect(out).toContain("outrank your own <agent-personality>");
+    expect(out).toContain("guardrails");
+  });
+
+  it("sits after the personality and before memory", () => {
+    const out = assembleSystemPrompt(
+      baseCtx({
+        personality: "helpful",
+        customInstructions: "Be terse.",
+        memory: [mem("plan", "enterprise")],
+      })
+    );
+    expect(out.indexOf("<agent-personality>")).toBeLessThan(out.indexOf("<custom-instructions>"));
+    expect(out.indexOf("<custom-instructions>")).toBeLessThan(out.indexOf("<memory>"));
+  });
+
+  it("drops the block whole rather than truncating an instruction", () => {
+    // Half an instruction is worse than none: the agent would act on a sentence that stops early.
+    const out = assembleSystemPrompt(baseCtx({ customInstructions: "x".repeat(4_001) }));
+    expect(out).not.toContain("<custom-instructions>");
+  });
+});

@@ -20,6 +20,11 @@ export interface UserDoc {
   email: string;
   /** Null until the user chooses a password — an invited account has none, and should say so. */
   passwordHash: string | null;
+  /**
+   * Null until the user sets one. Never derived from the email address: a guess that looks
+   * authored is worse than an honest absence, so readers fall back to the address instead.
+   */
+  name: string | null;
   role: Role;
   status: UserStatus;
   createdAt: Date;
@@ -29,6 +34,7 @@ export interface UserDoc {
 export interface PublicUser {
   id: string;
   email: string;
+  name: string | null;
   role: Role;
   status: UserStatus;
 }
@@ -37,9 +43,23 @@ export function toPublicUser(user: UserDoc): PublicUser {
   return {
     id: user._id,
     email: user.email,
+    name: user.name,
     role: user.role,
     status: user.status,
   };
+}
+
+/** The longest display name worth storing — past this it stops being a name. */
+export const MAX_NAME_CHARS = 80;
+
+/**
+ * Normalizes a submitted display name. Collapses internal whitespace so a name cannot be padded
+ * into looking like two columns, and treats an empty result as clearing the name rather than
+ * storing a blank one.
+ */
+export function normalizeName(name: string): string | null {
+  const collapsed = name.replace(/\s+/g, " ").trim();
+  return collapsed.length > 0 ? collapsed : null;
 }
 
 export function normalizeEmail(email: string): string {
@@ -71,6 +91,15 @@ export interface UserAdminRepo {
 export interface PasswordWriteRepo {
   /** Sets the password and marks the account active — redemption is what ends `invited`. */
   setPassword(id: string, passwordHash: string): Promise<void>;
+}
+
+/**
+ * The narrow surface the self-service profile route needs. Kept separate from UserRepo for the
+ * same reason as {@link UserAdminRepo}. PgUserRepo satisfies it.
+ */
+export interface ProfileWriteRepo {
+  /** Null clears the name, returning the account to being addressed by its email. */
+  setName(id: string, name: string | null): Promise<void>;
 }
 
 /** Thrown by `insert()` on a duplicate email — the caller maps this to `409`. */
@@ -121,6 +150,7 @@ function rowToUser(row: Record<string, unknown>): UserDoc {
     _id: row.id as string,
     email: row.email as string,
     passwordHash: (row.password_hash as string | null) ?? null,
+    name: (row.name as string | null) ?? null,
     role: row.role as Role,
     status: row.status as UserStatus,
     createdAt: row.created_at as Date,
@@ -150,9 +180,9 @@ export class PgUserRepo implements UserRepo {
   async insert(user: UserDoc): Promise<void> {
     try {
       await this.q.query(
-        `INSERT INTO users (id, email, password_hash, role, status, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [user._id, user.email, user.passwordHash, user.role, user.status, user.createdAt]
+        `INSERT INTO users (id, email, password_hash, name, role, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [user._id, user.email, user.passwordHash, user.name, user.role, user.status, user.createdAt]
       );
     } catch (err) {
       if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
@@ -187,6 +217,10 @@ export class PgUserRepo implements UserRepo {
       passwordHash,
     ]);
   }
+
+  async setName(id: string, name: string | null): Promise<void> {
+    await this.q.query("UPDATE users SET name = $2 WHERE id = $1", [id, name]);
+  }
 }
 
 export async function createUser(
@@ -199,6 +233,7 @@ export async function createUser(
     _id: randomUUID(),
     email: normalizeEmail(email),
     passwordHash: await hashPassword(password),
+    name: null,
     role,
     status: "active",
     createdAt: new Date(),
@@ -217,6 +252,7 @@ export async function inviteUser(repo: UserRepo, email: string): Promise<UserDoc
     _id: randomUUID(),
     email: normalizeEmail(email),
     passwordHash: null,
+    name: null,
     role: "member",
     status: "invited",
     createdAt: new Date(),

@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, test, vi } from "vitest";
 import { getUpdateCheck } from "~/lib/system";
-import SettingsAbout from "./_app.settings.about";
+import BusinessAbout from "./_app.business.about";
 
 vi.mock("~/lib/system", () => ({ getUpdateCheck: vi.fn() }));
 
@@ -13,7 +13,7 @@ test("shows the current version and supports an explicit update check", async ()
     updateAvailable: false,
   });
   const user = userEvent.setup();
-  render(<SettingsAbout />);
+  render(<BusinessAbout />);
 
   expect(await screen.findByText("Version 0.4.4")).toBeInTheDocument();
   expect(screen.getByText("You are up to date.")).toBeInTheDocument();

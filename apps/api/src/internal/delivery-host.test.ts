@@ -50,6 +50,7 @@ function user(id: string): UserDoc {
     _id: id,
     email: `${id}@example.com`,
     passwordHash: "x",
+    name: null,
     role: "admin",
     status: "active",
     createdAt: NOW,

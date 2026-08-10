@@ -192,8 +192,12 @@ export type UserStatus = "active" | "invited" | "disabled";
 export type SessionUser = {
   id: string;
   email: string;
+  // Null until the person sets one. Never derived from the email — a guess that looks authored is
+  // worse than an honest absence.
+  name: string | null;
   role: string;
   status: UserStatus;
+  createdAt?: string;
 };
 
 // Establish a session: POST credentials to the API, which sets the httpOnly session cookie + the
@@ -207,6 +211,12 @@ export async function login(email: string, password: string): Promise<SessionUse
 // unauthenticated — the _app gate uses that to redirect to /login.
 export async function getSession(): Promise<SessionUser> {
   return (await apiGet<{ user: SessionUser }>("/api/v1/auth/session")).user;
+}
+
+// Update the current user's own profile. Self-service and scoped to the caller's own record by the
+// server; there is no user id in the path precisely so it cannot be aimed at anyone else.
+export async function updateProfile(name: string | null): Promise<SessionUser> {
+  return (await apiWrite<{ user: SessionUser }>("PATCH", "/api/v1/auth/profile", { name })).user;
 }
 
 // Change the current user's password. The current one is required — a stolen session must not be

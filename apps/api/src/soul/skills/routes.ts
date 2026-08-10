@@ -944,7 +944,8 @@ export function registerSkillRoutes(
         // missing provider is a config problem (422), any other failure is an upstream error (502).
         if (e instanceof LlmNotConfiguredError) {
           return reply.code(422).send({
-            error: "SkillAudit needs an LLM provider — configure one in Settings → LLM.",
+            error:
+              "SkillAudit needs an LLM provider — configure one in Operate → Business → Models.",
           });
         }
         return reply

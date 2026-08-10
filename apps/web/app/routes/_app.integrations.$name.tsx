@@ -1,19 +1,20 @@
 import {
   type ClientLoaderFunctionArgs,
+  Link,
   type MetaFunction,
   useLoaderData,
   useRevalidator,
   useRouteError,
   useSearchParams,
 } from "@remix-run/react";
-import { ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
+import { ArrowLeft, ExternalLink, MoreHorizontal, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { IntegrationAuthFlow, startHandoff } from "~/components/integrations/auth-flow";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { MarkdownView } from "~/components/markdown-view";
-import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState, NotFoundState } from "~/components/states";
 import { StatusBadge } from "~/components/status-badge";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
 import { Modal } from "~/components/ui/modal";
@@ -95,20 +96,19 @@ function displayName(integration: IntegrationDetail): string {
   return integration.title ?? integration.name;
 }
 
+// Separators are decoration, and at narrow widths a wrapped line strands one at the end of the
+// row above. Below `sm` they are dropped and the gap widens instead, so the meta line still reads
+// as distinct items without the orphan.
 function Dot() {
   return (
-    <span aria-hidden className="opacity-40">
+    <span aria-hidden className="hidden opacity-40 sm:inline">
       ·
     </span>
   );
 }
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
-  return (
-    <h2 className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-      {children}
-    </h2>
-  );
+  return <h2 className="text-sm font-semibold text-foreground">{children}</h2>;
 }
 
 /**
@@ -119,19 +119,25 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
  */
 function GrantList({ grants }: { grants: IntegrationGrant[] }) {
   return (
-    <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+    <ul className="flex flex-col divide-y divide-border rounded-md border border-border">
       {grants.map((grant) => (
-        <li key={`${grant.label}:${grant.access ?? ""}`} className="flex gap-3 px-3 py-2">
-          <code className="shrink-0 text-xs text-foreground">{grant.label}</code>
-          {grant.access && (
-            <span className="shrink-0 text-xs uppercase tracking-wider text-muted-foreground">
-              {grant.access}
+        <li
+          key={`${grant.label}:${grant.access ?? ""}`}
+          className="flex flex-col gap-1 px-4 py-2.5 sm:flex-row sm:items-center sm:gap-3"
+        >
+          {/* Fixed columns: the scope and its access level are what an operator compares down the
+              list, and ragged columns make that a re-read of every row. Below `sm` there is no room
+              for three columns without shredding the description, so the row stacks instead. */}
+          <span className="flex items-center gap-2 sm:contents">
+            <code className="text-xs text-foreground sm:w-40 sm:shrink-0 sm:truncate">
+              {grant.label}
+            </code>
+            <span className="sm:w-14 sm:shrink-0">
+              {grant.access && <Badge className="capitalize">{grant.access}</Badge>}
             </span>
-          )}
+          </span>
           {grant.description && (
-            <span className="ml-auto text-right text-xs text-muted-foreground">
-              {grant.description}
-            </span>
+            <span className="text-xs text-muted-foreground">{grant.description}</span>
           )}
         </li>
       ))}
@@ -317,14 +323,28 @@ export default function IntegrationDetailPage() {
   }
 
   return (
-    <ResourcePanel crumbs={[{ label: "integrations", to: "/integrations" }, { label: name }]}>
+    <>
+      {/* The top bar names the section, not this integration, so the way back to the catalog has
+          to live on the page. */}
+      <Link
+        to="/integrations"
+        className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <ArrowLeft aria-hidden className="size-4" />
+        Integrations
+      </Link>
       <div className="flex flex-col gap-6">
         <header className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex min-w-0 gap-3">
-            <IntegrationIcon label={name} iconPath={integration.iconPath} size="lg" />
+            <IntegrationIcon
+              label={name}
+              iconPath={integration.iconPath}
+              iconColor={integration.iconColor}
+              size="lg"
+            />
             <div className="flex min-w-0 flex-col gap-1.5">
-              <h1 className="text-2xl font-bold tracking-tight text-foreground">{name}</h1>
-              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs text-muted-foreground">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">{name}</h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground sm:gap-x-2.5">
                 {/* The slug is what every URL, log line, and manifest calls it, so it stays
                     visible even once the brand name is the headline. */}
                 <code>{integration.name}</code>
@@ -569,7 +589,7 @@ export default function IntegrationDetailPage() {
           </div>
         </Modal>
       )}
-    </ResourcePanel>
+    </>
   );
 }
 

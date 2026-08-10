@@ -7,7 +7,7 @@ import type { TokenRepo } from "../api-tokens";
 import type { UserInviteRepo } from "../invites";
 import { makeRequireAuth } from "../middleware";
 import type { SessionStore } from "../session-store";
-import type { PasswordWriteRepo, UserAdminRepo, UserRepo } from "../users";
+import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "../users";
 import { registerSessionRoutes } from "./session";
 import { registerTokenRoutes } from "./tokens";
 import { registerAdminUserRoutes } from "./users";
@@ -20,6 +20,7 @@ interface AuthRouteOptions {
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   userAdminRepo?: UserAdminRepo;
   passwordWriteRepo?: PasswordWriteRepo;
+  profileWriteRepo?: ProfileWriteRepo;
   inviteRepo?: UserInviteRepo;
 }
 
@@ -63,6 +64,7 @@ export function registerAuthRoutes(
     rateLimitHook: preHandler,
     loginRateLimitHook: loginPreHandler,
     passwordWriteRepo: options.passwordWriteRepo,
+    profileWriteRepo: options.profileWriteRepo,
     inviteRepo: options.inviteRepo,
   });
   registerTokenRoutes(app, repo, tokenRepo, requireAuth, preHandler);

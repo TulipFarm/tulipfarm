@@ -1,6 +1,7 @@
 import { Navigate } from "@remix-run/react";
 
-// /settings has no pane of its own (dark mode lives in the sidebar) — land on the first tab.
+// Settings has no pane of its own, so it lands on the first section. Profile rather than the old
+// target of Secrets, which every non-admin was sent to and immediately 403'd on.
 export default function SettingsIndex() {
-  return <Navigate to="/settings/secrets" replace />;
+  return <Navigate to="/settings/profile" replace />;
 }

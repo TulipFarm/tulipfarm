@@ -68,7 +68,7 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | The single-use invitation that creates one | **Bind link** | `ChannelBind*` | — | "Link your account" | HMAC-signed, 15 min, nonce consumed on redemption; a credential — never logged, never in a query string |
 | The single-use link that gives a TulipFarm account its password | **Invite link** | `Invite`, `UserInvite*` | `/api/v1/users/:id/invite`, `/api/v1/auth/invites/*`, `/accept-invite` | "Invite link", "Reset password link" | Random secret, hash-only storage, 7 days, consumed on redemption; re-issuing revokes the outstanding one and is also the password recovery path. ⛔ "temporary password" — none is ever minted. Distinct from a **Bind link**, which links a channel sender, not an account |
 | Auth material for a provider/integration | **Credential** | `Credential` | — | "Credentials" | API key/token/login; *backed by* a Secret |
-| Encrypted at-rest value (storage primitive) | **Secret** | `Secret` | `/settings/secrets` | "Secrets" | the store; ≠ Credential |
+| Encrypted at-rest value (storage primitive) | **Secret** | `Secret` | `/business/secrets` | "Secrets" | the store; ≠ Credential |
 | Boot-time value from `.env`/`process.env` | **Env Config** | — | — | — | restart-required; not all values are secret (e.g. `SOUL_PATH`) — the one genuinely secret value inside it is the KEK (`ENCRYPTION_KEY`), named directly, not by renaming this bucket |
 | An installable agent capability module | **Skill** | `Skill` | `/skills`, `/api/v1/skills` | "Skills" | `plugin`/`capability` → retired as synonyms¹ |
 | Where skills are browsed/installed | **Marketplace** / **Install** | — | `/skills/marketplace`, `/skills/install` | "Marketplace" | |
@@ -131,6 +131,9 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | tier (meaning model routing) | ModelProfile | retiring — accepted as a deprecated wire alias for one release |
 | quick / standard / complex | Effort Preset (Auto/Fast/Balanced/Thorough) | retiring — deprecated wire aliases for one release |
 | model (meaning the user-facing choice) | effort preset | clean — a user picks effort, never a model |
+| LLM page | Models | clean |
+| Users page / Roles page | People | clean |
+| Security page | Auth | clean |
 | working memory | Core Block (the pinned tier) or Assertion (one stored fact) | code clean — every `WorkingMemory*` identifier retired (`MemoryService`, `MemoryAssertionView`, `MemoryRepo`, `EngineMemoryRepo`); the legacy `working_memory` **table** intentionally survives one more release as the cutover's recovery path (see `memory/backfill.pg.test.ts`), then drops |
 | memory entry / memory item | assertion | code clean — `InvalidMemoryAssertionError`, `assertValidAssertion`; `MAX_ENTRIES`/`MAX_TOTAL_CHARS` keep their names as cap constants, not as a term for an Assertion |
 

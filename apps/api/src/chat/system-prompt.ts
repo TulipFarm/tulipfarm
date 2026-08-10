@@ -16,6 +16,7 @@ export function assembleAgentSystemPrompt(args: {
   agent: SoulAgent;
   platformAgent: PlatformAgent | undefined;
   business?: AssembleContext["business"];
+  customInstructions?: AssembleContext["customInstructions"];
   memory: AssembleContext["memory"];
   recalledMemory?: AssembleContext["recalledMemory"];
   governancePages: AssembleContext["governancePages"];
@@ -35,6 +36,7 @@ export function assembleAgentSystemPrompt(args: {
     agent,
     platformAgent,
     business,
+    customInstructions,
     memory,
     recalledMemory,
     governancePages,
@@ -74,6 +76,7 @@ export function assembleAgentSystemPrompt(args: {
     tenantId: "default",
     business,
     personality: agent.body,
+    customInstructions,
     memory,
     recalledMemory,
     governancePages,

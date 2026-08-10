@@ -29,7 +29,7 @@ import type { UserInviteRepo } from "./auth/invites";
 import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
-import type { PasswordWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
+import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
@@ -74,6 +74,7 @@ import type { ObservabilityConfig } from "./observability/config";
 import { registerObservabilityRoutes } from "./observability/routes";
 import type { ObservabilityService } from "./observability/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
+import { registerPreferenceRoutes } from "./preferences/routes";
 import type { RateLimiter } from "./rate-limit";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
@@ -106,6 +107,7 @@ export interface AppOptions {
   userRepo?: UserRepo;
   userAdminRepo?: UserAdminRepo;
   passwordWriteRepo?: PasswordWriteRepo;
+  profileWriteRepo?: ProfileWriteRepo;
   userInviteRepo?: UserInviteRepo;
   tokenRepo?: TokenRepo;
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
@@ -431,6 +433,7 @@ export async function buildApp(opts: AppOptions = {}) {
       ...(opts.identity && { identity: opts.identity }),
       ...(opts.userAdminRepo && { userAdminRepo: opts.userAdminRepo }),
       ...(opts.passwordWriteRepo && { passwordWriteRepo: opts.passwordWriteRepo }),
+      ...(opts.profileWriteRepo && { profileWriteRepo: opts.profileWriteRepo }),
       ...(opts.userInviteRepo && { inviteRepo: opts.userInviteRepo }),
     });
     const requireAuth = makeRequireAuth({
@@ -491,6 +494,7 @@ export async function buildApp(opts: AppOptions = {}) {
 
     if (opts.kvService) {
       registerKvRoutes(app, opts.kvService, requireAuth);
+      registerPreferenceRoutes(app, opts.kvService, requireAuth);
     }
     registerSystemRoutes(app, { kv: opts.kvService, ...opts.systemRoutes }, requireAuth);
     if (opts.activityService) {

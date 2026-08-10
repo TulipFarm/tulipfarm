@@ -192,7 +192,7 @@ route's actual behavior rather than assuming one uniform "friendly 404".
 | 1 | Tab through `/resources/new` | Order: `type name` → `description` → `field 1 name` → `field 1 type` → (`field 1 choices` if enum) → `required` → `remove field 1` → `+ add field` → `Create type` → `Cancel`, each with a visible focus ring |
 | 2 | Tab through a record create form with a relation field present | Reaches the `relatedTo` combobox; `expect` its option list is operable by keyboard alone (Enter/Arrow), not mouse-only |
 | 3 | `expect` (P2 if not true) | Source shows the combobox's options only handle `onMouseDown` — no `onKeyDown` for Enter/Arrow selection. If Tabbing into an open list provides no way to choose an option without a pointer, that is a keyboard-operability failure |
-| 4 | On `/settings/security` (or wherever the toggle lives in this session), record the current theme, `click` `Toggle dark mode` | Theme flips |
+| 4 | On `/settings/auth` (or wherever the toggle lives in this session), record the current theme, `click` `Toggle dark mode` | Theme flips |
 | 5 | Revisit `/resources`, `/resources/qa-<run-id>-widget`, a record detail page, and the schema textarea in the flipped theme | All text legible, including the `[system]` block and any disabled/immutable input |
 | 6 | `click` `Toggle dark mode` again | Restored to the recorded baseline — a persisted preference on the operator's real session |
 | 7 | Resize to 375px width | Breadcrumb, the `New <type>` / `Edit type` / `Delete type` toolbar (wraps rather than overflows), and the schema-driven table (scrolls inside its own container) all stay usable; no page-level horizontal scroll |

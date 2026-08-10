@@ -9,10 +9,11 @@ import { ChevronRight, Search } from "lucide-react";
 import { type ReactNode, useId, useMemo, useState } from "react";
 import { InstallFromSource } from "~/components/integrations/install-from-source";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
-import { ResourcePanel } from "~/components/resource-panel";
 import { ErrorState } from "~/components/states";
 import { StatusBadge } from "~/components/status-badge";
+import { Badge } from "~/components/ui/badge";
 import { Input } from "~/components/ui/input";
+import { Panel, PanelEmpty } from "~/components/ui/panel";
 import { ApiError } from "~/lib/api";
 import { type IntegrationSummary, listIntegrations } from "~/lib/integrations";
 import { cn } from "~/lib/utils";
@@ -69,7 +70,7 @@ export default function IntegrationsIndex() {
   const rest = visible.filter((i) => i.status !== "connected");
 
   return (
-    <ResourcePanel crumbs={[{ label: "integrations" }]}>
+    <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative flex-1">
@@ -111,20 +112,22 @@ export default function IntegrationsIndex() {
       </div>
 
       {visible.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          {integrations.length === 0
-            ? "No integrations are available yet. Install one from a git repository to get started."
-            : "Nothing matches that search."}
-        </p>
+        <Panel>
+          <PanelEmpty>
+            {integrations.length === 0
+              ? "No integrations are available yet. Install one from a git repository to get started."
+              : "Nothing matches that search."}
+          </PanelEmpty>
+        </Panel>
       ) : (
-        <div className="flex flex-col gap-5">
+        <>
           {connected.length > 0 && <Section title="Connected" items={connected} />}
           {rest.length > 0 && (
             <Section title={connected.length > 0 ? "Available" : "All integrations"} items={rest} />
           )}
-        </div>
+        </>
       )}
-    </ResourcePanel>
+    </div>
   );
 }
 
@@ -156,16 +159,13 @@ function CategoryChip({
 
 function Section({ title, items }: { title: string; items: IntegrationSummary[] }) {
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-[0.625rem] font-medium uppercase tracking-[0.2em] text-muted-foreground">
-        {title} <span className="opacity-60">({items.length})</span>
-      </h2>
-      <ul className="flex flex-col divide-y divide-border rounded-sm border border-border">
+    <Panel title={title} actions={<Badge>{items.length}</Badge>} flush>
+      <ul className="flex flex-col divide-y divide-border">
         {items.map((integration) => (
           <IntegrationRow key={integration.name} integration={integration} />
         ))}
       </ul>
-    </section>
+    </Panel>
   );
 }
 
@@ -173,14 +173,16 @@ function RowBody({ integration }: { integration: IntegrationSummary }) {
   const name = displayName(integration);
   return (
     <>
-      <IntegrationIcon label={name} iconPath={integration.iconPath} />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="flex items-baseline gap-2">
+      <IntegrationIcon
+        label={name}
+        iconPath={integration.iconPath}
+        iconColor={integration.iconColor}
+      />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex items-center gap-2">
           <span className="truncate font-medium text-foreground">{name}</span>
           {integration.category && (
-            <span className="hidden shrink-0 text-xs capitalize text-muted-foreground sm:inline">
-              {integration.category}
-            </span>
+            <Badge className="hidden capitalize sm:inline-flex">{integration.category}</Badge>
           )}
         </span>
         {integration.description && (
@@ -198,7 +200,7 @@ function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
   // It is a row about a repository, not about an integration this deployment has.
   if (!integration.installed) {
     return (
-      <li className="flex items-center gap-3 px-3 py-2.5">
+      <li className="flex items-center gap-3 px-4 py-3">
         <RowBody integration={integration} />
         <span className="shrink-0 text-xs text-muted-foreground">Not installed</span>
       </li>
@@ -211,7 +213,7 @@ function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
           the pointer is already over, not the few characters of its title. */}
       <Link
         to={`/integrations/${encodeURIComponent(integration.name)}`}
-        className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-accent"
+        className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-accent"
       >
         <RowBody integration={integration} />
         <span className="flex shrink-0 items-center gap-2">
@@ -224,7 +226,7 @@ function IntegrationRow({ integration }: { integration: IntegrationSummary }) {
         </span>
       </Link>
       {integration.errorMessage && (
-        <p className="px-3 pb-2 text-xs text-destructive">{integration.errorMessage}</p>
+        <p className="px-4 pb-2 text-xs text-destructive">{integration.errorMessage}</p>
       )}
     </li>
   );

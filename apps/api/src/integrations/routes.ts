@@ -17,7 +17,7 @@ import { stringify as stringifyYaml } from "yaml";
 import { ErrorSchema } from "../auth/schemas";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
-import { brandIconPath } from "./brand-icon";
+import { brandIcon } from "./brand-icon";
 import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env";
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
@@ -119,6 +119,7 @@ async function toCatalog(
             installed: false,
             status: "disconnected" as ConnectionStatus,
           };
+      const mark = await brandIcon(entry?.manifest.icon ?? listing?.icon);
       return {
         ...base,
         title: listing?.title,
@@ -126,7 +127,10 @@ async function toCatalog(
         category: listing?.category,
         homepage: listing?.homepage,
         source: listing?.source,
-        iconPath: (await brandIconPath(entry?.manifest.icon ?? listing?.icon)) ?? undefined,
+        iconPath: mark?.path,
+        // The registry's colour is the fallback, not an override: it exists for brands the icon
+        // set does not carry, so a resolved mark always keeps its own.
+        iconColor: mark?.hex ?? listing?.color,
       };
     })
   );
@@ -134,6 +138,7 @@ async function toCatalog(
 
 async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
   const steps = resolveAuthSteps(entry.manifest);
+  const mark = await brandIcon(entry.manifest.icon ?? listing?.icon);
   return {
     ...toSummary(entry),
     // The same brand identity the catalog row showed. Landing on a detail page that drops back to
@@ -141,7 +146,8 @@ async function toDetail(entry: MergedIntegration, listing?: RegistryEntry) {
     title: listing?.title,
     category: listing?.category,
     homepage: listing?.homepage,
-    iconPath: (await brandIconPath(entry.manifest.icon ?? listing?.icon)) ?? undefined,
+    iconPath: mark?.path,
+    iconColor: mark?.hex ?? listing?.color,
     capabilities: entry.manifest.capabilities,
     grants: resolveGrants(entry.manifest),
     manifest: {
@@ -183,6 +189,8 @@ const IntegrationSummarySchema = {
     homepage: { type: "string" },
     /** Simple Icons path data for the brand mark; absent when the brand has none. */
     iconPath: { type: "string" },
+    /** The brand's hex without `#`, from the icon set or the registry. Legibility is the client's. */
+    iconColor: { type: "string" },
     version: { type: "string" },
     maintainer: { type: "string" },
     /** Git source of a curated third-party integration; absent when it ships in the image. */

@@ -11,6 +11,11 @@ import {
 } from "~/lib/memory";
 import SettingsMemory, { clientLoader } from "./_app.settings.memory";
 
+vi.mock("~/lib/settings", async () => {
+  const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
+  return { ...actual, getCustomInstructions: vi.fn().mockResolvedValue("") };
+});
+
 vi.mock("~/lib/memory", () => ({
   listMemory: vi.fn(),
   listPendingMemory: vi.fn(),
@@ -47,7 +52,7 @@ test("shows suggested memories awaiting a decision", async () => {
 
   expect(await screen.findByText("Works at Acme as a staff engineer.")).toBeInTheDocument();
   expect(screen.getByText("employer")).toBeInTheDocument();
-  expect(screen.getByText("(1)")).toBeInTheDocument();
+  expect(screen.getByText("Suggested memories")).toBeInTheDocument();
 });
 
 test("keeps a suggestion, confirming it", async () => {
@@ -73,7 +78,7 @@ test("discards a suggestion, denying it", async () => {
 test("hides the section entirely when nothing awaits review", async () => {
   renderPage();
 
-  expect(await screen.findByLabelText("new memory key")).toBeInTheDocument();
+  expect(await screen.findByLabelText("New memory key")).toBeInTheDocument();
   expect(screen.queryByText("Suggested memories")).not.toBeInTheDocument();
 });
 
@@ -81,7 +86,7 @@ test("still renders when the queue is unavailable, rather than failing the page"
   vi.mocked(listPendingMemory).mockRejectedValue(new Error("not registered"));
   renderPage();
 
-  expect(await screen.findByLabelText("new memory key")).toBeInTheDocument();
+  expect(await screen.findByLabelText("New memory key")).toBeInTheDocument();
   expect(screen.queryByText("Suggested memories")).not.toBeInTheDocument();
 });
 
@@ -102,8 +107,8 @@ test("keeps saved memories separate from suggestions", async () => {
   renderPage();
 
   // The saved entry is editable; the suggestion is not — it is only keep-or-discard.
-  expect(await screen.findByLabelText("value for language")).toBeInTheDocument();
-  expect(screen.queryByLabelText("value for employer")).not.toBeInTheDocument();
+  expect(await screen.findByLabelText("Value for language")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Value for employer")).not.toBeInTheDocument();
 });
 
 test("does not touch the saved-memory API when resolving a suggestion", async () => {

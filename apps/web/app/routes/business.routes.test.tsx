@@ -7,8 +7,8 @@ import { afterEach, expect, test, vi } from "vitest";
 import { ApiError } from "~/lib/api";
 import type { LlmProviderInfo } from "~/lib/settings";
 import * as settings from "~/lib/settings";
-import SettingsLlm from "./_app.settings.llm";
-import SettingsSecrets from "./_app.settings.secrets";
+import BusinessModels from "./_app.business.models";
+import BusinessSecrets from "./_app.business.secrets";
 
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
@@ -19,6 +19,17 @@ vi.mock("@remix-run/react", async () => {
     useRevalidator: vi.fn(() => ({ revalidate: vi.fn(), state: "idle" })),
   };
 });
+
+vi.mock("~/lib/use-session-user", () => ({
+  useSessionUser: () => ({
+    id: "u1",
+    email: "admin@x.dev",
+    name: null,
+    role: "admin",
+    status: "active",
+  }),
+  useIsAdmin: () => true,
+}));
 
 vi.mock("~/lib/settings", async () => {
   const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
@@ -74,7 +85,7 @@ afterEach(() => {
 const meta = { type: "user-provided" as const, createdAt: "x", updatedAt: "y" };
 
 test("groups a provider's stored fields into one collapsible row and shows config values", async () => {
-  renderWithData(<SettingsSecrets />, {
+  renderWithData(<BusinessSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
       { key: "azure-openai-resource-name", ...meta },
@@ -86,15 +97,15 @@ test("groups a provider's stored fields into one collapsible row and shows confi
   // picker) — proven by one "2 fields" badge + one Delete (not two per-key rows).
   expect(screen.getAllByText("Azure Foundry").length).toBeGreaterThanOrEqual(1);
   expect(screen.getByText("2 fields")).toBeInTheDocument();
-  expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: /^delete .* credentials$/i })).toHaveLength(1);
   // Expand to edit: config value (resource name) prefills; the secret stays blank/write-only.
-  await userEvent.click(screen.getByRole("button", { name: /^edit$/i }));
-  expect(screen.getByLabelText("azure resource_name")).toHaveValue("my-res");
-  expect(screen.getByLabelText("azure api_key")).toHaveValue("");
+  await userEvent.click(screen.getByRole("button", { name: "Edit Azure Foundry" }));
+  expect(screen.getByLabelText("Resource name for Azure Foundry")).toHaveValue("my-res");
+  expect(screen.getByLabelText("API key for Azure Foundry")).toHaveValue("");
 });
 
 test("editing a provider inline saves only the changed fields", async () => {
-  renderWithData(<SettingsSecrets />, {
+  renderWithData(<BusinessSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
       { key: "azure-openai-resource-name", ...meta },
@@ -103,18 +114,18 @@ test("editing a provider inline saves only the changed fields", async () => {
     config: { "azure-openai-resource-name": "my-res" },
   });
   // Edit happens in the row itself (expand it), then change the resource name and Save.
-  await userEvent.click(screen.getByRole("button", { name: /^edit$/i }));
-  const resource = screen.getByLabelText("azure resource_name");
+  await userEvent.click(screen.getByRole("button", { name: "Edit Azure Foundry" }));
+  const resource = screen.getByLabelText("Resource name for Azure Foundry");
   await userEvent.clear(resource);
   await userEvent.type(resource, "new-res");
-  await userEvent.click(screen.getByRole("button", { name: /^save$/i })); // the row's inline Save
+  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
   expect(settings.putSecret).toHaveBeenCalledWith("azure-openai-resource-name", "new-res");
   // The untouched (blank) API key is left as-is — not re-written.
   expect(settings.putSecret).not.toHaveBeenCalledWith("azure-openai-api-key", expect.anything());
 });
 
 test("a configured provider is not offered in the add picker (managed via Edit only)", () => {
-  renderWithData(<SettingsSecrets />, {
+  renderWithData(<BusinessSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
       { key: "azure-openai-resource-name", ...meta },
@@ -122,7 +133,7 @@ test("a configured provider is not offered in the add picker (managed via Edit o
     providers: PROVIDERS,
     config: {},
   });
-  const picker = screen.getByLabelText("secret provider");
+  const picker = screen.getByLabelText("Provider");
   const optionLabels = within(picker)
     .getAllByRole("option")
     .map((o) => o.textContent);
@@ -131,34 +142,34 @@ test("a configured provider is not offered in the add picker (managed via Edit o
 });
 
 test("selecting Custom… in the add picker reveals key/value fields and stores under the typed key", async () => {
-  renderWithData(<SettingsSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
-  await userEvent.selectOptions(screen.getByLabelText("secret provider"), "Custom…");
-  await userEvent.type(screen.getByLabelText("secret key"), "stripe-api-key");
-  await userEvent.type(screen.getByLabelText("secret value"), "sk_live_x");
-  await userEvent.click(screen.getByRole("button", { name: /save provider/i }));
+  renderWithData(<BusinessSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
+  await userEvent.selectOptions(screen.getByLabelText("Provider"), "Custom…");
+  await userEvent.type(screen.getByLabelText("Key"), "stripe-api-key");
+  await userEvent.type(screen.getByLabelText("Value"), "sk_live_x");
+  await userEvent.click(screen.getByRole("button", { name: /save credential/i }));
   expect(settings.putSecret).toHaveBeenCalledWith("stripe-api-key", "sk_live_x");
 });
 
 test("configuring a multi-field provider stores every field under its registry key", async () => {
-  renderWithData(<SettingsSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
-  await userEvent.selectOptions(screen.getByLabelText("secret provider"), "azure");
-  await userEvent.type(screen.getByLabelText("azure api_key"), "az-key");
-  await userEvent.type(screen.getByLabelText("azure resource_name"), "my-res");
-  await userEvent.click(screen.getByRole("button", { name: /save provider/i }));
+  renderWithData(<BusinessSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
+  await userEvent.selectOptions(screen.getByLabelText("Provider"), "azure");
+  await userEvent.type(screen.getByLabelText("API key for Azure Foundry"), "az-key");
+  await userEvent.type(screen.getByLabelText("Resource name for Azure Foundry"), "my-res");
+  await userEvent.click(screen.getByRole("button", { name: /save credential/i }));
   expect(settings.putSecret).toHaveBeenCalledWith("azure-openai-api-key", "az-key");
   expect(settings.putSecret).toHaveBeenCalledWith("azure-openai-resource-name", "my-res");
 });
 
 test("a 403 on write surfaces an admin-only message", async () => {
   vi.mocked(settings.putSecret).mockRejectedValueOnce(new ApiError(403, "forbidden"));
-  renderWithData(<SettingsSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
-  await userEvent.type(screen.getByLabelText("anthropic api_key"), "sk");
-  await userEvent.click(screen.getByRole("button", { name: /save provider/i }));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/admin only/i));
+  renderWithData(<BusinessSecrets />, { secrets: [], providers: PROVIDERS, config: {} });
+  await userEvent.type(screen.getByLabelText("API key for Anthropic"), "sk");
+  await userEvent.click(screen.getByRole("button", { name: /save credential/i }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/only an admin/i));
 });
 
 test("deleting a provider removes all of its stored field keys", async () => {
-  renderWithData(<SettingsSecrets />, {
+  renderWithData(<BusinessSecrets />, {
     secrets: [
       { key: "azure-openai-api-key", ...meta },
       { key: "azure-openai-resource-name", ...meta },
@@ -166,7 +177,7 @@ test("deleting a provider removes all of its stored field keys", async () => {
     providers: PROVIDERS,
     config: {},
   });
-  await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+  await userEvent.click(screen.getByRole("button", { name: /^delete /i }));
   const dialog = await screen.findByRole("dialog");
   await userEvent.click(within(dialog).getByRole("button", { name: /delete/i }));
   expect(settings.deleteSecret).toHaveBeenCalledWith("azure-openai-api-key");
@@ -174,27 +185,27 @@ test("deleting a provider removes all of its stored field keys", async () => {
 });
 
 test("a custom (non-provider) secret lists individually and deletes by its key", async () => {
-  renderWithData(<SettingsSecrets />, {
+  renderWithData(<BusinessSecrets />, {
     secrets: [{ key: "stale-key", ...meta }],
     providers: PROVIDERS,
     config: {},
   });
-  await userEvent.click(screen.getByRole("button", { name: /delete/i }));
+  await userEvent.click(screen.getByRole("button", { name: /^delete /i }));
   const dialog = await screen.findByRole("dialog");
   await userEvent.click(within(dialog).getByRole("button", { name: /delete/i }));
   expect(settings.deleteSecret).toHaveBeenCalledWith("stale-key");
 });
 
-// --- LLM config ---
+// --- Models ---
 
 test("llm pane saves the structured config via putLlmConfig", async () => {
   vi.mocked(settings.putLlmConfig).mockResolvedValueOnce(llmConfig);
-  renderWithData(<SettingsLlm />, {
+  renderWithData(<BusinessModels />, {
     config: llmConfig,
     providers: PROVIDERS,
     secretKeys: ["anthropic-api-key"],
   });
-  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
+  await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
   expect(settings.putLlmConfig).toHaveBeenCalledWith({
     ...llmConfig,
     presets: {
@@ -209,11 +220,11 @@ test("llm pane saves the structured config via putLlmConfig", async () => {
 
 test("a 403 saving the llm config surfaces an admin-only message", async () => {
   vi.mocked(settings.putLlmConfig).mockRejectedValueOnce(new ApiError(403, "forbidden"));
-  renderWithData(<SettingsLlm />, {
+  renderWithData(<BusinessModels />, {
     config: llmConfig,
     providers: PROVIDERS,
     secretKeys: ["anthropic-api-key"],
   });
-  await userEvent.click(screen.getByRole("button", { name: /^save$/i }));
-  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/admin only/i));
+  await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
+  await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/only an admin/i));
 });

@@ -17,7 +17,7 @@ actually does work for you — about twenty minutes, all of it in the browser.
 ### Create your admin account
 
 Open your instance's URL. Because no admin exists yet, the app redirects to the setup wizard
-at `/setup`. Work through the four steps:
+at `/setup`. Work through the three steps:
 
 1. **Admin account** — enter an email and password. This creates the first admin and logs
    you in.
@@ -26,10 +26,8 @@ at `/setup`. Work through the four steps:
 3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure Foundry, or an
    OpenAI-compatible endpoint), enter the credentials, and pick a model. You can skip this
    and configure it later.
-4. **Soul backup** — optionally point the soul at a git remote for backup. You can skip this
-   and set it up in **Settings** later.
 
-After step 4 the wizard redirects to the main workspace and the setup route locks — a second
+After step 3 the wizard redirects to the main workspace and the setup route locks — a second
 browser visitor cannot create another admin through it.
 
 <Callout type="warn">
@@ -47,10 +45,10 @@ browser visitor cannot create another admin through it.
 You build everything else by talking to the assistant, so it needs a model to run. If you
 skipped step 3 of the wizard, nothing below will work until you finish this one.
 
-Open **Settings → Secrets**, add an API key for a provider, then open **Settings → LLM** and
-assign a model to each tier. Tiers are the authoring shape behind the `fast`, `balanced`, and
-`thorough` effort presets, so that cheap work can use a cheap model and hard work can use a
-capable one, with fallback if a provider fails.
+Open **Operate → Business → Secrets**, add an API key for a provider, then open
+**Operate → Business → Models** and assign models to the **Fast**, **Balanced**, and **Thorough**
+chains. In **What each effort means**, choose which profile **Auto** resolves to when nobody picks
+an effort.
 
 The walkthrough is in
 [Configure LLM providers](/docs/guides/configure-llm-providers).

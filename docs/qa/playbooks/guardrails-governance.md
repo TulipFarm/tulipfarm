@@ -2,16 +2,17 @@
 id: guardrails-governance
 area: Guardrails & Governance
 suites: [smoke, full]
-routes: ["/admin/guardrails"]
-preconditions: [admin session required]
-blast_radius: read-only policy check; restoring any edited guardrail rule immediately
+routes: ["/business/guardrails"]
+preconditions: [signed-in session; admin required for writes]
+blast_radius: read-only policy check unless a QA-owned guardrail is available; restore any edited
+  guardrail immediately
 est_minutes: 10
 smoke_scenarios: [S1]
 ---
 
 # Safety Guardrails & Policy Governance
 
-Guardrails governance (`/admin/guardrails`, backed by `@tulipfarm/schema` and `guardrails.yaml`) defines policy rules, tool execution constraints, content moderation filters, autonomy ceilings, and compliance rules across agent turns.
+Guardrails governance lives in Operate → Business at `/business/guardrails`. The current page lists configured guardrails from `guardrails.yaml`, their On/Off state, and an admin-gated Turn on/Turn off action.
 
 Every scenario stands alone — a failure in one does not block the next.
 
@@ -19,42 +20,40 @@ Every scenario stands alone — a failure in one does not block the next.
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `navigate /admin/guardrails` (admin session) | Page loads within 5s; heading `Guardrails` |
-| 2 | `expect` list of configured policy rules renders (e.g. `Restricted Secret Leakage`, `Tool Execution Limits`, `Content Safety Filter`, `Data Export Limits`) | Policy rules visible |
-| 3 | `expect` each rule row displays rule name, description, trigger scope, action (`block`, `flag`, `require_approval`), and status badge (`Active` / `Disabled`) | Rule attributes present |
-| 4 | If non-admin session, `expect` access denied state (`ErrorState` or redirect) | Non-admin blocked |
+| 1 | `navigate /business/guardrails` | Page loads within 5s; heading `Guardrails` |
+| 2 | `expect` list of configured guardrails renders, or empty state `No guardrails configured.` | Policy rules visible |
+| 3 | `expect` each row displays guardrail name, configured/effect text, an `On`/`Off` badge, and a `Turn on` or `Turn off` button | Rule attributes present |
+| 4 | If non-admin session, reads still render; clicking a write action should surface `You do not have permission to change guardrails.` and leave state unchanged | Non-admin blocked |
 | 5 | `capture` screenshot, console delta, failed requests | — |
 
-## S2 — Policy rule detail and constraint parameters
+## S2 — Policy detail surface: expected absent
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | `click` a policy rule row | Rule detail inspector drawer/modal opens |
-| 2 | `expect` constraint parameter fields render (e.g. `Max Tool Calls Per Turn`, `Forbidden Keywords`, `Required Approval Role`) | Parameters rendered |
-| 3 | `expect` rule audit metadata displays `Last Modified`, `Modified By`, and source (`soul/guardrails.yaml`) | Audit metadata present |
-| 4 | Close rule detail panel with `Escape` or Close button | Panel closes |
-| 5 | `capture` screenshot, console delta, failed requests | — |
+| 1 | Click around a guardrail row without pressing `Turn on` or `Turn off` | No detail drawer/modal opens in the current UI |
+| 2 | `expect` no constraint-parameter inspector or audit-metadata panel is present | Current page is a compact list only |
+| 3 | `note` that detailed policy parameters must be audited from the Soul file viewer, not this page | Recorded |
+| 4 | `capture` screenshot, console delta, failed requests | — |
 
-## S3 — Governance changesets & candidate evaluation
+## S3 — Guardrail toggle discipline
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Locate **Governance Proposals / Changesets** section | Displays candidate policy proposals awaiting review |
-| 2 | `expect` candidate rules show `Proposed Version`, `Author`, and `Diff View` | Proposal details visible |
-| 3 | `expect` `Approve Policy` or `Reject Policy` buttons render with confirmation prompts | Actions present |
-| 4 | `note` candidate rules — do not approve or reject pre-existing proposals without explicit operator directive | Recorded |
-| 5 | `capture` screenshot, console delta, failed requests | — |
+| 1 | For a pre-existing guardrail, record its label and On/Off badge | Baseline recorded |
+| 2 | Do **not** click Turn on/Turn off on pre-existing guardrails during routine QA | No production guardrail changes |
+| 3 | If a disposable QA-owned guardrail exists, make only the stricter change, assert the badge changes, then restore immediately | Restore verified; failed restore is P0 |
+| 4 | `capture` screenshot, console delta, failed requests | — |
 
 ## S4 — Accessibility, themes, and mobile viewports
 
 | # | Action | Expected |
 | --- | --- | --- |
-| 1 | Tab through policy rules and action buttons | Focus rings visible on all interactive elements |
-| 2 | Toggle between Light and Dark themes | Rule status badges (`Active`, `Disabled`) and policy parameter code blocks remain legible |
-| 3 | Resize viewport to 375px mobile width | Rule table stacks or scrolls horizontally without page body overflow |
+| 1 | Tab through guardrail rows and Turn on/Turn off buttons | Focus rings visible on all interactive elements |
+| 2 | Toggle between Light and Dark themes | On/Off badges and guardrail row text remain legible |
+| 3 | Resize viewport to 375px mobile width | Guardrail rows wrap without page body overflow |
 | 4 | `capture` screenshot, console delta, failed requests | — |
 
 ## Notes for the runner
 
-- Admin-gated route: skip with a `note` if executed under a non-admin session.
+- Non-admin reads are expected to render; writes should show an explicit permission error.
 - Do not permanently disable active production guardrails during QA runs.

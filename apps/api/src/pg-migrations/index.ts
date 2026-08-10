@@ -1415,4 +1415,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 42,
+    description: "users carry a display name",
+    up: async (q) => {
+      // Until now a person was only ever their email address, so every surface that had to name
+      // someone printed a login credential at them. NULL means "has not set one" rather than
+      // backfilling the local part of the address, because a derived name is a guess and a guess
+      // that looks authored is worse than an honest absence — readers fall back to the email.
+      await q.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS name text");
+    },
+  },
 ];

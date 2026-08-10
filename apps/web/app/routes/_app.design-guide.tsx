@@ -5,12 +5,15 @@ import { Composer } from "~/components/chat/composer";
 import { MessagePartView } from "~/components/chat/parts";
 import { ToolRun } from "~/components/chat/tool-call";
 import { Transcript } from "~/components/chat/transcript";
+import { FormStatus } from "~/components/form-status";
 import { IntegrationIcon } from "~/components/integrations/integration-icon";
 import { PriorityBadge, StatusBadge } from "~/components/status-badge";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { CopyField } from "~/components/ui/copy-field";
+import { Field } from "~/components/ui/field";
 import { Input } from "~/components/ui/input";
+import { Panel, PanelEmpty, PanelRow } from "~/components/ui/panel";
 import { Select } from "~/components/ui/select";
 import { Separator } from "~/components/ui/separator";
 import { Textarea } from "~/components/ui/textarea";
@@ -486,26 +489,32 @@ export default function DesignGuideRoute() {
       <GuideSection
         id="brand-marks"
         title="Brand marks"
-        description="Third-party logos render monochrome from the manifest's icon slug. Not every brand ships a mark, so the monogram fallback is a first-class state, not an error."
+        description="Third-party logos, in the brand's own colour. Not every brand ships a mark, so the monogram fallback is a first-class state — and it carries the colour too, because one grey tile among coloured logos reads as a failed image."
       >
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
-            <IntegrationIcon label="GitHub" iconPath={GITHUB_MARK} />
+            <IntegrationIcon label="GitHub" iconPath={GITHUB_MARK} iconColor="181717" />
             <span className="text-sm">Resolved mark</span>
           </div>
           <div className="flex items-center gap-2">
-            <IntegrationIcon label="Slack" />
-            <span className="text-sm">Monogram fallback</span>
+            <IntegrationIcon label="Slack" iconColor="4A154B" />
+            <span className="text-sm">Monogram, curated colour</span>
           </div>
           <div className="flex items-center gap-2">
-            <IntegrationIcon label="Google Workspace" size="sm" />
+            <IntegrationIcon label="Acme CRM" />
+            <span className="text-sm">Uncurated</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <IntegrationIcon label="Google Workspace" size="sm" iconColor="4285F4" />
             <span className="text-sm">Small</span>
           </div>
         </div>
         <p className="mt-3 max-w-2xl text-sm text-muted-foreground">
-          Marks inherit <code>currentColor</code> rather than brand hues. Several brand colors
-          (GitHub <code>#181717</code>, Notion <code>#000000</code>) disappear on dark surfaces, and
-          a list mixing colored logos with monograms reads as a rendering failure.
+          A brand hex is the one colour that cannot be a token — it belongs to someone else and
+          arrives as runtime data. It is never rendered as authored: <code>brandInk</code> clamps
+          its OKLCH lightness per canvas, because GitHub&rsquo;s <code>#181717</code> is invisible
+          on the dark canvas and a pale brand is invisible on the light one. Both corrections ship
+          as custom properties so the <code>dark:</code> variant switches them without JavaScript.
         </p>
       </GuideSection>
 
@@ -549,37 +558,70 @@ export default function DesignGuideRoute() {
       <GuideSection
         id="forms"
         title="Component index"
-        description="Visible labels and local help remain part of every field contract."
+        description="Panel, Field and FormStatus are the shared composites every settings surface is assembled from. Visible labels and local help remain part of every field contract."
       >
-        <form
-          className="grid max-w-2xl gap-5 sm:grid-cols-2"
-          onSubmit={(event) => event.preventDefault()}
+        <Panel
+          title="Panel"
+          description="The titled container every settings and detail surface is built from. The title is an h2 — the top bar already names the page."
+          footer={
+            <div className="flex justify-end">
+              <Button size="sm">Save changes</Button>
+            </div>
+          }
         >
-          <label htmlFor="guide-name" className="grid gap-1.5 text-sm font-medium">
-            Name
-            <Input id="guide-name" placeholder="Quarterly planning" />
-          </label>
-          <label htmlFor="guide-status" className="grid gap-1.5 text-sm font-medium">
-            Status
-            <Select id="guide-status" defaultValue="draft">
-              <option value="draft">Draft</option>
-              <option value="active">Active</option>
-            </Select>
-          </label>
-          <label
-            htmlFor="guide-description"
-            className="grid gap-1.5 text-sm font-medium sm:col-span-2"
-          >
-            Description
-            <Textarea
-              id="guide-description"
-              placeholder="Describe the purpose and expected outcome."
-            />
-            <span className="text-xs font-normal text-muted-foreground">
-              Keep it concise and actionable.
-            </span>
-          </label>
-        </form>
+          <form className="grid gap-5 sm:grid-cols-2" onSubmit={(event) => event.preventDefault()}>
+            <Field label="Name">
+              <Input placeholder="Quarterly planning" />
+            </Field>
+            <Field label="Status">
+              <Select defaultValue="draft">
+                <option value="draft">Draft</option>
+                <option value="active">Active</option>
+              </Select>
+            </Field>
+            <Field
+              label="Description"
+              help="Keep it concise and actionable."
+              className="sm:col-span-2"
+            >
+              <Textarea placeholder="Describe the purpose and expected outcome." />
+            </Field>
+            <Field label="Website" error="Enter a full URL, including https://." required>
+              <Input defaultValue="example.com" />
+            </Field>
+          </form>
+        </Panel>
+
+        <div className="mt-6 space-y-3">
+          <FormStatus tone="error">Could not reach the API.</FormStatus>
+          <FormStatus tone="success">Profile updated.</FormStatus>
+        </div>
+
+        <Panel
+          title="Rows and empties"
+          description="PanelRow separates stacked records; PanelEmpty states the absence in words rather than leaving a blank."
+          className="mt-6"
+          flush
+        >
+          <PanelRow>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">Production deploy key</p>
+              <p className="truncate text-xs text-muted-foreground">Added 12 Mar 2026</p>
+            </div>
+            <Badge variant="success">Active</Badge>
+          </PanelRow>
+          <PanelRow>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">Staging deploy key</p>
+              <p className="truncate text-xs text-muted-foreground">Added 4 Feb 2026</p>
+            </div>
+            <Badge>Unused</Badge>
+          </PanelRow>
+        </Panel>
+
+        <Panel title="Nothing stored yet" className="mt-4">
+          <PanelEmpty>No credentials are stored for this workspace.</PanelEmpty>
+        </Panel>
       </GuideSection>
 
       <GuideSection

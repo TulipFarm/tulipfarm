@@ -64,6 +64,10 @@ class FakeUserRepo implements UserRepo, UserAdminRepo, PasswordWriteRepo {
       user.status = "active";
     }
   }
+  async setName(id: string, name: string | null): Promise<void> {
+    const user = this.users.find((u) => u._id === id);
+    if (user) user.name = name;
+  }
 }
 
 class FakeInviteRepo implements UserInviteRepo {
@@ -1385,5 +1389,83 @@ describe("change password", () => {
       payload: { currentPassword: "current-password", newPassword: "new-strong-password" },
     });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe("PATCH /api/v1/auth/profile", () => {
+  let app: FastifyInstance;
+  let store: MemorySessionStore;
+  let userRepo: FakeUserRepo;
+  let memberSid: string;
+  let memberId: string;
+
+  beforeEach(async () => {
+    store = new MemorySessionStore();
+    userRepo = new FakeUserRepo();
+    const member = await createUser(userRepo, "member@example.com", "current-password", "member");
+    memberId = member._id;
+    memberSid = await issueSession(store, member._id);
+
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      userAdminRepo: userRepo,
+      passwordWriteRepo: userRepo,
+      profileWriteRepo: userRepo,
+      userInviteRepo: new FakeInviteRepo(),
+      tokenRepo: new MemoryTokenRepo(),
+    });
+  });
+
+  afterEach(async () => {
+    await app.close();
+  });
+
+  function patchProfile(sid: string, payload: Record<string, unknown>) {
+    return app.inject({
+      method: "PATCH",
+      url: "/api/v1/auth/profile",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: csrfOf(sid) },
+      headers: { [CSRF_HEADER]: csrfOf(sid) },
+      payload,
+    });
+  }
+
+  it("requires a session", async () => {
+    const res = await app.inject({
+      method: "PATCH",
+      url: "/api/v1/auth/profile",
+      payload: { name: "Devika Raghunathan" },
+    });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("sets a display name and returns the updated user", async () => {
+    const res = await patchProfile(memberSid, { name: "Devika Raghunathan" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.name).toBe("Devika Raghunathan");
+    expect((await userRepo.findById(memberId))?.name).toBe("Devika Raghunathan");
+  });
+
+  it("collapses padded whitespace so a name cannot be laid out as two columns", async () => {
+    const res = await patchProfile(memberSid, { name: "  Devika     Raghunathan \n" });
+    expect(res.json().user.name).toBe("Devika Raghunathan");
+  });
+
+  it("clears the name when given blank text", async () => {
+    await patchProfile(memberSid, { name: "Devika Raghunathan" });
+    const res = await patchProfile(memberSid, { name: "   " });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user.name).toBeNull();
+  });
+
+  it("never returns the password hash", async () => {
+    const res = await patchProfile(memberSid, { name: "Devika Raghunathan" });
+    expect(res.json().user).not.toHaveProperty("passwordHash");
+  });
+
+  it("rejects a name past the cap", async () => {
+    const res = await patchProfile(memberSid, { name: "x".repeat(81) });
+    expect(res.statusCode).toBe(400);
   });
 });

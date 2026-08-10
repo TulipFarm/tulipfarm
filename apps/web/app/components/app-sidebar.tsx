@@ -1,31 +1,12 @@
 import { Link, NavLink, useLocation, useNavigate } from "@remix-run/react";
 import {
-  Activity,
-  BookOpen,
-  Bot,
-  Boxes,
-  Brain,
   ChevronRight,
-  Cpu,
-  History,
-  Inbox,
-  Info,
-  KeyRound,
   LogOut,
   type LucideIcon,
   Menu,
-  MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
-  Plug,
   Plus,
-  Puzzle,
-  Settings,
-  ShieldAlert,
-  ShieldCheck,
-  Sparkles,
-  Users,
-  Workflow,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { KnowledgeTree } from "~/components/knowledge/space-tree";
@@ -36,82 +17,25 @@ import { Tooltip } from "~/components/ui/tooltip";
 import { logout, type SessionUser } from "~/lib/api";
 import { useApprovals } from "~/lib/approvals-context";
 import { useConversations } from "~/lib/conversations-context";
+import {
+  iconForPath,
+  MODE_META,
+  type ProductMode as NavProductMode,
+  modeForPath as navModeForPath,
+  PRIMARY_MODES,
+  titleForPath,
+  visibleSections,
+} from "~/lib/nav";
 import { cn } from "~/lib/utils";
 
-type ProductMode = "chat" | "build" | "knowledge" | "operate" | "settings";
+type ProductMode = NavProductMode;
 
 // The rail's logo band, the context-panel header, and the top bar share one 52px row so the three
 // shell columns line up across the whole width (design-system §9).
 const HEADER_ROW = "flex h-[52px] shrink-0 items-center";
 
-/*
- * One source of truth for a mode's identity. The rail, the context-panel header, and the top-bar
- * breadcrumb all read from here, so a mode can never render under another mode's icon.
- */
-const MODE_META: Record<ProductMode, { label: string; to: string; icon: LucideIcon }> = {
-  chat: { label: "Chat", to: "/", icon: MessageSquare },
-  build: { label: "Build", to: "/resources", icon: Boxes },
-  knowledge: { label: "Knowledge", to: "/knowledge", icon: BookOpen },
-  operate: { label: "Operate", to: "/inbox", icon: Activity },
-  settings: { label: "Settings", to: "/settings", icon: Settings },
-};
-
-// Settings is a lower utility destination, so it sits below the divider rather than in this list.
-const PRIMARY_MODES = ["chat", "build", "knowledge", "operate"] as const;
-
-const BUILD_LINKS = [
-  { to: "/resources", label: "Resources", icon: Boxes },
-  { to: "/agents", label: "Agents", icon: Bot },
-  { to: "/skills", label: "Skills", icon: Puzzle },
-  { to: "/routines", label: "Routines", icon: Workflow },
-] as const;
-
-const OPERATE_LINKS = [
-  { to: "/inbox", label: "Inbox", icon: Inbox, badge: true },
-  { to: "/runs", label: "Runs", icon: Activity },
-  { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/operations", label: "Operations", icon: ShieldAlert },
-] as const;
-
-// Mirrors the section order in `_app.settings.tsx` so the sidebar and the section header agree.
-const SETTINGS_LINKS = [
-  { to: "/settings/secrets", label: "Secrets", icon: KeyRound },
-  { to: "/settings/security", label: "Security", icon: ShieldCheck },
-  { to: "/settings/llm", label: "LLM", icon: Cpu },
-  { to: "/settings/observability", label: "Observability", icon: Activity },
-  { to: "/settings/soul", label: "Soul", icon: Sparkles },
-  { to: "/settings/activities", label: "Activities", icon: History },
-  { to: "/settings/memory", label: "Memory", icon: Brain },
-  { to: "/settings/about", label: "About", icon: Info },
-  { to: "/admin/users", label: "Users", icon: Users },
-] as const;
-
 function modeForPath(pathname: string): ProductMode {
-  if (
-    pathname.startsWith("/settings") ||
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/design-guide")
-  ) {
-    return "settings";
-  }
-  if (pathname.startsWith("/knowledge")) return "knowledge";
-  if (
-    pathname.startsWith("/inbox") ||
-    pathname.startsWith("/runs") ||
-    pathname.startsWith("/integrations") ||
-    pathname.startsWith("/operations")
-  ) {
-    return "operate";
-  }
-  if (
-    pathname.startsWith("/resources") ||
-    pathname.startsWith("/agents") ||
-    pathname.startsWith("/skills") ||
-    pathname.startsWith("/routines")
-  ) {
-    return "build";
-  }
-  return "chat";
+  return navModeForPath(pathname);
 }
 
 function Logo() {
@@ -290,32 +214,33 @@ function LinkList({
   onNavigate,
   isAdmin,
 }: {
-  mode: ProductMode;
+  mode: "build" | "operate" | "settings";
   onNavigate: () => void;
   isAdmin: boolean;
 }) {
   const { count } = useApprovals();
-  const links =
-    mode === "build" ? BUILD_LINKS : mode === "operate" ? OPERATE_LINKS : SETTINGS_LINKS;
-  const visibleLinks = links.filter((item) => item.to !== "/admin/users" || isAdmin);
+  const sections = visibleSections(mode, { isAdmin, isDev: import.meta.env.DEV });
   return (
-    <nav aria-label={`${mode} navigation`} className="flex flex-col gap-1 px-2">
-      {visibleLinks.map((item) => (
-        <ContextLink
-          key={item.to}
-          {...item}
-          count={"badge" in item && item.badge ? count : undefined}
-          onNavigate={onNavigate}
-        />
+    <nav aria-label={`${mode} navigation`} className="flex flex-col gap-5 px-2">
+      {sections.map((section, index) => (
+        <div key={section.heading ?? `section-${index}`} className="flex flex-col gap-1">
+          {section.heading ? (
+            <h3 className="px-3 pb-1 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              {section.heading}
+            </h3>
+          ) : null}
+          {section.items.map((item) => (
+            <ContextLink
+              key={item.to}
+              to={item.to}
+              label={item.label}
+              icon={item.icon}
+              count={item.badge ? count : undefined}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
       ))}
-      {mode === "settings" && import.meta.env.DEV ? (
-        <ContextLink
-          to="/design-guide"
-          label="Design guide"
-          icon={Sparkles}
-          onNavigate={onNavigate}
-        />
-      ) : null}
     </nav>
   );
 }
@@ -427,44 +352,9 @@ export function AppSidebar({
   );
 }
 
-/*
- * Page identity for the top bar. Longest-prefix-first, so `/chats` resolves before `/chat`. The icon
- * belongs to the page, while the breadcrumb's parent crumb belongs to the mode.
- */
-const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
-  { prefix: "/resources", label: "Resources", icon: Boxes },
-  { prefix: "/agents", label: "Agents", icon: Bot },
-  { prefix: "/skills", label: "Skills", icon: Puzzle },
-  { prefix: "/routines", label: "Routines", icon: Workflow },
-  { prefix: "/runs", label: "Runs", icon: Activity },
-  { prefix: "/inbox", label: "Inbox", icon: Inbox },
-  { prefix: "/knowledge", label: "Knowledge", icon: BookOpen },
-  { prefix: "/integrations", label: "Integrations", icon: Plug },
-  { prefix: "/operations", label: "Operations", icon: ShieldAlert },
-  { prefix: "/settings", label: "Settings", icon: Settings },
-  { prefix: "/admin", label: "Admin", icon: Users },
-  { prefix: "/design-guide", label: "Design guide", icon: Sparkles },
-  { prefix: "/chats", label: "Chats", icon: MessageSquare },
-  { prefix: "/chat", label: "Chat", icon: MessageSquare },
-];
-
-function pageForPath(pathname: string) {
-  return (
-    PAGE_META.find(({ prefix }) => pathname.startsWith(prefix)) ?? PAGE_META[PAGE_META.length - 1]
-  );
-}
-
-function titleForPath(pathname: string): string {
-  return pageForPath(pathname)?.label ?? "Chat";
-}
-
-function iconForPath(pathname: string): LucideIcon {
-  return pageForPath(pathname)?.icon ?? MessageSquare;
-}
-
-function initialsFor(email: string): string {
-  const local = email.split("@")[0] ?? email;
-  const words = local.split(/[._+-]+/).filter(Boolean);
+function initialsFor(identity: string): string {
+  const local = identity.includes("@") ? (identity.split("@")[0] ?? identity) : identity;
+  const words = local.split(/[\s._+-]+/).filter(Boolean);
   const initials =
     words.length > 1
       ? words
@@ -479,14 +369,15 @@ function initialsFor(email: string): string {
 // surface, so identity reduces to a monogram and the address moves into its tooltip.
 function AccountChip({ user }: { user?: SessionUser }) {
   if (!user) return null;
+  const name = user.name?.trim() || user.email;
   return (
-    <Tooltip content={user.role === "admin" ? `${user.email} (Admin)` : user.email}>
+    <Tooltip content={user.role === "admin" ? `${name} (Admin)` : name}>
       <Link
-        to="/settings/security"
-        aria-label={`Account settings for ${user.email}`}
+        to="/settings/profile"
+        aria-label={`Account settings for ${name}`}
         className="flex size-8 items-center justify-center rounded-md bg-secondary text-[0.625rem] font-semibold text-secondary-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
       >
-        {initialsFor(user.email)}
+        {initialsFor(user.name?.trim() || user.email)}
       </Link>
     </Tooltip>
   );

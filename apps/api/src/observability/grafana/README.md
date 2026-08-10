@@ -13,11 +13,11 @@ spend_alert_usd: 50
 otlp:
   endpoint: https://otlp-gateway-<region>.grafana.net/otlp
   instance_id: "<your-grafana-cloud-instance-id>"
-  token: env://GRAFANA_OTLP_TOKEN # or a secret ref managed in Settings → Secrets
+  token: env://GRAFANA_OTLP_TOKEN # or a secret ref managed in Operate → Business → Secrets
 ```
 
 The `token` is a secret reference — set `GRAFANA_OTLP_TOKEN` in the environment, or store it via
-**Settings → Secrets** and reference it here. Restart the API to start the exporter.
+**Operate → Business → Secrets** and reference it here. Restart the API to start the exporter.
 
 ## 2. Import the dashboard
 
@@ -48,5 +48,5 @@ labels; use the in-app dashboard or traces to drill into individual conversation
 
 When export is enabled, TulipFarm also pushes one trace per chat turn over OTLP to Tempo: a root
 `turn` span with child `llm_call` / `tool_call` spans (durations, model/provider, status). Open the
-Tempo data source in Grafana to inspect individual turns; the in-app **Settings → Observability →
-Recent turns** drill-down shows the same timeline without leaving TulipFarm.
+Tempo data source in Grafana to inspect individual turns; the in-app **Operate → Health →
+Observability → Recent turns** drill-down shows the same timeline without leaving TulipFarm.

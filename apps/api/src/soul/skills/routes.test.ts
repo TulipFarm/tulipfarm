@@ -678,7 +678,7 @@ spec:
         payload: { scanId, name: "demo-skill" },
       });
       expect(res.statusCode).toBe(422);
-      expect(res.json().error).toMatch(/Settings → LLM/);
+      expect(res.json().error).toMatch(/Operate → Business → Models/);
     });
 
     it("returns 502 when the audit model call fails", async () => {

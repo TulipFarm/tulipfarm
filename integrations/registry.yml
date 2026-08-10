@@ -2,6 +2,8 @@
 #
 # Bundled integrations (a directory next to this file) are discovered automatically; an entry here
 # only adds the presentation metadata discovery cannot infer — display title, category, homepage.
+# `color` is a brand hex used only when the icon set carries no mark for the brand, so a logo-less
+# entry still reads as itself rather than as the one grey row in a coloured catalog.
 # An entry with a `source` is a curated third-party integration: nothing ships in the image, and
 # installing it clones that repo. Operators can also install any repo by URL without it being
 # listed here; this file is curation, not an allowlist.
@@ -17,6 +19,9 @@ integrations:
     title: Slack
     # No `icon`: Slack asked to be removed from Simple Icons, so there is no mark to name and the
     # catalog falls back to a monogram. Do not point this at a lookalike slug.
+    # `color` is Slack's own aubergine, so the monogram still reads as Slack rather than as the one
+    # grey row in a catalog of coloured logos.
+    color: "4A154B"
     category: chat
     homepage: https://slack.com
     description: Chat with your agents in channels and DMs, and let them post back.

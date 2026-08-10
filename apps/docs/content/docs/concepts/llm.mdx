@@ -37,9 +37,9 @@ secret keys are `anthropic-api-key`, `openai-api-key`, `azure-openai-api-key`,
 | `balanced` | The everyday default. |
 | `thorough` | Most capable, for work worth the extra time and cost. |
 
-A Soul maps each preset to a ModelProfile. The retired tier names `quick`, `standard`, and
-`complex` are still accepted on the wire for one release and translated to `fast`, `balanced`, and
-`thorough` respectively, with a deprecation logged.
+A Soul maps each effort preset to a ModelProfile. **Fast**, **Balanced**, and **Thorough** are the
+configured provider chains; **Auto** has no chain of its own and resolves to whichever profile the
+deployment marks as its default. Older wire aliases are translated during the compatibility window.
 
 ## ModelProfiles
 
@@ -48,13 +48,13 @@ modalities, context window), and the terms it may be used under (data residency,
 whether prompts may train the provider's models, and cost, token, and latency ceilings). It also
 names its own ordered fallbacks.
 
-Profiles have one authored source: the provider chains in `soul.yaml#llm`. TulipFarm derives
+Profiles have one authored source: the three provider chains in `soul.yaml#llm`. TulipFarm derives
 ModelProfiles deterministically from that block for both live Chat and bundle publication.
 Capability is read from the model spec pinned in the same config rather than guessed.
 
 Publication writes those derived profiles into the immutable bundle, not back into a `models/`
-directory. A Run is therefore routed against the profiles it was minted with, while Settings and
-new publications can never disagree about which configuration is current.
+directory. A Run is therefore routed against the profiles it was minted with, while the Models page
+and new publications can never disagree about which configuration is current.
 
 ## Denials
 

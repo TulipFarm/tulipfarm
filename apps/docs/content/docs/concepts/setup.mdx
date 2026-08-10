@@ -20,9 +20,8 @@ it cannot mint a second admin. The business step records `businessName`, `busine
 the optional `businessWebsite` in `soul.yaml`, and all three become static business context in every
 Agent's system prompt. That profile is not working [memory](/docs/concepts/memory). The LLM step
 stores the provider credentials as [secrets](/docs/concepts/secrets) and writes a default
-`llm` block in `soul.yaml` with all three provider chains pointing at the chosen model, so every effort
-preset resolves from the start; skipping it leaves
-that to **Settings → LLM Config**.
+`llm` block in `soul.yaml` with all three provider chains pointing at the chosen model and
+**Auto** resolving to **Balanced**; skipping it leaves that to **Operate → Business → Models**.
 
 Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.
 The wizard step routes return `403` from then on, while `GET /api/v1/setup/status` remains available
@@ -30,7 +29,8 @@ so the web app can decide whether setup is still open.
 
 <Callout type="info">
 Soul git backup is not part of the wizard. Configure the remote after setup in
-**Settings → Soul**, or seed it at boot with `SOUL_GIT_REMOTE_URL` / `SOUL_GIT_CREDENTIAL`.
+**Operate → Business → Soul**, or seed it at boot with `SOUL_GIT_REMOTE_URL` /
+`SOUL_GIT_CREDENTIAL`.
 </Callout>
 
 ## Headless mode

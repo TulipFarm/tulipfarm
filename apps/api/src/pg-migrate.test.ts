@@ -204,8 +204,13 @@ describe("runPgMigrations", () => {
   });
 
   describe("migration 32", () => {
+    // Every migration from 32 up runs against these fixtures, so they hold a stand-in for each
+    // baseline table a later migration touches — v42 adds a column to `users`.
+    const seedUsers = () => db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
+
     it("moves GitHub App credentials onto integration.github.* without touching ciphertext", async () => {
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
+      await seedUsers();
       await db.query(`CREATE TABLE secrets (
         key             text PRIMARY KEY,
         type            text NOT NULL,
@@ -248,6 +253,7 @@ describe("runPgMigrations", () => {
 
     it("is a no-op on a database with no secrets table", async () => {
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
+      await seedUsers();
       await db.query(`CREATE TABLE schema_version (
         id boolean PRIMARY KEY DEFAULT true,
         version integer NOT NULL,

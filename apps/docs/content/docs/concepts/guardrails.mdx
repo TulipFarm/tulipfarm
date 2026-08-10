@@ -38,5 +38,6 @@ with the turn context, and the Worker compiles the same policy before executing.
 invalid config falls back to `DEFAULT_GUARDRAILS`, so the system fails safe and never runs
 unguarded.
 
-Admins can view the policy at `/admin/guardrails`. Changes are proposed through
+Admins can view the policy in **Operate → Business → Guardrails** at `/business/guardrails`.
+Changes are proposed through
 `POST /api/v1/guardrails/changesets`; the read model is `GET /api/v1/guardrails`.

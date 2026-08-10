@@ -20,6 +20,8 @@ export type IntegrationSummary = {
   homepage?: string;
   /** Simple Icons path data, resolved server-side. Absent when the brand has no mark. */
   iconPath?: string;
+  /** Brand hex without `#`. Not canvas-safe as given — pass through `brandInk` before rendering. */
+  iconColor?: string;
   version?: string;
   maintainer?: string;
   /** Git source of a curated third-party entry; absent when it ships in the image. */

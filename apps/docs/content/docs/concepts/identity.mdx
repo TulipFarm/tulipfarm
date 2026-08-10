@@ -34,8 +34,9 @@ immediately; disabling refuses the credential on the next request.
 ## Roles, principals, and grants
 
 `@tulipfarm/authz` models principals, roles, grants, authority intersection, and policy evidence.
-Roles have names, allowed principal kinds, and scoped grants. `/admin/roles` is read-only today: it
-shows the role model but does not edit it. Role edits go through
+Roles have names, allowed principal kinds, and scoped grants. The Roles panel on
+`/business/people` is read-only today: it shows the role model but does not edit it. Role edits go
+through
 `POST /api/v1/roles/changesets`, which proposes a change through the Soul changeset authority
 instead of broadening access directly.
 

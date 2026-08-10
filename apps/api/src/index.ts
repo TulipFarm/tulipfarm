@@ -258,7 +258,7 @@ async function boot() {
     const gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console);
     // A stale/invalid remote (revoked PAT, unreachable host) must never crash-loop boot — fall
     // back to whatever soul state is already on disk and keep serving. `configureRemote` (the
-    // Settings → Soul PUT route) still throws on the same failure so the user sees it there.
+    // Business → Soul PUT route) still throws on the same failure so the user sees it there.
     try {
       await gitSync.bootSync();
     } catch (err) {
@@ -564,6 +564,7 @@ async function boot() {
           toolRegistry,
           memory: memoryService,
           memoryRecall: memoryRecallService,
+          kv: kvService,
           knowledge: knowledgeService,
           guardrails: guardrailsService,
           bundledSkills,
@@ -641,6 +642,7 @@ async function boot() {
       userRepo,
       userAdminRepo: userRepo,
       passwordWriteRepo: userRepo,
+      profileWriteRepo: userRepo,
       userInviteRepo: new PgUserInviteRepo(pool),
       tokenRepo,
       // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.

@@ -18,7 +18,14 @@ import {
 } from "../passwords";
 import { ErrorSchema, PublicUserSchema } from "../schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, rotateSession, type SessionStore } from "../session-store";
-import { type PasswordWriteRepo, toPublicUser, type UserRepo } from "../users";
+import {
+  MAX_NAME_CHARS,
+  normalizeName,
+  type PasswordWriteRepo,
+  type ProfileWriteRepo,
+  toPublicUser,
+  type UserRepo,
+} from "../users";
 
 // Precomputed lazily and reused: verifying against a dummy hash on unknown-user
 // login keeps response timing similar to the known-user path (no user enumeration).
@@ -40,6 +47,7 @@ export interface SessionRouteDeps {
   rateLimitHook?: PreHandler;
   loginRateLimitHook?: PreHandler;
   passwordWriteRepo?: PasswordWriteRepo;
+  profileWriteRepo?: ProfileWriteRepo;
   inviteRepo?: UserInviteRepo;
 }
 
@@ -52,6 +60,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     rateLimitHook,
     loginRateLimitHook,
     passwordWriteRepo,
+    profileWriteRepo,
     inviteRepo,
   } = deps;
   const loginPreHandlers = [rateLimitHook, loginRateLimitHook].filter(
@@ -237,6 +246,53 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
         reply.setCookie(SESSION_COOKIE, session.sid, sessionCookieOptions(ttlSeconds));
         setCsrfCookie(reply, session.csrfToken, ttlSeconds);
         return reply.send({ user: toPublicUser(req.user) });
+      }
+    );
+  }
+
+  if (profileWriteRepo) {
+    app.patch(
+      "/api/v1/auth/profile",
+      {
+        preHandler: rateLimitHook ? [rateLimitHook, requireAuth] : requireAuth,
+        schema: {
+          description:
+            "Update the current user's own profile. Self-service only — there is no target " +
+            "parameter, so this route cannot rename anybody else. Sending an empty or " +
+            "whitespace-only name clears it, and the account goes back to being addressed by " +
+            "its email.",
+          tags: ["auth"],
+          security: [{ sessionCookie: [] }, { bearerToken: [] }],
+          body: {
+            type: "object",
+            required: ["name"],
+            properties: {
+              name: { type: ["string", "null"], maxLength: MAX_NAME_CHARS },
+            },
+          },
+          response: {
+            200: {
+              type: "object",
+              properties: { user: PublicUserSchema },
+              required: ["user"],
+            },
+            400: ErrorSchema,
+            401: ErrorSchema,
+          },
+        },
+      },
+      async (req, reply) => {
+        if (!req.user) {
+          return reply.code(401).send({ error: "unauthorized" });
+        }
+        const body = (req.body ?? {}) as { name?: unknown };
+        if (body.name !== null && typeof body.name !== "string") {
+          return reply.code(400).send({ error: "name must be a string or null" });
+        }
+        const name = body.name === null ? null : normalizeName(body.name);
+
+        await profileWriteRepo.setName(req.user._id, name);
+        return reply.send({ user: toPublicUser({ ...req.user, name }) });
       }
     );
   }

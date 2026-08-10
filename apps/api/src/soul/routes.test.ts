@@ -607,6 +607,93 @@ describe("soul routes", () => {
     });
   });
 
+  // The web client reads and writes these exact field names. A rename on either side silently
+  // empties the form and 400s the save, so the wire shape is asserted literally here.
+  describe("business profile routes", () => {
+    let adminSid: string;
+
+    beforeEach(async () => {
+      const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+      adminSid = await store.create(admin._id);
+      vi.mocked(soulConfigFs.readFile).mockRejectedValue(enoent());
+    });
+
+    it("returns 401 without auth", async () => {
+      const res = await app.inject({ method: "GET", url: "/api/v1/business" });
+      expect(res.statusCode).toBe(401);
+    });
+
+    it("reads name/description/website out of soul.yaml", async () => {
+      vi.mocked(soulConfigFs.readFile).mockResolvedValue(
+        "businessName: Fernwood Roasters\n" +
+          "businessDescription: Speciality coffee wholesale.\n" +
+          "businessWebsite: https://fernwood.coffee\n"
+      );
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/business",
+        cookies: { [SESSION_COOKIE]: sid },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        name: "Fernwood Roasters",
+        description: "Speciality coffee wholesale.",
+        website: "https://fernwood.coffee",
+      });
+    });
+
+    it("answers with empty strings rather than nulls when nothing is set", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/business",
+        cookies: { [SESSION_COOKIE]: sid },
+      });
+      expect(res.json()).toEqual({ name: "", description: "", website: "" });
+    });
+
+    it("writes the soul.yaml keys and re-emits soul.synced", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/business",
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "  Fernwood Roasters  ", description: " Coffee. ", website: "" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(res.json()).toEqual({
+        name: "Fernwood Roasters",
+        description: "Coffee.",
+        website: "",
+      });
+      expect(vi.mocked(soulConfigFs.writeFile).mock.calls.at(-1)?.[1]).toContain(
+        "businessName: Fernwood Roasters"
+      );
+      expect(vi.mocked(gitSync.emit)).toHaveBeenCalledWith("soul.synced");
+    });
+
+    it("refuses a write from a non-admin", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/business",
+        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "Anything" },
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("rejects a blank name", async () => {
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/business",
+        cookies: { [SESSION_COOKIE]: adminSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers: { [CSRF_HEADER]: TEST_CSRF },
+        payload: { name: "   " },
+      });
+      expect(res.statusCode).toBe(400);
+    });
+  });
+
   describe("inferLanguage", () => {
     it("maps soul filenames to Shiki languages", () => {
       expect(inferLanguage("AGENT.md")).toBe("markdown");

@@ -1,33 +1,38 @@
+import { GitBranch } from "lucide-react";
 import { type FormEvent, useState } from "react";
+import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
+import { Field } from "~/components/ui/field";
+import { Input } from "~/components/ui/input";
 import { ApiError } from "~/lib/api";
 import { friendlyGitError, putGitConfig, type SoulGitConfig, syncSoul } from "~/lib/soul";
-
-const inputClass =
-  "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
+import { useIsAdmin } from "~/lib/use-session-user";
 
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
-    if (err.status === 403) return "admin only — only admins can change the git remote";
+    if (err.status === 403) return "Only an admin can change the git remote.";
     return friendlyGitError(err.message);
   }
   return err instanceof Error ? friendlyGitError(err.message) : "request failed";
 }
 
-function statusLabel(status: SoulGitConfig["status"]): { text: string; className: string } {
+function statusLabel(status: SoulGitConfig["status"]): {
+  text: string;
+  variant: "neutral" | "danger" | "primary";
+} {
   if (!status.remoteConfigured) {
-    return { text: "not connected", className: "text-muted-foreground" };
+    return { text: "Not connected", variant: "neutral" };
   }
   if (status.lastSyncError) {
-    return { text: "sync failed", className: "text-destructive" };
+    return { text: "Sync failed", variant: "danger" };
   }
   if (status.ahead === 0 && status.behind === 0) {
-    return { text: "up to date", className: "text-muted-foreground" };
+    return { text: "Up to date", variant: "neutral" };
   }
   const parts: string[] = [];
   if (status.ahead > 0) parts.push(`${status.ahead} ahead`);
   if (status.behind > 0) parts.push(`${status.behind} behind`);
-  return { text: parts.join(", "), className: "text-primary" };
+  return { text: parts.join(", "), variant: "primary" };
 }
 
 function formatLastSync(iso: string | null): string {
@@ -36,7 +41,7 @@ function formatLastSync(iso: string | null): string {
 }
 
 // Add/edit the soul git remote (URL + PAT) and show live sync status, above the read-only
-// tree/viewer on Settings → Soul. The PAT field is write-only (mirrors _app.settings.secrets.tsx):
+// tree/viewer on Business → Soul. The PAT field is write-only (mirrors _app.business.secrets.tsx):
 // it never redisplays a stored credential, only shows whether one is set.
 export function SoulGitConfigPanel({
   config,
@@ -45,7 +50,8 @@ export function SoulGitConfigPanel({
   config: SoulGitConfig;
   onSaved: () => void;
 }) {
-  const [editing, setEditing] = useState(!config.remoteUrl);
+  const isAdmin = useIsAdmin();
+  const [editing, setEditing] = useState(isAdmin && !config.remoteUrl);
   const [remoteUrl, setRemoteUrl] = useState(config.remoteUrl ?? "");
   const [credential, setCredential] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,15 +103,9 @@ export function SoulGitConfigPanel({
       {!editing ? (
         <>
           <div className="flex items-center gap-2 px-3 py-2">
-            <span aria-hidden className="text-primary">
-              ▸
-            </span>
+            <GitBranch aria-hidden className="size-4 text-muted-foreground" />
             <span className="font-medium text-foreground">Git remote</span>
-            <span
-              className={`rounded-sm bg-muted px-1.5 py-0.5 text-xs uppercase tracking-[0.15em] ${status.className}`}
-            >
-              {status.text}
-            </span>
+            <Badge variant={status.variant}>{status.text}</Badge>
             <div className="ml-auto flex items-center gap-1">
               {config.remoteUrl ? (
                 <Button
@@ -119,20 +119,28 @@ export function SoulGitConfigPanel({
                   {syncing ? "Syncing…" : "Sync now"}
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="cursor-pointer rounded-sm"
-                onClick={() => setEditing(true)}
-              >
-                Edit
-              </Button>
+              {isAdmin ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="cursor-pointer rounded-sm"
+                  onClick={() => setEditing(true)}
+                >
+                  Edit
+                </Button>
+              ) : null}
             </div>
           </div>
-          <p className="truncate border-t border-border px-3 py-2 font-mono text-xs text-muted-foreground">
-            {config.remoteUrl ?? "no remote configured"}
-          </p>
+          {config.remoteUrl ? (
+            <p className="truncate border-t border-border px-3 py-2 font-mono text-xs text-muted-foreground">
+              {config.remoteUrl}
+            </p>
+          ) : (
+            <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+              No remote configured. This soul lives only on this machine.
+            </p>
+          )}
           {config.remoteUrl ? (
             <p className="truncate border-t border-border px-3 py-2 text-xs text-muted-foreground">
               {formatLastSync(config.status.lastSyncAt)}
@@ -152,28 +160,28 @@ export function SoulGitConfigPanel({
           <p className="text-sm font-medium text-foreground">
             {config.remoteUrl ? "Edit git remote" : "Connect a git remote"}
           </p>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            remote url
-            <input
-              className={inputClass}
+          <Field label="Remote URL">
+            <Input
               value={remoteUrl}
               onChange={(e) => setRemoteUrl(e.target.value)}
               placeholder="https://github.com/org/soul.git"
-              aria-label="soul git remote url"
             />
-          </label>
-          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
-            personal access token
-            {config.credentialSet ? " — set, leave blank to keep" : " (optional)"}
-            <input
-              className={inputClass}
+          </Field>
+          <Field
+            label="Personal access token"
+            help={
+              config.credentialSet
+                ? "Already set. Leave blank to keep it."
+                : "Optional. Needed only for private repositories."
+            }
+          >
+            <Input
               type="password"
               value={credential}
               onChange={(e) => setCredential(e.target.value)}
               placeholder="••••••••"
-              aria-label="soul git credential"
             />
-          </label>
+          </Field>
           <div className="flex justify-end gap-2">
             {config.remoteUrl ? (
               <Button

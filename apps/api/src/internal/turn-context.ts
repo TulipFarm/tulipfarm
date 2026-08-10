@@ -22,9 +22,11 @@ import { assembleAgentSystemPrompt } from "../chat/system-prompt";
 import { availableToolsFor } from "../chat/turn-helpers";
 import type { ConversationStore, PersistedMessage } from "../conversations/service";
 import type { KnowledgeService } from "../knowledge/service";
+import type { KvService } from "../kv/service";
 import { MAX_HISTORY_TOKENS, MAX_TOOL_STEPS } from "../memory/limits";
 import type { MemoryRecallService } from "../memory/recall-service";
 import type { MemoryService } from "../memory/service";
+import { readCustomInstructions } from "../preferences/custom-instructions";
 import { getDefaultAssistant, resolveAgent } from "../soul/agents/registry";
 import { buildSoulCatalogue } from "../soul/catalogue";
 import type { BundledSkill } from "../soul/skills/bundled";
@@ -153,6 +155,11 @@ export interface ChatTurnContextResolverOptions {
   readonly soulLoader?: SoulLoader;
   readonly toolRegistry?: ToolRegistry;
   readonly memory?: MemoryService;
+  /**
+   * Backs the user's standing `<custom-instructions>`. Absent leaves the block unrendered, which
+   * is what every turn did before the setting existed.
+   */
+  readonly kv?: KvService;
   /** Durable relevance recall. Absent leaves the `<recalled-memory>` tier empty. */
   readonly memoryRecall?: MemoryRecallService;
   readonly knowledge?: KnowledgeService;
@@ -315,6 +322,12 @@ export class ChatTurnContextResolver implements TurnContextResolver {
     // Memory is a person's, so a Run acting as an Integration or an Agent has none to read.
     const memoryAssertions =
       memory && authority.subject.kind === "user" ? await memory.list(authority.subject.id) : [];
+    // Same subject rule: standing instructions are a person's, so a Run acting as an Integration
+    // or an Agent has none to honor.
+    const customInstructions =
+      this.options.kv && authority.subject.kind === "user"
+        ? await readCustomInstructions(this.options.kv, authority.subject.id)
+        : undefined;
     // Same subject rule as the always-on block: durable memory belongs to a person, so a Run acting
     // as an Integration or an Agent recalls nothing. The engine re-authorizes regardless; this
     // avoids asking it a question with no principal to answer for.
@@ -341,6 +354,7 @@ export class ChatTurnContextResolver implements TurnContextResolver {
         website:
           typeof manifest?.businessWebsite === "string" ? manifest.businessWebsite : undefined,
       },
+      customInstructions,
       memory: memoryAssertions,
       recalledMemory,
       governancePages,

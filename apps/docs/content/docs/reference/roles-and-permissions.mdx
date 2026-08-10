@@ -4,18 +4,20 @@ description: Principals, roles, grants, tokens, clients, sessions, invites, and 
 ---
 
 TulipFarm has user roles in the auth database and a provider-neutral authorization vocabulary in
-`@tulipfarm/authz`. The UI exposes the current role catalog read-only at `/admin/roles`.
+`@tulipfarm/authz`. The UI exposes the current role catalog read-only in the Roles panel on
+**Operate → Business → People** at `/business/people`.
 
 ## User roles
 
 | Role | Principal kind | Grants shown today |
 | --- | --- | --- |
 | `admin` | `user` | Allows any action on any resource. The first setup account is created with this role. |
-| `member` | `user` | Starts from broad user access, then denies admin-gated surfaces such as secrets, API tokens, identity, observability, LLM config, knowledge-source administration, system KV, setup, and operations. |
+| `member` | `user` | Starts from broad user access, then denies admin-gated surfaces such as secrets, API tokens, identity, observability, model configuration, knowledge-source administration, system KV, setup, and operations. |
 
 Routes still enforce many permissions directly from `user.role`. Custom role changes are proposed
-through `POST /api/v1/roles/changesets`, but the `/admin/roles` screen is read-only today: it shows
-role name, principal kinds, grants, and conditions; it does not edit assignments in the browser.
+through `POST /api/v1/roles/changesets`, but the Roles panel on `/business/people` is read-only
+today: it shows role name, principal kinds, grants, and conditions; it does not edit assignments in
+the browser.
 
 ## Principals and grants
 

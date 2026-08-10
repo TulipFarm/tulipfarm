@@ -56,7 +56,7 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
     await deps.secretsService.set(`${llmProvider()}-api-key`, llmKey);
     deps.log?.info(`Seeded ${llmProvider()} LLM API key from env`);
   } else {
-    deps.log?.info("LLM_API_KEY not set — configure LLM via Settings > LLM Config");
+    deps.log?.info("LLM_API_KEY not set — configure models via Operate > Business > Models");
   }
 
   // Mark setup complete so the web wizard never appears

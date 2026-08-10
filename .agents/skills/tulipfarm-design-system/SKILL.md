@@ -42,6 +42,9 @@ composition patterns over route-local styling.
   `aria-hidden`.
 - Do not introduce Storybook, a second component framework, raw palette values in components,
   emoji icons, one-off page headers, or controls wired to no handler.
+- The only sanctioned raw color is an external product's brand hex on its own mark, and it is never
+  rendered as authored — correct it per canvas with `brandInk` and color the whole set or none of
+  it (reference §3.1).
 
 ## Completion Check
 

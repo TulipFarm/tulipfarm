@@ -36,7 +36,13 @@ const AccountShellStub = createRemixStub([
     Component: () => (
       <AppShell
         isAdmin
-        user={{ id: "u1", email: "priya.nair@northgate.dev", role: "admin", status: "active" }}
+        user={{
+          id: "u1",
+          email: "priya.nair@northgate.dev",
+          name: null,
+          role: "admin",
+          status: "active",
+        }}
       >
         <p>Page content</p>
       </AppShell>
@@ -74,7 +80,7 @@ test("maps deep routes to stable product modes and top-bar titles", () => {
   expect(modeForPath("/skills/forecasting")).toBe("build");
   expect(modeForPath("/knowledge/spaces/ops")).toBe("knowledge");
   expect(modeForPath("/runs/run-1")).toBe("operate");
-  expect(modeForPath("/settings/llm")).toBe("settings");
+  expect(modeForPath("/settings/memory")).toBe("settings");
   expect(modeForPath("/design-guide")).toBe("settings");
   expect(titleForPath("/resources/tickets")).toBe("Resources");
   expect(titleForPath("/operations")).toBe("Operations");
@@ -135,24 +141,27 @@ test("renders Operate destinations and the live Inbox badge", () => {
   }
 });
 
-test("renders Settings destinations and the development design guide", () => {
-  render(<SidebarStub initialEntries={["/settings/llm"]} />);
-  for (const label of [
-    "Secrets",
-    "Security",
-    "LLM",
-    "Observability",
-    "Soul",
-    "Activities",
-    "Memory",
-    "About",
-  ]) {
+test("renders only personal destinations under Settings", () => {
+  render(<SidebarStub initialEntries={["/settings/profile"]} />);
+  for (const label of ["Profile", "Appearance", "Auth", "Memory"]) {
     expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+  }
+  // Workspace configuration is Operate's job now, so none of it may appear here.
+  for (const label of ["Secrets", "Models", "Observability", "People", "Business profile"]) {
+    expect(screen.queryByRole("link", { name: label })).not.toBeInTheDocument();
   }
   expect(screen.getByRole("link", { name: "Design guide" })).toHaveAttribute(
     "href",
     "/design-guide"
   );
+});
+
+test("groups business configuration under Operate", () => {
+  render(<SidebarStub initialEntries={["/business/models"]} />);
+  for (const label of ["Business profile", "Models", "Secrets", "Soul", "Guardrails", "About"]) {
+    expect(screen.getByRole("link", { name: label })).toBeInTheDocument();
+  }
+  expect(screen.getByRole("link", { name: "Models" })).toHaveAttribute("href", "/business/models");
 });
 
 test("renders recent chats and highlights the active Chat", () => {
@@ -246,7 +255,7 @@ test("reduces the signed-in account to a monogram in the top bar", () => {
   const account = screen.getByRole("link", {
     name: "Account settings for priya.nair@northgate.dev",
   });
-  expect(account).toHaveAttribute("href", "/settings/security");
+  expect(account).toHaveAttribute("href", "/settings/profile");
   expect(account).toHaveTextContent("PN");
   expect(screen.queryByText("priya.nair@northgate.dev")).not.toBeInTheDocument();
 });

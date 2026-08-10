@@ -30,6 +30,13 @@ test("showcases the live token, status, action, form, and composition vocabulary
     expect(screen.getByRole("heading", { name: heading })).toBeInTheDocument();
   }
   expect(screen.getByLabelText("Name")).toBeInTheDocument();
+  // The shared composites every settings surface is built from must be showable, not just documented.
+  expect(screen.getByRole("heading", { name: "Panel" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Rows and empties" })).toBeInTheDocument();
+  expect(screen.getByText("No credentials are stored for this workspace.")).toBeInTheDocument();
+  expect(screen.getByText("Enter a full URL, including https://.")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Could not reach the API.");
+  expect(screen.getByRole("status")).toHaveTextContent("Profile updated.");
   expect(screen.getByText("critical")).toBeInTheDocument();
   // The Chat model vocabulary: effort is chosen, a Model ID is only reported, and Auto names the
   // rung it resolved to. Rendered from the real Transcript/Composer, so it cannot drift from prod.

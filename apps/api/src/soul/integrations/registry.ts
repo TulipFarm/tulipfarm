@@ -24,8 +24,24 @@ export interface RegistryEntry {
    * read it from.
    */
   icon?: string;
+  /**
+   * The brand's hex, for a brand the icon set does not carry. Slack and Microsoft Teams asked to
+   * be removed from Simple Icons, so their rows resolve no mark and no colour with it — and one
+   * grey row in an otherwise branded catalog reads as a failed image, not as a brand without a
+   * logo. Naming the colour here lets the monogram carry the brand instead. Ignored when `icon`
+   * resolves, so a mark and its colour can never disagree.
+   */
+  color?: string;
   /** Git source for a curated third-party integration; absent means it ships in the image. */
   source?: string;
+}
+
+/** `RRGGBB`, with or without the `#` an author is likely to paste. */
+const HEX_RE = /^#?([0-9a-fA-F]{6})$/;
+
+function asHex(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return HEX_RE.exec(value.trim())?.[1]?.toUpperCase();
 }
 
 function asString(value: unknown): string | undefined {
@@ -63,6 +79,7 @@ export async function loadIntegrationRegistry(
         category: asString(record.category),
         homepage: asString(record.homepage),
         icon: asString(record.icon),
+        color: asHex(record.color),
         source: asString(record.source),
       });
     }

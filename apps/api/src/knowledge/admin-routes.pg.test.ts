@@ -43,6 +43,7 @@ describe("knowledge admin routes (reindex / backfill / index-status)", () => {
         _id: "u1",
         email: "u@example.com",
         passwordHash: "x",
+        name: null,
         role: req.headers["x-role"] === "admin" ? "admin" : "member",
         status: "active" as const,
         createdAt: new Date(),

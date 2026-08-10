@@ -11,6 +11,17 @@ function isErrnoException(err: unknown): err is NodeJS.ErrnoException {
   return err instanceof Error && "code" in err;
 }
 
+/** The business profile as both `GET` and `PUT /api/v1/business` return it. */
+const BusinessProfileSchema = {
+  type: "object",
+  properties: {
+    name: { type: "string" },
+    description: { type: "string" },
+    website: { type: "string" },
+  },
+  required: ["name", "description", "website"],
+} as const;
+
 export function registerSoulRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
@@ -195,6 +206,85 @@ export function registerSoulRoutes(
     async (_req, reply) => {
       gitSync.emit("soul.synced");
       return reply.code(204).send();
+    }
+  );
+
+  app.get(
+    "/api/v1/business",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Read the business profile recorded in soul.yaml — the same values the agent sees as " +
+          "<business-context>.",
+        tags: ["business"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        response: {
+          200: BusinessProfileSchema,
+          401: ErrorSchema,
+        },
+      },
+    },
+    async (_req, reply) => {
+      const config = await readSoulConfig(gitSync.path);
+      return reply.send({
+        name: typeof config.businessName === "string" ? config.businessName : "",
+        description:
+          typeof config.businessDescription === "string" ? config.businessDescription : "",
+        website: typeof config.businessWebsite === "string" ? config.businessWebsite : "",
+      });
+    }
+  );
+
+  app.put(
+    "/api/v1/business",
+    {
+      preHandler: requireAuth,
+      schema: {
+        description:
+          "Update the business profile in soul.yaml (admin only). Re-emits soul.synced so the " +
+          "change reaches the next turn's prompt instead of waiting for a periodic sync.",
+        tags: ["business"],
+        security: [{ sessionCookie: [] }, { bearerToken: [] }],
+        body: {
+          type: "object",
+          required: ["name"],
+          additionalProperties: false,
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 200 },
+            description: { type: "string", maxLength: 2000 },
+            website: { type: "string", maxLength: 500 },
+          },
+        },
+        response: {
+          200: BusinessProfileSchema,
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+        },
+      },
+    },
+    async (req, reply) => {
+      if (req.user?.role !== "admin") {
+        return reply.code(403).send({ error: "forbidden" });
+      }
+      const body = req.body as { name: string; description?: string; website?: string };
+      const name = body.name.trim();
+      if (!name) return reply.code(400).send({ error: "name is required" });
+      const description = body.description?.trim() ?? "";
+      const website = body.website?.trim() ?? "";
+
+      await patchSoulConfig(gitSync.path, {
+        businessName: name,
+        businessDescription: description,
+        businessWebsite: website,
+      });
+      await gitSync.commit("chore: update business profile").catch(() => {});
+      // Without this the manifest in memory keeps answering with the old profile until the next
+      // periodic sync — which never runs at all on a remote-less soul.
+      gitSync.emit("soul.synced");
+
+      return reply.send({ name, description, website });
     }
   );
 
