@@ -64,7 +64,7 @@ jobs:
           provenance: false
           sbom: false
           cache-from: type=gha,scope=tulipfarm-amd64
-          cache-to: type=gha,mode=max,scope=tulipfarm-amd64
+          cache-to: type=gha,mode=min,ignore-error=true,scope=tulipfarm-amd64
       - name: Load published candidate
         if: ${{ inputs.image != '' }}
         env:
