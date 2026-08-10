@@ -119,6 +119,24 @@ describe("SlackHttpKnowledgeApi", () => {
     expect(messages.map((m) => m.ts)).toEqual(["1.0", "2.0"]);
   });
 
+  it("stops gracefully after the page bound instead of throwing, so the caller can checkpoint and resume", async () => {
+    const page = (ts: string, hasMore: boolean, nextCursor?: string) =>
+      jsonResponse({
+        ok: true,
+        has_more: hasMore,
+        ...(nextCursor ? { response_metadata: { next_cursor: nextCursor } } : {}),
+        messages: [{ ts, user: "U1", text: `msg-${ts}` }],
+      });
+    const fetchImpl = vi.fn().mockImplementation(() => page("1.0", true, "next"));
+    const api = new SlackHttpKnowledgeApi({ token: "xoxb-test", teamId: "T1", fetch: fetchImpl });
+
+    const { messages } = await api.listMessages({ channelId: "C1", pageLimit: 200 });
+
+    // Bounded at 25 pages; never throws, always resolves with whatever it collected.
+    expect(fetchImpl).toHaveBeenCalledTimes(25);
+    expect(messages.length).toBeGreaterThan(0);
+  });
+
   it("sends the bot token as a bearer header", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: true, channels: [] }));
     const api = new SlackHttpKnowledgeApi({ token: "xoxb-secret", teamId: "T1", fetch: fetchImpl });
