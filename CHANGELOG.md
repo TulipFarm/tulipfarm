@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/TulipFarm/tulipfarm/compare/v0.8.1...v0.8.2) (2026-08-10)
+
+### Bug Fixes
+
+* **ci:** update buildx cache-to to mode=min and ignore-error=true ([#351](https://github.com/TulipFarm/tulipfarm/issues/351)) ([aba785b](https://github.com/TulipFarm/tulipfarm/commit/aba785ba4941508f636f63b8ab2ce254a465a02f))
+* **system:** allow runtime version env override over build constant ([#352](https://github.com/TulipFarm/tulipfarm/issues/352)) ([d7a0625](https://github.com/TulipFarm/tulipfarm/commit/d7a0625d7a45801329ac903b1d05cd5078ed73cd))
+
 ## [0.8.1](https://github.com/TulipFarm/tulipfarm/compare/v0.8.0...v0.8.1) (2026-08-10)
 
 ### Bug Fixes
