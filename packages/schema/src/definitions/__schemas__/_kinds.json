@@ -1,0 +1,19 @@
+[
+  "AccessGrant",
+  "Agent",
+  "App",
+  "Form",
+  "Guardrail",
+  "Integration",
+  "IntegrationAdapter",
+  "KnowledgeSource",
+  "MemorySettings",
+  "ModelProfile",
+  "Resource",
+  "Role",
+  "Routine",
+  "Settings",
+  "Skill",
+  "ToolContract",
+  "Trigger"
+]

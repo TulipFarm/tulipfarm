@@ -19,7 +19,7 @@ function toolState(overrides: Record<string, unknown> = {}): routineSchema.Routi
     action: "issue.comment",
     destination: "github",
     credentialRef: "secret://integrations/github/triage",
-    input: { issueNumber: "${input.issueNumber}", body: "hello" },
+    input: { issueNumber: `\${input.issueNumber}`, body: "hello" },
     end: true,
     ...overrides,
   } as routineSchema.RoutineState;
@@ -76,7 +76,13 @@ describe("planToolDispatch", () => {
 
   it("refuses a State whose authored Tool reference is unusable", () => {
     const state = compileWithTargets(toolState());
-    const withoutRef = { ...state, definition: { ...state.definition, toolRef: undefined } };
+    const definition: routineSchema.RoutineState = {
+      type: "agent",
+      name: "CommentIssue",
+      agentRef: { name: "triage", version: "1.0.0" },
+      end: true,
+    };
+    const withoutRef = { ...state, definition };
 
     expect(() => planToolDispatch(withoutRef, {}, CTX)).toThrow(
       new RoutineStepError("missing_tool_ref", "CommentIssue")

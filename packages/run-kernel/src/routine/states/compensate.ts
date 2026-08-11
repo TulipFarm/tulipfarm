@@ -36,6 +36,9 @@ export function planCompensation(
   state: CompiledState,
   ctx: CompensationContext
 ): CompensationRequest {
+  if (state.definition.type !== "compensate") {
+    throw new RoutineStepError("missing_target_ref", state.name);
+  }
   const targetRef = state.definition.targetRef;
   if (typeof targetRef !== "string" || targetRef.length === 0) {
     throw new RoutineStepError("missing_target_ref", state.name);

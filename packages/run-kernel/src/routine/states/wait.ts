@@ -21,6 +21,9 @@ export interface TimerWaitContext {
 }
 
 function durationMsOf(state: CompiledState): number {
+  if (state.definition.type !== "wait") {
+    throw new RoutineStepError("deadline_not_bounded", state.name);
+  }
   const waitFor = state.definition.waitFor;
   if (typeof waitFor !== "object" || waitFor === null) {
     throw new RoutineStepError("deadline_not_bounded", state.name);
@@ -34,6 +37,7 @@ function durationMsOf(state: CompiledState): number {
 
 /** True when the authored State waits on the clock rather than on an external event. */
 export function isTimerWait(state: CompiledState): boolean {
+  if (state.definition.type !== "wait") return false;
   const waitFor = state.definition.waitFor;
   if (typeof waitFor !== "object" || waitFor === null) return false;
   return (waitFor as Record<string, unknown>).kind === "timer";

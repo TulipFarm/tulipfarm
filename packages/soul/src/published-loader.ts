@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { validateResourceSchema } from "@tulipfarm/schema";
+import {
+  parseFrontmatter,
+  TulipFarmValidationError,
+  validateLegacyIntegrationManifest,
+  validateResourceSchema,
+  validateSoulConfig,
+} from "@tulipfarm/schema";
 import {
   type SoulSurfaceComponent,
   type SurfaceComponentSupport,
@@ -9,7 +15,9 @@ import {
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse as parseYaml } from "yaml";
+import { readFrontmatterArtifact, resolveDefinition } from "./definition-reader";
 import { validateAuthSteps, validateIngressContextEnv } from "./integration-auth";
+import { readContainedFile } from "./safe-fs";
 import type {
   IntegrationConnection,
   IntegrationManifest,
@@ -21,17 +29,12 @@ import type {
   SoulSkill,
 } from "./types";
 
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-
-export function parseFrontmatter(content: string): {
-  frontmatter: Record<string, unknown>;
-  body: string;
-} {
-  const match = FRONTMATTER_RE.exec(content);
-  if (!match) return { frontmatter: {}, body: content.trim() };
-  const frontmatter = (parseYaml(match[1]) ?? {}) as Record<string, unknown>;
-  return { frontmatter, body: match[2].trim() };
-}
+/**
+ * Re-exported from `@tulipfarm/schema`, which now owns frontmatter parsing so the write gate and
+ * this reader cannot disagree about what a legacy `AGENT.md` means. Kept here as a named export
+ * because it is part of this package's published surface.
+ */
+export { parseFrontmatter };
 
 async function subdirs(dir: string): Promise<string[]> {
   try {
@@ -45,9 +48,9 @@ async function subdirs(dir: string): Promise<string[]> {
   }
 }
 
-async function fileExists(path: string): Promise<boolean> {
+async function fileExists(rootPath: string, path: string): Promise<boolean> {
   try {
-    await readFile(path);
+    await readContainedFile(rootPath, path);
     return true;
   } catch (err) {
     const isNotFound =
@@ -75,7 +78,7 @@ async function loadEgressSpec(dir: string, manifest: IntegrationManifest): Promi
   const specFile = basename(manifest.egress.spec);
   try {
     // JSON is valid YAML, so one parser covers both the .json and .yaml specs providers publish.
-    return parseYaml(await readFile(join(dir, specFile), "utf8"));
+    return parseYaml(await readContainedFile(dir, join(dir, specFile)));
   } catch (err) {
     throw new Error(
       `declares egress.spec "${specFile}" but it could not be loaded: ${
@@ -96,6 +99,12 @@ export class SoulLoader {
   guardrailsConfig: Record<string, unknown> | null = null;
   observabilityConfig: Record<string, unknown> | null = null;
   manifest: Record<string, unknown> | null = null;
+  /**
+   * Artifacts skipped this load and why. A directory with no definition file is a real state —
+   * a half-finished authoring flow, or a legacy directory mid-migration — and it must not take the
+   * whole catalog down with it, which is what throwing inside `Promise.all` used to do.
+   */
+  quarantined: Array<{ kind: string; name: string; reason: string }> = [];
 
   constructor(
     private readonly soulPath: string,
@@ -104,6 +113,7 @@ export class SoulLoader {
   ) {}
 
   async load(): Promise<void> {
+    this.quarantined = [];
     const [
       agents,
       skills,
@@ -143,6 +153,13 @@ export class SoulLoader {
     this.logger.info(
       `Soul: loaded ${agents.size} agent(s), ${skills.size} skill(s), ${resources.size} resource(s), ${routines.size} routine(s), ${integrations.size} integration(s), ${surfaceComponents.size} Surface component(s)`
     );
+    for (const entry of this.quarantined) {
+      this.logger.warn(`Soul: skipped ${entry.kind} "${entry.name}" — ${entry.reason}`);
+    }
+  }
+
+  private quarantine(kind: string, name: string, reason: string): void {
+    this.quarantined.push({ kind, name, reason });
   }
 
   async reload(): Promise<void> {
@@ -162,10 +179,18 @@ export class SoulLoader {
     const map = new Map<string, SoulAgent>();
     const names = await subdirs(join(this.soulPath, "agents"));
     for (const name of names) {
-      const path = join(this.soulPath, "agents", name, "AGENT.md");
       try {
-        const content = await readFile(path, "utf8");
-        const { frontmatter, body } = parseFrontmatter(content);
+        const definition = await resolveDefinition(this.soulPath, "Agent", name);
+        if (definition === undefined) {
+          this.quarantine("agent", name, "no agent.yaml or AGENT.md in the directory");
+          continue;
+        }
+        const { frontmatter, body } = await readFrontmatterArtifact(
+          this.soulPath,
+          "Agent",
+          name,
+          definition
+        );
         map.set(name, { name, frontmatter, body });
       } catch (err) {
         throw artifactLoadError("agent", name, err);
@@ -178,10 +203,18 @@ export class SoulLoader {
     const map = new Map<string, SoulSkill>();
     const names = await subdirs(join(this.soulPath, "skills"));
     for (const name of names) {
-      const path = join(this.soulPath, "skills", name, "SKILL.md");
       try {
-        const content = await readFile(path, "utf8");
-        const { frontmatter, body } = parseFrontmatter(content);
+        const definition = await resolveDefinition(this.soulPath, "Skill", name);
+        if (definition === undefined) {
+          this.quarantine("skill", name, "no skill.yaml or SKILL.md in the directory");
+          continue;
+        }
+        const { frontmatter, body } = await readFrontmatterArtifact(
+          this.soulPath,
+          "Skill",
+          name,
+          definition
+        );
         map.set(name, { name, frontmatter, body });
       } catch (err) {
         throw artifactLoadError("skill", name, err);
@@ -194,14 +227,17 @@ export class SoulLoader {
     const map = new Map<string, SoulResource>();
     const names = await subdirs(join(this.soulPath, "resources"));
     for (const name of names) {
-      const schemaPath = join(this.soulPath, "resources", name, "schema.yml");
       try {
-        const content = await readFile(schemaPath, "utf8");
-        const schema = (parseYaml(content) ?? {}) as Record<string, unknown>;
+        const definition = await resolveDefinition(this.soulPath, "Resource", name);
+        if (definition === undefined) {
+          this.quarantine("resource", name, "no resource.yaml or schema.yml in the directory");
+          continue;
+        }
+        const schema = (parseYaml(definition.content) ?? {}) as Record<string, unknown>;
         validateResourceSchema(schema);
         const hooksPath = join(this.soulPath, "resources", name, "hooks.ts");
-        const hasHooks = await fileExists(hooksPath);
-        const hookSource = hasHooks ? await readFile(hooksPath, "utf8") : undefined;
+        const hasHooks = await fileExists(this.soulPath, hooksPath);
+        const hookSource = hasHooks ? await readContainedFile(this.soulPath, hooksPath) : undefined;
         const hookHash = hookSource
           ? createHash("sha256").update(hookSource).digest("hex")
           : undefined;
@@ -220,11 +256,11 @@ export class SoulLoader {
     for (const name of names) {
       const configPath = join(this.soulPath, "routines", name, "routine.yaml");
       try {
-        const content = await readFile(configPath, "utf8");
+        const content = await readContainedFile(this.soulPath, configPath);
         const config = (parseYaml(content) ?? {}) as Record<string, unknown>;
         const hooksPath = join(this.soulPath, "routines", name, "hooks.ts");
-        const hasHooks = await fileExists(hooksPath);
-        const hookSource = hasHooks ? await readFile(hooksPath, "utf8") : undefined;
+        const hasHooks = await fileExists(this.soulPath, hooksPath);
+        const hookSource = hasHooks ? await readContainedFile(this.soulPath, hooksPath) : undefined;
         const hookHash = hookSource
           ? createHash("sha256").update(hookSource).digest("hex")
           : undefined;
@@ -242,13 +278,14 @@ export class SoulLoader {
     for (const slug of slugs) {
       const dir = join(this.soulPath, "surface-components", slug);
       try {
-        const definition = (parseYaml(await readFile(join(dir, "component.yaml"), "utf8")) ??
-          {}) as Omit<SoulSurfaceComponent, "slug" | "views">;
+        const definition = (parseYaml(
+          await readContainedFile(this.soulPath, join(dir, "component.yaml"))
+        ) ?? {}) as Omit<SoulSurfaceComponent, "slug" | "views">;
         const views: Record<string, unknown> = {};
         for (const file of await readdir(join(dir, "views"))) {
           if (!file.endsWith(".yaml")) continue;
           views[file.slice(0, -5)] =
-            parseYaml(await readFile(join(dir, "views", file), "utf8")) ?? {};
+            parseYaml(await readContainedFile(this.soulPath, join(dir, "views", file))) ?? {};
         }
         const component = {
           ...definition,
@@ -273,16 +310,11 @@ export class SoulLoader {
       // manifest.yml is the V2 format; manifest.json is no longer supported
       const manifestPath = join(dir, "manifest.yml");
       try {
-        const manifestRaw = (parseYaml(await readFile(manifestPath, "utf8")) ??
-          {}) as IntegrationManifest;
-
-        // Validate egress block minimally
-        if (!manifestRaw.egress?.type) {
-          throw new Error("manifest.egress.type missing");
-        }
-        if (manifestRaw.egress.type === "mcp" && !manifestRaw.egress.entry?.transport) {
-          throw new Error("manifest.egress.entry.transport missing");
-        }
+        const parsedManifest =
+          parseYaml(await readContainedFile(this.soulPath, manifestPath)) ?? {};
+        const manifestRaw = validateLegacyIntegrationManifest(
+          parsedManifest
+        ) as IntegrationManifest;
 
         // Same posture as the egress check: a connect flow that can't complete is rejected at
         // load, not halfway through an operator's setup.
@@ -298,8 +330,9 @@ export class SoulLoader {
 
         let connection: IntegrationConnection | undefined;
         try {
-          const connRaw = (parseYaml(await readFile(join(dir, "connection.yaml"), "utf8")) ??
-            {}) as IntegrationConnection;
+          const connRaw = (parseYaml(
+            await readContainedFile(this.soulPath, join(dir, "connection.yaml"))
+          ) ?? {}) as IntegrationConnection;
           connection = connRaw;
         } catch {
           // connection.yaml is optional — integration is installed but not yet connected
@@ -307,7 +340,7 @@ export class SoulLoader {
 
         let setupGuide: string | undefined;
         try {
-          setupGuide = await readFile(join(dir, "setup-guide.md"), "utf8");
+          setupGuide = await readContainedFile(this.soulPath, join(dir, "setup-guide.md"));
         } catch {
           // setup-guide.md is optional
         }
@@ -319,7 +352,7 @@ export class SoulLoader {
           // basename() confines the read to the integration dir (no ../ traversal).
           const handlerFile = basename(manifestRaw.ingress.handler);
           try {
-            const source = await readFile(join(dir, handlerFile), "utf8");
+            const source = await readContainedFile(this.soulPath, join(dir, handlerFile));
             ingressHandler = {
               source,
               hash: createHash("sha256").update(source).digest("hex"),
@@ -345,6 +378,10 @@ export class SoulLoader {
           egressSpec: await loadEgressSpec(dir, manifestRaw),
         });
       } catch (err) {
+        if (err instanceof TulipFarmValidationError) {
+          this.quarantine("integration", slug, `${err.path || "/"} ${err.message}`);
+          continue;
+        }
         throw artifactLoadError("integration", slug, err);
       }
     }
@@ -353,11 +390,19 @@ export class SoulLoader {
 
   private async loadYamlFile(path: string, label: string): Promise<Record<string, unknown> | null> {
     try {
-      const content = await readFile(path, "utf8");
-      return (parseYaml(content) ?? {}) as Record<string, unknown>;
+      const content = await readContainedFile(this.soulPath, path);
+      const parsed = (parseYaml(content) ?? {}) as Record<string, unknown>;
+      if (label === "soul.yaml") {
+        return validateSoulConfig(parsed) as Record<string, unknown>;
+      }
+      return parsed;
     } catch (err) {
       const isNotFound =
         err instanceof Error && "code" in err && (err as NodeJS.ErrnoException).code === "ENOENT";
+      if (err instanceof TulipFarmValidationError) {
+        this.quarantine("configuration", label, `${err.path || "/"} ${err.message}`);
+        return null;
+      }
       if (!isNotFound) {
         throw artifactLoadError("configuration", label, err);
       }

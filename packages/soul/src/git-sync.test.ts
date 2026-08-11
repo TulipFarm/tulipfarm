@@ -24,6 +24,7 @@ function makeMockGit(overrides: Record<string, any> = {}) {
     add: vi.fn().mockResolvedValue(undefined),
     addConfig: vi.fn().mockResolvedValue(undefined),
     init: vi.fn().mockResolvedValue(undefined),
+    env: vi.fn(() => git),
     revparse: vi.fn().mockResolvedValue("/soul"),
     commit: vi.fn().mockResolvedValue({
       commit: "abc1234",
@@ -43,6 +44,11 @@ function makeLogger() {
 
 const REMOTE = "https://github.com/user/soul.git";
 const SOUL = "/soul";
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
 
 describe("GitSyncService", () => {
   let mockGit: ReturnType<typeof makeMockGit>;
@@ -189,6 +195,7 @@ describe("GitSyncService", () => {
     it("hard-resets and logs discarded commits on genuine divergence", async () => {
       mockGit.raw
         .mockResolvedValueOnce("2\t3") // rev-list: 2 ahead, 3 behind
+        .mockResolvedValueOnce("") // status: clean
         .mockResolvedValueOnce("abc123 local commit\ndef456 another");
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
@@ -196,9 +203,43 @@ describe("GitSyncService", () => {
       expect(mockGit.pull).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("divergence"));
     });
+
+    it("refuses to hard-reset a divergent repo with uncommitted work", async () => {
+      mockGit.raw
+        .mockResolvedValueOnce("2\t3") // rev-list: 2 ahead, 3 behind
+        .mockResolvedValueOnce(" M agents/ada/agent.yaml\n")
+        .mockResolvedValueOnce("abc123 local commit");
+      const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+
+      await expect(svc.bootSync()).rejects.toThrow(/uncommitted/);
+
+      expect(mockGit.reset).not.toHaveBeenCalled();
+    });
   });
 
   describe("credentials safety", () => {
+    it("strips ambient Git repository overrides from every git instance", async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockGit.raw.mockResolvedValue("0\t0");
+      const previous = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
+      process.env.GIT_DIR = "/elsewhere/.git";
+      process.env.GIT_WORK_TREE = "/elsewhere";
+      try {
+        const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
+        await svc.bootSync();
+      } finally {
+        restoreEnv("GIT_DIR", previous.GIT_DIR);
+        restoreEnv("GIT_WORK_TREE", previous.GIT_WORK_TREE);
+      }
+
+      expect(mockGit.env).toHaveBeenCalledWith(
+        expect.not.objectContaining({
+          GIT_DIR: expect.any(String),
+          GIT_WORK_TREE: expect.any(String),
+        })
+      );
+    });
+
     it("does not log the token in any log call", async () => {
       mockExistsSync.mockReturnValue(true);
       mockGit.raw.mockResolvedValue("0\t0");
@@ -244,7 +285,10 @@ describe("GitSyncService", () => {
     });
 
     it("does not push on genuine divergence (hard-reset path)", async () => {
-      mockGit.raw.mockResolvedValueOnce("2\t3").mockResolvedValueOnce("abc123 local commit");
+      mockGit.raw
+        .mockResolvedValueOnce("2\t3")
+        .mockResolvedValueOnce("")
+        .mockResolvedValueOnce("abc123 local commit");
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
       await svc.bootSync();
       expect(mockGit.push).not.toHaveBeenCalled();

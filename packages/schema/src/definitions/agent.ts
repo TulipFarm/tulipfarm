@@ -1,8 +1,8 @@
+import { type Static, Type } from "@sinclair/typebox";
 import {
   AGENT_AUTONOMY_CEILINGS,
   type AgentAutonomyCeiling,
   DEFINITION_TRUST_TIERS,
-  type DefinitionEnvelope,
   type DefinitionTrustTier,
   definitionRegistration,
   definitionSchema,
@@ -25,95 +25,77 @@ import {
 const KIND = "Agent";
 
 /** Deployment/role/Agent-level numeric limits (SPEC §9.1). The narrowest limit wins at runtime. */
-const agentLimitsSchema = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    wallClockMs: { type: "integer", minimum: 0 },
-    activeMs: { type: "integer", minimum: 0 },
-    tokens: { type: "integer", minimum: 0 },
-    costUsd: { type: "number", minimum: 0 },
-    toolCalls: { type: "integer", minimum: 0 },
-    delegationDepth: { type: "integer", minimum: 0 },
+const agentLimitsSchema = Type.Object(
+  {
+    wallClockMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    activeMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    tokens: Type.Optional(Type.Integer({ minimum: 0 })),
+    costUsd: Type.Optional(Type.Number({ minimum: 0 })),
+    toolCalls: Type.Optional(Type.Integer({ minimum: 0 })),
+    delegationDepth: Type.Optional(Type.Integer({ minimum: 0 })),
   },
-} as const;
+  { additionalProperties: false }
+);
 
-const agentSpecSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["owner", "instructions", "modelProfile", "autonomy", "trustTier"],
-  properties: {
-    owner: { type: "string", minLength: 1, maxLength: 256 },
-    maintainers: refListSchema,
+const agentSpecSchema = Type.Object(
+  {
+    owner: Type.String({ minLength: 1, maxLength: 256 }),
+    maintainers: Type.Optional(refListSchema),
     instructions: instructionsReferenceSchema,
-    personality: { type: "string", maxLength: 8192 },
+    personality: Type.Optional(Type.String({ maxLength: 8192 })),
     // Assigned Agent roles and the permission ceiling that bounds effective authority.
-    roles: refListSchema,
-    permissionCeiling: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        grants: refListSchema,
-        maxRiskClass: { type: "string", enum: ["low", "medium", "high"] },
-      },
-    },
-    modelProfile: { type: "string", minLength: 1, maxLength: 256 },
-    skills: refListSchema,
+    roles: Type.Optional(refListSchema),
+    permissionCeiling: Type.Optional(
+      Type.Object(
+        {
+          grants: Type.Optional(refListSchema),
+          maxRiskClass: Type.Optional(
+            Type.Unsafe<"low" | "medium" | "high">({
+              type: "string",
+              enum: ["low", "medium", "high"],
+            })
+          ),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    modelProfile: Type.String({ minLength: 1, maxLength: 256 }),
+    skills: Type.Optional(refListSchema),
     // Tools the Agent is *allowed* to request; never a grant of authority.
-    allowedTools: refListSchema,
-    autonomy: { type: "string", enum: [...AGENT_AUTONOMY_CEILINGS] },
-    limits: agentLimitsSchema,
-    guardrails: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        data: { type: "string", minLength: 1, maxLength: 256 },
-        delegation: { type: "string", minLength: 1, maxLength: 256 },
-      },
-    },
-    memoryScopes: {
-      type: "array",
-      uniqueItems: true,
-      items: { type: "string", enum: [...MEMORY_SCOPES] },
-    },
-    knowledgeScopes: refListSchema,
-    trustTier: { type: "string", enum: [...DEFINITION_TRUST_TIERS] },
+    allowedTools: Type.Optional(refListSchema),
+    autonomy: Type.Unsafe<AgentAutonomyCeiling>({
+      type: "string",
+      enum: [...AGENT_AUTONOMY_CEILINGS],
+    }),
+    limits: Type.Optional(agentLimitsSchema),
+    guardrails: Type.Optional(
+      Type.Object(
+        {
+          data: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+          delegation: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    memoryScopes: Type.Optional(
+      Type.Array(Type.Unsafe<MemoryScope>({ type: "string", enum: [...MEMORY_SCOPES] }), {
+        uniqueItems: true,
+      })
+    ),
+    knowledgeScopes: Type.Optional(refListSchema),
+    trustTier: Type.Unsafe<DefinitionTrustTier>({
+      type: "string",
+      enum: [...DEFINITION_TRUST_TIERS],
+    }),
     // Evaluation suite gate (SPEC §10); action-capable Agents require it before publication.
-    evaluationSuite: { type: "string", minLength: 1, maxLength: 256 },
+    evaluationSuite: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 export const AgentDefinitionSchema = definitionSchema(KIND, agentSpecSchema);
 
 export const AGENT_DEFINITION = definitionRegistration(KIND, AgentDefinitionSchema);
 
-export interface AgentSpec {
-  owner: string;
-  maintainers?: string[];
-  instructions: { path: string };
-  personality?: string;
-  roles?: string[];
-  permissionCeiling?: {
-    grants?: string[];
-    maxRiskClass?: "low" | "medium" | "high";
-  };
-  modelProfile: string;
-  skills?: string[];
-  allowedTools?: string[];
-  autonomy: AgentAutonomyCeiling;
-  limits?: {
-    wallClockMs?: number;
-    activeMs?: number;
-    tokens?: number;
-    costUsd?: number;
-    toolCalls?: number;
-    delegationDepth?: number;
-  };
-  guardrails?: { data?: string; delegation?: string };
-  memoryScopes?: MemoryScope[];
-  knowledgeScopes?: string[];
-  trustTier: DefinitionTrustTier;
-  evaluationSuite?: string;
-}
-
-export type AgentDefinition = DefinitionEnvelope<"Agent", AgentSpec>;
+export type AgentDefinition = Static<typeof AgentDefinitionSchema>;
+export type AgentSpec = AgentDefinition["spec"];

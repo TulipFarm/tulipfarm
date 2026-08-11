@@ -1,0 +1,1592 @@
+{
+  "$id": "tulipfarm.ai/v1/Trigger",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1"
+    },
+    "kind": {
+      "const": "Trigger"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "manual"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "internal_api"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+              "type": "string"
+            },
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "schedule": {
+              "additionalProperties": false,
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "missedRunPolicy": {
+                    "const": "catch_up_bounded"
+                  }
+                }
+              },
+              "properties": {
+                "calendarRef": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "catchUpCap": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "dstPolicy": {
+                  "enum": [
+                    "forward_only",
+                    "skip_missing",
+                    "run_repeated"
+                  ],
+                  "type": "string"
+                },
+                "endAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "jitterMs": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "missedRunPolicy": {
+                  "enum": [
+                    "skip",
+                    "run_once",
+                    "catch_up_bounded"
+                  ],
+                  "type": "string"
+                },
+                "overlapPolicy": {
+                  "enum": [
+                    "skip",
+                    "allow",
+                    "supersede"
+                  ],
+                  "type": "string"
+                },
+                "startAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "missedRunPolicy",
+                "overlapPolicy"
+              ],
+              "then": {
+                "additionalProperties": true,
+                "properties": {
+                  "catchUpCap": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "catchUpCap"
+                ]
+              },
+              "type": "object"
+            },
+            "type": {
+              "const": "datetime"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "at"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "everyMs": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "schedule": {
+              "additionalProperties": false,
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "missedRunPolicy": {
+                    "const": "catch_up_bounded"
+                  }
+                }
+              },
+              "properties": {
+                "calendarRef": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "catchUpCap": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "dstPolicy": {
+                  "enum": [
+                    "forward_only",
+                    "skip_missing",
+                    "run_repeated"
+                  ],
+                  "type": "string"
+                },
+                "endAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "jitterMs": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "missedRunPolicy": {
+                  "enum": [
+                    "skip",
+                    "run_once",
+                    "catch_up_bounded"
+                  ],
+                  "type": "string"
+                },
+                "overlapPolicy": {
+                  "enum": [
+                    "skip",
+                    "allow",
+                    "supersede"
+                  ],
+                  "type": "string"
+                },
+                "startAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "missedRunPolicy",
+                "overlapPolicy"
+              ],
+              "then": {
+                "additionalProperties": true,
+                "properties": {
+                  "catchUpCap": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "catchUpCap"
+                ]
+              },
+              "type": "object"
+            },
+            "type": {
+              "const": "interval"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "everyMs"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "expression": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "schedule": {
+              "additionalProperties": false,
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "missedRunPolicy": {
+                    "const": "catch_up_bounded"
+                  }
+                }
+              },
+              "properties": {
+                "calendarRef": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "catchUpCap": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "dstPolicy": {
+                  "enum": [
+                    "forward_only",
+                    "skip_missing",
+                    "run_repeated"
+                  ],
+                  "type": "string"
+                },
+                "endAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "jitterMs": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "missedRunPolicy": {
+                  "enum": [
+                    "skip",
+                    "run_once",
+                    "catch_up_bounded"
+                  ],
+                  "type": "string"
+                },
+                "overlapPolicy": {
+                  "enum": [
+                    "skip",
+                    "allow",
+                    "supersede"
+                  ],
+                  "type": "string"
+                },
+                "startAt": {
+                  "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$",
+                  "type": "string"
+                },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "missedRunPolicy",
+                "overlapPolicy"
+              ],
+              "then": {
+                "additionalProperties": true,
+                "properties": {
+                  "catchUpCap": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "catchUpCap"
+                ]
+              },
+              "type": "object"
+            },
+            "timezone": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": {
+              "const": "cron"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "expression"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "provider": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "webhook"
+            },
+            "verification": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "enum": [
+                    "hmac_sha256",
+                    "hmac_sha1",
+                    "ed25519"
+                  ],
+                  "type": "string"
+                },
+                "secretRef": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "signatureFormat": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "signatureHeader": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "signingTemplate": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "timestampHeader": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "toleranceMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "method",
+                "secretRef",
+                "signatureHeader"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "provider",
+            "verification"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "matchEventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "matchEventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "provider": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "integration_event"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "provider",
+            "matchEventType"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "formRef": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "form"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "formRef"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "backgroundIdentity": {
+              "additionalProperties": false,
+              "properties": {
+                "principalId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "principalKind": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "principalKind",
+                "principalId"
+              ],
+              "type": "object"
+            },
+            "concurrency": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "max": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "policy": {
+                  "enum": [
+                    "serialize",
+                    "parallel",
+                    "queue",
+                    "coalesce",
+                    "reject",
+                    "supersede"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key",
+                "policy"
+              ],
+              "type": "object"
+            },
+            "deduplication": {
+              "additionalProperties": false,
+              "properties": {
+                "key": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "windowMs": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "eventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "eventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "filter": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "inputMapping": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "matchEventType": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "matchEventVersion": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "rateLimit": {
+              "additionalProperties": false,
+              "properties": {
+                "maxPerMinute": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "maxPerMinute"
+              ],
+              "type": "object"
+            },
+            "routineRef": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "name": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "version"
+              ],
+              "type": "object"
+            },
+            "type": {
+              "const": "internal_event"
+            }
+          },
+          "required": [
+            "type",
+            "routineRef",
+            "eventType",
+            "eventVersion",
+            "backgroundIdentity",
+            "deduplication",
+            "matchEventType"
+          ],
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

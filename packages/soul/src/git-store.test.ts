@@ -5,11 +5,12 @@ import { stringify } from "yaml";
 
 vi.mock("simple-git", () => ({ default: vi.fn() }));
 vi.mock("node:fs", () => ({
-  mkdtempSync: vi.fn(() => "/tmp/soul-changeset-xyz"),
+  mkdtempSync: vi.fn(() => "/soul/.git/tulipfarm-changesets/changeset-xyz"),
+  mkdirSync: vi.fn(),
   writeFileSync: vi.fn(),
   rmSync: vi.fn(),
+  rmdirSync: vi.fn(),
 }));
-vi.mock("node:os", () => ({ tmpdir: vi.fn(() => "/tmp") }));
 
 import { rmSync, writeFileSync } from "node:fs";
 import simpleGit from "simple-git";
@@ -27,6 +28,8 @@ const SOUL = "/soul";
 interface MockGitOptions {
   headSha?: string | null;
   updateRefRejects?: boolean;
+  restoreRejects?: boolean;
+  branchRef?: string;
 }
 
 function makeMockGit(opts: MockGitOptions = {}) {
@@ -47,6 +50,10 @@ function makeMockGit(opts: MockGitOptions = {}) {
     raw: vi.fn((args: string[]) => {
       rawCalls.push(args);
       switch (args[0]) {
+        // The publish target is resolved from HEAD rather than assumed, so the mock must answer
+        // it — a repo created without `init.defaultBranch` is on `master`, not `main`.
+        case "symbolic-ref":
+          return Promise.resolve(`${opts.branchRef ?? "refs/heads/main"}\n`);
         case "hash-object":
           return Promise.resolve("blob1111\n");
         case "write-tree":
@@ -56,6 +63,10 @@ function makeMockGit(opts: MockGitOptions = {}) {
         case "update-ref":
           return opts.updateRefRejects
             ? Promise.reject(new Error("cannot lock ref: is at other but expected"))
+            : Promise.resolve("");
+        case "restore":
+          return opts.restoreRejects
+            ? Promise.reject(new Error("restore failed"))
             : Promise.resolve("");
         default:
           return Promise.resolve("");
@@ -97,7 +108,7 @@ const UPSERT: SoulFileChange = {
   path: "agents/ada/agent.yaml",
   content: stringify(AGENT_DOCUMENT),
 };
-const DELETE: SoulFileChange = { operation: "delete", path: "routines/old.yaml" };
+const DELETE: SoulFileChange = { operation: "delete", path: "routines/old/routine.yaml" };
 
 function makeValidated(overrides: Partial<ValidatedSoulChangeset> = {}): ValidatedSoulChangeset {
   return {
@@ -170,7 +181,11 @@ describe("SoulGitStore.commitChangeset", () => {
       "--cacheinfo",
       "100644,blob1111,agents/ada/agent.yaml",
     ]);
-    expect(mock.rawCalls).toContainEqual(["update-index", "--force-remove", "routines/old.yaml"]);
+    expect(mock.rawCalls).toContainEqual([
+      "update-index",
+      "--force-remove",
+      "routines/old/routine.yaml",
+    ]);
 
     // commit-tree parents off the base and carries signed metadata trailers
     const commitTree = mock.rawCalls.find((c) => c[0] === "commit-tree");
@@ -181,9 +196,25 @@ describe("SoulGitStore.commitChangeset", () => {
     expect(message).toContain("Soul-Changeset: cs_1");
     expect(message).toContain("Soul-Signature: key-1:sigvalue");
 
-    // CAS ref update guarded by the expected base, then working tree materialized
+    // CAS ref update guarded by the expected base, then only touched paths are materialized
     expect(mock.rawCalls).toContainEqual(["update-ref", "refs/heads/main", "commit3333", BASE]);
-    expect(mock.git.reset).toHaveBeenCalledWith(["--hard", "commit3333"]);
+    expect(mock.rawCalls).toContainEqual([
+      "restore",
+      "--source",
+      "commit3333",
+      "--staged",
+      "--worktree",
+      "--",
+      "agents/ada/agent.yaml",
+    ]);
+    expect(mock.rawCalls).toContainEqual([
+      "rm",
+      "-f",
+      "--ignore-unmatch",
+      "--",
+      "routines/old/routine.yaml",
+    ]);
+    expect(mock.git.reset).not.toHaveBeenCalled();
     expect(mockRmSync).toHaveBeenCalled();
   });
 
@@ -256,7 +287,7 @@ describe("SoulGitStore.commitChangeset", () => {
     });
 
     expect(mockWriteFileSync).toHaveBeenCalledWith(
-      "/tmp/soul-changeset-xyz/blob",
+      "/soul/.git/tulipfarm-changesets/changeset-xyz/blob",
       `${canonicalize(AGENT_DOCUMENT)}\n`
     );
   });
@@ -291,6 +322,21 @@ describe("SoulGitStore.commitChangeset", () => {
     expect(mockRmSync).toHaveBeenCalled();
   });
 
+  it("targets the branch HEAD points at, not an assumed main", async () => {
+    // `git init` produces `master` unless the host sets `init.defaultBranch`, so hardcoding
+    // `refs/heads/main` made the compare-and-swap target a ref that does not exist on a fresh
+    // container — reported as a conflict, whose advertised remedy is an unwinnable retry.
+    build({ branchRef: "refs/heads/master" });
+    const store = new SoulGitStore(SOUL, makeSigner(), logger);
+    await store.commitChangeset({
+      changeset: makeValidated(),
+      files: [UPSERT, DELETE],
+      actor: ACTOR,
+    });
+
+    expect(mock.rawCalls).toContainEqual(["update-ref", "refs/heads/master", "commit3333", BASE]);
+  });
+
   it("does not materialize the working tree when the CAS ref update loses the race", async () => {
     build({ updateRefRejects: true });
     const store = new SoulGitStore(SOUL, makeSigner(), logger);
@@ -300,6 +346,17 @@ describe("SoulGitStore.commitChangeset", () => {
 
     expect(mock.git.reset).not.toHaveBeenCalled();
     expect(mockRmSync).toHaveBeenCalled();
+  });
+
+  it("distinguishes a post-commit materialization failure from a failed commit", async () => {
+    build({ restoreRejects: true });
+    const store = new SoulGitStore(SOUL, makeSigner(), logger);
+
+    await expect(
+      store.commitChangeset({ changeset: makeValidated(), files: [UPSERT, DELETE], actor: ACTOR })
+    ).rejects.toMatchObject({ code: "POST_COMMIT_CLEANUP_FAILED" });
+
+    expect(mock.rawCalls).toContainEqual(["update-ref", "refs/heads/main", "commit3333", BASE]);
   });
 
   it("wraps a tree-write failure and cleans up the throwaway index", async () => {

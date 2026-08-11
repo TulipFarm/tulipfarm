@@ -1,0 +1,899 @@
+{
+  "$id": "tulipfarm.ai/v1/Guardrail",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Guardrail",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "defaultDecision": {
+          "const": "deny",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "actions": {
+                    "items": {
+                      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "audiences": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "constraints": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "executionEnvironments": {
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": "sandbox",
+                              "type": "string"
+                            },
+                            {
+                              "const": "managedAdapter",
+                              "type": "string"
+                            },
+                            {
+                              "const": "externalProtocol",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "maxCostUsd": {
+                        "minimum": 0.01,
+                        "type": "number"
+                      },
+                      "maxRecords": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "network": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "allowPrivateNetworks": {
+                            "const": false,
+                            "type": "boolean"
+                          },
+                          "allowedHosts": {
+                            "items": {
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "allowedHosts",
+                          "allowPrivateNetworks"
+                        ],
+                        "type": "object"
+                      },
+                      "timeWindow": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expiresAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          },
+                          "startsAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "startsAt",
+                          "expiresAt"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "dataClasses": {
+                    "items": {
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "destinations": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "conditions": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "attribute": {
+                              "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$",
+                              "type": "string"
+                            },
+                            "operator": {
+                              "anyOf": [
+                                {
+                                  "const": "equals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notEquals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "in",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notIn",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "attribute",
+                            "operator",
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "expiresAt": {
+                        "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                        "type": "string"
+                      },
+                      "resource": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "fields": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "recordIds": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "types": {
+                            "items": {
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "types"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": {
+                    "anyOf": [
+                      {
+                        "const": "allow",
+                        "type": "string"
+                      },
+                      {
+                        "const": "deny",
+                        "type": "string"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "type",
+                  "actions"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "actions": {
+                    "items": {
+                      "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "category": {
+                    "anyOf": [
+                      {
+                        "const": "soulChange",
+                        "type": "string"
+                      },
+                      {
+                        "const": "highRiskAction",
+                        "type": "string"
+                      },
+                      {
+                        "const": "destructiveAction",
+                        "type": "string"
+                      },
+                      {
+                        "const": "protectedDataEgress",
+                        "type": "string"
+                      },
+                      {
+                        "const": "credentialUse",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "constraints": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "executionEnvironments": {
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": "sandbox",
+                              "type": "string"
+                            },
+                            {
+                              "const": "managedAdapter",
+                              "type": "string"
+                            },
+                            {
+                              "const": "externalProtocol",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "maxCostUsd": {
+                        "minimum": 0.01,
+                        "type": "number"
+                      },
+                      "maxRecords": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "network": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "allowPrivateNetworks": {
+                            "const": false,
+                            "type": "boolean"
+                          },
+                          "allowedHosts": {
+                            "items": {
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "allowedHosts",
+                          "allowPrivateNetworks"
+                        ],
+                        "type": "object"
+                      },
+                      "timeWindow": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expiresAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          },
+                          "startsAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "startsAt",
+                          "expiresAt"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "minimumApprovers": {
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "conditions": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "attribute": {
+                              "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$",
+                              "type": "string"
+                            },
+                            "operator": {
+                              "anyOf": [
+                                {
+                                  "const": "equals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notEquals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "in",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notIn",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "attribute",
+                            "operator",
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "expiresAt": {
+                        "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                        "type": "string"
+                      },
+                      "resource": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "fields": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "recordIds": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "types": {
+                            "items": {
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "types"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "separationOfDuties": {
+                    "type": "boolean"
+                  },
+                  "type": {
+                    "const": "approval",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "type",
+                  "actions",
+                  "category",
+                  "minimumApprovers",
+                  "separationOfDuties"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "anyOf": [
+                      {
+                        "const": "block",
+                        "type": "string"
+                      },
+                      {
+                        "const": "redact",
+                        "type": "string"
+                      },
+                      {
+                        "const": "requireApproval",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "audiences": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "constraints": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "executionEnvironments": {
+                        "items": {
+                          "anyOf": [
+                            {
+                              "const": "sandbox",
+                              "type": "string"
+                            },
+                            {
+                              "const": "managedAdapter",
+                              "type": "string"
+                            },
+                            {
+                              "const": "externalProtocol",
+                              "type": "string"
+                            }
+                          ]
+                        },
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "maxCostUsd": {
+                        "minimum": 0.01,
+                        "type": "number"
+                      },
+                      "maxRecords": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "network": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "allowPrivateNetworks": {
+                            "const": false,
+                            "type": "boolean"
+                          },
+                          "allowedHosts": {
+                            "items": {
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "allowedHosts",
+                          "allowPrivateNetworks"
+                        ],
+                        "type": "object"
+                      },
+                      "timeWindow": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "expiresAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          },
+                          "startsAt": {
+                            "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "startsAt",
+                          "expiresAt"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "destinations": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "detectors": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "const": "secret",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "const": "dataClass",
+                              "type": "string"
+                            },
+                            "values": {
+                              "items": {
+                                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "values"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "type": {
+                              "const": "protectedField",
+                              "type": "string"
+                            },
+                            "values": {
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "values"
+                          ],
+                          "type": "object"
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "scope": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "conditions": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "attribute": {
+                              "pattern": "^[a-z][A-Za-z0-9]*(?:\\.[a-z][A-Za-z0-9]*)*$",
+                              "type": "string"
+                            },
+                            "operator": {
+                              "anyOf": [
+                                {
+                                  "const": "equals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notEquals",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "in",
+                                  "type": "string"
+                                },
+                                {
+                                  "const": "notIn",
+                                  "type": "string"
+                                }
+                              ]
+                            },
+                            "value": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "minItems": 1,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "attribute",
+                            "operator",
+                            "value"
+                          ],
+                          "type": "object"
+                        },
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      "expiresAt": {
+                        "pattern": "^\\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\\d|3[01])T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d{1,9})?Z$",
+                        "type": "string"
+                      },
+                      "resource": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "fields": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "recordIds": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "types": {
+                            "items": {
+                              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "types"
+                        ],
+                        "type": "object"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": {
+                    "const": "dlp",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "type",
+                  "detectors",
+                  "action"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "defaultDecision",
+        "rules"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

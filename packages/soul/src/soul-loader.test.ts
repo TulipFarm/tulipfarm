@@ -44,6 +44,28 @@ describe("SoulLoader", () => {
       expect(loader.guardrailsConfig).toBeNull();
       expect(loader.manifest).toBeNull();
     });
+
+    it("quarantines a manifest.yml that fails the legacy integration schema", async () => {
+      await write(
+        join(TMP, "integrations", "broken", "manifest.yml"),
+        "name: broken\negress:\n  type: openapi\n  spec: 123\n"
+      );
+      await write(
+        join(TMP, "integrations", "healthy", "manifest.yml"),
+        "name: healthy\negress:\n  type: none\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect(loader.integrations.has("broken")).toBe(false);
+      expect(loader.integrations.has("healthy")).toBe(true);
+      expect(loader.quarantined).toContainEqual({
+        kind: "integration",
+        name: "broken",
+        reason: expect.stringContaining("/egress"),
+      });
+    });
   });
 
   describe("agents", () => {
@@ -71,10 +93,112 @@ describe("SoulLoader", () => {
       expect(loader.agents.get("plain")?.body).toBe("Just body text.");
     });
 
-    it("fails closed when a published agent is missing AGENT.md", async () => {
+    it("quarantines a published agent with no definition file instead of failing the whole load", async () => {
+      // Per decision S3: boot never crashes on one bad artifact. Throwing here took the entire
+      // catalog down with it — `load()` runs every loader under `Promise.all`, so one empty agent
+      // directory also cost every skill, resource, routine and integration.
       await mkdirs(join(TMP, "agents", "broken"));
+      await write(join(TMP, "skills", "healthy", "SKILL.md"), "Still loads.");
       const loader = new SoulLoader(TMP, makeLogger());
-      await expect(loader.load()).rejects.toThrow('agent "broken"');
+
+      await loader.load();
+
+      expect(loader.agents.has("broken")).toBe(false);
+      expect(loader.quarantined).toContainEqual({
+        kind: "agent",
+        name: "broken",
+        reason: "no agent.yaml or AGENT.md in the directory",
+      });
+      // The point of quarantining rather than throwing: unrelated artifacts survive.
+      expect(loader.skills.get("healthy")?.body).toBe("Still loads.");
+    });
+
+    it("still fails closed when a definition exists but cannot be read", async () => {
+      // Absent and corrupt are different: nothing to misinterpret vs. something we cannot trust.
+      await write(
+        join(TMP, "agents", "bad-yaml", "agent.yaml"),
+        "apiVersion: tulipfarm.ai/v1\nkind: Agent\nspec:\n  instructions:\n    path: missing.md\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow('agent "bad-yaml"');
+    });
+  });
+
+  describe("canonical layout", () => {
+    // The regression that matters most: the writer emits `agent.yaml`, the loader used to read
+    // only `AGENT.md`. A successful write made the agent vanish, and the throw took the whole
+    // catalog with it. Both halves now resolve the path through the same registry.
+    it("reads a canonical agent.yaml + instructions.md pair", async () => {
+      await write(
+        join(TMP, "agents", "triage", "agent.yaml"),
+        [
+          "apiVersion: tulipfarm.ai/v1",
+          "kind: Agent",
+          "metadata:",
+          "  slug: triage",
+          "  displayName: Triage",
+          "spec:",
+          "  owner: ops@example.com",
+          "  modelProfile: balanced",
+          "  autonomy: propose_actions",
+          "  trustTier: business_authored",
+          "  instructions:",
+          "    path: instructions.md",
+          "",
+        ].join("\n")
+      );
+      await write(join(TMP, "agents", "triage", "instructions.md"), "Triage things.");
+
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+
+      const agent = loader.agents.get("triage");
+      expect(agent?.body).toBe("Triage things.");
+      expect(agent?.frontmatter).toMatchObject({
+        owner: "ops@example.com",
+        modelProfile: "balanced",
+        autonomy: "propose_actions",
+        trustTier: "business_authored",
+        name: "Triage",
+      });
+      // `instructions` is a file pointer, not configuration — it must not leak into the view
+      // consumers treat as frontmatter.
+      expect(agent?.frontmatter.instructions).toBeUndefined();
+    });
+
+    it("prefers the canonical definition when both layouts are present", async () => {
+      await write(join(TMP, "agents", "dual", "AGENT.md"), "---\nowner: legacy\n---\nLegacy body.");
+      await write(
+        join(TMP, "agents", "dual", "agent.yaml"),
+        [
+          "apiVersion: tulipfarm.ai/v1",
+          "kind: Agent",
+          "metadata:",
+          "  slug: dual",
+          "spec:",
+          "  owner: canonical",
+          "  instructions:",
+          "    path: instructions.md",
+          "",
+        ].join("\n")
+      );
+      await write(join(TMP, "agents", "dual", "instructions.md"), "Canonical body.");
+
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+
+      expect(loader.agents.get("dual")?.frontmatter.owner).toBe("canonical");
+      expect(loader.agents.get("dual")?.body).toBe("Canonical body.");
+    });
+
+    it("reads a canonical resource.yaml", async () => {
+      await write(
+        join(TMP, "resources", "ticket", "resource.yaml"),
+        "type: object\nproperties:\n  title:\n    type: string\n"
+      );
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+      expect(loader.resources.get("ticket")?.schema).toMatchObject({ type: "object" });
     });
   });
 
@@ -386,12 +510,45 @@ describe("SoulLoader", () => {
     it("parses llm from soul.yaml's nested `llm:` key", async () => {
       await write(
         join(TMP, "soul.yaml"),
-        "name: my-instance\nllm:\n  provider: anthropic\n  model: claude-sonnet-4-6\n"
+        [
+          "name: my-instance",
+          "llm:",
+          "  tiers:",
+          "    quick:",
+          "      providers:",
+          "        - provider: anthropic",
+          "          model: claude-haiku-4-5",
+          "    standard:",
+          "      providers:",
+          "        - provider: anthropic",
+          "          model: claude-sonnet-4-6",
+          "    complex:",
+          "      providers:",
+          "        - provider: anthropic",
+          "          model: claude-opus-4-8",
+          "",
+        ].join("\n")
       );
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
-      expect(loader.llmConfig).toMatchObject({ provider: "anthropic" });
+      expect(loader.llmConfig).toMatchObject({ tiers: { standard: expect.any(Object) } });
       expect(loader.manifest).toMatchObject({ name: "my-instance" });
+    });
+
+    it("quarantines an invalid soul.yaml instead of crashing boot", async () => {
+      await write(join(TMP, "soul.yaml"), "setupComplete: yes\n");
+      await write(join(TMP, "skills", "healthy", "SKILL.md"), "Still loads.");
+      const loader = new SoulLoader(TMP, makeLogger());
+
+      await loader.load();
+
+      expect(loader.manifest).toBeNull();
+      expect(loader.skills.get("healthy")?.body).toBe("Still loads.");
+      expect(loader.quarantined).toContainEqual({
+        kind: "configuration",
+        name: "soul.yaml",
+        reason: "/setupComplete must be boolean",
+      });
     });
 
     it("returns null for missing soul.yaml without warn", async () => {

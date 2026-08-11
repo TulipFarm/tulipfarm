@@ -1,6 +1,6 @@
+import { type Static, Type } from "@sinclair/typebox";
 import {
   DEFINITION_TRUST_TIERS,
-  type DefinitionEnvelope,
   type DefinitionTrustTier,
   definitionRegistration,
   definitionSchema,
@@ -18,89 +18,79 @@ import {
 
 const KIND = "Skill";
 
-const safeRelativePathSchema = {
-  type: "string",
+const safeRelativePathSchema = Type.String({
   minLength: 1,
   maxLength: 512,
   pattern: "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$",
-} as const;
+});
 
-const skillCommandSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name", "toolRef", "runtimeProfile", "entrypoint"],
-  properties: {
-    name: {
-      type: "string",
+const skillCommandSchema = Type.Object(
+  {
+    name: Type.String({
       minLength: 1,
       maxLength: 128,
       pattern: "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
-    },
-    toolRef: { type: "string", minLength: 1, maxLength: 256 },
-    runtimeProfile: { type: "string", minLength: 1, maxLength: 128 },
+    }),
+    toolRef: Type.String({ minLength: 1, maxLength: 256 }),
+    runtimeProfile: Type.String({ minLength: 1, maxLength: 128 }),
     entrypoint: safeRelativePathSchema,
-    staticArgs: {
-      type: "array",
-      maxItems: 64,
-      items: { type: "string", maxLength: 512 },
-    },
-    requiredCommands: refListSchema,
-    integrationBindings: {
-      type: "array",
-      // V1 Tool intents carry one opaque Credential reference. A future multi-Credential intent
-      // can widen this without changing the per-binding shape.
-      maxItems: 1,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["slot", "integrationKinds", "injectAs"],
-        properties: {
-          slot: {
-            type: "string",
-            minLength: 1,
-            maxLength: 64,
-            pattern: "^[a-z][a-z0-9_]*$",
-          },
-          integrationKinds: refListSchema,
-          injectAs: {
-            type: "object",
-            additionalProperties: false,
-            required: ["kind", "name"],
-            properties: {
-              kind: { type: "string", enum: ["file", "environment"] },
-              name: {
-                type: "string",
-                minLength: 1,
-                maxLength: 128,
-                pattern: "^[A-Z][A-Z0-9_]*$",
+    staticArgs: Type.Optional(Type.Array(Type.String({ maxLength: 512 }), { maxItems: 64 })),
+    requiredCommands: Type.Optional(refListSchema),
+    integrationBindings: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            slot: Type.String({
+              minLength: 1,
+              maxLength: 64,
+              pattern: "^[a-z][a-z0-9_]*$",
+            }),
+            integrationKinds: refListSchema,
+            injectAs: Type.Object(
+              {
+                kind: Type.Unsafe<"file" | "environment">({
+                  type: "string",
+                  enum: ["file", "environment"],
+                }),
+                name: Type.String({
+                  minLength: 1,
+                  maxLength: 128,
+                  pattern: "^[A-Z][A-Z0-9_]*$",
+                }),
               },
-            },
+              { additionalProperties: false }
+            ),
           },
-        },
-      },
-    },
-    fileOutputs: {
-      type: "array",
-      maxItems: 32,
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["name", "path", "mediaTypes", "maxBytes"],
-        properties: {
-          name: {
-            type: "string",
-            minLength: 1,
-            maxLength: 128,
-            pattern: "^[a-z][a-z0-9_]*$",
+          { additionalProperties: false }
+        ),
+        {
+          // V1 Tool intents carry one opaque Credential reference. A future multi-Credential intent
+          // can widen this without changing the per-binding shape.
+          maxItems: 1,
+        }
+      )
+    ),
+    fileOutputs: Type.Optional(
+      Type.Array(
+        Type.Object(
+          {
+            name: Type.String({
+              minLength: 1,
+              maxLength: 128,
+              pattern: "^[a-z][a-z0-9_]*$",
+            }),
+            path: safeRelativePathSchema,
+            mediaTypes: refListSchema,
+            maxBytes: Type.Integer({ minimum: 1 }),
           },
-          path: safeRelativePathSchema,
-          mediaTypes: refListSchema,
-          maxBytes: { type: "integer", minimum: 1 },
-        },
-      },
-    },
+          { additionalProperties: false }
+        ),
+        { maxItems: 32 }
+      )
+    ),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 /** Property names that would turn a Skill into an authority grant. Kept for the guard test. */
 export const SKILL_FORBIDDEN_GRANT_KEYS = [
@@ -118,74 +108,38 @@ export const SKILL_FORBIDDEN_GRANT_KEYS = [
   "credentials",
 ] as const;
 
-const skillSpecSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["instructions", "trustTier"],
-  properties: {
+const skillSpecSchema = Type.Object(
+  {
     instructions: instructionsReferenceSchema,
-    references: refListSchema,
-    templates: refListSchema,
-    examples: refListSchema,
+    references: Type.Optional(refListSchema),
+    templates: Type.Optional(refListSchema),
+    examples: Type.Optional(refListSchema),
     // Paths to JSON Schema assets bundled with the Skill (SPEC §8.1 skills/<slug>/schemas).
-    schemas: refListSchema,
-    assets: refListSchema,
+    schemas: Type.Optional(refListSchema),
+    assets: Type.Optional(refListSchema),
     // Sandboxed helper scripts; execution still traverses the sandbox + Tool Broker (SPEC §13).
-    scripts: refListSchema,
+    scripts: Type.Optional(refListSchema),
     // Named sandbox commands. Their ToolContract carries all authority and effect policy.
-    commands: {
-      type: "array",
-      minItems: 1,
-      maxItems: 64,
-      items: skillCommandSchema,
-    },
-    dependencies: refListSchema,
+    commands: Type.Optional(Type.Array(skillCommandSchema, { minItems: 1, maxItems: 64 })),
+    dependencies: Type.Optional(refListSchema),
     // Tool *abilities the Skill requires* — a declaration of need, never a grant of a Tool.
-    requiredToolAbilities: refListSchema,
-    trustTier: { type: "string", enum: [...DEFINITION_TRUST_TIERS] },
+    requiredToolAbilities: Type.Optional(refListSchema),
+    trustTier: Type.Unsafe<DefinitionTrustTier>({
+      type: "string",
+      enum: [...DEFINITION_TRUST_TIERS],
+    }),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 export const SkillDefinitionSchema = definitionSchema(KIND, skillSpecSchema);
 
 export const SKILL_DEFINITION = definitionRegistration(KIND, SkillDefinitionSchema);
 
-export interface SkillSpec {
-  instructions: { path: string };
-  references?: string[];
-  templates?: string[];
-  examples?: string[];
-  schemas?: string[];
-  assets?: string[];
-  scripts?: string[];
-  commands?: SkillCommand[];
-  dependencies?: string[];
-  requiredToolAbilities?: string[];
-  trustTier: DefinitionTrustTier;
-}
-
-export interface SkillCommandIntegrationBinding {
-  slot: string;
-  integrationKinds: string[];
-  injectAs: { kind: "file" | "environment"; name: string };
-}
-
-export interface SkillCommandFileOutput {
-  name: string;
-  path: string;
-  mediaTypes: string[];
-  maxBytes: number;
-}
-
-export interface SkillCommand {
-  name: string;
-  toolRef: string;
-  runtimeProfile: string;
-  entrypoint: string;
-  staticArgs?: string[];
-  requiredCommands?: string[];
-  integrationBindings?: SkillCommandIntegrationBinding[];
-  fileOutputs?: SkillCommandFileOutput[];
-}
-
-export type SkillDefinition = DefinitionEnvelope<"Skill", SkillSpec>;
+export type SkillDefinition = Static<typeof SkillDefinitionSchema>;
+export type SkillSpec = SkillDefinition["spec"];
+export type SkillCommand = NonNullable<SkillSpec["commands"]>[number];
+export type SkillCommandIntegrationBinding = NonNullable<
+  SkillCommand["integrationBindings"]
+>[number];
+export type SkillCommandFileOutput = NonNullable<SkillCommand["fileOutputs"]>[number];

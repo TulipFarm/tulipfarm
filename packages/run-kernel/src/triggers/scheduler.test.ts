@@ -318,7 +318,7 @@ describe("scheduleSpecFromTrigger", () => {
           backgroundIdentity: { principalKind: "service", principalId: "scheduler" },
           deduplication: { key: "daily-digest", windowMs: 60_000 },
           expression: "0 9 * * 1-5",
-          schedulePolicy: {
+          schedule: {
             timezone: NY,
             missedRunPolicy: "catch_up_bounded",
             catchUpCap: 3,
@@ -353,7 +353,7 @@ describe("scheduleSpecFromTrigger", () => {
           lifecycle: "published",
         },
         spec: {
-          type: "webhook",
+          type: "manual",
           routineRef: { name: "digest", version: "1.0.0" },
           eventType: "hook.received",
           eventVersion: 1,

@@ -1,5 +1,5 @@
 import type { PersistedWaitKind, RegisterWaitInput, WaitAggregation } from "../../waits";
-import type { CompiledState } from "../compiler";
+import { type CompiledState, stateFields } from "../compiler";
 import { RoutineStepError, type StepOutcome, stateOutcome } from "./step";
 
 /**
@@ -104,7 +104,7 @@ export function resolveErrorPath(
 
 /** Read a required list of authored role names off a State. */
 export function requireRoles(state: CompiledState, key: string): readonly string[] {
-  const value = state.definition[key];
+  const value = stateFields(state.definition)[key];
   const roles = Array.isArray(value) ? value.filter((r): r is string => typeof r === "string") : [];
   if (roles.length === 0) throw new RoutineStepError("principals_not_declared", state.name);
   return roles;

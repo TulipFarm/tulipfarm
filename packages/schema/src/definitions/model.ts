@@ -1,5 +1,5 @@
+import { type Static, Type } from "@sinclair/typebox";
 import {
-  type DefinitionEnvelope,
   definitionRegistration,
   definitionSchema,
   MODEL_DATA_RETENTION,
@@ -37,98 +37,77 @@ export const MODEL_PROFILE_DENIAL_REASONS = [
 
 export type ModelProfileDenialReason = (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
 
-const modelSpecSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["provider", "model", "reasoning", "supports", "allowCaching"],
-  properties: {
-    provider: { type: "string", minLength: 1, maxLength: 128 },
-    model: { type: "string", minLength: 1, maxLength: 128 },
+const modelSpecSchema = Type.Object(
+  {
+    provider: Type.String({ minLength: 1, maxLength: 128 }),
+    model: Type.String({ minLength: 1, maxLength: 128 }),
     // Which named provider connection supplies credentials. Absent means "the connection named
     // after the provider" — so a single-account deployment never has to state it.
-    connection: { type: "string", minLength: 1, maxLength: 128 },
-    capabilityClass: { type: "string", minLength: 1, maxLength: 64 },
-    reasoning: { type: "string", enum: [...MODEL_REASONING_LEVELS] },
-    supports: {
-      type: "object",
-      additionalProperties: false,
-      required: ["tools", "structuredOutput", "contextWindowTokens"],
-      properties: {
-        tools: { type: "boolean" },
-        structuredOutput: { type: "boolean" },
-        contextWindowTokens: { type: "integer", minimum: 1 },
+    connection: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    capabilityClass: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+    reasoning: Type.Unsafe<ModelReasoningLevel>({
+      type: "string",
+      enum: [...MODEL_REASONING_LEVELS],
+    }),
+    supports: Type.Object(
+      {
+        tools: Type.Boolean(),
+        structuredOutput: Type.Boolean(),
+        contextWindowTokens: Type.Integer({ minimum: 1 }),
         // Modality is a dimension, not a rung: absent means text-only, which is what every
         // profile authored before modality existed actually was.
-        inputModalities: {
-          type: "array",
-          uniqueItems: true,
-          items: { type: "string", enum: [...MODEL_MODALITIES] },
+        inputModalities: Type.Optional(
+          Type.Array(Type.Unsafe<ModelModality>({ type: "string", enum: [...MODEL_MODALITIES] }), {
+            uniqueItems: true,
+          })
+        ),
+        outputModalities: Type.Optional(
+          Type.Array(Type.Unsafe<ModelModality>({ type: "string", enum: [...MODEL_MODALITIES] }), {
+            uniqueItems: true,
+          })
+        ),
+      },
+      { additionalProperties: false }
+    ),
+    constraints: Type.Optional(
+      Type.Object(
+        {
+          maxCostUsd: Type.Optional(Type.Number({ minimum: 0 })),
+          maxTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+          maxLatencyMs: Type.Optional(Type.Integer({ minimum: 0 })),
+          dataRetention: Type.Optional(
+            Type.Unsafe<ModelDataRetention>({
+              type: "string",
+              enum: [...MODEL_DATA_RETENTION],
+            })
+          ),
+          allowTraining: Type.Optional(Type.Boolean()),
+          residency: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
         },
-        outputModalities: {
-          type: "array",
-          uniqueItems: true,
-          items: { type: "string", enum: [...MODEL_MODALITIES] },
+        { additionalProperties: false }
+      )
+    ),
+    budgets: Type.Optional(
+      Type.Object(
+        {
+          maxCostUsd: Type.Optional(Type.Number({ minimum: 0 })),
+          maxTokens: Type.Optional(Type.Integer({ minimum: 0 })),
         },
-      },
-    },
-    constraints: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        maxCostUsd: { type: "number", minimum: 0 },
-        maxTokens: { type: "integer", minimum: 0 },
-        maxLatencyMs: { type: "integer", minimum: 0 },
-        dataRetention: { type: "string", enum: [...MODEL_DATA_RETENTION] },
-        allowTraining: { type: "boolean" },
-        residency: { type: "string", minLength: 1, maxLength: 64 },
-      },
-    },
-    budgets: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        maxCostUsd: { type: "number", minimum: 0 },
-        maxTokens: { type: "integer", minimum: 0 },
-      },
-    },
+        { additionalProperties: false }
+      )
+    ),
     // Ordered fallback ModelProfile references; fallback occurs only when the replacement meets the
     // same Tool/structured-output/context/data/residency/budget constraints (SPEC §17).
-    fallbacks: refListSchema,
+    fallbacks: Type.Optional(refListSchema),
     // Sensitive caching is off by default (SPEC §17); authors must state intent explicitly.
-    allowCaching: { type: "boolean" },
+    allowCaching: Type.Boolean(),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 export const ModelProfileDefinitionSchema = definitionSchema(KIND, modelSpecSchema);
 
 export const MODEL_PROFILE_DEFINITION = definitionRegistration(KIND, ModelProfileDefinitionSchema);
 
-export interface ModelProfileSpec {
-  provider: string;
-  model: string;
-  /** Named provider connection supplying credentials; defaults to the provider name. */
-  connection?: string;
-  capabilityClass?: string;
-  reasoning: ModelReasoningLevel;
-  supports: {
-    tools: boolean;
-    structuredOutput: boolean;
-    contextWindowTokens: number;
-    /** Absent means text-only — the honest reading of a profile authored before modality existed. */
-    inputModalities?: ModelModality[];
-    outputModalities?: ModelModality[];
-  };
-  constraints?: {
-    maxCostUsd?: number;
-    maxTokens?: number;
-    maxLatencyMs?: number;
-    dataRetention?: ModelDataRetention;
-    allowTraining?: boolean;
-    residency?: string;
-  };
-  budgets?: { maxCostUsd?: number; maxTokens?: number };
-  fallbacks?: string[];
-  allowCaching: boolean;
-}
-
-export type ModelProfileDefinition = DefinitionEnvelope<"ModelProfile", ModelProfileSpec>;
+export type ModelProfileDefinition = Static<typeof ModelProfileDefinitionSchema>;
+export type ModelProfileSpec = ModelProfileDefinition["spec"];

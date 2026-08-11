@@ -1,11 +1,17 @@
+import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import type { SchemaRegistration } from "../registry";
 
 /**
  * Shared building blocks for the canonical authored-definition schemas (Agent, Skill,
- * ToolContract, ModelProfile) registered in the {@link SchemaRegistry}. Each schema
- * is a plain JSON Schema (draft 2020-12) that satisfies the registry's strict-object and
- * discriminator contracts: every object declares explicit unknown-property behaviour, and the
- * root pins `apiVersion`/`kind` with `const`.
+ * ToolContract, ModelProfile) registered in the {@link SchemaRegistry}. Each schema is built with
+ * TypeBox and satisfies the registry's strict-object and discriminator contracts: every object
+ * declares explicit unknown-property behaviour, and the root pins `apiVersion`/`kind` with `const`.
+ *
+ * TypeBox is used so a schema and the type describing its validated output cannot drift: the type
+ * is *derived* from the schema with `Static<>`, never written a second time by hand. Where a schema
+ * shape TypeBox does not emit natively is required — notably `enum`, which `Type.Union` would emit
+ * as `anyOf` — use `Type.Unsafe<T>` over a literal, with both `T` and the literal derived from the
+ * same `as const` array so the single source of truth survives.
  */
 
 /** Single canonical API version for authored Soul definitions. */
@@ -106,77 +112,63 @@ const DIGEST_PATTERN = "^[a-f0-9]{64}$";
  * Common envelope every authored definition carries (SPEC §7.1): stable identifier, human slug,
  * schema version, authored version, lifecycle state, and immutable published digest.
  */
-export const definitionMetadataSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["id", "slug", "schemaVersion", "authoredVersion", "lifecycle"],
-  properties: {
-    id: { type: "string", pattern: ID_PATTERN },
-    slug: { type: "string", pattern: SLUG_PATTERN, maxLength: 128 },
-    displayName: { type: "string", minLength: 1, maxLength: 256 },
-    schemaVersion: { type: "integer", minimum: 1 },
-    authoredVersion: { type: "integer", minimum: 1 },
-    lifecycle: { type: "string", enum: [...DEFINITION_LIFECYCLE_STATES] },
-    publishedDigest: { type: "string", pattern: DIGEST_PATTERN },
+export const definitionMetadataSchema = Type.Object(
+  {
+    id: Type.String({ pattern: ID_PATTERN }),
+    slug: Type.String({ pattern: SLUG_PATTERN, maxLength: 128 }),
+    displayName: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+    schemaVersion: Type.Integer({ minimum: 1 }),
+    authoredVersion: Type.Integer({ minimum: 1 }),
+    lifecycle: Type.Unsafe<DefinitionLifecycle>({
+      type: "string",
+      enum: [...DEFINITION_LIFECYCLE_STATES],
+    }),
+    publishedDigest: Type.Optional(Type.String({ pattern: DIGEST_PATTERN })),
   },
-} as const;
+  { additionalProperties: false }
+);
+
+/** Shape shared by every validated authored definition. */
+export type DefinitionMetadata = Static<typeof definitionMetadataSchema>;
 
 /** A non-empty array of unique reference strings (slugs or IDs of other definitions). */
-export const refListSchema = {
-  type: "array",
+export const refListSchema = Type.Array(Type.String({ minLength: 1, maxLength: 256 }), {
   uniqueItems: true,
-  items: { type: "string", minLength: 1, maxLength: 256 },
-} as const;
+});
 
 /** Reference to governed Markdown content stored beside its owning Soul definition. */
-export const instructionsReferenceSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["path"],
-  properties: {
-    path: { type: "string", minLength: 1, maxLength: 512, pattern: "^[^/].*\\.md$" },
+export const instructionsReferenceSchema = Type.Object(
+  {
+    path: Type.String({ minLength: 1, maxLength: 512, pattern: "^[^/].*\\.md$" }),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 /**
  * Wrap a `spec` schema in the strict discriminated root every authored definition shares.
  * The root pins `apiVersion`/`kind` and forbids unknown top-level keys.
+ *
+ * Generic over the `spec` schema so `Static<>` on the result yields the whole validated
+ * definition — envelope and spec together — with no hand-written counterpart to fall out of date.
  */
-export function definitionSchema(
-  kind: string,
-  spec: Record<string, unknown>
-): Record<string, unknown> {
-  return {
-    $id: `${DEFINITION_API_VERSION}/${kind}`,
-    type: "object",
-    additionalProperties: false,
-    required: ["apiVersion", "kind", "metadata", "spec"],
-    properties: {
-      apiVersion: { const: DEFINITION_API_VERSION },
-      kind: { const: kind },
+export function definitionSchema<Kind extends string, Spec extends TSchema>(
+  kind: Kind,
+  spec: Spec
+) {
+  return Type.Object(
+    {
+      apiVersion: Type.Literal(DEFINITION_API_VERSION),
+      kind: Type.Literal(kind),
       metadata: definitionMetadataSchema,
       spec,
     },
-  };
+    { $id: `${DEFINITION_API_VERSION}/${kind}`, additionalProperties: false }
+  );
 }
 
 /** Registration payload for the {@link SchemaRegistry}. */
-export function definitionRegistration(
-  kind: string,
-  schema: Record<string, unknown>
-): SchemaRegistration {
+export function definitionRegistration(kind: string, schema: TSchema): SchemaRegistration {
   return { apiVersion: DEFINITION_API_VERSION, kind, schema };
-}
-
-/** Shape shared by every validated authored definition. */
-export interface DefinitionMetadata {
-  id: string;
-  slug: string;
-  displayName?: string;
-  schemaVersion: number;
-  authoredVersion: number;
-  lifecycle: DefinitionLifecycle;
-  publishedDigest?: string;
 }
 
 export interface DefinitionEnvelope<Kind extends string, Spec> {

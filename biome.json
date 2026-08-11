@@ -62,6 +62,10 @@
       "linter": { "enabled": false },
       "formatter": { "enabled": false },
       "assist": { "enabled": false }
+    },
+    {
+      "includes": ["packages/schema/src/definitions/__schemas__/**/*.json"],
+      "formatter": { "enabled": false }
     }
   ]
 }

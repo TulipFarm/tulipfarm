@@ -1,8 +1,10 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validateSoulConfig } from "@tulipfarm/schema";
 import simpleGit from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parse as parseYaml } from "yaml";
 import { scaffoldSoul } from "./scaffold-soul";
 
 describe("scaffoldSoul", () => {
@@ -26,6 +28,9 @@ describe("scaffoldSoul", () => {
     expect(readFileSync(join(soulPath, "soul.yaml"), "utf8")).toContain(
       "TulipFarm Soul Configuration"
     );
+    expect(() =>
+      validateSoulConfig(parseYaml(readFileSync(join(soulPath, "soul.yaml"), "utf8")) ?? {})
+    ).not.toThrow();
     expect(readFileSync(join(soulPath, "skills-lock.json"), "utf8").trim()).toBe("{}");
   });
 

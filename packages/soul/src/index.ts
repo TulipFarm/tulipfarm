@@ -36,7 +36,9 @@ export type {
   ValidatedSoulFileChange,
 } from "./changeset";
 export {
+  isUnbornBase,
   SOUL_CHANGESET_SOURCES,
+  SOUL_UNBORN_BASE,
   SoulChangesetValidationError,
   validateSoulChangeset,
 } from "./changeset";
@@ -160,3 +162,15 @@ export type {
   WebhookHandshake,
   WebhookSecurity,
 } from "./types";
+export type {
+  SoulPrecondition,
+  SoulPushPort,
+  SoulReadResult,
+  SoulReloadPort,
+  SoulWrite,
+  SoulWriteErrorCode,
+  SoulWriteRequest,
+  SoulWriteResult,
+  SoulWriteTarget,
+} from "./writer";
+export { SoulWriteError, SoulWriter } from "./writer";
