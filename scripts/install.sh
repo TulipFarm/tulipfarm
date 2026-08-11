@@ -23,8 +23,16 @@
 #   TF_VERSION    app image tag → TULIPFARM_VERSION (default: latest)
 #   TF_INSTALL_DIR install dir (default: /opt/tulipfarm)
 #   TF_PORT / HOST_PORT  host port to publish (default: 8080)
+#   TF_PROJECT_NAME Compose project name (default: tulipfarm) — see below
 #   TF_RUNTIME    force engine: docker | podman
 #   TF_LOCAL_SRC  copy compose/.env.example from a local repo instead of curl (testing)
+#
+# Running more than one business on one machine: the Compose project name namespaces every
+# container and volume, so two installs sharing it share one database and one soul repo —
+# silently, since Compose treats the second as the first. A second install dir is not
+# enough. Give each stack its own name and port:
+#
+#   TF_PROJECT_NAME=acme TF_INSTALL_DIR=/opt/acme TF_PORT=8081 bash install.sh
 set -euo pipefail
 
 # ---- config (all overridable) ------------------------------------------------
@@ -34,6 +42,9 @@ TF_VERSION="${TF_VERSION:-latest}"
 INSTALL_DIR="${TF_INSTALL_DIR:-/opt/tulipfarm}"
 PORT_OVERRIDE="${TF_PORT:-${HOST_PORT:-}}"
 PORT="${PORT_OVERRIDE:-8080}"
+# Namespaces every container and volume. `uninstall.sh` reads the same two variables, in the
+# same order, and the value is recorded in the install marker so uninstall targets this stack.
+PROJECT_NAME="${TF_PROJECT_NAME:-${COMPOSE_PROJECT_NAME:-tulipfarm}}"
 TF_RUNTIME="${TF_RUNTIME:-}"
 TF_LOCAL_SRC="${TF_LOCAL_SRC:-}"
 TTY_INPUT="/dev/tty"
@@ -344,11 +355,13 @@ update_runtime_version() {
 }
 
 # ---- compose -----------------------------------------------------------------
+# `-p` rather than an exported COMPOSE_PROJECT_NAME: `$SUDO` resets the environment by
+# default, so an exported variable would not survive into the engine.
 # shellcheck disable=SC2086  # $SUDO may be empty and $ENGINE is a bare word — both must split
-compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose "$@" ); }
+compose() { ( cd "$INSTALL_DIR" && $SUDO $ENGINE compose -p "$PROJECT_NAME" "$@" ); }
 
 write_install_marker() {
-  local project_name="${COMPOSE_PROJECT_NAME:-tulipfarm}" tmp
+  local project_name="$PROJECT_NAME" tmp
   tmp="$($SUDO mktemp "${INSTALL_DIR}/.tulipfarm-install.tmp.XXXXXX")"
   $SUDO tee "$tmp" >/dev/null <<EOF
 managed-by=tulipfarm-installer

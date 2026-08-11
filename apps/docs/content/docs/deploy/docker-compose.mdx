@@ -126,6 +126,46 @@ docker compose pull && docker compose up -d
 Migrations apply automatically on boot, and there are **no down-migrations** — read
 [Updating and rollback](/docs/deploy/updating) before your first upgrade.
 
+## Running more than one business on one machine
+
+Copying `docker-compose.yml` into a second directory does **not** give you a second
+instance. Compose tells stacks apart by **project name**, not by directory, and the file
+pins one:
+
+```yaml
+name: tulipfarm
+```
+
+So a second `docker compose up -d` reuses the first stack's containers and volumes. Both
+businesses end up sharing one database and one soul repo. Nothing errors — the second
+simply comes up on the first's data, which is why this is worth knowing before you hit it.
+
+Give each stack its own project name and host port:
+
+```bash
+HOST_PORT=8081 docker compose -p acme up -d
+HOST_PORT=8082 docker compose -p globex up -d
+```
+
+That produces separate volumes per stack — `acme_tulipfarm-soul`, `globex_tulipfarm-soul`,
+and so on. Then keep using the same `-p` for every later command; one without it targets
+`tulipfarm`, not your stack:
+
+```bash
+docker compose -p acme logs -f app
+docker compose -p acme down
+```
+
+Setting `COMPOSE_PROJECT_NAME` in each directory's `.env` is the less error-prone option —
+it applies to every command in that directory without the flag. With the installer, use
+[`TF_PROJECT_NAME`](/docs/installation#running-a-second-instance-on-one-machine) instead.
+
+<Callout type="warn">
+  Do not rename an **existing** install's project. Volumes are named after it, so the
+  renamed stack starts empty and the old database and soul repo are left orphaned under
+  the previous name.
+</Callout>
+
 ## Scale-out is not supported
 
 Run **exactly one `app` replica**, **one maintenance `worker`**, and **one

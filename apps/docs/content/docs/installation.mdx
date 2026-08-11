@@ -108,6 +108,7 @@ All optional, set as environment variables before running:
 | `TF_VERSION` | `latest` | App image tag to run (`ghcr.io/tulipfarm/tulipfarm:<tag>`). |
 | `TF_PORT` | `8080` | Host port to publish; also changes it on an existing install. |
 | `TF_INSTALL_DIR` | `/opt/tulipfarm` | Install directory. |
+| `TF_PROJECT_NAME` | `tulipfarm` | Compose project name. Set it only for a [second, separate instance](#running-a-second-instance-on-one-machine). |
 | `TF_RUNTIME` | auto | Force `docker` or `podman`. |
 | `TF_BASE_URL` / `TF_REF` | `{{SITE_URL}}` / empty | Where compose + `.env.example` are fetched from. |
 
@@ -121,6 +122,23 @@ TF_VERSION=v0.1.0 TF_PORT=9000 \
 When no port override is supplied and the saved port belongs to another process, the
 installer prompts for a replacement. In a non-interactive environment, set `TF_PORT`
 before running instead.
+
+### Running a second instance on one machine
+
+A separate `TF_INSTALL_DIR` is **not** enough to separate two installs. Containers and
+volumes are namespaced by the Compose project name, not by the directory, so a second
+install left at the default `tulipfarm` attaches to the first one's database and soul
+repo. Nothing errors — the second instance simply comes up on the first's data.
+
+Give each instance its own project name, install directory, and port:
+
+```bash
+TF_PROJECT_NAME=acme TF_INSTALL_DIR=/opt/acme TF_PORT=8081 \
+  bash -c "curl -fsSL {{SITE_URL}}/install.sh | sudo -E bash"
+```
+
+The name is recorded in that install's marker file, so [uninstalling](/docs/uninstall)
+targets the right stack. Keep the same `TF_PROJECT_NAME` for later re-runs and updates.
 
 ### Installing an exact ref
 

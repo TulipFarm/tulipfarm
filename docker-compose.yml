@@ -1,3 +1,7 @@
+# Compose project name: namespaces every container and volume. Overridable by
+# COMPOSE_PROJECT_NAME (env or the `.env` next to this file) and by `-p`, both of which win
+# over this line. Do not edit it in place on an existing install — the volumes are named
+# after it, so renaming orphans your database and soul repo.
 name: tulipfarm
 
 # TulipFarm — paste-and-run stack (ARCH-V1, Postgres-only). `app` is the single image
@@ -15,6 +19,21 @@ name: tulipfarm
 #   HOST_PORT       host port to publish (default 8080)
 #   PUBLIC_URL      the origin users reach; drives CORS and the cookie `Secure` flag
 #   POSTGRES_PASSWORD  password for the bundled database (default `tulipfarm`)
+#   COMPOSE_PROJECT_NAME  see "more than one business" below (default `tulipfarm`)
+#
+# RUNNING MORE THAN ONE BUSINESS ON ONE MACHINE
+#   Copying this file to a second directory is not enough. The project name — not the
+#   directory — is what Compose uses to tell stacks apart, and it is pinned above, so a
+#   second `docker compose up -d` reuses the first stack's containers and volumes. Both
+#   businesses then share one database and one soul repo. Nothing errors; the second
+#   simply comes up on the first's data. Give each stack its own name and port:
+#
+#     docker compose -p acme  up -d     # with HOST_PORT=8081
+#     docker compose -p globex up -d    # with HOST_PORT=8082
+#
+#   Then keep using the same `-p` for every later command (`logs`, `down`, `pull`) — one
+#   without it targets `tulipfarm`, not your stack. Setting COMPOSE_PROJECT_NAME in each
+#   directory's `.env` is the less error-prone option.
 #
 # External / managed Postgres: set EXTERNAL_DATASTORE=true and DATABASE_URL to your
 # server (it must allow the `vector` and `citext` extensions), then start only the app and

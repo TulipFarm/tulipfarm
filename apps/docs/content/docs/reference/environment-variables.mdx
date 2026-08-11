@@ -116,4 +116,5 @@ These values are consumed by Docker Compose or the installer rather than by the 
 | `POSTGRES_PASSWORD` | Bundled Postgres only | `tulipfarm` in Compose | Password for the bundled PostgreSQL container and generated `DATABASE_URL`. |
 | `HOST_PORT` | No | `8080` | Host port published by the self-hosted Compose stack. |
 | `HOST_BIND` | No | `0.0.0.0` | Host interface Compose binds for the app port. |
+| `COMPOSE_PROJECT_NAME` | No | `tulipfarm` | Namespaces every container and volume. Change it only to run a [second, separate instance](/docs/deploy/docker-compose#running-more-than-one-business-on-one-machine) — renaming it on an existing install orphans that install's database and soul repo. |
 | `EXTERNAL_DATASTORE` | No | `false` | Installer/Compose switch documenting that `DATABASE_URL` points at managed Postgres. |
