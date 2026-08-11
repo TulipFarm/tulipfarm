@@ -1,5 +1,5 @@
+import { type Static, Type } from "@sinclair/typebox";
 import {
-  type DefinitionEnvelope,
   definitionRegistration,
   definitionSchema,
   refListSchema,
@@ -22,128 +22,112 @@ import {
 const KIND = "ToolContract";
 
 /** An embedded JSON Schema carried as opaque data (the Tool's own input/output shape). */
-const embeddedJsonSchema = { type: "object", additionalProperties: true } as const;
-
-const toolSpecSchema = {
+const embeddedJsonSchema = Type.Unsafe<Record<string, unknown>>({
   type: "object",
-  additionalProperties: false,
-  required: [
-    "toolId",
-    "toolVersion",
-    "action",
-    "inputSchema",
-    "outputSchema",
-    "riskClass",
-    "mutating",
-    "dryRun",
-    "idempotency",
-    "adapter",
-  ],
-  properties: {
-    toolId: { type: "string", minLength: 1, maxLength: 256 },
-    toolVersion: { type: "string", minLength: 1, maxLength: 64 },
-    description: { type: "string", minLength: 1, maxLength: 2_000 },
-    action: { type: "string", minLength: 1, maxLength: 128 },
+  additionalProperties: true,
+});
+
+const toolSpecSchema = Type.Object(
+  {
+    toolId: Type.String({ minLength: 1, maxLength: 256 }),
+    toolVersion: Type.String({ minLength: 1, maxLength: 64 }),
+    description: Type.Optional(Type.String({ minLength: 1, maxLength: 2_000 })),
+    action: Type.String({ minLength: 1, maxLength: 128 }),
     inputSchema: embeddedJsonSchema,
     outputSchema: embeddedJsonSchema,
-    errorSchema: embeddedJsonSchema,
-    riskClass: { type: "string", enum: [...TOOL_RISK_CLASSES] },
-    mutating: { type: "boolean" },
-    requiredActions: refListSchema,
-    requiredResources: refListSchema,
-    dataClasses: refListSchema,
-    allowedDestinations: refListSchema,
-    idempotency: {
-      type: "object",
-      additionalProperties: false,
-      required: ["strategy"],
-      properties: {
-        strategy: { type: "string", enum: [...TOOL_IDEMPOTENCY_STRATEGIES] },
+    errorSchema: Type.Optional(embeddedJsonSchema),
+    riskClass: Type.Unsafe<ToolRiskClass>({ type: "string", enum: [...TOOL_RISK_CLASSES] }),
+    mutating: Type.Boolean(),
+    requiredActions: Type.Optional(refListSchema),
+    requiredResources: Type.Optional(refListSchema),
+    dataClasses: Type.Optional(refListSchema),
+    allowedDestinations: Type.Optional(refListSchema),
+    dryRun: Type.Boolean(),
+    idempotency: Type.Object(
+      {
+        strategy: Type.Unsafe<ToolIdempotencyStrategy>({
+          type: "string",
+          enum: [...TOOL_IDEMPOTENCY_STRATEGIES],
+        }),
       },
-    },
-    timeout: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        activeMs: { type: "integer", minimum: 0 },
-        wallClockMs: { type: "integer", minimum: 0 },
+      { additionalProperties: false }
+    ),
+    timeout: Type.Optional(
+      Type.Object(
+        {
+          activeMs: Type.Optional(Type.Integer({ minimum: 0 })),
+          wallClockMs: Type.Optional(Type.Integer({ minimum: 0 })),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    retry: Type.Optional(
+      Type.Object(
+        {
+          maxAttempts: Type.Integer({ minimum: 0 }),
+          safeToRetry: Type.Boolean(),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    compensation: Type.Optional(
+      Type.Object(
+        {
+          operation: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+          reconciliation: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    adapter: Type.Object(
+      {
+        kind: Type.Unsafe<ToolAdapterKind>({ type: "string", enum: [...TOOL_ADAPTER_KINDS] }),
+        ref: Type.String({ minLength: 1, maxLength: 256 }),
       },
-    },
-    retry: {
-      type: "object",
-      additionalProperties: false,
-      required: ["maxAttempts", "safeToRetry"],
-      properties: {
-        maxAttempts: { type: "integer", minimum: 0 },
-        safeToRetry: { type: "boolean" },
-      },
-    },
-    dryRun: { type: "boolean" },
-    compensation: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        operation: { type: "string", minLength: 1, maxLength: 256 },
-        reconciliation: { type: "string", minLength: 1, maxLength: 256 },
-      },
-    },
-    adapter: {
-      type: "object",
-      additionalProperties: false,
-      required: ["kind", "ref"],
-      properties: {
-        kind: { type: "string", enum: [...TOOL_ADAPTER_KINDS] },
-        ref: { type: "string", minLength: 1, maxLength: 256 },
-      },
-    },
+      { additionalProperties: false }
+    ),
   },
-  allOf: [
-    {
-      if: {
-        additionalProperties: true,
-        required: ["mutating"],
-        properties: { mutating: { const: true } },
-      },
-      // biome-ignore lint/suspicious/noThenProperty: `then` is a JSON Schema keyword.
-      then: {
-        additionalProperties: true,
-        properties: {
-          idempotency: {
-            type: "object",
-            additionalProperties: true,
-            required: ["strategy"],
-            properties: { strategy: { enum: ["provider", "reconcile"] } },
+  {
+    additionalProperties: false,
+    required: [
+      "toolId",
+      "toolVersion",
+      "action",
+      "inputSchema",
+      "outputSchema",
+      "riskClass",
+      "mutating",
+      "dryRun",
+      "idempotency",
+      "adapter",
+    ],
+    allOf: [
+      {
+        if: {
+          additionalProperties: true,
+          required: ["mutating"],
+          properties: { mutating: { const: true } },
+        },
+        // biome-ignore lint/suspicious/noThenProperty: `then` is a JSON Schema keyword.
+        then: {
+          additionalProperties: true,
+          properties: {
+            idempotency: {
+              type: "object",
+              additionalProperties: true,
+              required: ["strategy"],
+              properties: { strategy: { enum: ["provider", "reconcile"] } },
+            },
           },
         },
       },
-    },
-  ],
-} as const;
+    ],
+  }
+);
 
 export const ToolContractDefinitionSchema = definitionSchema(KIND, toolSpecSchema);
 
 export const TOOL_CONTRACT_DEFINITION = definitionRegistration(KIND, ToolContractDefinitionSchema);
 
-export interface ToolContractSpec {
-  toolId: string;
-  toolVersion: string;
-  description?: string;
-  action: string;
-  inputSchema: Record<string, unknown>;
-  outputSchema: Record<string, unknown>;
-  errorSchema?: Record<string, unknown>;
-  riskClass: ToolRiskClass;
-  mutating: boolean;
-  requiredActions?: string[];
-  requiredResources?: string[];
-  dataClasses?: string[];
-  allowedDestinations?: string[];
-  idempotency: { strategy: ToolIdempotencyStrategy };
-  timeout?: { activeMs?: number; wallClockMs?: number };
-  retry?: { maxAttempts: number; safeToRetry: boolean };
-  dryRun: boolean;
-  compensation?: { operation?: string; reconciliation?: string };
-  adapter: { kind: ToolAdapterKind; ref: string };
-}
-
-export type ToolContractDefinition = DefinitionEnvelope<"ToolContract", ToolContractSpec>;
+export type ToolContractDefinition = Static<typeof ToolContractDefinitionSchema>;
+export type ToolContractSpec = ToolContractDefinition["spec"];

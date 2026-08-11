@@ -1,0 +1,298 @@
+{
+  "$id": "tulipfarm.ai/v1/ToolContract",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "ToolContract",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "additionalProperties": true,
+            "properties": {
+              "mutating": {
+                "const": true
+              }
+            },
+            "required": [
+              "mutating"
+            ]
+          },
+          "then": {
+            "additionalProperties": true,
+            "properties": {
+              "idempotency": {
+                "additionalProperties": true,
+                "properties": {
+                  "strategy": {
+                    "enum": [
+                      "provider",
+                      "reconcile"
+                    ]
+                  }
+                },
+                "required": [
+                  "strategy"
+                ],
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "action": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "adapter": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "native",
+                "integration",
+                "mcp",
+                "openapi",
+                "http",
+                "sandbox",
+                "postgres"
+              ],
+              "type": "string"
+            },
+            "ref": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "type": "object"
+        },
+        "allowedDestinations": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "compensation": {
+          "additionalProperties": false,
+          "properties": {
+            "operation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "reconciliation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "dataClasses": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "errorSchema": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "idempotency": {
+          "additionalProperties": false,
+          "properties": {
+            "strategy": {
+              "enum": [
+                "provider",
+                "reconcile",
+                "none"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "strategy"
+          ],
+          "type": "object"
+        },
+        "inputSchema": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "mutating": {
+          "type": "boolean"
+        },
+        "outputSchema": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "requiredActions": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "requiredResources": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "retry": {
+          "additionalProperties": false,
+          "properties": {
+            "maxAttempts": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "safeToRetry": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "maxAttempts",
+            "safeToRetry"
+          ],
+          "type": "object"
+        },
+        "riskClass": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ],
+          "type": "string"
+        },
+        "timeout": {
+          "additionalProperties": false,
+          "properties": {
+            "activeMs": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "wallClockMs": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "toolId": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "toolVersion": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolId",
+        "toolVersion",
+        "action",
+        "inputSchema",
+        "outputSchema",
+        "riskClass",
+        "mutating",
+        "dryRun",
+        "idempotency",
+        "adapter"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

@@ -35,6 +35,9 @@ export interface ChildRunPlan {
 }
 
 function routineRefOf(state: CompiledState): { name: string; version: string } {
+  if (state.definition.type !== "child_routine") {
+    throw new RoutineStepError("missing_routine_ref", state.name);
+  }
   const value = state.definition.routineRef;
   if (typeof value === "object" && value !== null) {
     const { name, version } = value as Record<string, unknown>;
@@ -56,7 +59,10 @@ export function planChildRun(
 ): ChildRunPlan {
   const routineRef = routineRefOf(state);
   const authority = narrowChildAuthority(ctx.parentAuthority, requested);
-  const mode = state.definition.mode === "detach" ? "detach" : "wait";
+  const mode =
+    state.definition.type === "child_routine" && state.definition.mode === "detach"
+      ? "detach"
+      : "wait";
 
   return {
     command: {

@@ -12,7 +12,7 @@ const ctx = {
   now: "2026-07-25T10:00:00.000Z",
 };
 
-function wait(waitFor: Record<string, unknown>) {
+function wait(waitFor: Extract<routineSchema.RoutineState, { type: "wait" }>["waitFor"]) {
   const state: routineSchema.RoutineState = {
     type: "wait",
     name: "Pause",

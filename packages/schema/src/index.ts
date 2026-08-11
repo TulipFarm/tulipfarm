@@ -1,6 +1,30 @@
 export type { AgentFrontmatter } from "./agent";
 export { AUTONOMY_VALUES, validateAgentFrontmatter } from "./agent";
 export { ajv } from "./ajv";
+export type {
+  ArtifactCompanion,
+  ArtifactKind,
+  ArtifactLayout,
+  ClassifiedSoulPath,
+  ContentMode,
+  DelegatedArtifactKind,
+} from "./artifacts";
+export {
+  ARTIFACT_LAYOUTS,
+  artifactDirectory,
+  artifactLayout,
+  CONTENT_MODES,
+  classifySoulPath,
+  companionPath,
+  containedPath,
+  DELEGATED_ARTIFACT_KINDS,
+  definitionPath,
+  isArtifactSlug,
+  isDefinitionKind,
+  legacyDefinitionCandidates,
+  legacyDefinitionPaths,
+  withinArtifactTree,
+} from "./artifacts";
 export type { ValidationBoundary } from "./boundaries";
 export { BOUNDARIES } from "./boundaries";
 export { CANONICAL_HASH_ALGORITHM, canonicalHash, canonicalize } from "./canonicalize";
@@ -20,6 +44,8 @@ export {
   UnknownSchemaError,
   YamlParseError,
 } from "./errors";
+export type { ParsedFrontmatter } from "./frontmatter";
+export { parseFrontmatter } from "./frontmatter";
 export type {
   ContentFilterConfig,
   GuardrailsConfig,
@@ -27,6 +53,11 @@ export type {
   ToolBlocklistConfig,
 } from "./guardrails";
 export { validateGuardrailsConfig } from "./guardrails";
+export type { LegacyIntegrationManifest } from "./integration-manifest";
+export {
+  LegacyIntegrationManifestSchema,
+  validateLegacyIntegrationManifest,
+} from "./integration-manifest";
 export type { InvocationRequestSchema } from "./invocation";
 export {
   CHAT_REQUEST_SCHEMA,
@@ -127,6 +158,8 @@ export {
   serializeSkill,
   validateSkill,
 } from "./skill-frontmatter";
+export type { SoulConfig } from "./soul-config";
+export { SoulConfigSchema, validateSoulConfig } from "./soul-config";
 export type { CounterFn } from "./transforms";
 export {
   applyTransforms,

@@ -1,0 +1,3197 @@
+{
+  "$id": "tulipfarm.ai/v1/Routine",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1"
+    },
+    "kind": {
+      "const": "Routine"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "compensation": {
+          "additionalProperties": false,
+          "properties": {
+            "policy": {
+              "enum": [
+                "none",
+                "explicit",
+                "on_failure"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "policy"
+          ],
+          "type": "object"
+        },
+        "concurrency": {
+          "additionalProperties": false,
+          "properties": {
+            "key": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "max": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "policy": {
+              "enum": [
+                "serialize",
+                "parallel",
+                "queue",
+                "coalesce",
+                "reject",
+                "supersede"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "policy"
+          ],
+          "type": "object"
+        },
+        "input": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "activeMs": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "artifactBytes": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "costUsd": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "fanOut": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "iterations": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "networkBytes": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "parallelism": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "resultRows": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "sideEffects": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tokens": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "wallClockMs": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "maintainers": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "output": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "owner": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "requiredToolAbilities": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "start": {
+          "minLength": 1,
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "type": "string"
+        },
+        "states": {
+          "items": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "agentRef": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "type": "object"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "maxRepairAttempts": {
+                    "maximum": 10,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "agent"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "agentRef"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "action": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "credentialRef": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "destination": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "toolRef": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "tool"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "toolRef",
+                  "action"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "conditions": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "condition": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "condition"
+                      ],
+                      "type": "object"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "default": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "end": {
+                        "type": "boolean"
+                      },
+                      "transition": {
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "branch"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "conditions"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "branches": {
+                    "items": {
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "join": {
+                    "enum": [
+                      "all",
+                      "any",
+                      "quorum"
+                    ],
+                    "type": "string"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "maxConcurrency": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "parallel"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "branches",
+                  "maxConcurrency"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "body": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "items": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "maxConcurrency": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxItems": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "foreach"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "items",
+                  "maxItems",
+                  "maxConcurrency"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "body": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "condition": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "maxDurationMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "maxIterations": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "repeat_until"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "condition",
+                  "maxIterations",
+                  "maxDurationMs"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "wait"
+                  },
+                  "waitFor": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "aggregation": {
+                        "enum": [
+                          "first",
+                          "all",
+                          "quorum",
+                          "window"
+                        ],
+                        "type": "string"
+                      },
+                      "correlation": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "durationMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "eventType": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "eventVersion": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "enum": [
+                          "timer",
+                          "event"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ],
+                    "type": "object"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "waitFor"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "approverRoles": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "approval"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "approverRoles"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "assigneeRoles": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "human_task"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "assigneeRoles"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "formRef": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "type": "object"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "form"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "formRef"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "mode": {
+                    "enum": [
+                      "wait",
+                      "detach"
+                    ],
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "routineRef": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "name": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "version"
+                    ],
+                    "type": "object"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "child_routine"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "routineRef",
+                  "mode"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "concurrencyKey": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "deadlineMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "end": {
+                    "type": "boolean"
+                  },
+                  "forState": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "identity": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "principalId": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "principalKind": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "principalKind",
+                      "principalId"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "limits": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "activeMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "artifactBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "costUsd": {
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "fanOut": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "iterations": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "networkBytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "parallelism": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultRows": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sideEffects": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "tokens": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "wallClockMs": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "observability": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "captureInputs": {
+                        "type": "boolean"
+                      },
+                      "captureOutputs": {
+                        "type": "boolean"
+                      },
+                      "level": {
+                        "enum": [
+                          "minimal",
+                          "standard",
+                          "detailed"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "level"
+                    ],
+                    "type": "object"
+                  },
+                  "onError": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "compensateWith": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "end": {
+                          "type": "boolean"
+                        },
+                        "errorRef": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "transition": {
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "errorRef"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "permissionCeiling": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "grants": {
+                        "items": {
+                          "maxLength": 256,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "maxRiskClass": {
+                        "enum": [
+                          "low",
+                          "medium",
+                          "high"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retention": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "evidenceDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "resultDays": {
+                        "minimum": 1,
+                        "type": "integer"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "retry": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "backoffMs": {
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxAttempts": {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "multiplier": {
+                        "minimum": 1,
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "maxAttempts"
+                    ],
+                    "type": "object"
+                  },
+                  "targetRef": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "transition": {
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                    "type": "string"
+                  },
+                  "type": {
+                    "const": "compensate"
+                  },
+                  "wallClockMs": {
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "type",
+                  "name",
+                  "targetRef"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "owner",
+        "start",
+        "states"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

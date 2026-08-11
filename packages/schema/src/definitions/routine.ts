@@ -1,7 +1,7 @@
+import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
 import {
   DEFINITION_API_VERSION,
-  type DefinitionMetadata,
   definitionMetadataSchema,
   definitionRegistration,
   refListSchema,
@@ -50,292 +50,276 @@ export const ROUTINE_CONCURRENCY_POLICIES = [
 
 const MAX_RETRY_ATTEMPTS = 100;
 
-const nonEmptyString = { type: "string", minLength: 1 } as const;
-const positiveInteger = { type: "integer", minimum: 1 } as const;
-const stateName = { type: "string", minLength: 1, pattern: "^[A-Za-z][A-Za-z0-9_]*$" } as const;
+const RISK_CLASSES = ["low", "medium", "high"] as const;
+const OBSERVABILITY_LEVELS = ["minimal", "standard", "detailed"] as const;
+const PARALLEL_JOINS = ["all", "any", "quorum"] as const;
+const WAIT_KINDS = ["timer", "event"] as const;
+const WAIT_AGGREGATIONS = ["first", "all", "quorum", "window"] as const;
+const CHILD_ROUTINE_MODES = ["wait", "detach"] as const;
+const COMPENSATION_POLICIES = ["none", "explicit", "on_failure"] as const;
+
+const nonEmptyString = Type.String({ minLength: 1 });
+const positiveInteger = Type.Integer({ minimum: 1 });
+const stateName = Type.String({ minLength: 1, pattern: "^[A-Za-z][A-Za-z0-9_]*$" });
 
 // An authored JSON Schema fragment (opaque here; validated as a schema by later stages).
-const jsonSchemaObject = { type: "object", additionalProperties: true } as const;
+const jsonSchemaObject = Type.Unknown({ type: "object", additionalProperties: true });
 
-const definitionRef = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name", "version"],
-  properties: { id: nonEmptyString, name: nonEmptyString, version: nonEmptyString },
-} as const;
-
-const retryPolicy = {
-  type: "object",
-  additionalProperties: false,
-  required: ["maxAttempts"],
-  properties: {
-    maxAttempts: { type: "integer", minimum: 1, maximum: MAX_RETRY_ATTEMPTS },
-    backoffMs: { type: "integer", minimum: 0 },
-    multiplier: { type: "number", minimum: 1 },
+const definitionRef = Type.Object(
+  {
+    id: Type.Optional(nonEmptyString),
+    name: nonEmptyString,
+    version: nonEmptyString,
   },
-} as const;
+  { additionalProperties: false }
+);
 
-const stateLimits = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    wallClockMs: positiveInteger,
-    activeMs: positiveInteger,
-    tokens: positiveInteger,
-    costUsd: { type: "number", minimum: 0 },
-    iterations: positiveInteger,
-    fanOut: positiveInteger,
-    parallelism: positiveInteger,
-    artifactBytes: positiveInteger,
-    resultRows: positiveInteger,
-    networkBytes: positiveInteger,
-    sideEffects: { type: "integer", minimum: 0 },
+const retryPolicy = Type.Object(
+  {
+    maxAttempts: Type.Integer({ minimum: 1, maximum: MAX_RETRY_ATTEMPTS }),
+    backoffMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    multiplier: Type.Optional(Type.Number({ minimum: 1 })),
   },
-} as const;
+  { additionalProperties: false }
+);
 
-const onErrorHandler = {
-  type: "object",
-  additionalProperties: false,
-  required: ["errorRef"],
-  properties: {
+const stateLimits = Type.Object(
+  {
+    wallClockMs: Type.Optional(positiveInteger),
+    activeMs: Type.Optional(positiveInteger),
+    tokens: Type.Optional(positiveInteger),
+    costUsd: Type.Optional(Type.Number({ minimum: 0 })),
+    iterations: Type.Optional(positiveInteger),
+    fanOut: Type.Optional(positiveInteger),
+    parallelism: Type.Optional(positiveInteger),
+    artifactBytes: Type.Optional(positiveInteger),
+    resultRows: Type.Optional(positiveInteger),
+    networkBytes: Type.Optional(positiveInteger),
+    sideEffects: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false }
+);
+
+const onErrorHandler = Type.Object(
+  {
     errorRef: nonEmptyString,
-    transition: stateName,
-    end: { type: "boolean" },
-    compensateWith: nonEmptyString,
+    transition: Type.Optional(stateName),
+    end: Type.Optional(Type.Boolean()),
+    compensateWith: Type.Optional(nonEmptyString),
   },
-} as const;
+  { additionalProperties: false }
+);
 
 // Fields shared by every typed State.
 const sharedStateProps = {
   name: stateName,
-  transition: stateName,
-  end: { type: "boolean" },
-  input: { type: "object", additionalProperties: true },
-  output: jsonSchemaObject,
-  onError: { type: "array", items: onErrorHandler },
-  retry: retryPolicy,
-  limits: stateLimits,
-  concurrencyKey: nonEmptyString,
-  deadlineMs: positiveInteger,
-  wallClockMs: positiveInteger,
-  identity: {
-    type: "object",
-    additionalProperties: false,
-    required: ["principalKind", "principalId"],
-    properties: { principalKind: nonEmptyString, principalId: nonEmptyString },
-  },
-  permissionCeiling: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      grants: refListSchema,
-      maxRiskClass: { type: "string", enum: ["low", "medium", "high"] },
-    },
-  },
-  retention: {
-    type: "object",
-    additionalProperties: false,
-    properties: { resultDays: positiveInteger, evidenceDays: positiveInteger },
-  },
-  observability: {
-    type: "object",
-    additionalProperties: false,
-    required: ["level"],
-    properties: {
-      level: { type: "string", enum: ["minimal", "standard", "detailed"] },
-      captureInputs: { type: "boolean" },
-      captureOutputs: { type: "boolean" },
-    },
-  },
-} as const;
+  transition: Type.Optional(stateName),
+  end: Type.Optional(Type.Boolean()),
+  input: Type.Optional(Type.Unknown({ type: "object", additionalProperties: true })),
+  output: Type.Optional(jsonSchemaObject),
+  onError: Type.Optional(Type.Array(onErrorHandler)),
+  retry: Type.Optional(retryPolicy),
+  limits: Type.Optional(stateLimits),
+  concurrencyKey: Type.Optional(nonEmptyString),
+  deadlineMs: Type.Optional(positiveInteger),
+  wallClockMs: Type.Optional(positiveInteger),
+  identity: Type.Optional(
+    Type.Object(
+      {
+        principalKind: nonEmptyString,
+        principalId: nonEmptyString,
+      },
+      { additionalProperties: false }
+    )
+  ),
+  permissionCeiling: Type.Optional(
+    Type.Object(
+      {
+        grants: Type.Optional(refListSchema),
+        maxRiskClass: Type.Optional(
+          Type.Unsafe<(typeof RISK_CLASSES)[number]>({ type: "string", enum: [...RISK_CLASSES] })
+        ),
+      },
+      { additionalProperties: false }
+    )
+  ),
+  retention: Type.Optional(
+    Type.Object(
+      {
+        resultDays: Type.Optional(positiveInteger),
+        evidenceDays: Type.Optional(positiveInteger),
+      },
+      { additionalProperties: false }
+    )
+  ),
+  observability: Type.Optional(
+    Type.Object(
+      {
+        level: Type.Unsafe<(typeof OBSERVABILITY_LEVELS)[number]>({
+          type: "string",
+          enum: [...OBSERVABILITY_LEVELS],
+        }),
+        captureInputs: Type.Optional(Type.Boolean()),
+        captureOutputs: Type.Optional(Type.Boolean()),
+      },
+      { additionalProperties: false }
+    )
+  ),
+} satisfies Record<string, TSchema>;
 
-const sharedStateRequired = ["type", "name"] as const;
-
-function state(
-  type: RoutineStateType,
-  extraProps: Record<string, unknown>,
-  extraRequired: readonly string[] = []
-) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: [...sharedStateRequired, ...extraRequired],
-    properties: {
-      type: { const: type },
+function state<
+  const StateType extends RoutineStateType,
+  const ExtraProps extends Record<string, TSchema>,
+>(type: StateType, extraProps: ExtraProps) {
+  return Type.Object(
+    {
+      type: Type.Unsafe<StateType>({ const: type }),
       ...sharedStateProps,
       ...extraProps,
     },
-  } as const;
+    { additionalProperties: false }
+  );
 }
 
 const stateVariants = [
-  state(
-    "agent",
-    { agentRef: definitionRef, maxRepairAttempts: { type: "integer", minimum: 0, maximum: 10 } },
-    ["agentRef"]
-  ),
-  state(
-    "tool",
-    {
-      toolRef: definitionRef,
-      action: nonEmptyString,
-      destination: nonEmptyString,
-      credentialRef: nonEmptyString,
-    },
-    ["toolRef", "action"]
-  ),
-  state(
-    "branch",
-    {
-      conditions: {
-        type: "array",
-        minItems: 1,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["condition"],
-          properties: {
-            condition: nonEmptyString,
-            transition: stateName,
-            end: { type: "boolean" },
-          },
+  state("agent", {
+    agentRef: definitionRef,
+    maxRepairAttempts: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+  }),
+  state("tool", {
+    toolRef: definitionRef,
+    action: nonEmptyString,
+    destination: Type.Optional(nonEmptyString),
+    credentialRef: Type.Optional(nonEmptyString),
+  }),
+  state("branch", {
+    conditions: Type.Array(
+      Type.Object(
+        {
+          condition: nonEmptyString,
+          transition: Type.Optional(stateName),
+          end: Type.Optional(Type.Boolean()),
         },
-      },
-      default: {
-        type: "object",
-        additionalProperties: false,
-        properties: { transition: stateName, end: { type: "boolean" } },
-      },
-    },
-    ["conditions"]
-  ),
-  state(
-    "parallel",
-    {
-      branches: { type: "array", minItems: 1, items: stateName },
-      maxConcurrency: positiveInteger,
-      join: { type: "string", enum: ["all", "any", "quorum"] },
-    },
-    ["branches", "maxConcurrency"]
-  ),
-  state(
-    "foreach",
-    {
-      items: nonEmptyString,
-      body: stateName,
-      maxItems: positiveInteger,
-      maxConcurrency: positiveInteger,
-    },
-    ["items", "maxItems", "maxConcurrency"]
-  ),
-  state(
-    "repeat_until",
-    {
-      condition: nonEmptyString,
-      body: stateName,
-      maxIterations: positiveInteger,
-      maxDurationMs: positiveInteger,
-    },
-    ["condition", "maxIterations", "maxDurationMs"]
-  ),
-  state(
-    "wait",
-    {
-      waitFor: {
-        type: "object",
-        additionalProperties: false,
-        required: ["kind"],
-        properties: {
-          kind: { type: "string", enum: ["timer", "event"] },
-          durationMs: positiveInteger,
-          eventType: nonEmptyString,
-          eventVersion: positiveInteger,
-          correlation: nonEmptyString,
-          aggregation: { type: "string", enum: ["first", "all", "quorum", "window"] },
+        { additionalProperties: false }
+      ),
+      { minItems: 1 }
+    ),
+    default: Type.Optional(
+      Type.Object(
+        {
+          transition: Type.Optional(stateName),
+          end: Type.Optional(Type.Boolean()),
         },
+        { additionalProperties: false }
+      )
+    ),
+  }),
+  state("parallel", {
+    branches: Type.Array(stateName, { minItems: 1 }),
+    maxConcurrency: positiveInteger,
+    join: Type.Optional(
+      Type.Unsafe<(typeof PARALLEL_JOINS)[number]>({ type: "string", enum: [...PARALLEL_JOINS] })
+    ),
+  }),
+  state("foreach", {
+    items: nonEmptyString,
+    body: Type.Optional(stateName),
+    maxItems: positiveInteger,
+    maxConcurrency: positiveInteger,
+  }),
+  state("repeat_until", {
+    condition: nonEmptyString,
+    body: Type.Optional(stateName),
+    maxIterations: positiveInteger,
+    maxDurationMs: positiveInteger,
+  }),
+  state("wait", {
+    waitFor: Type.Object(
+      {
+        kind: Type.Unsafe<(typeof WAIT_KINDS)[number]>({ type: "string", enum: [...WAIT_KINDS] }),
+        durationMs: Type.Optional(positiveInteger),
+        eventType: Type.Optional(nonEmptyString),
+        eventVersion: Type.Optional(positiveInteger),
+        correlation: Type.Optional(nonEmptyString),
+        aggregation: Type.Optional(
+          Type.Unsafe<(typeof WAIT_AGGREGATIONS)[number]>({
+            type: "string",
+            enum: [...WAIT_AGGREGATIONS],
+          })
+        ),
       },
-    },
-    ["waitFor"]
-  ),
-  state("approval", { approverRoles: { type: "array", minItems: 1, items: nonEmptyString } }, [
-    "approverRoles",
-  ]),
-  state("human_task", { assigneeRoles: { type: "array", minItems: 1, items: nonEmptyString } }, [
-    "assigneeRoles",
-  ]),
-  state("form", { formRef: definitionRef }, ["formRef"]),
-  state(
-    "child_routine",
-    { routineRef: definitionRef, mode: { type: "string", enum: ["wait", "detach"] } },
-    ["routineRef", "mode"]
-  ),
-  state("compensate", { targetRef: nonEmptyString, forState: stateName }, ["targetRef"]),
-];
+      { additionalProperties: false }
+    ),
+  }),
+  state("approval", { approverRoles: Type.Array(nonEmptyString, { minItems: 1 }) }),
+  state("human_task", { assigneeRoles: Type.Array(nonEmptyString, { minItems: 1 }) }),
+  state("form", { formRef: definitionRef }),
+  state("child_routine", {
+    routineRef: definitionRef,
+    mode: Type.Unsafe<(typeof CHILD_ROUTINE_MODES)[number]>({
+      type: "string",
+      enum: [...CHILD_ROUTINE_MODES],
+    }),
+  }),
+  state("compensate", {
+    targetRef: nonEmptyString,
+    forState: Type.Optional(stateName),
+  }),
+] as const;
 
-export const RoutineDefinitionSchema = {
-  $id: `${apiVersion}/${kind}`,
-  type: "object",
-  additionalProperties: false,
-  required: ["apiVersion", "kind", "metadata", "spec"],
-  properties: {
-    apiVersion: { const: apiVersion },
-    kind: { const: kind },
+const stateUnionSchema = Type.Unsafe<Static<(typeof stateVariants)[number]>>({
+  oneOf: stateVariants,
+});
+
+export const RoutineDefinitionSchema = Type.Object(
+  {
+    apiVersion: Type.Unsafe<typeof apiVersion>({ const: apiVersion }),
+    kind: Type.Unsafe<typeof kind>({ const: kind }),
     metadata: definitionMetadataSchema,
-    spec: {
-      type: "object",
-      additionalProperties: false,
-      required: ["owner", "start", "states"],
-      properties: {
+    spec: Type.Object(
+      {
         owner: nonEmptyString,
-        maintainers: refListSchema,
-        input: jsonSchemaObject,
-        output: jsonSchemaObject,
+        maintainers: Type.Optional(refListSchema),
+        input: Type.Optional(jsonSchemaObject),
+        output: Type.Optional(jsonSchemaObject),
         start: stateName,
-        states: { type: "array", minItems: 1, items: { oneOf: stateVariants } },
-        requiredToolAbilities: { type: "array", items: nonEmptyString },
-        limits: stateLimits,
-        concurrency: {
-          type: "object",
-          additionalProperties: false,
-          required: ["key", "policy"],
-          properties: {
-            key: nonEmptyString,
-            policy: { type: "string", enum: [...ROUTINE_CONCURRENCY_POLICIES] },
-            max: positiveInteger,
-          },
-        },
-        compensation: {
-          type: "object",
-          additionalProperties: false,
-          required: ["policy"],
-          properties: { policy: { type: "string", enum: ["none", "explicit", "on_failure"] } },
-        },
+        states: Type.Array(stateUnionSchema, { minItems: 1 }),
+        requiredToolAbilities: Type.Optional(Type.Array(nonEmptyString)),
+        limits: Type.Optional(stateLimits),
+        concurrency: Type.Optional(
+          Type.Object(
+            {
+              key: nonEmptyString,
+              policy: Type.Unsafe<(typeof ROUTINE_CONCURRENCY_POLICIES)[number]>({
+                type: "string",
+                enum: [...ROUTINE_CONCURRENCY_POLICIES],
+              }),
+              max: Type.Optional(positiveInteger),
+            },
+            { additionalProperties: false }
+          )
+        ),
+        compensation: Type.Optional(
+          Type.Object(
+            {
+              policy: Type.Unsafe<(typeof COMPENSATION_POLICIES)[number]>({
+                type: "string",
+                enum: [...COMPENSATION_POLICIES],
+              }),
+            },
+            { additionalProperties: false }
+          )
+        ),
       },
-    },
+      { additionalProperties: false }
+    ),
   },
-} as const;
+  { $id: `${apiVersion}/${kind}`, additionalProperties: false }
+);
 
-export interface RoutineState {
-  type: RoutineStateType;
-  name: string;
-  [key: string]: unknown;
-}
-
-export interface RoutineDefinition {
-  apiVersion: typeof apiVersion;
-  kind: typeof kind;
-  metadata: DefinitionMetadata;
-  spec: {
-    owner: string;
-    maintainers?: string[];
-    input?: Record<string, unknown>;
-    output?: Record<string, unknown>;
-    start: string;
-    states: RoutineState[];
-    requiredToolAbilities?: string[];
-    [key: string]: unknown;
-  };
-}
+export type RoutineDefinition = Static<typeof RoutineDefinitionSchema>;
+export type RoutineSpec = RoutineDefinition["spec"];
+export type RoutineState = RoutineSpec["states"][number];
 
 export interface ValidatedRoutineDocument extends ValidatedSchemaDocument {
   document: Readonly<RoutineDefinition>;

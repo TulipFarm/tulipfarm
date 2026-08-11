@@ -1,10 +1,6 @@
+import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
-import {
-  DEFINITION_API_VERSION,
-  type DefinitionMetadata,
-  definitionMetadataSchema,
-  definitionRegistration,
-} from "./common";
+import { DEFINITION_API_VERSION, definitionMetadataSchema, definitionRegistration } from "./common";
 
 /**
  * Trigger definition meta-schema (SPEC §7.1, §9.2). A Trigger maps a normalized event to a
@@ -49,193 +45,178 @@ export const CONCURRENCY_POLICIES = [
 ] as const;
 export const WEBHOOK_VERIFICATION_METHODS = ["hmac_sha256", "hmac_sha1", "ed25519"] as const;
 
-const nonEmptyString = { type: "string", minLength: 1 } as const;
-const positiveInteger = { type: "integer", minimum: 1 } as const;
+const DST_POLICIES = ["forward_only", "skip_missing", "run_repeated"] as const;
+
+const nonEmptyString = Type.String({ minLength: 1 });
+const positiveInteger = Type.Integer({ minimum: 1 });
 const ISO_DATE_TIME = "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$";
 
-const definitionRef = {
-  type: "object",
-  additionalProperties: false,
-  required: ["name", "version"],
-  properties: { id: nonEmptyString, name: nonEmptyString, version: nonEmptyString },
-} as const;
+const definitionRef = Type.Object(
+  {
+    id: Type.Optional(nonEmptyString),
+    name: nonEmptyString,
+    version: nonEmptyString,
+  },
+  { additionalProperties: false }
+);
 
-const schedulePolicy = {
-  type: "object",
-  additionalProperties: false,
-  required: ["missedRunPolicy", "overlapPolicy"],
-  properties: {
-    timezone: nonEmptyString,
-    dstPolicy: { type: "string", enum: ["forward_only", "skip_missing", "run_repeated"] },
-    missedRunPolicy: { type: "string", enum: [...MISSED_RUN_POLICIES] },
-    catchUpCap: positiveInteger,
-    overlapPolicy: { type: "string", enum: [...OVERLAP_POLICIES] },
-    jitterMs: { type: "integer", minimum: 0 },
-    startAt: { type: "string", pattern: ISO_DATE_TIME },
-    endAt: { type: "string", pattern: ISO_DATE_TIME },
-    calendarRef: nonEmptyString,
+const schedulePolicy = Type.Object(
+  {
+    timezone: Type.Optional(nonEmptyString),
+    dstPolicy: Type.Optional(
+      Type.Unsafe<(typeof DST_POLICIES)[number]>({ type: "string", enum: [...DST_POLICIES] })
+    ),
+    missedRunPolicy: Type.Unsafe<(typeof MISSED_RUN_POLICIES)[number]>({
+      type: "string",
+      enum: [...MISSED_RUN_POLICIES],
+    }),
+    catchUpCap: Type.Optional(positiveInteger),
+    overlapPolicy: Type.Unsafe<(typeof OVERLAP_POLICIES)[number]>({
+      type: "string",
+      enum: [...OVERLAP_POLICIES],
+    }),
+    jitterMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    startAt: Type.Optional(Type.String({ pattern: ISO_DATE_TIME })),
+    endAt: Type.Optional(Type.String({ pattern: ISO_DATE_TIME })),
+    calendarRef: Type.Optional(nonEmptyString),
   },
-  // Bounded catch-up: catching up on missed fires requires an explicit cap.
-  if: {
-    additionalProperties: true,
-    properties: { missedRunPolicy: { const: "catch_up_bounded" } },
-  },
-  // biome-ignore lint/suspicious/noThenProperty: `then` is a JSON Schema keyword, not a thenable.
-  then: {
-    additionalProperties: true,
-    properties: { catchUpCap: positiveInteger },
-    required: ["catchUpCap"],
-  },
-} as const;
+  {
+    additionalProperties: false,
+    // Bounded catch-up: catching up on missed fires requires an explicit cap.
+    if: {
+      additionalProperties: true,
+      properties: { missedRunPolicy: { const: "catch_up_bounded" } },
+    },
+    // biome-ignore lint/suspicious/noThenProperty: `then` is a JSON Schema keyword, not a thenable.
+    then: {
+      additionalProperties: true,
+      properties: { catchUpCap: positiveInteger },
+      required: ["catchUpCap"],
+    },
+  }
+);
 
 // Fields every trigger variant shares.
 const sharedSpecProps = {
   routineRef: definitionRef,
   eventType: nonEmptyString,
   eventVersion: positiveInteger,
-  filter: nonEmptyString,
-  inputMapping: { type: "object", additionalProperties: true },
-  backgroundIdentity: {
-    type: "object",
-    additionalProperties: false,
-    required: ["principalKind", "principalId"],
-    properties: { principalKind: nonEmptyString, principalId: nonEmptyString },
-  },
-  deduplication: {
-    type: "object",
-    additionalProperties: false,
-    required: ["key"],
-    properties: { key: nonEmptyString, windowMs: positiveInteger },
-  },
-  rateLimit: {
-    type: "object",
-    additionalProperties: false,
-    required: ["maxPerMinute"],
-    properties: { maxPerMinute: positiveInteger },
-  },
-  concurrency: {
-    type: "object",
-    additionalProperties: false,
-    required: ["key", "policy"],
-    properties: {
-      key: nonEmptyString,
-      policy: { type: "string", enum: [...CONCURRENCY_POLICIES] },
-      max: positiveInteger,
+  filter: Type.Optional(nonEmptyString),
+  inputMapping: Type.Optional(Type.Unknown({ type: "object", additionalProperties: true })),
+  backgroundIdentity: Type.Object(
+    {
+      principalKind: nonEmptyString,
+      principalId: nonEmptyString,
     },
-  },
-} as const;
+    { additionalProperties: false }
+  ),
+  deduplication: Type.Object(
+    {
+      key: nonEmptyString,
+      windowMs: Type.Optional(positiveInteger),
+    },
+    { additionalProperties: false }
+  ),
+  rateLimit: Type.Optional(
+    Type.Object(
+      {
+        maxPerMinute: positiveInteger,
+      },
+      { additionalProperties: false }
+    )
+  ),
+  concurrency: Type.Optional(
+    Type.Object(
+      {
+        key: nonEmptyString,
+        policy: Type.Unsafe<(typeof CONCURRENCY_POLICIES)[number]>({
+          type: "string",
+          enum: [...CONCURRENCY_POLICIES],
+        }),
+        max: Type.Optional(positiveInteger),
+      },
+      { additionalProperties: false }
+    )
+  ),
+} satisfies Record<string, TSchema>;
 
-const sharedRequired = [
-  "type",
-  "routineRef",
-  "eventType",
-  "eventVersion",
-  "backgroundIdentity",
-  "deduplication",
-] as const;
-
-function variant(
-  type: TriggerType,
-  extraProps: Record<string, unknown>,
-  extraRequired: readonly string[] = []
-) {
-  return {
-    type: "object",
-    additionalProperties: false,
-    required: [...sharedRequired, ...extraRequired],
-    properties: {
-      type: { const: type },
+function variant<
+  const VariantType extends TriggerType,
+  const ExtraProps extends Record<string, TSchema>,
+>(type: VariantType, extraProps: ExtraProps) {
+  return Type.Object(
+    {
+      type: Type.Unsafe<VariantType>({ const: type }),
       ...sharedSpecProps,
       ...extraProps,
     },
-  } as const;
+    { additionalProperties: false }
+  );
 }
 
 const specVariants = [
   variant("manual", {}),
   variant("internal_api", {}),
-  variant(
-    "datetime",
-    { at: { type: "string", pattern: ISO_DATE_TIME }, schedule: schedulePolicy },
-    ["at"]
-  ),
-  variant("interval", { everyMs: positiveInteger, schedule: schedulePolicy }, ["everyMs"]),
-  variant(
-    "cron",
-    { expression: nonEmptyString, timezone: nonEmptyString, schedule: schedulePolicy },
-    ["expression"]
-  ),
-  variant(
-    "webhook",
-    {
-      provider: nonEmptyString,
-      verification: {
-        type: "object",
-        additionalProperties: false,
-        required: ["method", "secretRef", "signatureHeader"],
-        properties: {
-          method: { type: "string", enum: [...WEBHOOK_VERIFICATION_METHODS] },
-          secretRef: nonEmptyString,
-          signatureHeader: nonEmptyString,
-          signingTemplate: nonEmptyString,
-          signatureFormat: nonEmptyString,
-          timestampHeader: nonEmptyString,
-          toleranceMs: positiveInteger,
-        },
+  variant("datetime", {
+    at: Type.String({ pattern: ISO_DATE_TIME }),
+    schedule: Type.Optional(schedulePolicy),
+  }),
+  variant("interval", {
+    everyMs: positiveInteger,
+    schedule: Type.Optional(schedulePolicy),
+  }),
+  variant("cron", {
+    expression: nonEmptyString,
+    timezone: Type.Optional(nonEmptyString),
+    schedule: Type.Optional(schedulePolicy),
+  }),
+  variant("webhook", {
+    provider: nonEmptyString,
+    verification: Type.Object(
+      {
+        method: Type.Unsafe<(typeof WEBHOOK_VERIFICATION_METHODS)[number]>({
+          type: "string",
+          enum: [...WEBHOOK_VERIFICATION_METHODS],
+        }),
+        secretRef: nonEmptyString,
+        signatureHeader: nonEmptyString,
+        signingTemplate: Type.Optional(nonEmptyString),
+        signatureFormat: Type.Optional(nonEmptyString),
+        timestampHeader: Type.Optional(nonEmptyString),
+        toleranceMs: Type.Optional(positiveInteger),
       },
-    },
-    ["provider", "verification"]
-  ),
-  variant(
-    "integration_event",
-    {
-      provider: nonEmptyString,
-      matchEventType: nonEmptyString,
-      matchEventVersion: positiveInteger,
-    },
-    ["provider", "matchEventType"]
-  ),
-  variant("form", { formRef: nonEmptyString }, ["formRef"]),
-  variant(
-    "internal_event",
-    { matchEventType: nonEmptyString, matchEventVersion: positiveInteger },
-    ["matchEventType"]
-  ),
-];
+      { additionalProperties: false }
+    ),
+  }),
+  variant("integration_event", {
+    provider: nonEmptyString,
+    matchEventType: nonEmptyString,
+    matchEventVersion: Type.Optional(positiveInteger),
+  }),
+  variant("form", { formRef: nonEmptyString }),
+  variant("internal_event", {
+    matchEventType: nonEmptyString,
+    matchEventVersion: Type.Optional(positiveInteger),
+  }),
+] as const;
 
-export const TriggerDefinitionSchema = {
-  $id: `${apiVersion}/${kind}`,
-  type: "object",
-  additionalProperties: false,
-  required: ["apiVersion", "kind", "metadata", "spec"],
-  properties: {
-    apiVersion: { const: apiVersion },
-    kind: { const: kind },
+const specSchema = Type.Unsafe<Static<(typeof specVariants)[number]>>({
+  oneOf: specVariants,
+});
+
+export const TriggerDefinitionSchema = Type.Object(
+  {
+    apiVersion: Type.Unsafe<typeof apiVersion>({ const: apiVersion }),
+    kind: Type.Unsafe<typeof kind>({ const: kind }),
     metadata: definitionMetadataSchema,
-    spec: { oneOf: specVariants },
+    spec: specSchema,
   },
-} as const;
+  { $id: `${apiVersion}/${kind}`, additionalProperties: false }
+);
 
-export interface TriggerRef {
-  id?: string;
-  name: string;
-  version: string;
-}
-
-export interface TriggerDefinition {
-  apiVersion: typeof apiVersion;
-  kind: typeof kind;
-  metadata: DefinitionMetadata;
-  spec: {
-    type: TriggerType;
-    routineRef: TriggerRef;
-    eventType: string;
-    eventVersion: number;
-    backgroundIdentity: { principalKind: string; principalId: string };
-    deduplication: { key: string; windowMs?: number };
-    [key: string]: unknown;
-  };
-}
+export type TriggerDefinition = Static<typeof TriggerDefinitionSchema>;
+export type TriggerSpec = TriggerDefinition["spec"];
+export type TriggerRef = TriggerSpec["routineRef"];
 
 export interface ValidatedTriggerDocument extends ValidatedSchemaDocument {
   document: Readonly<TriggerDefinition>;

@@ -55,7 +55,13 @@ describe("planCompensation", () => {
   });
 
   it("refuses to compensate without a declared target", () => {
-    const broken = { ...compensate(), definition: { type: "compensate", name: "Undo" } as const };
+    const definition: routineSchema.RoutineState = {
+      type: "agent",
+      name: "Undo",
+      agentRef: { name: "triage", version: "1.0.0" },
+      end: true,
+    };
+    const broken = { ...compensate(), definition };
 
     expect(() =>
       planCompensation(broken, { businessId: "biz", runId: "run-1", effectId: "effect-1" })

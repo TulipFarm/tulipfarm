@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
+import { hermeticGitEnv } from "./git-env";
 
 const SCAFFOLD_DIRS = ["resources", "routines", "agents", "skills", "integrations"];
 
@@ -28,7 +29,7 @@ export async function scaffoldSoul(soulPath: string): Promise<void> {
     writeFileSync(skillsLockPath, "{}\n");
   }
 
-  const git = simpleGit(soulPath);
+  const git = simpleGit(soulPath).env(hermeticGitEnv());
   await git.addConfig("user.name", BOT_GIT_NAME);
   await git.addConfig("user.email", BOT_GIT_EMAIL);
   await git.add("-A");

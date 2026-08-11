@@ -1,0 +1,114 @@
+{
+  "$id": "tulipfarm.ai/v1/Settings",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Settings",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "approvalCategories": {
+          "additionalProperties": false,
+          "properties": {
+            "credentialUse": {
+              "default": true,
+              "type": "boolean"
+            },
+            "destructiveAction": {
+              "default": true,
+              "type": "boolean"
+            },
+            "highRiskAction": {
+              "default": true,
+              "type": "boolean"
+            },
+            "protectedDataEgress": {
+              "default": true,
+              "type": "boolean"
+            },
+            "soulChange": {
+              "default": true,
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "soulChange",
+            "highRiskAction",
+            "destructiveAction",
+            "protectedDataEgress",
+            "credentialUse"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "approvalCategories"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

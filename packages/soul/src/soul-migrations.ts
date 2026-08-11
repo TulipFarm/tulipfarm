@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { TulipFarmValidationError, validateSoulConfig } from "@tulipfarm/schema";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { SOUL_MIGRATIONS } from "./migrations/index";
 import type { Logger } from "./types";
@@ -11,7 +12,14 @@ export async function runSoulMigrations(soulPath: string, logger: Logger): Promi
   try {
     const content = await readFile(soulYamlPath, "utf8");
     manifest = (parseYaml(content) ?? {}) as Record<string, unknown>;
-  } catch {
+    validateSoulConfig(manifest);
+  } catch (err) {
+    if (err instanceof TulipFarmValidationError) {
+      logger.warn(
+        `Soul: skipped format migrations — invalid soul.yaml ${err.path}: ${err.message}`
+      );
+      return false;
+    }
     // soul.yaml absent or unreadable — treat version as 0
   }
 
@@ -40,6 +48,7 @@ export async function runSoulMigrations(soulPath: string, logger: Logger): Promi
         manifest = {};
       }
       manifest = { ...manifest, soulFormatVersion: migration.version };
+      validateSoulConfig(manifest);
       await writeFile(soulYamlPath, stringifyYaml(manifest), "utf8");
       changed = true;
       logger.info(`Soul: format migration v${migration.version} applied`);

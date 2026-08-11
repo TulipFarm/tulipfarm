@@ -407,26 +407,56 @@ export function scheduleSpecFromTrigger(
   if (!SCHEDULE_TYPES.includes(spec.type)) {
     throw new ScheduleError("not_a_schedule", spec.deduplication.key);
   }
-  const policy = (spec.schedulePolicy ?? {}) as Record<string, unknown>;
-  const optional = <T>(value: unknown, guard: (candidate: unknown) => boolean): T | undefined =>
-    guard(value) ? (value as T) : undefined;
-  const isString = (value: unknown) => typeof value === "string";
-  const isNumber = (value: unknown) => typeof value === "number";
-
-  return {
-    type: spec.type as ScheduleType,
-    at: optional<string>(spec.at, isString),
-    everyMs: optional<number>(spec.everyMs, isNumber),
-    expression: optional<string>(spec.expression, isString),
-    timezone: optional<string>(policy.timezone ?? spec.timezone, isString) ?? "UTC",
-    dstPolicy: optional<DstPolicy>(policy.dstPolicy, isString) ?? "forward_only",
-    missedRunPolicy: optional<MissedRunPolicy>(policy.missedRunPolicy, isString) ?? "skip",
-    catchUpCap: optional<number>(policy.catchUpCap, isNumber),
-    overlapPolicy: optional<OverlapPolicy>(policy.overlapPolicy, isString) ?? "skip",
-    jitterMs: optional<number>(policy.jitterMs, isNumber),
-    startAt: optional<string>(policy.startAt, isString),
-    endAt: optional<string>(policy.endAt, isString),
-    calendar,
-    deduplicationKey: spec.deduplication.key,
-  };
+  if (spec.type === "datetime") {
+    const policy = spec.schedule;
+    return {
+      type: spec.type,
+      at: spec.at,
+      timezone: policy?.timezone ?? "UTC",
+      dstPolicy: policy?.dstPolicy ?? "forward_only",
+      missedRunPolicy: policy?.missedRunPolicy ?? "skip",
+      catchUpCap: policy?.catchUpCap,
+      overlapPolicy: policy?.overlapPolicy ?? "skip",
+      jitterMs: policy?.jitterMs,
+      startAt: policy?.startAt,
+      endAt: policy?.endAt,
+      calendar,
+      deduplicationKey: spec.deduplication.key,
+    };
+  }
+  if (spec.type === "interval") {
+    const policy = spec.schedule;
+    return {
+      type: spec.type,
+      everyMs: spec.everyMs,
+      timezone: policy?.timezone ?? "UTC",
+      dstPolicy: policy?.dstPolicy ?? "forward_only",
+      missedRunPolicy: policy?.missedRunPolicy ?? "skip",
+      catchUpCap: policy?.catchUpCap,
+      overlapPolicy: policy?.overlapPolicy ?? "skip",
+      jitterMs: policy?.jitterMs,
+      startAt: policy?.startAt,
+      endAt: policy?.endAt,
+      calendar,
+      deduplicationKey: spec.deduplication.key,
+    };
+  }
+  if (spec.type === "cron") {
+    const policy = spec.schedule;
+    return {
+      type: spec.type,
+      expression: spec.expression,
+      timezone: policy?.timezone ?? spec.timezone ?? "UTC",
+      dstPolicy: policy?.dstPolicy ?? "forward_only",
+      missedRunPolicy: policy?.missedRunPolicy ?? "skip",
+      catchUpCap: policy?.catchUpCap,
+      overlapPolicy: policy?.overlapPolicy ?? "skip",
+      jitterMs: policy?.jitterMs,
+      startAt: policy?.startAt,
+      endAt: policy?.endAt,
+      calendar,
+      deduplicationKey: spec.deduplication.key,
+    };
+  }
+  throw new ScheduleError("not_a_schedule", spec.deduplication.key);
 }

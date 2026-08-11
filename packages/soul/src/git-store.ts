@@ -1,9 +1,24 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join, resolve, sep } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit, { type SimpleGit } from "simple-git";
-import type { SoulFileChange, ValidatedSoulChangeset } from "./changeset";
+import {
+  isUnbornBase,
+  SOUL_UNBORN_BASE,
+  type SoulFileChange,
+  type ValidatedSoulChangeset,
+} from "./changeset";
 import {
   buildCommitMessage,
   buildCommitSigningPayload,
@@ -15,11 +30,11 @@ import {
   CommitSigningError,
   type SignedCommitMetadata,
 } from "./commit-signing";
+import { hermeticGitEnv } from "./git-env";
 import { parseSoulFile } from "./parse";
 import type { Logger } from "./types";
 
 const GIT_TIMEOUT_MS = 30_000;
-const SOUL_BRANCH_REF = "refs/heads/main";
 const BLOB_MODE = "100644";
 const ZERO_OID = "0".repeat(40);
 
@@ -29,7 +44,10 @@ export type SoulGitStoreErrorCode =
   | "CONTENT_MISMATCH"
   | "SIGNING_FAILED"
   | "WRITE_FAILED"
-  | "REF_UPDATE_FAILED";
+  | "REF_UPDATE_FAILED"
+  | "POST_COMMIT_CLEANUP_FAILED"
+  /** HEAD is detached or not a branch. A repository-state fault, never a losable race. */
+  | "BRANCH_UNRESOLVED";
 
 /** Deterministic, payload-safe failure from the atomic writer. Carries no file content. */
 export class SoulGitStoreError extends Error {
@@ -83,18 +101,124 @@ export class SoulGitStore {
 
   private git(indexFile?: string, extraEnv?: Record<string, string>): SimpleGit {
     const git = simpleGit(this.soulPath, { timeout: { block: GIT_TIMEOUT_MS } });
-    if (indexFile === undefined && extraEnv === undefined) return git;
-    return git.env({
-      ...process.env,
-      ...(indexFile !== undefined ? { GIT_INDEX_FILE: indexFile } : {}),
-      ...extraEnv,
-    });
+    return git.env(
+      hermeticGitEnv({
+        ...(indexFile !== undefined ? { GIT_INDEX_FILE: indexFile } : {}),
+        ...extraEnv,
+      })
+    );
   }
 
   /** Current committed tip, or null when the branch is unborn (fresh repo, no commits). */
-  private async resolveHead(): Promise<string | null> {
+  /**
+   * The ref the compare-and-swap must target: whatever branch HEAD actually points at.
+   *
+   * Assuming `refs/heads/main` was wrong in a way that only showed up off this machine. `git init`
+   * still creates `master` unless `init.defaultBranch` says otherwise, and `GitSyncService`
+   * initialises the Soul repo with a bare `.init()`. A developer whose global config sets `main`
+   * never sees it; a fresh container has no such config, so every write would target a ref that
+   * does not exist — and would be reported as a conflict, whose advertised remedy is to retry.
+   */
+  private async branchRef(): Promise<string> {
+    let ref: string;
+    try {
+      ref = (await this.git().raw(["symbolic-ref", "--quiet", "HEAD"])).trim();
+    } catch (error) {
+      throw new SoulGitStoreError(
+        "BRANCH_UNRESOLVED",
+        `Soul git store: HEAD is detached — refusing to publish onto no branch (${errText(error)})`,
+        { cause: error }
+      );
+    }
+    if (!ref.startsWith("refs/heads/")) {
+      throw new SoulGitStoreError(
+        "BRANCH_UNRESOLVED",
+        `Soul git store: HEAD does not point at a branch (${ref || "detached"})`
+      );
+    }
+    return ref;
+  }
+
+  async head(): Promise<string | null> {
     try {
       return (await this.git().revparse(["HEAD"])).trim();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The base a changeset should declare to build on the current tip. Unlike `head()`, an unborn
+   * branch is reported as the zero-OID sentinel so the value is always a valid changeset field.
+   */
+  async baseCommit(): Promise<string> {
+    return (await this.head()) ?? SOUL_UNBORN_BASE;
+  }
+
+  /** Read a tracked file's content, or null when it does not exist. Path must be Soul-relative. */
+  readFile(path: string): string | null {
+    const resolved = this.resolveExistingPath(path);
+    if (resolved === null) return null;
+    try {
+      if (!statSync(resolved).isFile()) return null;
+      return readFileSync(resolved, "utf8");
+    } catch {
+      return null;
+    }
+  }
+
+  /** Whether a Soul-relative path currently exists in the working tree. */
+  exists(path: string): boolean {
+    return this.resolveExistingPath(path) !== null;
+  }
+
+  /** Every Soul-relative file path under `directory`, recursively. Empty when absent. */
+  listFiles(directory: string): string[] {
+    const resolved = this.resolveExistingPath(directory);
+    if (resolved === null) return [];
+    const out: string[] = [];
+    const walk = (abs: string, rel: string): void => {
+      for (const entry of readdirSync(abs, { withFileTypes: true })) {
+        if (entry.name === ".git") continue;
+        const childRel = rel === "" ? entry.name : `${rel}/${entry.name}`;
+        const childAbs = join(abs, entry.name);
+        if (entry.isSymbolicLink()) {
+          if (this.resolveExistingPath(childRel) === null) continue;
+          if (statSync(childAbs).isFile()) out.push(childRel);
+          else if (statSync(childAbs).isDirectory()) walk(childAbs, childRel);
+        } else if (entry.isDirectory()) walk(childAbs, childRel);
+        else if (entry.isFile()) out.push(childRel);
+      }
+    };
+    if (!statSync(resolved).isDirectory()) return [];
+    walk(resolved, directory);
+    return out.sort();
+  }
+
+  /**
+   * Contain a Soul-relative path inside the repo, or null when it escapes.
+   *
+   * Reads are gated the same way writes are: a path that the write gate would refuse to classify
+   * must not become a readable one, or `..` becomes an arbitrary host-file read.
+   */
+  private resolvePath(path: string): string | null {
+    if (path === "" || path.startsWith("/") || path.includes("\\") || path.includes("\0")) {
+      return null;
+    }
+    const root = resolve(this.soulPath);
+    const target = resolve(root, path);
+    if (target !== root && !target.startsWith(`${root}${sep}`)) return null;
+    return target;
+  }
+
+  private resolveExistingPath(path: string): string | null {
+    const lexical = this.resolvePath(path);
+    if (lexical === null || !existsSync(lexical)) return null;
+    try {
+      const root = realpathSync(this.soulPath);
+      const target = realpathSync(lexical);
+      if (target !== root && !target.startsWith(`${root}${sep}`)) return null;
+      return lexical;
     } catch {
       return null;
     }
@@ -187,6 +311,54 @@ export class SoulGitStore {
     return (await idx.raw(["write-tree"])).trim();
   }
 
+  private async materializeCommit(
+    commitSha: string,
+    files: readonly SoulFileChange[]
+  ): Promise<void> {
+    const upsertPaths = files
+      .filter((file) => file.operation === "upsert")
+      .map((file) => file.path);
+    const deletePaths = files
+      .filter((file) => file.operation === "delete")
+      .map((file) => file.path);
+
+    if (upsertPaths.length > 0) {
+      await this.git().raw([
+        "restore",
+        "--source",
+        commitSha,
+        "--staged",
+        "--worktree",
+        "--",
+        ...upsertPaths,
+      ]);
+    }
+    if (deletePaths.length > 0) {
+      await this.git().raw(["rm", "-f", "--ignore-unmatch", "--", ...deletePaths]);
+      for (const path of deletePaths) {
+        const resolved = this.resolvePath(path);
+        if (resolved === null) continue;
+        rmSync(resolved, { force: true });
+        this.pruneEmptyParents(path);
+      }
+    }
+  }
+
+  private pruneEmptyParents(path: string): void {
+    const parts = path.split("/");
+    parts.pop();
+    while (parts.length > 0) {
+      const directory = this.resolvePath(parts.join("/"));
+      if (directory === null) return;
+      try {
+        rmdirSync(directory);
+      } catch {
+        return;
+      }
+      parts.pop();
+    }
+  }
+
   /**
    * Atomically publish `request` as a signed commit on `main`. Returns the new commit evidence.
    * Throws `SoulGitStoreError` (deterministic, no file content) on any failure; nothing partial is
@@ -202,8 +374,10 @@ export class SoulGitStore {
     }
     const canonicalFiles = this.validatedFiles(changeset, files);
 
-    const expected = changeset.expectedBaseCommit === "" ? null : changeset.expectedBaseCommit;
-    const parentSha = await this.resolveHead();
+    const expected = isUnbornBase(changeset.expectedBaseCommit)
+      ? null
+      : changeset.expectedBaseCommit;
+    const parentSha = await this.head();
     if (parentSha !== expected) {
       throw new SoulGitStoreError(
         "BASE_MISMATCH",
@@ -211,7 +385,9 @@ export class SoulGitStore {
       );
     }
 
-    const workDir = mkdtempSync(join(tmpdir(), "soul-changeset-"));
+    const scratchRoot = join(this.soulPath, ".git", "tulipfarm-changesets");
+    mkdirSync(scratchRoot, { recursive: true });
+    const workDir = mkdtempSync(join(scratchRoot, "changeset-"));
     const indexFile = join(workDir, "index");
     try {
       let treeSha: string;
@@ -247,7 +423,7 @@ export class SoulGitStore {
       commitArgs.push("-m", message);
       const commitSha = (await this.git(indexFile, identityEnv()).raw(commitArgs)).trim();
 
-      const refArgs = ["update-ref", SOUL_BRANCH_REF, commitSha];
+      const refArgs = ["update-ref", await this.branchRef(), commitSha];
       refArgs.push(parentSha ?? ZERO_OID);
       try {
         await this.git().raw(refArgs);
@@ -259,10 +435,15 @@ export class SoulGitStore {
         );
       }
 
-      // Materialize the newly published tree into the working directory the loader reads. A crash
-      // between the ref update and here leaves HEAD ahead of the working tree — a reconcilable
-      // state (`git reset --hard HEAD` on boot), never a partial publish.
-      await this.git().reset(["--hard", commitSha]);
+      try {
+        await this.materializeCommit(commitSha, canonicalFiles);
+      } catch (error) {
+        throw new SoulGitStoreError(
+          "POST_COMMIT_CLEANUP_FAILED",
+          `Soul git store: committed ${commitSha} but failed to materialize the working tree — ${errText(error)}`,
+          { cause: error }
+        );
+      }
 
       this.logger.info(
         `Soul: committed changeset ${changeset.id} as ${commitSha} (${files.length} file change(s))`

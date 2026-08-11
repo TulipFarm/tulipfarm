@@ -11,6 +11,7 @@ function mappedState() {
         type: "branch",
         name: "Map",
         input: { literal: "fixed", region: MAPPED_INPUT },
+        conditions: [{ condition: 'input.region == "never"', end: true }],
         default: { end: true },
       },
     ],

@@ -1,0 +1,265 @@
+{
+  "$id": "tulipfarm.ai/v1/Agent",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Agent",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedTools": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "autonomy": {
+          "enum": [
+            "answer_only",
+            "propose_actions",
+            "execute_low_risk",
+            "execute_policy_authorized"
+          ],
+          "type": "string"
+        },
+        "evaluationSuite": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "guardrails": {
+          "additionalProperties": false,
+          "properties": {
+            "data": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            "delegation": {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "instructions": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 512,
+              "minLength": 1,
+              "pattern": "^[^/].*\\.md$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "knowledgeScopes": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "limits": {
+          "additionalProperties": false,
+          "properties": {
+            "activeMs": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "costUsd": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "delegationDepth": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "toolCalls": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "wallClockMs": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "maintainers": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "memoryScopes": {
+          "items": {
+            "enum": [
+              "user_private",
+              "user_agent",
+              "agent_private",
+              "team_role",
+              "business",
+              "run_local"
+            ],
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "modelProfile": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "owner": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "permissionCeiling": {
+          "additionalProperties": false,
+          "properties": {
+            "grants": {
+              "items": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "maxRiskClass": {
+              "enum": [
+                "low",
+                "medium",
+                "high"
+              ],
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "personality": {
+          "maxLength": 8192,
+          "type": "string"
+        },
+        "roles": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "skills": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "trustTier": {
+          "enum": [
+            "first_party",
+            "business_authored",
+            "third_party"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "instructions",
+        "modelProfile",
+        "autonomy",
+        "trustTier"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

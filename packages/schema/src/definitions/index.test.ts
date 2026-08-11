@@ -17,6 +17,7 @@ describe("Authored definition registry integration", () => {
       "Routine",
       "Trigger",
       "Role",
+      "Resource",
       "Guardrail",
       "Settings",
       "IntegrationAdapter",

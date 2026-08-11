@@ -1,0 +1,177 @@
+{
+  "$id": "tulipfarm.ai/v1/KnowledgeSource",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "KnowledgeSource",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "accessControl": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "maximumAgeSeconds": {
+                  "maximum": 3600,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "live",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode",
+                "maximumAgeSeconds"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "aclArtifactId": {
+                  "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-HJKMNP-TV-Z]{26})$",
+                  "type": "string"
+                },
+                "aclRevision": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maximumAgeSeconds": {
+                  "maximum": 3600,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "mode": {
+                  "const": "snapshot",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode",
+                "aclArtifactId",
+                "aclRevision",
+                "maximumAgeSeconds"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "classification": {
+          "items": {
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "integrationId": {
+          "pattern": "^(?:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-HJKMNP-TV-Z]{26})$",
+          "type": "string"
+        },
+        "source": {
+          "additionalProperties": false,
+          "properties": {
+            "externalId": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "externalTenantId": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "ownerExternalId": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "provider": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "provider",
+            "externalId",
+            "externalTenantId",
+            "ownerExternalId"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "integrationId",
+        "source",
+        "accessControl",
+        "classification"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

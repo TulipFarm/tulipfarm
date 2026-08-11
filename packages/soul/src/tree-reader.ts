@@ -1,7 +1,8 @@
-import { type LlmConfig, type VersionedSchemaDocument, validateLlmConfig } from "@tulipfarm/schema";
+import { type VersionedSchemaDocument, validateSoulConfig } from "@tulipfarm/schema";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { parse as parseYaml } from "yaml";
 import type { BundleSourceFile } from "./compiler";
+import { hermeticGitEnv } from "./git-env";
 import { modelProfileDocuments } from "./model-profile-documents";
 import { parseSoulFile } from "./parse";
 import type { SoulTreeReader } from "./publication";
@@ -15,7 +16,7 @@ export class GitSoulTreeReader implements SoulTreeReader {
   private readonly git: SimpleGit;
 
   constructor(soulPath: string) {
-    this.git = simpleGit(soulPath);
+    this.git = simpleGit(soulPath).env(hermeticGitEnv());
   }
 
   private async paths(commitSha: string): Promise<string[]> {
@@ -49,8 +50,11 @@ export class GitSoulTreeReader implements SoulTreeReader {
       const manifest = parseYaml(await this.content(commitSha, "soul.yaml")) as
         | Record<string, unknown>
         | undefined;
-      if (manifest?.llm !== undefined) {
-        definitions.push(...modelProfileDocuments(validateLlmConfig(manifest.llm as LlmConfig)));
+      if (manifest !== undefined) {
+        const config = validateSoulConfig(manifest);
+        if (config.llm !== undefined) {
+          definitions.push(...modelProfileDocuments(config.llm));
+        }
       }
     }
     return definitions;

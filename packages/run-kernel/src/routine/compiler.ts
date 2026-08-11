@@ -156,13 +156,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/**
+ * A dynamic-key view of an authored State. `RoutineState` is a discriminated union with
+ * `additionalProperties: false`, so it deliberately has no index signature; these readers look up
+ * keys chosen at runtime and so must opt out of the union explicitly rather than silently.
+ */
+export function stateFields(state: routineSchema.RoutineState): Record<string, unknown> {
+  return state as unknown as Record<string, unknown>;
+}
+
 function readString(state: routineSchema.RoutineState, key: string): string | null {
-  const value = state[key];
+  const value = stateFields(state)[key];
   return typeof value === "string" ? value : null;
 }
 
 function readNumber(state: routineSchema.RoutineState, key: string): number | null {
-  const value = state[key];
+  const value = stateFields(state)[key];
   return typeof value === "number" ? value : null;
 }
 
@@ -216,7 +225,7 @@ function successorsOf(state: routineSchema.RoutineState): string[] {
   const fallback = readRecord(state, "default");
   if (fallback) push(fallback.transition);
   for (const branch of readArray(state, "branches")) push(branch);
-  push(state.body);
+  if (state.type === "foreach" || state.type === "repeat_until") push(state.body);
   return targets;
 }
 
@@ -419,7 +428,9 @@ export function compileRoutine(
     for (const [i, branch] of readArray(state, "branches").entries()) {
       requireTarget(branch, `${path}/branches/${i}`);
     }
-    requireTarget(state.body, `${path}/body`);
+    if (state.type === "foreach" || state.type === "repeat_until") {
+      requireTarget(state.body, `${path}/body`);
+    }
 
     if (state.type === "compensate") {
       const forState = readString(state, "forState");

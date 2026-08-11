@@ -12,6 +12,20 @@ export const SOUL_CHANGESET_SOURCES = [
 
 export type SoulChangesetSource = (typeof SOUL_CHANGESET_SOURCES)[number];
 
+/**
+ * The base a changeset declares when the Soul branch is unborn — a freshly initialized repo with
+ * no commit yet. Git's own zero-OID, which `update-ref` already requires to mean "no prior value".
+ *
+ * A sentinel is needed because a changeset's `expectedBaseCommit` must be a non-empty string
+ * (an absent base is a missing field, not a valid one), so "no base" needs a value that says so.
+ */
+export const SOUL_UNBORN_BASE = "0".repeat(40);
+
+/** True when `base` names the unborn branch rather than a real commit. */
+export function isUnbornBase(base: string): boolean {
+  return base === "" || base === SOUL_UNBORN_BASE;
+}
+
 export type SoulFileChange =
   | { readonly operation: "upsert"; readonly path: string; readonly content: string }
   | { readonly operation: "delete"; readonly path: string };

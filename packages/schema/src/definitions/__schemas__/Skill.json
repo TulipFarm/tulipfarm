@@ -1,0 +1,327 @@
+{
+  "$id": "tulipfarm.ai/v1/Skill",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "Skill",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "assets": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "commands": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "entrypoint": {
+                "maxLength": 512,
+                "minLength": 1,
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$",
+                "type": "string"
+              },
+              "fileOutputs": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "maxBytes": {
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "mediaTypes": {
+                      "items": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "name": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    },
+                    "path": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "path",
+                    "mediaTypes",
+                    "maxBytes"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "integrationBindings": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "injectAs": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "file",
+                            "environment"
+                          ],
+                          "type": "string"
+                        },
+                        "name": {
+                          "maxLength": 128,
+                          "minLength": 1,
+                          "pattern": "^[A-Z][A-Z0-9_]*$",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind",
+                        "name"
+                      ],
+                      "type": "object"
+                    },
+                    "integrationKinds": {
+                      "items": {
+                        "maxLength": 256,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "slot": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "integrationKinds",
+                    "injectAs"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 1,
+                "type": "array"
+              },
+              "name": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "requiredCommands": {
+                "items": {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "runtimeProfile": {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              "staticArgs": {
+                "items": {
+                  "maxLength": 512,
+                  "type": "string"
+                },
+                "maxItems": 64,
+                "type": "array"
+              },
+              "toolRef": {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "toolRef",
+              "runtimeProfile",
+              "entrypoint"
+            ],
+            "type": "object"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "examples": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "instructions": {
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "maxLength": 512,
+              "minLength": 1,
+              "pattern": "^[^/].*\\.md$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "references": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "requiredToolAbilities": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "schemas": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "scripts": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "templates": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "trustTier": {
+          "enum": [
+            "first_party",
+            "business_authored",
+            "third_party"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "instructions",
+        "trustTier"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

@@ -9,7 +9,7 @@ function agentState(overrides: Record<string, unknown> = {}): routineSchema.Rout
     type: "agent",
     name: "Classify",
     agentRef: { name: "triage", version: "1.0.0" },
-    input: { subject: "${input.subject}", locale: "en" },
+    input: { subject: `\${input.subject}`, locale: "en" },
     end: true,
     ...overrides,
   } as routineSchema.RoutineState;
@@ -69,7 +69,14 @@ describe("planAgentInvocation", () => {
 
   it("refuses a State whose authored Agent reference is unusable", () => {
     const state = compileWithTargets(agentState());
-    const withoutRef = { ...state, definition: { ...state.definition, agentRef: undefined } };
+    const definition: routineSchema.RoutineState = {
+      type: "tool",
+      name: "Classify",
+      toolRef: { name: "github.issue.comment", version: "1.0.0" },
+      action: "issue.comment",
+      end: true,
+    };
+    const withoutRef = { ...state, definition };
 
     expect(() => planAgentInvocation(withoutRef, {})).toThrow(
       new RoutineStepError("missing_agent_ref", "Classify")

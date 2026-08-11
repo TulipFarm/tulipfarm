@@ -11,6 +11,7 @@ import {
 import { KNOWLEDGE_SOURCE_DEFINITION } from "./knowledge";
 import { MEMORY_SETTINGS_DEFINITION } from "./memory";
 import { MODEL_PROFILE_DEFINITION } from "./model";
+import { RESOURCE_DEFINITION } from "./resource";
 import { ROLE_DEFINITION } from "./role";
 import { ROUTINE_DEFINITION } from "./routine";
 import { SETTINGS_DEFINITION } from "./settings";
@@ -38,6 +39,12 @@ export {
   type ModelProfileDenialReason,
   type ModelProfileSpec,
 } from "./model";
+export {
+  RESOURCE_DEFINITION,
+  type ResourceDefinition,
+  ResourceSchema,
+  type ResourceSpec,
+} from "./resource";
 export * from "./role";
 export * from "./settings";
 export {
@@ -66,6 +73,7 @@ export const DEFINITION_REGISTRATIONS: readonly SchemaRegistration[] = [
   ROUTINE_DEFINITION,
   TRIGGER_DEFINITION,
   ROLE_DEFINITION,
+  RESOURCE_DEFINITION,
   GUARDRAIL_DEFINITION,
   SETTINGS_DEFINITION,
   INTEGRATION_ADAPTER_DEFINITION,
@@ -86,6 +94,7 @@ export const DEFINITION_KINDS = [
   "Routine",
   "Trigger",
   "Role",
+  "Resource",
   "Guardrail",
   "Settings",
   "IntegrationAdapter",

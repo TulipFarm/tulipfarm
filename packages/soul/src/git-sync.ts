@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
+import { hermeticGitEnv } from "./git-env";
 import { scaffoldSoul } from "./scaffold-soul";
 import type { Logger } from "./types";
 
@@ -54,7 +55,7 @@ export class GitSyncService extends EventEmitter {
     return simpleGit(this.soulPath, {
       timeout: { block: GIT_TIMEOUT_MS },
       ...(config.length > 0 ? { config } : {}),
-    });
+    }).env(hermeticGitEnv());
   }
 
   get path(): string {
@@ -87,7 +88,10 @@ export class GitSyncService extends EventEmitter {
           `Soul: SOUL_PATH "${this.soulPath}" is inside another git repository (${enclosing}). Point SOUL_PATH at a dedicated directory outside the project repo (e.g. ~/.tulipfarm/soul).`
         );
       }
-      await (await this.gitAt()).init();
+      // Explicit branch name: git's compiled-in default is still `master`, so without this the
+      // branch a fresh Soul repo gets depends on whether the host happens to set
+      // `init.defaultBranch`. The rest of the system (remote sync, publication) speaks `main`.
+      await (await this.gitAt()).init(["--initial-branch=main"]);
       this.logger.info(`Soul: initialized git repo at ${this.soulPath}`);
     }
 
@@ -143,6 +147,7 @@ export class GitSyncService extends EventEmitter {
           timeout: { block: GIT_TIMEOUT_MS },
           ...(config.length > 0 ? { config } : {}),
         })
+          .env(hermeticGitEnv())
           .outputHandler((_cmd, stdout, stderr) => {
             stdout.pipe(process.stdout);
             stderr.pipe(process.stderr);
@@ -345,6 +350,12 @@ export class GitSyncService extends EventEmitter {
 
     if (ahead > 0) {
       // Genuine divergence — upstream wins per SOUL-V1-004
+      const dirty = await git.raw(["status", "--porcelain"]);
+      if (dirty.trim().length > 0) {
+        throw new Error(
+          "Soul: refusing to hard-reset a divergent repository with uncommitted work; commit or remove the local edits first"
+        );
+      }
       const discarded = await git.raw(["log", "--oneline", "origin/main..HEAD"]);
       this.logger.warn(
         `Soul: genuine divergence detected — discarding ${ahead} local commit(s):\n${discarded.trim()}`

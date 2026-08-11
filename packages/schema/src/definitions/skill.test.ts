@@ -5,10 +5,7 @@ import { DEFINITION_API_VERSION } from "./common";
 import { SKILL_DEFINITION, SKILL_FORBIDDEN_GRANT_KEYS, SkillDefinitionSchema } from "./skill";
 
 function skillSpecPropertyNames(): string[] {
-  const root = SkillDefinitionSchema as {
-    properties: { spec: { properties: Record<string, unknown> } };
-  };
-  return Object.keys(root.properties.spec.properties);
+  return Object.keys(SkillDefinitionSchema.properties.spec.properties);
 }
 
 function registry(): SchemaRegistry {

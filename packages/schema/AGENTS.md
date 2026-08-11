@@ -1,12 +1,16 @@
 # Schema — Agent Conventions
 
 `@tulipfarm/schema` — single source of truth for all config data shapes: TypeBox schemas +
-inferred types + thin `validate*` wrappers, plus declarative resource transforms.
+`Static<>`-derived types + thin `validate*` wrappers, plus declarative resource transforms.
 See root `AGENTS.md` for commands/lint.
+
+**Every schema is built with TypeBox and every type is derived from it** — see
+[Schemas are TypeBox](#schemas-are-typebox). Read that before editing anything under
+`src/definitions/`.
 
 ## Public API (`src/index.ts`)
 
-- **`validate(boundary, schema, data)`** — compiles (TypeBox → AJV) and asserts; throws
+- **`validate(boundary, schema, data)`** — compiles the JSON Schema with AJV and asserts; throws
   `TulipFarmValidationError` carrying the `boundary` + the instance `path`.
 - **`ajv`** — the shared `Ajv2020` instance (`strict: false`, `allErrors: true`).
 - **`applyTransforms`** + **`validateResourceSchema`** — resource `x-*` keyword handling.
@@ -48,6 +52,69 @@ See root `AGENTS.md` for commands/lint.
   by the same `callId` — so a turn with several calls in flight can be rendered from the stream
   alone, without a reader guessing which one an approval is about.
 
+## Schemas are TypeBox
+
+Every schema in this package is built with **TypeBox**, and every type describing a validated value
+is derived from its schema with `Static<>`. A schema and its type are never both written by hand.
+
+```ts
+const agentSpecSchema = Type.Object({ /* ... */ }, { additionalProperties: false });
+
+export const AgentDefinitionSchema = definitionSchema("Agent", agentSpecSchema);
+export const AGENT_DEFINITION = definitionRegistration("Agent", AgentDefinitionSchema);
+
+export type AgentDefinition = Static<typeof AgentDefinitionSchema>;
+export type AgentSpec = AgentDefinition["spec"];
+```
+
+### Why this rule exists
+
+Nine of these files used to declare a plain JSON Schema object literal *and* a separate
+hand-written `interface` for the same shape, with **nothing binding the two**. Editing one and not
+the other compiled cleanly and shipped a type that lied about what validation accepted. Deriving
+the type removes the possibility rather than relying on review to catch it.
+
+`definitionSchema()` is generic over `TSchema` specifically so a plain literal is a **compile
+error**, not a silent downgrade. Do not defeat that with a cast.
+
+### Patterns
+
+- Optional property → `Type.Optional(...)`. Never hand-write a `required` array: TypeBox derives it
+  from which properties are not optional.
+- **Enums are the trap.** `Type.Union([Type.Literal("a"), ...])` emits `anyOf`, which is a
+  *different schema*. To keep the `enum` form, use `Type.Unsafe` over a literal, deriving both the
+  type argument and the array from the same `as const` array so there is still one source of truth:
+
+  ```ts
+  Type.Unsafe<MemoryScope>({ type: "string", enum: [...MEMORY_SCOPES] })
+  ```
+
+- `Type.Unsafe<T>` is the escape hatch for shapes TypeBox has no constructor for (`if`/`then`,
+  hand-assembled `allOf`). It asserts rather than derives, so keep its scope as small as possible
+  and always base `T` on the same constants the literal uses.
+
+### The safety net
+
+`src/definitions/__schemas__/<Kind>.json` records the exact JSON Schema each kind registers, one
+file per kind, plus `_kinds.json` guarding the set itself (a dropped kind would otherwise take its
+`it.each` case with it and "pass" by never running). `schema-snapshot.test.ts` regenerates from the
+TypeBox source and asserts against them on every run.
+
+**These are vitest file snapshots, not build output.** Nothing imports them; they are not in the
+shipped package. Never hand-edit one — edit the TypeBox schema and re-lock.
+
+They exist because the emitted JSON does not always follow obviously from the source: `Type.Union`
+emits `anyOf` where `Type.Unsafe<T>({type:"string",enum:[...]})` emits `enum`, and `Type.Literal`
+adds a `type` alongside `const`. A source diff can look innocuous while the wire contract moves.
+
+That matters because these schemas are not internal implementation — operators' Soul repositories
+already hold artifacts validated against them, with digests recorded. **A diff here is a
+compatibility event**, to be justified in review, not regenerated away:
+
+```bash
+pnpm --filter @tulipfarm/schema test -u    # re-lock, then read the diff before accepting it
+```
+
 ## Boundaries
 
 7 error-tagging contexts: `soul`, `resource`, `api`, `agent`, `llm`, `event`, `integration`.
@@ -63,6 +130,9 @@ See root `AGENTS.md` for commands/lint.
 
 ## How to extend
 
+- **New definition kind:** add `src/definitions/<kind>.ts` following the TypeBox pattern above,
+  register it in `definitions/index.ts`, then re-lock the snapshots with `test -u` (this writes a
+  new `__schemas__/<Kind>.json` and updates `_kinds.json`).
 - **New normalizer:** add the key to `NORMALIZER_KEYS` *and* its fn to the map in
   `transforms/normalizers.ts`.
 - **New computed fn:** add the key to `COMPUTED_FN_KEYS` *and* its async fn in

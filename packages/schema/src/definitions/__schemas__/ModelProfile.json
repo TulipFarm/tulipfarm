@@ -1,0 +1,222 @@
+{
+  "$id": "tulipfarm.ai/v1/ModelProfile",
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "const": "tulipfarm.ai/v1",
+      "type": "string"
+    },
+    "kind": {
+      "const": "ModelProfile",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": false,
+      "properties": {
+        "authoredVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "displayName": {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^([0-9A-HJKMNP-TV-Z]{26}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "draft",
+            "validated",
+            "simulated",
+            "approved",
+            "published",
+            "active",
+            "retired"
+          ],
+          "type": "string"
+        },
+        "publishedDigest": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "slug": {
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "slug",
+        "schemaVersion",
+        "authoredVersion",
+        "lifecycle"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "additionalProperties": false,
+      "properties": {
+        "allowCaching": {
+          "type": "boolean"
+        },
+        "budgets": {
+          "additionalProperties": false,
+          "properties": {
+            "maxCostUsd": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxTokens": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "capabilityClass": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "connection": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "constraints": {
+          "additionalProperties": false,
+          "properties": {
+            "allowTraining": {
+              "type": "boolean"
+            },
+            "dataRetention": {
+              "enum": [
+                "none",
+                "zero_retention",
+                "provider_default"
+              ],
+              "type": "string"
+            },
+            "maxCostUsd": {
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxLatencyMs": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "maxTokens": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "residency": {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "fallbacks": {
+          "items": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "model": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "type": "string"
+        },
+        "reasoning": {
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "type": "string"
+        },
+        "supports": {
+          "additionalProperties": false,
+          "properties": {
+            "contextWindowTokens": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "inputModalities": {
+              "items": {
+                "enum": [
+                  "text",
+                  "image",
+                  "audio",
+                  "video"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "outputModalities": {
+              "items": {
+                "enum": [
+                  "text",
+                  "image",
+                  "audio",
+                  "video"
+                ],
+                "type": "string"
+              },
+              "type": "array",
+              "uniqueItems": true
+            },
+            "structuredOutput": {
+              "type": "boolean"
+            },
+            "tools": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "tools",
+            "structuredOutput",
+            "contextWindowTokens"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "reasoning",
+        "supports",
+        "allowCaching"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
+  "type": "object"
+}

@@ -6,6 +6,7 @@ import {
   compileRoutine,
   type IdentityCeiling,
   RoutineCompileError,
+  stateFields,
 } from "./compiler";
 
 /**
@@ -89,7 +90,7 @@ export interface ChildPlanEnvelope {
 }
 
 function refName(state: routineSchema.RoutineState, key: string): string | null {
-  const value = state[key];
+  const value = stateFields(state)[key];
   if (typeof value !== "object" || value === null) return null;
   const name = (value as Record<string, unknown>).name;
   return typeof name === "string" ? name : null;
@@ -123,7 +124,7 @@ export function compileGeneratedChildPlan(
       throw new RoutineCompileError("tool_not_permitted", `${path}/toolRef`);
     }
     for (const [key, ceiling] of Object.entries(envelope.bounds)) {
-      const value = state[key];
+      const value = stateFields(state)[key];
       if (typeof value === "number" && typeof ceiling === "number" && value > ceiling) {
         throw new RoutineCompileError("bound_exceeds_ceiling", `${path}/${key}`);
       }
