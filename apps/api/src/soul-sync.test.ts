@@ -41,6 +41,27 @@ describe("registerSoulSync", () => {
     clearInterval(interval);
   });
 
+  it("reconciles the active bundle to HEAD after each pull", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const syncer = {
+      syncOnce: vi.fn(async () => {
+        order.push("sync");
+      }),
+    };
+    const reconcile = vi.fn(async () => {
+      order.push("reconcile");
+    });
+
+    const interval = registerSoulSync(syncer, REMOTE, { reconcile });
+    await vi.advanceTimersByTimeAsync(SOUL_SYNC_INTERVAL_MS);
+
+    expect(syncer.syncOnce).toHaveBeenCalledOnce();
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(order).toEqual(["sync", "reconcile"]);
+    clearInterval(interval);
+  });
+
   it("registers nothing when no git remote is configured", async () => {
     vi.useFakeTimers();
     const syncer = { syncOnce: vi.fn(async () => {}) };

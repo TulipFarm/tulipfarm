@@ -22,6 +22,7 @@ export interface MetricsSink {
   recordToolCall(d: { toolName: string; status: string }): void;
   recordTurn(d: { status: string }): void;
   recordJob(d: { queue: string; status: string }): void;
+  recordSoulPublication?(d: { status: string; stage: string; latencyMs?: number }): void;
   recordSurface?(d: {
     target: string;
     component: string;
@@ -70,8 +71,34 @@ class Counter {
     if (existing) existing.value += value;
     else if (this.points.size < MAX_LABEL_SETS) this.points.set(key, { labels, value });
   }
+
   snapshot(): Point[] {
     return [...this.points.values()];
+  }
+}
+
+class Histogram {
+  private points = new Map<string, Point>();
+  private counts = new Map<string, number>();
+
+  record(labels: LabelSet, value: number): void {
+    if (!Number.isFinite(value)) return;
+    const key = labelKey(labels);
+    const existing = this.points.get(key);
+    if (existing) {
+      existing.value += value;
+      this.counts.set(key, (this.counts.get(key) ?? 0) + 1);
+    } else if (this.points.size < MAX_LABEL_SETS) {
+      this.points.set(key, { labels, value });
+      this.counts.set(key, 1);
+    }
+  }
+
+  snapshot(): Array<Point & { count: number }> {
+    return [...this.points.entries()].map(([key, point]) => ({
+      ...point,
+      count: this.counts.get(key) ?? 0,
+    }));
   }
 }
 
@@ -91,10 +118,14 @@ export class OtlpMetricsExporter implements MetricsSink {
     tool_calls_total: new Counter(),
     turns_total: new Counter(),
     job_runs_total: new Counter(),
+    soul_publication_outcomes_total: new Counter(),
     surface_render_total: new Counter(),
     surface_validation_total: new Counter(),
     surface_interaction_total: new Counter(),
     surface_delivery_total: new Counter(),
+  };
+  private readonly histograms: Record<string, Histogram> = {
+    soul_publication_latency_ms: new Histogram(),
   };
   private timer: ReturnType<typeof setInterval> | null = null;
   private readonly startUnixNano: string;
@@ -134,6 +165,14 @@ export class OtlpMetricsExporter implements MetricsSink {
     this.counters.job_runs_total.add({ queue: d.queue, status: d.status });
   }
 
+  recordSoulPublication(d: { status: string; stage: string; latencyMs?: number }): void {
+    const labels = { status: d.status, stage: d.stage };
+    this.counters.soul_publication_outcomes_total.add(labels);
+    if (d.latencyMs !== undefined) {
+      this.histograms.soul_publication_latency_ms.record(labels, d.latencyMs);
+    }
+  }
+
   recordSurface(d: {
     target: string;
     component: string;
@@ -165,7 +204,7 @@ export class OtlpMetricsExporter implements MetricsSink {
   /** Build the OTLP/JSON ExportMetricsServiceRequest for the current cumulative totals. */
   buildPayload(): Record<string, unknown> {
     const timeUnixNano = unixNano(this.nowMs());
-    const metrics = Object.entries(this.counters)
+    const sums = Object.entries(this.counters)
       .map(([name, counter]) => ({
         name,
         sum: {
@@ -183,6 +222,25 @@ export class OtlpMetricsExporter implements MetricsSink {
         },
       }))
       .filter((m) => (m.sum.dataPoints as unknown[]).length > 0);
+    const histograms = Object.entries(this.histograms)
+      .map(([name, histogram]) => ({
+        name,
+        histogram: {
+          aggregationTemporality: 2, // CUMULATIVE
+          dataPoints: histogram.snapshot().map((p) => ({
+            attributes: Object.entries(p.labels).map(([key, v]) => ({
+              key,
+              value: { stringValue: v },
+            })),
+            startTimeUnixNano: this.startUnixNano,
+            timeUnixNano,
+            count: p.count,
+            sum: p.value,
+          })),
+        },
+      }))
+      .filter((m) => (m.histogram.dataPoints as unknown[]).length > 0);
+    const metrics = [...sums, ...histograms];
 
     return {
       resourceMetrics: [

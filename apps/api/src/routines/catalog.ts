@@ -1,4 +1,4 @@
-import type { BundleSigner, SoulPublicationCoordinator } from "@tulipfarm/soul";
+import type { BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
 
 type ActiveBundleReader = Pick<SoulPublicationCoordinator, "activeBundle">;
 
@@ -41,12 +41,12 @@ function triggerSummary(spec: Record<string, unknown>): string {
 export class ActiveRoutineCatalog implements RoutineCatalog {
   constructor(
     private readonly publications: ActiveBundleReader,
-    private readonly signer: BundleSigner,
+    private readonly verifier: BundleVerifier,
     private readonly businessId: string
   ) {}
 
   async list(): Promise<RoutineCatalogItem[]> {
-    const bundle = await this.publications.activeBundle(this.businessId, this.signer);
+    const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
     if (!bundle) return [];
 
     const triggersByRoutine = new Map<string, RoutineCatalogTrigger[]>();

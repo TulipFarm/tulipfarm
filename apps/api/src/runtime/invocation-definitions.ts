@@ -8,7 +8,7 @@ import {
   type WebhookVerificationMethod,
 } from "@tulipfarm/run-kernel";
 import { definitions } from "@tulipfarm/schema";
-import type { BundleSigner, SoulPublicationCoordinator } from "@tulipfarm/soul";
+import type { BundleVerifier, SoulPublicationCoordinator } from "@tulipfarm/soul";
 
 const ROUTINE_DEFINITION_PREFIX = "published:routine:";
 
@@ -44,7 +44,7 @@ function mapInputMappings(raw: unknown): Record<string, string> | undefined | nu
 export class ActiveRoutineInvocationResolver implements RoutineInvocationResolver {
   constructor(
     private readonly publications: ActiveBundleReader,
-    private readonly signer: BundleSigner
+    private readonly verifier: BundleVerifier
   ) {}
 
   async resolve(input: {
@@ -55,7 +55,7 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
     const slug = input.definitionRef.slice(ROUTINE_DEFINITION_PREFIX.length);
     if (slug.length === 0) return undefined;
 
-    const bundle = await this.publications.activeBundle(input.businessId, this.signer);
+    const bundle = await this.publications.activeBundle(input.businessId, this.verifier);
     const definition = bundle?.get("Routine", slug);
     if (!bundle || !definition) return undefined;
 
@@ -102,14 +102,14 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
 export class ActiveTriggerInvocationResolver {
   constructor(
     private readonly publications: ActiveBundleReader,
-    private readonly signer: BundleSigner,
+    private readonly verifier: BundleVerifier,
     private readonly businessId: string
   ) {}
 
   async resolveTrigger(slug: string): Promise<RegisteredTrigger | null> {
     if (slug.length === 0) return null;
 
-    const bundle = await this.publications.activeBundle(this.businessId, this.signer);
+    const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
     const definition = bundle?.get("Trigger", slug);
     if (!bundle || !definition) return null;
 
@@ -181,14 +181,14 @@ export class ActiveTriggerInvocationResolver {
 export class ActiveWebhookTriggerResolver {
   constructor(
     private readonly publications: ActiveBundleReader,
-    private readonly signer: BundleSigner,
+    private readonly verifier: BundleVerifier,
     private readonly businessId: string
   ) {}
 
   async resolveTrigger(provider: string, triggerSlug: string): Promise<WebhookTrigger | null> {
     if (provider.length === 0 || triggerSlug.length === 0) return null;
 
-    const bundle = await this.publications.activeBundle(this.businessId, this.signer);
+    const bundle = await this.publications.activeBundle(this.businessId, this.verifier);
     const definition = bundle?.get("Trigger", triggerSlug);
     if (!bundle || !definition) return null;
 

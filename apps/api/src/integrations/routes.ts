@@ -17,6 +17,7 @@ import { stringify as stringifyYaml } from "yaml";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
+import { commitActorFromRequest } from "../soul/commit-actor";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
 import { brandIcon } from "./brand-icon";
@@ -378,6 +379,7 @@ export function registerIntegrationRoutes(
             manifest: entry.manifest,
             patch: env,
             commitMessage: `soul: connect integration ${name}`,
+            actor: commitActorFromRequest(req),
           }
         ));
       } catch (error) {
@@ -433,7 +435,7 @@ export function registerIntegrationRoutes(
         stringifyYaml({ enabled: false, env: soulEntry.connection?.env ?? {} }),
         "utf8"
       );
-      await gitSync.withSync(`soul: disconnect integration ${name}`);
+      await gitSync.withSync(`soul: disconnect integration ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       // An agent must not keep calling a provider whose credential the operator just revoked.
       const revoked = declarativeTools?.sync();
@@ -470,7 +472,7 @@ export function registerIntegrationRoutes(
         delete lock.integrations[name];
         await writeIntegrationLock(gitSync.path, lock);
       }
-      await gitSync.withSync(`soul: remove integration ${name}`);
+      await gitSync.withSync(`soul: remove integration ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       declarativeTools?.sync();
       await auditWrite(req, "integration.remove", `integration:${name}`, { secretsDeleted: true });

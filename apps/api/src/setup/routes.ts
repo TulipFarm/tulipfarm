@@ -12,6 +12,7 @@ import { ErrorSchema, PublicUserSchema } from "../auth/schemas";
 import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
+import { commitActorFromRequest } from "../soul/commit-actor";
 import { isHeadlessBoot } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
@@ -236,7 +237,9 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         businessDescription: description,
         businessWebsite: website,
       });
-      await gitSync.commit("chore: set business profile").catch(() => {});
+      await gitSync
+        .commit("chore: set business profile", commitActorFromRequest(req))
+        .catch(() => {});
       return reply.code(204).send();
     }
   );
@@ -366,9 +369,11 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
         },
       },
     },
-    async (_req, reply) => {
+    async (req, reply) => {
       await patchSoulConfig(soulPath, { setupComplete: true });
-      await gitSync.commit("chore: complete first-run setup").catch(() => {});
+      await gitSync
+        .commit("chore: complete first-run setup", commitActorFromRequest(req))
+        .catch(() => {});
       return reply.code(204).send();
     }
   );

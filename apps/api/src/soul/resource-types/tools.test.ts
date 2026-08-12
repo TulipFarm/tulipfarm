@@ -93,7 +93,7 @@ describe("create_resource_type", () => {
       VALID_SCHEMA_YAML,
       "utf8"
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add resource type ticket");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add resource type ticket", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
   });
@@ -252,7 +252,10 @@ describe("resource_type_update", () => {
       UPDATED_YAML,
       "utf8"
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update resource type ticket");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
+      "soul: update resource type ticket",
+      undefined
+    );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
   });
@@ -300,7 +303,10 @@ describe("create_resource_hooks", () => {
 
     expect(res).toEqual({ success: true, data: { name: "ticket", hasHooks: true } });
     expect(writeFile).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"), VALID_HOOK, "utf8");
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add hooks for resource type ticket");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
+      "soul: add hooks for resource type ticket",
+      undefined
+    );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
@@ -414,7 +420,8 @@ describe("resource_hooks_delete", () => {
     expect(res).toEqual({ success: true, data: { name: "ticket", hasHooks: false } });
     expect(unlink).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"));
     expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
-      "soul: remove hooks for resource type ticket"
+      "soul: remove hooks for resource type ticket",
+      undefined
     );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });

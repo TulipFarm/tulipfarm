@@ -28,13 +28,17 @@ import {
   SecretsService,
 } from "@tulipfarm/secrets";
 import {
+  type CommitActor,
   type CredentialProvider,
+  compileExecutionBundle,
+  GitSoulTreeReader,
   GitSyncService,
   PgBundleStore,
   resolveSoulPath,
   runSoulMigrations,
   SoulLoader,
   SoulPublicationCoordinator,
+  SoulPublisher,
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
@@ -56,7 +60,7 @@ import { PgBoss } from "pg-boss";
 import { subscribeActivityLogging } from "./activity/events";
 import { PgActivityRepo } from "./activity/repo";
 import { ActivityService } from "./activity/service";
-import { llmProbe, postgresProbe, queueProbe, soulProbe } from "./admin/health";
+import { type HealthProbe, llmProbe, postgresProbe, queueProbe, soulProbe } from "./admin/health";
 import { OperationalNotImplementedError } from "./admin/routes";
 import { createRunReader } from "./admin/run-reader";
 import { createRuntimeOperationalApi } from "./admin/runtime";
@@ -69,6 +73,7 @@ import { PgAuditEventRepo } from "./audit/repo";
 import { AuditService } from "./audit/service";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { PgUserInviteRepo } from "./auth/invites";
+import { makeRequireAuth } from "./auth/middleware";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
@@ -77,6 +82,7 @@ import { PgConversationStore } from "./conversations/store.pg";
 import {
   ambientTransactionPort,
   connectPg,
+  type Queryable,
   runtimePoolOptions,
   startRuntimePool,
   transactionPort,
@@ -169,7 +175,11 @@ import {
   ActiveTriggerInvocationResolver,
   ActiveWebhookTriggerResolver,
 } from "./runtime/invocation-definitions";
-import { resolveSoulBundleSigner } from "./runtime/soul-bundle-signer";
+import {
+  resolveSoulBundleSigner,
+  resolveSoulBundleVerifier,
+  type SoulBundleKeyStore,
+} from "./runtime/soul-bundle-signer";
 import { ScheduleDispatcher } from "./schedule/dispatcher";
 import { registerScheduleDispatch } from "./schedule/register";
 import { RoutineScheduleStateStore } from "./schedule/state-store";
@@ -186,6 +196,7 @@ import {
 } from "./setup/worker-credential";
 import { createGitHubSoulCredentialProvider } from "./soul/github-repo-credential";
 import { loadBundledIntegrations } from "./soul/integrations/bundled";
+import { registerSoulPublicationRoutes } from "./soul/publication-routes";
 import { loadBundledSkills, loadDisabledBundledSkills } from "./soul/skills/bundled";
 import { registerSoulSync } from "./soul-sync";
 import { PgSurfaceActionStore } from "./surfaces/action-store";
@@ -218,6 +229,128 @@ const secretsBootstrap = ((): BootstrapSecretsResult => {
 validateEnvironment();
 
 const port = Number.parseInt(process.env.PORT || "4010", 10);
+// Fallback actor for genuinely system-initiated Soul commits (format migrations, tool writes with
+// no request actor). Deliberately synthetic so the activation ledger never mistakes it for a user.
+const SYSTEM_SOUL_COMMIT_ACTOR: CommitActor = {
+  principalId: "service:tulipfarm-system",
+  name: "TulipFarm (system)",
+  email: "",
+};
+// Attribution for reconciliation publications — HEAD that moved by boot or remote sync, not by a
+// local user write — so a GitHub author's change is not credited to the API.
+const SOUL_SYNC_COMMIT_ACTOR: CommitActor = {
+  principalId: "service:tulipfarm-soul-sync",
+  name: "TulipFarm Soul Sync",
+  email: "",
+};
+const SOUL_BUNDLE_KEY_PROVISIONING_LOCK = "tulipfarm:soul-bundle-key-provisioning";
+
+function soulBundleKeyStore(
+  secretsService: SecretsService,
+  database: Queryable
+): SoulBundleKeyStore {
+  return {
+    list: () => secretsService.list(),
+    get: (key) => secretsService.get(key),
+    set: (key, plaintext, type) => secretsService.set(key, plaintext, type),
+    withProvisioningLock: (operation) =>
+      withTransaction(database, async (tx) => {
+        await tx.query("SELECT pg_advisory_xact_lock(hashtext($1))", [
+          SOUL_BUNDLE_KEY_PROVISIONING_LOCK,
+        ]);
+        return operation();
+      }),
+  };
+}
+
+function numberFrom(value: unknown): number {
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function dateMs(value: unknown): number | undefined {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value !== "string") return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function soulPublicationProbe(database: Queryable): HealthProbe {
+  return {
+    component: "soul-publication",
+    async check() {
+      const result = await database.query(
+        `
+          WITH stats AS (
+            SELECT
+              COUNT(*) FILTER (WHERE dead_lettered_at IS NOT NULL) AS dead_lettered_count,
+              MAX(publication_sequence) AS newest_sequence
+            FROM soul_publications
+            WHERE business_id = $1
+          ),
+          newest AS (
+            SELECT created_at, publication_sequence
+            FROM soul_publications
+            WHERE business_id = $1
+            ORDER BY publication_sequence DESC
+            LIMIT 1
+          ),
+          active_publication AS (
+            SELECT p.created_at, p.publication_sequence
+            FROM soul_active_bundles active
+            JOIN soul_publications p
+              ON p.business_id = active.business_id
+             AND p.digest = active.digest
+            WHERE active.business_id = $1
+            ORDER BY p.publication_sequence DESC
+            LIMIT 1
+          )
+          SELECT
+            stats.dead_lettered_count,
+            stats.newest_sequence,
+            newest.created_at AS newest_created_at,
+            newest.publication_sequence AS newest_publication_sequence,
+            active_publication.created_at AS active_created_at,
+            active_publication.publication_sequence AS active_publication_sequence
+          FROM stats
+          LEFT JOIN newest ON true
+          LEFT JOIN active_publication ON true
+        `,
+        [DEPLOYMENT_BUSINESS_ID]
+      );
+      const row = result.rows[0] as Record<string, unknown> | undefined;
+      const deadLetteredCount = numberFrom(row?.dead_lettered_count);
+      const newestSequence = numberFrom(row?.newest_publication_sequence);
+      const activeSequence = numberFrom(row?.active_publication_sequence);
+      const newestCreatedMs = dateMs(row?.newest_created_at);
+      const activeCreatedMs = dateMs(row?.active_created_at);
+      const activeLagMs =
+        newestCreatedMs !== undefined && activeCreatedMs !== undefined
+          ? Math.max(0, newestCreatedMs - activeCreatedMs)
+          : undefined;
+
+      if (newestSequence === 0) {
+        return { status: "degraded", detail: "no Soul publication has been recorded" };
+      }
+      if (activeSequence === 0) {
+        return {
+          status: "degraded",
+          detail: `dead-lettered ${deadLetteredCount}, no active Soul bundle`,
+        };
+      }
+      const detail = `dead-lettered ${deadLetteredCount}, active lag ${activeLagMs ?? 0}ms`;
+      if (deadLetteredCount > 0 || activeSequence < newestSequence) {
+        return { status: "degraded", detail };
+      }
+      return { status: "ok", detail };
+    },
+  };
+}
 
 async function boot() {
   try {
@@ -280,7 +413,42 @@ async function boot() {
         : async () => undefined;
     }
 
-    const gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console);
+    const runTransactions = transactionPort(pool);
+    const bundleKeys = soulBundleKeyStore(secretsService, pool);
+    const soulBundleSigner = await resolveSoulBundleSigner(bundleKeys);
+    const soulBundleVerifier = await resolveSoulBundleVerifier(secretsService);
+    const soulPublications = new SoulPublicationCoordinator(
+      new PgSoulPublicationStore(runTransactions),
+      new PgBundleStore(runTransactions),
+      console
+    );
+    let gitSync: GitSyncService;
+    const soulPublisher = new SoulPublisher({
+      treeReader: new GitSoulTreeReader(soulPath),
+      compiler: compileExecutionBundle,
+      signer: soulBundleSigner,
+      coordinator: soulPublications,
+      logger: console,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      gitState: {
+        headSha: () => gitSync.headSha(),
+        hasCommit: (sha) => gitSync.hasCommit(sha),
+      },
+      activeCommitSha: async (businessId) => {
+        try {
+          return (await soulPublications.activeBundle(businessId, soulBundleVerifier))?.commitSha;
+        } catch (err) {
+          console.error(
+            `Soul: could not read active bundle for reconcile (${err instanceof Error ? err.message : String(err)}) — treating as unpublished`
+          );
+          return undefined;
+        }
+      },
+    });
+    gitSync = new GitSyncService(soulPath, gitRemoteUrl, gitCredentialProvider, console, {
+      committedTreePublisher: soulPublisher,
+      defaultCommitActor: () => SYSTEM_SOUL_COMMIT_ACTOR,
+    });
     // A stale/invalid remote (revoked PAT, unreachable host) must never crash-loop boot — fall
     // back to whatever soul state is already on disk and keep serving. `configureRemote` (the
     // Business → Soul PUT route) still throws on the same failure so the user sees it there.
@@ -289,6 +457,17 @@ async function boot() {
     } catch (err) {
       console.error(
         `Soul: boot sync with remote failed (${err instanceof Error ? err.message : String(err)}) — continuing with local soul state`
+      );
+    }
+
+    // Nothing published bundles before this producer existed, and remote-authored commits never
+    // fire the local commit hook — both leave `soul_active_bundles` behind git HEAD, with dead
+    // Routines/Triggers. Reconcile HEAD into the active bundle at boot. Never fatal, same as above.
+    try {
+      await soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR);
+    } catch (err) {
+      console.error(
+        `Soul: boot reconcile failed (${err instanceof Error ? err.message : String(err)}) — active bundle may lag HEAD until the next sync`
       );
     }
 
@@ -320,13 +499,6 @@ async function boot() {
     // One validator for the request boundary: the gateway rejects an unregistered schema reference
     // before minting a Run, and the same instance re-validates on publish and on every later read.
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
-    const runTransactions = transactionPort(pool);
-    const soulBundleSigner = await resolveSoulBundleSigner(secretsService);
-    const soulPublications = new SoulPublicationCoordinator(
-      new PgSoulPublicationStore(runTransactions),
-      new PgBundleStore(runTransactions),
-      console
-    );
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
         runTransactions,
@@ -337,7 +509,7 @@ async function boot() {
           )
       ),
       validator: invocationValidator,
-      routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleSigner),
+      routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
     // Ticks every `cron`/`interval`/`datetime` `x-triggers` entry across active Routines and starts
     // a Run for whatever's due. Lives here (not the Worker) since only this process holds the live
@@ -354,12 +526,12 @@ async function boot() {
     const events = new EventStore(runTransactions, randomUUID);
     const triggerDefinitions = new ActiveTriggerInvocationResolver(
       soulPublications,
-      soulBundleSigner,
+      soulBundleVerifier,
       DEPLOYMENT_BUSINESS_ID
     );
     const webhookTriggerDefinitions = new ActiveWebhookTriggerResolver(
       soulPublications,
-      soulBundleSigner,
+      soulBundleVerifier,
       DEPLOYMENT_BUSINESS_ID
     );
     // Same DEK `SecretsService` encrypts stored secrets with — no separate key material.
@@ -748,7 +920,7 @@ async function boot() {
       routineApprovals,
       routineCatalog: new ActiveRoutineCatalog(
         soulPublications,
-        soulBundleSigner,
+        soulBundleVerifier,
         DEPLOYMENT_BUSINESS_ID
       ),
       toolApprovals,
@@ -801,6 +973,7 @@ async function boot() {
           postgresProbe(pool),
           queueProbe(boss),
           soulProbe(gitSync),
+          soulPublicationProbe(pool),
           llmProbe(llmService),
         ],
         // Routine-state Approvals resume through the routine wake queue, which has no consumer
@@ -839,6 +1012,26 @@ async function boot() {
       },
     });
 
+    registerSoulPublicationRoutes(
+      app,
+      {
+        store: new PgSoulPublicationStore(runTransactions),
+        coordinator: soulPublications,
+        bundleStore: new PgBundleStore(runTransactions),
+        verifier: soulBundleVerifier,
+        audit: auditService,
+        logger: console,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        telemetry: createObservabilityTelemetryPort(observabilityService),
+      },
+      makeRequireAuth({
+        store: sessionStore,
+        userRepo,
+        tokenRepo,
+        apiClientRepo,
+      })
+    );
+
     // Init after buildApp so fallback events log through Fastify's Pino logger.
     declarativeTools.sync();
     await llmService.init(soulLoader.llmConfig, secretsService, app.log);
@@ -872,6 +1065,7 @@ async function boot() {
       activity: activityService,
       soulLoader,
       log: app.log,
+      reconcile: () => soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR),
     });
     await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
@@ -928,6 +1122,36 @@ async function boot() {
       traces: tracesSink,
       captureContent: obsConfig.captureContent,
     });
+    const drainSoulPublications = async (consumer: string, max = 10): Promise<void> => {
+      const outcomes = await soulPublications.drain(consumer, max);
+      for (const outcome of outcomes) {
+        metricsSink?.recordSoulPublication?.({
+          status: outcome.status,
+          stage: outcome.stage,
+          latencyMs: outcome.latencyMs,
+        });
+      }
+    };
+    await drainSoulPublications("api.soul-publication.boot", 100).catch((err) => {
+      app.log.error(
+        `Soul publication boot drain failed — ${err instanceof Error ? err.message : String(err)}`
+      );
+    });
+    let soulDrainRunning = false;
+    const soulPublicationDrainInterval = setInterval(() => {
+      if (soulDrainRunning) return;
+      soulDrainRunning = true;
+      void drainSoulPublications("api.soul-publication.loop")
+        .catch((err) => {
+          app.log.error(
+            `Soul publication drain failed — ${err instanceof Error ? err.message : String(err)}`
+          );
+        })
+        .finally(() => {
+          soulDrainRunning = false;
+        });
+    }, 5_000);
+    soulPublicationDrainInterval.unref?.();
     await registerConnectorSync(boss, {
       registry: buildDefaultRegistry(),
       state: new PgConnectorStateRepo(pool),
@@ -982,6 +1206,7 @@ async function boot() {
       force.unref();
       try {
         if (soulSyncInterval) clearInterval(soulSyncInterval);
+        clearInterval(soulPublicationDrainInterval);
         await app.close();
         await boss.stop({ graceful: false });
         // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.

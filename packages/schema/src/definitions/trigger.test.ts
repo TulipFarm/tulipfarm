@@ -49,11 +49,26 @@ describe("Trigger schema", () => {
       provider: "github",
       verification: {
         method: "hmac_sha256",
-        secretRef: "webhook.github.secret",
+        secretRef: "secret://webhook/github/secret",
         signatureHeader: "x-hub-signature-256",
       },
     });
     expect(() => validateTriggerDefinition(ok)).not.toThrow();
+  });
+
+  // A bare key is what the compiler refuses to put in an execution bundle. Accepting it here would
+  // make the Trigger authorable but unpublishable, and under auto-publish one such Trigger wedges
+  // every later Soul change behind it. The authoring and publication boundaries share one pattern.
+  it("rejects a bare secret key that is not a secret:// reference", () => {
+    const bare = base("webhook", {
+      provider: "github",
+      verification: {
+        method: "hmac_sha256",
+        secretRef: "webhook.github.secret",
+        signatureHeader: "x-hub-signature-256",
+      },
+    });
+    expect(() => validateTriggerDefinition(bare)).toThrow(SchemaValidationError);
   });
 
   it("rejects raw-provider masquerading: a webhook trigger without verification", () => {

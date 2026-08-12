@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
+import type { CommitActor } from "./commit-signing";
 import { hermeticGitEnv } from "./git-env";
 import { scaffoldSoul } from "./scaffold-soul";
 import type { Logger } from "./types";
@@ -18,12 +19,22 @@ const GIT_TIMEOUT_MS = 30_000;
  * every call — never cached by the caller, since installation tokens expire hourly. */
 export type CredentialProvider = () => Promise<string | undefined>;
 
+export interface SoulCommittedTreePublisher {
+  publishCommittedTree(input: { commitSha: string; actor: CommitActor }): Promise<void>;
+}
+
+export interface GitSyncServiceOptions {
+  readonly committedTreePublisher?: SoulCommittedTreePublisher;
+  readonly defaultCommitActor?: () => CommitActor | undefined;
+}
+
 export class GitSyncService extends EventEmitter {
   constructor(
     private readonly soulPath: string,
     private remoteUrl: string | undefined,
     private credentialProvider: CredentialProvider,
-    private readonly logger: Logger
+    private readonly logger: Logger,
+    private readonly options: GitSyncServiceOptions = {}
   ) {
     super();
   }
@@ -307,6 +318,24 @@ export class GitSyncService extends EventEmitter {
     return Number.parseInt(out.trim(), 10);
   }
 
+  /** Current HEAD sha, or `undefined` when the repo has no commits yet. Pure local read — no fetch. */
+  async headSha(): Promise<string | undefined> {
+    const git = await this.gitAt();
+    return git
+      .revparse(["HEAD"])
+      .then((sha) => sha.trim())
+      .catch(() => undefined);
+  }
+
+  /** Whether `sha` still resolves to a commit object in this repo. */
+  async hasCommit(sha: string): Promise<boolean> {
+    const git = await this.gitAt();
+    return git
+      .raw(["cat-file", "-e", `${sha}^{commit}`])
+      .then(() => true)
+      .catch(() => false);
+  }
+
   private async pull(): Promise<void> {
     const remoteUrl = this.remoteUrl;
     if (remoteUrl === undefined) return;
@@ -369,18 +398,24 @@ export class GitSyncService extends EventEmitter {
     await git.pull("origin", "main", ["--ff-only"]);
   }
 
-  async commit(message: string): Promise<{ sha: string; filesChanged: number }> {
+  async commit(
+    message: string,
+    actor?: CommitActor
+  ): Promise<{ sha: string; filesChanged: number }> {
     await this.ensureRepo();
     const git = await this.gitAt();
     await git.add("-A");
     const result = await git.commit(message);
-    return { sha: result.commit, filesChanged: result.summary.changes };
+    const committed = { sha: result.commit, filesChanged: result.summary.changes };
+    await this.afterSuccessfulCommit(committed, actor);
+    return committed;
   }
 
   /** Commit only migration-owned paths, preserving unrelated local Soul edits. */
   async commitPaths(
     message: string,
-    paths: readonly string[]
+    paths: readonly string[],
+    actor?: CommitActor
   ): Promise<{ sha: string; filesChanged: number }> {
     if (
       paths.length === 0 ||
@@ -399,7 +434,37 @@ export class GitSyncService extends EventEmitter {
     }
     if (changedPaths.length === 0) throw new Error("Soul: no migration-owned changes to commit");
     const result = await git.commit(message, changedPaths);
-    return { sha: result.commit, filesChanged: result.summary.changes };
+    const committed = { sha: result.commit, filesChanged: result.summary.changes };
+    await this.afterSuccessfulCommit(committed, actor);
+    return committed;
+  }
+
+  /**
+   * Every successful local commit path must flow through this one hook. `commitPaths` is not a
+   * wrapper around `commit`, so a third commit helper added later must call this too or it can
+   * silently bypass bundle publication and leave `soul_active_bundles` empty again.
+   */
+  private async afterSuccessfulCommit(
+    result: { sha: string; filesChanged: number },
+    actor: CommitActor | undefined
+  ): Promise<void> {
+    if (result.sha.length === 0 || result.filesChanged === 0) return;
+    const publisher = this.options.committedTreePublisher;
+    if (publisher === undefined) return;
+    const resolvedActor = actor ?? this.options.defaultCommitActor?.();
+    if (resolvedActor === undefined) {
+      this.logger.error(
+        `Soul: committed ${result.sha} but skipped bundle publication because no commit actor was supplied`
+      );
+      return;
+    }
+    try {
+      await publisher.publishCommittedTree({ commitSha: result.sha, actor: resolvedActor });
+    } catch (err) {
+      this.logger.error(
+        `Soul: committed ${result.sha} but bundle publication failed — ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
   }
 
   async push(): Promise<boolean> {
@@ -412,8 +477,11 @@ export class GitSyncService extends EventEmitter {
   }
 
   /** Commit then best-effort push (SOUL-V1-003). Push failure is logged, not thrown. */
-  async withSync(message: string): Promise<{ sha: string; filesChanged: number }> {
-    const result = await this.commit(message);
+  async withSync(
+    message: string,
+    actor?: CommitActor
+  ): Promise<{ sha: string; filesChanged: number }> {
+    const result = await this.commit(message, actor);
     if (this.remoteUrl) {
       try {
         await this.push();
@@ -429,9 +497,10 @@ export class GitSyncService extends EventEmitter {
   /** Scoped variant used by format migrations so later Settings commits never sweep their files. */
   async withSyncPaths(
     message: string,
-    paths: readonly string[]
+    paths: readonly string[],
+    actor?: CommitActor
   ): Promise<{ sha: string; filesChanged: number }> {
-    const result = await this.commitPaths(message, paths);
+    const result = await this.commitPaths(message, paths, actor);
     if (this.remoteUrl) {
       try {
         await this.push();

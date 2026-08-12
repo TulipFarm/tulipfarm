@@ -2,7 +2,7 @@ import type { LlmService } from "@tulipfarm/llm";
 import type { LlmConfig } from "@tulipfarm/schema";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { llmProviderForFieldKey } from "@tulipfarm/secrets";
-import type { GitSyncService, Logger, SoulLoader } from "@tulipfarm/soul";
+import type { CommitActor, GitSyncService, Logger, SoulLoader } from "@tulipfarm/soul";
 import { pruneLlmConfig } from "./prune";
 import { deleteLlmConfigFromSoulYaml, writeLlmConfigToSoulYaml } from "./soul-yaml-io";
 
@@ -26,8 +26,8 @@ export function makeLlmCascadeOnSecretDelete(
   llmService: LlmService,
   secretsService: SecretsService,
   logger: Logger
-): (deletedKey: string) => Promise<void> {
-  return async (deletedKey: string): Promise<void> => {
+): (deletedKey: string, actor: CommitActor) => Promise<void> {
+  return async (deletedKey: string, actor: CommitActor): Promise<void> => {
     const currentConfig = soulLoader.llmConfig as LlmConfig | undefined;
     if (!currentConfig) return;
 
@@ -47,7 +47,7 @@ export function makeLlmCascadeOnSecretDelete(
       await deleteLlmConfigFromSoulYaml(gitSync.path);
     }
 
-    await gitSync.withSync(commitMsg);
+    await gitSync.withSync(commitMsg, actor);
     await soulLoader.reload();
     await llmService.init(soulLoader.llmConfig, secretsService, logger);
 

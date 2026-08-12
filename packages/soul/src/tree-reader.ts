@@ -1,4 +1,10 @@
-import { type VersionedSchemaDocument, validateSoulConfig } from "@tulipfarm/schema";
+import {
+  type ClassifiedSoulPath,
+  type ContentMode,
+  classifySoulPath,
+  type VersionedSchemaDocument,
+  validateSoulConfig,
+} from "@tulipfarm/schema";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { parse as parseYaml } from "yaml";
 import type { BundleSourceFile } from "./compiler";
@@ -8,15 +14,60 @@ import { parseSoulFile } from "./parse";
 import type { SoulTreeReader } from "./publication";
 
 const COMMIT_SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
-const DEFINITION_FILE =
-  /(?:^|\/)(?:agent|skill)\.ya?ml$|^(?:tools|routines|triggers|roles|guardrails|knowledge|forms)\/[^/]+\.ya?ml$|^integrations\/.+\.ya?ml$/;
-const SKILL_COMPANION = /^skills\/[^/]+\/(?!skill\.ya?ml$).+$/;
+const BUNDLED_DEFINITION_CONTENT_MODES = new Set<ContentMode>([
+  "definition",
+  "legacy",
+  "delegated",
+]);
+const BUNDLED_FILE_CONTENT_MODES = new Set<ContentMode>(["prose", "executable", "delegated"]);
+
+// Bundle membership is a distribution decision: only machine-managed state stays out.
+// `temporalClass` is orthogonal — it selects which digest a reader uses. Pinned readers use the
+// Run's digest; live authority readers use the active digest. Invariant 2 in
+// docs/architecture/authorization-design.md is enforced by PinnedDefinitionLoader refusing live
+// kinds, not by excluding authority from the signed bundle distribution channel.
+function isBundledAuthoredContent(location: ClassifiedSoulPath): boolean {
+  return !location.modes.includes("managed");
+}
+
+export function isBundledDefinitionPath(path: string): boolean {
+  const location = classifySoulPath(path);
+  if (location === null) return false;
+  return (
+    location.definition &&
+    isBundledAuthoredContent(location) &&
+    location.modes.some((mode) => BUNDLED_DEFINITION_CONTENT_MODES.has(mode))
+  );
+}
+
+export function isBundledSourceFilePath(path: string): boolean {
+  const location = classifySoulPath(path);
+  if (location === null) return false;
+  return (
+    isBundledAuthoredContent(location) &&
+    location.modes.some((mode) => BUNDLED_FILE_CONTENT_MODES.has(mode))
+  );
+}
+
+function invalidDefinitionError(issue: NonNullable<ReturnType<typeof parseSoulFile>["issue"]>) {
+  const field = issue.field === undefined ? "" : ` at ${issue.field}`;
+  return new Error(`SOUL_DEFINITION_INVALID: ${issue.code} in ${issue.path}${field}`);
+}
 
 export class GitSoulTreeReader implements SoulTreeReader {
-  private readonly git: SimpleGit;
+  private handle: SimpleGit | undefined;
 
-  constructor(soulPath: string) {
-    this.git = simpleGit(soulPath).env(hermeticGitEnv());
+  constructor(private readonly soulPath: string) {}
+
+  /**
+   * simple-git throws from its own constructor when the directory does not yet exist, so the
+   * handle is bound on first read instead. The reader is constructed during wiring, before
+   * `GitSyncService.bootSync()` has created the Soul working copy on a fresh deployment; binding
+   * eagerly made that ordering a boot crash rather than a latent mistake.
+   */
+  private get git(): SimpleGit {
+    if (!this.handle) this.handle = simpleGit(this.soulPath).env(hermeticGitEnv());
+    return this.handle;
   }
 
   private async paths(commitSha: string): Promise<string[]> {
@@ -36,12 +87,13 @@ export class GitSoulTreeReader implements SoulTreeReader {
     const definitions: VersionedSchemaDocument[] = [];
     const paths = await this.paths(commitSha);
     for (const path of paths) {
-      if (!DEFINITION_FILE.test(path)) continue;
+      if (!isBundledDefinitionPath(path)) continue;
       const parsed = parseSoulFile({
         operation: "upsert",
         path,
         content: await this.content(commitSha, path),
       });
+      if (parsed.issue !== undefined) throw invalidDefinitionError(parsed.issue);
       if (parsed.parsed?.definition !== undefined) {
         definitions.push(parsed.parsed.definition.document);
       }
@@ -63,7 +115,7 @@ export class GitSoulTreeReader implements SoulTreeReader {
   async readFiles(commitSha: string): Promise<readonly BundleSourceFile[]> {
     const files: BundleSourceFile[] = [];
     for (const path of await this.paths(commitSha)) {
-      if (!SKILL_COMPANION.test(path)) continue;
+      if (!isBundledSourceFilePath(path)) continue;
       files.push({ path, content: await this.content(commitSha, path) });
     }
     return files;

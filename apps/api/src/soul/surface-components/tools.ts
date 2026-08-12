@@ -9,11 +9,12 @@ import {
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse, stringify } from "yaml";
-import { err, ok, type ToolCallResult } from "../../tools/types";
+import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types";
 
 export interface SurfaceComponentToolContext {
   readonly gitSync: GitSyncService;
   readonly surfaceSupport?: SurfaceComponentSupport;
+  readonly requestContext?: RequestContext;
 }
 
 export interface SurfaceComponentTool {
@@ -213,7 +214,10 @@ const create: SurfaceComponentTool = {
     }
     try {
       await writeComponent(context, value);
-      await context.gitSync.withSync(`soul: add Surface component ${value.slug}`);
+      await context.gitSync.withSync(
+        `soul: add Surface component ${value.slug}`,
+        context.requestContext?.actor
+      );
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
       return err("internal_error", reason(error));
@@ -235,7 +239,10 @@ const update: SurfaceComponentTool = {
     }
     try {
       await writeComponent(context, value);
-      await context.gitSync.withSync(`soul: update Surface component ${value.slug}`);
+      await context.gitSync.withSync(
+        `soul: update Surface component ${value.slug}`,
+        context.requestContext?.actor
+      );
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
       return err("internal_error", reason(error));

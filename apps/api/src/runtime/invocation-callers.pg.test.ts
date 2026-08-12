@@ -1,3 +1,4 @@
+import { generateKeyPairSync } from "node:crypto";
 import type { PGlite } from "@electric-sql/pglite";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import {
@@ -15,7 +16,8 @@ import {
 } from "@tulipfarm/schema";
 import {
   compileExecutionBundle,
-  createHmacBundleSigner,
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
   PgBundleStore,
   SoulPublicationCoordinator,
   signExecutionBundle,
@@ -77,7 +79,15 @@ describe("non-chat invocation callers", () => {
     await runPgMigrations(db as unknown as Queryable);
     validator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const transactions = transactionPort(db as unknown as Queryable);
-    const signer = createHmacBundleSigner("bundle-key-1", "secret");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const keyId = "bundle-key-1";
+    const signer = createEd25519BundleSigner(
+      keyId,
+      privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+    );
+    const verifier = createEd25519BundleVerifier([
+      { keyId, publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString() },
+    ]);
     const publications = new SoulPublicationCoordinator(
       new PgSoulPublicationStore(transactions),
       new PgBundleStore(transactions),
@@ -112,7 +122,10 @@ describe("non-chat invocation callers", () => {
         },
       ],
     });
-    await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+    await publications.publish({
+      bundle: signExecutionBundle(bundle, signer),
+      actor: { principalId: "user:test", name: "Test User", email: "test@example.com" },
+    });
     await publications.drain("test");
     invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
@@ -121,7 +134,7 @@ describe("non-chat invocation callers", () => {
           new ArtifactService(new ArtifactStore(ambientTransactionPort(transaction)), validator)
       ),
       validator,
-      routineDefinitions: new ActiveRoutineInvocationResolver(publications, signer),
+      routineDefinitions: new ActiveRoutineInvocationResolver(publications, verifier),
     });
   });
 

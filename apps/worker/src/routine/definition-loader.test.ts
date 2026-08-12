@@ -1,6 +1,8 @@
+import { generateKeyPairSync } from "node:crypto";
 import {
   compileExecutionBundle,
-  createHmacBundleSigner,
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
   InMemoryBundleStore,
   PinnedDefinitionLoader,
   signExecutionBundle,
@@ -9,7 +11,12 @@ import type { PersistedRun } from "@tulipfarm/storage";
 import { describe, expect, it } from "vitest";
 import { RoutineDefinitionLoadError, WorkerRoutineDefinitionLoader } from "./definition-loader";
 
-const signer = createHmacBundleSigner("bundle-key", "test-secret");
+const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+const keyId = "bundle-key";
+const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+const publicKeyPem = publicKey.export({ format: "pem", type: "spki" }).toString();
+const signer = createEd25519BundleSigner(keyId, privateKeyPem);
+const verifier = createEd25519BundleVerifier([{ keyId, publicKeyPem }]);
 
 function routine(lifecycle = "published") {
   return {
@@ -78,7 +85,7 @@ async function loader(document = routine()) {
   await bundles.put(record);
   return {
     record,
-    loader: new WorkerRoutineDefinitionLoader(new PinnedDefinitionLoader(bundles, signer)),
+    loader: new WorkerRoutineDefinitionLoader(new PinnedDefinitionLoader(bundles, verifier)),
   };
 }
 

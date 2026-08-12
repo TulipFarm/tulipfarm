@@ -1,4 +1,8 @@
 export type {
+  BundleExistsProbe,
+  InMemorySoulPublicationStoreOptions,
+  SoulBundleActivationInput,
+  SoulBundleActivationRecord,
   SoulDefinitionProjection,
   SoulPublicationOutboxMessage,
   SoulPublicationRecord,
@@ -11,4 +15,5 @@ export {
   PgSoulPublicationStore,
   SOUL_PUBLICATION_STAGES,
   SOUL_PUBLICATION_STORAGE_STATEMENTS,
+  StaleActivationError,
 } from "./publication-store";

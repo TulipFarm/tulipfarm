@@ -60,7 +60,7 @@ describe("routine_forge", () => {
     expect(readFileSync(join(soulPath, "routines", "daily-report", "hooks.ts"), "utf8")).toContain(
       "beforeHook"
     );
-    expect(withSync).toHaveBeenCalledWith("soul: forge routine daily-report");
+    expect(withSync).toHaveBeenCalledWith("soul: forge routine daily-report", undefined);
     expect(onRoutinesChanged).toHaveBeenCalledOnce();
   });
 

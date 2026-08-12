@@ -5,10 +5,15 @@ import {
   artifactLayout,
   classifySoulPath,
   companionPath,
+  DELEGATED_ARTIFACT_KINDS,
   definitionPath,
   isDefinitionKind,
+  isLiveKind,
+  isPinnedKind,
+  temporalClassOf,
   withinArtifactTree,
 } from "./artifacts";
+import { DEFINITION_KINDS } from "./definitions";
 
 describe("artifact layout table", () => {
   it("declares a unique kind and directory per artifact", () => {
@@ -40,6 +45,47 @@ describe("artifact layout table", () => {
     for (const layout of ARTIFACT_LAYOUTS) {
       expect(layout.directory === "").toBe(layout.scope === "singleton");
     }
+  });
+
+  it("declares a temporal class for every layout", () => {
+    for (const layout of ARTIFACT_LAYOUTS) {
+      expect(["pinned", "live"]).toContain(layout.temporalClass);
+      expect(temporalClassOf(layout.kind)).toBe(layout.temporalClass);
+    }
+  });
+
+  it("covers every artifact kind so a new kind must choose a temporal class", () => {
+    const allKinds = [...DEFINITION_KINDS, ...DELEGATED_ARTIFACT_KINDS].sort();
+    const layoutKinds = ARTIFACT_LAYOUTS.map((layout) => layout.kind).sort();
+
+    expect(layoutKinds).toEqual(allKinds);
+    for (const kind of allKinds) {
+      expect(artifactLayout(kind)?.temporalClass).toEqual(expect.stringMatching(/^(pinned|live)$/));
+    }
+  });
+});
+
+describe("artifact temporal classes", () => {
+  it("keeps authority live", () => {
+    expect(temporalClassOf("Role")).toBe("live");
+    expect(temporalClassOf("AccessGrant")).toBe("live");
+    expect(isLiveKind("Role")).toBe(true);
+    expect(isLiveKind("AccessGrant")).toBe(true);
+  });
+
+  it("keeps core behaviour pinned", () => {
+    expect(temporalClassOf("Routine")).toBe("pinned");
+    expect(temporalClassOf("ToolContract")).toBe("pinned");
+    expect(temporalClassOf("Guardrail")).toBe("pinned");
+    expect(isPinnedKind("Routine")).toBe(true);
+    expect(isPinnedKind("ToolContract")).toBe(true);
+    expect(isPinnedKind("Guardrail")).toBe(true);
+  });
+
+  it("fails closed for unknown kinds", () => {
+    expect(temporalClassOf("UnknownKind")).toBeNull();
+    expect(isPinnedKind("UnknownKind")).toBe(false);
+    expect(isLiveKind("UnknownKind")).toBe(false);
   });
 });
 

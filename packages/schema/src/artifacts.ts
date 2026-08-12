@@ -28,6 +28,20 @@ export type DelegatedArtifactKind = (typeof DELEGATED_ARTIFACT_KINDS)[number];
 export type ArtifactKind = DefinitionKind | DelegatedArtifactKind;
 
 /**
+ * Temporal semantics for Soul artifacts.
+ *
+ * ADR-008 makes bundles immutable so behaviour stays frozen for a Run, but
+ * `docs/architecture/authorization-design.md` Invariant 2 forbids doing that to authority:
+ * authorization is evaluated live, never from a Run-pinned copy. Otherwise a parked Run could keep
+ * using a Role or AccessGrant after an administrator revoked it.
+ *
+ * - `pinned` — behaviour/configuration read from the Run's bundle digest.
+ * - `live` — authority read from the current active version, so revocation reaches in-flight Runs.
+ */
+export const TEMPORAL_CLASSES = ["pinned", "live"] as const;
+export type TemporalClass = (typeof TEMPORAL_CLASSES)[number];
+
+/**
  * How a file's *content* may be checked. A path can admit more than one mode: during the migration
  * to the `apiVersion`/`kind` envelope, `routines/<slug>/routine.yaml` legitimately holds either
  * format, and `skills/<slug>/SKILL.md` is either a legacy definition (it has frontmatter) or plain
@@ -62,6 +76,7 @@ export interface ArtifactCompanion {
 
 export interface ArtifactLayout {
   readonly kind: ArtifactKind;
+  readonly temporalClass: TemporalClass;
   /** `singleton` lives at the tree root; `collection` lives under `<directory>/<slug>/`. */
   readonly scope: "collection" | "singleton";
   /** Empty for singletons. */
@@ -82,9 +97,10 @@ const HOOKS: ArtifactCompanion = { match: "hooks.ts", modes: ["executable"] };
  * exceptions. Uniformity is the point: the gateway, the loader, and the writers need no per-kind
  * path branching, and an artifact that later grows a companion does not force a layout migration.
  */
-export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
+const ARTIFACT_LAYOUT_ENTRIES = [
   {
     kind: "Settings",
+    temporalClass: "pinned",
     scope: "singleton",
     directory: "",
     definitionFile: "soul.yaml",
@@ -94,6 +110,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "GuardrailsPolicy",
+    temporalClass: "pinned",
     scope: "singleton",
     directory: "",
     definitionFile: "guardrails.yaml",
@@ -103,6 +120,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "ObservabilityConfig",
+    temporalClass: "pinned",
     scope: "singleton",
     directory: "",
     definitionFile: "observability.config.yaml",
@@ -112,6 +130,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "SkillsLock",
+    temporalClass: "pinned",
     scope: "singleton",
     directory: "",
     definitionFile: "skills-lock.json",
@@ -121,6 +140,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "IntegrationsLock",
+    temporalClass: "pinned",
     scope: "singleton",
     directory: "",
     definitionFile: "integrations-lock.json",
@@ -130,6 +150,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Agent",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "agents",
     definitionFile: "agent.yaml",
@@ -139,6 +160,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Skill",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "skills",
     definitionFile: "skill.yaml",
@@ -156,6 +178,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Resource",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "resources",
     definitionFile: "resource.yaml",
@@ -165,6 +188,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Routine",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "routines",
     definitionFile: "routine.yaml",
@@ -174,6 +198,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Integration",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "integrations",
     definitionFile: "integration.yaml",
@@ -190,6 +215,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "SurfaceComponent",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "surface-components",
     definitionFile: "component.yaml",
@@ -199,6 +225,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "ToolContract",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "tools",
     definitionFile: "tool.yaml",
@@ -208,6 +235,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "ModelProfile",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "model-profiles",
     definitionFile: "model-profile.yaml",
@@ -217,6 +245,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Trigger",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "triggers",
     definitionFile: "trigger.yaml",
@@ -226,6 +255,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Role",
+    temporalClass: "live",
     scope: "collection",
     directory: "roles",
     definitionFile: "role.yaml",
@@ -235,6 +265,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "AccessGrant",
+    temporalClass: "live",
     scope: "collection",
     directory: "access-grants",
     definitionFile: "access-grant.yaml",
@@ -244,6 +275,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Guardrail",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "guardrails",
     definitionFile: "guardrail.yaml",
@@ -253,6 +285,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "IntegrationAdapter",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "integration-adapters",
     definitionFile: "adapter.yaml",
@@ -262,6 +295,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "App",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "apps",
     definitionFile: "app.yaml",
@@ -271,6 +305,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "KnowledgeSource",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "knowledge",
     definitionFile: "knowledge-source.yaml",
@@ -280,6 +315,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "MemorySettings",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "memory",
     definitionFile: "memory-settings.yaml",
@@ -289,6 +325,7 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
   },
   {
     kind: "Form",
+    temporalClass: "pinned",
     scope: "collection",
     directory: "forms",
     definitionFile: "form.yaml",
@@ -296,7 +333,26 @@ export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = [
     legacyDefinitionFiles: [],
     companions: [],
   },
-];
+] as const satisfies readonly ArtifactLayout[];
+
+type DeclaredArtifactLayoutKind = (typeof ARTIFACT_LAYOUT_ENTRIES)[number]["kind"];
+type MissingArtifactLayoutKind = Exclude<ArtifactKind, DeclaredArtifactLayoutKind>;
+type ExtraArtifactLayoutKind = Exclude<DeclaredArtifactLayoutKind, ArtifactKind>;
+type ArtifactLayoutTotality = [MissingArtifactLayoutKind, ExtraArtifactLayoutKind] extends [
+  never,
+  never,
+]
+  ? true
+  : never;
+const _ARTIFACT_LAYOUT_TOTALITY: ArtifactLayoutTotality = true;
+type LayoutForTemporalClass<Class extends TemporalClass> = Extract<
+  (typeof ARTIFACT_LAYOUT_ENTRIES)[number],
+  { readonly temporalClass: Class }
+>;
+export type PinnedArtifactKind = LayoutForTemporalClass<"pinned">["kind"];
+export type LiveArtifactKind = LayoutForTemporalClass<"live">["kind"];
+
+export const ARTIFACT_LAYOUTS: readonly ArtifactLayout[] = ARTIFACT_LAYOUT_ENTRIES;
 
 const BY_KIND: ReadonlyMap<string, ArtifactLayout> = new Map(
   ARTIFACT_LAYOUTS.map((layout) => [layout.kind, layout])
@@ -323,6 +379,21 @@ export function isDefinitionKind(kind: string): kind is DefinitionKind {
 
 export function artifactLayout(kind: ArtifactKind): ArtifactLayout | undefined {
   return BY_KIND.get(kind);
+}
+
+/** Returns `null` for unknown kinds so callers can fail closed. */
+export function temporalClassOf(kind: string): TemporalClass | null {
+  return BY_KIND.get(kind)?.temporalClass ?? null;
+}
+
+/** True only for known artifact kinds that are safe to read from a Run-pinned bundle. */
+export function isPinnedKind(kind: string): kind is PinnedArtifactKind {
+  return temporalClassOf(kind) === "pinned";
+}
+
+/** True only for known artifact kinds that must be read from the live active version. */
+export function isLiveKind(kind: string): kind is LiveArtifactKind {
+  return temporalClassOf(kind) === "live";
 }
 
 /** Lowercase kebab-case, matching `definitionMetadataSchema`'s slug pattern. */

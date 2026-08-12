@@ -24,7 +24,7 @@ import {
   loadEncryptionKeys,
   PgDekRepo,
   PgSecretRepo,
-  SecretsService,
+  type SecretsService,
 } from "@tulipfarm/secrets";
 import { PgBundleStore } from "@tulipfarm/soul";
 import {
@@ -65,6 +65,7 @@ import { WorkerPinnedDefinitionReader } from "./routine/pinned-definitions";
 import { buildBundleSandboxAdapters } from "./routine/sandbox-tooling";
 import { BrokerRoutineToolPort } from "./routine/tool-port";
 import { RunDispatcher } from "./run-dispatcher";
+import { GuardedWorkerSecretsService } from "./secrets-guard";
 import { type DrainableLoop, drain } from "./shutdown";
 import { createChatExecutor } from "./turn/chat-executor";
 import { createIntegrationExecutor } from "./turn/integration-executor";
@@ -241,7 +242,7 @@ export async function main(): Promise<void> {
   let secretsService: Promise<SecretsService> | undefined;
   const secrets = async () =>
     (secretsService ??= (async () =>
-      new SecretsService(
+      new GuardedWorkerSecretsService(
         new PgSecretRepo(pool),
         await loadActiveDek(new PgDekRepo(pool), loadEncryptionKeys())
       ))());

@@ -31,6 +31,7 @@ import type { ActivityService } from "../../activity/service";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl, stripUrlCredentials } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
+import { commitActorFromRequest } from "../commit-actor";
 import {
   ALLOWED_SOURCE_HINT,
   cloneToTemp as cloneSourceToTemp,
@@ -808,7 +809,7 @@ export function registerSkillRoutes(
         `${JSON.stringify(lock, null, 2)}\n`,
         "utf8"
       );
-      await gitSync.withSync(`soul: remove skill ${name}`);
+      await gitSync.withSync(`soul: remove skill ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       await auditWrite(req, "skill.remove", `skill:${name}`, {
         bundled: bundledSkills.has(name),
@@ -1075,7 +1076,10 @@ export function registerSkillRoutes(
         "utf8"
       );
 
-      await gitSync.withSync(`soul: install skill(s) ${installed.join(", ")}`);
+      await gitSync.withSync(
+        `soul: install skill(s) ${installed.join(", ")}`,
+        commitActorFromRequest(req)
+      );
       await soulLoader.reload();
       await activity?.record({
         category: "skill",

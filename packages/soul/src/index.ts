@@ -72,7 +72,11 @@ export {
 } from "./converters/legacy-definitions";
 export type { SoulCommitRequest, SoulCommitResult, SoulGitStoreErrorCode } from "./git-store";
 export { SoulGitStore, SoulGitStoreError } from "./git-store";
-export type { CredentialProvider } from "./git-sync";
+export type {
+  CredentialProvider,
+  GitSyncServiceOptions,
+  SoulCommittedTreePublisher,
+} from "./git-sync";
 export { GitSyncService } from "./git-sync";
 export {
   authEnvNames,
@@ -90,31 +94,60 @@ export {
 } from "./integration-auth";
 export { validateThirdPartyManifest } from "./integration-trust";
 export type { SoulMigration } from "./migrations/index";
-export type { PinnedDefinition, PinnedDefinitionRef } from "./pinned-definition";
-export { PinnedDefinitionLoader } from "./pinned-definition";
 export type {
+  LiveAuthorityDefinitionReader,
+  LiveAuthorityDefinitionRef,
+  PinnedDefinition,
+  PinnedDefinitionRef,
+} from "./pinned-definition";
+export {
+  assertLiveAuthorityKind,
+  assertPinnedDefinitionKind,
+  LiveAuthorityTemporalClassError,
+  PinnedDefinitionLoader,
+  PinnedDefinitionTemporalClassError,
+} from "./pinned-definition";
+export type {
+  RuntimeBundleVerificationCache,
+  SoulPublicationCoordinatorOptions,
   SoulPublicationErrorCode,
   SoulPublicationOutcome,
   SoulPublishRequest,
   SoulTreeReader,
 } from "./publication";
 export {
+  LruRuntimeBundleVerificationCache,
+  SOUL_PUBLICATION_MAX_ATTEMPTS,
+  SOUL_PUBLICATION_OUTBOX_LEASE_MS,
+  SOUL_PUBLICATION_RETRY_BASE_DELAY_MS,
+  SOUL_PUBLICATION_RETRY_MAX_DELAY_MS,
   SOUL_PUBLICATION_TOPIC,
   SoulPublicationCoordinator,
   SoulPublicationError,
+  VERIFIED_RUNTIME_BUNDLE_CACHE_MAX_ENTRIES,
 } from "./publication";
 export { parseFrontmatter, SoulLoader } from "./published-loader";
+export type {
+  ExecutionBundleCompiler,
+  PublishCommittedTreeRequest,
+  SoulPublisherGitState,
+  SoulPublisherOptions,
+} from "./publisher";
+export { SoulPublisher } from "./publisher";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
 export { scaffoldSoul } from "./scaffold-soul";
 export { validateSoulSemantics } from "./semantic";
-export type { BundleSigner } from "./signatures";
+export type { BundleSigner, BundleVerifier, TrustedBundlePublicKey } from "./signatures";
 export {
   buildBundleSigningPayload,
-  createHmacBundleSigner,
-  SOUL_BUNDLE_SIGNING_KEY,
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
+  SOUL_BUNDLE_PRIVATE_KEY,
+  SOUL_BUNDLE_PUBLIC_KEY,
   SOUL_BUNDLE_SIGNING_KEY_ID,
   signExecutionBundle,
+  verifierFromSigner,
   verifyExecutionBundle,
 } from "./signatures";
 export type {

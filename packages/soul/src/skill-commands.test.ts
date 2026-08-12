@@ -1,7 +1,13 @@
+import { generateKeyPairSync } from "node:crypto";
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import { compileExecutionBundle } from "./compiler";
-import { createHmacBundleSigner, signExecutionBundle, verifyExecutionBundle } from "./signatures";
+import {
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
+  signExecutionBundle,
+  verifyExecutionBundle,
+} from "./signatures";
 import { resolveRuntimeSkillCommands } from "./skill-commands";
 
 const API = "tulipfarm.ai/v1";
@@ -24,7 +30,17 @@ function definition(kind: string, slug: string, spec: Record<string, unknown>) {
 
 describe("resolveRuntimeSkillCommands", () => {
   it("resolves an immutable entrypoint and sandbox ToolContract from a verified bundle", () => {
-    const signer = createHmacBundleSigner("key", "secret");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+    const signer = createEd25519BundleSigner(
+      "key",
+      privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+    );
+    const verifier = createEd25519BundleVerifier([
+      {
+        keyId: "key",
+        publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+      },
+    ]);
     const record = signExecutionBundle(
       compileExecutionBundle({
         businessId: "business-1",
@@ -67,7 +83,7 @@ describe("resolveRuntimeSkillCommands", () => {
       }),
       signer
     );
-    const bundle = verifyExecutionBundle(record, signer);
+    const bundle = verifyExecutionBundle(record, verifier);
 
     const commands = resolveRuntimeSkillCommands(bundle);
     expect(commands).toHaveLength(1);

@@ -378,6 +378,8 @@ export const RUN_STORAGE_STATEMENTS: readonly string[] = [
     ON runs (business_id, status, created_at)`,
   `CREATE INDEX IF NOT EXISTS runs_lease_reclaim_idx
     ON runs (business_id, status, lease_expires_at)`,
+  `CREATE INDEX IF NOT EXISTS runs_bundle_digest_idx
+    ON runs (business_id, (bundle->>'digest'))`,
   `CREATE INDEX IF NOT EXISTS run_states_status_idx
     ON run_states (business_id, run_id, status)`,
   `CREATE INDEX IF NOT EXISTS state_attempts_order_idx

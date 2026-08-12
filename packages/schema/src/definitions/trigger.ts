@@ -1,6 +1,11 @@
 import { type Static, type TSchema, Type } from "@sinclair/typebox";
 import { SchemaRegistry, type ValidatedSchemaDocument } from "../registry";
-import { DEFINITION_API_VERSION, definitionMetadataSchema, definitionRegistration } from "./common";
+import {
+  DEFINITION_API_VERSION,
+  definitionMetadataSchema,
+  definitionRegistration,
+  secretReferenceSchema,
+} from "./common";
 
 /**
  * Trigger definition meta-schema (SPEC §7.1, §9.2). A Trigger maps a normalized event to a
@@ -9,7 +14,7 @@ import { DEFINITION_API_VERSION, definitionMetadataSchema, definitionRegistratio
  *
  * Security invariants enforced structurally:
  * - A webhook trigger cannot masquerade as a trusted provider without declaring signature
- *   verification (a non-empty `secretRef`) — Hermes's `INSECURE_NO_AUTH` escape hatch is
+ *   verification (a `secret://` `secretRef`) — Hermes's `INSECURE_NO_AUTH` escape hatch is
  *   not representable (SPEC §9.2, §24).
  * - A scheduled/event Run uses an explicit `backgroundIdentity`; it never inherits an
  *   interactive user (SPEC §12).
@@ -178,7 +183,7 @@ const specVariants = [
           type: "string",
           enum: [...WEBHOOK_VERIFICATION_METHODS],
         }),
-        secretRef: nonEmptyString,
+        secretRef: secretReferenceSchema,
         signatureHeader: nonEmptyString,
         signingTemplate: Type.Optional(nonEmptyString),
         signatureFormat: Type.Optional(nonEmptyString),

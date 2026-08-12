@@ -4,6 +4,7 @@ import {
   type DefinitionMetadata,
   definitionMetadataSchema,
   definitionRegistration,
+  SECRET_REFERENCE_PATTERN,
 } from "./common";
 
 const apiVersion = DEFINITION_API_VERSION;
@@ -14,8 +15,7 @@ const slugPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$";
 // segments a bare slug cannot express. Each segment is still a slug — no wildcards, no casing.
 const qualifiedSlugPattern = "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)*$";
 const actionPattern = "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$";
-const secretReferencePattern =
-  "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$";
+const secretReferencePattern = SECRET_REFERENCE_PATTERN;
 const httpsEndpointPattern =
   "^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[1-9][0-9]{0,4})?(?:/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*)?$";
 const dateTimePattern =

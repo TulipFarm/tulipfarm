@@ -1,6 +1,7 @@
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { commitActorFromRequest } from "../soul/commit-actor";
 import { ALLOWED_SOURCE_HINT, isAllowedSource } from "../soul/git-source";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import {
@@ -151,7 +152,7 @@ export function registerIntegrationMarketplaceRoutes(
       try {
         return await installIntegrationFromSource(
           { source, name },
-          { soulLoader, gitSync, bundledSlugs: bundledSlugs() }
+          { soulLoader, gitSync, bundledSlugs: bundledSlugs(), actor: commitActorFromRequest(req) }
         );
       } catch (error) {
         if (error instanceof IntegrationInstallError) {

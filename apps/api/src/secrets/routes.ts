@@ -1,8 +1,10 @@
 import type { SecretsService, SecretType } from "@tulipfarm/secrets";
 import { InvalidSecretKeyError } from "@tulipfarm/secrets";
+import type { CommitActor } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import type { UserDoc } from "../auth/users";
+import { commitActorFromRequest } from "../soul/commit-actor";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -23,7 +25,7 @@ export function registerSecretsRoutes(
   requireAuth: PreHandler,
   opts?: {
     /** Called after a successful delete; errors are caught and logged — never surface to the caller. */
-    onSecretDeleted?: (key: string) => Promise<void>;
+    onSecretDeleted?: (key: string, actor: CommitActor) => Promise<void>;
   }
 ): void {
   app.get(
@@ -146,7 +148,7 @@ export function registerSecretsRoutes(
 
       if (opts?.onSecretDeleted) {
         try {
-          await opts.onSecretDeleted(key);
+          await opts.onSecretDeleted(key, commitActorFromRequest(req));
         } catch (err) {
           app.log.error(
             `[secrets] post-delete cascade for ${key} failed — ${err instanceof Error ? err.message : String(err)}`

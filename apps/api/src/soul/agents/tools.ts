@@ -4,13 +4,14 @@ import { join } from "node:path";
 import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { stringify } from "yaml";
-import { err, ok, type ToolCallResult } from "../../tools/types.js";
+import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 export interface AgentToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
+  requestContext?: RequestContext;
 }
 
 export interface AgentTool {
@@ -107,7 +108,7 @@ const agentCreate: AgentTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: add agent ${name}`);
+      await ctx.gitSync.withSync(`soul: add agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -178,7 +179,7 @@ const agentUpdate: AgentTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: update agent ${name}`);
+      await ctx.gitSync.withSync(`soul: update agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -278,7 +279,7 @@ const agentDelete: AgentTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: remove agent ${name}`);
+      await ctx.gitSync.withSync(`soul: remove agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }

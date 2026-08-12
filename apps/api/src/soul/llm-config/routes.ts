@@ -20,6 +20,7 @@ import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { UserDoc } from "../../auth/users";
+import { commitActorFromRequest } from "../commit-actor";
 import { writeLlmConfigToSoulYaml } from "./soul-yaml-io";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -520,7 +521,7 @@ export function registerLlmConfigRoutes(
       }
 
       await writeLlmConfigToSoulYaml(gitSync.path, config);
-      await gitSync.withSync("soul: update llm config");
+      await gitSync.withSync("soul: update llm config", commitActorFromRequest(req));
       await soulLoader.reload();
       await llmService.init(soulLoader.llmConfig, secrets, app.log);
 

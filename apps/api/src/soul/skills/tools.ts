@@ -10,7 +10,7 @@ import {
   validateSkill,
 } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { err, ok, type ToolCallResult } from "../../tools/types.js";
+import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
 import { type BundledSkill, persistDisabledBundledSkills } from "./bundled.js";
 import { scanSkill, skillTrustLevel } from "./guard.js";
@@ -22,6 +22,7 @@ export interface SkillToolContext {
   llmService?: LlmService;
   bundledSkills: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills: Set<string>;
+  requestContext?: RequestContext;
 }
 
 export interface SkillTool {
@@ -140,7 +141,7 @@ const skillCreate: SkillTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: add skill ${name}`);
+      await ctx.gitSync.withSync(`soul: add skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -297,7 +298,7 @@ const skillUpdate: SkillTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: update skill ${name}`);
+      await ctx.gitSync.withSync(`soul: update skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -415,7 +416,7 @@ const skillDelete: SkillTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: remove skill ${name}`);
+      await ctx.gitSync.withSync(`soul: remove skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -477,7 +478,7 @@ const skillActivate: SkillTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: activate skill ${name}`);
+      await ctx.gitSync.withSync(`soul: activate skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }

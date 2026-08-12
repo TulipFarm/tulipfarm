@@ -1,8 +1,9 @@
+import { generateKeyPairSync } from "node:crypto";
 import {
   compileExecutionBundle,
-  createHmacBundleSigner,
+  createEd25519BundleSigner,
   InMemoryBundleStore,
-  SOUL_BUNDLE_SIGNING_KEY,
+  SOUL_BUNDLE_PUBLIC_KEY,
   SOUL_BUNDLE_SIGNING_KEY_ID,
   signExecutionBundle,
 } from "@tulipfarm/soul";
@@ -26,10 +27,19 @@ const definition = {
   },
 };
 
+function keyPair() {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  return {
+    privateKeyPem: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString(),
+  };
+}
+
 describe("WorkerPinnedDefinitionReader", () => {
-  it("reads the API-provisioned signing Secret once and verifies exact bundles", async () => {
+  it("reads the API-provisioned public key once and verifies exact bundles", async () => {
     const bundles = new InMemoryBundleStore();
-    const signer = createHmacBundleSigner(SOUL_BUNDLE_SIGNING_KEY_ID, "shared-secret");
+    const keys = keyPair();
+    const signer = createEd25519BundleSigner(SOUL_BUNDLE_SIGNING_KEY_ID, keys.privateKeyPem);
     const record = signExecutionBundle(
       compileExecutionBundle({
         businessId: "business-1",
@@ -40,7 +50,7 @@ describe("WorkerPinnedDefinitionReader", () => {
       signer
     );
     await bundles.put(record);
-    const get = vi.fn(async () => "shared-secret");
+    const get = vi.fn(async () => keys.publicKeyPem);
     const secrets = vi.fn(async () => ({ get }));
     const reader = new WorkerPinnedDefinitionReader(bundles, secrets);
     const ref = {
@@ -55,11 +65,13 @@ describe("WorkerPinnedDefinitionReader", () => {
     expect((await reader.load(ref))?.bundle.digest).toBe(record.digest);
     expect(secrets).toHaveBeenCalledTimes(1);
     expect(get).toHaveBeenCalledOnce();
-    expect(get).toHaveBeenCalledWith(SOUL_BUNDLE_SIGNING_KEY);
+    expect(get).toHaveBeenCalledWith(SOUL_BUNDLE_PUBLIC_KEY);
   });
 
   it("fails closed when the stored bundle was signed by different material", async () => {
     const bundles = new InMemoryBundleStore();
+    const signingKeys = keyPair();
+    const verifyingKeys = keyPair();
     const record = signExecutionBundle(
       compileExecutionBundle({
         businessId: "business-1",
@@ -67,11 +79,11 @@ describe("WorkerPinnedDefinitionReader", () => {
         commitSha: "commit-1",
         documents: [definition],
       }),
-      createHmacBundleSigner(SOUL_BUNDLE_SIGNING_KEY_ID, "publication-secret")
+      createEd25519BundleSigner(SOUL_BUNDLE_SIGNING_KEY_ID, signingKeys.privateKeyPem)
     );
     await bundles.put(record);
     const reader = new WorkerPinnedDefinitionReader(bundles, async () => ({
-      get: async () => "wrong-secret",
+      get: async () => verifyingKeys.publicKeyPem,
     }));
 
     await expect(

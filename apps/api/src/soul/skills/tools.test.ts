@@ -136,7 +136,7 @@ describe("skill_create", () => {
     const content = vi.mocked(writeFile).mock.calls[0][1] as string;
     expect(content).toContain("_pendingAudit: true");
     expect(content).toContain("Review code carefully.");
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add skill code-review");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add skill code-review", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(mockBuildAudit).toHaveBeenCalledOnce();
     expect(mockBuildAudit.mock.calls[0][2]).toEqual({
@@ -324,7 +324,10 @@ describe("skill_activate", () => {
     const content = vi.mocked(writeFile).mock.calls[0][1] as string;
     expect(content).not.toContain("_pendingAudit");
     expect(content).toContain("review"); // user frontmatter preserved
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: activate skill code-review");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
+      "soul: activate skill code-review",
+      undefined
+    );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
@@ -396,7 +399,7 @@ describe("skill_update", () => {
       expect.stringContaining("New body."),
       "utf8"
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill code-review");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill code-review", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(mockBuildAudit).not.toHaveBeenCalled();
     const content = vi.mocked(writeFile).mock.calls[0][1] as string;
@@ -666,7 +669,10 @@ describe("skill_update", () => {
       "utf8"
     );
     expect(disabled.has("resource-forge")).toBe(false);
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update skill resource-forge");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
+      "soul: update skill resource-forge",
+      undefined
+    );
   });
 
   it("materializes a bundled-only Skill before surgically patching it", async () => {
@@ -783,7 +789,7 @@ describe("skill_delete", () => {
       recursive: true,
       force: true,
     });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove skill code-review");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove skill code-review", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
