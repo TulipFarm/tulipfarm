@@ -63,7 +63,7 @@ describe("agent_create", () => {
       "You plan tasks.",
       "utf8"
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent task-planner");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent task-planner", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
@@ -144,7 +144,7 @@ describe("agent_create", () => {
     );
     expect(res.success).toBe(true);
     expect(writeFile).toHaveBeenCalled();
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent reviewer");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add agent reviewer", undefined);
   });
 });
 
@@ -174,7 +174,7 @@ describe("agent_update", () => {
       expect.stringContaining("New body."),
       "utf8"
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 
@@ -239,7 +239,7 @@ describe("agent_update", () => {
       success: true,
       data: { name: "task-planner", frontmatter: { custom: "kept-as-is" }, body: "New body." },
     });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: update agent task-planner", undefined);
   });
 });
 
@@ -307,7 +307,7 @@ describe("agent_delete", () => {
       recursive: true,
       force: true,
     });
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove agent task-planner");
+    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: remove agent task-planner", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
 

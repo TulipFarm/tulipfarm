@@ -109,6 +109,34 @@ const SLUG_PATTERN = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 const DIGEST_PATTERN = "^[a-f0-9]{64}$";
 
 /**
+ * Canonical secret *reference* shape, shared by every authored definition that names credential
+ * material and by the execution-bundle compiler that refuses to store the material itself.
+ *
+ * `secret://` plus non-empty slash-separated segments; each segment starts and ends
+ * alphanumerically and may contain `.`, `_`, `-` between. This deliberately excludes bare secret
+ * keys (`webhook.github.secret`), env var names (`GITHUB_SECRET`), and traversal-shaped refs.
+ *
+ * Declared once here because the authoring boundary and the publication boundary must agree: a
+ * value the schema accepts but the compiler rejects is authorable yet unpublishable, and under
+ * auto-publish that wedges every later Soul change behind it.
+ */
+export const SECRET_REFERENCE_PATTERN =
+  "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$";
+
+const SECRET_REFERENCE_REGEX = new RegExp(SECRET_REFERENCE_PATTERN);
+
+/** True when `value` is a `secret://` reference rather than an inline credential. */
+export function isSecretReference(value: string): boolean {
+  return SECRET_REFERENCE_REGEX.test(value);
+}
+
+/** A schema field that must hold a `secret://` reference, never the secret itself. */
+export const secretReferenceSchema = Type.String({
+  pattern: SECRET_REFERENCE_PATTERN,
+  maxLength: 512,
+});
+
+/**
  * Common envelope every authored definition carries (SPEC §7.1): stable identifier, human slug,
  * schema version, authored version, lifecycle state, and immutable published digest.
  */

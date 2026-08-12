@@ -897,7 +897,10 @@ spec:
       await expect(access(dir)).rejects.toThrow();
       const lock = JSON.parse(await readFile(join(soulPath, "skills-lock.json"), "utf8"));
       expect(lock.skills["installed-skill"]).toBeUndefined();
-      expect(withSync).toHaveBeenCalledWith("soul: remove skill installed-skill");
+      expect(withSync).toHaveBeenCalledWith(
+        "soul: remove skill installed-skill",
+        expect.any(Object)
+      );
       expect(reload).toHaveBeenCalledOnce();
     });
 

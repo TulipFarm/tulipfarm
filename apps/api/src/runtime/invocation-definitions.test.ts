@@ -1,7 +1,9 @@
+import { generateKeyPairSync } from "node:crypto";
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import {
   compileExecutionBundle,
-  createHmacBundleSigner,
+  createEd25519BundleSigner,
+  createEd25519BundleVerifier,
   InMemoryBundleStore,
   SoulPublicationCoordinator,
   signExecutionBundle,
@@ -15,7 +17,16 @@ import {
 } from "./invocation-definitions";
 
 const BUSINESS_ID = "business-1";
-const signer = createHmacBundleSigner("bundle-key-1", "secret");
+const ACTOR = { principalId: "user:test", name: "Test User", email: "test@example.com" };
+const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+const keyId = "bundle-key-1";
+const signer = createEd25519BundleSigner(
+  keyId,
+  privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+);
+const verifier = createEd25519BundleVerifier([
+  { keyId, publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString() },
+]);
 
 function routine(
   lifecycle: "draft" | "published" = "published",
@@ -51,9 +62,9 @@ async function activeResolver(document: VersionedSchemaDocument) {
     commitSha: "c0ffee",
     documents: [document],
   });
-  await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+  await publications.publish({ bundle: signExecutionBundle(bundle, signer), actor: ACTOR });
   await publications.drain("test");
-  return new ActiveRoutineInvocationResolver(publications, signer);
+  return new ActiveRoutineInvocationResolver(publications, verifier);
 }
 
 function trigger(
@@ -93,9 +104,9 @@ async function activeTriggerResolver(document: VersionedSchemaDocument) {
     commitSha: "c0ffee",
     documents: [document, routine()],
   });
-  await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+  await publications.publish({ bundle: signExecutionBundle(bundle, signer), actor: ACTOR });
   await publications.drain("test");
-  return new ActiveTriggerInvocationResolver(publications, signer, BUSINESS_ID);
+  return new ActiveTriggerInvocationResolver(publications, verifier, BUSINESS_ID);
 }
 
 function webhookTrigger(
@@ -126,7 +137,7 @@ function webhookTrigger(
       provider: overrides.provider ?? "github",
       verification: overrides.verification ?? {
         method: "hmac_sha256",
-        secretRef: "webhook.github.secret",
+        secretRef: "secret://webhook/github/secret",
         signatureHeader: "x-hub-signature-256",
       },
     },
@@ -145,9 +156,9 @@ async function activeWebhookTriggerResolver(document: VersionedSchemaDocument) {
     commitSha: "c0ffee",
     documents: [document, routine()],
   });
-  await publications.publish({ bundle: signExecutionBundle(bundle, signer) });
+  await publications.publish({ bundle: signExecutionBundle(bundle, signer), actor: ACTOR });
   await publications.drain("test");
-  return new ActiveWebhookTriggerResolver(publications, signer, BUSINESS_ID);
+  return new ActiveWebhookTriggerResolver(publications, verifier, BUSINESS_ID);
 }
 
 describe("ActiveRoutineInvocationResolver", () => {
@@ -180,7 +191,7 @@ describe("ActiveRoutineInvocationResolver", () => {
       new InMemoryBundleStore(),
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     );
-    const resolver = new ActiveRoutineInvocationResolver(publications, signer);
+    const resolver = new ActiveRoutineInvocationResolver(publications, verifier);
 
     await expect(
       resolver.resolve({
@@ -246,7 +257,7 @@ describe("ActiveTriggerInvocationResolver", () => {
       new InMemoryBundleStore(),
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     );
-    const resolver = new ActiveTriggerInvocationResolver(publications, signer, BUSINESS_ID);
+    const resolver = new ActiveTriggerInvocationResolver(publications, verifier, BUSINESS_ID);
 
     await expect(resolver.resolveTrigger("start-digest")).resolves.toBeNull();
   });
@@ -284,7 +295,7 @@ describe("ActiveWebhookTriggerResolver", () => {
       eventVersion: 1,
       verification: {
         method: "hmac_sha256",
-        secretRef: "webhook.github.secret",
+        secretRef: "secret://webhook/github/secret",
         signatureHeader: "x-hub-signature-256",
       },
       backgroundIdentity: { principalKind: "system", principalId: "trigger-runner" },
@@ -296,7 +307,7 @@ describe("ActiveWebhookTriggerResolver", () => {
       webhookTrigger({
         verification: {
           method: "hmac_sha256",
-          secretRef: "webhook.github.secret",
+          secretRef: "secret://webhook/github/secret",
           signatureHeader: "x-hub-signature-256",
           signingTemplate: "{timestamp}.{body}",
           signatureFormat: "sha256={signature}",
@@ -322,7 +333,7 @@ describe("ActiveWebhookTriggerResolver", () => {
       new InMemoryBundleStore(),
       { info: vi.fn(), warn: vi.fn(), error: vi.fn() }
     );
-    const resolver = new ActiveWebhookTriggerResolver(publications, signer, BUSINESS_ID);
+    const resolver = new ActiveWebhookTriggerResolver(publications, verifier, BUSINESS_ID);
 
     await expect(resolver.resolveTrigger("github", "github-push")).resolves.toBeNull();
   });

@@ -28,6 +28,9 @@ git remote. See root `AGENTS.md` for commands/lint.
   authored projection from Git. Persistence is `@tulipfarm/storage`'s `SoulPublicationStore`.
   `apps/api` composes the verified `activeBundle()` read side for Routine invocation; it does not
   consult live Git when pinning a Run.
+- **`SoulPublisher`** — the only bridge from a successful Soul git commit to publication. Every
+  new commit helper must call the `GitSyncService` post-commit hook, or `soul_active_bundles` can
+  go empty again.
 - **`runSoulMigrations()`** + type `SoulMigration`.
 - Types: `SoulAgent`, `SoulSkill`, `SoulResource`, `SoulRoutine`, `SoulIntegration`.
 
@@ -39,7 +42,8 @@ skills/<name>/SKILL.md
 resources/<name>/schema.yml       # + optional hooks.ts (SHA256-hashed for integrity)
 routines/<name>/routine.yaml      # + optional hooks.ts
 integrations/<name>/manifest.yml   # + connection.yaml once connected, + the egress spec if declared
-soul.yaml   guardrails.yaml   # repo-root manifests (optional); soul.yaml's `llm:` key holds LLM config
+soul.yaml                         # repo-root manifest; `llm:` key holds LLM config
+guardrails.yaml                   # optional repo-root guardrail policy
 ```
 
 Resource schemas are checked with `validateResourceSchema` (`@tulipfarm/schema`) on load.
@@ -54,9 +58,15 @@ alongside `manifest.yml` — see `apps/api/src/integrations/install.ts`.
 
 - `soul-loader.ts` — the `load*` readers + frontmatter parsing + hook-hash tracking; `llmConfig` is
   derived from `manifest.llm` after `soul.yaml` loads (not a separate file read).
+- `tree-reader.ts` — bundle membership is derived from `ARTIFACT_LAYOUTS` via
+  `classifySoulPath`. Do not add a "better" regex here; path contracts drift when described twice.
+- `pinned-definition.ts` — pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown
+  kinds. `temporalClass` means "which digest to read", not "whether the artifact is bundled".
 - `git-sync.ts` — sync engine. Divergence rule (SOUL-V1-004): upstream wins on genuine
   divergence, but **un-pushed local commits are preserved** (retry push, don't blind-reset).
   Commits use `BOT_GIT_NAME` / `BOT_GIT_EMAIL` from `@tulipfarm/constants`.
+- `publisher.ts` / `publication.ts` / `signatures.ts` — compile → Ed25519 sign → publish →
+  activate. The API signs with the private key; Workers verify with public keys only.
 - `migrations/index.ts` — the `SOUL_MIGRATIONS` array; `soul-migrations.ts` runs pending ones.
 - `types.ts` — the Integration manifest authoring contract (`EgressConfig`, `EgressAuth`,
   `EgressOperation`). Widening these types widens what every third-party integration may declare,
@@ -69,12 +79,13 @@ alongside `manifest.yml` — see `apps/api/src/integrations/install.ts`.
 
 ## How to extend
 
-- **New artifact type:** add a `load<Type>` reader (read its subdir, parse, validate), store it
-  in a map, and export its interface from `types.ts`.
+- **New artifact type:** add it to `@tulipfarm/schema`'s `ARTIFACT_LAYOUTS` first. Derive paths,
+  companions, bundle membership, and temporal class from that registry; never duplicate the
+  contract with a regex or hand-built path table.
 - **New migration:** append to `SOUL_MIGRATIONS` with a monotonic `version`, a `description`, and
   an async `up(soulPath)`.
-- **New integration:** nothing changes here — write a manifest
-  ([`docs/architecture/building-an-integration.md`](../../docs/architecture/building-an-integration.md)).
+- **New integration:** nothing changes here — write a manifest. See
+  `../../docs/architecture/building-an-integration.md`.
   Touch this package only when a provider needs a manifest capability that does not exist yet.
 
 ## Tests

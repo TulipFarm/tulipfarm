@@ -3,9 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("simple-git", () => ({ default: vi.fn() }));
 vi.mock("node:fs", () => ({ existsSync: vi.fn(), mkdirSync: vi.fn(), writeFileSync: vi.fn() }));
 
+import { generateKeyPairSync } from "node:crypto";
 import { existsSync } from "node:fs";
+import type { VersionedSchemaDocument } from "@tulipfarm/schema";
+import { InMemorySoulPublicationStore } from "@tulipfarm/storage";
 import simpleGit from "simple-git";
+import { InMemoryBundleStore } from "./bundle";
+import type { CommitActor } from "./commit-signing";
+import { compileExecutionBundle } from "./compiler";
 import { GitSyncService } from "./git-sync";
+import { SoulPublicationCoordinator } from "./publication";
+import { SoulPublisher } from "./publisher";
+import { createEd25519BundleSigner, createEd25519BundleVerifier } from "./signatures";
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockSimpleGit = vi.mocked(simpleGit);
@@ -44,6 +53,62 @@ function makeLogger() {
 
 const REMOTE = "https://github.com/user/soul.git";
 const SOUL = "/soul";
+const BUSINESS = "business-1";
+const ACTOR: CommitActor = {
+  principalId: "user:test",
+  name: "Test User",
+  email: "test@example.com",
+};
+
+function routine(): VersionedSchemaDocument {
+  return {
+    apiVersion: "tulipfarm.ai/v1",
+    kind: "Routine",
+    metadata: {
+      id: "11111111-1111-4111-8111-111111111111",
+      slug: "daily-digest",
+      schemaVersion: 1,
+      authoredVersion: 1,
+      lifecycle: "published",
+    },
+    spec: {
+      owner: "platform",
+      start: "Finish",
+      states: [{ type: "branch", name: "Finish", conditions: [{ condition: "true", end: true }] }],
+    },
+  } as VersionedSchemaDocument;
+}
+
+function publishingService(logger: ReturnType<typeof makeLogger>) {
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const keyId = "bundle-key-1";
+  const publications = new SoulPublicationCoordinator(
+    new InMemorySoulPublicationStore(),
+    new InMemoryBundleStore(),
+    logger
+  );
+  const publisher = new SoulPublisher({
+    treeReader: {
+      readDefinitions: vi.fn(async () => [routine()]),
+      readFiles: vi.fn(async () => []),
+    },
+    compiler: compileExecutionBundle,
+    signer: createEd25519BundleSigner(
+      keyId,
+      privateKey.export({ format: "pem", type: "pkcs8" }).toString()
+    ),
+    coordinator: publications,
+    logger,
+    businessId: BUSINESS,
+  });
+  const verifier = createEd25519BundleVerifier([
+    { keyId, publicKeyPem: publicKey.export({ format: "pem", type: "spki" }).toString() },
+  ]);
+  const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger, {
+    committedTreePublisher: publisher,
+  });
+  return { publications, svc, verifier };
+}
 
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) delete process.env[key];
@@ -309,6 +374,33 @@ describe("GitSyncService", () => {
       expect(result).toEqual({ sha: "abc1234", filesChanged: 2 });
     });
 
+    it("publishes and activates the committed Soul tree", async () => {
+      const { publications, svc, verifier } = publishingService(logger);
+
+      await svc.commit("soul: update routine", ACTOR);
+      await publications.drain("test");
+
+      const active = await publications.activeBundle(BUSINESS, verifier);
+      expect(active?.commitSha).toBe("abc1234");
+      expect(active?.get("Routine", "daily-digest")?.authoredVersion).toBe(1);
+    });
+
+    it("does not roll back a durable commit when bundle publication fails", async () => {
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger, {
+        committedTreePublisher: {
+          publishCommittedTree: vi.fn(async () => {
+            throw new Error("compiler unavailable");
+          }),
+        },
+      });
+
+      await expect(svc.commit("soul: update routine", ACTOR)).resolves.toEqual({
+        sha: "abc1234",
+        filesChanged: 2,
+      });
+      expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("compiler unavailable"));
+    });
+
     it("returns empty sha and zero changes when nothing to commit", async () => {
       mockGit.commit.mockResolvedValue({ commit: "", summary: { changes: 0 } });
       const svc = new GitSyncService(SOUL, REMOTE, async () => undefined, logger);
@@ -336,6 +428,32 @@ describe("GitSyncService", () => {
         "soul.yaml",
         "models",
       ]);
+    });
+
+    it("publishes scoped commitPaths commits too", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
+      const { publications, svc, verifier } = publishingService(logger);
+
+      await svc.commitPaths("chore(soul): migrate format", ["soul.yaml"], ACTOR);
+      await publications.drain("test");
+
+      const active = await publications.activeBundle(BUSINESS, verifier);
+      expect(active?.commitSha).toBe("abc1234");
+      expect(active?.get("Routine", "daily-digest")?.id).toBe(
+        "11111111-1111-4111-8111-111111111111"
+      );
+    });
+
+    it("publishes withSyncPaths commits through the same hook", async () => {
+      mockGit.raw.mockResolvedValue(" M soul.yaml\n");
+      const { publications, svc, verifier } = publishingService(logger);
+
+      await svc.withSyncPaths("chore(soul): migrate format", ["soul.yaml"], ACTOR);
+      await publications.drain("test");
+
+      await expect(publications.activeBundle(BUSINESS, verifier)).resolves.toMatchObject({
+        commitSha: "abc1234",
+      });
     });
 
     it("does not pass an absent retired directory as a Git pathspec", async () => {
@@ -584,6 +702,32 @@ describe("GitSyncService", () => {
       const second = await svc.getStatus();
       expect(second.lastSyncError).toBe("host unreachable");
       expect(second.lastSyncAt).toBe(first.lastSyncAt);
+    });
+  });
+
+  describe("headSha / hasCommit (reconcile inputs)", () => {
+    beforeEach(() => {
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it("returns the trimmed HEAD sha", async () => {
+      mockGit.revparse.mockResolvedValueOnce("deadbeefcafe\n");
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+      expect(await svc.headSha()).toBe("deadbeefcafe");
+    });
+
+    it("returns undefined when the repo has no commits", async () => {
+      mockGit.revparse.mockRejectedValueOnce(new Error("ambiguous argument 'HEAD'"));
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+      expect(await svc.headSha()).toBeUndefined();
+    });
+
+    it("reports a present commit as true and an unknown one as false", async () => {
+      const svc = new GitSyncService(SOUL, undefined, async () => undefined, logger);
+      mockGit.raw.mockResolvedValueOnce("");
+      expect(await svc.hasCommit("abc1234")).toBe(true);
+      mockGit.raw.mockRejectedValueOnce(new Error("Not a valid object name"));
+      expect(await svc.hasCommit("nope")).toBe(false);
     });
   });
 });

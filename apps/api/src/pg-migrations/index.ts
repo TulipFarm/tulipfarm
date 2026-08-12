@@ -1622,4 +1622,278 @@ export const PG_MIGRATIONS: PgMigration[] = [
       }
     },
   },
+  {
+    version: 48,
+    description:
+      "Soul publication safety: provenance, leases, activation history, and retention FKs",
+    up: async (q) => {
+      const addConstraint = async (table: string, constraint: string, sql: string) => {
+        const present = await q.query(
+          `SELECT constraint_name FROM information_schema.table_constraints
+           WHERE table_schema = 'public' AND table_name = $1 AND constraint_name = $2`,
+          [table, constraint]
+        );
+        if (present.rows.length === 0) await q.query(sql);
+      };
+      const hasColumns = async (table: string, columns: readonly string[]) => {
+        const present = await q.query(
+          `SELECT column_name FROM information_schema.columns
+           WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+          [table, columns]
+        );
+        return present.rows.length === columns.length;
+      };
+
+      await q.query("CREATE SEQUENCE IF NOT EXISTS soul_publication_sequence");
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_publications (
+        changeset_id text PRIMARY KEY CHECK (length(changeset_id) > 0),
+        business_id  text NOT NULL CHECK (length(business_id) > 0),
+        commit_sha   text NOT NULL CHECK (length(commit_sha) > 0),
+        digest       text NOT NULL CHECK (length(digest) > 0),
+        stage        text NOT NULL CHECK (stage IN ('committed', 'projected', 'stored', 'active')),
+        attempts     integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+        failure_code text,
+        UNIQUE (business_id, digest)
+      )`);
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_publication_outbox (
+        id           text PRIMARY KEY CHECK (length(id) > 0),
+        business_id  text NOT NULL CHECK (length(business_id) > 0),
+        changeset_id text NOT NULL REFERENCES soul_publications(changeset_id),
+        topic        text NOT NULL CHECK (length(topic) > 0),
+        consumed_by  text,
+        created_at   timestamptz NOT NULL DEFAULT now()
+      )`);
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_definition_projections (
+        business_id      text NOT NULL CHECK (length(business_id) > 0),
+        digest           text NOT NULL CHECK (length(digest) > 0),
+        kind             text NOT NULL CHECK (length(kind) > 0),
+        definition_id    text NOT NULL CHECK (length(definition_id) > 0),
+        slug             text NOT NULL CHECK (length(slug) > 0),
+        authored_version integer NOT NULL CHECK (authored_version > 0),
+        hash             text NOT NULL CHECK (length(hash) > 0),
+        PRIMARY KEY (business_id, kind, definition_id),
+        UNIQUE (business_id, kind, slug)
+      )`);
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_active_bundles (
+        business_id text PRIMARY KEY CHECK (length(business_id) > 0),
+        digest      text NOT NULL CHECK (length(digest) > 0)
+      )`);
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_execution_bundles (
+        digest       text PRIMARY KEY CHECK (length(digest) > 0),
+        business_id  text NOT NULL CHECK (length(business_id) > 0),
+        changeset_id text NOT NULL CHECK (length(changeset_id) > 0),
+        commit_sha   text NOT NULL CHECK (length(commit_sha) > 0),
+        bundle       jsonb NOT NULL CHECK (jsonb_typeof(bundle) = 'object'),
+        signature    jsonb NOT NULL CHECK (
+          jsonb_typeof(signature) = 'object'
+          AND signature ?& ARRAY['keyId', 'value']
+        ),
+        created_at   timestamptz NOT NULL DEFAULT now()
+      )`);
+      await q.query(`CREATE INDEX IF NOT EXISTS soul_publication_outbox_pending_idx
+        ON soul_publication_outbox (created_at, id) WHERE consumed_by IS NULL`);
+      await q.query(`CREATE INDEX IF NOT EXISTS soul_execution_bundles_business_idx
+        ON soul_execution_bundles (business_id, created_at DESC)`);
+      if (await hasColumns("runs", ["business_id", "bundle"])) {
+        await q.query(`CREATE INDEX IF NOT EXISTS runs_bundle_digest_idx
+          ON runs (business_id, (bundle->>'digest'))`);
+      }
+      if (await hasColumns("audit_events", ["business_id", "bundle_digest"])) {
+        await q.query(`CREATE INDEX IF NOT EXISTS audit_events_bundle_digest_idx
+          ON audit_events (business_id, bundle_digest) WHERE bundle_digest IS NOT NULL`);
+      }
+
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS publication_sequence bigint"
+      );
+      await q.query(
+        "ALTER TABLE soul_publications ALTER COLUMN publication_sequence SET DEFAULT nextval('soul_publication_sequence')"
+      );
+      await q.query(
+        "UPDATE soul_publications SET publication_sequence = nextval('soul_publication_sequence') WHERE publication_sequence IS NULL"
+      );
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN publication_sequence SET NOT NULL");
+      await addConstraint(
+        "soul_publications",
+        "soul_publications_publication_sequence_check",
+        "ALTER TABLE soul_publications ADD CONSTRAINT soul_publications_publication_sequence_check CHECK (publication_sequence > 0)"
+      );
+      await addConstraint(
+        "soul_publications",
+        "soul_publications_business_publication_sequence_key",
+        "ALTER TABLE soul_publications ADD CONSTRAINT soul_publications_business_publication_sequence_key UNIQUE (business_id, publication_sequence)"
+      );
+
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS actor_principal_id text"
+      );
+      // Production tables are empty before the publisher ships. This fallback only keeps old local
+      // development rows migratable; new writes are rejected unless a real actor is supplied.
+      await q.query(
+        "UPDATE soul_publications SET actor_principal_id = 'legacy:unknown' WHERE actor_principal_id IS NULL"
+      );
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN actor_principal_id SET NOT NULL");
+      await addConstraint(
+        "soul_publications",
+        "soul_publications_actor_principal_id_check",
+        "ALTER TABLE soul_publications ADD CONSTRAINT soul_publications_actor_principal_id_check CHECK (length(actor_principal_id) > 0)"
+      );
+
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS created_at timestamptz"
+      );
+      await q.query("UPDATE soul_publications SET created_at = now() WHERE created_at IS NULL");
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN created_at SET DEFAULT now()");
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN created_at SET NOT NULL");
+
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS next_attempt_at timestamptz"
+      );
+      await q.query(
+        "UPDATE soul_publications SET next_attempt_at = now() WHERE next_attempt_at IS NULL"
+      );
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN next_attempt_at SET DEFAULT now()");
+      await q.query("ALTER TABLE soul_publications ALTER COLUMN next_attempt_at SET NOT NULL");
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS dead_lettered_at timestamptz"
+      );
+      await q.query(
+        "ALTER TABLE soul_publications ADD COLUMN IF NOT EXISTS dead_letter_reason text"
+      );
+      await addConstraint(
+        "soul_publications",
+        "soul_publications_dead_letter_reason_check",
+        "ALTER TABLE soul_publications ADD CONSTRAINT soul_publications_dead_letter_reason_check CHECK (dead_lettered_at IS NULL OR dead_letter_reason IS NOT NULL)"
+      );
+      await q.query(`CREATE INDEX IF NOT EXISTS soul_publications_retry_idx
+        ON soul_publications (next_attempt_at, changeset_id) WHERE dead_lettered_at IS NULL`);
+
+      await q.query(
+        "ALTER TABLE soul_publication_outbox ADD COLUMN IF NOT EXISTS consumed_at timestamptz"
+      );
+      await q.query("ALTER TABLE soul_publication_outbox ADD COLUMN IF NOT EXISTS claimed_by text");
+      await q.query(
+        "ALTER TABLE soul_publication_outbox ADD COLUMN IF NOT EXISTS claimed_at timestamptz"
+      );
+      await q.query(
+        "ALTER TABLE soul_publication_outbox ADD COLUMN IF NOT EXISTS claim_lease_expires_at timestamptz"
+      );
+      await addConstraint(
+        "soul_publication_outbox",
+        "soul_publication_outbox_claim_check",
+        `ALTER TABLE soul_publication_outbox ADD CONSTRAINT soul_publication_outbox_claim_check CHECK (
+          (claimed_by IS NULL AND claimed_at IS NULL AND claim_lease_expires_at IS NULL)
+          OR (claimed_by IS NOT NULL AND claimed_at IS NOT NULL AND claim_lease_expires_at IS NOT NULL)
+        )`
+      );
+      await addConstraint(
+        "soul_publication_outbox",
+        "soul_publication_outbox_consumed_check",
+        `ALTER TABLE soul_publication_outbox ADD CONSTRAINT soul_publication_outbox_consumed_check CHECK (
+          (consumed_by IS NULL AND consumed_at IS NULL)
+          OR (consumed_by IS NOT NULL AND consumed_at IS NOT NULL)
+        )`
+      );
+      await q.query(`CREATE INDEX IF NOT EXISTS soul_publication_outbox_claim_idx
+        ON soul_publication_outbox (claim_lease_expires_at, created_at, id) WHERE consumed_by IS NULL`);
+
+      await q.query(
+        "ALTER TABLE soul_active_bundles ADD COLUMN IF NOT EXISTS activation_sequence bigint"
+      );
+      await q.query(
+        "ALTER TABLE soul_active_bundles ADD COLUMN IF NOT EXISTS activated_at timestamptz"
+      );
+      await q.query(
+        "ALTER TABLE soul_active_bundles ADD COLUMN IF NOT EXISTS activated_by_principal_id text"
+      );
+      await q.query(`UPDATE soul_active_bundles a
+        SET activation_sequence = p.publication_sequence,
+            activated_at = COALESCE(a.activated_at, now()),
+            activated_by_principal_id = p.actor_principal_id
+        FROM soul_publications p
+        WHERE a.business_id = p.business_id
+          AND a.digest = p.digest
+          AND (a.activation_sequence IS NULL OR a.activated_by_principal_id IS NULL)`);
+      await q.query(
+        "ALTER TABLE soul_active_bundles ALTER COLUMN activation_sequence SET NOT NULL"
+      );
+      await q.query("ALTER TABLE soul_active_bundles ALTER COLUMN activated_at SET DEFAULT now()");
+      await q.query("ALTER TABLE soul_active_bundles ALTER COLUMN activated_at SET NOT NULL");
+      await q.query(
+        "ALTER TABLE soul_active_bundles ALTER COLUMN activated_by_principal_id SET NOT NULL"
+      );
+      await addConstraint(
+        "soul_active_bundles",
+        "soul_active_bundles_activation_sequence_check",
+        "ALTER TABLE soul_active_bundles ADD CONSTRAINT soul_active_bundles_activation_sequence_check CHECK (activation_sequence > 0)"
+      );
+      await addConstraint(
+        "soul_active_bundles",
+        "soul_active_bundles_activated_by_principal_id_check",
+        "ALTER TABLE soul_active_bundles ADD CONSTRAINT soul_active_bundles_activated_by_principal_id_check CHECK (length(activated_by_principal_id) > 0)"
+      );
+
+      await q.query(`CREATE TABLE IF NOT EXISTS soul_bundle_activations (
+        business_id                  text NOT NULL CHECK (length(business_id) > 0),
+        activation_sequence          bigint NOT NULL CHECK (activation_sequence > 0),
+        digest                       text NOT NULL CHECK (length(digest) > 0),
+        changeset_id                 text NOT NULL REFERENCES soul_publications(changeset_id),
+        activated_at                 timestamptz NOT NULL DEFAULT now(),
+        activated_by_principal_id    text NOT NULL CHECK (length(activated_by_principal_id) > 0),
+        PRIMARY KEY (business_id, activation_sequence),
+        UNIQUE (business_id, digest)
+      )`);
+      await q.query(`INSERT INTO soul_bundle_activations (
+        business_id, activation_sequence, digest, changeset_id, activated_at,
+        activated_by_principal_id
+      )
+      SELECT a.business_id, a.activation_sequence, a.digest, p.changeset_id, a.activated_at,
+             a.activated_by_principal_id
+        FROM soul_active_bundles a
+        JOIN soul_publications p ON p.business_id = a.business_id AND p.digest = a.digest
+      ON CONFLICT (business_id, activation_sequence) DO NOTHING`);
+      await q.query(`CREATE INDEX IF NOT EXISTS soul_bundle_activations_time_idx
+        ON soul_bundle_activations (business_id, activated_at DESC, activation_sequence DESC)`);
+
+      await addConstraint(
+        "soul_execution_bundles",
+        "soul_execution_bundles_business_digest_key",
+        "ALTER TABLE soul_execution_bundles ADD CONSTRAINT soul_execution_bundles_business_digest_key UNIQUE (business_id, digest)"
+      );
+      await addConstraint(
+        "soul_active_bundles",
+        "soul_active_bundles_bundle_fkey",
+        `ALTER TABLE soul_active_bundles ADD CONSTRAINT soul_active_bundles_bundle_fkey
+          FOREIGN KEY (business_id, digest) REFERENCES soul_execution_bundles(business_id, digest)`
+      );
+      await addConstraint(
+        "soul_bundle_activations",
+        "soul_bundle_activations_bundle_fkey",
+        `ALTER TABLE soul_bundle_activations ADD CONSTRAINT soul_bundle_activations_bundle_fkey
+          FOREIGN KEY (business_id, digest) REFERENCES soul_execution_bundles(business_id, digest)`
+      );
+    },
+  },
+  {
+    version: 49,
+    description: "Soul activation events use their own monotonic sequence",
+    up: async (q) => {
+      await q.query("CREATE SEQUENCE IF NOT EXISTS soul_activation_sequence");
+      await q.query(
+        "ALTER TABLE soul_bundle_activations DROP CONSTRAINT IF EXISTS soul_bundle_activations_business_id_digest_key"
+      );
+      await q.query(`SELECT setval(
+        'soul_activation_sequence',
+        GREATEST(
+          COALESCE((SELECT MAX(activation_sequence) FROM soul_bundle_activations), 0),
+          COALESCE((SELECT MAX(activation_sequence) FROM soul_active_bundles), 0),
+          1
+        ),
+        GREATEST(
+          COALESCE((SELECT MAX(activation_sequence) FROM soul_bundle_activations), 0),
+          COALESCE((SELECT MAX(activation_sequence) FROM soul_active_bundles), 0)
+        ) > 0
+      )`);
+    },
+  },
 ];

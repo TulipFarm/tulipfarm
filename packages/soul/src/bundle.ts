@@ -21,7 +21,8 @@ export type BundleErrorCode =
   | "SECRET_MATERIAL"
   | "DIGEST_MISMATCH"
   | "SIGNATURE_INVALID"
-  | "DIGEST_CONFLICT";
+  | "SIGNATURE_KEY_UNKNOWN"
+  | "BUNDLE_VERSION_UNSUPPORTED";
 
 export interface BundleAsset {
   readonly ownerDefinitionId: string;
@@ -81,7 +82,12 @@ export interface ExecutionBundle {
   readonly bundleVersion: typeof EXECUTION_BUNDLE_VERSION;
   readonly businessId: string;
   readonly changesetId: string;
-  /** The signed Soul commit this bundle was compiled from, for lineage only. */
+  /**
+   * The signed Soul commit this bundle was compiled from. Lineage (this and `changesetId`) stays
+   * out of the digest so the digest is a true content address: byte-identical definitions
+   * republished under a new commit dedupe to one stored bundle. Tampering is still caught because
+   * `buildBundleSigningPayload` binds `commit` and `changeset` into the signature.
+   */
   readonly commitSha: string;
   /** Sorted by `kind` then `slug`, so the digest is order-independent. */
   readonly definitions: readonly BundleDefinition[];
@@ -92,6 +98,11 @@ export interface ExecutionBundle {
 export interface BundleSignature {
   readonly keyId: string;
   readonly value: string;
+}
+
+export interface BundleVerifier {
+  readonly trustedKeyIds: readonly string[];
+  verify(payload: string, signature: BundleSignature): boolean;
 }
 
 /** A bundle plus its content address and the signature covering it. */
@@ -116,9 +127,14 @@ export function immutableSnapshot<T>(value: T): T {
   return deepFreeze(structuredClone(value));
 }
 
-/** Content address of a bundle: the canonical hash of its complete parsed data. */
+/** Content address of a bundle: the canonical hash of its authored content, not its lineage. */
 export function computeBundleDigest(bundle: ExecutionBundle): string {
-  return canonicalHash(bundle);
+  return canonicalHash({
+    bundleVersion: bundle.bundleVersion,
+    businessId: bundle.businessId,
+    definitions: bundle.definitions,
+    assets: bundle.assets,
+  });
 }
 
 /** The verified, Git-free view a worker executes against. */
@@ -160,8 +176,10 @@ export function createRuntimeBundle(bundle: ExecutionBundle, digest: string): Ru
 }
 
 /**
- * Content-addressed, append-only bundle storage. `put` is idempotent for a duplicate delivery of
- * the same record and never overwrites a stored digest — a bundle is immutable once stored.
+ * Content-addressed, append-only bundle storage. `put` is idempotent: because the digest covers
+ * content only, republishing identical content under a new commit yields the same digest with a
+ * different signature. The first stored copy wins and is authoritative — its signature stays a
+ * valid attestation of that content — so `put` never overwrites a stored digest.
  */
 export interface BundleStore {
   put(record: SignedExecutionBundle): Promise<void>;
@@ -180,19 +198,9 @@ export class InMemoryBundleStore implements BundleStore {
         "Bundle store: record digest does not cover its bundle"
       );
     }
-    const stored = this.records.get(digest);
-    if (stored) {
-      if (
-        stored.signature.keyId !== record.signature.keyId ||
-        stored.signature.value !== record.signature.value
-      ) {
-        throw new BundleError(
-          "DIGEST_CONFLICT",
-          `Bundle store: digest ${digest} is already stored with a different signature`
-        );
-      }
-      return;
-    }
+    // First stored copy wins: a same-digest republish under a new signature is legitimate content
+    // addressing, so accept it idempotently without overwriting the authoritative attestation.
+    if (this.records.has(digest)) return;
     this.records.set(digest, immutableSnapshot(record));
   }
 

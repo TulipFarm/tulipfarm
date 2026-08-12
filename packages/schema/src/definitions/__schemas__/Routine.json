@@ -458,7 +458,8 @@
                     "type": "string"
                   },
                   "credentialRef": {
-                    "minLength": 1,
+                    "maxLength": 512,
+                    "pattern": "^secret://[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?(?:/[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)*$",
                     "type": "string"
                   },
                   "deadlineMs": {

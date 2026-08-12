@@ -5,7 +5,7 @@ import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { err, ok, type ToolCallResult } from "../../tools/types.js";
+import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
 
@@ -13,6 +13,7 @@ export interface ResourceTypeToolContext {
   gitSync: GitSyncService;
   soulLoader: SoulLoader;
   reconcile?: () => Promise<void>;
+  requestContext?: RequestContext;
 }
 
 export interface ResourceTypeTool {
@@ -146,7 +147,7 @@ const createResourceType: ResourceTypeTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: add resource type ${name}`);
+      await ctx.gitSync.withSync(`soul: add resource type ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -219,7 +220,7 @@ const resourceTypeUpdate: ResourceTypeTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: update resource type ${name}`);
+      await ctx.gitSync.withSync(`soul: update resource type ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -327,7 +328,10 @@ const createResourceHooks: ResourceTypeTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: add hooks for resource type ${name}`);
+      await ctx.gitSync.withSync(
+        `soul: add hooks for resource type ${name}`,
+        ctx.requestContext?.actor
+      );
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -384,7 +388,10 @@ const deleteResourceHooks: ResourceTypeTool = {
     }
 
     try {
-      await ctx.gitSync.withSync(`soul: remove hooks for resource type ${name}`);
+      await ctx.gitSync.withSync(
+        `soul: remove hooks for resource type ${name}`,
+        ctx.requestContext?.actor
+      );
     } catch (e) {
       return err("internal_error", reason(e));
     }

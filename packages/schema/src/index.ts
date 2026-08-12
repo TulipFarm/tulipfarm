@@ -8,6 +8,9 @@ export type {
   ClassifiedSoulPath,
   ContentMode,
   DelegatedArtifactKind,
+  LiveArtifactKind,
+  PinnedArtifactKind,
+  TemporalClass,
 } from "./artifacts";
 export {
   ARTIFACT_LAYOUTS,
@@ -21,8 +24,12 @@ export {
   definitionPath,
   isArtifactSlug,
   isDefinitionKind,
+  isLiveKind,
+  isPinnedKind,
   legacyDefinitionCandidates,
   legacyDefinitionPaths,
+  TEMPORAL_CLASSES,
+  temporalClassOf,
   withinArtifactTree,
 } from "./artifacts";
 export type { ValidationBoundary } from "./boundaries";

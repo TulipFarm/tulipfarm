@@ -5,6 +5,7 @@ import {
   definitionMetadataSchema,
   definitionRegistration,
   refListSchema,
+  secretReferenceSchema,
 } from "./common";
 
 /**
@@ -190,7 +191,7 @@ const stateVariants = [
     toolRef: definitionRef,
     action: nonEmptyString,
     destination: Type.Optional(nonEmptyString),
-    credentialRef: Type.Optional(nonEmptyString),
+    credentialRef: Type.Optional(secretReferenceSchema),
   }),
   state("branch", {
     conditions: Type.Array(

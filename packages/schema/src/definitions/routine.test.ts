@@ -58,6 +58,23 @@ describe("Routine schema", () => {
     expect(ROUTINE_STATE_TYPES).toContain("repeat_until");
   });
 
+  it("rejects plain credentialRef values on Tool states", () => {
+    expect(() =>
+      validateRoutineDefinition(
+        routine([
+          {
+            type: "tool",
+            name: "Label",
+            toolRef: { name: "gh", version: "1" },
+            action: "add_label",
+            credentialRef: "github-installation",
+            end: true,
+          },
+        ])
+      )
+    ).toThrow(SchemaValidationError);
+  });
+
   it("exposes every SPEC §9.1 typed state type", () => {
     expect([...ROUTINE_STATE_TYPES].sort()).toEqual(
       [

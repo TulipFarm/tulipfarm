@@ -137,6 +137,11 @@ export class RegistryToolDispatcher implements TurnToolDispatcher {
     const surfaceComponents = [...(this.options.soulLoader?.surfaceComponents.values() ?? [])];
     const context: RequestContext = {
       userId: authority.subject.id,
+      actor: {
+        principalId: `${authority.subject.kind}:${authority.subject.id}`,
+        name: authority.subject.id,
+        email: "",
+      },
       conversationId: authority.turn.conversationId,
       runId: authority.runId,
       toolCallId: call.callId,

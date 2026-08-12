@@ -11,6 +11,7 @@ import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
+import { commitActorFromRequest } from "../commit-actor";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -150,7 +151,7 @@ export function registerResourceTypeRoutes(
       await mkdir(typeDir, { recursive: true });
       await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
 
-      await gitSync.commit(`soul: add resource type ${name}`);
+      await gitSync.commit(`soul: add resource type ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       // Materialise the new type's Postgres table before the client can POST records to it.
       await reconcile?.();
@@ -229,7 +230,7 @@ export function registerResourceTypeRoutes(
       if (!check.ok) return reply.code(check.status).send(check.body);
 
       await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
-      await gitSync.commit(`soul: update resource type ${name}`);
+      await gitSync.commit(`soul: update resource type ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       // New columns may have been added — materialise them before records reference them.
       await reconcile?.();
@@ -266,7 +267,7 @@ export function registerResourceTypeRoutes(
         return reply.code(404).send({ error: "resource type not found" });
       }
       await rm(typeDir, { recursive: true, force: true });
-      await gitSync.commit(`soul: remove resource type ${name}`);
+      await gitSync.commit(`soul: remove resource type ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       await auditWrite(req, "resource-type.delete", `resource-type:${name}`);
       return reply.code(204).send();
@@ -359,7 +360,10 @@ export function registerResourceTypeRoutes(
 
       const hooksFile = join(gitSync.path, "resources", name, "hooks.ts");
       await writeFile(hooksFile, source, "utf8");
-      await gitSync.commit(`soul: add hooks for resource type ${name}`);
+      await gitSync.commit(
+        `soul: add hooks for resource type ${name}`,
+        commitActorFromRequest(req)
+      );
       await soulLoader.reload();
       // Hooks are executable code running against business data — the highest-value write here.
       await auditWrite(req, "resource-type.hooks.write", `resource-type:${name}`);
@@ -400,7 +404,10 @@ export function registerResourceTypeRoutes(
       }
 
       await unlink(hooksFile);
-      await gitSync.commit(`soul: remove hooks for resource type ${name}`);
+      await gitSync.commit(
+        `soul: remove hooks for resource type ${name}`,
+        commitActorFromRequest(req)
+      );
       await soulLoader.reload();
       await auditWrite(req, "resource-type.hooks.delete", `resource-type:${name}`);
       return reply.code(204).send();

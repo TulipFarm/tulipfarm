@@ -90,6 +90,9 @@ describe("RegistryToolDispatcher", () => {
     expect(seen).toEqual([
       {
         userId: "user-1",
+        // A Tool that writes to the Soul commits as the Run's recorded subject, so the activation
+        // ledger names the person the work ran for rather than the API service principal.
+        actor: { principalId: "user:user-1", name: "user-1", email: "" },
         conversationId: CONVERSATION_ID,
         runId: RUN_ID,
         toolCallId: "c1",

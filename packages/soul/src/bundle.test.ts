@@ -1,7 +1,6 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
 import {
-  BundleError,
   computeBundleDigest,
   type ExecutionBundle,
   InMemoryBundleStore,
@@ -26,11 +25,14 @@ function doc(slug: string, spec: Record<string, unknown>): VersionedSchemaDocume
   } as unknown as VersionedSchemaDocument;
 }
 
-function bundleOf(spec: Record<string, unknown>): ExecutionBundle {
+function bundleOf(
+  spec: Record<string, unknown>,
+  lineage: { changesetId?: string; commitSha?: string } = {}
+): ExecutionBundle {
   return compileExecutionBundle({
     businessId: "biz-1",
-    changesetId: "cs-1",
-    commitSha: "c0ffee",
+    changesetId: lineage.changesetId ?? "cs-1",
+    commitSha: lineage.commitSha ?? "c0ffee",
     documents: [doc("fast", spec)],
   });
 }
@@ -54,6 +56,20 @@ describe("computeBundleDigest", () => {
     expect(computeBundleDigest(bundleOf({ a: 1 }))).not.toBe(
       computeBundleDigest(bundleOf({ a: 2 }))
     );
+  });
+
+  it("is a content address: identical content under different lineage yields one digest", () => {
+    const first = bundleOf({ a: 1 }, { changesetId: "cs-1", commitSha: "commit-a" });
+    const second = bundleOf({ a: 1 }, { changesetId: "cs-2", commitSha: "commit-b" });
+    expect(first.changesetId).not.toBe(second.changesetId);
+    expect(first.commitSha).not.toBe(second.commitSha);
+    expect(computeBundleDigest(first)).toBe(computeBundleDigest(second));
+  });
+
+  it("still separates tenants: same content under a different business differs", () => {
+    const mine = bundleOf({ a: 1 });
+    const theirs = { ...mine, businessId: "biz-2" } satisfies ExecutionBundle;
+    expect(computeBundleDigest(mine)).not.toBe(computeBundleDigest(theirs));
   });
 });
 
@@ -101,12 +117,12 @@ describe("InMemoryBundleStore", () => {
     await expect(store.get(record.digest)).resolves.toEqual(record);
   });
 
-  it("refuses to overwrite a stored digest with a different signature", async () => {
+  it("idempotently accepts a republish of identical content under a new signature, first wins", async () => {
     const store = new InMemoryBundleStore();
-    const record = signed(bundleOf({ a: 1 }));
+    const record = signed(bundleOf({ a: 1 }, { commitSha: "commit-a" }));
     await store.put(record);
-    const rival = { ...record, signature: { keyId: "k2", value: "other" } };
-    await expect(store.put(rival)).rejects.toBeInstanceOf(BundleError);
+    const republish = { ...record, signature: { keyId: "k2", value: "other" } };
+    await store.put(republish);
     await expect(store.get(record.digest)).resolves.toEqual(record);
   });
 });

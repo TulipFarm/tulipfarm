@@ -287,7 +287,7 @@ describe("llm-config routes", () => {
         llm: unknown;
       };
       expect(manifest.llm).toEqual(next);
-      expect(withSync).toHaveBeenCalledWith("soul: update llm config");
+      expect(withSync).toHaveBeenCalledWith("soul: update llm config", expect.any(Object));
       expect(reload).toHaveBeenCalledOnce();
       expect(init).toHaveBeenCalledOnce();
     });

@@ -415,7 +415,7 @@ describe("integration marketplace routes", () => {
         ref: await headOf(repo),
       });
       expect(lock.integrations.linear.hash).toMatch(/^[0-9a-f]{64}$/);
-      expect(withSync).toHaveBeenCalledWith("soul: install integration linear");
+      expect(withSync).toHaveBeenCalledWith("soul: install integration linear", expect.any(Object));
     });
 
     it("copies a setup guide when the repo ships one", async () => {

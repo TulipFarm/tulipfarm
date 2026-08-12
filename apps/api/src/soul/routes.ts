@@ -5,6 +5,7 @@ import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import { patchSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
+import { commitActorFromRequest } from "./commit-actor";
 import { readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -77,7 +78,7 @@ export function registerSoulRoutes(
     },
     async (req, reply) => {
       const { message } = req.body as { message: string };
-      const result = await gitSync.commit(message);
+      const result = await gitSync.commit(message, commitActorFromRequest(req));
       if (result.sha === "") {
         return reply.code(204).send();
       }
@@ -285,7 +286,9 @@ export function registerSoulRoutes(
         businessDescription: description,
         businessWebsite: website,
       });
-      await gitSync.commit("chore: update business profile").catch(() => {});
+      await gitSync
+        .commit("chore: update business profile", commitActorFromRequest(req))
+        .catch(() => {});
       // Without this the manifest in memory keeps answering with the old profile until the next
       // periodic sync — which never runs at all on a remote-less soul.
       gitSync.emit("soul.synced");

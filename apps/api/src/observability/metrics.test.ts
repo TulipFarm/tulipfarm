@@ -102,6 +102,42 @@ describe("OtlpMetricsExporter", () => {
     );
   });
 
+  it("records every Soul publication outcome and latency when available", () => {
+    const e = exporter();
+    e.recordSoulPublication({ status: "advanced", stage: "active", latencyMs: 42 });
+    e.recordSoulPublication({ status: "failed", stage: "projected" });
+    e.recordSoulPublication({ status: "dead_lettered", stage: "stored" });
+
+    const payload = e.buildPayload() as {
+      resourceMetrics: [
+        {
+          scopeMetrics: [
+            {
+              metrics: Array<{
+                name: string;
+                sum?: { dataPoints: Array<{ asDouble: number }> };
+                histogram?: { dataPoints: Array<{ count: number; sum: number }> };
+              }>;
+            },
+          ];
+        },
+      ];
+    };
+    const metrics = payload.resourceMetrics[0].scopeMetrics[0].metrics;
+    const byName = Object.fromEntries(metrics.map((metric) => [metric.name, metric]));
+
+    expect(byName.soul_publication_outcomes_total.sum?.dataPoints).toHaveLength(3);
+    expect(
+      byName.soul_publication_outcomes_total.sum?.dataPoints.reduce(
+        (total, point) => total + point.asDouble,
+        0
+      )
+    ).toBe(3);
+    expect(byName.soul_publication_latency_ms.histogram?.dataPoints).toEqual([
+      expect.objectContaining({ count: 1, sum: 42 }),
+    ]);
+  });
+
   it("POSTs OTLP JSON with basic auth to /v1/metrics", async () => {
     const fetchMock = vi.fn(async () => new Response(null, { status: 200 }));
     const e = exporter(fetchMock as unknown as typeof fetch);

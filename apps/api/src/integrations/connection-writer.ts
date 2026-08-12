@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { SecretsService } from "@tulipfarm/secrets";
 import {
   authFlowSatisfied,
+  type CommitActor,
   type GitSyncService,
   type IntegrationManifest,
   type SoulLoader,
@@ -38,6 +39,7 @@ export interface MergeConnectionEnvInput {
   /** Values to merge in. An empty string is a real value: it clears a field the operator blanked. */
   patch: Record<string, string>;
   commitMessage: string;
+  actor?: CommitActor;
 }
 
 export interface MergeConnectionEnvResult {
@@ -71,7 +73,7 @@ export async function mergeConnectionEnv(
   const dir = join(deps.gitSync.path, "integrations", input.slug);
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "connection.yaml"), stringifyYaml({ enabled, env: sealed }), "utf8");
-  await deps.gitSync.withSync(input.commitMessage);
+  await deps.gitSync.withSync(input.commitMessage, input.actor);
   await deps.soulLoader.reload();
 
   return { enabled, connectedNow: enabled && existing?.enabled !== true };

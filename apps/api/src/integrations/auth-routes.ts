@@ -2,6 +2,7 @@ import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, IntegrationManifest, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
+import { commitActorFromRequest } from "../soul/commit-actor";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import {
   AuthBrokerError,
@@ -127,6 +128,7 @@ export function registerIntegrationAuthRoutes(
               manifest,
               patch: action.env,
               commitMessage: `soul: integration ${name} auth step ${step}`,
+              actor: commitActorFromRequest(req),
             });
             if (connectedNow) await deps.onConnected?.(name);
           }

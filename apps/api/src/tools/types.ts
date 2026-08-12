@@ -35,6 +35,7 @@ export interface ClientContext {
 /** Per-request caller identity. Service references are closed over at registration time. */
 export interface RequestContext {
   userId: string;
+  actor?: CommitActor;
   /** Server-resolved target. Request payloads cannot override it. */
   presentationContext?: PresentationContext;
   surfaceCatalog?: readonly SurfaceComponentDefinition[];
@@ -98,6 +99,7 @@ export interface ApprovalGate {
 }
 
 import type { EventEmitter } from "node:events";
+import type { CommitActor } from "@tulipfarm/soul";
 import type {
   PresentationContext,
   SoulSurfaceComponent,

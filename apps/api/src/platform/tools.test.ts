@@ -487,7 +487,7 @@ describe("endSoulBatchTool", () => {
     const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
     const res = await endSoulBatchTool.handler({ message: "soul: batch write" }, ctx);
     expect(res).toEqual({ success: true, data: { sha: "deadbeef", filesChanged: 3 } });
-    expect(gitSync.withSync).toHaveBeenCalledWith("soul: batch write");
+    expect(gitSync.withSync).toHaveBeenCalledWith("soul: batch write", undefined);
   });
 
   it("returns internal_error when gitSync absent", async () => {
@@ -519,7 +519,7 @@ describe("soulRepoCommitTool", () => {
     const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
     const res = await soulRepoCommitTool.handler({ message: "soul: add agent" }, ctx);
     expect(res).toEqual({ success: true, data: { sha: "c0ffee", filesChanged: 1 } });
-    expect(gitSync.commit).toHaveBeenCalledWith("soul: add agent");
+    expect(gitSync.commit).toHaveBeenCalledWith("soul: add agent", undefined);
   });
 
   it("returns internal_error when gitSync absent", async () => {

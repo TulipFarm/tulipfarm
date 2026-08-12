@@ -184,6 +184,227 @@ describe("runPgMigrations", () => {
         "soul_publications",
       ]);
     });
+
+    it("installs the publication and activation safety schema through migration 49", async () => {
+      await runPgMigrations(db, undefined, () => {});
+
+      const activationSequence = await db.query<{ reg: string | null }>(
+        "SELECT to_regclass('soul_activation_sequence') AS reg"
+      );
+      expect(activationSequence.rows[0]?.reg).toBe("soul_activation_sequence");
+
+      const publicationColumns = await db.query<{ column_name: string }>(`SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'soul_publications'
+          AND column_name IN (
+            'publication_sequence',
+            'actor_principal_id',
+            'attempts',
+            'next_attempt_at',
+            'failure_code',
+            'dead_lettered_at',
+            'dead_letter_reason'
+          )
+        ORDER BY column_name`);
+      expect(publicationColumns.rows.map((row) => row.column_name)).toEqual([
+        "actor_principal_id",
+        "attempts",
+        "dead_letter_reason",
+        "dead_lettered_at",
+        "failure_code",
+        "next_attempt_at",
+        "publication_sequence",
+      ]);
+
+      const activationColumns = await db.query<{ table_name: string; column_name: string }>(
+        `SELECT table_name, column_name
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name IN ('soul_active_bundles', 'soul_bundle_activations')
+            AND column_name IN (
+              'business_id',
+              'activation_sequence',
+              'digest',
+              'changeset_id',
+              'activated_at',
+              'activated_by_principal_id'
+            )
+          ORDER BY table_name, column_name`
+      );
+      expect(activationColumns.rows).toEqual([
+        { table_name: "soul_active_bundles", column_name: "activated_at" },
+        { table_name: "soul_active_bundles", column_name: "activated_by_principal_id" },
+        { table_name: "soul_active_bundles", column_name: "activation_sequence" },
+        { table_name: "soul_active_bundles", column_name: "business_id" },
+        { table_name: "soul_active_bundles", column_name: "digest" },
+        { table_name: "soul_bundle_activations", column_name: "activated_at" },
+        { table_name: "soul_bundle_activations", column_name: "activated_by_principal_id" },
+        { table_name: "soul_bundle_activations", column_name: "activation_sequence" },
+        { table_name: "soul_bundle_activations", column_name: "business_id" },
+        { table_name: "soul_bundle_activations", column_name: "changeset_id" },
+        { table_name: "soul_bundle_activations", column_name: "digest" },
+      ]);
+
+      const foreignKeys = await db.query<{ table_name: string; constraint_name: string }>(
+        `SELECT table_name, constraint_name
+          FROM information_schema.table_constraints
+          WHERE table_schema = 'public'
+            AND constraint_type = 'FOREIGN KEY'
+            AND table_name IN (
+              'soul_publication_outbox',
+              'soul_active_bundles',
+              'soul_bundle_activations'
+            )
+          ORDER BY table_name, constraint_name`
+      );
+      expect(foreignKeys.rows).toEqual(
+        expect.arrayContaining([
+          {
+            table_name: "soul_active_bundles",
+            constraint_name: "soul_active_bundles_bundle_fkey",
+          },
+          {
+            table_name: "soul_bundle_activations",
+            constraint_name: "soul_bundle_activations_bundle_fkey",
+          },
+          {
+            table_name: "soul_bundle_activations",
+            constraint_name: "soul_bundle_activations_changeset_id_fkey",
+          },
+          {
+            table_name: "soul_publication_outbox",
+            constraint_name: "soul_publication_outbox_changeset_id_fkey",
+          },
+        ])
+      );
+
+      const repeatDigestUnique = await db.query<{ constraint_name: string }>(
+        `SELECT constraint_name
+          FROM information_schema.table_constraints
+          WHERE table_schema = 'public'
+            AND table_name = 'soul_bundle_activations'
+            AND constraint_type = 'UNIQUE'`
+      );
+      expect(repeatDigestUnique.rows).toEqual([]);
+    });
+  });
+
+  describe("migration 49", () => {
+    it("moves activation history off the publication sequence without losing repeat activations", async () => {
+      await db.query(`CREATE SEQUENCE soul_publication_sequence`);
+      await db.query(`CREATE TABLE soul_publications (
+        changeset_id text PRIMARY KEY,
+        business_id text NOT NULL,
+        commit_sha text NOT NULL,
+        digest text NOT NULL,
+        stage text NOT NULL,
+        publication_sequence bigint NOT NULL,
+        actor_principal_id text NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        attempts integer NOT NULL DEFAULT 0,
+        next_attempt_at timestamptz NOT NULL DEFAULT now(),
+        failure_code text,
+        dead_lettered_at timestamptz,
+        dead_letter_reason text,
+        UNIQUE (business_id, digest),
+        UNIQUE (business_id, publication_sequence)
+      )`);
+      await db.query(`CREATE TABLE soul_execution_bundles (
+        digest text PRIMARY KEY,
+        business_id text NOT NULL,
+        changeset_id text NOT NULL,
+        commit_sha text NOT NULL,
+        bundle jsonb NOT NULL,
+        signature jsonb NOT NULL,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        UNIQUE (business_id, digest)
+      )`);
+      await db.query(`CREATE TABLE soul_active_bundles (
+        business_id text PRIMARY KEY,
+        digest text NOT NULL,
+        activation_sequence bigint NOT NULL,
+        activated_at timestamptz NOT NULL DEFAULT now(),
+        activated_by_principal_id text NOT NULL
+      )`);
+      await db.query(`CREATE TABLE soul_bundle_activations (
+        business_id text NOT NULL,
+        activation_sequence bigint NOT NULL,
+        digest text NOT NULL,
+        changeset_id text NOT NULL REFERENCES soul_publications(changeset_id),
+        activated_at timestamptz NOT NULL DEFAULT now(),
+        activated_by_principal_id text NOT NULL,
+        PRIMARY KEY (business_id, activation_sequence),
+        UNIQUE (business_id, digest)
+      )`);
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 48)");
+      await db.query(`INSERT INTO soul_execution_bundles (
+        digest, business_id, changeset_id, commit_sha, bundle, signature
+      ) VALUES (
+        'digest-1',
+        'biz-1',
+        'changeset-1',
+        'commit-1',
+        '{}'::jsonb,
+        '{"keyId":"key-1","value":"sig"}'::jsonb
+      )`);
+      await db.query(`INSERT INTO soul_publications (
+        changeset_id, business_id, commit_sha, digest, stage, publication_sequence,
+        actor_principal_id
+      ) VALUES (
+        'changeset-1',
+        'biz-1',
+        'commit-1',
+        'digest-1',
+        'active',
+        1,
+        'publisher-1'
+      )`);
+      await db.query(`INSERT INTO soul_active_bundles (
+        business_id, digest, activation_sequence, activated_by_principal_id
+      ) VALUES ('biz-1', 'digest-1', 1, 'publisher-1')`);
+      await db.query(`INSERT INTO soul_bundle_activations (
+        business_id, activation_sequence, digest, changeset_id, activated_by_principal_id
+      ) VALUES ('biz-1', 1, 'digest-1', 'changeset-1', 'publisher-1')`);
+
+      await runPgMigrations(db, undefined, () => {});
+
+      const version = await db.query<{ version: number }>(
+        "SELECT version FROM schema_version WHERE id = true"
+      );
+      expect(Number(version.rows[0]?.version)).toBe(49);
+
+      const next = await db.query<{ activation_sequence: string | number }>(
+        "SELECT nextval('soul_activation_sequence') AS activation_sequence"
+      );
+      expect(Number(next.rows[0]?.activation_sequence)).toBe(2);
+
+      await db.query(`INSERT INTO soul_bundle_activations (
+        business_id, activation_sequence, digest, changeset_id, activated_by_principal_id
+      ) VALUES (
+        'biz-1',
+        nextval('soul_activation_sequence'),
+        'digest-1',
+        'changeset-1',
+        'operator-1'
+      )`);
+      const rows = await db.query<{
+        activation_sequence: string | number;
+        activated_by_principal_id: string;
+      }>(`SELECT activation_sequence, activated_by_principal_id
+        FROM soul_bundle_activations
+        ORDER BY activation_sequence`);
+      expect(rows.rows.map((row) => Number(row.activation_sequence))).toEqual([1, 3]);
+      expect(rows.rows.map((row) => row.activated_by_principal_id)).toEqual([
+        "publisher-1",
+        "operator-1",
+      ]);
+    });
   });
 
   describe("migration 21", () => {

@@ -3,6 +3,7 @@ import type { Dirent } from "node:fs";
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import {
+  type CommitActor,
   type GitSyncService,
   type IntegrationManifest,
   type SoulLoader,
@@ -264,6 +265,7 @@ export async function installIntegrationFromSource(
     soulLoader: SoulLoader;
     gitSync: GitSyncService;
     bundledSlugs: ReadonlySet<string>;
+    actor?: CommitActor;
   }
 ): Promise<InstallResult> {
   const { ref, integrations } = await inspectIntegrationSource(options.source);
@@ -335,7 +337,7 @@ export async function installIntegrationFromSource(
     };
     await writeIntegrationLock(deps.gitSync.path, lock);
 
-    await deps.gitSync.withSync(`soul: install integration ${chosen.name}`);
+    await deps.gitSync.withSync(`soul: install integration ${chosen.name}`, deps.actor);
   } catch (error) {
     await rm(dir, { recursive: true, force: true });
     await deps.soulLoader.reload();

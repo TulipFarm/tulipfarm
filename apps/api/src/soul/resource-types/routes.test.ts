@@ -153,7 +153,10 @@ describe("resource-type routes", () => {
         VALID_SCHEMA_YAML,
         "utf8"
       );
-      expect(gitSync.commit).toHaveBeenCalledWith("soul: add resource type ticket");
+      expect(gitSync.commit).toHaveBeenCalledWith(
+        "soul: add resource type ticket",
+        expect.objectContaining({ email: "user@example.com" })
+      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -374,7 +377,10 @@ x-computed:
         VALID_SCHEMA_YAML,
         "utf8"
       );
-      expect(gitSync.commit).toHaveBeenCalledWith("soul: update resource type ticket");
+      expect(gitSync.commit).toHaveBeenCalledWith(
+        "soul: update resource type ticket",
+        expect.objectContaining({ email: "user@example.com" })
+      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -414,7 +420,10 @@ x-computed:
         recursive: true,
         force: true,
       });
-      expect(gitSync.commit).toHaveBeenCalledWith("soul: remove resource type ticket");
+      expect(gitSync.commit).toHaveBeenCalledWith(
+        "soul: remove resource type ticket",
+        expect.objectContaining({ email: "user@example.com" })
+      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
   });
@@ -522,7 +531,10 @@ x-computed:
         VALID_HOOK,
         "utf8"
       );
-      expect(gitSync.commit).toHaveBeenCalledWith("soul: add hooks for resource type ticket");
+      expect(gitSync.commit).toHaveBeenCalledWith(
+        "soul: add hooks for resource type ticket",
+        expect.objectContaining({ email: "user@example.com" })
+      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 
@@ -586,7 +598,10 @@ x-computed:
       const res = await app.inject(delHooks());
       expect(res.statusCode).toBe(204);
       expect(unlink).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"));
-      expect(gitSync.commit).toHaveBeenCalledWith("soul: remove hooks for resource type ticket");
+      expect(gitSync.commit).toHaveBeenCalledWith(
+        "soul: remove hooks for resource type ticket",
+        expect.objectContaining({ email: "user@example.com" })
+      );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
     });
 

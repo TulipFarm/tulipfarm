@@ -443,7 +443,7 @@ export const routineForgeTool: PlatformTool = {
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, "routine.yaml"), stringifyYaml(definition), "utf8");
       if (hooks) await writeFile(join(dir, "hooks.ts"), hooks, "utf8");
-      await ctx.gitSync.withSync(`soul: forge routine ${name}`);
+      await ctx.gitSync.withSync(`soul: forge routine ${name}`, ctx.requestContext?.actor);
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
@@ -536,7 +536,7 @@ export const endSoulBatchTool: PlatformTool = {
     if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
     const { message } = args as { message: string };
     try {
-      const result = await ctx.gitSync.withSync(message);
+      const result = await ctx.gitSync.withSync(message, ctx.requestContext?.actor);
       return ok({ sha: result.sha, filesChanged: result.filesChanged });
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));
@@ -572,7 +572,7 @@ export const soulRepoCommitTool: PlatformTool = {
     if (!ctx.gitSync) return err("internal_error", "Soul git sync is not available.");
     const { message } = args as { message: string };
     try {
-      const result = await ctx.gitSync.commit(message);
+      const result = await ctx.gitSync.commit(message, ctx.requestContext?.actor);
       return ok({ sha: result.sha, filesChanged: result.filesChanged });
     } catch (e) {
       return err("internal_error", e instanceof Error ? e.message : String(e));

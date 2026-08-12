@@ -21,6 +21,12 @@ export interface SoulSyncOptions {
   activity?: ActivityService;
   soulLoader?: SoulArtifacts;
   log?: { error(obj: unknown, msg?: string): void };
+  /**
+   * Reconcile the active bundle with git HEAD after each pull. A remote-authored commit moves HEAD
+   * without firing the local commit hook, so without this the draft read side reloads the new
+   * rules while `soul_active_bundles` stays pinned to the last locally-committed tree.
+   */
+  reconcile?: () => Promise<void>;
 }
 
 export const SOUL_SYNC_JOB = "soul-sync";
@@ -83,7 +89,7 @@ export function registerSoulSync(
 ): ReturnType<typeof setInterval> | undefined {
   if (!gitRemoteUrl) return undefined;
 
-  const { activity, soulLoader, log } = opts;
+  const { activity, soulLoader, log, reconcile } = opts;
   let running = false;
   return setInterval(() => {
     if (running) return;
@@ -95,6 +101,7 @@ export function registerSoulSync(
         await soulLoader.reload();
         await recordSoulDiff(activity, before, snapshot(soulLoader));
       }
+      if (reconcile) await reconcile();
     })
       .catch((error: unknown) => {
         log?.error({ error }, "periodic soul sync failed");

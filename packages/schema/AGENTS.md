@@ -29,10 +29,17 @@ See root `AGENTS.md` for commands/lint.
 - **`SchemaRegistry`** — strict `apiVersion`/`kind` dispatch with explicit unknown-property
   behavior, fail-closed YAML parsing, deterministic validation issues, and immutable validated
   documents.
+- **`ARTIFACT_LAYOUTS`** (+ `classifySoulPath`, `definitionPath`, `companionPath`,
+  `temporalClassOf`) — the single registry for where Soul artifacts live, which companion files
+  belong to them, and whether runtime reads use a pinned or live digest. Consumers must derive from
+  this registry; never copy it into regexes or parallel tables.
 - **`canonicalize` + `canonicalHash`** — deterministic canonical JSON and lowercase SHA-256 hex
   over parsed data; rejects values that JSON would silently erase or change.
 - **Schema contract errors** — stable error codes for invalid/unknown/duplicate schemas, validation,
   YAML parsing, and canonicalization without protected payload values.
+- **`SECRET_REFERENCE_PATTERN`** (+ `secretReferenceSchema`, `isSecretReference`) — the one
+  canonical shape for opaque Secret references. Trigger schemas, Integration schemas, and bundle
+  compilation must use this export so authoring and publication cannot disagree.
 - **`INVOCATION_REQUEST_SCHEMAS`** (+ `CHAT_REQUEST_SCHEMA_REF`, `MANUAL_REQUEST_SCHEMA_REF`,
   `INTEGRATION_REQUEST_SCHEMA_REF`) — plain JSON Schemas for every request that mints a Run; the
   chat entry is the API's Fastify body schema, so the route and the request Artifact cannot drift.
@@ -133,6 +140,12 @@ pnpm --filter @tulipfarm/schema test -u    # re-lock, then read the diff before 
 - **New definition kind:** add `src/definitions/<kind>.ts` following the TypeBox pattern above,
   register it in `definitions/index.ts`, then re-lock the snapshots with `test -u` (this writes a
   new `__schemas__/<Kind>.json` and updates `_kinds.json`).
+- **New Soul artifact kind or file layout:** add it to `ARTIFACT_LAYOUTS` in `src/artifacts.ts`.
+  Include companions and `temporalClass`. The tree reader, writers, validators, and bundle compiler
+  must derive from that registry; "write a better regex" is the defect pattern, not the fix.
+- **New Secret-bearing field:** use `secretReferenceSchema` or `SECRET_REFERENCE_PATTERN`; do not
+  redeclare a local pattern. A value accepted by schema but rejected by the bundle compiler wedges
+  auto-publication for the business.
 - **New normalizer:** add the key to `NORMALIZER_KEYS` *and* its fn to the map in
   `transforms/normalizers.ts`.
 - **New computed fn:** add the key to `COMPUTED_FN_KEYS` *and* its async fn in
