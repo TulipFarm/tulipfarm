@@ -59,7 +59,7 @@ export type OperationsModel = {
   incidents: Array<Record<string, unknown>>;
   quarantine: Array<Record<string, unknown>>;
   killSwitches: Array<Record<string, unknown>>;
-  audit: Array<Record<string, unknown>>;
+  activity: Array<Record<string, unknown>>;
   recovery: { supportBundleAvailable: boolean; lastBackupAt: string | null };
 };
 

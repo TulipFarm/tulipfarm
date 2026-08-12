@@ -182,8 +182,30 @@ services:
       start_period: 20s
 
   postgres:
-    image: pgvector/pgvector:pg17
+    # Pinned by digest as well as tag: `pg17` is a moving target, so an unpinned rebuild can change
+    # the server or pgvector version underneath an existing data volume. Update both together.
+    image: pgvector/pgvector:pg17@sha256:494dff7e67e7bc2c826b94c331364978d145ebb86fd338154138b084223b7f67
     restart: unless-stopped
+    # `pg_stat_statements` cannot be loaded by `CREATE EXTENSION` alone — it must be preloaded at
+    # server start. Without it there is no way to answer "which query is slow" after the fact.
+    # The migration that enables it tolerates its absence, so a managed host that does not preload
+    # it still boots.
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=all
+      # Defaults are sized for a tiny container. These suit a single-node deployment; a managed
+      # host ignores them entirely because it is not started by this file.
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
     environment:
       POSTGRES_USER: tulipfarm
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tulipfarm}

@@ -202,6 +202,10 @@ export const ARCHITECTURE_CONFIG: ArchitectureConfig = {
       "schema",
       "authz",
       "audit",
+      // Pool tuning has to be identical in every process that opens a connection: three apps
+      // sizing their pools independently oversubscribe the server's `max_connections` between
+      // them, and the failure shows up as an unrelated app being refused a connection.
+      "constants",
       "run-kernel",
       "tool-broker",
       "integrations",

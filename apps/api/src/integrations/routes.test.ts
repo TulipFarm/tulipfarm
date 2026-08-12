@@ -1,11 +1,13 @@
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 import { buildApp } from "../app";
+import { AuditService } from "../audit/service";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
@@ -16,6 +18,7 @@ import type { BundledIntegration } from "../soul/integrations/bundled";
 import type { SlackAuthTestResult } from "./slack-binding";
 
 const TEST_CSRF = "a".repeat(64);
+const AUDIT_BUSINESS = "deployment";
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -119,6 +122,7 @@ class FakeIntegrationStore {
 
 describe("integrations routes", () => {
   let app: FastifyInstance;
+  let auditRepo: InMemoryAuditEventRepo;
   let store: MemorySessionStore;
   let sid: string;
   let soulPath: string;
@@ -230,7 +234,9 @@ describe("integrations routes", () => {
 
     integrationStore = new FakeIntegrationStore();
 
+    auditRepo = new InMemoryAuditEventRepo();
     app = await buildApp({
+      auditService: new AuditService(auditRepo, AUDIT_BUSINESS),
       sessionStore: store,
       userRepo,
       tokenRepo,
@@ -494,6 +500,75 @@ describe("integrations routes", () => {
       );
       expect(written.enabled).toBe(false);
       expect(written.env.SLACK_BOT_TOKEN).toMatch(/^secret:\/\//);
+    });
+  });
+
+  /**
+   * These routes write the Soul repo directly, so the audit ledger is the only record of who
+   * granted or revoked an Agent's reach into an external system. Asserted through real requests:
+   * a route wired to accept an `AuditService` but never calling it type-checks perfectly.
+   */
+  describe("audit evidence", () => {
+    const chain = () => auditRepo.listChain(AUDIT_BUSINESS);
+
+    it("records who connected an integration, without ever storing the credential", async () => {
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_TEAM_ID: "T123" } },
+      });
+
+      const [event] = await chain();
+      expect(event?.action).toBe("integration.connect");
+      expect(event?.target).toBe("integration:slack");
+      expect(event?.reasonCodes).toContain("SOUL_DIRECT_WRITE");
+      // Field names are evidence; values are credentials.
+      expect(event?.safeMetadata?.fields).toEqual(["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"]);
+      expect(JSON.stringify(event)).not.toContain("xoxb-secret");
+    });
+
+    it("records disconnect and removal, so revocation is as answerable as the grant", async () => {
+      const connect = {
+        method: "POST" as const,
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-secret", SLACK_TEAM_ID: "T123" } },
+      };
+      await app.inject(connect);
+      await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/disconnect",
+        cookies: auth(),
+        headers,
+      });
+      await app.inject({
+        method: "DELETE",
+        url: "/api/v1/integrations/slack",
+        cookies: auth(),
+        headers,
+      });
+
+      expect((await chain()).map((e) => e.action)).toEqual([
+        "integration.connect",
+        "integration.disconnect",
+        "integration.remove",
+      ]);
+    });
+
+    it("does not record a write that never happened", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: auth(),
+        headers,
+        payload: { env: {} },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(await chain()).toEqual([]);
     });
   });
 

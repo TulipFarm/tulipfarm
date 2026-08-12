@@ -1,8 +1,34 @@
 import type { PGlite } from "@electric-sql/pglite";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
 import { PG_MIGRATIONS } from "./pg-migrations";
 import { makePglite } from "./test/pglite";
+
+/** Each embedding table and the migration that first creates it. */
+const EMBEDDING_TABLE_ORIGINS = [
+  { table: "knowledge_chunks", dimColumn: "dim", createdAt: 1 },
+  { table: "knowledge_source_chunks", dimColumn: "dim", createdAt: 29 },
+  { table: "memory_assertions", dimColumn: "embedding_dim", createdAt: 33 },
+  { table: "memory_chunks", dimColumn: "embedding_dim", createdAt: 35 },
+] as const;
+
+/**
+ * v45 indexes every embedding column, so a fixture that starts mid-history has to stand in for the
+ * embedding tables that already existed at its cutoff. Only those: the later ones are created by
+ * the sweep itself, and pre-creating them would shadow their real definitions behind
+ * `CREATE TABLE IF NOT EXISTS` and quietly test the wrong schema.
+ */
+async function seedEmbeddingTablesAsOf(db: PGlite, version: number): Promise<void> {
+  await db.query("CREATE EXTENSION IF NOT EXISTS vector");
+  for (const origin of EMBEDDING_TABLE_ORIGINS.filter((o) => o.createdAt <= version)) {
+    await db.query(`CREATE TABLE IF NOT EXISTS ${origin.table} (
+      id        uuid PRIMARY KEY,
+      embedding vector,
+      ${origin.dimColumn} integer
+    )`);
+  }
+}
 
 describe("runPgMigrations", () => {
   let db: PGlite;
@@ -20,6 +46,7 @@ describe("runPgMigrations", () => {
     // v27's `knowledge_source_chunks.embedding` needs pgvector, normally created by baseline (v1).
     await db.query("CREATE EXTENSION IF NOT EXISTS vector");
     await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
+    await seedEmbeddingTablesAsOf(db, 14);
     await db.query("CREATE TABLE messages (id uuid PRIMARY KEY)");
     await db.query("CREATE TABLE users (id uuid PRIMARY KEY, password_hash text NOT NULL)");
     await db.query("CREATE TABLE runs (id uuid PRIMARY KEY, bundle jsonb NOT NULL)");
@@ -175,6 +202,7 @@ describe("runPgMigrations", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
+      await seedEmbeddingTablesAsOf(db, 20);
       // Minimal stand-in for the real `users` table (created well before v20): later migrations
       // past 21 run in the same sweep and need it to exist with the columns they touch (v25 adds
       // one, v27 relaxes `password_hash`), even though this test only exercises migration 21.
@@ -238,6 +266,7 @@ describe("runPgMigrations", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
+      await seedEmbeddingTablesAsOf(db, 31);
 
       await runPgMigrations(db, undefined, () => {});
 
@@ -260,8 +289,174 @@ describe("runPgMigrations", () => {
         CONSTRAINT schema_version_single_row CHECK (id)
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 31)");
+      await seedEmbeddingTablesAsOf(db, 31);
 
       await expect(runPgMigrations(db, undefined, () => {})).resolves.not.toThrow();
     });
+  });
+});
+
+/**
+ * Wraps the test database so a test can watch the SQL a run issues, and stand in for events that
+ * are otherwise unreachable from a single process — a peer holding the lock, a statement failing
+ * mid-migration.
+ */
+function watch(db: PGlite, intercept?: Intercept) {
+  const statements: string[] = [];
+  const queryable: Queryable = {
+    async query(text, params) {
+      statements.push(text);
+      const override = intercept?.(text, params);
+      if (override) return await override;
+      return (await db.query(text, params)) as { rows: Record<string, unknown>[] };
+    },
+  };
+  return { queryable, statements };
+}
+
+type Intercept = (
+  sql: string,
+  params: unknown[] | undefined
+) => Promise<{ rows: Record<string, unknown>[] }> | undefined;
+
+const NOOP_LOG = () => {};
+
+async function tableExists(db: PGlite, name: string): Promise<boolean> {
+  const { rows } = await db.query<{ reg: string | null }>("SELECT to_regclass($1) AS reg", [name]);
+  return rows[0]?.reg !== null;
+}
+
+async function schemaVersion(db: PGlite): Promise<number> {
+  const { rows } = await db.query<{ version: number }>(
+    "SELECT version FROM schema_version WHERE id = true"
+  );
+  return Number(rows[0]?.version);
+}
+
+describe("runPgMigrations concurrency and atomicity", () => {
+  let db: PGlite;
+  const latestVersion = Math.max(...PG_MIGRATIONS.map((m) => m.version));
+
+  beforeEach(async () => {
+    db = await makePglite();
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it("holds the advisory lock across the whole run", async () => {
+    const { queryable, statements } = watch(db);
+
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+
+    // The lock must precede even `CREATE TABLE IF NOT EXISTS schema_version` — that statement is
+    // itself racy between replicas — and outlive the last migration.
+    expect(statements[0]).toContain("pg_try_advisory_lock");
+    expect(statements.filter((s) => s.includes("pg_try_advisory_lock"))).toHaveLength(1);
+    expect(statements.at(-1)).toContain("pg_advisory_unlock");
+  });
+
+  it("skips migrations a peer applied while this instance waited for the lock", async () => {
+    let peerHasRun = false;
+    // Stand in for the peer finishing its sweep in the instant before we win the lock.
+    const intercept: Intercept = (sql) => {
+      if (!sql.includes("pg_try_advisory_lock") || peerHasRun) return undefined;
+      peerHasRun = true;
+      return runPgMigrations(db, undefined, NOOP_LOG).then(() => ({ rows: [{ locked: true }] }));
+    };
+    const { queryable, statements } = watch(db, intercept);
+
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+
+    // Reading the version before the lock instead of after would replay all 44 migrations here.
+    expect(statements.filter((s) => s === "BEGIN")).toHaveLength(0);
+    expect(await schemaVersion(db)).toBe(latestVersion);
+  });
+
+  it("gives up loudly rather than hanging when a peer holds the lock indefinitely", async () => {
+    const held: Intercept = (sql) =>
+      sql.includes("pg_try_advisory_lock")
+        ? Promise.resolve({ rows: [{ locked: false }] })
+        : undefined;
+    const { queryable } = watch(db, held);
+    const exit = vi.fn();
+    const sleep = vi.fn(async () => {});
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPgMigrations(queryable, exit, NOOP_LOG, {
+      lockAttempts: 3,
+      lockDelayMs: 10,
+      sleep,
+    });
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(sleep).toHaveBeenCalledTimes(2); // waits between attempts, not after the last
+    expect(errors.mock.calls[0]?.[0]).toContain("migration lock");
+    expect(await tableExists(db, "schema_version")).toBe(false);
+    errors.mockRestore();
+  });
+
+  it("rolls back every statement of a failed migration, and frees the lock for the retry", async () => {
+    // Fails partway through the baseline, after `resource_sample` itself was created — so passing
+    // this proves the whole migration was undone, not merely the statement that threw.
+    const failing: Intercept = (sql) =>
+      sql.includes("resource_sample_ts_idx") ? Promise.reject(new Error("disk full")) : undefined;
+    const { queryable } = watch(db, failing);
+    const exit = vi.fn();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPgMigrations(queryable, exit, NOOP_LOG);
+
+    expect(exit).toHaveBeenCalledWith(1);
+    expect(errors.mock.calls[0]?.[0]).toContain("disk full");
+    expect(await tableExists(db, "resource_sample")).toBe(false);
+    expect(await schemaVersion(db)).toBe(0);
+    errors.mockRestore();
+
+    // The retry must not be locked out by the corpse of the failed run.
+    await runPgMigrations(db, undefined, NOOP_LOG);
+    expect(await schemaVersion(db)).toBe(latestVersion);
+    expect(await tableExists(db, "resource_sample")).toBe(true);
+  });
+
+  it("records what ran, when, and for how long", async () => {
+    await runPgMigrations(db, undefined, NOOP_LOG);
+
+    const { rows } = await db.query<{ version: number; description: string; duration_ms: number }>(
+      "SELECT version, description, duration_ms FROM schema_migrations ORDER BY version"
+    );
+    expect(rows).toHaveLength(PG_MIGRATIONS.length);
+    expect(rows.map((r) => r.version)).toEqual(
+      PG_MIGRATIONS.map((m) => m.version).sort((a, b) => a - b)
+    );
+    expect(rows.every((r) => r.duration_ms !== null)).toBe(true);
+    expect(rows.at(-1)?.description).toBe(
+      PG_MIGRATIONS.find((m) => m.version === latestVersion)?.description
+    );
+  });
+
+  it("is a no-op on an already-current database", async () => {
+    await runPgMigrations(db, undefined, NOOP_LOG);
+    const { queryable, statements } = watch(db);
+
+    await runPgMigrations(queryable, undefined, NOOP_LOG);
+
+    expect(statements.filter((s) => s === "BEGIN")).toHaveLength(0);
+    const { rows } = await db.query("SELECT version FROM schema_migrations");
+    expect(rows).toHaveLength(PG_MIGRATIONS.length);
+  });
+
+  it("seeds one baseline row for a database migrated before the ledger existed", async () => {
+    await runPgMigrations(db, undefined, NOOP_LOG);
+    await db.query("DROP TABLE schema_migrations");
+
+    await runPgMigrations(db, undefined, NOOP_LOG);
+
+    // 44 invented timestamps would be a lie; one honest marker is not.
+    const { rows } = await db.query<{ version: number; description: string }>(
+      "SELECT version, description FROM schema_migrations"
+    );
+    expect(rows).toEqual([{ version: latestVersion, description: "pre-ledger baseline" }]);
   });
 });

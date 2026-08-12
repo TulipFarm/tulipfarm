@@ -131,6 +131,9 @@ importers:
       '@tulipfarm/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tulipfarm/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@tulipfarm/authz':
         specifier: workspace:*
         version: link:../../packages/authz
@@ -313,6 +316,9 @@ importers:
 
   apps/integration-worker:
     dependencies:
+      '@tulipfarm/constants':
+        specifier: workspace:*
+        version: link:../../packages/constants
       '@tulipfarm/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations

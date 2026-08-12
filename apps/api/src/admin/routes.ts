@@ -63,7 +63,16 @@ export interface OperationsReadModel {
   readonly incidents: readonly Record<string, unknown>[];
   readonly quarantine: readonly Record<string, unknown>[];
   readonly killSwitches: readonly Record<string, unknown>[];
-  readonly audit: readonly Record<string, unknown>[];
+  /**
+   * Recent *activity-feed* entries — not audit-ledger events.
+   *
+   * Named `activity` deliberately: this field used to be called `audit` and rendered under an
+   * "Audit" heading, while being populated from `ActivityService`, a cosmetic UI feed with no
+   * hash chain, no reason codes and no append-only guarantee. An operator asking "who repointed
+   * the Soul git remote" would read it and get an answer that had never been through the ledger.
+   * The real ledger is `audit_events`, exposed at `GET /api/v1/audit/events`.
+   */
+  readonly activity: readonly Record<string, unknown>[];
   readonly recovery: {
     readonly supportBundleAvailable: boolean;
     readonly lastBackupAt: string | null;

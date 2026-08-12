@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/schema": "workspace:*",

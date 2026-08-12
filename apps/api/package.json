@@ -20,6 +20,7 @@
     "@scalar/fastify-api-reference": "^1.62.0",
     "@sinclair/typebox": "^0.34.49",
     "@tulipfarm/agent-runtime": "workspace:*",
+    "@tulipfarm/audit": "workspace:*",
     "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",

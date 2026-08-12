@@ -14,6 +14,7 @@ import { StatusBadge as SemanticStatusBadge, type StatusTone } from "~/component
 import type { OperationsModel } from "~/lib/operations";
 import { formatIso } from "~/lib/schema";
 import { cn } from "~/lib/utils";
+import { AuditLedgerPanel } from "./audit-ledger-panel";
 
 export type OperationAction =
   | "support-bundle.create"
@@ -248,8 +249,8 @@ function compactIdentifier(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-4)}`;
 }
 
-const AUDIT_PREVIEW_LIMIT = 8;
-const AUDIT_SEARCH_KEYS = [
+const ACTIVITY_PREVIEW_LIMIT = 8;
+const ACTIVITY_SEARCH_KEYS = [
   "action",
   "event",
   "summary",
@@ -262,16 +263,16 @@ const AUDIT_SEARCH_KEYS = [
   "status",
 ] as const;
 
-function matchesAuditQuery(item: OperationalItem, query: string): boolean {
+function matchesActivityQuery(item: OperationalItem, query: string): boolean {
   if (!query) return true;
-  return AUDIT_SEARCH_KEYS.some((key) => text(item, key)?.toLowerCase().includes(query));
+  return ACTIVITY_SEARCH_KEYS.some((key) => text(item, key)?.toLowerCase().includes(query));
 }
 
-function AuditTable({ items }: { items: readonly OperationalItem[] }) {
+function OperationalActivityTable({ items }: { items: readonly OperationalItem[] }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
-  const matchingItems = items.filter((item) => matchesAuditQuery(item, normalizedQuery));
-  const visibleItems = matchingItems.slice(0, AUDIT_PREVIEW_LIMIT);
+  const matchingItems = items.filter((item) => matchesActivityQuery(item, normalizedQuery));
+  const visibleItems = matchingItems.slice(0, ACTIVITY_PREVIEW_LIMIT);
 
   return (
     <Section
@@ -280,12 +281,12 @@ function AuditTable({ items }: { items: readonly OperationalItem[] }) {
       icon={<ShieldAlert aria-hidden="true" className="size-3.5" />}
     >
       {items.length === 0 ? (
-        <EmptyPanel>No audit events recorded</EmptyPanel>
+        <EmptyPanel>No operational activity recorded</EmptyPanel>
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2">
             <label className="relative min-w-48 flex-1 sm:max-w-xs">
-              <span className="sr-only">Filter audit events</span>
+              <span className="sr-only">Filter operational activity</span>
               <Search
                 aria-hidden="true"
                 className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -315,7 +316,7 @@ function AuditTable({ items }: { items: readonly OperationalItem[] }) {
           ) : (
             <div className="max-w-full overflow-x-auto">
               <table
-                aria-label="Audit and lineage events"
+                aria-label="Recent operational activity"
                 className="w-full min-w-[46rem] text-left"
               >
                 <thead>
@@ -466,7 +467,9 @@ export function OperationsConsole({
         <KillSwitchesPanel items={model.killSwitches} />
       </div>
 
-      <AuditTable items={model.audit} />
+      <OperationalActivityTable items={model.activity} />
+
+      <AuditLedgerPanel />
 
       <Section title="Recovery" icon={<DatabaseBackup aria-hidden="true" className="size-3.5" />}>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-3 py-3 text-xs">

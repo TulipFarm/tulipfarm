@@ -23,11 +23,22 @@ import {
 } from "@tulipfarm/storage";
 import { EFFECT_STORAGE_STATEMENTS } from "@tulipfarm/tool-broker";
 import type { Queryable } from "../db";
+import {
+  dropInvalidEmbeddingIndexes,
+  EMBEDDING_COLUMNS,
+  embeddingIndexStatements,
+} from "../vector-search";
 
 export interface PgMigration {
   version: number;
   description: string;
   up: (q: Queryable) => Promise<void>;
+  /**
+   * Run outside a transaction. Required only for statements Postgres refuses to run inside one —
+   * `CREATE INDEX CONCURRENTLY` above all. Such a migration gives up atomicity: a failure can
+   * leave partial objects behind, so prefer the default whenever the statement allows it.
+   */
+  concurrent?: boolean;
 }
 
 /**
@@ -1495,6 +1506,119 @@ export const PG_MIGRATIONS: PgMigration[] = [
     up: async (q) => {
       for (const sql of RESOURCE_SAMPLE_STATEMENTS) {
         await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 45,
+    description: "embeddings: partial HNSW indexes so vector recall stops scanning",
+    // `CREATE INDEX CONCURRENTLY` cannot run inside a transaction. Worth the lost atomicity here:
+    // these tables carry the whole knowledge corpus, and a plain build would lock out writes for
+    // the length of it. The cost is that an interrupted build leaves an invalid index behind, and
+    // `IF NOT EXISTS` would then skip it forever — so sweep those first.
+    concurrent: true,
+    up: async (q) => {
+      await dropInvalidEmbeddingIndexes(q);
+      for (const { table, column, dimColumn } of EMBEDDING_COLUMNS) {
+        for (const sql of embeddingIndexStatements(table, column, dimColumn)) {
+          await q.query(sql);
+        }
+      }
+    },
+  },
+  {
+    version: 46,
+    description: "audit: append-only hash-linked event ledger",
+    up: async (q) => {
+      await q.query(`
+        CREATE TABLE IF NOT EXISTS audit_events (
+          id uuid PRIMARY KEY,
+          business_id text NOT NULL,
+          chain_index bigint NOT NULL,
+          previous_hash text,
+          hash text NOT NULL,
+          actor_principal_id text NOT NULL,
+          effective_principal_id text NOT NULL,
+          agent_id text,
+          run_id text,
+          state_id text,
+          action text NOT NULL,
+          target text NOT NULL,
+          decision text NOT NULL,
+          reason_codes text[] NOT NULL,
+          guardrail_digest text,
+          bundle_digest text,
+          source_classification text,
+          destination_classification text,
+          request_hash text,
+          result_hash text,
+          correlation_id text NOT NULL,
+          causation_id text,
+          occurred_at timestamptz NOT NULL,
+          safe_metadata jsonb,
+          safe_refs jsonb,
+          recorded_at timestamptz NOT NULL DEFAULT now()
+        )
+      `);
+      // The compare-and-append guard. Two concurrent writers can both read the same tail and both
+      // pass an application-level check; only this constraint makes one of them lose, which is
+      // what lets AuditWriter retry instead of silently forking the chain.
+      await q.query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS audit_events_chain_idx ON audit_events (business_id, chain_index)"
+      );
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS audit_events_correlation_idx ON audit_events (correlation_id)"
+      );
+      await q.query(
+        "CREATE INDEX IF NOT EXISTS audit_events_occurred_idx ON audit_events (business_id, occurred_at DESC)"
+      );
+
+      // Immutability is enforced by the database, not by convention. A trigger is the primary
+      // mechanism rather than `REVOKE` because it binds even a superuser: turning it off takes a
+      // deliberate, itself-auditable `ALTER TABLE ... DISABLE TRIGGER`, not merely a stray UPDATE
+      // in a future migration or a careless repository method.
+      await q.query(`
+        CREATE OR REPLACE FUNCTION audit_events_append_only() RETURNS trigger
+        LANGUAGE plpgsql AS $fn$
+        BEGIN
+          RAISE EXCEPTION 'audit_events is append-only; % is not permitted', TG_OP
+            USING ERRCODE = 'insufficient_privilege';
+        END
+        $fn$
+      `);
+      await q.query("DROP TRIGGER IF EXISTS audit_events_no_mutate ON audit_events");
+      await q.query(`
+        CREATE TRIGGER audit_events_no_mutate
+        BEFORE UPDATE OR DELETE ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION audit_events_append_only()
+      `);
+      // TRUNCATE bypasses row triggers entirely, so it needs its own statement-level trigger.
+      await q.query("DROP TRIGGER IF EXISTS audit_events_no_truncate ON audit_events");
+      await q.query(`
+        CREATE TRIGGER audit_events_no_truncate
+        BEFORE TRUNCATE ON audit_events
+        FOR EACH STATEMENT EXECUTE FUNCTION audit_events_append_only()
+      `);
+    },
+  },
+  {
+    version: 47,
+    description: "ops: enable pg_stat_statements where the server allows it",
+    up: async (q) => {
+      // Best-effort by design. `pg_stat_statements` needs `shared_preload_libraries`, which is set
+      // in docker-compose.yml but is not settable on many managed hosts. Query observability is
+      // worth having wherever it is available, and never worth refusing to boot over — so a
+      // failure here is logged by the caller's migration wrapper only if it is genuinely fatal.
+      // The savepoint is essential, not decoration: a failed statement aborts the whole
+      // surrounding transaction, so catching the error is not enough — every later statement,
+      // including the `schema_version` bump, would fail with "current transaction is aborted".
+      await q.query("SAVEPOINT try_pg_stat_statements");
+      try {
+        await q.query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements");
+        await q.query("RELEASE SAVEPOINT try_pg_stat_statements");
+      } catch {
+        // Absent, not preloaded, or insufficient privilege. All three are survivable.
+        await q.query("ROLLBACK TO SAVEPOINT try_pg_stat_statements");
       }
     },
   },
