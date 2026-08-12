@@ -1,4 +1,5 @@
 import { workerData } from "node:worker_threads";
+import { pgPoolTuning } from "@tulipfarm/constants";
 import { serveHookRequests } from "@tulipfarm/sandbox";
 import { Pool } from "pg";
 import { rowToResourceDoc, tableName } from "../resources/schema";
@@ -13,7 +14,15 @@ let pool: Pool | null = null;
 
 function getPool(): Pool {
   if (!pool) {
-    pool = new Pool({ connectionString: workerData.connectionString as string });
+    // The pool serving user-authored hook code: pinned to the restricted runtime role where one
+    // exists, and bounded by the shared timeouts, so a hook cannot hold a connection open or run
+    // an unbounded query. `max` is deliberately small — one sandbox thread needs very few.
+    const roleOptions = workerData.roleOptions as string | undefined;
+    pool = new Pool({
+      connectionString: workerData.connectionString as string,
+      ...pgPoolTuning({ max: 2 }),
+      ...(roleOptions === undefined ? {} : { options: roleOptions }),
+    });
   }
   return pool;
 }

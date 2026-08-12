@@ -6,6 +6,7 @@ import type {
 } from "@tulipfarm/knowledge";
 import type { Queryable } from "../db";
 import type { EmbeddingPort } from "../knowledge/types";
+import { dimLiteral, embeddingDistanceSql } from "../vector-search";
 
 interface KnowledgeSourceChunkRow {
   source_id: string;
@@ -150,15 +151,17 @@ export class PgKnowledgeIndexStore implements MutableKnowledgeIndexPort {
     dim: number,
     limit: number
   ): Promise<KnowledgeCandidate[]> {
+    // Must be byte-identical to the indexed expression, or Postgres quietly scans instead.
+    const { sql: distance } = embeddingDistanceSql("embedding", "$1", dim);
     const { rows } = await this.q.query(
       `SELECT source_id, chunk_id, revision, classification, digest, content,
-              (embedding <=> $1::vector) AS distance
+              (${distance}) AS distance
        FROM knowledge_source_chunks
        WHERE business_id = $2 AND source_id = ANY($3::text[])
-         AND embedding IS NOT NULL AND dim = $4
-       ORDER BY embedding <=> $1::vector
-       LIMIT $5`,
-      [JSON.stringify(queryEmbedding), businessId, sourceIds, dim, limit]
+         AND embedding IS NOT NULL AND dim = ${dimLiteral(dim)}
+       ORDER BY ${distance}
+       LIMIT $4`,
+      [JSON.stringify(queryEmbedding), businessId, sourceIds, limit]
     );
     return (rows as unknown as Array<KnowledgeSourceChunkRow & { distance: number }>).map((row) =>
       rowToCandidate(row, 1 - Number(row.distance))

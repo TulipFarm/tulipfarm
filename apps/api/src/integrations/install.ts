@@ -10,6 +10,7 @@ import {
   validateThirdPartyManifest,
 } from "@tulipfarm/soul";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { stripUrlCredentials } from "../audit/soul-write";
 import { cloneToTemp, sourceType } from "../soul/git-source";
 
 /*
@@ -272,7 +273,7 @@ export async function installIntegrationFromSource(
     chosen = integrations.find((entry) => entry.name === options.name);
     if (!chosen) {
       throw new IntegrationInstallError(
-        `integration "${options.name}" not found in ${options.source}`,
+        `integration "${options.name}" not found in ${stripUrlCredentials(options.source)}`,
         404
       );
     }
@@ -322,7 +323,11 @@ export async function installIntegrationFromSource(
 
     const lock = await readIntegrationLock(deps.gitSync.path);
     lock.integrations[chosen.name] = {
-      sourceUrl: options.source,
+      // `integrations-lock.json` is committed and pushed by the `withSync` below, so an install
+      // from `https://user:token@host/repo` would publish that token to the Soul repo's remote.
+      // Only the credential is stripped: this is provenance, so `file://` and `owner/repo`
+      // sources must survive verbatim. Nothing re-clones from this field.
+      sourceUrl: stripUrlCredentials(options.source),
       sourceType: sourceType(options.source),
       manifestPath: chosen.manifestPath,
       ref,
@@ -338,5 +343,5 @@ export async function installIntegrationFromSource(
   }
   await deps.soulLoader.reload();
 
-  return { name: chosen.name, source: options.source, ref };
+  return { name: chosen.name, source: stripUrlCredentials(options.source), ref };
 }

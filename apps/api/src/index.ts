@@ -64,6 +64,9 @@ import { buildApp } from "./app";
 import { RoutineApprovalService } from "./approvals/routine-approvals";
 import { ApprovalsRepo } from "./approvals/runtime-repo";
 import { ToolApprovalService } from "./approvals/tool-approvals";
+import { AuditReadService } from "./audit/read-service";
+import { PgAuditEventRepo } from "./audit/repo";
+import { AuditService } from "./audit/service";
 import { PgTokenRepo } from "./auth/api-tokens";
 import { PgUserInviteRepo } from "./auth/invites";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
@@ -71,7 +74,14 @@ import { PgUserRepo } from "./auth/users";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgConversationStore } from "./conversations/store.pg";
-import { ambientTransactionPort, connectPg, transactionPort, withTransaction } from "./db";
+import {
+  ambientTransactionPort,
+  connectPg,
+  runtimePoolOptions,
+  startRuntimePool,
+  transactionPort,
+  withTransaction,
+} from "./db";
 import { logEnvironmentStatus, validateEnvironment } from "./env";
 import { FeedbackRepo } from "./feedback/repo";
 import { registerGuardrailsReload } from "./guardrails/reload";
@@ -99,6 +109,7 @@ import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
 import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
 import { registerConnectorSync } from "./knowledge/connectors/sync";
+import { registerEmbeddingBackfill } from "./knowledge/embedding-backfill";
 import { subscribeKnowledgeIndexing } from "./knowledge/events";
 import { enqueueIndex, makeIndexQueueStats, registerKnowledgeIndexing } from "./knowledge/indexing";
 import { PgKnowledgeLinksRepo } from "./knowledge/links-repo";
@@ -187,6 +198,7 @@ import { buildGitHubTools } from "./tools/github/tools";
 import { buildToolRegistry } from "./tools/setup";
 import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
+import { ensureEmbeddingIndexes } from "./vector-search";
 
 // Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
@@ -209,8 +221,12 @@ const port = Number.parseInt(process.env.PORT || "4010", 10);
 
 async function boot() {
   try {
-    const pool = await connectPg();
-    await runPgMigrations(pool);
+    const migrationPool = await connectPg();
+    await runPgMigrations(migrationPool);
+    // After migrations, on the owner pool (which has no statement timeout): an ANN index left
+    // invalid by an interrupted build is invisible to the planner but still costs every write.
+    await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
+    const pool = await startRuntimePool(migrationPool);
 
     // Second half of the key-loss guard: a KEK invented this boot against a database that
     // already holds wrapped DEKs means the real key was lost, not that this is a first boot.
@@ -360,7 +376,7 @@ async function boot() {
     const hookExecutor =
       process.env.HOOKS_DISABLED === "true"
         ? undefined
-        : createHookExecutor(process.env.DATABASE_URL as string);
+        : createHookExecutor(process.env.DATABASE_URL as string, runtimePoolOptions());
 
     const llmService = new LlmService();
     const guardrailsService = new GuardrailsService();
@@ -417,6 +433,13 @@ async function boot() {
     );
     const kvService = new KvService(new PgKvRepo(pool));
     const activityService = new ActivityService(new PgActivityRepo(pool));
+    // Audit is separate from activity by design: activity is a UI feed, audit is evidence.
+    // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
+    const auditRepo = new PgAuditEventRepo(pool);
+    const auditService = new AuditService(auditRepo);
+    // The ledger's reader. Without it `audit_events` is write-only and the evidence is
+    // unreachable outside `psql` — see `audit/routes.ts`.
+    const auditReadService = new AuditReadService(auditRepo);
     const obsConfig = parseObservabilityConfig(soulLoader.observabilityConfig);
     const resourceRepoFactory = new PgResourceRepoFactory(pool);
     const counterStore = new PgCounterStore(pool);
@@ -713,6 +736,8 @@ async function boot() {
       toolRegistry,
       declarativeTools,
       activityService,
+      auditService,
+      auditReadService,
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,
@@ -848,9 +873,7 @@ async function boot() {
       soulLoader,
       log: app.log,
     });
-    const scheduleDispatchInterval = registerScheduleDispatch(scheduleDispatcher, {
-      log: app.log,
-    });
+    await registerScheduleDispatch(boss, scheduleDispatcher, { log: app.log });
     await registerObsPruneSchedule(boss, obsConfig.retentionDays * 24 * 60 * 60 * 1000);
     await registerKnowledgeIndexing(boss, {
       service: knowledgeService,
@@ -865,6 +888,11 @@ async function boot() {
           : null;
       },
       activity: activityService,
+    });
+    await registerEmbeddingBackfill(boss, {
+      db: pool,
+      embeddings: embeddingService,
+      log: app.log,
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
@@ -954,7 +982,6 @@ async function boot() {
       force.unref();
       try {
         if (soulSyncInterval) clearInterval(soulSyncInterval);
-        clearInterval(scheduleDispatchInterval);
         await app.close();
         await boss.stop({ graceful: false });
         // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.

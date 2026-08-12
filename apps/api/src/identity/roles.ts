@@ -24,6 +24,7 @@ const ADMIN_ONLY_SURFACES: readonly { readonly type: string; readonly enforcedIn
   { type: "kv_system", enforcedIn: "kv/routes.ts" },
   { type: "setup", enforcedIn: "setup/routes.ts" },
   { type: "operations", enforcedIn: "admin/runtime.ts" },
+  { type: "audit", enforcedIn: "audit/routes.ts" },
 ];
 
 /**

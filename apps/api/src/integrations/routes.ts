@@ -14,6 +14,8 @@ import {
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { stringify as stringifyYaml } from "yaml";
+import type { AuditService } from "../audit/service";
+import { makeSoulAuditWriter } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
@@ -214,8 +216,12 @@ export function registerIntegrationRoutes(
    * `onConnected` (shared with the OAuth callback); disconnect and uninstall sync here, so
    * revoking an integration also revokes the Tools it published.
    */
-  declarativeTools?: { sync: () => number; countFor: (slug: string) => number }
+  declarativeTools?: { sync: () => number; countFor: (slug: string) => number },
+  // Optional: record connect/disconnect/remove as audit evidence. Connecting an integration grants
+  // Agents a new external reach, which is exactly the kind of change an auditor asks about.
+  audit?: AuditService
 ): void {
+  const auditWrite = makeSoulAuditWriter(audit);
   async function materializeIfBundledOnly(slug: string): Promise<void> {
     if (soulLoader.integrations.has(slug)) return;
     const bundledEntry = bundled.get(slug);
@@ -381,6 +387,11 @@ export function registerIntegrationRoutes(
         throw error;
       }
       if (connectedNow) await onConnected?.(name);
+      // Field *names* only. Values are credentials, and `safeMetadata` would reject them anyway.
+      await auditWrite(req, "integration.connect", `integration:${name}`, {
+        status: enabled ? "connected" : "pending",
+        fields: Object.keys(env),
+      });
       return {
         status: enabled ? "connected" : "pending",
         toolCount: declarativeTools?.countFor(name) ?? 0,
@@ -425,7 +436,10 @@ export function registerIntegrationRoutes(
       await gitSync.withSync(`soul: disconnect integration ${name}`);
       await soulLoader.reload();
       // An agent must not keep calling a provider whose credential the operator just revoked.
-      declarativeTools?.sync();
+      const revoked = declarativeTools?.sync();
+      await auditWrite(req, "integration.disconnect", `integration:${name}`, {
+        ...(revoked === undefined ? {} : { toolsResynced: revoked }),
+      });
       return { status: "disconnected" };
     }
   );
@@ -459,6 +473,7 @@ export function registerIntegrationRoutes(
       await gitSync.withSync(`soul: remove integration ${name}`);
       await soulLoader.reload();
       declarativeTools?.sync();
+      await auditWrite(req, "integration.remove", `integration:${name}`, { secretsDeleted: true });
       return reply.code(204).send();
     }
   );

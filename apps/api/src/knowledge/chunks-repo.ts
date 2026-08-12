@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { type Queryable, withTransaction } from "../db";
+import { dimLiteral, embeddingDistanceSql } from "../vector-search";
 import type {
   ChunkInput,
   ExistingChunk,
@@ -158,16 +159,18 @@ export class PgKnowledgeChunkRepo implements KnowledgeChunkRepo {
     limit: number,
     filters: SearchFilters
   ): Promise<SearchHit[]> {
-    const params: unknown[] = [JSON.stringify(queryEmbedding), dim];
+    const params: unknown[] = [JSON.stringify(queryEmbedding)];
     const conds = pageFilterConditions(filters, params);
     const filterSql = conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";
     params.push(limit);
+    // Must be byte-identical to the indexed expression, or Postgres quietly scans instead.
+    const { sql: distance } = embeddingDistanceSql("c.embedding", "$1", dim);
     const { rows } = await this.q.query(
       `SELECT c.id AS chunk_id, c.page_id, c.content, p.title, p.source,
-              (c.embedding <=> $1::vector) AS distance
+              (${distance}) AS distance
        FROM knowledge_chunks c JOIN knowledge_pages p ON p.id = c.page_id
-       WHERE c.embedding IS NOT NULL AND c.dim = $2 AND p.active = true${filterSql}
-       ORDER BY c.embedding <=> $1::vector
+       WHERE c.embedding IS NOT NULL AND c.dim = ${dimLiteral(dim)} AND p.active = true${filterSql}
+       ORDER BY ${distance}
        LIMIT $${params.length}`,
       params
     );

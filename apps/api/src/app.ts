@@ -24,6 +24,9 @@ import { registerApprovalRoutes } from "./approvals/routes";
 import type { RoutineApprovalService } from "./approvals/routine-approvals";
 import type { ApprovalsRepo } from "./approvals/runtime-repo";
 import type { ToolApprovalService } from "./approvals/tool-approvals";
+import type { AuditReadService } from "./audit/read-service";
+import { registerAuditRoutes } from "./audit/routes";
+import type { AuditService } from "./audit/service";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import type { UserInviteRepo } from "./auth/invites";
@@ -177,6 +180,8 @@ export interface AppOptions {
   surfaceArtifactStore?: SurfaceArtifactStore;
   surfaceActionStore?: SurfaceActionStore;
   activityService?: ActivityService;
+  auditService?: AuditService;
+  auditReadService?: AuditReadService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
   /** Canonical proposal-only Routine authoring and simulation boundary. */
@@ -519,6 +524,9 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.activityService) {
       registerActivityRoutes(app, opts.activityService, requireAuth);
     }
+    if (opts.auditReadService) {
+      registerAuditRoutes(app, opts.auditReadService, requireAuth);
+    }
     if (opts.memoryService) {
       registerMemoryRoutes(
         app,
@@ -539,7 +547,7 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
     if (opts.gitSync) {
-      registerSoulRoutes(app, opts.gitSync, requireAuth, opts.secretsService);
+      registerSoulRoutes(app, opts.gitSync, requireAuth, opts.secretsService, opts.auditService);
       if (opts.soulLoader) {
         registerResourceTypeRoutes(
           app,
@@ -547,7 +555,8 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.soulLoader,
           requireAuth,
           opts.reconcileResources,
-          opts.rateLimiter
+          opts.rateLimiter,
+          opts.auditService
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
         if (opts.secretsService) {
@@ -605,7 +614,8 @@ export async function buildApp(opts: AppOptions = {}) {
                   businessId: opts.githubInstall.businessId,
                 }
               : undefined,
-            opts.declarativeTools
+            opts.declarativeTools,
+            opts.auditService
           );
           registerIntegrationMarketplaceRoutes(
             app,
@@ -651,7 +661,8 @@ export async function buildApp(opts: AppOptions = {}) {
             requireAuth,
             opts.activityService,
             opts.bundledSkills,
-            opts.disabledBundledSkills
+            opts.disabledBundledSkills,
+            opts.auditService
           );
           if (opts.secretsService) {
             registerLlmConfigRoutes(
@@ -660,7 +671,8 @@ export async function buildApp(opts: AppOptions = {}) {
               opts.gitSync,
               opts.llmService,
               opts.secretsService,
-              requireAuth
+              requireAuth,
+              opts.auditService
             );
           }
         }

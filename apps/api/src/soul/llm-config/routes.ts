@@ -16,6 +16,8 @@ import {
 import { LLM_PROVIDERS, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuditService } from "../../audit/service";
+import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { UserDoc } from "../../auth/users";
 import { writeLlmConfigToSoulYaml } from "./soul-yaml-io";
@@ -268,8 +270,12 @@ export function registerLlmConfigRoutes(
   gitSync: GitSyncService,
   llmService: LlmService,
   secrets: SecretsService,
-  requireAuth: PreHandler
+  requireAuth: PreHandler,
+  // Optional: record LLM config changes as audit evidence. Which model answers, and under whose
+  // key, decides both cost and where the business's prompts are sent.
+  audit?: AuditService
 ): void {
+  const auditWrite = makeSoulAuditWriter(audit);
   app.get(
     "/api/v1/llm-providers",
     {
@@ -518,6 +524,9 @@ export function registerLlmConfigRoutes(
       await soulLoader.reload();
       await llmService.init(soulLoader.llmConfig, secrets, app.log);
 
+      await auditWrite(req, "llm-config.update", "soul:llm-config", {
+        tiers: Object.keys((config as { tiers?: Record<string, unknown> }).tiers ?? {}),
+      });
       return reply.send(soulLoader.llmConfig);
     }
   );

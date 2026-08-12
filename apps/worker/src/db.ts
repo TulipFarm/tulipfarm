@@ -1,3 +1,4 @@
+import { pgPoolTuning } from "@tulipfarm/constants";
 import type { Queryable as StorageQueryable, TransactionPort } from "@tulipfarm/storage";
 import { Pool } from "pg";
 
@@ -52,7 +53,7 @@ export function transactionPort(database: Queryable): TransactionPort {
 }
 
 export async function connectPg(connectionString: string): Promise<Pool> {
-  const pool = new Pool({ connectionString });
+  const pool = new Pool({ connectionString, ...pgPoolTuning() });
   // Force a connection now so boot fails loud if Postgres is unreachable.
   await pool.query("SELECT 1");
   return pool;

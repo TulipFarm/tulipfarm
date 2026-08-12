@@ -1,6 +1,8 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { AuditService } from "../audit/service";
+import { makeSoulAuditWriter, redactRemoteUrl } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
 import { patchSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
 import { readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
@@ -26,8 +28,12 @@ export function registerSoulRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
   requireAuth: PreHandler,
-  secretsService?: SecretsService
+  secretsService?: SecretsService,
+  // Optional: record direct Soul config writes as audit evidence. The git-remote route below is
+  // the sharpest of these — it decides where the whole business's Soul repository is pushed.
+  audit?: AuditService
 ): void {
+  const auditWrite = makeSoulAuditWriter(audit);
   // Recursive node schema for the soul tree response (self-referencing children).
   app.addSchema({
     $id: "soulTreeNode",
@@ -284,6 +290,10 @@ export function registerSoulRoutes(
       // periodic sync — which never runs at all on a remote-less soul.
       gitSync.emit("soul.synced");
 
+      await auditWrite(req, "soul-config.update", "soul:business-profile", {
+        hasDescription: description.length > 0,
+        hasWebsite: website.length > 0,
+      });
       return reply.send({ name, description, website });
     }
   );
@@ -411,12 +421,25 @@ export function registerSoulRoutes(
       if (credential) {
         await secretsService.set(SOUL_GIT_CREDENTIAL_KEY, credential);
       }
+      let syncError: string | undefined;
       try {
         const resolvedCredential = credential || undefined;
         await gitSync.configureRemote(remoteUrl, async () => resolvedCredential);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return reply.code(400).send({ error: `Failed to sync with remote: ${message}` });
+        syncError = err instanceof Error ? err.message : String(err);
+      }
+      // Emitted whether or not the sync succeeded: the config write and the credential store
+      // above have already landed durably, so a remote that fails to connect is still a remote
+      // that was configured -- which is exactly what an auditor asks about. The failure text is
+      // deliberately not recorded; git echoes the remote URL into its errors and this ledger is
+      // append-only. The remote is host-only for the same reason: it can embed a credential.
+      await auditWrite(req, "soul-config.git-remote", "soul:git-remote", {
+        remote: redactRemoteUrl(remoteUrl),
+        credentialProvided: credential.length > 0,
+        synced: syncError === undefined,
+      });
+      if (syncError) {
+        return reply.code(400).send({ error: `Failed to sync with remote: ${syncError}` });
       }
       return reply.code(204).send();
     }

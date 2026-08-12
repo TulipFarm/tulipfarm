@@ -179,10 +179,10 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
         deps.activity.list({ limit: 50 }),
         probeHealth(deps.healthProbes),
       ]);
-      const audit = activity.items.map(safeActivity);
+      const recent = activity.items.map(safeActivity);
       return {
         health: health.map((component) => ({ ...component })),
-        incidents: audit.filter((item) => item.status === "error"),
+        incidents: recent.filter((item) => item.status === "error"),
         // Quarantine and recovery are recorded by subsystems this deployment does not run yet.
         // Reported as empty because they are empty, not because the data is withheld.
         quarantine: [],
@@ -190,7 +190,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
           process.env.HOOKS_DISABLED === "true"
             ? [{ id: "hooks", status: "enabled", scope: "all hooks" }]
             : [],
-        audit,
+        activity: recent,
         recovery: { supportBundleAvailable: false, lastBackupAt: null },
       };
     },

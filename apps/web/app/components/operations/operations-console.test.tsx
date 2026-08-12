@@ -17,7 +17,7 @@ const model = {
   ],
   quarantine: [{ id: "quarantine-1", reason: "ambiguous effect" }],
   killSwitches: [{ id: "all-mutations", enabled: false }],
-  audit: [
+  activity: [
     {
       id: "audit-1",
       action: "run.cancel",
@@ -51,7 +51,7 @@ describe("OperationsConsole", () => {
     expect(screen.getByText("worker")).toBeInTheDocument();
     expect(screen.getByText("Degraded")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
-    expect(screen.getByRole("table", { name: "Audit and lineage events" })).toBeInTheDocument();
+    expect(screen.getByRole("table", { name: "Recent operational activity" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Event" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "View all activities" })).toHaveAttribute(
       "href",
@@ -69,22 +69,22 @@ describe("OperationsConsole", () => {
       incidents: [],
       quarantine: [],
       killSwitches: [],
-      audit: [],
+      activity: [],
       recovery: { supportBundleAvailable: false, lastBackupAt: null },
     });
     expect(screen.getByText("No active incidents")).toBeInTheDocument();
     expect(screen.getByText("No quarantined items")).toBeInTheDocument();
     expect(screen.getByText("No kill switches enabled")).toBeInTheDocument();
-    expect(screen.getByText("No audit events recorded")).toBeInTheDocument();
+    expect(screen.getByText("No operational activity recorded")).toBeInTheDocument();
     expect(screen.getByText("No backup reported")).toBeInTheDocument();
   });
 
-  it("filters audit events using the rendered summary fields", async () => {
+  it("filters operational activity using the rendered summary fields", async () => {
     const user = userEvent.setup();
     renderConsole({
       ...model,
-      audit: [
-        ...model.audit,
+      activity: [
+        ...model.activity,
         {
           id: "audit-2",
           action: "job.run",
@@ -98,7 +98,10 @@ describe("OperationsConsole", () => {
       ],
     });
 
-    await user.type(screen.getByRole("searchbox", { name: "Filter audit events" }), "connector");
+    await user.type(
+      screen.getByRole("searchbox", { name: "Filter operational activity" }),
+      "connector"
+    );
     expect(screen.getByText("Connector sync ran")).toBeInTheDocument();
     expect(screen.queryByText("Cancelled a stalled Run")).not.toBeInTheDocument();
     expect(screen.getByText("Showing 1 of 2 events")).toBeInTheDocument();

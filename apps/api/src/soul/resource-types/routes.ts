@@ -6,6 +6,8 @@ import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfar
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import type { AuditService } from "../../audit/service";
+import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
@@ -90,8 +92,10 @@ export function registerResourceTypeRoutes(
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
   reconcile?: () => Promise<void>,
-  rateLimiter?: RateLimiter
+  rateLimiter?: RateLimiter,
+  audit?: AuditService
 ): void {
+  const auditWrite = makeSoulAuditWriter(audit);
   const rateLimitHook = rateLimiter
     ? makeRateLimitHook(
         rateLimiter,
@@ -150,6 +154,7 @@ export function registerResourceTypeRoutes(
       await soulLoader.reload();
       // Materialise the new type's Postgres table before the client can POST records to it.
       await reconcile?.();
+      await auditWrite(req, "resource-type.create", `resource-type:${name}`);
 
       return reply.code(201).send({ name, schema: schemaYaml, hasHooks: false });
     }
@@ -228,6 +233,7 @@ export function registerResourceTypeRoutes(
       await soulLoader.reload();
       // New columns may have been added — materialise them before records reference them.
       await reconcile?.();
+      await auditWrite(req, "resource-type.update", `resource-type:${name}`);
 
       const reloaded = soulLoader.resources.get(name);
       return reply
@@ -262,6 +268,7 @@ export function registerResourceTypeRoutes(
       await rm(typeDir, { recursive: true, force: true });
       await gitSync.commit(`soul: remove resource type ${name}`);
       await soulLoader.reload();
+      await auditWrite(req, "resource-type.delete", `resource-type:${name}`);
       return reply.code(204).send();
     }
   );
@@ -354,6 +361,8 @@ export function registerResourceTypeRoutes(
       await writeFile(hooksFile, source, "utf8");
       await gitSync.commit(`soul: add hooks for resource type ${name}`);
       await soulLoader.reload();
+      // Hooks are executable code running against business data — the highest-value write here.
+      await auditWrite(req, "resource-type.hooks.write", `resource-type:${name}`);
 
       return reply.send({ name, hasHooks: true, source });
     }
@@ -393,6 +402,7 @@ export function registerResourceTypeRoutes(
       await unlink(hooksFile);
       await gitSync.commit(`soul: remove hooks for resource type ${name}`);
       await soulLoader.reload();
+      await auditWrite(req, "resource-type.hooks.delete", `resource-type:${name}`);
       return reply.code(204).send();
     }
   );

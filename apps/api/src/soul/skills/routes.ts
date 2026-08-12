@@ -28,6 +28,8 @@ import {
 } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ActivityService } from "../../activity/service";
+import type { AuditService } from "../../audit/service";
+import { makeSoulAuditWriter, redactRemoteUrl, stripUrlCredentials } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import {
   ALLOWED_SOURCE_HINT,
@@ -562,8 +564,12 @@ export function registerSkillRoutes(
   // Optional: record skill installs in the activity feed.
   activity?: ActivityService,
   bundledSkills: ReadonlyMap<string, BundledSkill> = new Map(),
-  disabledBundledSkills: Set<string> = new Set()
+  disabledBundledSkills: Set<string> = new Set(),
+  // Optional: record installs/removals as audit evidence. Distinct from `activity` above —
+  // activity is a UI feed whose loss is cosmetic, audit answers who changed the Agents' capabilities.
+  audit?: AuditService
 ): void {
+  const auditWrite = makeSoulAuditWriter(audit);
   app.get(
     "/api/v1/skills",
     {
@@ -804,6 +810,9 @@ export function registerSkillRoutes(
       );
       await gitSync.withSync(`soul: remove skill ${name}`);
       await soulLoader.reload();
+      await auditWrite(req, "skill.remove", `skill:${name}`, {
+        bundled: bundledSkills.has(name),
+      });
       return reply.code(204).send();
     }
   );
@@ -1048,7 +1057,12 @@ export function registerSkillRoutes(
       const lock = await readLock(gitSync.path);
       for (const skill of chosen as DiscoveredSkill[]) {
         lock.skills[skill.name] = {
-          sourceUrl: entry.source,
+          // `skills-lock.json` is committed to the Soul repo and pushed to its remote, and
+          // `sourceUrl` is served back out of this module (`toSkillSummary`). An operator who
+          // installs from `https://user:token@host/repo` would otherwise publish that token to
+          // git history. Only the credential is stripped: this field is provenance, so `file://`
+          // and `owner/repo` sources must survive verbatim.
+          sourceUrl: stripUrlCredentials(entry.source),
           sourceType: sourceType(entry.source),
           skillPath: skill.skillPath,
           ref: entry.ref,
@@ -1070,7 +1084,17 @@ export function registerSkillRoutes(
         targetType: "skill",
         targetId: installed.join(", "),
         summary: `Installed skill(s): ${installed.join(", ")}`,
-        metadata: { skills: installed, source: entry.source, ref: entry.ref },
+        metadata: {
+          skills: installed,
+          source: stripUrlCredentials(entry.source),
+          ref: entry.ref,
+        },
+      });
+      await auditWrite(req, "skill.install", `skill:${installed.join(",")}`, {
+        skills: installed,
+        // Operators paste credential-bearing clone URLs here; the ledger keeps this forever.
+        source: redactRemoteUrl(entry.source),
+        ...(entry.ref ? { ref: entry.ref } : {}),
       });
       return { installed };
     }

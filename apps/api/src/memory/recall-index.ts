@@ -16,6 +16,7 @@ import {
   startMemorySpan,
 } from "@tulipfarm/memory";
 import type { Queryable } from "../db";
+import { dimLiteral, embeddingDistanceSql } from "../vector-search";
 import { embedOne, type MemoryEmbedder } from "./embedder";
 
 /**
@@ -196,18 +197,25 @@ export class PgMemoryRecallIndex implements MemoryRecallIndex {
     if (this.embedder === undefined || !this.embedder.isAvailable()) return [];
     const embedded = await embedOne(this.embedder, request.query);
     if (embedded === undefined) return [];
+    // Must be byte-identical to the indexed expressions, or Postgres quietly scans instead.
+    const { sql: assertionDistance } = embeddingDistanceSql(
+      "a.embedding",
+      "$2",
+      embedded.dimension
+    );
+    const { sql: chunkDistance } = embeddingDistanceSql("c.embedding", "$2", embedded.dimension);
     const { rows } = await this.db.query(
       `WITH hits AS (
          SELECT a.assertion_id, NULL::text AS chunk_type, NULL::text AS source_type,
-                a.embedding <=> $2::vector AS distance
+                ${assertionDistance} AS distance
            FROM memory_assertions a
           WHERE a.business_id = $1
             AND ${candidateFloor("a")}
             AND a.embedding IS NOT NULL
-            AND a.embedding_dim = $3
+            AND a.embedding_dim = ${dimLiteral(embedded.dimension)}
          UNION ALL
          SELECT c.assertion_id, c.chunk_type, e.source_type,
-                c.embedding <=> $2::vector AS distance
+                ${chunkDistance} AS distance
            FROM memory_chunks c
            JOIN memory_assertions a
              ON a.business_id = c.business_id AND a.assertion_id = c.assertion_id
@@ -216,7 +224,7 @@ export class PgMemoryRecallIndex implements MemoryRecallIndex {
           WHERE c.business_id = $1
             AND ${candidateFloor("a")}
             AND c.embedding IS NOT NULL
-            AND c.embedding_dim = $3
+            AND c.embedding_dim = ${dimLiteral(embedded.dimension)}
        )
        SELECT assertion_id,
               (array_agg(chunk_type ORDER BY (chunk_type IS NULL), distance))[1] AS chunk_type,
@@ -224,8 +232,8 @@ export class PgMemoryRecallIndex implements MemoryRecallIndex {
          FROM hits
         GROUP BY assertion_id
         ORDER BY min(distance), assertion_id
-        LIMIT $4`,
-      [request.businessId, JSON.stringify(embedded.embedding), embedded.dimension, request.limit]
+        LIMIT $3`,
+      [request.businessId, JSON.stringify(embedded.embedding), request.limit]
     );
     return (
       rows as { assertion_id: string; chunk_type: string | null; source_type: string | null }[]

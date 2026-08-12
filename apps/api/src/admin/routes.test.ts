@@ -57,7 +57,7 @@ function deps(overrides: Partial<OperationalApiDeps> = {}): OperationalApiDeps {
       incidents: [],
       quarantine: [],
       killSwitches: [],
-      audit: [],
+      activity: [],
       recovery: { supportBundleAvailable: true, lastBackupAt: null },
     }),
     getGuardrails: async () => ({ revision: "guardrail-7", items: [] }),

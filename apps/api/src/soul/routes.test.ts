@@ -1,10 +1,12 @@
 import { promises as soulConfigFs } from "node:fs";
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import type { SecretMeta, SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app";
+import { AuditService } from "../audit/service";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
@@ -42,6 +44,7 @@ vi.mock("node:fs", async (importOriginal) => {
 
 const TEST_CSRF = "a".repeat(64);
 
+const AUDIT_BUSINESS = "deployment";
 const SOUL_ROOT = "/soul";
 
 const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
@@ -394,6 +397,8 @@ describe("soul routes", () => {
       } as unknown as SecretsService;
     }
 
+    let auditRepo: InMemoryAuditEventRepo;
+
     async function rebuild(gitSyncOverrides: Record<string, unknown>, secretKeys: string[] = []) {
       gitSync = {
         ...makeFakeGitSync(),
@@ -410,8 +415,16 @@ describe("soul routes", () => {
         ...gitSyncOverrides,
       } as unknown as GitSyncService;
       const secretsService = makeFakeSecretsService(secretKeys);
+      auditRepo = new InMemoryAuditEventRepo();
       await app.close();
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, secretsService });
+      app = await buildApp({
+        auditService: new AuditService(auditRepo, AUDIT_BUSINESS),
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        secretsService,
+      });
       return secretsService;
     }
 
@@ -565,6 +578,53 @@ describe("soul routes", () => {
           payload: {},
         });
         expect(res.statusCode).toBe(400);
+      });
+
+      /**
+       * The audit ledger is the only record of who pointed this deployment's Soul repo at a new
+       * remote. Both durable changes -- the config write and the credential store -- land *before*
+       * `configureRemote` is attempted, so returning 400 on a sync failure without emitting would
+       * leave a repointed deployment with no evidence of who repointed it. A remote that fails to
+       * connect is still a remote that was configured.
+       */
+      it("records the remote change even when the sync attempt fails", async () => {
+        await rebuild({
+          configureRemote: vi.fn().mockRejectedValue(new Error("could not read Username")),
+        });
+        const res = await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "ghp_test" },
+        });
+
+        expect(res.statusCode).toBe(400);
+        const [event] = await auditRepo.listChain(AUDIT_BUSINESS);
+        expect(event?.action).toBe("soul-config.git-remote");
+        expect(event?.reasonCodes).toContain("SOUL_DIRECT_WRITE");
+        expect(event?.safeMetadata?.synced).toBe(false);
+      });
+
+      /**
+       * A remote URL can carry `user:token@` in its userinfo, and this ledger is append-only --
+       * a credential written here cannot be taken back out.
+       */
+      it("keeps the credential out of the ledger entirely", async () => {
+        await rebuild({});
+        await app.inject({
+          method: "PUT",
+          url: "/api/v1/soul/git-config",
+          cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+          headers: { [CSRF_HEADER]: TEST_CSRF },
+          payload: { remoteUrl: "https://gituser:ghp_supersecret@github.com/acme/soul.git" },
+        });
+
+        const [event] = await auditRepo.listChain(AUDIT_BUSINESS);
+        expect(event?.safeMetadata?.remote).toBe("https://github.com/acme/soul.git");
+        expect(event?.safeMetadata?.synced).toBe(true);
+        expect(JSON.stringify(event)).not.toContain("ghp_supersecret");
+        expect(JSON.stringify(event)).not.toContain("gituser");
       });
 
       it("persists remote url, sets credential secret, and calls configureRemote", async () => {
