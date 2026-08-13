@@ -1,7 +1,7 @@
 /**
  * AccessGrant shape and matching per SPEC §12: a grant scopes an action to Resource
- * type/Record selector, field selector, data class, destination, conditions, and expiry, with
- * an explicit allow/deny effect. Matching fails closed: a scoped grant never matches a request
+ * type/domain/Record selector, field selector, data class, destination, conditions, and expiry,
+ * with an explicit allow/deny effect. Matching fails closed: a scoped grant never matches a request
  * that omits the scoped dimension, for allow and deny alike, so scoping is deterministic and a
  * grant cannot silently widen (SPEC §12 non-amplification, §24 fail-closed defaults).
  */
@@ -13,6 +13,11 @@ export interface AccessGrant {
   readonly action: string;
   /** Resource type name or "*" for any type. */
   readonly resourceType: string;
+  /**
+   * Business-authored domain. Absent is conservative: it covers only domainless requests, not every
+   * domain. Use "*" deliberately to cover every named domain.
+   */
+  readonly domain?: string;
   /** Specific Record id; absent or "*" covers every Record of the type. */
   readonly recordSelector?: string;
   /** Fields covered; absent covers every field. Present, it only matches field-level requests. */
@@ -32,6 +37,7 @@ export interface AccessGrant {
 export interface AccessRequest {
   readonly action: string;
   readonly resourceType: string;
+  readonly domain?: string;
   readonly recordId?: string;
   readonly field?: string;
   readonly dataClass?: string;
@@ -46,8 +52,18 @@ export interface AccessRequest {
  */
 export function grantMatches(grant: AccessGrant, request: AccessRequest, now: Date): boolean {
   if (grant.expiresAt && grant.expiresAt <= now) return false;
+  if (request.action === "*" || request.resourceType === "*" || request.domain === "*") {
+    return false;
+  }
   if (grant.action !== "*" && grant.action !== request.action) return false;
   if (grant.resourceType !== "*" && grant.resourceType !== request.resourceType) return false;
+  if (grant.domain === undefined) {
+    if (request.domain !== undefined) return false;
+  } else if (grant.domain === "*") {
+    if (request.domain === undefined) return false;
+  } else if (grant.domain !== request.domain) {
+    return false;
+  }
   if (
     grant.recordSelector !== undefined &&
     grant.recordSelector !== "*" &&

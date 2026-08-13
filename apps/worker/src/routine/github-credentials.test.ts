@@ -6,6 +6,9 @@ import {
   GITHUB_INSTALLATION_SECRET_REF,
   GitHubInstallationTokenProvider,
   githubCompositeSecretProvider,
+  githubInstallationSecretRef,
+  isGitHubInstallationSecretRef,
+  parseGitHubInstallationSecretRef,
 } from "./github-credentials";
 import type { GitHubInstallationDirectory, GitHubInstallationRecord } from "./github-installation";
 
@@ -168,5 +171,103 @@ describe("githubCompositeSecretProvider", () => {
     expect(await composite.resolveCurrent("secret://llm/openai")).toEqual({
       value: "base:secret://llm/openai",
     });
+  });
+});
+
+const SECOND_INSTALLATION: GitHubInstallationRecord = {
+  integrationId: "integration-2",
+  installationId: "install-2",
+  accountLogin: "acme",
+  appExternalId: "123456",
+  repositories: ["acme/widgets"],
+  permissions: { issues: "write", metadata: "read" },
+};
+
+describe("installation-selective credential refs", () => {
+  function providerOver(records: readonly GitHubInstallationRecord[]) {
+    return new GitHubInstallationTokenProvider({
+      http: fakeHttp((request) => {
+        const matched = /^\/app\/installations\/(.+)\/access_tokens$/.exec(request.path);
+        if (matched === null) throw new Error(`unexpected request: ${request.path}`);
+        return { token: `ghs_${matched[1]}`, expires_at: "2026-08-06T01:00:00.000Z" };
+      }),
+      installations: directoryOf(records),
+      secrets: secretsServiceWith({ "integration.github.GITHUB_APP_PRIVATE_KEY": PRIVATE_KEY_PEM }),
+      now: () => new Date("2026-08-06T00:00:00.000Z"),
+    });
+  }
+
+  it("round-trips every selector through its ref", () => {
+    expect(parseGitHubInstallationSecretRef(githubInstallationSecretRef({ kind: "any" }))).toEqual({
+      kind: "any",
+    });
+    expect(
+      parseGitHubInstallationSecretRef(
+        githubInstallationSecretRef({ kind: "repository", repository: "tulip/farm" })
+      )
+    ).toEqual({ kind: "repository", repository: "tulip/farm" });
+    expect(
+      parseGitHubInstallationSecretRef(
+        githubInstallationSecretRef({ kind: "account", owner: "tulip" })
+      )
+    ).toEqual({ kind: "account", owner: "tulip" });
+  });
+
+  it("reads a malformed scoped ref as unowned rather than widening it to the bare ref", () => {
+    expect(
+      parseGitHubInstallationSecretRef(`${GITHUB_INSTALLATION_SECRET_REF}/repo/no-slash`)
+    ).toBeUndefined();
+    expect(
+      parseGitHubInstallationSecretRef(`${GITHUB_INSTALLATION_SECRET_REF}/account/`)
+    ).toBeUndefined();
+    expect(parseGitHubInstallationSecretRef("secret://something/else")).toBeUndefined();
+    // Still owned by this provider, so it is denied here rather than falling through to `base`.
+    expect(isGitHubInstallationSecretRef(`${GITHUB_INSTALLATION_SECRET_REF}/repo/no-slash`)).toBe(
+      true
+    );
+  });
+
+  it("mints each installation's own token from a repository-scoped ref", async () => {
+    const provider = providerOver([INSTALLATION, SECOND_INSTALLATION]);
+    expect(
+      await provider.resolveCurrent(
+        githubInstallationSecretRef({ kind: "repository", repository: "tulip/farm" })
+      )
+    ).toEqual({ value: "ghs_install-1" });
+    expect(
+      await provider.resolveCurrent(
+        githubInstallationSecretRef({ kind: "repository", repository: "acme/widgets" })
+      )
+    ).toEqual({ value: "ghs_install-2" });
+  });
+
+  it("refuses the bare ref with several installations but honours a scoped one", async () => {
+    const provider = providerOver([INSTALLATION, SECOND_INSTALLATION]);
+    expect(await provider.resolveCurrent(GITHUB_INSTALLATION_SECRET_REF)).toBeNull();
+    expect(
+      await provider.resolveCurrent(githubInstallationSecretRef({ kind: "account", owner: "acme" }))
+    ).toEqual({ value: "ghs_install-2" });
+  });
+
+  it("refuses a selector no installation matches rather than borrowing the sole one", async () => {
+    const provider = providerOver([INSTALLATION]);
+    expect(
+      await provider.resolveCurrent(
+        githubInstallationSecretRef({ kind: "repository", repository: "other/repo" })
+      )
+    ).toBeNull();
+  });
+
+  it("refuses when two installations list the same repository", async () => {
+    const overlapping: GitHubInstallationRecord = {
+      ...SECOND_INSTALLATION,
+      repositories: ["tulip/farm"],
+    };
+    const provider = providerOver([INSTALLATION, overlapping]);
+    expect(
+      await provider.resolveCurrent(
+        githubInstallationSecretRef({ kind: "repository", repository: "tulip/farm" })
+      )
+    ).toBeNull();
   });
 });

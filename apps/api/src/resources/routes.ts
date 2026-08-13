@@ -6,6 +6,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { DOMAIN_EVENTS } from "../domain-events";
 import { parsePaginationQuery } from "../pagination";
+import type { RecordAction, RecordAuthorizer } from "./authorize";
+import { recordPrincipalOf } from "./authorize";
 import { type CounterStore, makeHistoryEntry, type ResourceRepoFactory, toApiRecord } from "./repo";
 import {
   loadForWrite,
@@ -56,9 +58,48 @@ export function registerResourceRoutes(
   soulLoader: SoulLoader,
   requireAuth: PreHandler,
   hookExecutor?: HookExecutor,
-  events?: EventEmitter
+  events?: EventEmitter,
+  /**
+   * Decides record authority for this door (`authorize.ts`). Optional for the same reason the chat
+   * dispatcher's gate is: a deployment can run with no durable principals at all (tests, and the
+   * pre-authorization boot path). Where it is absent these routes are exactly as authorized as they
+   * were before — `requireAuth` only. Production always wires it, which `app.test.ts` pins.
+   */
+  recordAuthorizer?: RecordAuthorizer
 ): void {
   const counter = counterStore.makeCounterFn();
+
+  /**
+   * Refuses a record request the caller's grants do not cover, answering `403` with the same
+   * shape every other denial uses.
+   *
+   * A request whose principal kind the authority model does not know is refused rather than
+   * passed: "I could not be described" must not be the cheapest way past the check — the same rule
+   * `tool-dispatch.ts` applies to an undescribable subject.
+   */
+  async function denyUnauthorized(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    action: RecordAction,
+    type: string,
+    id?: string
+  ): Promise<boolean> {
+    if (recordAuthorizer === undefined) return false;
+    const principal = recordPrincipalOf(req);
+    if (principal === undefined) {
+      await reply.code(403).send({ error: "not authorized for this resource" });
+      return true;
+    }
+    const allowed = await recordAuthorizer.authorize({
+      principal,
+      action,
+      type,
+      ...(id === undefined ? {} : { id }),
+    });
+    if (allowed) return false;
+    await reply.code(403).send({ error: "not authorized for this resource" });
+    return true;
+  }
 
   // ── POST /api/v1/resources/:type ────────────────────────────────────────────
   app.post(
@@ -73,6 +114,7 @@ export function registerResourceRoutes(
         body: { type: "object", additionalProperties: true },
         response: {
           201: RecordSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           422: ValidationErrorSchema,
           401: ErrorSchema,
@@ -83,6 +125,7 @@ export function registerResourceRoutes(
       const { type } = req.params as { type: string };
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
+      if (await denyUnauthorized(req, reply, "record.create", type)) return reply;
 
       const schema = resourceDef.schema;
       const now = new Date();
@@ -152,6 +195,7 @@ export function registerResourceRoutes(
             },
             required: ["items", "nextCursor"],
           },
+          403: ErrorSchema,
           404: ErrorSchema,
           401: ErrorSchema,
         },
@@ -162,6 +206,7 @@ export function registerResourceRoutes(
       if (!soulLoader.resources.has(type)) {
         return reply.code(404).send({ error: `resource type not found: ${type}` });
       }
+      if (await denyUnauthorized(req, reply, "record.list", type)) return reply;
 
       const query = req.query as Record<string, unknown>;
       const { limit, after } = parsePaginationQuery(query);
@@ -191,7 +236,7 @@ export function registerResourceRoutes(
           properties: { type: { type: "string" }, id: { type: "string" } },
           required: ["type", "id"],
         },
-        response: { 200: RecordSchema, 404: ErrorSchema, 401: ErrorSchema },
+        response: { 200: RecordSchema, 403: ErrorSchema, 404: ErrorSchema, 401: ErrorSchema },
       },
     },
     async (req, reply) => {
@@ -199,6 +244,7 @@ export function registerResourceRoutes(
       if (!soulLoader.resources.has(type)) {
         return reply.code(404).send({ error: `resource type not found: ${type}` });
       }
+      if (await denyUnauthorized(req, reply, "record.read", type, id)) return reply;
 
       const repo = repoFactory.forType(type);
       const doc = await repo.findById(id);
@@ -227,6 +273,7 @@ export function registerResourceRoutes(
         response: {
           200: RecordSchema,
           400: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
@@ -238,6 +285,7 @@ export function registerResourceRoutes(
       const { type, id } = req.params as { type: string; id: string };
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
+      if (await denyUnauthorized(req, reply, "record.update", type, id)) return reply;
 
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
@@ -316,6 +364,7 @@ export function registerResourceRoutes(
         response: {
           200: RecordSchema,
           400: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
@@ -327,6 +376,7 @@ export function registerResourceRoutes(
       const { type, id } = req.params as { type: string; id: string };
       const resourceDef = soulLoader.resources.get(type);
       if (!resourceDef) return reply.code(404).send({ error: `resource type not found: ${type}` });
+      if (await denyUnauthorized(req, reply, "record.update", type, id)) return reply;
 
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });
@@ -410,6 +460,7 @@ export function registerResourceRoutes(
         response: {
           204: { type: "null" },
           400: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
           401: ErrorSchema,
@@ -423,6 +474,7 @@ export function registerResourceRoutes(
       if (!resourceDef) {
         return reply.code(404).send({ error: `resource type not found: ${type}` });
       }
+      if (await denyUnauthorized(req, reply, "record.delete", type, id)) return reply;
 
       const ifMatch = parseIfMatch(req);
       if (ifMatch === null) return reply.code(400).send({ error: "If-Match header required" });

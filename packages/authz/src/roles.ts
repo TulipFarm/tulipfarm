@@ -1,14 +1,14 @@
 /**
- * Custom composable roles per SPEC §12: administrators define roles assignable to users,
- * Agents, or both; roles compose through parents but must stay cycle-free; assignment never
+ * Custom composable roles per SPEC §12: administrators define roles assignable to canonical
+ * principal kinds; roles compose through parents but must stay cycle-free; assignment never
  * crosses a business boundary or a principal-kind boundary. Resolution fails closed — an
  * unknown or cyclic reference is an error, and an expired role contributes nothing.
  */
 
 import type { AccessGrant } from "./grants";
-import type { Principal } from "./principals";
+import type { Principal, PrincipalKind } from "./principals";
 
-export type RoleAssignableTo = "user" | "agent" | "both";
+export type RoleAssignableTo = readonly PrincipalKind[];
 
 export interface Role {
   readonly id: string;
@@ -66,9 +66,8 @@ export function assertRoleGraphAcyclic(roles: readonly Role[]): void {
 }
 
 /**
- * Throws unless `role` may be assigned to `principal` at `now`: the kinds must agree with
- * `assignableTo` (only user and Agent principals ever take these roles), the business must
- * match, and the role must not be expired (SPEC §12).
+ * Throws unless `role` may be assigned to `principal` at `now`: the principal kind must be in
+ * `assignableTo`, the business must match, and the role must not be expired (SPEC §12).
  */
 export function assertRoleAssignable(
   role: Role,
@@ -84,13 +83,12 @@ export function assertRoleAssignable(
   if (role.expiresAt && role.expiresAt <= now) {
     throw new RoleAssignmentError("expired", `role ${role.id} has expired`);
   }
-  const kindAllowed =
-    (principal.kind === "user" && role.assignableTo !== "agent") ||
-    (principal.kind === "agent" && role.assignableTo !== "user");
-  if (!kindAllowed) {
+  if (!role.assignableTo.includes(principal.kind)) {
     throw new RoleAssignmentError(
       "kind_mismatch",
-      `role ${role.id} (${role.assignableTo}) is not assignable to a ${principal.kind} principal`
+      `role ${role.id} (${role.assignableTo.join(", ")}) is not assignable to a ${
+        principal.kind
+      } principal`
     );
   }
 }

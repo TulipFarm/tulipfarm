@@ -1,4 +1,5 @@
 import { ajv } from "@tulipfarm/schema";
+import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { jsonSchema, type ToolSet, tool } from "ai";
 import type { BatchCoordinator } from "../tools/batch-executor";
 import { truncateResult } from "../tools/truncate";
@@ -34,7 +35,16 @@ function argumentErrors(errors: AjvErrors): string {
 
 export const TOOL_TIMEOUT_MS = 30_000;
 export const MAX_PRESENTATION_CORRECTIVE_ATTEMPTS = 2;
-const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
+/**
+ * Whether a Tool presents to a surface, read from its own declaration.
+ *
+ * This was a third hand-maintained copy of the same three names. A Tool that presents but is
+ * missing from such a list is exposed without a surface *and* escapes the corrective-attempt limit
+ * below — so the list drifting silently weakened a guard, rather than merely mislabelling a Tool.
+ */
+function presentsToSurface(toolDefinition: { definition?: { availableTo?: ToolAvailability } }) {
+  return toolDefinition.definition?.availableTo?.requiresPresentation === true;
+}
 
 function withToolTimeout(p: Promise<ToolCallResult>): Promise<ToolCallResult> {
   return Promise.race([
@@ -53,9 +63,12 @@ export class ToolRegistry {
   private readonly tools = new Map<string, ToolDef>();
   constructor(private readonly options: { defaultDeny?: boolean } = {}) {}
 
-  register(tool: ToolDef): void {
-    this.tools.set(tool.name, tool);
+  register(tool: ToolDef, options: { replace?: boolean } = {}): void {
     ajv.compile(tool.inputSchema);
+    if (this.tools.has(tool.name) && options.replace !== true) {
+      throw new Error(`Tool "${tool.name}" is already registered`);
+    }
+    this.tools.set(tool.name, tool);
   }
 
   unregister(name: string): void {
@@ -82,7 +95,7 @@ export class ToolRegistry {
         : this.getAll();
     const exposed = authorized.filter(
       (toolDefinition) =>
-        ctx.presentationContext !== undefined || !PRESENTATION_TOOL_NAMES.has(toolDefinition.name)
+        ctx.presentationContext !== undefined || !presentsToSurface(toolDefinition)
     );
     return Object.fromEntries(
       exposed.map((t) => [
@@ -93,7 +106,7 @@ export class ToolRegistry {
             (t.inputSchemaFor?.(ctx) ?? t.inputSchema) as Parameters<typeof jsonSchema>[0]
           ),
           execute: async (args: unknown, opts: { toolCallId: string }) => {
-            const isPresentationTool = PRESENTATION_TOOL_NAMES.has(t.name);
+            const isPresentationTool = presentsToSurface(t);
             if (
               isPresentationTool &&
               presentationValidationFailures > MAX_PRESENTATION_CORRECTIVE_ATTEMPTS

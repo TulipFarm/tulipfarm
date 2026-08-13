@@ -283,7 +283,7 @@ describe("completeAuthStep", () => {
         return jsonResponse({ access_token: "tok", expires_in: 3600 });
       },
     });
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       slug: "notion",
       stepIndex: 0,
       env: {
@@ -291,6 +291,10 @@ describe("completeAuthStep", () => {
         NOTION_ACCESS_TOKEN_EXPIRES_AT: "2026-01-01T01:00:00.000Z",
       },
     });
+    // The step itself is carried out of the exchange so a personal connect can seal the token
+    // under the same env names the manifest declared, without re-resolving the manifest and
+    // risking the two disagreeing about which step just ran.
+    expect(outcome.oauth2Step?.kind).toBe("oauth2");
     const sent = new URLSearchParams(sentBody);
     expect(sent.get("grant_type")).toBe("authorization_code");
     expect(sent.get("code")).toBe("abc");
@@ -517,6 +521,7 @@ describe("completeAuthStep", () => {
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
       consumedAt: null,
+      principal: null,
     });
     await expect(
       completeAuthStep({

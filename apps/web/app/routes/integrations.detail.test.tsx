@@ -1,7 +1,28 @@
 import { createRemixStub } from "@remix-run/testing";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, test, vi } from "vitest";
+import { beforeEach, expect, test, vi } from "vitest";
+
+/*
+ * Connecting, disconnecting and removing an integration seal or revoke the deployment-wide
+ * provider credential, so the API refuses a non-admin. The page has to agree: offering a control
+ * the server will 403 teaches people the product is broken rather than that they lack authority.
+ */
+let admin = true;
+
+vi.mock("~/lib/use-session-user", () => ({
+  useSessionUser: () => ({
+    id: "u1",
+    email: "a@b.dev",
+    name: null,
+    role: admin ? "admin" : "member",
+  }),
+  useIsAdmin: () => admin,
+}));
+
+beforeEach(() => {
+  admin = true;
+});
 
 vi.mock("~/lib/integrations", async (importOriginal) => ({
   ...(await importOriginal<typeof import("~/lib/integrations")>()),
@@ -154,4 +175,55 @@ test("shows the connect flow only while disconnected", async () => {
 test("says so plainly when an integration needs no credentials at all", async () => {
   renderDetail(detail({ connected: false, auth: [] }));
   expect(await screen.findByText(/declares no credentials/i)).toBeInTheDocument();
+});
+
+/*
+ * The member's view of the same page. These pin the boundary the API now enforces on
+ * `POST /integrations/:name/connect|disconnect`, `DELETE /integrations/:name`, and GitHub's
+ * installation-disconnect and Soul-repo routes: everything that reads stays, everything that
+ * writes the connection goes. A member still needs this page — it is where they learn what the
+ * integration reaches and whether it is connected at all.
+ */
+test("offers a member no way to connect, and says why instead", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      connected: false,
+      auth: [{ index: 0, kind: "fields", satisfied: false, producesEnv: true, fields: [] }],
+    })
+  );
+  await screen.findByRole("heading", { level: 1 });
+
+  // The heading stays, so the section is not silently missing — only its controls are.
+  expect(screen.getByText(/^connect$/i)).toBeInTheDocument();
+  expect(await screen.findByText(/an admin has to do it/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^continue$/i })).not.toBeInTheDocument();
+});
+
+test("hides disconnect and remove from a member", async () => {
+  admin = false;
+  renderDetail(detail({ connected: true, status: "connected" }));
+  await screen.findByRole("heading", { level: 1 });
+
+  expect(screen.queryByRole("button", { name: /disconnect/i })).not.toBeInTheDocument();
+  // The overflow menu holds only the destructive action, so it goes with it rather than opening
+  // onto nothing.
+  expect(screen.queryByRole("button", { name: /more actions/i })).not.toBeInTheDocument();
+});
+
+test("still shows a member what the integration is and whether it is connected", async () => {
+  admin = false;
+  renderDetail(
+    detail({
+      connected: true,
+      status: "connected",
+      description: "Issues, pull requests and code review.",
+      capabilities: ["Open a pull request"],
+    })
+  );
+  await screen.findByRole("heading", { level: 1 });
+
+  expect(screen.getByText("Connected")).toBeInTheDocument();
+  expect(screen.getByText(/issues, pull requests/i)).toBeInTheDocument();
+  expect(screen.getByText("Open a pull request")).toBeInTheDocument();
 });

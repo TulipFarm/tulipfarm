@@ -84,6 +84,7 @@ export {
   authSecretEnvNames,
   authStepProducesEnv,
   authStepSatisfied,
+  isPersonalCredentialStep,
   nextAuthStep,
   oauth2ExpiresAtEnv,
   oauth2RefreshTokenEnv,
@@ -136,6 +137,17 @@ export type {
 export { SoulPublisher } from "./publisher";
 export type { SoulSemanticIssue, SoulSemanticIssueCode } from "./refs";
 export { SoulSemanticValidationError } from "./refs";
+export type {
+  CompiledSoulGrant,
+  CompiledSoulRole,
+  SoulRoleCompileErrorCode,
+} from "./role-compiler";
+export {
+  compileRoleDefinition,
+  compileSoulRole,
+  compileSoulRoles,
+  SoulRoleCompileError,
+} from "./role-compiler";
 export { scaffoldSoul } from "./scaffold-soul";
 export { validateSoulSemantics } from "./semantic";
 export type { BundleSigner, BundleVerifier, TrustedBundlePublicKey } from "./signatures";
@@ -188,6 +200,7 @@ export type {
   SoulAgent,
   SoulIntegration,
   SoulResource,
+  SoulRole,
   SoulRoutine,
   SoulSkill,
   ToolBinding,

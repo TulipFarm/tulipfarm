@@ -36,6 +36,30 @@ describe("grantMatches", () => {
     expect(grantMatches(wildcard, request({ resourceType: "customer" }), NOW)).toBe(true);
   });
 
+  it("treats an absent grant domain as domainless only", () => {
+    expect(grantMatches(grant(), request(), NOW)).toBe(true);
+    expect(grantMatches(grant(), request({ domain: "hr" }), NOW)).toBe(false);
+  });
+
+  it("matches exact and wildcard grant domains only for named-domain requests", () => {
+    expect(
+      grantMatches(grant({ domain: "engineering" }), request({ domain: "engineering" }), NOW)
+    ).toBe(true);
+    expect(grantMatches(grant({ domain: "engineering" }), request({ domain: "hr" }), NOW)).toBe(
+      false
+    );
+    expect(grantMatches(grant({ domain: "engineering" }), request(), NOW)).toBe(false);
+    expect(grantMatches(grant({ domain: "*" }), request({ domain: "hr" }), NOW)).toBe(true);
+    expect(grantMatches(grant({ domain: "*" }), request(), NOW)).toBe(false);
+  });
+
+  it("never treats target-side wildcard sentinels as literal request values", () => {
+    const wildcard = grant({ action: "*", resourceType: "*", domain: "*" });
+    expect(grantMatches(wildcard, request({ action: "*" }), NOW)).toBe(false);
+    expect(grantMatches(wildcard, request({ resourceType: "*" }), NOW)).toBe(false);
+    expect(grantMatches(wildcard, request({ domain: "*" }), NOW)).toBe(false);
+  });
+
   it("never matches at or past its expiry", () => {
     const expiring = grant({ expiresAt: NOW });
     expect(grantMatches(expiring, request(), NOW)).toBe(false);
@@ -77,5 +101,12 @@ describe("grantMatches", () => {
     const deny = grant({ effect: "deny", recordSelector: "rec-1" });
     expect(grantMatches(deny, request({ recordId: "rec-1" }), NOW)).toBe(true);
     expect(grantMatches(deny, request({ recordId: "rec-2" }), NOW)).toBe(false);
+  });
+
+  it("matches domain-scoped deny grants with the same scoping rules", () => {
+    const deny = grant({ effect: "deny", domain: "hr" });
+    expect(grantMatches(deny, request({ domain: "hr" }), NOW)).toBe(true);
+    expect(grantMatches(deny, request({ domain: "engineering" }), NOW)).toBe(false);
+    expect(grantMatches(deny, request(), NOW)).toBe(false);
   });
 });

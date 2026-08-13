@@ -133,14 +133,20 @@ describe("integrations routes", () => {
   let secretsService: FakeSecretsService;
   let bundledIntegrations: Map<string, BundledIntegration>;
   let integrationStore: FakeIntegrationStore;
+  let memberSid: string;
   const temps: string[] = [];
 
   beforeEach(async () => {
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    // Connect, disconnect and remove write the deployment-wide provider credential, so they take
+    // the same operator gate as a `scope: "business"` auth step. The default session is therefore
+    // an admin; `memberSid` exists so the refusal itself is pinned rather than assumed.
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
+    const member = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberSid = await store.create(member._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "integrations-soul-"));
     temps.push(soulPath);
@@ -267,6 +273,7 @@ describe("integrations routes", () => {
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
+  const memberAuth = () => ({ [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF });
   const headers = { [CSRF_HEADER]: TEST_CSRF };
 
   describe("GET /api/v1/integrations", () => {
@@ -387,6 +394,48 @@ describe("integrations routes", () => {
   });
 
   describe("POST /api/v1/integrations/:name/connect", () => {
+    /**
+     * The bypass this gate closes. `auth-routes.ts` refuses a member a `scope: "business"` auth
+     * step because it re-points the credential every unattended Run spends — but this route
+     * performs that same write, and was on authentication alone. A member could seal the
+     * provider's client id and secret here instead, pointing the deployment's OAuth flow at an app
+     * they control, and the admin's later business connect would exchange against it.
+     *
+     * Asserted before the write, not just on the status: a 403 that still sealed the env would be
+     * worse than no gate, because it would look enforced.
+     */
+    it("refuses a member, who could otherwise re-point the deployment credential", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/connect",
+        cookies: memberAuth(),
+        headers,
+        payload: { env: { SLACK_BOT_TOKEN: "xoxb-attacker" } },
+      });
+      expect(res.statusCode).toBe(403);
+      await expect(secretsService.get("integration.slack.SLACK_BOT_TOKEN")).rejects.toThrow();
+    });
+
+    it("refuses a member disconnecting, which would revoke every Agent's reach", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/slack/disconnect",
+        cookies: memberAuth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("refuses a member removing the integration outright", async () => {
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/integrations/slack",
+        cookies: memberAuth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
     it("400s when required env is missing", async () => {
       const res = await app.inject({
         method: "POST",

@@ -1,4 +1,5 @@
 import type { PGlite } from "@electric-sql/pglite";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Queryable } from "./db";
 import { runPgMigrations } from "./pg-migrate";
@@ -377,7 +378,9 @@ describe("runPgMigrations", () => {
       const version = await db.query<{ version: number }>(
         "SELECT version FROM schema_version WHERE id = true"
       );
-      expect(Number(version.rows[0]?.version)).toBe(49);
+      expect(Number(version.rows[0]?.version)).toBe(
+        Math.max(...PG_MIGRATIONS.map((migration) => migration.version))
+      );
 
       const next = await db.query<{ activation_sequence: string | number }>(
         "SELECT nextval('soul_activation_sequence') AS activation_sequence"
@@ -655,6 +658,153 @@ describe("runPgMigrations concurrency and atomicity", () => {
     expect(rows.at(-1)?.description).toBe(
       PG_MIGRATIONS.find((m) => m.version === latestVersion)?.description
     );
+  });
+
+  describe("migration 50", () => {
+    it("drops the single-admin index and revokes owner authority when admin is demoted", async () => {
+      const adminId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      await db.query(`CREATE TABLE users (
+        id            uuid PRIMARY KEY,
+        email         text NOT NULL UNIQUE,
+        password_hash text,
+        role          text NOT NULL,
+        status        text NOT NULL,
+        created_at    timestamptz NOT NULL
+      )`);
+      await db.query(
+        "CREATE UNIQUE INDEX users_single_admin_idx ON users (role) WHERE role = 'admin'"
+      );
+      await db.query(
+        `INSERT INTO users (id, email, password_hash, role, status, created_at)
+         VALUES ($1, 'owner@example.com', 'hash', 'admin', 'active', '2026-08-12T00:00:00Z')`,
+        [adminId]
+      );
+      await db.query(`CREATE TABLE schema_version (
+        id boolean PRIMARY KEY DEFAULT true,
+        version integer NOT NULL,
+        CONSTRAINT schema_version_single_row CHECK (id)
+      )`);
+      await db.query("INSERT INTO schema_version (id, version) VALUES (true, 49)");
+
+      await runPgMigrations(db, undefined, NOOP_LOG);
+
+      const version = await db.query<{ version: number }>(
+        "SELECT version FROM schema_version WHERE id = true"
+      );
+      expect(Number(version.rows[0]?.version)).toBe(latestVersion);
+
+      const indexes = await db.query<{ indexname: string }>(
+        "SELECT indexname FROM pg_indexes WHERE indexname = 'users_single_admin_idx'"
+      );
+      expect(indexes.rows).toEqual([]);
+      const setupIndexes = await db.query<{ indexname: string }>(
+        "SELECT indexname FROM pg_indexes WHERE indexname = 'users_setup_bootstrap_admin_idx'"
+      );
+      expect(setupIndexes.rows).toEqual([{ indexname: "users_setup_bootstrap_admin_idx" }]);
+
+      const setupBootstrap = await db.query<{ setup_bootstrap: boolean }>(
+        "SELECT setup_bootstrap FROM users WHERE id = $1",
+        [adminId]
+      );
+      expect(setupBootstrap.rows).toEqual([{ setup_bootstrap: true }]);
+
+      const assignments = await db.query<{ role_id: string }>(
+        `SELECT role_id FROM role_assignments
+         WHERE business_id = $1 AND principal_id = $2
+         ORDER BY role_id`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(assignments.rows.map((row) => row.role_id)).toEqual(["admin", "owner"]);
+
+      const groupMembers = await db.query<{ group_id: string }>(
+        `SELECT group_id FROM principal_group_members
+         WHERE business_id = $1 AND principal_id = $2`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(groupMembers.rows).toEqual([{ group_id: "owners" }]);
+
+      await expect(
+        db.query(
+          `INSERT INTO users (id, email, password_hash, role, status, created_at, setup_bootstrap)
+           VALUES (
+             'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+             'racer@example.com',
+             'hash',
+             'admin',
+             'active',
+             now(),
+             true
+           )`
+        )
+      ).rejects.toThrow();
+      await expect(
+        db.query(
+          `INSERT INTO users (id, email, password_hash, role, status, created_at)
+           VALUES (
+             'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+             'admin2@example.com',
+             'hash',
+             'admin',
+             'active',
+             now()
+           )`
+        )
+      ).resolves.toBeDefined();
+
+      await db.query("UPDATE users SET status = 'disabled' WHERE id = $1", [adminId]);
+      const disabledPrincipal = await db.query<{ status: string }>(
+        `SELECT status FROM principals
+         WHERE business_id = $1 AND id = $2`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(disabledPrincipal.rows).toEqual([{ status: "disabled" }]);
+      const disabledAssignments = await db.query<{ role_id: string }>(
+        `SELECT role_id FROM role_assignments
+         WHERE business_id = $1 AND principal_id = $2
+         ORDER BY role_id`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(disabledAssignments.rows.map((row) => row.role_id)).toEqual(["admin", "owner"]);
+      const disabledGroupMembers = await db.query<{ group_id: string }>(
+        `SELECT group_id FROM principal_group_members
+         WHERE business_id = $1 AND principal_id = $2`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(disabledGroupMembers.rows).toEqual([{ group_id: "owners" }]);
+
+      await db.query("UPDATE users SET status = 'active' WHERE id = $1", [adminId]);
+      await db.query("UPDATE users SET role = 'member' WHERE id = $1", [adminId]);
+      const demotedAssignments = await db.query<{ role_id: string }>(
+        `SELECT role_id FROM role_assignments
+         WHERE business_id = $1 AND principal_id = $2
+         ORDER BY role_id`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(demotedAssignments.rows.map((row) => row.role_id)).toEqual(["member"]);
+      const demotedGroupMembers = await db.query(
+        `SELECT 1 FROM principal_group_members
+         WHERE business_id = $1 AND group_id = 'owners' AND principal_id = $2`,
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(demotedGroupMembers.rows).toEqual([]);
+
+      await db.query("DELETE FROM users WHERE id = $1", [adminId]);
+      const remainingPrincipals = await db.query(
+        "SELECT 1 FROM principals WHERE business_id = $1 AND id = $2",
+        [DEPLOYMENT_BUSINESS_ID, adminId]
+      );
+      expect(remainingPrincipals.rows).toEqual([]);
+      const remainingAssignments = await db.query(
+        "SELECT 1 FROM role_assignments WHERE principal_id = $1",
+        [adminId]
+      );
+      expect(remainingAssignments.rows).toEqual([]);
+      const remainingGroupMembers = await db.query(
+        "SELECT 1 FROM principal_group_members WHERE principal_id = $1",
+        [adminId]
+      );
+      expect(remainingGroupMembers.rows).toEqual([]);
+    });
   });
 
   it("is a no-op on an already-current database", async () => {

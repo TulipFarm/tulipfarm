@@ -111,6 +111,8 @@ export {
   isEffortRung,
   resolveEffortPreset,
 } from "./model-catalog";
+export type { PrincipalKind } from "./principals";
+export { PRINCIPAL_KINDS } from "./principals";
 export type {
   SchemaRegistration,
   ValidatedSchemaDocument,

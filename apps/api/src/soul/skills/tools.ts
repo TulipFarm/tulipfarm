@@ -10,7 +10,9 @@ import {
   validateSkill,
 } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
+import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
+import { soulCommitError } from "../../tools/soul-faults";
+import { err, ok, type RequestContext } from "../../tools/types.js";
 import { buildAudit } from "./audit.js";
 import { type BundledSkill, persistDisabledBundledSkills } from "./bundled.js";
 import { scanSkill, skillTrustLevel } from "./guard.js";
@@ -25,16 +27,22 @@ export interface SkillToolContext {
   requestContext?: RequestContext;
 }
 
-export interface SkillTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: SkillToolContext) => Promise<ToolCallResult>;
-}
+const SOUL_SKILL_TARGET = "soul.skill";
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function skillTargets(args: unknown) {
+  const id = stringArg(args, "name");
+  // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
+  return id === undefined ? [] : [{ type: SOUL_SKILL_TARGET, id }];
 }
 
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
@@ -88,12 +96,20 @@ const CREATE_SCHEMA = {
 
 const validateCreate = ajv.compile(CREATE_SCHEMA);
 
-const skillCreate: SkillTool = {
+const skillCreate = defineApiTool<SkillToolContext>({
   name: "skill_create",
   description:
     "Create a new skill in the soul repo. Writes SKILL.md (pending audit), commits via withSync, runs SkillAudit synchronously, and returns the audit report. The skill is not active in prompt assembly until confirmed via skill_activate.",
+  tier: "system",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
+  authorization: {
+    action: "soul.skill.create",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
     const { name, body, frontmatter } = args as {
@@ -143,7 +159,7 @@ const skillCreate: SkillTool = {
     try {
       await ctx.gitSync.withSync(`soul: add skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -175,7 +191,7 @@ const skillCreate: SkillTool = {
     // Return user-supplied frontmatter (without the internal _pendingAudit marker).
     return ok({ name, frontmatter, body, auditReport });
   },
-};
+});
 
 // ── skill_update ──────────────────────────────────────────────────────────────
 
@@ -213,12 +229,20 @@ const UPDATE_SCHEMA = {
 
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 
-const skillUpdate: SkillTool = {
+const skillUpdate = defineApiTool<SkillToolContext>({
   name: "skill_update",
   description:
     "Update an existing Skill. Prefer old_string/new_string for surgical body fixes; use body and/or frontmatter only for full replacements. Patch text must be unique unless replace_all is true. Updates preserve audit state and do not re-run SkillAudit. Commits and pushes via withSync.",
+  tier: "system",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
+  authorization: {
+    action: "soul.skill.update",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
     const { name, body, frontmatter, old_string, new_string, replace_all } = args as {
@@ -300,7 +324,7 @@ const skillUpdate: SkillTool = {
     try {
       await ctx.gitSync.withSync(`soul: update skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -311,7 +335,7 @@ const skillUpdate: SkillTool = {
 
     return ok({ name, frontmatter: validation.frontmatter, body: newBody });
   },
-};
+});
 
 // ── skill_get ─────────────────────────────────────────────────────────────────
 
@@ -326,12 +350,20 @@ const GET_SCHEMA = {
 
 const validateGet = ajv.compile(GET_SCHEMA);
 
-const skillGet: SkillTool = {
+const skillGet = defineApiTool<SkillToolContext>({
   name: "skill_get",
   description:
     "Get a Skill's frontmatter, markdown body, and provenance from the merged Soul-over-bundled view.",
+  tier: "system",
   mutating: false,
   inputSchema: GET_SCHEMA,
+  authorization: {
+    action: "soul.skill.read",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet));
     const { name } = args as { name: string };
@@ -345,7 +377,7 @@ const skillGet: SkillTool = {
       provenance: soulSkill ? "soul" : "builtin",
     });
   },
-};
+});
 
 // ── skill_list ────────────────────────────────────────────────────────────────
 
@@ -357,11 +389,18 @@ const LIST_SCHEMA = {
 
 const validateList = ajv.compile(LIST_SCHEMA);
 
-const skillList: SkillTool = {
+const skillList = defineApiTool<SkillToolContext>({
   name: "skill_list",
   description: "List Skills from the merged Soul-over-bundled view with provenance.",
+  tier: "system",
   mutating: false,
   inputSchema: LIST_SCHEMA,
+  authorization: {
+    action: "soul.skill.list",
+    resources: ["soul.skill"],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList));
     const skills = Array.from(
@@ -373,7 +412,7 @@ const skillList: SkillTool = {
     }));
     return ok({ skills });
   },
-};
+});
 
 // ── skill_delete ──────────────────────────────────────────────────────────────
 
@@ -388,12 +427,20 @@ const DELETE_SCHEMA = {
 
 const validateDelete = ajv.compile(DELETE_SCHEMA);
 
-const skillDelete: SkillTool = {
+const skillDelete = defineApiTool<SkillToolContext>({
   name: "skill_delete",
   description:
     "Delete a Skill from the merged view. Soul Skills are removed; bundled Skills are hidden with a persistent tombstone. Commits and pushes via withSync.",
+  tier: "system",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
+  authorization: {
+    action: "soul.skill.delete",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
     const { name } = args as { name: string };
@@ -418,7 +465,7 @@ const skillDelete: SkillTool = {
     try {
       await ctx.gitSync.withSync(`soul: remove skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -429,7 +476,7 @@ const skillDelete: SkillTool = {
 
     return ok({ name, deleted: true });
   },
-};
+});
 
 // ── skill_activate ────────────────────────────────────────────────────────────
 
@@ -444,12 +491,20 @@ const ACTIVATE_SCHEMA = {
 
 const validateActivate = ajv.compile(ACTIVATE_SCHEMA);
 
-const skillActivate: SkillTool = {
+const skillActivate = defineApiTool<SkillToolContext>({
   name: "skill_activate",
   description:
     "Activate a forge-created skill after the operator has reviewed its SkillAudit report. Removes the _pendingAudit marker, commits, and reloads — making the skill available in prompt assembly.",
+  tier: "system",
   mutating: true,
   inputSchema: ACTIVATE_SCHEMA,
+  authorization: {
+    action: "soul.skill.activate",
+    resources: ["soul.skill"],
+    targets: skillTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateActivate(args)) return err("validation_error", firstError(validateActivate));
     const { name } = args as { name: string };
@@ -480,7 +535,7 @@ const skillActivate: SkillTool = {
     try {
       await ctx.gitSync.withSync(`soul: activate skill ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -491,9 +546,9 @@ const skillActivate: SkillTool = {
 
     return ok({ name, activated: true });
   },
-};
+});
 
-export const SKILL_TOOLS: SkillTool[] = [
+export const SKILL_TOOLS: ApiToolDefinition<SkillToolContext>[] = [
   skillCreate,
   skillUpdate,
   skillGet,

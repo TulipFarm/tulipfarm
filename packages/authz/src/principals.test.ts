@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   assertPrincipalAuthenticatable,
   assertSessionMatchesPrincipal,
+  isPrincipalKind,
+  PRINCIPAL_KINDS,
   type Principal,
   PrincipalDeniedError,
   type SessionBinding,
@@ -29,15 +31,7 @@ function session(overrides: Partial<SessionBinding> = {}): SessionBinding {
 
 describe("assertPrincipalAuthenticatable", () => {
   it("allows an active, unexpired principal of every kind", () => {
-    const kinds: Principal["kind"][] = [
-      "user",
-      "agent",
-      "routine",
-      "integration_adapter",
-      "api",
-      "service",
-    ];
-    for (const kind of kinds) {
+    for (const kind of PRINCIPAL_KINDS) {
       expect(() => assertPrincipalAuthenticatable(principal({ kind }))).not.toThrow();
     }
   });
@@ -46,6 +40,21 @@ describe("assertPrincipalAuthenticatable", () => {
     expect(() => assertPrincipalAuthenticatable(principal({ status: "disabled" }))).toThrow(
       PrincipalDeniedError
     );
+  });
+
+  describe("isPrincipalKind", () => {
+    it("recognizes only canonical principal kinds", () => {
+      expect(PRINCIPAL_KINDS).toEqual([
+        "user",
+        "agent",
+        "routine",
+        "integration_adapter",
+        "api",
+        "service",
+      ]);
+      expect(isPrincipalKind("service")).toBe(true);
+      expect(isPrincipalKind("bot")).toBe(false);
+    });
   });
 
   it("denies a principal past its expiry", () => {

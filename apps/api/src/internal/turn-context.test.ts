@@ -2,6 +2,7 @@ import { DEFAULT_GUARDRAILS, type GuardrailsService } from "@tulipfarm/agent-run
 import type { ArtifactService } from "@tulipfarm/run-kernel";
 import { canonicalHash } from "@tulipfarm/schema";
 import type { SoulLoader, SoulSkill } from "@tulipfarm/soul";
+import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
 import type { PersistedMessage } from "../conversations/service";
@@ -45,7 +46,20 @@ function message(overrides: Partial<PersistedMessage> = {}): PersistedMessage {
   };
 }
 
+// Surface availability is read from the Tool's own `availableTo`, so a fixture that omits it
+// declares a Tool offerable anywhere — which is what a bare registration genuinely means.
+const FIXTURE_AVAILABILITY: Record<string, ToolAvailability> = {
+  present: { requiresPresentation: true },
+  update_presentation: { requiresPresentation: true },
+  request_input: { requiresPresentation: true },
+  get_client_context: { requiresWebChat: true },
+  navigate_to: { requiresWebChat: true },
+  prefill_form: { requiresWebChat: true },
+  invoke_action: { requiresWebChat: true },
+};
+
 function toolDef(name: string): ToolDef {
+  const availableTo = FIXTURE_AVAILABILITY[name];
   return {
     name,
     tier: "platform",
@@ -53,6 +67,7 @@ function toolDef(name: string): ToolDef {
     description: `${name} does something`,
     inputSchema: { type: "object" },
     execute: async () => ok({}),
+    ...(availableTo === undefined ? {} : { definition: { availableTo } as ToolDef["definition"] }),
   };
 }
 

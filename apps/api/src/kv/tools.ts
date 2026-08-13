@@ -1,7 +1,8 @@
 import { ajv } from "@tulipfarm/schema";
+import { type ApiToolDefinition, defineApiTool } from "../tools/define";
 import { KV_NAME_RE, MAX_KEY_CHARS, MAX_NAMESPACE_CHARS, MAX_VALUE_BYTES } from "./limits";
 import type { KvService } from "./service";
-import { err, ok, type ToolCallResult } from "./tool-result";
+import { err, ok } from "./tool-result";
 
 /**
  * Per-request context a KV tool handler runs against. `agentId` is the hard-wired owner for the
@@ -12,15 +13,6 @@ export interface KvToolContext {
   userId: string;
   agentId?: string;
   service: KvService;
-}
-
-/** A platform (built-in) tool: schema + LLM-facing guidance + a handler that returns a result. */
-export interface PlatformTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: KvToolContext) => Promise<ToolCallResult>;
 }
 
 const AGENT = "agent" as const;
@@ -85,16 +77,49 @@ function firstError(errors: typeof validateGet.errors): string {
   return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
+type TargetRef = { type: string; id: string };
+
 const GUIDANCE =
   "This is the agent's own private key-value scratch space — isolated from other agents and from " +
   "users. Use it for durable state across turns (cached lookups, counters, working notes). Store " +
   "small, stable user facts in Memory and business documents in knowledge instead.";
 
-export const kvSetTool: PlatformTool = {
+function objectArg(args: unknown): Record<string, unknown> {
+  return typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  const value = objectArg(args)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function kvNamespaceTarget(args: unknown): TargetRef[] {
+  const namespace = stringArg(args, "namespace");
+  return namespace === undefined ? [] : [{ type: "platform.kv", id: `namespace:${namespace}` }];
+}
+
+function kvEntryTarget(args: unknown): TargetRef[] {
+  const namespace = stringArg(args, "namespace");
+  const key = stringArg(args, "key");
+  const targets = kvNamespaceTarget(args);
+  if (namespace !== undefined && key !== undefined) {
+    targets.push({ type: "platform.kv", id: `entry:${namespace}:${key}` });
+  }
+  return targets;
+}
+
+export const kvSetTool = defineApiTool<KvToolContext>({
   name: "kv_set",
   description: `Store a JSON value under (namespace, key) in your key-value store. Last write wins; optional ttlSeconds expires it. ${GUIDANCE}`,
+  tier: "platform",
   mutating: true,
   inputSchema: SET_SCHEMA,
+  authorization: {
+    action: "kv.set",
+    resources: ["platform.kv"],
+    targets: kvEntryTarget,
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateSet(args)) return err("validation_error", firstError(validateSet.errors));
     if (!ctx.agentId) return err("internal_error", "agent identity required for kv tools");
@@ -117,13 +142,20 @@ export const kvSetTool: PlatformTool = {
     }
     return ok({ namespace, key, stored: true });
   },
-};
+});
 
-export const kvGetTool: PlatformTool = {
+export const kvGetTool = defineApiTool<KvToolContext>({
   name: "kv_get",
   description: `Read a JSON value by (namespace, key) from your key-value store. Returns found=false if absent or expired. ${GUIDANCE}`,
+  tier: "platform",
   mutating: false,
   inputSchema: GET_SCHEMA,
+  authorization: {
+    action: "kv.get",
+    resources: ["platform.kv"],
+    targets: kvEntryTarget,
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet.errors));
     if (!ctx.agentId) return err("internal_error", "agent identity required for kv tools");
@@ -138,13 +170,20 @@ export const kvGetTool: PlatformTool = {
       expiresAt: entry.expiresAt?.toISOString(),
     });
   },
-};
+});
 
-export const kvDeleteTool: PlatformTool = {
+export const kvDeleteTool = defineApiTool<KvToolContext>({
   name: "kv_delete",
   description: `Delete an entry by (namespace, key) from your key-value store. Idempotent — deleting an absent key still succeeds. ${GUIDANCE}`,
+  tier: "platform",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
+  authorization: {
+    action: "kv.delete",
+    resources: ["platform.kv"],
+    targets: kvEntryTarget,
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete.errors));
     if (!ctx.agentId) return err("internal_error", "agent identity required for kv tools");
@@ -152,13 +191,20 @@ export const kvDeleteTool: PlatformTool = {
     const deleted = await ctx.service.delete(AGENT, ctx.agentId, namespace, key);
     return ok({ namespace, key, deleted });
   },
-};
+});
 
-export const kvListTool: PlatformTool = {
+export const kvListTool = defineApiTool<KvToolContext>({
   name: "kv_list",
   description: `List all live entries in a namespace of your key-value store. ${GUIDANCE}`,
+  tier: "platform",
   mutating: false,
   inputSchema: LIST_SCHEMA,
+  authorization: {
+    action: "kv.list",
+    resources: ["platform.kv"],
+    targets: kvNamespaceTarget,
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList.errors));
     if (!ctx.agentId) return err("internal_error", "agent identity required for kv tools");
@@ -173,7 +219,12 @@ export const kvListTool: PlatformTool = {
       })),
     });
   },
-};
+});
 
 /** Registry of the KV platform tools, picked up by the chat tool runtime. */
-export const KV_TOOLS: PlatformTool[] = [kvGetTool, kvSetTool, kvDeleteTool, kvListTool];
+export const KV_TOOLS: ApiToolDefinition<KvToolContext>[] = [
+  kvGetTool,
+  kvSetTool,
+  kvDeleteTool,
+  kvListTool,
+];

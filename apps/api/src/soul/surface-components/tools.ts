@@ -9,6 +9,8 @@ import {
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse, stringify } from "yaml";
+import { type ApiToolDefinition, defineApiTool } from "../../tools/define";
+import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types";
 
 export interface SurfaceComponentToolContext {
@@ -17,18 +19,8 @@ export interface SurfaceComponentToolContext {
   readonly requestContext?: RequestContext;
 }
 
-export interface SurfaceComponentTool {
-  readonly name: string;
-  readonly description: string;
-  readonly mutating: boolean;
-  readonly inputSchema: Record<string, unknown>;
-  readonly handler: (
-    args: unknown,
-    context: SurfaceComponentToolContext
-  ) => Promise<ToolCallResult>;
-}
-
 const SLUG = "^[a-z][a-z0-9-]*$";
+const SOUL_SURFACE_COMPONENT_TARGET = "soul.surface_component";
 const TARGET = {
   type: "object",
   additionalProperties: false,
@@ -100,6 +92,18 @@ function directory(context: SurfaceComponentToolContext, slug: string): string {
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function surfaceComponentTargets(args: unknown) {
+  const id = stringArg(args, "slug");
+  // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
+  return id === undefined ? [] : [{ type: SOUL_SURFACE_COMPONENT_TARGET, id }];
 }
 
 function validateComponent(
@@ -199,12 +203,20 @@ async function writeComponent(
   }
 }
 
-const create: SurfaceComponentTool = {
+const create = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_create",
   description:
     "Create a validated business Surface component under surface-components/<slug> and publish it through Soul git sync.",
+  tier: "system",
   mutating: true,
   inputSchema: DEFINITION,
+  authorization: {
+    action: "soul.surface_component.create",
+    resources: ["soul.surface_component"],
+    targets: surfaceComponentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, context) => {
     const invalid = validateComponent(args, context.surfaceSupport);
     if (invalid) return invalid;
@@ -220,16 +232,25 @@ const create: SurfaceComponentTool = {
       );
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
-      return err("internal_error", reason(error));
+      return soulCommitError(error, reason(error));
     }
   },
-};
+});
 
-const update: SurfaceComponentTool = {
-  ...create,
+const update = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_update",
   description:
     "Replace and revalidate an existing business Surface component, then publish it through Soul git sync.",
+  tier: "system",
+  mutating: true,
+  inputSchema: DEFINITION,
+  authorization: {
+    action: "soul.surface_component.update",
+    resources: ["soul.surface_component"],
+    targets: surfaceComponentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, context) => {
     const invalid = validateComponent(args, context.surfaceSupport);
     if (invalid) return invalid;
@@ -245,14 +266,15 @@ const update: SurfaceComponentTool = {
       );
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
-      return err("internal_error", reason(error));
+      return soulCommitError(error, reason(error));
     }
   },
-};
+});
 
-const get: SurfaceComponentTool = {
+const get = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_get",
   description: "Read one published business Surface component and its declarative views.",
+  tier: "system",
   mutating: false,
   inputSchema: {
     type: "object",
@@ -260,6 +282,13 @@ const get: SurfaceComponentTool = {
     required: ["slug"],
     properties: { slug: { type: "string", pattern: SLUG } },
   },
+  authorization: {
+    action: "soul.surface_component.read",
+    resources: ["soul.surface_component"],
+    targets: surfaceComponentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, context) => {
     const { slug } = args as { slug: string };
     const componentDirectory = directory(context, slug);
@@ -281,13 +310,20 @@ const get: SurfaceComponentTool = {
       return err("not_found", "Surface component was not found.");
     }
   },
-};
+});
 
-const list: SurfaceComponentTool = {
+const list = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_list",
   description: "List published business Surface components.",
+  tier: "system",
   mutating: false,
   inputSchema: { type: "object", additionalProperties: false, properties: {} },
+  authorization: {
+    action: "soul.surface_component.list",
+    resources: ["soul.surface_component"],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (_args, context) => {
     try {
       const entries = await readdir(root(context), { withFileTypes: true });
@@ -301,6 +337,11 @@ const list: SurfaceComponentTool = {
       return ok({ components: [] });
     }
   },
-};
+});
 
-export const SURFACE_COMPONENT_TOOLS = [create, update, get, list] as const;
+export const SURFACE_COMPONENT_TOOLS: readonly ApiToolDefinition<SurfaceComponentToolContext>[] = [
+  create,
+  update,
+  get,
+  list,
+];

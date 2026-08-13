@@ -67,7 +67,42 @@ function ctxFor(repo: FakeKvRepo, agentId?: string): KvToolContext {
   return { userId: "u1", agentId, service: new KvService(repo) };
 }
 
+function expectNoMalformedTargets(tool: (typeof KV_TOOLS)[number], args: unknown): void {
+  expect(() => tool.targetsFor(args)).not.toThrow();
+  for (const ref of tool.targetsFor(args)) {
+    expect(ref.type).not.toMatch(/undefined|null/);
+    expect(ref.id).not.toMatch(/undefined|null/);
+  }
+}
+
 describe("KV agent tools", () => {
+  it("target derivations tolerate empty and unexpected raw arguments", () => {
+    for (const tool of KV_TOOLS) {
+      expectNoMalformedTargets(tool, {});
+      expectNoMalformedTargets(tool, { unexpected: true });
+      expectNoMalformedTargets(tool, null);
+    }
+  });
+
+  it("entry operations derive both namespace and entry targets", () => {
+    for (const tool of [kvGetTool, kvSetTool, kvDeleteTool]) {
+      expect(tool.targetsFor({ namespace: "scratch", key: "k" })).toEqual([
+        { type: "platform.kv", id: "namespace:scratch" },
+        { type: "platform.kv", id: "entry:scratch:k" },
+      ]);
+    }
+  });
+
+  it("entry operations derive only genuinely determined partial targets", () => {
+    for (const tool of [kvGetTool, kvSetTool, kvDeleteTool]) {
+      expect(tool.targetsFor({ namespace: "scratch" })).toEqual([
+        { type: "platform.kv", id: "namespace:scratch" },
+      ]);
+      expect(tool.targetsFor({ key: "k" })).toEqual([]);
+      expect(tool.targetsFor({ namespace: { name: "scratch" }, key: "k" })).toEqual([]);
+    }
+  });
+
   it("kv_set pins the entry to scope='agent' and owner = ctx.agentId", async () => {
     const repo = new FakeKvRepo();
     const res = await kvSetTool.handler(

@@ -1,10 +1,21 @@
+import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
 import { ToolRegistry } from "../broker/tool-adapter";
+import type { ToolDef } from "../tools/types";
 import { allowedToolNamesFor, availableToolsFor } from "./turn-helpers";
+
+// Availability is read from each Tool's own `availableTo`, so the fixture has to carry the
+// declarations a real registration carries — a bare Tool declares nothing and is offered anywhere.
+const AVAILABILITY: Record<string, ToolAvailability | undefined> = {
+  record_list: undefined,
+  present: { requiresPresentation: true },
+  request_input: { requiresPresentation: true },
+  get_client_context: { requiresWebChat: true },
+};
 
 function registry(): ToolRegistry {
   const value = new ToolRegistry();
-  for (const name of ["record_list", "present", "request_input", "get_client_context"]) {
+  for (const [name, availableTo] of Object.entries(AVAILABILITY)) {
     value.register({
       name,
       tier: "platform",
@@ -12,6 +23,9 @@ function registry(): ToolRegistry {
       description: `${name} description`,
       inputSchema: { type: "object" },
       execute: async () => ({ success: true, data: {} }),
+      ...(availableTo === undefined
+        ? {}
+        : { definition: { availableTo } as ToolDef["definition"] }),
     });
   }
   return value;

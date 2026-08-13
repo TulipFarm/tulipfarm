@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { ajv } from "@tulipfarm/schema";
-import { err, ok, type ToolCallResult } from "../tools/types";
+import { type ApiToolDefinition, defineApiTool } from "../tools/define";
+import { err, ok } from "../tools/types";
 import type { KnowledgeService } from "./service";
 
 /** Per-request context a knowledge tool runs against (KN-V1-006). No ACL (KN-V1-001). */
@@ -13,12 +14,52 @@ export interface KnowledgeToolContext {
   conversationId?: string;
 }
 
+/**
+ * The gate matches `resourceType` exactly against the two-level grant grammar, and derived targets
+ * replace the Tool's static `resources`. A target typed `knowledge_space` is therefore unmatchable
+ * by any authorable grant *and* suppresses the `platform.knowledge` check. The kind moves into the
+ * id, where `recordSelector` still separates a space from a page from a path.
+ */
+const KNOWLEDGE_RESOURCE = "platform.knowledge";
+
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return validate.errors?.[0]?.message ?? "invalid input";
 }
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+type TargetRef = { type: string; id: string };
+
+function objectArg(args: unknown): Record<string, unknown> {
+  return typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  const value = objectArg(args)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function pagePathTargets(args: unknown): TargetRef[] {
+  const spaceId = stringArg(args, "spaceId");
+  const path = stringArg(args, "path");
+  const targets: TargetRef[] = [];
+  if (spaceId !== undefined) targets.push({ type: KNOWLEDGE_RESOURCE, id: `space:${spaceId}` });
+  if (spaceId !== undefined && path !== undefined) {
+    targets.push({ type: KNOWLEDGE_RESOURCE, id: `path:${spaceId}:${path}` });
+  }
+  return targets;
+}
+
+function knowledgeSpaceTarget(args: unknown): TargetRef[] {
+  const spaceId = stringArg(args, "spaceId");
+  return spaceId === undefined ? [] : [{ type: KNOWLEDGE_RESOURCE, id: `space:${spaceId}` }];
+}
+
+function knowledgePageTarget(args: unknown): TargetRef[] {
+  const pageId = stringArg(args, "pageId");
+  return pageId === undefined ? [] : [{ type: KNOWLEDGE_RESOURCE, id: `page:${pageId}` }];
 }
 
 /** Tool name shared with the producer (it maps this tool's result to the `sources` SSE event) and the
@@ -29,14 +70,6 @@ export const CITE_SOURCES_TOOL = "cite_sources";
  *  returns undefined and renders unlinked. Single source of truth for the `/knowledge/pages/:id` form. */
 function pageUrl(page: { _id: string; spaceId?: string | null }): string | undefined {
   return page.spaceId ? `/knowledge/pages/${page._id}` : undefined;
-}
-
-export interface KnowledgeTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: KnowledgeToolContext) => Promise<ToolCallResult>;
 }
 
 const QUERY_SCHEMA = {
@@ -93,12 +126,26 @@ const CREATE_PAGE_SCHEMA = {
 } as const;
 const validateCreatePage = ajv.compile(CREATE_PAGE_SCHEMA);
 
-const queryKnowledge: KnowledgeTool = {
+const queryKnowledge = defineApiTool<KnowledgeToolContext>({
   name: "query_knowledge",
   description:
     "Search the shared knowledge base by meaning (vector) with a lexical fallback. Returns ranked OKF wiki pages and authorized indexed source snippets from every connected source — including synced Slack channel history, Confluence pages, and other connectors — each labelled with its origin. Use this (not a messaging tool) to answer questions about what was said in a Slack channel or any other connected source. Read OKF pages with `get_page` before answering; source snippets are already the retrievable excerpt. Pass `spaceId` to scope the search to a single space (wiki only).",
+  tier: "platform",
   mutating: false,
   inputSchema: QUERY_SCHEMA,
+  authorization: {
+    action: "knowledge.search",
+    resources: ["platform.knowledge"],
+    targets: (args) => {
+      const rawSpaceId = stringArg(args, "spaceId")?.trim();
+      // Omitted or invalid spaceId intentionally means corpus-wide search; keep [] so the coarse
+      // platform.knowledge search grant is checked instead of fabricating a fake space target.
+      return rawSpaceId && UUID_RE.test(rawSpaceId)
+        ? [{ type: KNOWLEDGE_RESOURCE, id: `space:${rawSpaceId}` }]
+        : [];
+    },
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateQuery(args)) return err("validation_error", firstError(validateQuery));
     const a = args as {
@@ -135,14 +182,30 @@ const queryKnowledge: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const citeSources: KnowledgeTool = {
+const citeSources = defineApiTool<KnowledgeToolContext>({
   name: CITE_SOURCES_TOOL,
   description:
     "Declare the knowledge pages you used to answer. Pass the pageId of each page (the `pageId` field from a query_knowledge result) with the inline [n] ref number you wrote in your answer. The UI shows these as clickable source citations. Call once, after writing the answer; only include pages you actually used.",
+  tier: "platform",
   mutating: false,
   inputSchema: CITE_SOURCES_SCHEMA,
+  authorization: {
+    action: "knowledge.citation.emit",
+    resources: ["platform.knowledge"],
+    targets: (args) => {
+      const citations = objectArg(args).citations;
+      const pageIds = (Array.isArray(citations) ? citations : [])
+        .map((citation) => objectArg(citation).pageId)
+        .filter((pageId): pageId is string => typeof pageId === "string" && pageId.length > 0);
+      return [...new Set(pageIds)].map((pageId) => ({
+        type: KNOWLEDGE_RESOURCE,
+        id: `page:${pageId}`,
+      }));
+    },
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateCite(args)) return err("validation_error", firstError(validateCite));
     const a = args as { citations: { ref: number; pageId: string }[] };
@@ -173,14 +236,20 @@ const citeSources: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const createKnowledgePage: KnowledgeTool = {
+const createKnowledgePage = defineApiTool<KnowledgeToolContext>({
   name: "create_knowledge_page",
   description:
     "Author a new knowledge page (markdown). Use for durable, page-sized content that exceeds Memory. Returns the new page id.",
+  tier: "platform",
   mutating: true,
   inputSchema: CREATE_PAGE_SCHEMA,
+  authorization: {
+    action: "knowledge.page.create",
+    resources: ["platform.knowledge"],
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateCreatePage(args)) return err("validation_error", firstError(validateCreatePage));
     const a = args as { title: string; content: string; domain?: string; tags?: string[] };
@@ -191,7 +260,7 @@ const createKnowledgePage: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
 // ── OKF spaces ───────────────────────────────────────────────────────────────
 
@@ -229,12 +298,18 @@ const LIST_SPACES_SCHEMA = {
   properties: {},
 } as const;
 
-const createSpace: KnowledgeTool = {
+const createSpace = defineApiTool<KnowledgeToolContext>({
   name: "create_space",
   description:
     "Create an Open Knowledge Format space — a navigable, cross-linked tree of pages (a wiki). Returns the new space id to author pages into with write_page.",
+  tier: "platform",
   mutating: true,
   inputSchema: CREATE_SPACE_SCHEMA,
+  authorization: {
+    action: "knowledge.space.create",
+    resources: ["platform.knowledge"],
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateCreateSpace(args)) return err("validation_error", firstError(validateCreateSpace));
     const a = args as { name: string; description?: string };
@@ -251,13 +326,21 @@ const createSpace: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const listSpaces: KnowledgeTool = {
+const listSpaces = defineApiTool<KnowledgeToolContext>({
   name: "list_spaces",
   description: "List the available knowledge spaces (id, name, description).",
+  tier: "platform",
   mutating: false,
   inputSchema: LIST_SPACES_SCHEMA,
+  authorization: {
+    action: "knowledge.space.list",
+    resources: ["platform.knowledge"],
+    // Listing spaces is a coarse catalog read; no individual space is touched yet.
+    targets: () => [],
+    dataClasses: ["source_content"],
+  },
   handler: async (_args, ctx) => {
     try {
       const page = await ctx.service.listSpaces({ limit: 50 });
@@ -268,14 +351,21 @@ const listSpaces: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const writePage: KnowledgeTool = {
+const writePage = defineApiTool<KnowledgeToolContext>({
   name: "write_page",
   description:
     "Author or update one Open Knowledge Format page in a space. `content` is the full page markdown: optional YAML frontmatter (title, description, resource, tags) then a markdown body. Cross-link other pages with markdown links like [Customers](/tables/customers.md). `path` is the page's location, e.g. 'tables/orders'. A path whose last segment is 'index' or 'log' writes that directory's listing/changelog instead of a page.",
+  tier: "platform",
   mutating: true,
   inputSchema: WRITE_PAGE_SCHEMA,
+  authorization: {
+    action: "knowledge.page.write",
+    resources: ["platform.knowledge"],
+    targets: pagePathTargets,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateWritePage(args)) {
       return err("validation_error", firstError(validateWritePage));
@@ -298,14 +388,21 @@ const writePage: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const navigateSpace: KnowledgeTool = {
+const navigateSpace = defineApiTool<KnowledgeToolContext>({
   name: "navigate_space",
   description:
     "Walk a knowledge space one directory at a time (progressive disclosure). Returns the index listing for `dirPath` ('' = space root): its subdirectories and pages with short descriptions. Drill into a subdirectory by passing its path, then read a page's content with query_knowledge.",
+  tier: "platform",
   mutating: false,
   inputSchema: NAVIGATE_SCHEMA,
+  authorization: {
+    action: "knowledge.space.navigate",
+    resources: ["platform.knowledge"],
+    targets: knowledgeSpaceTarget,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateNavigate(args)) return err("validation_error", firstError(validateNavigate));
     const a = args as { spaceId: string; dirPath?: string };
@@ -317,7 +414,7 @@ const navigateSpace: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
 // ── Precision retrieval (exact lookups, not search) ─────────────────────────────
 
@@ -348,12 +445,19 @@ const GET_SPACE_SCHEMA = {
 } as const;
 const validateGetSpace = ajv.compile(GET_SPACE_SCHEMA);
 
-const getPageByPath: KnowledgeTool = {
+const getPageByPath = defineApiTool<KnowledgeToolContext>({
   name: "get_page_by_path",
   description:
     "Fetch one exact knowledge page by its space id and path (e.g. 'policies/refunds') — a direct lookup with no search/ranking. Use when you know the page's location. Returns its full markdown content.",
+  tier: "platform",
   mutating: false,
   inputSchema: GET_PAGE_BY_PATH_SCHEMA,
+  authorization: {
+    action: "knowledge.page.read",
+    resources: ["platform.knowledge"],
+    targets: pagePathTargets,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateGetPageByPath(args))
       return err("validation_error", firstError(validateGetPageByPath));
@@ -368,14 +472,21 @@ const getPageByPath: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const getPage: KnowledgeTool = {
+const getPage = defineApiTool<KnowledgeToolContext>({
   name: "get_page",
   description:
     "Fetch a knowledge page's full content by its pageId. Use after query_knowledge (which returns only a matching chunk) to read the whole page. Returns the full markdown plus a wiki url when the page lives in a space.",
+  tier: "platform",
   mutating: false,
   inputSchema: GET_PAGE_SCHEMA,
+  authorization: {
+    action: "knowledge.page.read",
+    resources: ["platform.knowledge"],
+    targets: knowledgePageTarget,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateGetPage(args)) return err("validation_error", firstError(validateGetPage));
     const a = args as { pageId: string };
@@ -396,14 +507,21 @@ const getPage: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const getBacklinks: KnowledgeTool = {
+const getBacklinks = defineApiTool<KnowledgeToolContext>({
   name: "get_backlinks",
   description:
     "List the pages that link to a page (its inbound 'linked from' references, same- or cross-space). Use to discover related pages. Returns null/not_found for a non-OKF page.",
+  tier: "platform",
   mutating: false,
   inputSchema: GET_PAGE_SCHEMA,
+  authorization: {
+    action: "knowledge.page.backlinks.read",
+    resources: ["platform.knowledge"],
+    targets: knowledgePageTarget,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateGetPage(args)) return err("validation_error", firstError(validateGetPage));
     const a = args as { pageId: string };
@@ -415,14 +533,21 @@ const getBacklinks: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const getSpaceGraph: KnowledgeTool = {
+const getSpaceGraph = defineApiTool<KnowledgeToolContext>({
   name: "get_space_graph",
   description:
     "Get a space's cross-link graph — its page nodes and the links between them — to understand how a space's pages relate. Returns not_found when the space does not exist.",
+  tier: "platform",
   mutating: false,
   inputSchema: GET_SPACE_SCHEMA,
+  authorization: {
+    action: "knowledge.space.graph.read",
+    resources: ["platform.knowledge"],
+    targets: knowledgeSpaceTarget,
+    dataClasses: ["source_content"],
+  },
   handler: async (args, ctx) => {
     if (!validateGetSpace(args)) return err("validation_error", firstError(validateGetSpace));
     const a = args as { spaceId: string };
@@ -434,9 +559,9 @@ const getSpaceGraph: KnowledgeTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-export const KNOWLEDGE_TOOLS: KnowledgeTool[] = [
+export const KNOWLEDGE_TOOLS: ApiToolDefinition<KnowledgeToolContext>[] = [
   queryKnowledge,
   citeSources,
   createKnowledgePage,

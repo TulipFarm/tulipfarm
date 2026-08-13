@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@tulipfarm/authz": "workspace:*",
     "@tulipfarm/constants": "workspace:*",
     "@tulipfarm/schema": "workspace:*",
     "@tulipfarm/storage": "workspace:*",

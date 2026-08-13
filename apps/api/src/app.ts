@@ -27,6 +27,7 @@ import type { ToolApprovalService } from "./approvals/tool-approvals";
 import type { AuditReadService } from "./audit/read-service";
 import { registerAuditRoutes } from "./audit/routes";
 import type { AuditService } from "./audit/service";
+import { makeSoulAuditWriter } from "./audit/soul-write";
 import type { TokenRepo } from "./auth/api-tokens";
 import { csrfHook, makeCsrfHook } from "./auth/csrf";
 import type { UserInviteRepo } from "./auth/invites";
@@ -34,6 +35,9 @@ import { makeRequireAuth } from "./auth/middleware";
 import { registerAuthRoutes } from "./auth/routes";
 import type { SessionStore } from "./auth/session-store";
 import type { PasswordWriteRepo, ProfileWriteRepo, UserAdminRepo, UserRepo } from "./auth/users";
+import { buildCapabilityCatalog } from "./authz/capabilities";
+import { registerAuthzRoutes } from "./authz/routes";
+import type { AuthzAdminService } from "./authz/service";
 import type { ToolRegistry } from "./broker/tool-adapter";
 import { registerConversationRoutes } from "./chat/conversation-routes";
 import type { ConversationRepo } from "./chat/conversations";
@@ -54,6 +58,7 @@ import {
   registerGitHubInstallRoutes,
 } from "./integrations/github-install-routes";
 import { registerIntegrationMarketplaceRoutes } from "./integrations/marketplace-routes";
+import type { PrincipalProviderTokenRepo } from "./integrations/principal-tokens";
 import { registerIntegrationRoutes } from "./integrations/routes";
 import {
   ensureDefaultSlackRoute,
@@ -83,6 +88,7 @@ import type { ObservabilityService } from "./observability/service";
 import { registerOnboardingRoutes } from "./onboarding/routes";
 import { registerPreferenceRoutes } from "./preferences/routes";
 import type { RateLimiter } from "./rate-limit";
+import type { RecordAuthorizer } from "./resources/authorize";
 import type { CounterStore, ResourceRepoFactory } from "./resources/repo";
 import { registerResourceRoutes } from "./resources/routes";
 import type { CanonicalRoutineAuthoringService } from "./routines/authoring";
@@ -92,6 +98,7 @@ import { registerRoutineCatalogRoutes } from "./routines/catalog-routes";
 import { type RunEventRouteDeps, registerRunEventRoutes } from "./runs/events";
 import { type RunReplayDeps, registerRunReplayRoutes } from "./runs/replay";
 import { registerSecretsRoutes } from "./secrets/routes";
+import type { SetupAdminCreator } from "./setup/first-admin";
 import { registerSetupRoutes, registerSetupStatusRoute } from "./setup/routes";
 import { isHeadlessBoot } from "./setup/service";
 import { registerAgentRoutes } from "./soul/agents/routes";
@@ -99,6 +106,7 @@ import type { BundledIntegration } from "./soul/integrations/bundled";
 import { makeLlmCascadeOnSecretDelete } from "./soul/llm-config/cascade";
 import { registerLlmConfigRoutes } from "./soul/llm-config/routes";
 import { registerResourceTypeRoutes } from "./soul/resource-types/routes";
+import { registerAccessLevelRoutes } from "./soul/roles/routes";
 import { registerSoulRoutes } from "./soul/routes";
 import type { BundledSkill } from "./soul/skills/bundled";
 import { registerSkillRoutes } from "./soul/skills/routes";
@@ -120,6 +128,7 @@ export interface AppOptions {
   identity?: Omit<IdentityRouteDeps, "sessionStore" | "userRepo" | "ttlSeconds">;
   rateLimiter?: RateLimiter;
   secretsService?: SecretsService;
+  setupAdminCreator?: SetupAdminCreator;
   gitSync?: GitSyncService;
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
@@ -146,11 +155,29 @@ export interface AppOptions {
   integrationAuth?: {
     repo: IntegrationAuthRequestRepo;
     fetchImpl?: typeof globalThis.fetch;
+    /**
+     * Where a *personal* provider credential is sealed (D7). Absent means this deployment cannot
+     * hold them and a user-scoped connect is refused — which must stay in step with
+     * `CredentialResolver`, or a Tool will deny a call for want of a credential and point the
+     * person at a connect flow that cannot issue one.
+     */
+    tokens: PrincipalProviderTokenRepo | undefined;
   };
   hookExecutor?: HookExecutor;
   resourceRepoFactory?: ResourceRepoFactory;
   counterStore?: CounterStore;
+  /**
+   * Decides record authority for the REST record routes. Absent leaves them authenticated-only,
+   * which is what every test and the pre-authorization boot path want; production wires it.
+   */
+  recordAuthorizer?: RecordAuthorizer;
   reconcileResources?: () => Promise<void>;
+  /**
+   * Projects authored Soul Roles into durable rows. Wired alongside `gitSync` + `toolRegistry` to
+   * enable the access-level authoring routes; absent leaves them unregistered, so a deployment
+   * without a Soul repository cannot be asked to write one.
+   */
+  reconcileSoulRoles?: () => Promise<void>;
   domainEventEmitter?: EventEmitter;
   llmService?: LlmService;
   conversationRepo?: ConversationRepo;
@@ -208,6 +235,8 @@ export interface AppOptions {
   systemRoutes?: SystemRoutesDeps;
   /** Authorized Phase 9 browser read models and server-side command authorities. */
   operationalApi?: OperationalApiDeps;
+  /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
+  authzAdmin?: AuthzAdminService;
   /** Persist-first authority shared by Chat and every Trigger ingress. */
   invocations?: DurableInvocationGateway;
   /**
@@ -484,6 +513,7 @@ export async function buildApp(opts: AppOptions = {}) {
         userRepo: opts.userRepo,
         sessionStore: opts.sessionStore,
         secretsService: opts.secretsService,
+        ...(opts.setupAdminCreator ? { setupAdminCreator: opts.setupAdminCreator } : {}),
         gitSync: opts.gitSync,
         soulPath,
         requireAuth,
@@ -527,6 +557,9 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.auditReadService) {
       registerAuditRoutes(app, opts.auditReadService, requireAuth);
     }
+    if (opts.authzAdmin) {
+      registerAuthzRoutes(app, opts.authzAdmin, requireAuth, opts.rateLimiter);
+    }
     if (opts.memoryService) {
       registerMemoryRoutes(
         app,
@@ -559,6 +592,24 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.auditService
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
+        // Access-level authoring needs all three: Soul to write the Role into, the Tool registry to
+        // build the capability catalog from, and the reconciler to project it. Missing any one
+        // would leave a surface that can create a level nobody can be granted.
+        if (opts.toolRegistry && opts.reconcileSoulRoles) {
+          const toolRegistry = opts.toolRegistry;
+          const reconcileRoles = opts.reconcileSoulRoles;
+          registerAccessLevelRoutes(app, {
+            gitSync: opts.gitSync,
+            requireAuth,
+            auditWrite: makeSoulAuditWriter(opts.auditService),
+            // Rebuilt per request, not captured: declarative integration Tools register and
+            // unregister when an integration connects or disconnects, so a catalog cached at boot
+            // would offer capabilities that no longer exist and hide ones that now do.
+            catalog: () => buildCapabilityCatalog(toolRegistry.getAll()),
+            reconcile: reconcileRoles,
+            ...(opts.rateLimiter === undefined ? {} : { rateLimiter: opts.rateLimiter }),
+          });
+        }
         if (opts.secretsService) {
           const soulLoader = opts.soulLoader;
           const slackBindDeps: SlackBindDeps | undefined = opts.slackBind
@@ -639,6 +690,7 @@ export async function buildApp(opts: AppOptions = {}) {
                 endpoints: resolveAuthEndpoints(),
                 fetchImpl: opts.integrationAuth.fetchImpl,
                 onConnected,
+                tokens: opts.integrationAuth.tokens,
               },
               requireAuth
             );
@@ -696,7 +748,8 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.soulLoader,
         requireAuth,
         opts.hookExecutor,
-        opts.domainEventEmitter
+        opts.domainEventEmitter,
+        opts.recordAuthorizer
       );
     }
     if (opts.llmService && opts.conversationRepo && opts.messageRepo) {

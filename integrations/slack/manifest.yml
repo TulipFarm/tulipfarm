@@ -97,6 +97,10 @@ auth:
   # 3. One click replaces the two values that used to be pasted by hand: installing the app yields
   #    the bot token, and the same response carries the workspace id that channel routing needs.
   #    Slack's OAuth v2 does not accept PKCE, so it is disabled rather than silently rejected.
+  #    This step deliberately omits `personal: true`. It is an `authorization_code` exchange, but
+  #    what comes back is a workspace *bot* token with bot scopes — one shared credential for the
+  #    whole business, not the installer's own access. Marking it personal would seal that shared
+  #    token under whoever clicked Install and credit the bot's entire reach to them.
   - kind: oauth2
     title: Install to your workspace
     description: Installing the app yields the bot token and the workspace id that channel routing

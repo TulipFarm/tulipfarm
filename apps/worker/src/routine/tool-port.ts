@@ -19,6 +19,7 @@ import {
   ToolDispatchError,
   type ToolIntent,
 } from "@tulipfarm/tool-broker";
+import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 
 /**
  * The Worker's Tool authority for Routine Runs.
@@ -84,8 +85,36 @@ function definitionsOf<T>(bundle: RuntimeBundle, kind: string): T[] {
     .map((definition) => definition.document as unknown as T);
 }
 
+/**
+ * Scopes a bare GitHub installation-token `credentialRef` to the installation this call names.
+ *
+ * `CredentialDispatcher` forwards only the ref string, so a Tool State authored against the bare
+ * ref is unresolvable the moment a business holds more than one App installation. The arguments
+ * already name the repository (or, for repository creation, the account), and that is exactly the
+ * selector `selectGitHubInstallation` matches on — so narrowing here is the only place the two can
+ * meet. A ref that is already scoped is left alone: the author's explicit choice outranks a
+ * derivation, and re-deriving it could only disagree.
+ */
+function scopedCredentialRef(plan: ToolDispatchPlan): string | undefined {
+  const ref = plan.credentialRef;
+  if (ref !== GITHUB_INSTALLATION_SECRET_REF) return ref;
+  const args = plan.arguments;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return ref;
+  const source = args as Record<string, unknown>;
+  const repository = source.repository;
+  if (typeof repository === "string" && repository.length > 0) {
+    return githubInstallationSecretRef({ kind: "repository", repository });
+  }
+  const owner = source.owner;
+  if (typeof owner === "string" && owner.length > 0) {
+    return githubInstallationSecretRef({ kind: "account", owner });
+  }
+  return ref;
+}
+
 function intentOf(request: RoutineToolRequest): ToolIntent {
   const { plan } = request;
+  const credentialRef = scopedCredentialRef(plan);
   return {
     // Derived from the Run and the State occurrence, so a replay proposes the same intent.
     intentId: plan.effectId,
@@ -98,7 +127,7 @@ function intentOf(request: RoutineToolRequest): ToolIntent {
     targetRefs: [],
     arguments: plan.arguments,
     ...(plan.destination === undefined ? {} : { destination: plan.destination }),
-    ...(plan.credentialRef === undefined ? {} : { credentialRef: plan.credentialRef }),
+    ...(credentialRef === undefined ? {} : { credentialRef }),
     idempotencyKey: plan.idempotencyKey,
   };
 }

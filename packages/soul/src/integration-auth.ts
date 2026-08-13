@@ -24,6 +24,31 @@ export function oauth2ExpiresAtEnv(step: AuthOAuth2Step): string {
   return step.expires_at_env ?? `${step.token_env}_EXPIRES_AT`;
 }
 
+/**
+ * Whether this step can mint a credential representing **the authorizing person** rather than the
+ * installation.
+ *
+ * The discriminator is the explicit `personal: true`, **not** the grant type. OAuth2 says how a
+ * token was obtained and nothing about whose access it carries: Slack's "Install to your
+ * workspace" step is `authorization_code` and returns a workspace *bot* token with bot scopes.
+ * Inferring "personal" from the grant would seal that shared token under one person's name — the
+ * whole bot's reach attributed to them in the audit trail, and every Tool acting "as the human" in
+ * fact acting as the bot. Undeclared means not personal, so a manifest that never considered the
+ * question cannot answer it by accident.
+ *
+ * Lives here, beside `resolveAuthSteps`, because every consumer must read the identical test: the
+ * connect route that refuses to issue a user-scoped state, and the Tool compiler that decides a
+ * Tool may demand a personal credential. A Tool that refuses a call for want of a credential the
+ * connect route would not issue is a dead end for whoever reads the refusal.
+ */
+export function isPersonalCredentialStep(step: AuthStep): boolean {
+  return (
+    step.kind === "oauth2" &&
+    (step.grant ?? "authorization_code") === "authorization_code" &&
+    step.personal === true
+  );
+}
+
 /** The ordered connect flow for a manifest, whether it declares `auth` or the legacy fields. */
 export function resolveAuthSteps(manifest: IntegrationManifest): AuthStep[] {
   if (manifest.auth) return manifest.auth;

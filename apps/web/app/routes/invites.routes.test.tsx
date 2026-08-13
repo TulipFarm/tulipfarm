@@ -4,27 +4,18 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import * as apiLib from "~/lib/api";
 import { ApiError } from "~/lib/api";
-import * as usersLib from "~/lib/users";
-import PeopleRoute from "./_app.business.people";
 import AuthSettings from "./_app.settings.auth";
 import AcceptInvite from "./accept-invite";
 
 /*
- * Invite provisioning and password change, end to end at the UI seam: the admin page issues links
- * it shows exactly once, the acceptance page redeems a token it reads from the URL *fragment*
- * (never the query string), and the Settings form requires the current password.
+ * Invite redemption and password change, end to end at the UI seam: the acceptance page redeems a
+ * token it reads from the URL *fragment* (never the query string), and the Settings form requires
+ * the current password.
+ *
+ * Issuing a link is the admin half of the same story and lives with the page that does it, in
+ * `business-access-people.test.tsx` — the People page merged into Access.
  */
 
-vi.mock("~/lib/users", async () => {
-  const actual = await vi.importActual<typeof usersLib>("~/lib/users");
-  return {
-    ...actual,
-    listUsers: vi.fn(),
-    createUser: vi.fn(),
-    reissueInvite: vi.fn(),
-    setUserStatus: vi.fn(),
-  };
-});
 vi.mock("~/lib/api", async () => {
   const actual = await vi.importActual<typeof apiLib>("~/lib/api");
   return {
@@ -34,16 +25,12 @@ vi.mock("~/lib/api", async () => {
     changePassword: vi.fn(),
   };
 });
-vi.mock("~/lib/clipboard", () => ({ copyText: vi.fn().mockResolvedValue(true) }));
 // The Auth page also lists API tokens; stub that fetch so it cannot colour the password assertions.
 vi.mock("~/lib/settings", async () => {
   const actual = await vi.importActual<typeof import("~/lib/settings")>("~/lib/settings");
   return { ...actual, listApiTokens: vi.fn().mockResolvedValue([]) };
 });
 
-const listUsers = vi.mocked(usersLib.listUsers);
-const createUser = vi.mocked(usersLib.createUser);
-const reissueInvite = vi.mocked(usersLib.reissueInvite);
 const previewInvite = vi.mocked(apiLib.previewInvite);
 const acceptInvite = vi.mocked(apiLib.acceptInvite);
 const changePassword = vi.mocked(apiLib.changePassword);
@@ -53,78 +40,6 @@ const EXPIRES = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
 afterEach(() => {
   vi.clearAllMocks();
   window.location.hash = "";
-});
-
-function user(overrides: Partial<usersLib.UserSummary> = {}): usersLib.UserSummary {
-  return {
-    id: "u1",
-    email: "member@example.com",
-    name: null,
-    role: "member",
-    status: "active",
-    ...overrides,
-  };
-}
-
-function renderAdmin() {
-  const Stub = createRemixStub([
-    {
-      path: "/business/people",
-      Component: PeopleRoute,
-      loader: async () => ({ users: await listUsers() }),
-    },
-  ]);
-  return render(<Stub initialEntries={["/business/people"]} />);
-}
-
-test("inviting a user shows a copyable link carrying the token in the fragment", async () => {
-  listUsers.mockResolvedValue([]);
-  createUser.mockResolvedValue({
-    user: user({ email: "new@example.com", status: "invited" }),
-    invite: { token: "tok-123", expiresAt: EXPIRES },
-  });
-
-  renderAdmin();
-  await userEvent.type(await screen.findByLabelText("Email"), "new@example.com");
-  await userEvent.click(screen.getByRole("button", { name: "Send invite" }));
-
-  const link = await screen.findByText(/\/accept-invite#token=tok-123$/);
-  expect(link).toBeTruthy();
-  // The token must never sit in the query string, where nginx would log it.
-  expect(link.textContent).not.toContain("?token=");
-});
-
-test("an invited user offers a new link and an active one offers a reset link", async () => {
-  listUsers.mockResolvedValue([
-    user({ id: "u1", email: "pending@example.com", status: "invited" }),
-    user({ id: "u2", email: "active@example.com", status: "active" }),
-  ]);
-
-  renderAdmin();
-  expect(await screen.findByText("Invite pending")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "New invite link" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Reset password link" })).toBeTruthy();
-});
-
-test("re-issuing a link for an active user surfaces it for sharing", async () => {
-  listUsers.mockResolvedValue([user({ status: "active" })]);
-  reissueInvite.mockResolvedValue({ token: "tok-fresh", expiresAt: EXPIRES });
-
-  renderAdmin();
-  await userEvent.click(await screen.findByRole("button", { name: "Reset password link" }));
-
-  await waitFor(() => expect(reissueInvite).toHaveBeenCalledWith("u1"));
-  expect(await screen.findByText(/#token=tok-fresh$/)).toBeTruthy();
-});
-
-test("a disabled user offers no invite link", async () => {
-  listUsers.mockResolvedValue([user({ status: "disabled" })]);
-
-  renderAdmin();
-  expect(await screen.findByText("Disabled")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "New invite link" })).toBeNull();
-  expect(screen.queryByRole("button", { name: "Reset password link" })).toBeNull();
-  expect(screen.getByRole("button", { name: "Enable" })).toBeTruthy();
 });
 
 function renderAccept() {

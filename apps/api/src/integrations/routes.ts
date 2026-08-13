@@ -25,6 +25,7 @@ import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
 import { readIntegrationLock, writeIntegrationLock } from "./install";
+import { refuseNonOperator } from "./operator";
 
 /*
  * Generic connect/disconnect backend for Soul-declared integrations (manifest.yml + optional
@@ -337,11 +338,14 @@ export function registerIntegrationRoutes(
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      // Deployment-wide credential write: operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
@@ -417,11 +421,14 @@ export function registerIntegrationRoutes(
             properties: { status: { type: "string" } },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      // Deployment-wide credential write: operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
         return reply.code(404).send({ error: `integration not connected: ${name}` });
@@ -455,10 +462,17 @@ export function registerIntegrationRoutes(
         tags: ["integrations"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        response: { 204: { type: "null" }, 401: ErrorSchema, 404: ErrorSchema },
+        response: {
+          204: { type: "null" },
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
       },
     },
     async (req, reply) => {
+      // Deployment-wide credential write: operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });

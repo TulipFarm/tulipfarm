@@ -8,6 +8,9 @@
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "@tulipfarm/schema": "workspace:*"
+  },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.3",
     "@tulipfarm/tsconfig": "workspace:*",

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { KnowledgeService } from "./service";
-import { KNOWLEDGE_TOOLS, type KnowledgeTool, type KnowledgeToolContext } from "./tools";
+import { KNOWLEDGE_TOOLS, type KnowledgeToolContext } from "./tools";
 import type { QueryKnowledgeHit } from "./types";
+
+type KnowledgeTool = (typeof KNOWLEDGE_TOOLS)[number];
 
 function getTool(name: string): KnowledgeTool {
   const t = KNOWLEDGE_TOOLS.find((x) => x.name === name);
@@ -11,6 +13,15 @@ function getTool(name: string): KnowledgeTool {
 
 function ctx(service: Partial<KnowledgeService>): KnowledgeToolContext {
   return { userId: "u1", service: service as KnowledgeService };
+}
+
+function expectNoMalformedTargets(toolName: string, args: unknown): void {
+  const tool = getTool(toolName);
+  expect(() => tool.targetsFor(args)).not.toThrow();
+  for (const ref of tool.targetsFor(args)) {
+    expect(ref.type).not.toMatch(/undefined|null/);
+    expect(ref.id).not.toMatch(/undefined|null/);
+  }
 }
 
 describe("knowledge tools", () => {
@@ -28,6 +39,67 @@ describe("knowledge tools", () => {
       "query_knowledge",
       "write_page",
     ]);
+  });
+
+  it("target derivations tolerate empty and unexpected raw arguments", () => {
+    for (const name of [
+      "query_knowledge",
+      "cite_sources",
+      "write_page",
+      "navigate_space",
+      "get_page_by_path",
+      "get_page",
+      "get_backlinks",
+      "get_space_graph",
+      "list_spaces",
+    ]) {
+      expectNoMalformedTargets(name, {});
+      expectNoMalformedTargets(name, { unexpected: true });
+      expectNoMalformedTargets(name, null);
+    }
+  });
+
+  it("write_page and get_page_by_path derive only determined page path targets", () => {
+    for (const name of ["write_page", "get_page_by_path"]) {
+      const tool = getTool(name);
+      expect(tool.targetsFor({ spaceId: "s1" })).toEqual([
+        { type: "platform.knowledge", id: "space:s1" },
+      ]);
+      expect(tool.targetsFor({ path: "handbook" })).toEqual([]);
+      expect(tool.targetsFor({ spaceId: { id: "s1" }, path: "handbook" })).toEqual([]);
+      expect(tool.targetsFor({ spaceId: "s1", path: "handbook" })).toEqual([
+        { type: "platform.knowledge", id: "space:s1" },
+        { type: "platform.knowledge", id: "path:s1:handbook" },
+      ]);
+    }
+  });
+
+  it("cite_sources target derivation ignores non-array citations and non-string pageIds", () => {
+    const tool = getTool("cite_sources");
+    expect(tool.targetsFor({ citations: "x" })).toEqual([]);
+    expect(
+      tool.targetsFor({ citations: [{ pageId: { id: "p1" } }, null, { pageId: "p1" }] })
+    ).toEqual([{ type: "platform.knowledge", id: "page:p1" }]);
+  });
+
+  it("query_knowledge uses a space target only for valid UUID filters", () => {
+    const tool = getTool("query_knowledge");
+    const uuid = "cf653c1b-e20a-4edd-81ec-dc92c7ae193f";
+
+    expect(tool.targetsFor({ query: "sla", spaceId: uuid })).toEqual([
+      { type: "platform.knowledge", id: `space:${uuid}` },
+    ]);
+    expect(tool.targetsFor({ query: "sla" })).toEqual([]);
+    expect(tool.targetsFor({ query: "sla", spaceId: "global" })).toEqual([]);
+    expect(tool.targetsFor({ query: "sla", spaceId: 7 })).toEqual([]);
+  });
+
+  it("list_spaces stays at the coarse knowledge catalog scope", () => {
+    const tool = getTool("list_spaces");
+
+    expect(tool.targetsFor({})).toEqual([]);
+    expect(tool.targetsFor(null)).toEqual([]);
+    expect(tool.authorization.resources).toEqual(["platform.knowledge"]);
   });
 
   it("query_knowledge forwards a valid UUID spaceId filter to the service", async () => {

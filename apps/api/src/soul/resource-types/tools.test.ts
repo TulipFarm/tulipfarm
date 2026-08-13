@@ -1,17 +1,18 @@
 import type { GitSyncService, SoulLoader, SoulResource } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RESOURCE_TYPE_TOOLS, type ResourceTypeTool, type ResourceTypeToolContext } from "./tools";
+import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "./tools";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
   writeFile: vi.fn().mockResolvedValue(undefined),
   readFile: vi.fn().mockResolvedValue(""),
+  rm: vi.fn().mockResolvedValue(undefined),
   unlink: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { existsSync } from "node:fs";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 
 const VALID_SCHEMA_YAML = `type: object
 properties:
@@ -47,27 +48,77 @@ function makeCtx(resources: SoulResource[] = []): ResourceTypeToolContext & {
   };
 }
 
-const createTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "create_resource_type"
-) as ResourceTypeTool;
-const listTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "list_resource_types"
-) as ResourceTypeTool;
-const schemaTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "resource_type_schema"
-) as ResourceTypeTool;
-const updateTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "resource_type_update"
-) as ResourceTypeTool;
-const createHooksTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "create_resource_hooks"
-) as ResourceTypeTool;
-const getHooksTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "resource_hooks_get"
-) as ResourceTypeTool;
-const deleteHooksTool = RESOURCE_TYPE_TOOLS.find(
-  (t) => t.name === "resource_hooks_delete"
-) as ResourceTypeTool;
+function getTool(name: string) {
+  const tool = RESOURCE_TYPE_TOOLS.find((candidate) => candidate.name === name);
+  if (!tool) throw new Error(`tool not found: ${name}`);
+  return tool;
+}
+
+const createTool = getTool("create_resource_type");
+const listTool = getTool("list_resource_types");
+const schemaTool = getTool("resource_type_schema");
+const updateTool = getTool("resource_type_update");
+const createHooksTool = getTool("create_resource_hooks");
+const getHooksTool = getTool("resource_hooks_get");
+const deleteHooksTool = getTool("resource_hooks_delete");
+
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
+describe("RESOURCE_TYPE_TOOLS targetsFor", () => {
+  it("derives the resource type slug from name arguments", () => {
+    const cases = [
+      { name: "create_resource_type", args: { name: "ticket", schema: VALID_SCHEMA_YAML } },
+      { name: "resource_type_schema", args: { name: "ticket" } },
+      { name: "resource_type_update", args: { name: "ticket", schema: VALID_SCHEMA_YAML } },
+      { name: "create_resource_hooks", args: { name: "ticket", source: VALID_HOOK } },
+      { name: "resource_hooks_get", args: { name: "ticket" } },
+      { name: "resource_hooks_delete", args: { name: "ticket" } },
+    ];
+
+    for (const entry of cases) {
+      expect(getTool(entry.name).targetsFor(entry.args), entry.name).toEqual([
+        { type: "soul.resource_type", id: "ticket" },
+      ]);
+    }
+  });
+
+  it("returns no target for listing all resource types", () => {
+    expect(listTool.targetsFor({})).toEqual([]);
+  });
+
+  it("keeps target derivation total for raw model output", () => {
+    const rawInputs: unknown[] = [{}, { unexpected: true }, { name: 7 }, null, []];
+    for (const tool of [
+      createTool,
+      schemaTool,
+      updateTool,
+      createHooksTool,
+      getHooksTool,
+      deleteHooksTool,
+    ]) {
+      for (const input of rawInputs) {
+        expect(() => tool.targetsFor(input), `${tool.name} target derivation`).not.toThrow();
+        expectNoNullishTargetText(tool.targetsFor(input));
+      }
+    }
+  });
+
+  it("separates executable hook management from plain schema edits", () => {
+    expect(schemaTool.authorization.action).toBe("soul.resource_type.read");
+    expect(getHooksTool.authorization.action).toBe("soul.resource_type.hooks.read");
+    expect(updateTool.authorization.action).toBe("soul.resource_type.update");
+    expect(createHooksTool.authorization.action).toBe("soul.resource_type.hooks.update");
+    expect(deleteHooksTool.authorization.action).toBe("soul.resource_type.hooks.delete");
+  });
+
+  it("keeps list_resource_types at the coarse resource-type catalog scope", () => {
+    expect(listTool.authorization.resources).toEqual(["soul.resource_type"]);
+    expect(listTool.targetsFor({})).toEqual([]);
+    expect(listTool.targetsFor(null)).toEqual([]);
+  });
+});
 
 // ── create_resource_type ──────────────────────────────────────────────────────
 
@@ -96,6 +147,22 @@ describe("create_resource_type", () => {
     expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add resource type ticket", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
+  });
+
+  // Domain is the HR/engineering wall and is admin-only. This Tool declares one fixed
+  // authorization action, so it cannot present itself as the admin-only one when `domain` is
+  // present — and until the chat gate enforces, accepting it would hand every member the exact
+  // bypass the REST route now closes.
+  it("refuses a domain argument outright", async () => {
+    const ctx = makeCtx();
+    const res = await createTool.handler(
+      { name: "ticket", schema: VALID_SCHEMA_YAML, domain: "engineering" },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(writeFile).not.toHaveBeenCalled();
+    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid name (uppercase)", async () => {
@@ -198,6 +265,23 @@ describe("list_resource_types", () => {
     });
     expect(types.find((t) => t.name === "customer")).toMatchObject({ hasHooks: true });
   });
+
+  it("returns resource type domains when present", async () => {
+    const ctx = makeCtx([
+      {
+        name: "ticket",
+        domain: "engineering",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      },
+    ]);
+    const res = await listTool.handler({}, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { types: [expect.objectContaining({ name: "ticket", domain: "engineering" })] },
+    });
+  });
 });
 
 // ── resource_type_schema ──────────────────────────────────────────────────────
@@ -215,6 +299,23 @@ describe("resource_type_schema", () => {
     expect(data.name).toBe("ticket");
     expect(data.schema).toContain("object");
     expect(data.hasHooks).toBe(false);
+  });
+
+  it("returns domain for existing type when present", async () => {
+    const ctx = makeCtx([
+      {
+        name: "ticket",
+        domain: "engineering",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      },
+    ]);
+    const res = await schemaTool.handler({ name: "ticket" }, ctx);
+    expect(res).toMatchObject({
+      success: true,
+      data: { name: "ticket", domain: "engineering" },
+    });
   });
 
   it("returns not_found for unknown type", async () => {
@@ -258,6 +359,41 @@ describe("resource_type_update", () => {
     );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a domain argument outright", async () => {
+    const ctx = makeCtx([
+      { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
+    ]);
+    const res = await updateTool.handler(
+      { name: "ticket", schema: UPDATED_YAML, domain: "engineering" },
+      ctx
+    );
+
+    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
+    expect(writeFile).not.toHaveBeenCalled();
+  });
+
+  // A member editing the schema of a domained Resource is ordinary; the wall must survive it.
+  it("carries an existing domain through a schema update untouched", async () => {
+    const ctx = makeCtx([
+      {
+        name: "salary-review",
+        domain: "hr",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      },
+    ]);
+    const res = await updateTool.handler({ name: "salary-review", schema: UPDATED_YAML }, ctx);
+
+    expect(res.success).toBe(true);
+    expect(writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("resource.yaml"),
+      expect.stringContaining("domain: hr"),
+      "utf8"
+    );
+    expect(rm).toHaveBeenCalledWith(expect.stringContaining("schema.yml"), { force: true });
   });
 
   it("returns not_found when type does not exist", async () => {

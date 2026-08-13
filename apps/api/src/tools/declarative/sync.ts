@@ -35,6 +35,7 @@ export interface DeclarativeToolSyncDeps {
 export class DeclarativeToolSync {
   /** Exactly what this syncer registered last time, so it only ever unregisters its own names. */
   private registered: ReadonlySet<string> = new Set();
+  private registeredBySlug: ReadonlyMap<string, ReadonlySet<string>> = new Map();
 
   constructor(private readonly deps: DeclarativeToolSyncDeps) {}
 
@@ -55,27 +56,46 @@ export class DeclarativeToolSync {
       },
       logger
     );
+    const syncProblems = [...problems];
 
-    const next = new Set(tools.map((tool) => tool.name));
+    const desired = new Set(tools.map((tool) => tool.name));
+    const registered = new Set<string>();
+    const registeredBySlug = new Map<string, Set<string>>();
     for (const name of this.registered) {
-      if (!next.has(name)) this.deps.registry.unregister(name);
+      if (!desired.has(name)) this.deps.registry.unregister(name);
     }
     for (const tool of tools) {
-      this.deps.registry.register(tool);
+      const slug = tool.definition?.provider;
+      if (this.registered.has(tool.name)) this.deps.registry.unregister(tool.name);
+      try {
+        this.deps.registry.register(tool);
+      } catch (error) {
+        const problem = `Integration "${slug ?? "unknown"}" did not register Tool "${tool.name}": ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        syncProblems.push(problem);
+        logger?.error(problem);
+        continue;
+      }
+      registered.add(tool.name);
+      if (slug === undefined) continue;
+      const names = registeredBySlug.get(slug) ?? new Set<string>();
+      names.add(tool.name);
+      registeredBySlug.set(slug, names);
     }
-    this.registered = next;
+    this.registered = registered;
+    this.registeredBySlug = registeredBySlug;
 
-    if (problems.length === 0 && tools.length > 0) {
+    if (syncProblems.length === 0 && registered.size > 0) {
       logger?.info(
-        `Declarative Tools: ${tools.length} published by ${connected.length} connected integration(s)`
+        `Declarative Tools: ${registered.size} published by ${connected.length} connected integration(s)`
       );
     }
-    return tools.length;
+    return registered.size;
   }
 
   /** How many Tools one integration currently publishes — the connect response's `toolCount`. */
   countFor(slug: string): number {
-    const prefix = `${slug}_`;
-    return [...this.registered].filter((name) => name.startsWith(prefix)).length;
+    return this.registeredBySlug.get(slug)?.size ?? 0;
   }
 }

@@ -143,6 +143,12 @@ const AuthOAuth2StepSchema = Type.Object(
     grant: Type.Optional(
       Type.Unsafe<(typeof OAUTH_GRANTS)[number]>({ type: "string", enum: [...OAUTH_GRANTS] })
     ),
+    /**
+     * Whether the returned token represents the authorizing person rather than the installation.
+     * Declared, never inferred from `grant`: Slack's install step is `authorization_code` and
+     * returns a workspace bot token.
+     */
+    personal: Type.Optional(Type.Boolean()),
     authorization_url: Type.Optional(Type.String({ minLength: 1 })),
     token_url: Type.String({ minLength: 1 }),
     refresh_url: Type.Optional(Type.String({ minLength: 1 })),

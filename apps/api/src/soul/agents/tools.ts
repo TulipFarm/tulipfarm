@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { ajv, TulipFarmValidationError, validateAgentFrontmatter } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import { stringify } from "yaml";
+import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
+import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
+const SOUL_AGENT_TARGET = "soul.agent";
 
 export interface AgentToolContext {
   gitSync: GitSyncService;
@@ -14,16 +17,20 @@ export interface AgentToolContext {
   requestContext?: RequestContext;
 }
 
-export interface AgentTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: AgentToolContext) => Promise<ToolCallResult>;
-}
-
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function agentTargets(args: unknown) {
+  const id = stringArg(args, "name");
+  // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
+  return id === undefined ? [] : [{ type: SOUL_AGENT_TARGET, id }];
 }
 
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
@@ -74,12 +81,20 @@ const CREATE_SCHEMA = {
 
 const validateCreate = ajv.compile(CREATE_SCHEMA);
 
-const agentCreate: AgentTool = {
+const agentCreate = defineApiTool<AgentToolContext>({
   name: "agent_create",
   description:
     "Create a new agent in the soul repo by writing its AGENT.md. Commits and pushes via withSync. No approval gate.",
+  tier: "system",
   mutating: true,
   inputSchema: CREATE_SCHEMA,
+  authorization: {
+    action: "soul.agent.create",
+    resources: ["soul.agent"],
+    targets: agentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
     const {
@@ -110,7 +125,7 @@ const agentCreate: AgentTool = {
     try {
       await ctx.gitSync.withSync(`soul: add agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -121,7 +136,7 @@ const agentCreate: AgentTool = {
 
     return ok({ name, frontmatter, body });
   },
-};
+});
 
 // ── agent_update ──────────────────────────────────────────────────────────────
 
@@ -144,12 +159,20 @@ const UPDATE_SCHEMA = {
 
 const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 
-const agentUpdate: AgentTool = {
+const agentUpdate = defineApiTool<AgentToolContext>({
   name: "agent_update",
   description:
     "Update an existing agent's body and/or frontmatter. At least one must be provided. Commits and pushes via withSync.",
+  tier: "system",
   mutating: true,
   inputSchema: UPDATE_SCHEMA,
+  authorization: {
+    action: "soul.agent.update",
+    resources: ["soul.agent"],
+    targets: agentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
     const { name, body, frontmatter } = args as {
@@ -181,7 +204,7 @@ const agentUpdate: AgentTool = {
     try {
       await ctx.gitSync.withSync(`soul: update agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -192,7 +215,7 @@ const agentUpdate: AgentTool = {
 
     return ok({ name, frontmatter: newFm, body: newBody });
   },
-};
+});
 
 // ── agent_get ─────────────────────────────────────────────────────────────────
 
@@ -207,11 +230,19 @@ const GET_SCHEMA = {
 
 const validateGet = ajv.compile(GET_SCHEMA);
 
-const agentGet: AgentTool = {
+const agentGet = defineApiTool<AgentToolContext>({
   name: "agent_get",
   description: "Get an agent's frontmatter and markdown body from the soul.",
+  tier: "system",
   mutating: false,
   inputSchema: GET_SCHEMA,
+  authorization: {
+    action: "soul.agent.read",
+    resources: ["soul.agent"],
+    targets: agentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet));
     const { name } = args as { name: string };
@@ -219,7 +250,7 @@ const agentGet: AgentTool = {
     if (!agent) return err("not_found", `agent not found: ${name}`);
     return ok({ name: agent.name, frontmatter: agent.frontmatter, body: agent.body });
   },
-};
+});
 
 // ── agent_list ────────────────────────────────────────────────────────────────
 
@@ -231,11 +262,18 @@ const LIST_SCHEMA = {
 
 const validateList = ajv.compile(LIST_SCHEMA);
 
-const agentList: AgentTool = {
+const agentList = defineApiTool<AgentToolContext>({
   name: "agent_list",
   description: "List all agents defined in the soul repo.",
+  tier: "system",
   mutating: false,
   inputSchema: LIST_SCHEMA,
+  authorization: {
+    action: "soul.agent.list",
+    resources: ["soul.agent"],
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList));
     const agents = Array.from(ctx.soulLoader.agents.values()).map(({ name, frontmatter }) => ({
@@ -244,7 +282,7 @@ const agentList: AgentTool = {
     }));
     return ok({ agents });
   },
-};
+});
 
 // ── agent_delete ──────────────────────────────────────────────────────────────
 
@@ -259,12 +297,20 @@ const DELETE_SCHEMA = {
 
 const validateDelete = ajv.compile(DELETE_SCHEMA);
 
-const agentDelete: AgentTool = {
+const agentDelete = defineApiTool<AgentToolContext>({
   name: "agent_delete",
   description:
     "Delete an agent from the soul repo. Removes its directory, commits and pushes via withSync.",
+  tier: "system",
   mutating: true,
   inputSchema: DELETE_SCHEMA,
+  authorization: {
+    action: "soul.agent.delete",
+    resources: ["soul.agent"],
+    targets: agentTargets,
+    dataClasses: ["soul_definition"],
+  },
+  requiresApproval: false,
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
     const { name } = args as { name: string };
@@ -281,7 +327,7 @@ const agentDelete: AgentTool = {
     try {
       await ctx.gitSync.withSync(`soul: remove agent ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -292,9 +338,9 @@ const agentDelete: AgentTool = {
 
     return ok({ name, deleted: true });
   },
-};
+});
 
-export const AGENT_TOOLS: AgentTool[] = [
+export const AGENT_TOOLS: ApiToolDefinition<AgentToolContext>[] = [
   agentCreate,
   agentUpdate,
   agentGet,

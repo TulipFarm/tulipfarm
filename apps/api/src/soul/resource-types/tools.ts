@@ -1,13 +1,21 @@
 import { existsSync } from "node:fs";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
+import { type ApiToolDefinition, defineApiTool } from "../../tools/define.js";
+import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types.js";
+import {
+  resourceDefinitionYaml,
+  resourceEnvelopeError,
+  resourceTypePayload,
+} from "./definition.js";
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
+const SOUL_RESOURCE_TYPE_TARGET = "soul.resource_type";
 
 export interface ResourceTypeToolContext {
   gitSync: GitSyncService;
@@ -16,16 +24,20 @@ export interface ResourceTypeToolContext {
   requestContext?: RequestContext;
 }
 
-export interface ResourceTypeTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: ResourceTypeToolContext) => Promise<ToolCallResult>;
-}
-
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function resourceTypeTargets(args: unknown) {
+  const id = stringArg(args, "name");
+  // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
+  return id === undefined ? [] : [{ type: SOUL_RESOURCE_TYPE_TARGET, id }];
 }
 
 function validateSchemaYaml(
@@ -67,6 +79,18 @@ function validateSchemaYaml(
   return { ok: true, parsed: parsed as Record<string, unknown>, yaml: schemaYaml };
 }
 
+/**
+ * Neither Tool takes a `domain`.
+ *
+ * A Resource's domain is the wall between an HR Resource and an engineering one, so setting or
+ * changing it is admin-only (`ADMIN_ONLY_SURFACES` → `soul.resource_type.set_domain`). The REST
+ * routes enforce that with a role check. This chat path **cannot**: a Tool declares one fixed
+ * `authorization.action`, so `create_resource_type` cannot present itself as the admin-only action
+ * only when `domain` is present — and until Stage 4 the chat dispatcher runs no authorization at
+ * all. Accepting the argument here would therefore hand every member the exact bypass the route
+ * gate closes. Domain stays an admin-surface operation; `update_resource_type` carries an existing
+ * domain through untouched. Restore a distinct admin-actioned Tool once the gate enforces.
+ */
 const CREATE_SCHEMA = {
   type: "object",
   required: ["name", "schema"],
@@ -121,12 +145,20 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
   return `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim();
 }
 
-const createResourceType: ResourceTypeTool = {
+const createResourceType = defineApiTool<ResourceTypeToolContext>({
   name: "create_resource_type",
   description:
     "Create a new resource type by writing its JSON Schema (as YAML) to the soul repo. Commits and pushes via withSync.",
   mutating: true,
+  tier: "system",
   inputSchema: CREATE_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.create",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
@@ -149,7 +181,7 @@ const createResourceType: ResourceTypeTool = {
     try {
       await ctx.gitSync.withSync(`soul: add resource type ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -161,31 +193,42 @@ const createResourceType: ResourceTypeTool = {
 
     return ok({ name, schema: schemaYaml, hasHooks: false });
   },
-};
+});
 
-const listResourceTypes: ResourceTypeTool = {
+const listResourceTypes = defineApiTool<ResourceTypeToolContext>({
   name: "list_resource_types",
   description: "List all resource types defined in the soul repo.",
   mutating: false,
+  tier: "system",
   inputSchema: LIST_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.list",
+    resources: ["soul.resource_type"],
+    // Listing resource-type names is a coarse catalog read; no single resource type is touched.
+    targets: () => [],
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList));
-    const types = Array.from(ctx.soulLoader.resources.values()).map(
-      ({ name, schema, hasHooks }) => ({
-        name,
-        schema: stringifyYaml(schema),
-        hasHooks,
-      })
-    );
+    const types = Array.from(ctx.soulLoader.resources.values()).map(resourceTypePayload);
     return ok({ types });
   },
-};
+});
 
-const resourceTypeSchema: ResourceTypeTool = {
+const resourceTypeSchema = defineApiTool<ResourceTypeToolContext>({
   name: "resource_type_schema",
   description: "Get the JSON Schema (as a YAML string) for a single resource type.",
   mutating: false,
+  tier: "system",
   inputSchema: SCHEMA_GET_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.read",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateSchemaGet(args)) return err("validation_error", firstError(validateSchemaGet));
     const { name } = args as { name: string };
@@ -193,15 +236,23 @@ const resourceTypeSchema: ResourceTypeTool = {
     const rt = ctx.soulLoader.resources.get(name);
     if (!rt) return err("not_found", `resource type not found: ${name}`);
 
-    return ok({ name: rt.name, schema: stringifyYaml(rt.schema), hasHooks: rt.hasHooks });
+    return ok(resourceTypePayload(rt));
   },
-};
+});
 
-const resourceTypeUpdate: ResourceTypeTool = {
+const resourceTypeUpdate = defineApiTool<ResourceTypeToolContext>({
   name: "resource_type_update",
   description: "Replace the schema of an existing resource type. Commits and pushes via withSync.",
   mutating: true,
+  tier: "system",
   inputSchema: UPDATE_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.update",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
     const { name, schema: schemaYaml } = args as { name: string; schema: string };
@@ -212,9 +263,23 @@ const resourceTypeUpdate: ResourceTypeTool = {
     const validated = validateSchemaYaml(schemaYaml);
     if (!validated.ok) return validated.result;
 
-    const schemaFile = join(ctx.gitSync.path, "resources", name, "schema.yml");
+    const typeDir = join(ctx.gitSync.path, "resources", name);
+    // The existing domain is carried through untouched: this Tool cannot set, change or clear it.
+    const existingDomain = ctx.soulLoader.resources.get(name)?.domain;
     try {
-      await writeFile(schemaFile, schemaYaml, "utf8");
+      if (existingDomain === undefined) {
+        await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+      } else {
+        const body = resourceDefinitionYaml({
+          name,
+          schema: validated.parsed,
+          domain: existingDomain,
+        });
+        const envelopeError = resourceEnvelopeError(body);
+        if (envelopeError !== undefined) return err("validation_error", envelopeError);
+        await writeFile(join(typeDir, "resource.yaml"), body, "utf8");
+        await rm(join(typeDir, "schema.yml"), { force: true });
+      }
     } catch (e) {
       return err("internal_error", reason(e));
     }
@@ -222,7 +287,7 @@ const resourceTypeUpdate: ResourceTypeTool = {
     try {
       await ctx.gitSync.withSync(`soul: update resource type ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -233,9 +298,14 @@ const resourceTypeUpdate: ResourceTypeTool = {
     }
 
     const rt = ctx.soulLoader.resources.get(name);
-    return ok({ name, schema: schemaYaml, hasHooks: rt?.hasHooks ?? false });
+    return ok({
+      name,
+      schema: schemaYaml,
+      hasHooks: rt?.hasHooks ?? false,
+      ...(rt?.domain === undefined ? {} : { domain: rt.domain }),
+    });
   },
-};
+});
 
 // ── Hook tools ────────────────────────────────────────────────────────────────
 
@@ -301,14 +371,22 @@ function validateHookSource(source: string): ToolCallResult | null {
   return null;
 }
 
-const createResourceHooks: ResourceTypeTool = {
+const createResourceHooks = defineApiTool<ResourceTypeToolContext>({
   name: "create_resource_hooks",
   description:
     "Create or replace a hooks.ts file for a resource type. The source must be a parenthesized " +
     "object literal with optional `before` and/or `after` async functions. Runs static analysis " +
     "to block banned patterns (require, import, eval, fetch, setTimeout, etc.). Commits via withSync.",
   mutating: true,
+  tier: "system",
   inputSchema: HOOKS_WRITE_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.hooks.update",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateHooksWrite(args)) return err("validation_error", firstError(validateHooksWrite));
     const { name, source } = args as { name: string; source: string };
@@ -333,7 +411,7 @@ const createResourceHooks: ResourceTypeTool = {
         ctx.requestContext?.actor
       );
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -344,13 +422,21 @@ const createResourceHooks: ResourceTypeTool = {
 
     return ok({ name, hasHooks: true });
   },
-};
+});
 
-const getResourceHooks: ResourceTypeTool = {
+const getResourceHooks = defineApiTool<ResourceTypeToolContext>({
   name: "resource_hooks_get",
   description: "Get the hooks.ts source for a resource type, or null if none exists.",
   mutating: false,
+  tier: "system",
   inputSchema: HOOKS_GET_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.hooks.read",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateHooksGet(args)) return err("validation_error", firstError(validateHooksGet));
     const { name } = args as { name: string };
@@ -360,14 +446,22 @@ const getResourceHooks: ResourceTypeTool = {
 
     return ok({ name, hasHooks: rt.hasHooks, source: rt.hookSource ?? null });
   },
-};
+});
 
-const deleteResourceHooks: ResourceTypeTool = {
+const deleteResourceHooks = defineApiTool<ResourceTypeToolContext>({
   name: "resource_hooks_delete",
   description:
     "Remove the hooks.ts file for a resource type. The resource type itself is not affected.",
   mutating: true,
+  tier: "system",
   inputSchema: HOOKS_DELETE_SCHEMA,
+  requiresApproval: false,
+  authorization: {
+    action: "soul.resource_type.hooks.delete",
+    resources: ["soul.resource_type"],
+    targets: resourceTypeTargets,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateHooksDelete(args)) return err("validation_error", firstError(validateHooksDelete));
     const { name } = args as { name: string };
@@ -393,7 +487,7 @@ const deleteResourceHooks: ResourceTypeTool = {
         ctx.requestContext?.actor
       );
     } catch (e) {
-      return err("internal_error", reason(e));
+      return soulCommitError(e, reason(e));
     }
 
     try {
@@ -404,9 +498,9 @@ const deleteResourceHooks: ResourceTypeTool = {
 
     return ok({ name, hasHooks: false });
   },
-};
+});
 
-export const RESOURCE_TYPE_TOOLS: ResourceTypeTool[] = [
+export const RESOURCE_TYPE_TOOLS: ApiToolDefinition<ResourceTypeToolContext>[] = [
   createResourceType,
   listResourceTypes,
   resourceTypeSchema,

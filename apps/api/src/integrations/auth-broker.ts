@@ -6,7 +6,12 @@ import type {
   IntegrationManifest,
   RequiredEnvVar,
 } from "@tulipfarm/soul";
-import { oauth2ExpiresAtEnv, oauth2RefreshTokenEnv, resolveAuthSteps } from "@tulipfarm/soul";
+import {
+  isPersonalCredentialStep,
+  oauth2ExpiresAtEnv,
+  oauth2RefreshTokenEnv,
+  resolveAuthSteps,
+} from "@tulipfarm/soul";
 import type { Queryable } from "../db";
 
 /**
@@ -74,6 +79,16 @@ export interface IntegrationAuthRequestDoc {
   createdAt: Date;
   expiresAt: Date;
   consumedAt: Date | null;
+  /**
+   * Whose connect this is. Null is the business-wide flow — credentials land in `connection.yaml`
+   * and every caller spends them. A principal means the resulting token is *that principal's own*
+   * (D7) and must be sealed into `principal_provider_tokens`, never into the shared connection.
+   *
+   * It is recorded at issue time rather than read from the session at callback time because the
+   * callback is deliberately unauthenticated (a cross-site top-level navigation carries no
+   * `SameSite=Strict` cookie), so the callback has no trustworthy notion of who is connecting.
+   */
+  principal: { readonly kind: string; readonly id: string } | null;
 }
 
 export interface IntegrationAuthRequestRepo {
@@ -85,6 +100,8 @@ export interface IntegrationAuthRequestRepo {
 export const DEFAULT_AUTH_REQUEST_TTL_SECONDS = 600;
 
 function rowToRequest(row: Record<string, unknown>): IntegrationAuthRequestDoc {
+  const kind = (row.principal_kind as string | null) ?? null;
+  const id = (row.principal_id as string | null) ?? null;
   return {
     state: row.state as string,
     integrationSlug: row.integration_slug as string,
@@ -93,6 +110,9 @@ function rowToRequest(row: Record<string, unknown>): IntegrationAuthRequestDoc {
     createdAt: row.created_at as Date,
     expiresAt: row.expires_at as Date,
     consumedAt: (row.consumed_at as Date | null) ?? null,
+    // Both or neither: a half-written pair cannot name a principal, and guessing one half would
+    // attribute a credential to the wrong subject.
+    principal: kind !== null && id !== null ? { kind, id } : null,
   };
 }
 
@@ -102,8 +122,9 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
   async create(request: IntegrationAuthRequestDoc): Promise<void> {
     await this.q.query(
       `INSERT INTO integration_auth_requests
-         (state, integration_slug, step_index, code_verifier, created_at, expires_at, consumed_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+         (state, integration_slug, step_index, code_verifier, created_at, expires_at, consumed_at,
+          principal_kind, principal_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         request.state,
         request.integrationSlug,
@@ -112,6 +133,8 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
         request.createdAt,
         request.expiresAt,
         request.consumedAt,
+        request.principal?.kind ?? null,
+        request.principal?.id ?? null,
       ]
     );
   }
@@ -188,6 +211,14 @@ export interface StartAuthStepInput {
   now?: () => Date;
   /** Only the `webhook` step calls a provider from here; every other step round-trips the browser. */
   fetchImpl?: typeof globalThis.fetch;
+  /**
+   * Connect *as this principal* rather than for the deployment (D7). Absent is the business-wide
+   * flow. Only an `oauth2` authorization-code step can produce a personal credential; asking for a
+   * user-scoped run of any other step kind is rejected rather than silently downgraded, because a
+   * downgrade would write the deployment's shared credential in response to a request to connect
+   * a personal one.
+   */
+  principal?: { readonly kind: string; readonly id: string };
 }
 
 function stepAt(manifest: IntegrationManifest, index: number): AuthStep {
@@ -209,6 +240,7 @@ async function issueState(input: StartAuthStepInput, codeVerifier: string | null
       now.getTime() + (input.ttlSeconds ?? DEFAULT_AUTH_REQUEST_TTL_SECONDS) * 1000
     ),
     consumedAt: null,
+    principal: input.principal ?? null,
   });
   return state;
 }
@@ -339,6 +371,19 @@ async function readJsonBody(response: Response): Promise<Record<string, unknown>
 export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStartAction> {
   const step = stepAt(input.manifest, input.stepIndex);
 
+  // A personal credential may only come from a step that declares itself personal. Grant type is
+  // not the test: Slack's install step is `authorization_code` and returns a workspace bot token,
+  // so accepting the grant alone would seal a shared bot credential under one person's name.
+  // Refusing here is what keeps "connect my GitHub" from quietly re-running the operator flow, and
+  // it reads the identical predicate the Tool compiler uses, so a Tool can never demand a
+  // credential this route would refuse to mint.
+  if (input.principal !== undefined && !isPersonalCredentialStep(step)) {
+    throw new AuthBrokerError(
+      "unknown_step",
+      `step ${input.stepIndex} cannot issue a personal credential; only an oauth2 authorization_code step declaring \`personal: true\` can`
+    );
+  }
+
   switch (step.kind) {
     case "fields":
       return { action: "collect_fields", fields: step.fields };
@@ -411,6 +456,14 @@ export interface AuthStepOutcome {
   stepIndex: number;
   /** Connection env values this step produced, to be merged and sealed by the caller. */
   env: Record<string, string>;
+  /**
+   * Whose credential this is, echoed from the consumed request. Present means the caller must seal
+   * it under that principal instead of merging it into the shared `connection.yaml` — the whole
+   * point of the user-scoped flow, and the one decision the callback route cannot make for itself.
+   */
+  principal?: { readonly kind: string; readonly id: string };
+  /** The OAuth2 step this outcome came from, when it was one. Names the token env vars. */
+  oauth2Step?: AuthOAuth2Step;
 }
 
 async function postForm(
@@ -491,7 +544,11 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
   }
   const fetchImpl = input.fetchImpl ?? globalThis.fetch;
   const now = (input.now ?? (() => new Date()))();
-  const outcome = { slug: request.integrationSlug, stepIndex: request.stepIndex };
+  const outcome = {
+    slug: request.integrationSlug,
+    stepIndex: request.stepIndex,
+    ...(request.principal === null ? {} : { principal: request.principal }),
+  };
 
   try {
     return await completeStep({ input, request, manifest, fetchImpl, now, outcome });
@@ -509,7 +566,7 @@ async function completeStep(ctx: {
   manifest: IntegrationManifest;
   fetchImpl: typeof globalThis.fetch;
   now: Date;
-  outcome: { slug: string; stepIndex: number };
+  outcome: Omit<AuthStepOutcome, "env">;
 }): Promise<AuthStepOutcome> {
   const { input, request, manifest, fetchImpl, now, outcome } = ctx;
   const step = stepAt(manifest, request.stepIndex);
@@ -574,7 +631,7 @@ async function completeStep(ctx: {
       };
       if (request.codeVerifier) body.code_verifier = request.codeVerifier;
       const response = await postForm(fetchImpl, step.token_url, body);
-      return { ...outcome, env: mapTokenResponse(step, response, now) };
+      return { ...outcome, oauth2Step: step, env: mapTokenResponse(step, response, now) };
     }
   }
 }

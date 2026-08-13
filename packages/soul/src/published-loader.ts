@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import {
+  DEFINITION_REGISTRATIONS,
   parseFrontmatter,
+  type ResourceDefinition,
+  type RoleDefinition,
+  SchemaRegistry,
   TulipFarmValidationError,
   validateLegacyIntegrationManifest,
   validateResourceSchema,
@@ -25,6 +29,7 @@ import type {
   SoulAgent,
   SoulIntegration,
   SoulResource,
+  SoulRole,
   SoulRoutine,
   SoulSkill,
 } from "./types";
@@ -35,6 +40,8 @@ import type {
  * because it is part of this package's published surface.
  */
 export { parseFrontmatter };
+
+const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
 async function subdirs(dir: string): Promise<string[]> {
   try {
@@ -65,6 +72,31 @@ function artifactLoadError(kind: string, name: string, err: unknown): Error {
   return new Error(`Soul: failed to load published ${kind} "${name}": ${detail}`);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Reads the canonical `resource.yaml` envelope. This **must** throw rather than fall back when the
+ * document fails validation.
+ *
+ * The caller's fallback (`?? parseYaml(definition.content)`) exists for the pre-envelope legacy
+ * `schema.yml`, where the whole file genuinely is the Record schema. Letting an *envelope-shaped*
+ * file reach that fallback silently reinterpreted the entire envelope
+ * (`apiVersion`/`kind`/`metadata`/`spec`) as the Record JSON Schema **and dropped `spec.domain`** —
+ * so a Resource an owner had walled into `hr` loaded as domainless. Since the member allow-list
+ * grants every member `record.*` on a domainless request, that silently reopened the HR/engineering
+ * wall this stage exists to build. Fail loudly instead; the caller wraps this in `artifactLoadError`
+ * exactly as it already does for a malformed schema mapping.
+ */
+function resourceDefinitionOf(content: string, path: string): ResourceDefinition {
+  const validated = definitionRegistry.validateYaml(content);
+  if (validated.kind !== "Resource") {
+    throw new Error(`${path}: expected a Resource definition but found kind "${validated.kind}"`);
+  }
+  return validated.document as unknown as ResourceDefinition;
+}
+
 /**
  * Reads the OpenAPI document an `egress: { type: "openapi" }` manifest names, so the Tool compiler
  * never touches the filesystem itself. `basename()` confines the read to the integration's own
@@ -93,6 +125,7 @@ export class SoulLoader {
   skills: Map<string, SoulSkill> = new Map();
   resources: Map<string, SoulResource> = new Map();
   routines: Map<string, SoulRoutine> = new Map();
+  roles: Map<string, SoulRole> = new Map();
   integrations: Map<string, SoulIntegration> = new Map();
   surfaceComponents: Map<string, SoulSurfaceComponent> = new Map();
   llmConfig: Record<string, unknown> | null = null;
@@ -119,6 +152,7 @@ export class SoulLoader {
       skills,
       resources,
       routines,
+      roles,
       integrations,
       surfaceComponents,
       guardrailsConfig,
@@ -129,6 +163,7 @@ export class SoulLoader {
       this.loadSkills(),
       this.loadResources(),
       this.loadRoutines(),
+      this.loadRoles(),
       this.loadIntegrations(),
       this.loadSurfaceComponents(),
       this.loadYamlFile(join(this.soulPath, "guardrails.yaml"), "guardrails.yaml"),
@@ -143,6 +178,7 @@ export class SoulLoader {
     this.skills = skills;
     this.resources = resources;
     this.routines = routines;
+    this.roles = roles;
     this.integrations = integrations;
     this.surfaceComponents = surfaceComponents;
     this.llmConfig = (manifest?.llm as Record<string, unknown> | undefined) ?? null;
@@ -151,7 +187,7 @@ export class SoulLoader {
     this.manifest = manifest;
 
     this.logger.info(
-      `Soul: loaded ${agents.size} agent(s), ${skills.size} skill(s), ${resources.size} resource(s), ${routines.size} routine(s), ${integrations.size} integration(s), ${surfaceComponents.size} Surface component(s)`
+      `Soul: loaded ${agents.size} agent(s), ${skills.size} skill(s), ${resources.size} resource(s), ${routines.size} routine(s), ${roles.size} role(s), ${integrations.size} integration(s), ${surfaceComponents.size} Surface component(s)`
     );
     for (const entry of this.quarantined) {
       this.logger.warn(`Soul: skipped ${entry.kind} "${entry.name}" — ${entry.reason}`);
@@ -233,7 +269,18 @@ export class SoulLoader {
           this.quarantine("resource", name, "no resource.yaml or schema.yml in the directory");
           continue;
         }
-        const schema = (parseYaml(definition.content) ?? {}) as Record<string, unknown>;
+        const resourceDefinition = definition.legacy
+          ? undefined
+          : resourceDefinitionOf(definition.content, definition.path);
+        // The fallback is only ever the legacy pre-envelope `schema.yml`, where the file itself is
+        // the Record schema. A non-legacy `resource.yaml` has already thrown above if invalid.
+        const parsedSchema =
+          resourceDefinition?.spec.recordSchema ??
+          ((parseYaml(definition.content) ?? {}) as Record<string, unknown>);
+        if (!isRecord(parsedSchema)) {
+          throw new Error(`${definition.path}: expected a resource schema mapping`);
+        }
+        const schema: Record<string, unknown> = parsedSchema;
         validateResourceSchema(schema);
         const hooksPath = join(this.soulPath, "resources", name, "hooks.ts");
         const hasHooks = await fileExists(this.soulPath, hooksPath);
@@ -241,8 +288,19 @@ export class SoulLoader {
         const hookHash = hookSource
           ? createHash("sha256").update(hookSource).digest("hex")
           : undefined;
-        const hooksEnabled = schema["x-hooks-enabled"] !== false;
-        map.set(name, { name, schema, hasHooks, hookSource, hookHash, hooksEnabled });
+        const hooksEnabled =
+          resourceDefinition?.spec.hooks?.enabled ?? schema["x-hooks-enabled"] !== false;
+        map.set(name, {
+          name,
+          ...(resourceDefinition?.spec.domain === undefined
+            ? {}
+            : { domain: resourceDefinition.spec.domain }),
+          schema,
+          hasHooks,
+          hookSource,
+          hookHash,
+          hooksEnabled,
+        });
       } catch (err) {
         throw artifactLoadError("resource", name, err);
       }
@@ -267,6 +325,28 @@ export class SoulLoader {
         map.set(name, { name, config, hasHooks, hookSource, hookHash });
       } catch (err) {
         throw artifactLoadError("routine", name, err);
+      }
+    }
+    return map;
+  }
+
+  private async loadRoles(): Promise<Map<string, SoulRole>> {
+    const map = new Map<string, SoulRole>();
+    const names = await subdirs(join(this.soulPath, "roles"));
+    for (const name of names) {
+      try {
+        const definition = await resolveDefinition(this.soulPath, "Role", name);
+        if (definition === undefined) {
+          this.quarantine("role", name, "no role.yaml in the directory");
+          continue;
+        }
+        const validated = definitionRegistry.validateYaml(definition.content);
+        if (validated.kind !== "Role") {
+          throw new Error(`${definition.path}: expected a Role definition`);
+        }
+        map.set(name, { name, definition: validated.document as RoleDefinition });
+      } catch (err) {
+        throw artifactLoadError("role", name, err);
       }
     }
     return map;

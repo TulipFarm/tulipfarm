@@ -102,6 +102,7 @@ describe("resource-type routes", () => {
   let gitSync: GitSyncService;
   let soulLoader: SoulLoader;
   let sid: string;
+  let adminSid: string;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -115,6 +116,8 @@ describe("resource-type routes", () => {
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
+    const admin = await createUser(userRepo, "admin@example.com", "pass", "admin");
+    adminSid = await store.create(admin._id);
 
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync, soulLoader });
   });
@@ -425,6 +428,148 @@ x-computed:
         expect.objectContaining({ email: "user@example.com" })
       );
       expect(soulLoader.reload).toHaveBeenCalledOnce();
+    });
+  });
+
+  // ── The domain wall ───────────────────────────────────────────────────────
+
+  /**
+   * A Resource's `domain` is what separates an HR Resource from an engineering one. Members may
+   * author record schemas; only an admin may decide the domain, because
+   * `MEMBER_UNDOMAINED_RECORD_ACTIONS` hands every member full CRUD on any *domainless* type.
+   */
+  describe("domain is admin-only", () => {
+    const auth = (session: string) => ({
+      cookies: { [SESSION_COOKIE]: session, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+    });
+
+    it("refuses a member setting a domain on create", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        ...auth(sid),
+        payload: { name: "salary-review", schema: VALID_SCHEMA_YAML, domain: "hr" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
+
+    it("lets an admin set a domain on create, writing the canonical envelope", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        ...auth(adminSid),
+        payload: { name: "salary-review", schema: VALID_SCHEMA_YAML, domain: "hr" },
+      });
+      expect(res.statusCode).toBe(201);
+      expect(res.json()).toMatchObject({ name: "salary-review", domain: "hr" });
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("resource.yaml"),
+        expect.stringContaining("domain: hr"),
+        "utf8"
+      );
+    });
+
+    it("still lets a member create a domainless type", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        ...auth(sid),
+        payload: { name: "ticket", schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(201);
+    });
+
+    it("refuses a member re-domaining an existing type", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      soulLoader.resources.set("salary-review", {
+        name: "salary-review",
+        domain: "hr",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      } as unknown as SoulResource);
+
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/resource-types/salary-review",
+        ...auth(sid),
+        payload: { schema: VALID_SCHEMA_YAML, domain: "engineering" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(writeFile).not.toHaveBeenCalled();
+    });
+
+    it("lets a member edit the schema of a domained type without changing its domain", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      soulLoader.resources.set("salary-review", {
+        name: "salary-review",
+        domain: "hr",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      } as unknown as SoulResource);
+
+      const res = await app.inject({
+        method: "PUT",
+        url: "/api/v1/resource-types/salary-review",
+        ...auth(sid),
+        payload: { schema: VALID_SCHEMA_YAML },
+      });
+      expect(res.statusCode).toBe(200);
+      // The wall survives an ordinary schema edit.
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("resource.yaml"),
+        expect.stringContaining("domain: hr"),
+        "utf8"
+      );
+    });
+
+    // Without this the POST gate is walkable: delete the `hr` type, re-create it domainless.
+    it("refuses a member deleting a domained type", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      soulLoader.resources.set("salary-review", {
+        name: "salary-review",
+        domain: "hr",
+        schema: { type: "object" },
+        hasHooks: false,
+        hooksEnabled: true,
+      } as unknown as SoulResource);
+
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/resource-types/salary-review",
+        ...auth(sid),
+      });
+      expect(res.statusCode).toBe(403);
+      expect(rm).not.toHaveBeenCalled();
+    });
+
+    it("still lets a member delete a domainless type", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      const res = await app.inject({
+        method: "DELETE",
+        url: "/api/v1/resource-types/ticket",
+        ...auth(sid),
+      });
+      expect(res.statusCode).toBe(204);
+    });
+
+    /**
+     * `checkSchemaYaml` is laxer than the envelope's `recordSchema`. Writing an envelope the
+     * loader would reject used to cost the Resource its domain silently; now the loader throws, so
+     * it would break Soul boot. The route must refuse it instead of committing it.
+     */
+    it("refuses a domained schema the Resource envelope would reject", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/resource-types",
+        ...auth(adminSid),
+        payload: { name: "salary-review", schema: "type: object\n", domain: "hr" },
+      });
+      expect(res.statusCode).toBe(422);
+      expect(writeFile).not.toHaveBeenCalled();
     });
   });
 

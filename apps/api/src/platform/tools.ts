@@ -13,8 +13,10 @@ import type {
 import { stringify as stringifyYaml } from "yaml";
 import type { BundledSkill } from "../soul/skills/bundled";
 import { resolveSkill } from "../soul/skills/registry";
+import { type ApiToolDefinition, defineApiTool } from "../tools/define";
+import { soulCommitError } from "../tools/soul-faults";
 import type { RequestContext } from "../tools/types";
-import { err, ok, type ToolCallResult } from "./tool-result";
+import { err, ok } from "./tool-result";
 
 export interface PlatformToolContext {
   soulLoader?: {
@@ -41,15 +43,39 @@ export interface PlatformToolContext {
   events?: EventEmitter;
 }
 
-export interface PlatformTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: PlatformToolContext) => Promise<ToolCallResult>;
+type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
+
+/**
+ * Delegation acts on the *platform* capability to hand a conversation to an Agent, which is what
+ * these Tools declare. Deriving `soul.agent` here — the resource the Soul CRUD Tools own — both
+ * escaped the declared resource (silencing the `platform.agent` check, since derived targets
+ * replace static resources at the gate) and conflated "may route work to this Agent" with "may edit
+ * this Agent's definition".
+ */
+const SOUL_AGENT_TARGET = "platform.agent";
+const SOUL_ROUTINE_TARGET = "soul.routine";
+const SOUL_SKILL_TARGET = "soul.skill";
+const SOUL_REPO_TARGET = "soul.repo";
+const SOUL_REPO_ALL_TARGET_ID = "entire-repository";
+
+function stringArg(args: unknown, key: string): string | undefined {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
+function soulTarget(
+  type: typeof SOUL_AGENT_TARGET | typeof SOUL_ROUTINE_TARGET | typeof SOUL_SKILL_TARGET,
+  args: unknown,
+  key: string
+) {
+  const id = stringArg(args, key);
+  return id === undefined ? [] : [{ type, id }];
+}
+
+function wholeSoulRepoTarget() {
+  return [{ type: SOUL_REPO_TARGET, id: SOUL_REPO_ALL_TARGET_ID }];
+}
 
 // `oneOf` fan-out can make AJV report the failure
 // against the outermost branch it tried first, not the field that's actually wrong several
@@ -82,12 +108,20 @@ const LOAD_SKILL_SCHEMA: Record<string, unknown> = {
 };
 const validateLoadSkill = ajv.compile(LOAD_SKILL_SCHEMA);
 
-export const loadSkillTool: PlatformTool = {
+export const loadSkillTool = defineApiTool<PlatformToolContext>({
   name: "load_skill",
   description:
     "Load a Skill's frontmatter and body by name so the agent can apply its instructions. Resolves Soul Skills before the read-only bundled overlay. Graceful not_found when the Skill is absent.",
   mutating: false,
+  tier: "platform",
   inputSchema: LOAD_SKILL_SCHEMA,
+  authorization: {
+    action: "platform.skill.load",
+    resources: ["soul.skill"],
+    // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
+    targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "name"),
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateLoadSkill(args))
       return err("validation_error", firstError(validateLoadSkill.errors));
@@ -101,7 +135,7 @@ export const loadSkillTool: PlatformTool = {
     if (skill) return ok({ name: skill.name, frontmatter: skill.frontmatter, body: skill.body });
     return err("not_found", `Skill "${name}" not found.`);
   },
-};
+});
 
 // ── load_skill_reference ──────────────────────────────────────────────────────
 
@@ -127,12 +161,19 @@ const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
 };
 const validateLoadSkillRef = ajv.compile(LOAD_SKILL_REFERENCE_SCHEMA);
 
-export const loadSkillReferenceTool: PlatformTool = {
+export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
   name: "load_skill_reference",
   description:
     "Load a reference file from a skill's references/ directory. Use this to pull in supporting material (playbooks, templates) that are too large to include in the skill body.",
   mutating: false,
+  tier: "platform",
   inputSchema: LOAD_SKILL_REFERENCE_SCHEMA,
+  authorization: {
+    action: "platform.skill_reference.load",
+    resources: ["soul.skill"],
+    targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "skill"),
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateLoadSkillRef(args))
       return err("validation_error", firstError(validateLoadSkillRef.errors));
@@ -164,7 +205,7 @@ export const loadSkillReferenceTool: PlatformTool = {
       return err("not_found", `Reference "${reference}" not found for skill "${skill}".`);
     }
   },
-};
+});
 
 // ── validate_artifact ─────────────────────────────────────────────────────────
 
@@ -182,12 +223,18 @@ const VALIDATE_ARTIFACT_SCHEMA: Record<string, unknown> = {
 };
 const validateArtifactArgs = ajv.compile(VALIDATE_ARTIFACT_SCHEMA);
 
-export const validateArtifactTool: PlatformTool = {
+export const validateArtifactTool = defineApiTool<PlatformToolContext>({
   name: "validate_artifact",
   description:
     "Validate an arbitrary artifact against a JSON Schema. Returns { valid: true } on success or { valid: false, errors: [...] } with AJV error details. Use before writing structured data to resources.",
   mutating: false,
+  tier: "platform",
   inputSchema: VALIDATE_ARTIFACT_SCHEMA,
+  authorization: {
+    action: "platform.artifact.validate",
+    resources: ["platform.artifact"],
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, _ctx) => {
     if (!validateArtifactArgs(args))
       return err("validation_error", firstError(validateArtifactArgs.errors));
@@ -208,7 +255,7 @@ export const validateArtifactTool: PlatformTool = {
       })),
     });
   },
-};
+});
 
 // ── transfer_to_agent ─────────────────────────────────────────────────────────
 
@@ -226,12 +273,19 @@ const TRANSFER_TO_AGENT_SCHEMA: Record<string, unknown> = {
 };
 const validateTransfer = ajv.compile(TRANSFER_TO_AGENT_SCHEMA);
 
-export const transferToAgentTool: PlatformTool = {
+export const transferToAgentTool = defineApiTool<PlatformToolContext>({
   name: "transfer_to_agent",
   description:
     "Hand the conversation off to another configured agent. The conversation's active agent switches and future turns are handled by the target. Validates that the target is a known platform or Soul agent.",
   mutating: false,
+  tier: "platform",
   inputSchema: TRANSFER_TO_AGENT_SCHEMA,
+  authorization: {
+    action: "platform.agent.transfer",
+    resources: ["platform.agent"],
+    targets: (args) => soulTarget(SOUL_AGENT_TARGET, args, "agentId"),
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateTransfer(args))
       return err("validation_error", firstError(validateTransfer.errors));
@@ -244,7 +298,7 @@ export const transferToAgentTool: PlatformTool = {
     const agentName = typeof agent.frontmatter.name === "string" ? agent.frontmatter.name : agentId;
     return ok({ agentId, agentName, status: "transferred", message: message ?? null });
   },
-};
+});
 
 // ── delegate_to_agent ─────────────────────────────────────────────────────────
 
@@ -267,12 +321,19 @@ const DELEGATE_TO_AGENT_SCHEMA: Record<string, unknown> = {
 };
 const validateDelegate = ajv.compile(DELEGATE_TO_AGENT_SCHEMA);
 
-export const delegateToAgentTool: PlatformTool = {
+export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
   name: "delegate_to_agent",
   description:
     "Delegate a sub-task to another agent and record the delegation. The UI surfaces a delegation-event card. Full async execution is deferred (Agents v0.9) — V1 records intent and returns a delegation receipt.",
   mutating: false,
+  tier: "platform",
   inputSchema: DELEGATE_TO_AGENT_SCHEMA,
+  authorization: {
+    action: "platform.agent.delegate",
+    resources: ["platform.agent"],
+    targets: (args) => soulTarget(SOUL_AGENT_TARGET, args, "agentId"),
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateDelegate(args))
       return err("validation_error", firstError(validateDelegate.errors));
@@ -285,7 +346,7 @@ export const delegateToAgentTool: PlatformTool = {
     if (!agent) return err("not_found", `Agent "${agentId}" not found in soul.`);
     return ok({ agentId, task, context: context ?? null, status: "delegated" });
   },
-};
+});
 
 // ── trigger_routine ───────────────────────────────────────────────────────────
 
@@ -303,12 +364,19 @@ const TRIGGER_ROUTINE_SCHEMA: Record<string, unknown> = {
 };
 const validateTriggerRoutine = ajv.compile(TRIGGER_ROUTINE_SCHEMA);
 
-export const triggerRoutineTool: PlatformTool = {
+export const triggerRoutineTool = defineApiTool<PlatformToolContext>({
   name: "trigger_routine",
   description:
     "Trigger a routine by name with optional inputs (validated against the routine's x-inputs schema). Returns the run id; watch progress via the routine run APIs.",
   mutating: true,
+  tier: "platform",
   inputSchema: TRIGGER_ROUTINE_SCHEMA,
+  authorization: {
+    action: "platform.routine.trigger",
+    resources: ["soul.routine"],
+    targets: (args) => soulTarget(SOUL_ROUTINE_TARGET, args, "name"),
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateTriggerRoutine(args))
       return err("validation_error", firstError(validateTriggerRoutine.errors));
@@ -327,7 +395,7 @@ export const triggerRoutineTool: PlatformTool = {
       return err("validation_error", message);
     }
   },
-};
+});
 
 // ── routine_forge ─────────────────────────────────────────────────────────────
 
@@ -388,7 +456,7 @@ function findUnknownAgentRef(
   return undefined;
 }
 
-export const routineForgeTool: PlatformTool = {
+export const routineForgeTool = defineApiTool<PlatformToolContext>({
   name: "routine_forge",
   description:
     "Create or update a ROUTINE (a scheduled/triggered automation) in the soul repo — use this, " +
@@ -412,7 +480,14 @@ export const routineForgeTool: PlatformTool = {
     "writes soul/routines/{name}/routine.yaml (+ optional hooks.ts), and commits via withSync. " +
     "No approval step (ROUT-V1-002).",
   mutating: true,
+  tier: "platform",
   inputSchema: ROUTINE_FORGE_SCHEMA,
+  authorization: {
+    action: "platform.routine.forge",
+    resources: ["soul.routine"],
+    targets: (args) => soulTarget(SOUL_ROUTINE_TARGET, args, "name"),
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateRoutineForge(args))
       return err("validation_error", firstError(validateRoutineForge.errors));
@@ -445,7 +520,7 @@ export const routineForgeTool: PlatformTool = {
       if (hooks) await writeFile(join(dir, "hooks.ts"), hooks, "utf8");
       await ctx.gitSync.withSync(`soul: forge routine ${name}`, ctx.requestContext?.actor);
     } catch (e) {
-      return err("internal_error", e instanceof Error ? e.message : String(e));
+      return soulCommitError(e, e instanceof Error ? e.message : String(e));
     }
 
     // withSync does not emit soul.synced — revalidate + reconcile schedules explicitly.
@@ -456,7 +531,7 @@ export const routineForgeTool: PlatformTool = {
     }
     return ok({ name, committed: true, hasHooks: Boolean(hooks) });
   },
-};
+});
 
 // ── routine_picker ────────────────────────────────────────────────────────────
 
@@ -467,12 +542,20 @@ const ROUTINE_PICKER_SCHEMA: Record<string, unknown> = {
 };
 const validateRoutinePicker = ajv.compile(ROUTINE_PICKER_SCHEMA);
 
-export const routinePickerTool: PlatformTool = {
+export const routinePickerTool = defineApiTool<PlatformToolContext>({
   name: "routine_picker",
   description:
     "List all available routines from the soul so the user can pick one to trigger. Returns name, title, and description for each routine.",
   mutating: false,
+  tier: "platform",
   inputSchema: ROUTINE_PICKER_SCHEMA,
+  authorization: {
+    action: "platform.routine.list",
+    resources: ["soul.routine"],
+    // This lists the routine catalog only; the coarse soul.routine read is the intended check.
+    targets: () => [],
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateRoutinePicker(args))
       return err("validation_error", firstError(validateRoutinePicker.errors));
@@ -484,7 +567,7 @@ export const routinePickerTool: PlatformTool = {
     }));
     return ok({ routines: items });
   },
-};
+});
 
 // ── begin_soul_batch ──────────────────────────────────────────────────────────
 
@@ -495,18 +578,24 @@ const BEGIN_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
 };
 const validateBeginSoulBatch = ajv.compile(BEGIN_SOUL_BATCH_SCHEMA);
 
-export const beginSoulBatchTool: PlatformTool = {
+export const beginSoulBatchTool = defineApiTool<PlatformToolContext>({
   name: "begin_soul_batch",
   description:
     "Open a soul-batch window. Multiple soul file writes performed after this call will be committed together by end_soul_batch. Call end_soul_batch to close the batch and commit.",
   mutating: false,
+  tier: "platform",
   inputSchema: BEGIN_SOUL_BATCH_SCHEMA,
+  authorization: {
+    action: "platform.soul_batch.begin",
+    resources: ["soul.repo"],
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, _ctx) => {
     if (!validateBeginSoulBatch(args))
       return err("validation_error", firstError(validateBeginSoulBatch.errors));
     return ok({ status: "open" });
   },
-};
+});
 
 // ── end_soul_batch ────────────────────────────────────────────────────────────
 
@@ -524,12 +613,20 @@ const END_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
 };
 const validateEndSoulBatch = ajv.compile(END_SOUL_BATCH_SCHEMA);
 
-export const endSoulBatchTool: PlatformTool = {
+export const endSoulBatchTool = defineApiTool<PlatformToolContext>({
   name: "end_soul_batch",
   description:
     "Close the soul-batch window and commit all pending soul writes as a single commit via withSync (commit + best-effort push).",
   mutating: true,
+  tier: "platform",
   inputSchema: END_SOUL_BATCH_SCHEMA,
+  authorization: {
+    action: "platform.soul_batch.end",
+    resources: ["soul.repo"],
+    // A batch commit can publish writes across every Soul artifact family, not one named artifact.
+    targets: wholeSoulRepoTarget,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateEndSoulBatch(args))
       return err("validation_error", firstError(validateEndSoulBatch.errors));
@@ -542,7 +639,7 @@ export const endSoulBatchTool: PlatformTool = {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
   },
-};
+});
 
 // ── soul_repo_commit ──────────────────────────────────────────────────────────
 
@@ -560,12 +657,18 @@ const SOUL_REPO_COMMIT_SCHEMA: Record<string, unknown> = {
 };
 const validateSoulRepoCommit = ajv.compile(SOUL_REPO_COMMIT_SCHEMA);
 
-export const soulRepoCommitTool: PlatformTool = {
+export const soulRepoCommitTool = defineApiTool<PlatformToolContext>({
   name: "soul_repo_commit",
   description:
     "Stage and commit all current soul changes locally (attributed to tulipfarm-bot). Does not push — use soul_repo_push or end_soul_batch to reach the remote.",
   mutating: true,
+  tier: "platform",
   inputSchema: SOUL_REPO_COMMIT_SCHEMA,
+  authorization: {
+    action: "platform.soul_repo.commit",
+    resources: ["soul.repo"],
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateSoulRepoCommit(args))
       return err("validation_error", firstError(validateSoulRepoCommit.errors));
@@ -578,7 +681,7 @@ export const soulRepoCommitTool: PlatformTool = {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
   },
-};
+});
 
 // ── soul_repo_push ────────────────────────────────────────────────────────────
 
@@ -589,12 +692,20 @@ const SOUL_REPO_PUSH_SCHEMA: Record<string, unknown> = {
 };
 const validateSoulRepoPush = ajv.compile(SOUL_REPO_PUSH_SCHEMA);
 
-export const soulRepoPushTool: PlatformTool = {
+export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
   name: "soul_repo_push",
   description:
     "Push committed soul changes to the configured git remote. Returns { pushed: false } when no remote is configured (local-only mode).",
   mutating: true,
+  tier: "platform",
   inputSchema: SOUL_REPO_PUSH_SCHEMA,
+  authorization: {
+    action: "platform.soul_repo.push",
+    resources: ["soul.repo"],
+    // Push publishes the repository's current committed state, so narrow artifact grants cannot apply.
+    targets: wholeSoulRepoTarget,
+    dataClasses: ["soul_definition"],
+  },
   handler: async (args, ctx) => {
     if (!validateSoulRepoPush(args))
       return err("validation_error", firstError(validateSoulRepoPush.errors));
@@ -606,7 +717,7 @@ export const soulRepoPushTool: PlatformTool = {
       return err("internal_error", e instanceof Error ? e.message : String(e));
     }
   },
-};
+});
 
 // ── call_skill (routine-spawned only) ────────────────────────────────────────
 
@@ -624,12 +735,19 @@ const CALL_SKILL_SCHEMA: Record<string, unknown> = {
 };
 const validateCallSkill = ajv.compile(CALL_SKILL_SCHEMA);
 
-export const callSkillTool: PlatformTool = {
+export const callSkillTool = defineApiTool<PlatformToolContext>({
   name: "call_skill",
   description:
     "Load and invoke a skill within the current routine execution context. Only callable from a routine-spawned agent turn.",
   mutating: false,
+  tier: "platform",
   inputSchema: CALL_SKILL_SCHEMA,
+  authorization: {
+    action: "platform.skill.call",
+    resources: ["soul.skill"],
+    targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "name"),
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateCallSkill(args))
       return err("validation_error", firstError(validateCallSkill.errors));
@@ -650,7 +768,7 @@ export const callSkillTool: PlatformTool = {
       args: skillArgs ?? null,
     });
   },
-};
+});
 
 // ── complete_state (routine-spawned only) ─────────────────────────────────────
 
@@ -663,12 +781,18 @@ const COMPLETE_STATE_SCHEMA: Record<string, unknown> = {
 };
 const validateCompleteState = ajv.compile(COMPLETE_STATE_SCHEMA);
 
-export const completeStateTool: PlatformTool = {
+export const completeStateTool = defineApiTool<PlatformToolContext>({
   name: "complete_state",
   description:
     "Signal completion of the current routine state and emit its output. Only callable from a routine-spawned agent turn.",
   mutating: true,
+  tier: "platform",
   inputSchema: COMPLETE_STATE_SCHEMA,
+  authorization: {
+    action: "platform.state.complete",
+    resources: ["platform.state"],
+    dataClasses: ["operational"],
+  },
   handler: async (args, ctx) => {
     if (!validateCompleteState(args))
       return err("validation_error", firstError(validateCompleteState.errors));
@@ -682,7 +806,7 @@ export const completeStateTool: PlatformTool = {
       output: output ?? null,
     });
   },
-};
+});
 
 // ── complete_task ─────────────────────────────────────────────────────────────
 
@@ -707,12 +831,18 @@ const COMPLETE_TASK_SCHEMA: Record<string, unknown> = {
 };
 const validateCompleteTask = ajv.compile(COMPLETE_TASK_SCHEMA);
 
-export const completeTaskTool: PlatformTool = {
+export const completeTaskTool = defineApiTool<PlatformToolContext>({
   name: "complete_task",
   description:
     "Signal that the delegated work is finished and hand control back to the front-desk agent. Call this when a creation/onboarding session is done (success), cannot proceed (failed), or was abandoned (cancelled).",
   mutating: false,
+  tier: "platform",
   inputSchema: COMPLETE_TASK_SCHEMA,
+  authorization: {
+    action: "platform.task.complete",
+    resources: ["platform.task"],
+    dataClasses: ["operational"],
+  },
   handler: async (args) => {
     if (!validateCompleteTask(args))
       return err("validation_error", firstError(validateCompleteTask.errors));
@@ -730,7 +860,7 @@ export const completeTaskTool: PlatformTool = {
       completed: true,
     });
   },
-};
+});
 
 // ── get_current_time ──────────────────────────────────────────────────────────
 
@@ -758,25 +888,31 @@ const validateGetCurrentTime = ajv.compile(GET_CURRENT_TIME_SCHEMA);
  * Shares `formatTemporalContext` with the block on purpose. A fresh reading that disagreed in
  * format with the one the Agent was already given would read as a different kind of fact.
  */
-export const getCurrentTimeTool: PlatformTool = {
+export const getCurrentTimeTool = defineApiTool<PlatformToolContext>({
   name: "get_current_time",
   description:
     "Get the current date, day of week and time. The <current-context> block is read once at the " +
     "start of the turn, so call this when a long-running turn may have outlived it, or to read the " +
     "time in a different timezone.",
   mutating: false,
+  tier: "platform",
   inputSchema: GET_CURRENT_TIME_SCHEMA,
+  authorization: {
+    action: "platform.time.read",
+    resources: ["platform.time"],
+    dataClasses: ["operational"],
+  },
   handler: async (args) => {
     if (!validateGetCurrentTime(args))
       return err("validation_error", firstError(validateGetCurrentTime.errors));
     const { timezone } = args as { timezone?: string };
     return ok({ current: formatTemporalContext({ now: new Date(), timezone }) });
   },
-};
+});
 
 // ── Registry ──────────────────────────────────────────────────────────────────
 
-export const PLATFORM_TOOLS: PlatformTool[] = [
+export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,
   loadSkillReferenceTool,
   validateArtifactTool,

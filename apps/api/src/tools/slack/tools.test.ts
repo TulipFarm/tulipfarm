@@ -1,7 +1,11 @@
-import type { IntegrationHttpRequest } from "@tulipfarm/integrations";
+import { type IntegrationHttpRequest, SLACK_TOOL_CONTRACTS } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
-import { MemoryEffectStore } from "@tulipfarm/tool-broker";
+import {
+  MemoryEffectStore,
+  type ReserveEffectInput,
+  type ToolIntent,
+} from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
 import type { IntegrationConversation, IntegrationConversationsRepo } from "../../ingress/repo";
 import type { RequestContext } from "../types";
@@ -83,7 +87,67 @@ function context(overrides: Partial<RequestContext> = {}): RequestContext {
   return { userId: "user-1", runId: "run-1", toolCallId: "call-1", ...overrides };
 }
 
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
 describe("buildSlackTools", () => {
+  it("derives egress destinations from the published Slack contract", () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.000") });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "send_slack_message");
+    if (tool?.definition === undefined) throw new Error("send_slack_message not registered");
+
+    expect(tool.definition.authorization.allowedDestinations).toEqual(
+      SLACK_TOOL_CONTRACTS[0].spec.allowedDestinations
+    );
+  });
+
+  it("keeps Slack target derivation total for raw model output", () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.000") });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "send_slack_message");
+    if (tool?.definition === undefined) throw new Error("send_slack_message not registered");
+    const rawInputs: unknown[] = [{}, { unexpected: true }, { channel: 7 }, null, []];
+
+    for (const input of rawInputs) {
+      expect(() => tool.definition?.targetsFor(input), "send_slack_message targets").not.toThrow();
+      expectNoNullishTargetText(tool.definition.targetsFor(input));
+    }
+  });
+
+  it("normalizes channel-name targets and keeps raw Slack IDs in a separate stable namespace", () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.000") });
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects: new MemoryEffectStore(),
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((candidate) => candidate.name === "send_slack_message");
+    if (tool?.definition === undefined) throw new Error("send_slack_message not registered");
+
+    expect(tool.definition.targetsFor({ channel: "#general" })).toEqual([
+      { type: "integration.slack", id: "channel-name:general" },
+    ]);
+    expect(tool.definition.targetsFor({ channel: "general" })).toEqual([
+      { type: "integration.slack", id: "channel-name:general" },
+    ]);
+    expect(tool.definition.targetsFor({ channel: "C0123456789" })).toEqual([
+      { type: "integration.slack", id: "channel:C0123456789" },
+    ]);
+  });
+
   it("resolves a channel name, sends, and returns the ledger dispatch output", async () => {
     const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.001") });
     const threads = fakeThreads();
@@ -263,5 +327,57 @@ describe("buildSlackTools", () => {
     if (!result.success) {
       expect(result.error.code).toBe("not_found");
     }
+  });
+});
+
+describe("intents carry the Tool's derived targets", () => {
+  /** Captures what the handler actually reserved, which is where the intent becomes durable. */
+  class RecordingEffectStore extends MemoryEffectStore {
+    readonly intents: ToolIntent[] = [];
+    override async reserve(input: ReserveEffectInput) {
+      this.intents.push(input.intent);
+      return super.reserve(input);
+    }
+  }
+
+  // `targetRefs: []` was hardcoded here while the derivation existed only as a declaration, so the
+  // gate would have authorized against the Tool's coarse static resource no matter which channel
+  // the model named. This asserts the intent the handler builds is the one `targetsFor` describes.
+  it("reserves an effect whose intent names the resolved channel", async () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.002") });
+    const effects = new RecordingEffectStore();
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects,
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((t) => t.name === "send_slack_message");
+    if (tool === undefined) throw new Error("send_slack_message not registered");
+
+    await tool.execute({ channel: "C0123456789", text: "hi" }, context());
+
+    expect(effects.intents.at(0)?.targetRefs).toEqual([
+      { type: "integration.slack", id: "channel:C0123456789" },
+    ]);
+  });
+
+  it("keeps an unresolved channel name in its own target namespace", async () => {
+    const tooling = buildSlackTooling({ secrets: fakeSecretsService(), http: fakeHttp("100.002") });
+    const effects = new RecordingEffectStore();
+    const tools = buildSlackTools(BUSINESS_ID, {
+      ...tooling,
+      effects,
+      threads: fakeThreads(),
+      mentionedThreads: fakeMentionedThreads(),
+    });
+    const tool = tools.find((t) => t.name === "send_slack_message");
+    if (tool === undefined) throw new Error("send_slack_message not registered");
+
+    await tool.execute({ channel: "#slack-bot-test", text: "hi" }, context());
+
+    expect(effects.intents.at(0)?.targetRefs).toEqual([
+      { type: "integration.slack", id: "channel-name:slack-bot-test" },
+    ]);
   });
 });

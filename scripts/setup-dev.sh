@@ -74,7 +74,7 @@ CONTAINER_DATABASE_URL="postgresql://tulipfarm:${POSTGRES_PASSWORD}@localhost:54
 SOUL_DIR="$HOME/.tulipfarm/soul"
 if [ ! -d "$SOUL_DIR/.git" ]; then
   echo "📁 Initializing soul directory at $SOUL_DIR..."
-  mkdir -p "$SOUL_DIR"/{resources,routines,agents,skills,integrations}
+  mkdir -p "$SOUL_DIR"/{resources,routines,agents,skills,integrations,roles}
 
   # Create stub files. NOTE: no `llm:` key in soul.yaml — an empty/comment-only one fails LLM-config
   # validation (requires `tiers`). Absent config = LLM features disabled until the UI wizard writes it.

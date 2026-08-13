@@ -28,6 +28,8 @@ export interface UserDoc {
   role: Role;
   status: UserStatus;
   createdAt: Date;
+  /** True only for the first-admin setup/bootstrap path that must be concurrency-guarded. */
+  setupBootstrap?: boolean;
 }
 
 // Shape returned to clients — never includes the password hash.
@@ -111,13 +113,13 @@ export class EmailAlreadyExistsError extends Error {
 }
 
 /**
- * Thrown by `insert()` when a second admin row would violate the single-admin database
- * invariant (`users_single_admin_idx`, greenfield baseline) — the concurrency-safe replacement
- * for the old check-then-insert `count() === 0` race in setup/routes.ts (#172).
+ * Thrown when a second first-admin setup/bootstrap claim would violate
+ * `users_setup_bootstrap_admin_idx` — the concurrency-safe replacement for the old
+ * check-then-insert `count() === 0` race in setup/routes.ts (#172), without limiting later admins.
  */
 export class AdminAlreadyExistsError extends Error {
   constructor() {
-    super("an admin user already exists");
+    super("a setup admin user already exists");
     this.name = "AdminAlreadyExistsError";
   }
 }
@@ -180,12 +182,22 @@ export class PgUserRepo implements UserRepo {
   async insert(user: UserDoc): Promise<void> {
     try {
       await this.q.query(
-        `INSERT INTO users (id, email, password_hash, name, role, status, created_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [user._id, user.email, user.passwordHash, user.name, user.role, user.status, user.createdAt]
+        `INSERT INTO users (
+           id, email, password_hash, name, role, status, created_at, setup_bootstrap
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          user._id,
+          user.email,
+          user.passwordHash,
+          user.name,
+          user.role,
+          user.status,
+          user.createdAt,
+          user.setupBootstrap === true,
+        ]
       );
     } catch (err) {
-      if (user.role === "admin" && isUniqueViolation(err, "users_single_admin_idx")) {
+      if (isUniqueViolation(err, "users_setup_bootstrap_admin_idx")) {
         throw new AdminAlreadyExistsError();
       }
       if (isUniqueViolation(err, "users_email_key")) {
@@ -227,7 +239,11 @@ export async function createUser(
   repo: UserRepo,
   email: string,
   password: string,
-  role: Role
+  role: Role,
+  options: {
+    readonly setupBootstrap?: boolean;
+    readonly insert?: (user: UserDoc) => Promise<void>;
+  } = {}
 ): Promise<UserDoc> {
   const user: UserDoc = {
     _id: randomUUID(),
@@ -237,8 +253,9 @@ export async function createUser(
     role,
     status: "active",
     createdAt: new Date(),
+    ...(options.setupBootstrap === true ? { setupBootstrap: true } : {}),
   };
-  await repo.insert(user);
+  await (options.insert ?? repo.insert.bind(repo))(user);
   return user;
 }
 

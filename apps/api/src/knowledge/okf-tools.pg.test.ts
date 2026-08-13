@@ -10,8 +10,10 @@ import { PgKnowledgePageRepo, PgKnowledgeRevisionRepo } from "./repo";
 import { KnowledgeService } from "./service";
 import { PgKnowledgeSpaceOverrideRepo } from "./space-overrides-repo";
 import { PgKnowledgeSpaceRepo } from "./spaces-repo";
-import { KNOWLEDGE_TOOLS, type KnowledgeTool, type KnowledgeToolContext } from "./tools";
+import { KNOWLEDGE_TOOLS, type KnowledgeToolContext } from "./tools";
 import type { EmbeddingPort } from "./types";
+
+type KnowledgeTool = (typeof KNOWLEDGE_TOOLS)[number];
 
 function lexicalOnly(): EmbeddingPort {
   return {

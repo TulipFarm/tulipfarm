@@ -47,13 +47,16 @@ import {
   ChildLinkStore,
   EventStore,
   IntegrationStore,
+  PgGroupRepo,
+  PgPrincipalRepo,
+  PgRoleRepo,
   PgSoulPublicationStore,
   RunEventStore,
   RunStore,
   SoulRepositoryStore,
   WaitStore,
 } from "@tulipfarm/storage";
-import { PgEffectStore } from "@tulipfarm/tool-broker";
+import { CompositeToolEntitlement, PgEffectStore } from "@tulipfarm/tool-broker";
 import { config } from "dotenv";
 import type { FastifyBaseLogger } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -76,6 +79,7 @@ import { PgUserInviteRepo } from "./auth/invites";
 import { makeRequireAuth } from "./auth/middleware";
 import { DEFAULT_SESSION_TTL_SECONDS, PgSessionStore } from "./auth/session-store";
 import { PgUserRepo } from "./auth/users";
+import { AuthzAdminService } from "./authz/service";
 import { PgConversationRepo } from "./chat/conversations";
 import { PgMessageRepo } from "./chat/messages";
 import { PgConversationStore } from "./conversations/store.pg";
@@ -95,9 +99,12 @@ import { createHookExecutor } from "./hooks/executor";
 import { PgRawPayloadVault } from "./hooks/raw-payload-vault";
 import { webhookSecretPort } from "./hooks/secret-port";
 import { PgApiClientRepo } from "./identity/api-clients";
+import { buildLiveAuthorityLayerResolver } from "./identity/authority-layers";
 import { channelBindKeyResolver } from "./identity/channel-link";
 import { PgExternalIdentityRepo } from "./identity/external-links";
 import { ExternalLinkKnowledgeIdentityMap } from "./identity/knowledge-identity-map";
+import { reconcileSoulRoles, registerSoulRoleReconcile } from "./identity/role-reconcile";
+import { syncDeploymentRoles } from "./identity/roles";
 import { IngressIdentityResolver } from "./ingress/identity";
 import {
   IngressDeliveriesRepo,
@@ -106,9 +113,13 @@ import {
 } from "./ingress/repo";
 import { PgIntegrationAuthRequestRepo } from "./integrations/auth-broker";
 import { resolveSecretRef } from "./integrations/connection-env";
+import { PgPrincipalProviderTokenRepo } from "./integrations/principal-tokens";
+import { CredentialResolver } from "./internal/credential-mode";
 import { IngressDeliveryHost } from "./internal/delivery-host";
+import { GitHubEntitlementPort, HttpGitHubPermissionApi } from "./internal/github-entitlement";
 import { InternalRoutineApprovalHost } from "./internal/routine-approval-host";
 import { RegistryToolDispatcher } from "./internal/tool-dispatch";
+import { LiveToolGate } from "./internal/tool-gate";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
@@ -160,6 +171,7 @@ import { createObservabilityTelemetryPort } from "./observability/telemetry-port
 import { OtlpTracesExporter } from "./observability/traces";
 import { runPgMigrations } from "./pg-migrate";
 import { PgRateLimiter } from "./rate-limit";
+import { LiveRecordAuthorizer } from "./resources/authorize";
 import { reconcileResourceTables, registerResourceReconcile } from "./resources/reconcile";
 import { PgCounterStore, PgResourceRepoFactory } from "./resources/repo";
 import { ActiveRoutineCatalog } from "./routines/catalog";
@@ -189,6 +201,7 @@ import {
   type BootstrapSecretsResult,
   bootstrapSecrets,
 } from "./setup/bootstrap-secrets";
+import { PgSetupAdminCreator } from "./setup/first-admin";
 import { readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "./setup/soul-config";
 import {
   provisionIntegrationWorkerCredential,
@@ -360,6 +373,14 @@ async function boot() {
     // invalid by an interrupted build is invisible to the planner but still costs every write.
     await ensureEmbeddingIndexes(migrationPool, (msg) => console.log(msg));
     const pool = await startRuntimePool(migrationPool);
+    /**
+     * One instance, shared by the two halves of D7's personal-credential protocol: the connect
+     * route that seals a credential and the resolver that decides a call needs one. They are a
+     * protocol, not two features — a resolver that denies with "connect it from Settings" while
+     * the connect route is unwired is a dead end for the person reading it, so neither may be
+     * configured without the other.
+     */
+    const principalTokens = new PgPrincipalProviderTokenRepo(pool);
 
     // Second half of the key-loss guard: a KEK invented this boot against a database that
     // already holds wrapped DEKs means the real key was lost, not that this is a first boot.
@@ -492,9 +513,20 @@ async function boot() {
     );
     const sessionStore = new PgSessionStore(pool, ttlSeconds);
     const userRepo = new PgUserRepo(pool);
+    const setupAdminCreator = new PgSetupAdminCreator(pool, DEPLOYMENT_BUSINESS_ID);
     const tokenRepo = new PgTokenRepo(pool);
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
+    await syncDeploymentRoles(new PgRoleRepo(transactionPort(pool)));
+    // Project authored Soul Roles into durable rows after the bootstrap roles are seeded, so an
+    // authored Role actually resolves through the authority layers (and a Role deleted from Soul is
+    // reaped). Reserved bootstrap ids are never touched. See identity/role-reconcile.ts.
+    await reconcileSoulRoles(
+      new PgRoleRepo(transactionPort(pool)),
+      soulLoader,
+      DEPLOYMENT_BUSINESS_ID,
+      console
+    );
     const rateLimiter = new PgRateLimiter(pool);
     // One validator for the request boundary: the gateway rejects an unregistered schema reference
     // before minting a Run, and the same instance re-validates on publish and on every later read.
@@ -609,6 +641,42 @@ async function boot() {
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
     const auditRepo = new PgAuditEventRepo(pool);
     const auditService = new AuditService(auditRepo);
+    // Stage 3 admin authorization surface. Reuses the same Pg repos and the live authority resolver
+    // the gate will later consume, so `explain` runs the one decision function, not a copy. Role
+    // *definitions* stay Soul-authored — this service never writes durable Role rows.
+    // One resolver, shared. The admin surface's "why was this denied" and the gate's actual
+    // decision must read the same grants through the same code, or the explanation describes a
+    // deployment that does not exist.
+    const authorityLayerResolver = buildLiveAuthorityLayerResolver(pool);
+    const authzAdmin = new AuthzAdminService({
+      roles: new PgRoleRepo(transactionPort(pool)),
+      groups: new PgGroupRepo(transactionPort(pool)),
+      principals: new PgPrincipalRepo(transactionPort(pool)),
+      resolver: authorityLayerResolver,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      audit: auditService,
+      // Names come from the Soul artifacts themselves, so a level is called what its author called
+      // it rather than by the UUID its durable row is keyed on. `compileSoulRole` derives the row
+      // id from `metadata.id`, so this map keys on the same value the roles repo returns.
+      roleNames: () =>
+        new Map(
+          [...soulLoader.roles.values()].map(
+            (role) =>
+              [
+                role.definition.metadata.id,
+                {
+                  // `role.name` is the artifact directory the loader keyed on, which is exactly the
+                  // slug the delete route addresses. Re-deriving it from the display name would
+                  // break the moment a level was named something that slugifies differently.
+                  slug: role.name,
+                  ...(role.definition.metadata.displayName === undefined
+                    ? {}
+                    : { displayName: role.definition.metadata.displayName }),
+                },
+              ] as const
+          )
+        ),
+    });
     // The ledger's reader. Without it `audit_events` is write-only and the evidence is
     // unreachable outside `psql` — see `audit/routes.ts`.
     const auditReadService = new AuditReadService(auditRepo);
@@ -800,6 +868,26 @@ async function boot() {
           surfaceActionStore,
           guardrails: guardrailsService,
           githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
+          // The flip. Until these two are supplied the dispatcher runs every registered Tool on
+          // the agent allowlist alone; with them, no chat Tool executes without a grant.
+          gate: new LiveToolGate(),
+          authorityLayers: authorityLayerResolver,
+          // D7. Without this every provider Tool spends the deployment's shared credential and the
+          // provider sees one actor for the whole business, so its own ACLs stop discriminating.
+          credentials: new CredentialResolver({ tokens: principalTokens, soulLoader }),
+          // Authority layer L5. Every GitHub Tool spends the App installation's credential, so
+          // without this the platform's answer to "may this person touch that repo" is whatever
+          // the bot can reach — the union of everyone's access.
+          entitlements: new CompositeToolEntitlement([
+            new GitHubEntitlementPort(
+              externalIdentityRepo,
+              new HttpGitHubPermissionApi(githubTooling.installationToken)
+            ),
+          ]),
+          // s6-ledger. Without this a mutating platform Tool — Record CRUD, Soul Forge, memory,
+          // key-value — has no reservation, so a duplicate delivery of the same tool call applies
+          // its write twice, and a Tool that throws leaves nothing for reconciliation to find.
+          effects: new PgEffectStore(runTransactions),
         }),
         approvals: {
           // The subject comes from the Run, so the principal allowed to decide is the one the Run
@@ -861,6 +949,7 @@ async function boot() {
       resourceRepo: new PgResourceRepo(pool),
       sessionStore,
       userRepo,
+      setupAdminCreator,
       userAdminRepo: userRepo,
       passwordWriteRepo: userRepo,
       profileWriteRepo: userRepo,
@@ -887,11 +976,25 @@ async function boot() {
         soulRepositories: soulRepositoryStore,
       },
       githubStatus: { integrations: channelIntegrations, businessId: DEPLOYMENT_BUSINESS_ID },
-      integrationAuth: { repo: new PgIntegrationAuthRequestRepo(pool) },
+      integrationAuth: { repo: new PgIntegrationAuthRequestRepo(pool), tokens: principalTokens },
       hookExecutor,
       resourceRepoFactory,
       counterStore,
+      // The REST record API is the same records the Record Tools reach, by a different door. The
+      // domain wall the gate enforces is only a wall if this door enforces it too.
+      recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
       reconcileResources,
+      // Reload Soul then project Roles, in that order — the reconciler reads the loader's catalog,
+      // so projecting without reloading would write the state from before the level was committed.
+      reconcileSoulRoles: async () => {
+        await soulLoader.reload();
+        await reconcileSoulRoles(
+          new PgRoleRepo(transactionPort(pool)),
+          soulLoader,
+          DEPLOYMENT_BUSINESS_ID,
+          console
+        );
+      },
       domainEventEmitter,
       llmService,
       guardrailsService,
@@ -910,6 +1013,7 @@ async function boot() {
       activityService,
       auditService,
       auditReadService,
+      authzAdmin,
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,
@@ -1048,6 +1152,13 @@ async function boot() {
     );
     registerGuardrailsReload(gitSync, soulLoader, guardrailsService, app.log);
     registerResourceReconcile(gitSync, soulLoader, pool, app.log);
+    registerSoulRoleReconcile(
+      gitSync,
+      soulLoader,
+      new PgRoleRepo(transactionPort(pool)),
+      DEPLOYMENT_BUSINESS_ID,
+      app.log
+    );
     logEnvironmentStatus(app.log);
     // Before the wizard, and independent of it: a deployment that never opens the wizard still
     // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
@@ -1056,6 +1167,7 @@ async function boot() {
     await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
     await bootstrapFromEnv({
       userRepo,
+      setupAdminCreator,
       secretsService,
       soulPath,
       log: app.log,

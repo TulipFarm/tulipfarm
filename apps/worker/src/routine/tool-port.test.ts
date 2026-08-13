@@ -9,6 +9,7 @@ import {
   type ToolAdapterRequest,
 } from "@tulipfarm/tool-broker";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 import { BrokerRoutineToolPort, type RoutineToolRequest } from "./tool-port";
 
 const BUSINESS_ID = "biz-1";
@@ -191,6 +192,30 @@ describe("BrokerRoutineToolPort", () => {
     expect(await port().execute(request({ authorityLayers: [] }))).toEqual({ kind: "succeeded" });
   });
 
+  // A named limitation, pinned so it cannot be mistaken for per-Record scoping that works.
+  //
+  // `intentOf` sends `targetRefs: []`, so `protectedRequests` falls back to the contract's
+  // `requiredResources` and, that being empty too, finally to the Tool itself. The routine path
+  // therefore decides at *Tool* granularity: it is fail-closed (a Tool the bundle does not publish
+  // has no grant at all) but it cannot tell two Records of the same type apart, so an engineering
+  // Routine and an HR Routine calling the same Tool are the same question to it.
+  //
+  // Closing this is not a wiring job. The chat path derives targets by calling `targetsFor`, a
+  // function on the live `ApiToolDefinition`; a Run authorizes against its pinned bundle, where a
+  // contract is *data* and no function survives publication. Per-Record scoping here needs a
+  // declarative target binding in `ToolContractSpec` that both paths evaluate — a contract change,
+  // and the reason this is left as one.
+  it("decides at Tool granularity, carrying no target the arguments could have named", async () => {
+    expect(await port().execute(request())).toEqual({ kind: "succeeded" });
+
+    const dispatched = dispatch.mock.calls[0]?.[0];
+    expect(dispatched?.intent.arguments).not.toEqual({});
+    // Arguments reached the adapter; nothing derived a target from them, so authorization saw only
+    // the Tool. Were this ever to become non-empty without a contract-level binding, the either/or
+    // in `protectedRequests` would drop the Tool-level check that is currently the whole decision.
+    expect(dispatched?.intent.targetRefs).toEqual([]);
+  });
+
   it("still denies when an external layer explicitly denies, even though the bundle's own contract allows", async () => {
     const denied = request({
       authorityLayers: [
@@ -316,5 +341,71 @@ describe("BrokerRoutineToolPort", () => {
       kind: "failed",
       reason: "invalid_arguments",
     });
+  });
+});
+
+/**
+ * `CredentialDispatcher` forwards only the ref string, so a Tool State authored against the bare
+ * GitHub installation ref would be unresolvable the moment a business holds two installations.
+ * These assert the narrowing happens on the intent the ledger records — not somewhere later — so
+ * the reserved effect and the credential that carried it name the same installation.
+ */
+describe("BrokerRoutineToolPort GitHub credential scoping", () => {
+  async function reservedIntent(plan: ToolDispatchPlan) {
+    const port = new BrokerRoutineToolPort({ effects, adapters });
+    await port.execute(request({ plan }));
+    const effect = await effects.get(BUSINESS_ID, plan.effectId);
+    if (effect === undefined) throw new Error("effect not reserved");
+    return effect.intent;
+  }
+
+  it("scopes an authored bare ref to the repository the arguments name", async () => {
+    const intent = await reservedIntent({
+      ...PLAN,
+      arguments: { repository: "tulip/farm", body: "hello" },
+      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
+    });
+    expect(intent.credentialRef).toBe(
+      githubInstallationSecretRef({ kind: "repository", repository: "tulip/farm" })
+    );
+  });
+
+  it("scopes to the account when only an owner is named", async () => {
+    const intent = await reservedIntent({
+      ...PLAN,
+      arguments: { owner: "tulip", name: "new-repo" },
+      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
+    });
+    expect(intent.credentialRef).toBe(
+      githubInstallationSecretRef({ kind: "account", owner: "tulip" })
+    );
+  });
+
+  it("leaves an already-scoped authored ref alone", async () => {
+    const authored = githubInstallationSecretRef({ kind: "account", owner: "acme" });
+    const intent = await reservedIntent({
+      ...PLAN,
+      arguments: { repository: "tulip/farm", body: "hello" },
+      credentialRef: authored,
+    });
+    expect(intent.credentialRef).toBe(authored);
+  });
+
+  it("leaves a non-GitHub ref alone", async () => {
+    const intent = await reservedIntent({
+      ...PLAN,
+      arguments: { repository: "tulip/farm", body: "hello" },
+      credentialRef: "secret://integrations/slack/bot-token",
+    });
+    expect(intent.credentialRef).toBe("secret://integrations/slack/bot-token");
+  });
+
+  it("leaves the bare ref alone when the arguments name no installation", async () => {
+    const intent = await reservedIntent({
+      ...PLAN,
+      arguments: { body: "hello" },
+      credentialRef: GITHUB_INSTALLATION_SECRET_REF,
+    });
+    expect(intent.credentialRef).toBe(GITHUB_INSTALLATION_SECRET_REF);
   });
 });

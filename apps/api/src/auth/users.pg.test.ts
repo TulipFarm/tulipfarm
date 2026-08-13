@@ -64,9 +64,19 @@ describe("PgUserRepo", () => {
     await expect(repo.insert(makeUser({ email: "dup@example.com" }))).rejects.toThrow();
   });
 
-  it("rejects a second admin insert with AdminAlreadyExistsError (users_single_admin_idx, #172)", async () => {
+  it("allows more than one admin after the single-admin index is retired", async () => {
     await repo.insert(makeUser({ role: "admin" }));
-    await expect(repo.insert(makeUser({ role: "admin" }))).rejects.toThrow(AdminAlreadyExistsError);
+    await expect(repo.insert(makeUser({ role: "admin" }))).resolves.toBeUndefined();
+    expect(await repo.count()).toBe(2);
+  });
+
+  it("rejects a second setup bootstrap admin without limiting later admins", async () => {
+    await repo.insert(makeUser({ role: "admin", setupBootstrap: true }));
+    await expect(repo.insert(makeUser({ role: "admin", setupBootstrap: true }))).rejects.toThrow(
+      AdminAlreadyExistsError
+    );
+    await expect(repo.insert(makeUser({ role: "admin" }))).resolves.toBeUndefined();
+    expect(await repo.count()).toBe(2);
   });
 
   it("still allows member inserts after an admin exists", async () => {

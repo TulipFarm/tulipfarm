@@ -4,7 +4,7 @@ import { BOT_GIT_EMAIL, BOT_GIT_NAME } from "@tulipfarm/constants";
 import simpleGit from "simple-git";
 import { hermeticGitEnv } from "./git-env";
 
-const SCAFFOLD_DIRS = ["resources", "routines", "agents", "skills", "integrations"];
+const SCAFFOLD_DIRS = ["resources", "routines", "agents", "skills", "integrations", "roles"];
 
 /**
  * Populate a fresh, commit-less soul checkout with the same stub layout
