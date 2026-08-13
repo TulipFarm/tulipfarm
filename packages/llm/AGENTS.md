@@ -34,9 +34,20 @@ map gave a `full`-autonomy Run the *weakest* model, coupling oversight to capabi
 
 ## How to extend
 
-- **Add a provider:** add the `@ai-sdk/<x>` dep, then a case in `provider.ts`. Resolve the key
-  from `entry.api_key_ref` — `env://VAR` reads `process.env`, otherwise `secrets.get(ref)`
+- **Add an API-keyed provider:** add the `@ai-sdk/<x>` dep, then a case in `provider.ts`. Resolve
+  the key from `entry.api_key_ref` — `env://VAR` reads `process.env`, otherwise `secrets.get(ref)`
   (`@tulipfarm/secrets`).
+- **Add a CLI provider** (a coding-agent CLI run as the model against a personal subscription
+  instead of an API key, e.g. `claude-code`): implement `CliLanguageModel` (`src/cli/base.ts`) —
+  it owns the `LanguageModelV4` plumbing (`doGenerate`/`doStream`, timeout, abort, usage), the
+  subclass only supplies a `runTurn` async generator. Reuse `src/cli/jail.ts` (HOME jail + env
+  allowlist), `src/cli/transcript.ts` (prompt → replayed text), and `src/cli/structured.ts`
+  (JSON-mode emulation). Register a static `ModelSpec` in `src/cli/specs.ts` — CLI models never
+  resolve against the LiteLLM catalog, so `validateRoutingCapacity`
+  (`apps/api/src/soul/llm-config/routes.ts`) needs this fallback to get a `max_input_tokens`. Add
+  the provider id to `packages/secrets/src/registry.ts`'s `LlmProviderId` + `LLM_PROVIDERS`
+  (reuse `role: "api_key"` for the single portable-token field), then a case in `provider.ts`. See
+  `docs/plans/cli-agent-providers.md` and `claude-code.ts` for the worked example.
 - **Tune fallback:** classify errors in `isHardFailure()` — auth / `404` / abort propagate
   immediately; `429` / `5xx` / timeout fall through to the next provider (logged via `FallbackLogger`).
 - **Do not add a second selector here.** A capability decision belongs in `selectModelProfile`,

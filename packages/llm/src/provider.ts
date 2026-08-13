@@ -12,6 +12,7 @@ import {
   type SecretsService,
   SecretUnavailableError,
 } from "@tulipfarm/secrets";
+import { ClaudeCodeModel } from "./cli/claude-code";
 import { ClassifiedLanguageModel } from "./provider-error";
 
 export async function resolveApiKey(
@@ -113,6 +114,12 @@ export async function createModel(
       }
       const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
       return new ClassifiedLanguageModel(p(entry.model));
+    }
+    case "claude-code": {
+      // Not an API key — apiKey above resolved the claude-code-oauth-token secret (role: "api_key").
+      // The CLI provider is not wrapped in ClassifiedLanguageModel: its errors already arrive as
+      // plain Error or LlmProviderError, not the AI SDK's APICallError shape that classifier expects.
+      return new ClaudeCodeModel(entry.model, apiKey);
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);

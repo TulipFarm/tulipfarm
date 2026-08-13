@@ -8,7 +8,7 @@
  * (over HTTP). Grows as new providers/integrations are added.
  */
 
-export type LlmProviderId = "anthropic" | "openai" | "azure" | "openai-compatible";
+export type LlmProviderId = "anthropic" | "openai" | "azure" | "openai-compatible" | "claude-code";
 
 /** Semantic role of a field, so the LLM layer can resolve it without hard-coding key strings. */
 export type ProviderFieldRole = "api_key" | "resource_name" | "base_url";
@@ -23,6 +23,8 @@ export type ProviderField = {
   /** Optional fields don't gate "configured" (e.g. an openai-compatible endpoint may need no key). */
   optional?: boolean;
   placeholder?: string;
+  /** Shown under the field (e.g. how to obtain the value) when the field isn't already stored. */
+  hint?: string;
 };
 
 export type LlmProviderInfo = {
@@ -87,6 +89,25 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
         role: "base_url",
         kind: "config",
         placeholder: "http://localhost:11434/v1",
+      },
+    ],
+  },
+  {
+    // Runs the Claude Code CLI as the model, authenticated with a portable token minted from a
+    // Claude Pro/Max subscription (`claude setup-token`, read via CLAUDE_CODE_OAUTH_TOKEN) instead
+    // of an API key — lets a user with no API budget run TulipFarm. See
+    // docs/plans/cli-agent-providers.md. Reuses role: "api_key" so Settings, /setup, and the
+    // delete-key-prunes-config cascade all work unchanged.
+    id: "claude-code",
+    label: "Claude Code (subscription)",
+    fields: [
+      {
+        key: "claude-code-oauth-token",
+        label: "OAuth token",
+        role: "api_key",
+        kind: "secret",
+        placeholder: "sk-ant-oat01-…",
+        hint: "Run `claude setup-token` in a terminal (requires a Claude Pro/Max subscription), then paste the printed token here.",
       },
     ],
   },

@@ -499,6 +499,8 @@ function ChainRow({
  * Inline editors made the chain unreadable — a list whose whole point is order was buried under
  * four inputs per row. The drawer keeps the ordering visible behind it.
  */
+const CUSTOM_MODEL = "__custom__";
+
 function ModelSheet({
   open,
   row,
@@ -548,11 +550,12 @@ function ModelSheet({
    * spec; several near-matches need the operator to say which one this is; no match at all still
    * needs a context window, or the runtime has no budget to plan against.
    */
-  async function pinSpec(candidate?: string) {
-    if (!provider || !model) return;
+  async function pinSpec(candidate?: string, modelOverride?: string) {
+    const targetModel = modelOverride ?? model;
+    if (!provider || !targetModel) return;
     setResolving(true);
     try {
-      const result = await resolveModelSpec(provider, model, false, candidate);
+      const result = await resolveModelSpec(provider, targetModel, false, candidate);
       if (result.spec) {
         onChange({ spec: result.spec });
         setCandidates([]);
@@ -575,6 +578,11 @@ function ModelSheet({
   const info = providers.find((p) => p.id === provider);
   const ready = info ? isProviderConfigured(info, secretKeys) : false;
   const facts = specFacts(row?.spec);
+  const hasSuggestions = !!options && options.models.length > 0;
+  // A suggested id picks the dropdown value directly; anything else (including empty, mid-typing a
+  // custom id) falls to the "Custom…" branch so the free-text input stays in control.
+  const isSuggested = hasSuggestions && !!row?.model && options.models.includes(row.model);
+  const showCustomInput = !hasSuggestions || !isSuggested;
 
   return (
     <Sheet open={open} onClose={onClose} title="Model">
@@ -605,28 +613,45 @@ function ModelSheet({
                   : (options?.reason ?? "Enter the ID exactly as your provider spells it.")
             }
           >
-            <Input
-              list={options && options.models.length > 0 ? "model-options" : undefined}
-              value={row.model}
-              onChange={(e) => {
-                onChange({ model: e.target.value, spec: undefined });
-                setCandidates([]);
-                setUnmatched(false);
-              }}
-              onBlur={() => {
-                if (row.model.trim() && !row.spec) void pinSpec();
-              }}
-              placeholder="e.g. gpt-4o-mini"
-              className="font-mono"
-            />
+            {hasSuggestions ? (
+              <Select
+                value={isSuggested ? row.model : CUSTOM_MODEL}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setCandidates([]);
+                  setUnmatched(false);
+                  if (value === CUSTOM_MODEL) {
+                    onChange({ model: "", spec: undefined });
+                    return;
+                  }
+                  onChange({ model: value, spec: undefined });
+                  void pinSpec(undefined, value);
+                }}
+              >
+                {options.models.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+                <option value={CUSTOM_MODEL}>Custom…</option>
+              </Select>
+            ) : null}
+            {showCustomInput ? (
+              <Input
+                value={row.model}
+                onChange={(e) => {
+                  onChange({ model: e.target.value, spec: undefined });
+                  setCandidates([]);
+                  setUnmatched(false);
+                }}
+                onBlur={() => {
+                  if (row.model.trim() && !row.spec) void pinSpec();
+                }}
+                placeholder="e.g. gpt-4o-mini"
+                className={cn("font-mono", hasSuggestions && "mt-2")}
+              />
+            ) : null}
           </Field>
-          {options && options.models.length > 0 ? (
-            <datalist id="model-options">
-              {options.models.map((m) => (
-                <option key={m} value={m} />
-              ))}
-            </datalist>
-          ) : null}
 
           <div className="rounded-md border border-border p-3">
             <div className="flex items-center justify-between gap-3">

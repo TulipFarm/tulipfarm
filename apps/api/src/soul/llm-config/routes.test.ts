@@ -177,6 +177,7 @@ describe("llm-config routes", () => {
         "openai",
         "azure",
         "openai-compatible",
+        "claude-code",
       ]);
       const anthropic = providers.find((p: { id: string }) => p.id === "anthropic");
       expect(anthropic.fields).toContainEqual(

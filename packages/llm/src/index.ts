@@ -1,3 +1,4 @@
+export { cliModelIds, cliModelSpec } from "./cli/specs";
 export { createEmbeddingModel } from "./embedding-provider";
 export {
   EMBEDDING_UNAVAILABLE_WARNING,

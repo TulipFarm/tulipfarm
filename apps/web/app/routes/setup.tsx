@@ -373,6 +373,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   openai: "gpt-4o",
   azure: "gpt-4o",
   "openai-compatible": "",
+  "claude-code": "sonnet",
 };
 
 type LlmDraft = { providerId: string; model: string; fieldValues: Record<string, string> };
@@ -473,7 +474,7 @@ function LlmStep({
           key={field.key}
           id={`setup-${field.key}`}
           label={`${field.label}${field.optional ? " (optional)" : ""}`}
-          hint={field.kind === "secret" ? "Stored encrypted." : undefined}
+          hint={field.hint ?? (field.kind === "secret" ? "Stored encrypted." : undefined)}
         >
           <Input
             id={`setup-${field.key}`}

@@ -1,6 +1,6 @@
 import { createModel } from "@tulipfarm/llm";
 import { LlmCredentialError } from "@tulipfarm/schema";
-import type { SecretsService } from "@tulipfarm/secrets";
+import { llmProviderById, providerField, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
 import { generateText } from "ai";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -21,6 +21,7 @@ import { patchSoulConfig, readSoulConfig } from "./soul-config";
 const PROBE_MODEL: Record<string, string> = {
   anthropic: "claude-haiku-4-5-20251001",
   openai: "gpt-4o-mini",
+  "claude-code": "haiku",
 };
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -266,7 +267,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           type: "object",
           required: ["provider", "apiKey"],
           properties: {
-            provider: { type: "string", enum: ["anthropic", "openai"] },
+            provider: { type: "string", enum: ["anthropic", "openai", "claude-code"] },
             apiKey: { type: "string", minLength: 1 },
           },
         },
@@ -280,11 +281,15 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     },
     async (req, reply) => {
       const body = (req.body ?? {}) as { provider?: unknown; apiKey?: unknown };
-      const provider = body.provider === "openai" ? "openai" : "anthropic";
+      const provider =
+        body.provider === "openai" || body.provider === "claude-code" ? body.provider : "anthropic";
       const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
       if (!apiKey) return reply.code(400).send({ error: "apiKey is required" });
 
-      const secretKey = `${provider}-api-key`;
+      const providerInfo = llmProviderById(provider);
+      const secretKey = providerInfo
+        ? (providerField(providerInfo, "api_key")?.key ?? `${provider}-api-key`)
+        : `${provider}-api-key`;
       await secretsService.set(secretKey, apiKey);
 
       // Live probe: validate the key is accepted by the provider.
