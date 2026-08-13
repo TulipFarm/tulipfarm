@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { HookError, type HookExecutor } from "@tulipfarm/sandbox";
 import type { SoulLoader, SoulResource } from "@tulipfarm/soul";
+import {
+  authorizeToolIntent,
+  type PublishedToolContract,
+  toolContractSpecOf,
+} from "@tulipfarm/tool-broker";
 import { describe, expect, it, vi } from "vitest";
 import type { PaginatedResult } from "../pagination.js";
 import type {
@@ -66,7 +71,10 @@ class FakeRepoFactory implements ResourceRepoFactory {
 
 const stubCounterStore: CounterStore = { makeCounterFn: () => async () => 1 };
 
-function makeSoulLoader(types: Record<string, Record<string, unknown>>): {
+function makeSoulLoader(
+  types: Record<string, Record<string, unknown>>,
+  domains: Readonly<Record<string, string>> = {}
+): {
   resources: { get: (type: string) => SoulResource | undefined; has: (type: string) => boolean };
 } {
   return {
@@ -75,6 +83,7 @@ function makeSoulLoader(types: Record<string, Record<string, unknown>>): {
         const schema = types[type];
         if (!schema) return undefined;
         return {
+          ...(domains[type] === undefined ? {} : { domain: domains[type] }),
           schema,
           hooksEnabled: false,
           hookSource: undefined,
@@ -90,6 +99,29 @@ function getTool(name: string) {
   const t = RESOURCE_TOOLS.find((t) => t.name === name);
   if (!t) throw new Error(`tool not found: ${name}`);
   return t;
+}
+
+function publishedContract(toolName: string): PublishedToolContract {
+  const spec = toolContractSpecOf(getTool(toolName));
+  return {
+    ...spec,
+    definitionId: `definition:${toolName}`,
+    authoredVersion: 1,
+    publishedDigest: "a".repeat(64),
+    requiredActions: spec.requiredActions ?? [],
+    requiredResources: spec.requiredResources ?? [],
+    dataClasses: spec.dataClasses ?? [],
+    allowedDestinations: spec.allowedDestinations ?? [],
+  };
+}
+
+function expectNoMalformedTargets(toolName: string, args: unknown): void {
+  const tool = getTool(toolName);
+  expect(() => tool.targetsFor(args)).not.toThrow();
+  for (const ref of tool.targetsFor(args)) {
+    expect(ref.type).not.toMatch(/undefined|null/);
+    expect(ref.id).not.toMatch(/undefined|null/);
+  }
 }
 
 function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeSoulLoader>) {
@@ -113,6 +145,238 @@ function makeCtx(factory?: FakeRepoFactory, soulLoader?: ReturnType<typeof makeS
     events: undefined,
   };
 }
+
+describe("RESOURCE_TOOLS targetsFor", () => {
+  it("target derivations tolerate empty and unexpected raw arguments", () => {
+    for (const tool of RESOURCE_TOOLS) {
+      expectNoMalformedTargets(tool.name, {});
+      expectNoMalformedTargets(tool.name, { unexpected: true });
+      expectNoMalformedTargets(tool.name, null);
+    }
+  });
+
+  it("record id tools derive only genuinely determined partial targets", () => {
+    for (const name of ["record_get", "record_update", "record_delete"]) {
+      const tool = getTool(name);
+      expect(tool.targetsFor({ type: "ticket" })).toEqual([{ type: "record", id: "ticket" }]);
+      expect(tool.targetsFor({ id: "rec-1" })).toEqual([]);
+      expect(tool.targetsFor({ type: { name: "ticket" }, id: "rec-1" })).toEqual([]);
+    }
+  });
+
+  it("derives different resource-type refs from each record tool's type argument", () => {
+    const cases = [
+      {
+        name: "record_create",
+        first: { type: "ticket", data: { title: "T" } },
+        second: { type: "leave-request", data: { title: "T" } },
+        expected: [{ type: "record", id: "ticket" }],
+        expectedSecond: [{ type: "record", id: "leave-request" }],
+      },
+      {
+        name: "record_list",
+        first: { type: "ticket" },
+        second: { type: "leave-request" },
+        expected: [{ type: "record", id: "ticket" }],
+        expectedSecond: [{ type: "record", id: "leave-request" }],
+      },
+      {
+        name: "record_get",
+        first: { type: "ticket", id: "rec-1" },
+        second: { type: "leave-request", id: "rec-1" },
+        expected: [
+          { type: "record", id: "ticket" },
+          { type: "record.ticket", id: "rec-1" },
+        ],
+        expectedSecond: [
+          { type: "record", id: "leave-request" },
+          { type: "record.leave-request", id: "rec-1" },
+        ],
+      },
+      {
+        name: "record_update",
+        first: { type: "ticket", id: "rec-1", version: 1, data: { title: "T" } },
+        second: { type: "leave-request", id: "rec-1", version: 1, data: { title: "T" } },
+        expected: [
+          { type: "record", id: "ticket" },
+          { type: "record.ticket", id: "rec-1" },
+        ],
+        expectedSecond: [
+          { type: "record", id: "leave-request" },
+          { type: "record.leave-request", id: "rec-1" },
+        ],
+      },
+      {
+        name: "record_delete",
+        first: { type: "ticket", id: "rec-1", version: 1 },
+        second: { type: "leave-request", id: "rec-1", version: 1 },
+        expected: [
+          { type: "record", id: "ticket" },
+          { type: "record.ticket", id: "rec-1" },
+        ],
+        expectedSecond: [
+          { type: "record", id: "leave-request" },
+          { type: "record.leave-request", id: "rec-1" },
+        ],
+      },
+      {
+        name: "record_search",
+        first: { type: "ticket", filters: { status: "open" } },
+        second: { type: "leave-request", filters: { status: "open" } },
+        expected: [{ type: "record", id: "ticket" }],
+        expectedSecond: [{ type: "record", id: "leave-request" }],
+      },
+    ];
+
+    for (const entry of cases) {
+      const tool = getTool(entry.name);
+      expect(tool.targetsFor(entry.first), entry.name).toEqual(entry.expected);
+      expect(tool.targetsFor(entry.second), entry.name).toEqual(entry.expectedSecond);
+    }
+  });
+
+  it("derives record domains from the trusted resource type definition", () => {
+    const soulLoader = makeSoulLoader(
+      {
+        engineering_ticket: { type: "object", properties: { title: { type: "string" } } },
+        hr_review: { type: "object", properties: { title: { type: "string" } } },
+        note: { type: "object", properties: { title: { type: "string" } } },
+      },
+      { engineering_ticket: "engineering", hr_review: "hr" }
+    );
+    const ctx = makeCtx(new FakeRepoFactory(), soulLoader);
+    const tool = getTool("record_update");
+
+    expect(
+      tool.targetsFor(
+        { type: "hr_review", id: "rec-1", version: 1, data: {}, domain: "engineering" },
+        ctx
+      )
+    ).toEqual([
+      { type: "record", id: "hr_review", domain: "hr" },
+      { type: "record.hr_review", id: "rec-1", domain: "hr" },
+    ]);
+    expect(tool.targetsFor({ type: "note", id: "rec-1", version: 1, data: {} }, ctx)).toEqual([
+      { type: "record", id: "note" },
+      { type: "record.note", id: "rec-1" },
+    ]);
+  });
+
+  it("denies HR record mutation to an engineering-only principal", () => {
+    const soulLoader = makeSoulLoader(
+      {
+        engineering_ticket: { type: "object", properties: { title: { type: "string" } } },
+        hr_review: { type: "object", properties: { title: { type: "string" } } },
+      },
+      { engineering_ticket: "engineering", hr_review: "hr" }
+    );
+    const ctx = makeCtx(new FakeRepoFactory(), soulLoader);
+    const tool = getTool("record_update");
+    const contract = { ...publishedContract("record_update"), dataClasses: ["internal"] };
+    const policy = {
+      authorityLayers: [
+        {
+          name: "principal",
+          grants: [
+            {
+              action: "record.update",
+              resourceType: "*",
+              domain: "engineering",
+              effect: "allow" as const,
+            },
+          ],
+        },
+      ],
+      guardrailRules: [{ id: "allow", effect: "allow" as const, action: "*", resourceType: "*" }],
+      dlpRules: [{ dataClass: "internal" }],
+      guardrailRevision: "test",
+    };
+
+    const hrOutcome = authorizeToolIntent(
+      {
+        intentId: "intent-hr",
+        businessId: "business-1",
+        runId: "run-1",
+        stateId: "state-1",
+        toolId: "record_update",
+        toolVersion: "1",
+        action: "record.update",
+        targetRefs: tool.targetsFor(
+          { type: "hr_review", id: "rec-1", version: 1, data: { title: "No" } },
+          ctx
+        ),
+        arguments: {},
+        idempotencyKey: "hr",
+      },
+      contract,
+      policy
+    );
+    const engineeringOutcome = authorizeToolIntent(
+      {
+        intentId: "intent-eng",
+        businessId: "business-1",
+        runId: "run-1",
+        stateId: "state-1",
+        toolId: "record_update",
+        toolVersion: "1",
+        action: "record.update",
+        targetRefs: tool.targetsFor(
+          { type: "engineering_ticket", id: "rec-1", version: 1, data: { title: "Yes" } },
+          ctx
+        ),
+        arguments: {},
+        idempotencyKey: "eng",
+      },
+      contract,
+      policy
+    );
+
+    expect(hrOutcome).toMatchObject({ outcome: "denied", reason: "authorization_denied" });
+    expect(engineeringOutcome).toMatchObject({ outcome: "authorized" });
+  });
+
+  it("keeps undomained record mutation authorized by today's domainless grant", () => {
+    const ctx = makeCtx(
+      new FakeRepoFactory(),
+      makeSoulLoader({
+        note: { type: "object", properties: { title: { type: "string" } } },
+      })
+    );
+    const tool = getTool("record_update");
+    const contract = { ...publishedContract("record_update"), dataClasses: ["internal"] };
+    const outcome = authorizeToolIntent(
+      {
+        intentId: "intent-note",
+        businessId: "business-1",
+        runId: "run-1",
+        stateId: "state-1",
+        toolId: "record_update",
+        toolVersion: "1",
+        action: "record.update",
+        targetRefs: tool.targetsFor(
+          { type: "note", id: "rec-1", version: 1, data: { title: "Still allowed" } },
+          ctx
+        ),
+        arguments: {},
+        idempotencyKey: "note",
+      },
+      contract,
+      {
+        authorityLayers: [
+          {
+            name: "principal",
+            grants: [{ action: "record.update", resourceType: "*", effect: "allow" }],
+          },
+        ],
+        guardrailRules: [{ id: "allow", effect: "allow" as const, action: "*", resourceType: "*" }],
+        dlpRules: [{ dataClass: "internal" }],
+        guardrailRevision: "test",
+      }
+    );
+
+    expect(outcome).toMatchObject({ outcome: "authorized" });
+  });
+});
 
 describe("record_create", () => {
   it("creates a record and returns it with id + version:1", async () => {

@@ -148,7 +148,9 @@ describe("integration marketplace routes", () => {
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    // `DELETE /:name` removes the deployment-wide connection, so it takes the operator gate that
+    // `integrations/routes.ts` applies alongside connect and disconnect.
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "integrations-soul-"));

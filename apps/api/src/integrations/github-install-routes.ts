@@ -11,6 +11,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { GitHubInstallHttp } from "./github-http";
 import { type InstalledRepository, listInstalledRepositories } from "./github-install";
+import { refuseNonOperator } from "./operator";
 
 /*
  * What a business can do with GitHub *after* it is connected: inspect its installations, pick a
@@ -153,11 +154,16 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
             properties: { status: { type: "string" } },
           },
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      // Disconnecting an installation revokes every Agent's reach through it, and the two
+      // Soul-repo routes decide which repository this business's source of truth *is*.
+      // Operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { installationId } = req.params as { installationId: string };
       const snapshot = await deps.integrations.loadProviderSnapshot(deps.businessId, "github");
       const integration = snapshot.integrations.find(
@@ -299,6 +305,7 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           500: ErrorSchema,
           502: ErrorSchema,
@@ -306,6 +313,10 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
       },
     },
     async (req, reply) => {
+      // Disconnecting an installation revokes every Agent's reach through it, and the two
+      // Soul-repo routes decide which repository this business's source of truth *is*.
+      // Operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { installationId, owner, repo } = req.body as {
         installationId: string;
         owner: string;
@@ -372,6 +383,7 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
           },
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: {
             type: "object",
@@ -384,6 +396,10 @@ export function registerGitHubInstallRoutes(app: FastifyInstance, deps: GitHubIn
       },
     },
     async (req, reply) => {
+      // Disconnecting an installation revokes every Agent's reach through it, and the two
+      // Soul-repo routes decide which repository this business's source of truth *is*.
+      // Operator only (see refuseNonOperator).
+      if (refuseNonOperator(req, reply)) return reply;
       const { installationId, owner, repo } = req.body as {
         installationId: string;
         owner: string;

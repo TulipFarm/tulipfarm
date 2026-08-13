@@ -159,11 +159,12 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
           description: "Limits every agent is checked against, before and after it acts.",
         },
         {
-          to: "/business/people",
-          label: "People",
+          to: "/business/access",
+          label: "People & access",
           icon: Users,
           adminOnly: true,
-          description: "Who can sign in, what they can do, and who has not accepted yet.",
+          description:
+            "Invite people, turn accounts off, and decide what each person is allowed to do.",
           wide: true,
         },
         {
@@ -261,7 +262,10 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
   { prefix: "/business/secrets", label: "Secrets", icon: KeyRound },
   { prefix: "/business/soul", label: "Soul", icon: Sparkles },
   { prefix: "/business/guardrails", label: "Guardrails", icon: ShieldCheck },
-  { prefix: "/business/people", label: "People", icon: Users },
+  // `/business/people` merged into `/business/access` and now redirects there. It keeps an entry so
+  // the top bar names the destination during that redirect rather than falling back to Chat.
+  { prefix: "/business/people", label: "People & access", icon: Users },
+  { prefix: "/business/access", label: "People & access", icon: Users },
   { prefix: "/business/about", label: "About", icon: Info },
   { prefix: "/settings/profile", label: "Profile", icon: UserRound },
   { prefix: "/settings/appearance", label: "Appearance", icon: Palette },

@@ -4,7 +4,8 @@ import type { HookExecutor } from "@tulipfarm/sandbox";
 import { ajv } from "@tulipfarm/schema";
 import type { SoulLoader } from "@tulipfarm/soul";
 import { parsePaginationQuery } from "../pagination.js";
-import { err, ok, type ToolCallResult } from "../tools/types.js";
+import { type ApiToolDefinition, defineApiTool } from "../tools/define.js";
+import { err, ok } from "../tools/types.js";
 import {
   type CounterStore,
   makeHistoryEntry,
@@ -40,14 +41,6 @@ export interface ResourceServices {
   events?: EventEmitter;
 }
 
-export interface ResourceTool {
-  name: string;
-  description: string;
-  mutating: boolean;
-  inputSchema: Record<string, unknown>;
-  handler: (args: unknown, ctx: ResourceToolContext) => Promise<ToolCallResult>;
-}
-
 function firstError(validate: ReturnType<typeof ajv.compile>): string {
   const e = validate.errors?.[0];
   if (!e) return "invalid arguments";
@@ -56,6 +49,39 @@ function firstError(validate: ReturnType<typeof ajv.compile>): string {
 
 function reason(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+type TargetRef = { type: string; id: string; domain?: string };
+
+function objectArg(args: unknown): Record<string, unknown> {
+  return typeof args === "object" && args !== null ? (args as Record<string, unknown>) : {};
+}
+
+function stringArg(args: unknown, key: string): string | undefined {
+  const value = objectArg(args)[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function resourceDomain(ctx: ResourceToolContext | undefined, type: string): string | undefined {
+  return ctx?.soulLoader.resources.get(type)?.domain;
+}
+
+function recordTypeTargets(args: unknown, ctx?: ResourceToolContext): TargetRef[] {
+  const type = stringArg(args, "type");
+  if (type === undefined) return [];
+  const domain = resourceDomain(ctx, type);
+  return [{ type: "record", id: type, ...(domain === undefined ? {} : { domain }) }];
+}
+
+function recordAndRecordIdTargets(args: unknown, ctx?: ResourceToolContext): TargetRef[] {
+  const type = stringArg(args, "type");
+  const id = stringArg(args, "id");
+  const targets = recordTypeTargets(args, ctx);
+  if (type !== undefined && id !== undefined) {
+    const domain = resourceDomain(ctx, type);
+    targets.push({ type: `record.${type}`, id, ...(domain === undefined ? {} : { domain }) });
+  }
+  return targets;
 }
 
 const CREATE_SCHEMA = {
@@ -137,12 +163,19 @@ const validateUpdate = ajv.compile(UPDATE_SCHEMA);
 const validateDelete = ajv.compile(DELETE_SCHEMA);
 const validateSearch = ajv.compile(SEARCH_SCHEMA);
 
-const resourceCreate: ResourceTool = {
+const resourceCreate = defineApiTool<ResourceToolContext>({
   name: "record_create",
   description:
     "Create a new record of the given resource type. Returns the created record with its UUID id and version.",
   mutating: true,
+  tier: "system",
   inputSchema: CREATE_SCHEMA,
+  authorization: {
+    action: "record.create",
+    resources: ["record"],
+    targets: recordTypeTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateCreate(args)) return err("validation_error", firstError(validateCreate));
     const { type, data: rawData } = args as { type: string; data: Record<string, unknown> };
@@ -187,14 +220,21 @@ const resourceCreate: ResourceTool = {
     await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(doc));
     return ok(toApiRecord(doc));
   },
-};
+});
 
-const resourceList: ResourceTool = {
+const resourceList = defineApiTool<ResourceToolContext>({
   name: "record_list",
   description:
     "List records of a resource type. Cursor-paginated. Soft-deleted records excluded by default.",
   mutating: false,
+  tier: "system",
   inputSchema: LIST_SCHEMA,
+  authorization: {
+    action: "record.list",
+    resources: ["record"],
+    targets: recordTypeTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateList(args)) return err("validation_error", firstError(validateList));
     const a = args as { type: string; cursor?: string; limit?: number; includeDeleted?: boolean };
@@ -213,13 +253,20 @@ const resourceList: ResourceTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const resourceGet: ResourceTool = {
+const resourceGet = defineApiTool<ResourceToolContext>({
   name: "record_get",
   description: "Get a single record by id.",
   mutating: false,
+  tier: "system",
   inputSchema: GET_SCHEMA,
+  authorization: {
+    action: "record.read",
+    resources: ["record"],
+    targets: recordAndRecordIdTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateGet(args)) return err("validation_error", firstError(validateGet));
     const { type, id } = args as { type: string; id: string };
@@ -236,14 +283,21 @@ const resourceGet: ResourceTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-const resourceUpdate: ResourceTool = {
+const resourceUpdate = defineApiTool<ResourceToolContext>({
   name: "record_update",
   description:
     "Merge-update a record. Pass only the fields to change. Requires version for optimistic concurrency.",
   mutating: true,
+  tier: "system",
   inputSchema: UPDATE_SCHEMA,
+  authorization: {
+    action: "record.update",
+    resources: ["record"],
+    targets: recordAndRecordIdTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateUpdate(args)) return err("validation_error", firstError(validateUpdate));
     const {
@@ -313,14 +367,21 @@ const resourceUpdate: ResourceTool = {
     await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(newDoc));
     return ok(toApiRecord(newDoc));
   },
-};
+});
 
-const resourceDelete: ResourceTool = {
+const resourceDelete = defineApiTool<ResourceToolContext>({
   name: "record_delete",
   description:
     "Soft-delete a record. Requires version for optimistic concurrency. Record remains in history.",
   mutating: true,
+  tier: "system",
   inputSchema: DELETE_SCHEMA,
+  authorization: {
+    action: "record.delete",
+    resources: ["record"],
+    targets: recordAndRecordIdTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateDelete(args)) return err("validation_error", firstError(validateDelete));
     const { type, id, version } = args as { type: string; id: string; version: number };
@@ -359,14 +420,22 @@ const resourceDelete: ResourceTool = {
     await maybeRunAfterHook(ctx.hookExecutor, resourceDef, type, toApiRecord(softDeleted));
     return ok({ id });
   },
-};
+});
 
-const resourceSearch: ResourceTool = {
+const resourceSearch = defineApiTool<ResourceToolContext>({
   name: "record_search",
   description:
     "Search records of a resource type by field values (JSONB containment match). All filter fields must match exactly.",
   mutating: false,
+  tier: "system",
   inputSchema: SEARCH_SCHEMA,
+  authorization: {
+    // Deliberately same authority as record_list: both reveal records from one resource type.
+    action: "record.list",
+    resources: ["record"],
+    targets: recordTypeTargets,
+    dataClasses: ["business_record"],
+  },
   handler: async (args, ctx) => {
     if (!validateSearch(args)) return err("validation_error", firstError(validateSearch));
     const a = args as {
@@ -391,9 +460,9 @@ const resourceSearch: ResourceTool = {
       return err("internal_error", reason(e));
     }
   },
-};
+});
 
-export const RESOURCE_TOOLS: ResourceTool[] = [
+export const RESOURCE_TOOLS: ApiToolDefinition<ResourceToolContext>[] = [
   resourceCreate,
   resourceList,
   resourceGet,

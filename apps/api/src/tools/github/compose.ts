@@ -13,10 +13,12 @@ import type { IntegrationStore } from "@tulipfarm/storage";
 import { CredentialDispatcher, type ToolAdapter } from "@tulipfarm/tool-broker";
 import { GitHubInstallHttp } from "../../integrations/github-http";
 import { InstallationScopeGitHubContextResolver } from "./context";
+import type { GitHubInstallationSelector } from "./credentials";
 import {
-  GITHUB_INSTALLATION_SECRET_REF,
   GitHubInstallationTokenProvider,
   githubCompositeSecretProvider,
+  githubInstallationSecretRef,
+  isGitHubInstallationSecretRef,
 } from "./credentials";
 import type { GitHubInstallationDirectory } from "./installation";
 import { StoreGitHubInstallationDirectory } from "./installation";
@@ -46,16 +48,34 @@ export interface GitHubTooling {
   readonly installations: GitHubInstallationDirectory;
 }
 
-/** Default-deny authorizer: only the GitHub installation-token ref may ever lease. */
+/**
+ * What composition gets back, which is more than the Tools need.
+ *
+ * `installationToken` is kept off `GitHubTooling` deliberately: that interface is what a Tool is
+ * handed, and a Tool has no business minting a raw token — it dispatches through `credentials`,
+ * which leases per effect and records one. The entitlement check is the exception because it
+ * performs no effect; it is the question asked before deciding whether an effect may happen.
+ */
+export interface GitHubToolingBundle extends GitHubTooling {
+  /**
+   * The installation token covering one repository. Scoped rather than installation-blind because
+   * a business may hold several installations, and the entitlement check must ask GitHub over the
+   * credential of the installation that actually covers the repository in question — asking with
+   * another account's token yields a 404 the check would have to read as "could not determine".
+   */
+  readonly installationToken: (selector: GitHubInstallationSelector) => Promise<string | undefined>;
+}
+
+/** Default-deny authorizer: only a GitHub installation-token ref may ever lease. */
 const githubOnlyAuthorizer: SecretAuthorizer = {
   authorize(scope) {
-    if (scope.secretRef !== GITHUB_INSTALLATION_SECRET_REF)
+    if (!isGitHubInstallationSecretRef(scope.secretRef))
       return { allowed: false, reason: "not_authorized" };
     return { allowed: true, maxTtlMs: 5 * 60 * 1000, maxUses: 1 };
   },
 };
 
-export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTooling {
+export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubToolingBundle {
   const http = options.http ?? new GitHubInstallHttp();
   const now = options.now ?? (() => new Date());
   const installations = new StoreGitHubInstallationDirectory(
@@ -91,6 +111,9 @@ export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTo
   });
 
   return {
+    installationToken: async (selector: GitHubInstallationSelector) =>
+      (await provider.resolveCurrent(githubInstallationSecretRef(selector)).catch(() => null))
+        ?.value,
     adapters: new Map<string, ToolAdapter>([[GITHUB_ADAPTER_REF, adapter]]),
     credentials,
     installations,

@@ -5,13 +5,19 @@ import { analyzeHook, HookAnalysisError } from "@tulipfarm/sandbox";
 import { ajv, TulipFarmValidationError, validateResourceSchema } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml } from "yaml";
 import type { AuditService } from "../../audit/service";
 import { makeSoulAuditWriter } from "../../audit/soul-write";
 import { ErrorSchema } from "../../auth/schemas";
 import type { RateLimiter } from "../../rate-limit";
 import { makeRateLimitHook } from "../../rate-limit";
 import { commitActorFromRequest } from "../commit-actor";
+import {
+  RESOURCE_DOMAIN_RE,
+  resourceDefinitionYaml,
+  resourceEnvelopeError,
+  resourceTypePayload,
+} from "./definition";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -80,12 +86,26 @@ const ResourceTypeSchema = {
     name: { type: "string" },
     schema: { type: "string" },
     hasHooks: { type: "boolean" },
+    domain: { type: "string" },
   },
   required: ["name", "schema", "hasHooks"],
 } as const;
 
 const SOUL_WRITE_LIMIT = 60;
 const SOUL_WRITE_WINDOW_MS = 60_000;
+
+/**
+ * A Resource's `domain` is the wall between an HR record and an engineering one: the member
+ * allow-list grants every member `record.*` on *domainless* requests, so setting, changing or
+ * removing a domain is what decides whether a Resource is walled at all. Authoring the record
+ * *schema* stays open to members; deciding its **domain** does not.
+ *
+ * Fails closed for non-user principals (API clients carry no role), matching
+ * `soul/publication-routes.ts`.
+ */
+function isDeploymentAdmin(req: FastifyRequest): boolean {
+  return req.principal?.kind === "user" && req.principal.role === "admin";
+}
 
 export function registerResourceTypeRoutes(
   app: FastifyInstance,
@@ -122,22 +142,34 @@ export function registerResourceTypeRoutes(
           properties: {
             name: { type: "string" },
             schema: { type: "string" },
+            domain: { type: "string" },
           },
         },
         response: {
           201: ResourceTypeSchema,
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           409: ErrorSchema,
           422: ValidationErrorSchema,
         },
       },
     },
     async (req, reply) => {
-      const { name, schema: schemaYaml } = req.body as { name: string; schema: string };
+      const {
+        name,
+        schema: schemaYaml,
+        domain,
+      } = req.body as { name: string; schema: string; domain?: string };
 
       if (!name || !NAME_RE.test(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
+      }
+      if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
+        return reply.code(400).send({ error: "invalid resource type domain" });
+      }
+      if (domain !== undefined && !isDeploymentAdmin(req)) {
+        return reply.code(403).send({ error: "only an admin can set a resource type's domain" });
       }
 
       const typeDir = join(gitSync.path, "resources", name);
@@ -149,7 +181,22 @@ export function registerResourceTypeRoutes(
       if (!check.ok) return reply.code(check.status).send(check.body);
 
       await mkdir(typeDir, { recursive: true });
-      await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+      const body =
+        domain === undefined
+          ? schemaYaml
+          : resourceDefinitionYaml({ name, schema: check.parsed, domain });
+      if (domain !== undefined) {
+        const envelopeError = resourceEnvelopeError(body);
+        if (envelopeError !== undefined) {
+          await rm(typeDir, { recursive: true, force: true });
+          return reply.code(422).send({ error: envelopeError });
+        }
+      }
+      await writeFile(
+        join(typeDir, domain === undefined ? "schema.yml" : "resource.yaml"),
+        body,
+        "utf8"
+      );
 
       await gitSync.commit(`soul: add resource type ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
@@ -157,7 +204,12 @@ export function registerResourceTypeRoutes(
       await reconcile?.();
       await auditWrite(req, "resource-type.create", `resource-type:${name}`);
 
-      return reply.code(201).send({ name, schema: schemaYaml, hasHooks: false });
+      return reply.code(201).send({
+        name,
+        schema: schemaYaml,
+        hasHooks: false,
+        ...(domain === undefined ? {} : { domain }),
+      });
     }
   );
 
@@ -182,11 +234,7 @@ export function registerResourceTypeRoutes(
       },
     },
     async (_req, reply) => {
-      const types = Array.from(soulLoader.resources.values()).map(({ name, schema, hasHooks }) => ({
-        name,
-        schema: stringifyYaml(schema),
-        hasHooks,
-      }));
+      const types = Array.from(soulLoader.resources.values()).map(resourceTypePayload);
       return reply.send({ types });
     }
   );
@@ -204,12 +252,13 @@ export function registerResourceTypeRoutes(
         body: {
           type: "object",
           required: ["schema"],
-          properties: { schema: { type: "string" } },
+          properties: { schema: { type: "string" }, domain: { type: "string" } },
         },
         response: {
           200: ResourceTypeSchema,
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           422: ValidationErrorSchema,
         },
@@ -217,19 +266,43 @@ export function registerResourceTypeRoutes(
     },
     async (req, reply) => {
       const { name } = req.params as { name: string };
-      const { schema: schemaYaml } = req.body as { schema: string };
+      const { schema: schemaYaml, domain } = req.body as { schema: string; domain?: string };
 
       if (!name || !NAME_RE.test(name)) {
         return reply.code(400).send({ error: "invalid resource type name" });
+      }
+      if (domain !== undefined && !RESOURCE_DOMAIN_RE.test(domain)) {
+        return reply.code(400).send({ error: "invalid resource type domain" });
       }
       const typeDir = join(gitSync.path, "resources", name);
       if (!existsSync(typeDir)) {
         return reply.code(404).send({ error: "resource type not found" });
       }
+      const existingDomain = soulLoader.resources.get(name)?.domain;
+      // Only a *change* of domain needs admin — a member editing the schema of a domained Resource
+      // omits `domain` and keeps the existing wall, which is the ordinary case.
+      if (domain !== undefined && domain !== existingDomain && !isDeploymentAdmin(req)) {
+        return reply.code(403).send({ error: "only an admin can change a resource type's domain" });
+      }
       const check = checkSchemaYaml(schemaYaml);
       if (!check.ok) return reply.code(check.status).send(check.body);
 
-      await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+      const nextDomain = domain ?? existingDomain;
+      if (nextDomain === undefined) {
+        await writeFile(join(typeDir, "schema.yml"), schemaYaml, "utf8");
+      } else {
+        const body = resourceDefinitionYaml({
+          name,
+          schema: check.parsed,
+          domain: nextDomain,
+        });
+        const envelopeError = resourceEnvelopeError(body);
+        if (envelopeError !== undefined) {
+          return reply.code(422).send({ error: envelopeError });
+        }
+        await writeFile(join(typeDir, "resource.yaml"), body, "utf8");
+        await rm(join(typeDir, "schema.yml"), { force: true });
+      }
       await gitSync.commit(`soul: update resource type ${name}`, commitActorFromRequest(req));
       await soulLoader.reload();
       // New columns may have been added — materialise them before records reference them.
@@ -237,9 +310,12 @@ export function registerResourceTypeRoutes(
       await auditWrite(req, "resource-type.update", `resource-type:${name}`);
 
       const reloaded = soulLoader.resources.get(name);
-      return reply
-        .code(200)
-        .send({ name, schema: schemaYaml, hasHooks: reloaded?.hasHooks ?? false });
+      return reply.code(200).send({
+        name,
+        schema: schemaYaml,
+        hasHooks: reloaded?.hasHooks ?? false,
+        ...(reloaded?.domain === undefined ? {} : { domain: reloaded.domain }),
+      });
     }
   );
 
@@ -254,7 +330,13 @@ export function registerResourceTypeRoutes(
         tags: ["soul"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
-        response: { 204: { type: "null" }, 400: ErrorSchema, 401: ErrorSchema, 404: ErrorSchema },
+        response: {
+          204: { type: "null" },
+          400: ErrorSchema,
+          401: ErrorSchema,
+          403: ErrorSchema,
+          404: ErrorSchema,
+        },
       },
     },
     async (req, reply) => {
@@ -265,6 +347,11 @@ export function registerResourceTypeRoutes(
       const typeDir = join(gitSync.path, "resources", name);
       if (!existsSync(typeDir)) {
         return reply.code(404).send({ error: "resource type not found" });
+      }
+      // Without this a member could delete a domained Resource and re-create it domainless,
+      // walking around the admin gate on POST and taking the wall down by the back door.
+      if (soulLoader.resources.get(name)?.domain !== undefined && !isDeploymentAdmin(req)) {
+        return reply.code(403).send({ error: "only an admin can delete a domained resource type" });
       }
       await rm(typeDir, { recursive: true, force: true });
       await gitSync.commit(`soul: remove resource type ${name}`, commitActorFromRequest(req));

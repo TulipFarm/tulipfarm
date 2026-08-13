@@ -76,6 +76,49 @@ describe("decideEffectivePermission", () => {
     expect(decision).toEqual({ allowed: false, reason: "explicit_deny", deniedLayer: "guardrail" });
   });
 
+  it("lets a domain-scoped explicit deny beat a matching domain allow", () => {
+    const request: AccessRequest = { ...READ, domain: "hr" };
+    const decision = decideEffectivePermission(
+      [
+        layer("user", [{ ...allowAll, domain: "*" }]),
+        layer("guardrail", [
+          { ...allowAll, domain: "*" },
+          { ...denyRead, domain: "hr" },
+        ]),
+      ],
+      request,
+      NOW
+    );
+    expect(decision).toEqual({ allowed: false, reason: "explicit_deny", deniedLayer: "guardrail" });
+  });
+
+  it("lets an engineering-only record grant mutate engineering records but not HR records", () => {
+    const grants: AccessGrant[] = [
+      {
+        action: "record.update",
+        resourceType: "*",
+        domain: "engineering",
+        effect: "allow",
+      },
+    ];
+    const authority = [layer("principal", grants)];
+
+    expect(
+      decideEffectivePermission(
+        authority,
+        { action: "record.update", resourceType: "record.ticket", domain: "engineering" },
+        NOW
+      ).allowed
+    ).toBe(true);
+    expect(
+      decideEffectivePermission(
+        authority,
+        { action: "record.update", resourceType: "record.performance_review", domain: "hr" },
+        NOW
+      ).allowed
+    ).toBe(false);
+  });
+
   it("never unions: adding a broader layer cannot flip a denial", () => {
     const denied = [layer("user", [allowRead]), layer("agent", [])];
     expect(decideEffectivePermission(denied, READ, NOW).allowed).toBe(false);

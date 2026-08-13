@@ -19,6 +19,7 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { MemorySessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
+import type { SetupAdminCreator } from "./first-admin";
 
 class FakeUserRepo implements UserRepo {
   users: UserDoc[] = [];
@@ -31,13 +32,20 @@ class FakeUserRepo implements UserRepo {
   async count() {
     return this.users.length;
   }
-  // Mirrors the production `users_single_admin_idx` invariant (PgUserRepo.insert) so tests
-  // can exercise the first-admin race without a real Postgres connection (#172).
   async insert(u: UserDoc) {
-    if (u.role === "admin" && this.users.some((existing) => existing.role === "admin")) {
+    if (u.setupBootstrap && this.users.some((existing) => existing.setupBootstrap)) {
       throw new AdminAlreadyExistsError();
     }
     this.users.push(u);
+  }
+}
+
+class FakeSetupAdminCreator implements SetupAdminCreator {
+  constructor(private readonly users: FakeUserRepo) {}
+
+  async create(user: UserDoc): Promise<void> {
+    await this.users.insert(user);
+    ownerPrincipalIds.push(user._id);
   }
 }
 
@@ -105,9 +113,12 @@ async function makeApp(dir: string): Promise<FastifyInstance> {
   const soulPath = path.join(dir, "soul");
   vi.stubEnv("SOUL_PATH", soulPath);
   vi.stubEnv("ENCRYPTION_KEY", crypto.randomBytes(32).toString("base64"));
+  const userRepo = new FakeUserRepo();
+  const setupAdminCreator = new FakeSetupAdminCreator(userRepo);
   return buildApp({
     sessionStore: new MemorySessionStore(),
-    userRepo: new FakeUserRepo(),
+    userRepo,
+    setupAdminCreator,
     tokenRepo: new StubTokenRepo(),
     secretsService: new SecretsService(new FakeSecretRepo(), {
       dekId: randomUUID(),
@@ -119,8 +130,10 @@ async function makeApp(dir: string): Promise<FastifyInstance> {
 
 let dir: string;
 let app: FastifyInstance;
+let ownerPrincipalIds: string[];
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "setup-"));
+  ownerPrincipalIds = [];
   app = await makeApp(dir);
 });
 afterEach(async () => {
@@ -166,6 +179,7 @@ describe("setup routes", () => {
   it("creates the first admin, auto-logs in, then locks (403)", async () => {
     const cookies = await createAdmin();
     expect(cookies.some((c) => c.name === "tf_sid")).toBe(true);
+    expect(ownerPrincipalIds).toHaveLength(1);
     const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
     // admin exists but setupComplete not set yet
     expect(status.json()).toEqual({ needsSetup: false });

@@ -17,6 +17,7 @@ import {
   loadSkillTool,
   PLATFORM_TOOLS,
   type PlatformToolContext,
+  routineForgeTool,
   routinePickerTool,
   soulRepoCommitTool,
   soulRepoPushTool,
@@ -89,6 +90,80 @@ function makeGitSync(opts: {
       : vi.fn().mockResolvedValue(opts.commitResult ?? { sha: "abc123", filesChanged: 2 }),
   } as unknown as import("@tulipfarm/soul").GitSyncService;
 }
+
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
+// ── Authorization declarations ───────────────────────────────────────────────
+
+describe("platform authorization declarations", () => {
+  it("uses Soul target types for Soul-backed Skills, Agents, and Routines", () => {
+    expect(loadSkillTool.targetsFor({ name: "research" })).toEqual([
+      { type: "soul.skill", id: "research" },
+    ]);
+    expect(loadSkillReferenceTool.targetsFor({ skill: "research", reference: "guide.md" })).toEqual(
+      [{ type: "soul.skill", id: "research" }]
+    );
+    expect(callSkillTool.targetsFor({ name: "research" })).toEqual([
+      { type: "soul.skill", id: "research" },
+    ]);
+    expect(transferToAgentTool.targetsFor({ agentId: "planner" })).toEqual([
+      { type: "platform.agent", id: "planner" },
+    ]);
+    expect(delegateToAgentTool.targetsFor({ agentId: "planner", task: "plan" })).toEqual([
+      { type: "platform.agent", id: "planner" },
+    ]);
+    expect(triggerRoutineTool.targetsFor({ name: "daily-digest" })).toEqual([
+      { type: "soul.routine", id: "daily-digest" },
+    ]);
+    expect(routineForgeTool.targetsFor({ name: "daily-digest" })).toEqual([
+      { type: "soul.routine", id: "daily-digest" },
+    ]);
+  });
+
+  it("authorizes both halves of a Soul batch against the same resource", () => {
+    expect(beginSoulBatchTool.authorization.resources).toEqual(["soul.repo"]);
+    expect(endSoulBatchTool.authorization.resources).toEqual(["soul.repo"]);
+    expect(beginSoulBatchTool.targetsFor({})).toEqual([]);
+    expect(endSoulBatchTool.targetsFor({ message: "publish" })).toEqual([
+      { type: "soul.repo", id: "entire-repository" },
+    ]);
+    expect(soulRepoPushTool.targetsFor({})).toEqual([
+      { type: "soul.repo", id: "entire-repository" },
+    ]);
+    expect(routinePickerTool.targetsFor({})).toEqual([]);
+  });
+
+  it("keeps touched target derivations total for raw model output", () => {
+    const tools = [
+      loadSkillTool,
+      loadSkillReferenceTool,
+      callSkillTool,
+      transferToAgentTool,
+      delegateToAgentTool,
+      triggerRoutineTool,
+      routineForgeTool,
+      routinePickerTool,
+      endSoulBatchTool,
+      soulRepoPushTool,
+    ];
+    const rawInputs: unknown[] = [
+      {},
+      { unexpected: true },
+      { name: 7, skill: null, agentId: ["bad"] },
+      null,
+      [],
+    ];
+
+    for (const tool of tools) {
+      for (const input of rawInputs) {
+        expect(() => tool.targetsFor(input), `${tool.name} target derivation`).not.toThrow();
+        expectNoNullishTargetText(tool.targetsFor(input));
+      }
+    }
+  });
+});
 
 // ── load_skill ────────────────────────────────────────────────────────────────
 

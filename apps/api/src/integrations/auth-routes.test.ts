@@ -14,6 +14,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
+import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
 const TEST_CSRF = "a".repeat(64);
 
@@ -102,6 +103,9 @@ const NOTION_MANIFEST: BundledIntegration["manifest"] = {
     },
     {
       kind: "oauth2",
+      // Notion's authorize URL takes `owner=user`, so this exchange really does return the
+      // authorizing person's own token — the declaration Slack's install step must not carry.
+      personal: true,
       authorization_url: "https://notion.test/authorize",
       token_url: "https://notion.test/token",
       client_id_env: "NOTION_CLIENT_ID",
@@ -118,14 +122,21 @@ describe("integration auth routes", () => {
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
   let repo: MemoryAuthRequestRepo;
+  let principalTokens: InMemoryPrincipalProviderTokenRepo;
+  let memberSid: string;
   let fetchImpl: ReturnType<typeof vi.fn>;
   const temps: string[] = [];
 
   beforeEach(async () => {
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    // Connecting the *deployment's* shared credential is an operator act — these flows all
+    // exercise `scope: "business"`, so the fixture must be an administrator. A `member` here
+    // would assert a reach the deployment does not grant.
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
+    const memberUser = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberSid = await store.create(memberUser._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "integration-auth-soul-"));
     temps.push(soulPath);
@@ -168,6 +179,7 @@ describe("integration auth routes", () => {
 
     secretsService = new FakeSecretsService();
     repo = new MemoryAuthRequestRepo();
+    principalTokens = new InMemoryPrincipalProviderTokenRepo();
     fetchImpl = vi.fn();
 
     app = await buildApp({
@@ -178,7 +190,11 @@ describe("integration auth routes", () => {
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations: new Map([["notion", { manifest: NOTION_MANIFEST }]]),
-      integrationAuth: { repo, fetchImpl: fetchImpl as never },
+      integrationAuth: {
+        repo,
+        fetchImpl: fetchImpl as never,
+        tokens: principalTokens,
+      },
     });
   });
 
@@ -239,6 +255,56 @@ describe("integration auth routes", () => {
         headers,
       });
       expect(res.statusCode).toBe(404);
+    });
+
+    /**
+     * The two halves of the personal-credential protocol are one feature, not two. The resolver
+     * refuses a human's user-mode call with "connect it from Settings, Integrations"; if this route
+     * cannot store what that connect produces, the person following that instruction walks into a
+     * 409 and the Tool is permanently unreachable — a prompt pointing at a dead end. This pins the
+     * halves together so neither can ship without the other.
+     */
+    it("completes a user-scoped connect rather than refusing for want of a token store", async () => {
+      await connectFields();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/notion/auth/start/1",
+        cookies: auth(),
+        headers,
+        payload: { scope: "user" },
+      });
+      expect(res.statusCode).toBe(200);
+      expect(new URL(res.json().url).searchParams.get("state")).toBeTruthy();
+    });
+
+    /**
+     * `business` scope re-points the credential every unattended Run and every service-mode Tool
+     * then spends, so any member completing it would redirect the whole deployment's provider
+     * identity. It takes the same fail-closed operator gate as the authorization admin API. `user`
+     * scope stays self-service: it mints a credential bounded by what the provider already grants
+     * that person, and requiring an operator there would make personal credentials unusable and
+     * push every Tool back onto the shared bot.
+     */
+    it("refuses a business-scoped connect from a non-operator", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/notion/auth/start/0",
+        cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+    });
+
+    it("lets that same non-operator connect their own credential", async () => {
+      await connectFields();
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/notion/auth/start/1",
+        cookies: { [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF },
+        headers,
+        payload: { scope: "user" },
+      });
+      expect(res.statusCode).toBe(200);
     });
 
     it("404s for a step the manifest does not declare", async () => {

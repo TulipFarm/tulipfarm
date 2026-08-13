@@ -93,6 +93,7 @@ const SPEC_METHODS = Object.keys(HTTP_METHODS) as SpecMethod[];
 
 /** Agent-facing tool names are identifiers, not prose — the model calls them verbatim. */
 const TOOL_NAME_RE = /^[a-z][a-z0-9_]{2,63}$/;
+const ACTION_SLUG_PREFIX = "i_";
 
 const PERMISSIVE_SCHEMA = { type: "object", additionalProperties: true } as const;
 
@@ -449,6 +450,20 @@ function authBinding(auth: OpenApiEgressAuth | undefined): OpenApiOperationBindi
   };
 }
 
+function encodeActionSlug(slug: string): string {
+  return [...slug].map((char) => char.charCodeAt(0).toString(16).padStart(2, "0")).join("");
+}
+
+function actionSlug(slug: string): string {
+  const normalized = slug
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  if (normalized.length === 0) return `${ACTION_SLUG_PREFIX}${encodeActionSlug(slug) || "empty"}`;
+  if (/^[a-z]/.test(normalized)) return normalized;
+  return `${ACTION_SLUG_PREFIX}${normalized}`;
+}
+
 function compileOne(
   slug: string,
   declared: OpenApiEgressOperation,
@@ -469,12 +484,17 @@ function compileOne(
   const spec: ToolContractSpec = {
     toolId,
     toolVersion: "1.0.0",
-    action: operation.operationId,
+    action: `${actionSlug(slug)}.${declared.name}`,
     inputSchema,
     outputSchema: deriveOutput(operation, root),
     riskClass: mutating ? "high" : "medium",
     mutating,
     allowedDestinations: [new URL(baseUrl).host],
+    // A compiled tool reaches a third-party API, so the data it moves is that provider's content —
+    // the same class the hand-written GitHub, Slack and Jira contracts already declare for exactly
+    // this. It is not a placeholder: `checkDlpBoundary` denies `unclassified_data` before it reads
+    // a single rule, so a compiler that omits this emits tools no authority can ever run.
+    dataClasses: ["source_content"],
     idempotency: { strategy: mutating ? "reconcile" : "none" },
     retry: { maxAttempts: 1, safeToRetry: false },
     dryRun: false,

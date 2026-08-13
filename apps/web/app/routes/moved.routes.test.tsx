@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import AdminGuardrails from "./_app.admin.guardrails";
 import AdminRoles from "./_app.admin.roles";
 import AdminUsers from "./_app.admin.users";
+import BusinessPeople from "./_app.business.people";
 import SettingsIndex from "./_app.settings._index";
 import SettingsAbout from "./_app.settings.about";
 import SettingsActivities from "./_app.settings.activities";
@@ -28,8 +29,9 @@ const MOVES: [string, ComponentType, string][] = [
   ["/settings/observability", SettingsObservability, "/business/observability"],
   ["/settings/about", SettingsAbout, "/business/about"],
   ["/settings/security", SettingsSecurity, "/settings/auth"],
-  ["/admin/users", AdminUsers, "/business/people"],
-  ["/admin/roles", AdminRoles, "/business/people"],
+  ["/admin/users", AdminUsers, "/business/access"],
+  ["/admin/roles", AdminRoles, "/business/access"],
+  ["/business/people", BusinessPeople, "/business/access"],
   ["/admin/guardrails", AdminGuardrails, "/business/guardrails"],
 ];
 

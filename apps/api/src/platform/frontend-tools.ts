@@ -1,4 +1,5 @@
 import { ajv } from "@tulipfarm/schema";
+import { defineApiTool, toToolDef } from "../tools/define";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../tools/types";
 
 /**
@@ -29,6 +30,20 @@ function requireContextRead(ctx: RequestContext): ToolCallResult | null {
   return null;
 }
 
+function frontendRouteTarget(args: unknown) {
+  const route = typeof args === "object" && args !== null && "to" in args ? args.to : undefined;
+  return typeof route === "string" && route.length > 0
+    ? [{ type: "platform.frontend", id: `route:${route}` }]
+    : [];
+}
+
+function frontendActionTarget(args: unknown) {
+  const name = typeof args === "object" && args !== null && "name" in args ? args.name : undefined;
+  return typeof name === "string" && name.length > 0
+    ? [{ type: "platform.frontend", id: `action:${name}` }]
+    : [];
+}
+
 // ── get_client_context ──────────────────────────────────────────────────────────
 
 const EMPTY_SCHEMA: Record<string, unknown> = {
@@ -37,14 +52,20 @@ const EMPTY_SCHEMA: Record<string, unknown> = {
   properties: {},
 };
 
-export const getClientContextTool: ToolDef = {
+const getClientContextToolDefinition = defineApiTool<RequestContext>({
   name: "get_client_context",
   tier: "platform",
   mutating: false,
   description:
     "Read what the user is currently looking at in the app — the current route and page title. Call this to ground answers in the user's view (e.g. the resource record they have open) and BEFORE any navigate / prefill / invoke action.",
   inputSchema: EMPTY_SCHEMA,
-  execute: async (_args, ctx) => {
+  authorization: {
+    action: "frontend.read_context",
+    resources: ["platform.frontend"],
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresWebChat: true },
+  handler: async (_args, ctx) => {
     if (ctx.contextRead) ctx.contextRead.value = true;
     const cc = ctx.clientContext;
     if (!cc || (!cc.route && !cc.title)) {
@@ -52,7 +73,12 @@ export const getClientContextTool: ToolDef = {
     }
     return ok({ available: true, route: cc.route ?? null, title: cc.title ?? null });
   },
-};
+});
+
+export const getClientContextTool: ToolDef = toToolDef(
+  getClientContextToolDefinition,
+  (ctx) => ctx
+);
 
 // ── navigate_to ─────────────────────────────────────────────────────────────────
 
@@ -77,14 +103,21 @@ const NAVIGATE_TO_SCHEMA: Record<string, unknown> = {
 };
 const validateNavigateTo = ajv.compile(NAVIGATE_TO_SCHEMA);
 
-export const navigateToTool: ToolDef = {
+const navigateToToolDefinition = defineApiTool<RequestContext>({
   name: "navigate_to",
   tier: "platform",
   mutating: false,
   description:
     "Navigate the user to an internal app route (must start with '/'). Use to open a page or record you just referenced. Requires a get_client_context read first so you don't move the user somewhere they already are.",
   inputSchema: NAVIGATE_TO_SCHEMA,
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "frontend.navigate",
+    resources: ["platform.frontend"],
+    targets: frontendRouteTarget,
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresWebChat: true },
+  handler: async (args, ctx) => {
     const denied = requireContextRead(ctx);
     if (denied) return denied;
     if (!validateNavigateTo(args))
@@ -92,7 +125,9 @@ export const navigateToTool: ToolDef = {
     const { to, reason } = args as { to: string; reason?: string };
     return ok({ action: "navigate", to, reason: reason ?? null });
   },
-};
+});
+
+export const navigateToTool: ToolDef = toToolDef(navigateToToolDefinition, (ctx) => ctx);
 
 // ── prefill_form ──────────────────────────────────────────────────────────────
 
@@ -111,14 +146,20 @@ const PREFILL_FORM_SCHEMA: Record<string, unknown> = {
 };
 const validatePrefillForm = ajv.compile(PREFILL_FORM_SCHEMA);
 
-export const prefillFormTool: ToolDef = {
+const prefillFormToolDefinition = defineApiTool<RequestContext>({
   name: "prefill_form",
   tier: "platform",
   mutating: false,
   description:
     "Pre-fill the form the user currently has open with proposed values (matched by field name) for them to review and confirm — you do not submit. Read get_client_context first to confirm a relevant form is on screen.",
   inputSchema: PREFILL_FORM_SCHEMA,
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "frontend.prefill_form",
+    resources: ["platform.frontend"],
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresWebChat: true },
+  handler: async (args, ctx) => {
     const denied = requireContextRead(ctx);
     if (denied) return denied;
     if (!validatePrefillForm(args))
@@ -126,7 +167,9 @@ export const prefillFormTool: ToolDef = {
     const { values, reason } = args as { values: Record<string, unknown>; reason?: string };
     return ok({ action: "prefill", values, reason: reason ?? null });
   },
-};
+});
+
+export const prefillFormTool: ToolDef = toToolDef(prefillFormToolDefinition, (ctx) => ctx);
 
 // ── invoke_action ───────────────────────────────────────────────────────────────
 
@@ -146,14 +189,21 @@ const INVOKE_ACTION_SCHEMA: Record<string, unknown> = {
 };
 const validateInvokeAction = ajv.compile(INVOKE_ACTION_SCHEMA);
 
-export const invokeActionTool: ToolDef = {
+const invokeActionToolDefinition = defineApiTool<RequestContext>({
   name: "invoke_action",
   tier: "platform",
   mutating: false,
   description:
     "Invoke a named client-side action the current page registered (the page decides what each action does). Read get_client_context first so you only invoke actions available on the user's current view.",
   inputSchema: INVOKE_ACTION_SCHEMA,
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "frontend.invoke_action",
+    resources: ["platform.frontend"],
+    targets: frontendActionTarget,
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresWebChat: true },
+  handler: async (args, ctx) => {
     const denied = requireContextRead(ctx);
     if (denied) return denied;
     if (!validateInvokeAction(args))
@@ -165,7 +215,9 @@ export const invokeActionTool: ToolDef = {
     };
     return ok({ action: "invoke", name, payload: payload ?? {}, reason: reason ?? null });
   },
-};
+});
+
+export const invokeActionTool: ToolDef = toToolDef(invokeActionToolDefinition, (ctx) => ctx);
 
 /** Frontend tools, registered as raw ToolDefs so they receive the per-request RequestContext. */
 export const FRONTEND_TOOLS: ToolDef[] = [

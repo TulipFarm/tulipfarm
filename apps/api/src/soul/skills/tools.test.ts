@@ -2,7 +2,9 @@ import type { LlmService } from "@tulipfarm/llm";
 import { LlmNotConfiguredError } from "@tulipfarm/schema";
 import type { GitSyncService, SoulLoader, SoulSkill } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SKILL_TOOLS, type SkillTool, type SkillToolContext } from "./tools";
+import { SKILL_TOOLS, type SkillToolContext } from "./tools";
+
+type SkillTool = (typeof SKILL_TOOLS)[number];
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
@@ -99,6 +101,31 @@ const updateTool = SKILL_TOOLS.find((t) => t.name === "skill_update") as SkillTo
 const getTool = SKILL_TOOLS.find((t) => t.name === "skill_get") as SkillTool;
 const listTool = SKILL_TOOLS.find((t) => t.name === "skill_list") as SkillTool;
 const deleteTool = SKILL_TOOLS.find((t) => t.name === "skill_delete") as SkillTool;
+
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
+describe("SKILL_TOOLS authorization declarations", () => {
+  it("uses the canonical Soul Skill target type", () => {
+    for (const tool of [createTool, activateTool, updateTool, getTool, deleteTool]) {
+      expect(tool.targetsFor({ name: "code-review" }), tool.name).toEqual([
+        { type: "soul.skill", id: "code-review" },
+      ]);
+    }
+    expect(listTool.targetsFor({})).toEqual([]);
+  });
+
+  it("keeps target derivation total for raw model output", () => {
+    const rawInputs: unknown[] = [{}, { unexpected: true }, { name: 7 }, null, []];
+    for (const tool of [createTool, activateTool, updateTool, getTool, deleteTool]) {
+      for (const input of rawInputs) {
+        expect(() => tool.targetsFor(input), `${tool.name} target derivation`).not.toThrow();
+        expectNoNullishTargetText(tool.targetsFor(input));
+      }
+    }
+  });
+});
 
 // ── skill_create ──────────────────────────────────────────────────────────────
 

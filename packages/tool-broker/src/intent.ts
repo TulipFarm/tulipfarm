@@ -3,6 +3,7 @@ import { canonicalHash } from "@tulipfarm/schema";
 export interface ToolTargetRef {
   readonly type: string;
   readonly id: string;
+  readonly domain?: string;
 }
 
 export interface ToolIntent {
@@ -65,10 +66,21 @@ export function normalizeToolIntent(input: unknown): ToolIntent {
 
   const targetRefs: ToolTargetRef[] = [];
   for (const target of input.targetRefs) {
-    if (!record(target) || !nonEmptyString(target.type) || !nonEmptyString(target.id)) {
+    if (
+      !record(target) ||
+      !nonEmptyString(target.type) ||
+      !nonEmptyString(target.id) ||
+      !optionalString(target.domain)
+    ) {
       throw new ToolIntentError("invalid_intent");
     }
-    targetRefs.push(Object.freeze({ type: target.type, id: target.id }));
+    targetRefs.push(
+      Object.freeze({
+        type: target.type,
+        id: target.id,
+        ...(target.domain === undefined ? {} : { domain: target.domain }),
+      })
+    );
   }
 
   const intent = {

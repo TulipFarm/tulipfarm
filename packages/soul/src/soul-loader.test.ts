@@ -30,6 +30,7 @@ describe("SoulLoader", () => {
         join(TMP, "skills"),
         join(TMP, "resources"),
         join(TMP, "routines"),
+        join(TMP, "roles"),
         join(TMP, "integrations")
       );
       const loader = new SoulLoader(TMP, makeLogger());
@@ -38,6 +39,7 @@ describe("SoulLoader", () => {
       expect(loader.skills.size).toBe(0);
       expect(loader.resources.size).toBe(0);
       expect(loader.routines.size).toBe(0);
+      expect(loader.roles.size).toBe(0);
       expect(loader.integrations.size).toBe(0);
       expect(loader.surfaceComponents.size).toBe(0);
       expect(loader.llmConfig).toBeNull();
@@ -194,11 +196,101 @@ describe("SoulLoader", () => {
     it("reads a canonical resource.yaml", async () => {
       await write(
         join(TMP, "resources", "ticket", "resource.yaml"),
-        "type: object\nproperties:\n  title:\n    type: string\n"
+        [
+          "apiVersion: tulipfarm.ai/v1",
+          "kind: Resource",
+          "metadata:",
+          "  id: 00000000-0000-4000-8000-000000000001",
+          "  slug: ticket",
+          "  schemaVersion: 1",
+          "  authoredVersion: 1",
+          "  lifecycle: draft",
+          "spec:",
+          "  domain: engineering",
+          "  recordSchema:",
+          "    type: object",
+          "    properties:",
+          "      title:",
+          "        type: string",
+          "",
+        ].join("\n")
       );
       const loader = new SoulLoader(TMP, makeLogger());
       await loader.load();
       expect(loader.resources.get("ticket")?.schema).toMatchObject({ type: "object" });
+      expect(loader.resources.get("ticket")?.domain).toBe("engineering");
+    });
+
+    // Regression: an envelope-shaped `resource.yaml` that fails validation used to be swallowed and
+    // fall back to the legacy path, which reinterpreted the whole envelope as the Record schema
+    // *and silently dropped `spec.domain`* — loading an `hr` Resource as domainless, which the
+    // member allow-list grants every member `record.*` on. It must fail loudly instead.
+    it("fails loudly on an invalid resource.yaml rather than loading it without its domain", async () => {
+      await write(
+        join(TMP, "resources", "salary-review", "resource.yaml"),
+        [
+          "apiVersion: tulipfarm.ai/v1",
+          "kind: Resource",
+          "metadata:",
+          "  id: 00000000-0000-4000-8000-000000000009",
+          "  slug: salary-review",
+          "  schemaVersion: 1",
+          "  authoredVersion: 1",
+          "  lifecycle: not-a-real-lifecycle",
+          "spec:",
+          "  domain: hr",
+          "  recordSchema:",
+          "    type: object",
+          "    properties:",
+          "      band:",
+          "        type: string",
+          "",
+        ].join("\n")
+      );
+
+      const loader = new SoulLoader(TMP, makeLogger());
+      await expect(loader.load()).rejects.toThrow(/salary-review/);
+    });
+
+    it("reads a canonical role.yaml", async () => {
+      await write(
+        join(TMP, "roles", "support-operator", "role.yaml"),
+        [
+          "apiVersion: tulipfarm.ai/v1",
+          "kind: Role",
+          "metadata:",
+          "  id: 11111111-1111-4111-8111-111111111111",
+          "  slug: support-operator",
+          "  schemaVersion: 1",
+          "  authoredVersion: 1",
+          "  lifecycle: published",
+          "spec:",
+          "  principalTypes: [user, agent, routine, integration_adapter, api, service]",
+          "  grants:",
+          "    - effect: allow",
+          "      actions: [ticket.read]",
+          "      resource:",
+          "        types: [record.ticket]",
+          "      domains: ['*']",
+          "      delegable: false",
+          "",
+        ].join("\n")
+      );
+
+      const loader = new SoulLoader(TMP, makeLogger());
+      await loader.load();
+
+      const role = loader.roles.get("support-operator");
+      expect(role?.definition.kind).toBe("Role");
+      expect(role?.definition.spec.principalTypes).toEqual([
+        "user",
+        "agent",
+        "routine",
+        "integration_adapter",
+        "api",
+        "service",
+      ]);
+      expect(role?.definition.spec.grants[0]?.domains).toEqual(["*"]);
     });
   });
 

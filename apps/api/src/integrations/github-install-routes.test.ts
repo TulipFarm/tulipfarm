@@ -152,6 +152,7 @@ describe("GitHub App install routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
   let sid: string;
+  let memberSid: string;
   let secretsService: FakeSecretsService;
   let integrationStore: FakeIntegrationStore;
   let soulRepositories: FakeSoulRepositoryStore;
@@ -159,6 +160,9 @@ describe("GitHub App install routes", () => {
   let http: IntegrationHttpPort;
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
+  /* A signed-in non-operator. Disconnecting an installation or repointing the Soul repo is an
+   * operator act, so every write below must refuse this session. */
+  const memberAuth = () => ({ [SESSION_COOKIE]: memberSid, [CSRF_COOKIE]: TEST_CSRF });
   const headers = { [CSRF_HEADER]: TEST_CSRF };
 
   beforeEach(async () => {
@@ -168,8 +172,11 @@ describe("GitHub App install routes", () => {
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    // These routes are operator-only, so the default session has to be one.
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
+    const member = await createUser(userRepo, "member@example.com", "pass", "member");
+    memberSid = await store.create(member._id);
 
     secretsService = new FakeSecretsService();
     integrationStore = new FakeIntegrationStore();
@@ -311,6 +318,32 @@ describe("GitHub App install routes", () => {
       expect(status.json()).toEqual({ installations: [] });
     });
 
+    /*
+     * The same authority `integrations/routes.ts` refuses a member for, through a different door.
+     * Disconnecting revokes every Agent's reach through that installation, so authentication alone
+     * is not the bar. Asserting the installation survives — not merely the status code — is what
+     * makes this fail if the gate moves after the effect instead of before it.
+     */
+    it("refuses a member disconnecting an installation, and leaves it connected", async () => {
+      await installGitHubApp();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/github/installations/99/disconnect",
+        cookies: memberAuth(),
+        headers,
+      });
+      expect(res.statusCode).toBe(403);
+
+      const status = await app.inject({
+        method: "GET",
+        url: "/api/v1/integrations/github/status",
+        cookies: auth(),
+        headers,
+      });
+      expect(status.json().installations).toHaveLength(1);
+    });
+
     it("404s on a second disconnect of the same installation", async () => {
       await installGitHubApp();
       await app.inject({
@@ -417,6 +450,39 @@ describe("GitHub App install routes", () => {
           createdVia: "connected_existing",
         })
       );
+    });
+
+    /*
+     * The most consequential of the three. This row decides which repository this business's Soul
+     * — the source of truth every other layer is checked against — actually *is*. A member able to
+     * repoint it would own every Resource, Agent, Skill and Routine definition the platform then
+     * enforces. Both routes assert the row is still absent, because a 403 that arrives after the
+     * write would be no protection at all.
+     */
+    it("refuses a member connecting a Soul repo, and writes no mapping", async () => {
+      await installWithPermissions({ issues: "write", metadata: "read" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/github/soul-repo",
+        cookies: memberAuth(),
+        headers,
+        payload: { installationId: "99", owner: "acme-corp", repo: "widgets" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(await soulRepositories.get("biz-1")).toBeUndefined();
+    });
+
+    it("refuses a member creating a Soul repo via the App, and writes no mapping", async () => {
+      await installWithPermissions({ administration: "write", metadata: "read" });
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/v1/integrations/github/soul-repo/create",
+        cookies: memberAuth(),
+        headers,
+        payload: { installationId: "99", owner: "acme-corp", repo: "fresh-soul" },
+      });
+      expect(res.statusCode).toBe(403);
+      expect(await soulRepositories.get("biz-1")).toBeUndefined();
     });
 
     it("400s connecting a repo the installation doesn't grant", async () => {

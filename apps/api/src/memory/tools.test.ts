@@ -118,6 +118,44 @@ describe("MEMORY_TOOLS registry", () => {
   });
 });
 
+describe("memory authorization declarations", () => {
+  it("uses distinct actions and target namespaces for service facts and lifecycle corrections", () => {
+    expect(updateMemoryTool.authorization.action).toBe("memory.service.remember");
+    expect(updateMemoryTool.targetsFor({ key: "reply_tone" })).toEqual([
+      { type: "platform.memory", id: "key:reply_tone" },
+    ]);
+    expect(deleteMemoryTool.authorization.action).toBe("memory.service.forget");
+    expect(deleteMemoryTool.targetsFor({ key: "reply_tone" })).toEqual([
+      { type: "platform.memory", id: "key:reply_tone" },
+    ]);
+    expect(rememberCorrectionTool.authorization.action).toBe("memory.lifecycle.remember");
+    expect(rememberCorrectionTool.targetsFor({ subject: "weekly_report_format" })).toEqual([
+      { type: "platform.memory", id: "subject:weekly_report_format" },
+    ]);
+  });
+
+  it("keeps memory target derivations total for raw model output", () => {
+    const rawInputs: unknown[] = [{}, { unexpected: true }, { key: 7, subject: null }, null, []];
+
+    for (const tool of [
+      updateMemoryTool,
+      deleteMemoryTool,
+      recallMemoryTool,
+      rememberCorrectionTool,
+    ]) {
+      for (const input of rawInputs) {
+        expect(() => tool.targetsFor(input), `${tool.name} target derivation`).not.toThrow();
+        expect(JSON.stringify(tool.targetsFor(input))).not.toMatch(/undefined|null/);
+      }
+    }
+  });
+
+  it("leaves recall_memory at the coarse platform.memory scope", () => {
+    expect(recallMemoryTool.targetsFor({ query: "milk" })).toEqual([]);
+    expect(recallMemoryTool.targetsFor(null)).toEqual([]);
+  });
+});
+
 describe("recallMemoryTool", () => {
   function ctxWith(
     recall: (

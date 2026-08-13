@@ -10,6 +10,7 @@ import {
 } from "@tulipfarm/integrations";
 import type { AccessGrantDefinition } from "@tulipfarm/schema";
 import type { ToolIntent } from "@tulipfarm/tool-broker";
+import { selectGitHubInstallation } from "./credentials";
 import type { GitHubInstallationDirectory } from "./installation";
 
 /**
@@ -105,17 +106,11 @@ export class InstallationScopeGitHubContextResolver implements GitHubContextReso
     const repository = repositoryArgument(intent);
     if (repository === undefined) return undefined;
 
-    const installations = await this.installations.list();
-    const matches = installations.filter((entry) => entry.repositories.includes(repository));
-    if (matches.length === 0) return undefined;
-    if (matches.length > 1) {
-      this.log?.warn(
-        { event: "github.context.ambiguous_installation", repository, count: matches.length },
-        "multiple active GitHub installations list the same repository; refusing to guess"
-      );
-      return undefined;
-    }
-    const installation = matches[0];
+    const installation = selectGitHubInstallation(
+      await this.installations.list(),
+      { kind: "repository", repository },
+      this.log
+    );
     if (installation === undefined) return undefined;
 
     const scope: GitHubInstallationScope = {
@@ -140,17 +135,11 @@ export class InstallationScopeGitHubContextResolver implements GitHubContextReso
     const owner = ownerArgument(intent);
     if (owner === undefined) return undefined;
 
-    const installations = await this.installations.list();
-    const matches = installations.filter((entry) => entry.accountLogin === owner);
-    if (matches.length === 0) return undefined;
-    if (matches.length > 1) {
-      this.log?.warn(
-        { event: "github.context.ambiguous_installation", owner, count: matches.length },
-        "multiple active GitHub installations cover the same account; refusing to guess"
-      );
-      return undefined;
-    }
-    const installation = matches[0];
+    const installation = selectGitHubInstallation(
+      await this.installations.list(),
+      { kind: "account", owner },
+      this.log
+    );
     if (installation === undefined) return undefined;
 
     const scope: GitHubInstallationScope = {

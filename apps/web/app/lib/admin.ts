@@ -32,18 +32,3 @@ export function proposeGuardrailToggle(
     `guardrail-${model.revision}-${item.id}-${enabled}`
   );
 }
-
-export type RolesModel = {
-  revision: string;
-  items: Array<{
-    id: string;
-    name: string;
-    principalKinds: string[];
-    grants: string[];
-    conditions: string[];
-  }>;
-};
-
-export function getRoles(): Promise<RolesModel> {
-  return apiGet<RolesModel>("/api/v1/roles");
-}

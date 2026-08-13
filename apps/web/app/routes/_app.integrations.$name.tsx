@@ -30,6 +30,7 @@ import {
   type IntegrationGrant,
   listSlackRoutes,
 } from "~/lib/integrations";
+import { useIsAdmin } from "~/lib/use-session-user";
 
 /*
  * One integration, as a document rather than a settings form (mirrors knowledge/page-detail.tsx):
@@ -249,6 +250,7 @@ export default function IntegrationDetailPage() {
   const [callbackError, setCallbackError] = useState<string>();
   const [guideOpen, setGuideOpen] = useState(false);
 
+  const isAdmin = useIsAdmin();
   const authSteps = integration.auth ?? [];
   const isConnected = integration.connected;
   const installStep = authSteps.find((step) => step.kind === "install");
@@ -389,7 +391,7 @@ export default function IntegrationDetailPage() {
               label={isConnected ? "Connected" : "Not connected"}
               tone={isConnected ? "success" : "neutral"}
             />
-            <MoreMenu onDelete={handleDelete} deleting={deleting} />
+            {isAdmin && <MoreMenu onDelete={handleDelete} deleting={deleting} />}
           </div>
         </header>
 
@@ -419,6 +421,11 @@ export default function IntegrationDetailPage() {
             {authSteps.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 This integration declares no credentials. Nothing to set up.
+              </p>
+            ) : !isAdmin ? (
+              <p className="max-w-prose text-xs text-muted-foreground">
+                Connecting seals the credential every agent in this workspace spends, so an admin
+                has to do it. Ask one to connect {name}.
               </p>
             ) : (
               <IntegrationAuthFlow
@@ -487,22 +494,24 @@ export default function IntegrationDetailPage() {
                           : `${install.repositories.length} repo${install.repositories.length === 1 ? "" : "s"}: ${install.repositories.join(", ")}`}
                       </span>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={disconnectingInstallId === install.installationId}
-                      onClick={() => handleDisconnectInstallation(install.installationId)}
-                    >
-                      {disconnectingInstallId === install.installationId
-                        ? "Disconnecting…"
-                        : "Disconnect"}
-                    </Button>
+                    {isAdmin && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={disconnectingInstallId === install.installationId}
+                        onClick={() => handleDisconnectInstallation(install.installationId)}
+                      >
+                        {disconnectingInstallId === install.installationId
+                          ? "Disconnecting…"
+                          : "Disconnect"}
+                      </Button>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
             <div className="flex items-center gap-3">
-              {installStep && (
+              {installStep && isAdmin && (
                 <Button size="sm" disabled={addingInstall} onClick={handleAddInstall}>
                   {addingInstall ? "Opening…" : "Add another install"}
                 </Button>
@@ -557,7 +566,7 @@ export default function IntegrationDetailPage() {
 
         {actionError && <p className="text-sm text-destructive">{actionError}</p>}
 
-        {isConnected && (
+        {isConnected && isAdmin && (
           <section className="flex flex-col gap-2 border-t border-border pt-5">
             <SectionHeading>Connection</SectionHeading>
             <p className="max-w-prose text-xs text-muted-foreground">

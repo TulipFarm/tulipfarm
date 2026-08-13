@@ -7,6 +7,7 @@ import {
 } from "./common";
 
 const apiVersion = DEFINITION_API_VERSION;
+const domainPattern = "^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$";
 
 const MetadataSchema = Type.Unsafe<DefinitionMetadata>(definitionMetadataSchema);
 
@@ -41,6 +42,7 @@ export const ResourceSchema = Type.Object(
     metadata: MetadataSchema,
     spec: Type.Object(
       {
+        domain: Type.Optional(Type.String({ pattern: domainPattern })),
         recordSchema: RecordSchemaSchema,
         hooks: Type.Optional(HooksSchema),
       },

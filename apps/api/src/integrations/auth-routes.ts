@@ -12,6 +12,8 @@ import {
   startAuthStep,
 } from "./auth-broker";
 import { mergeConnectionEnv, readConnectionEnv } from "./connection-writer";
+import { sealPrincipalCredential } from "./principal-connect";
+import type { PrincipalProviderTokenRepo } from "./principal-tokens";
 import { mergeIntegrations } from "./routes";
 
 /*
@@ -38,6 +40,18 @@ export interface AuthRoutesDeps {
    * OAuth-connected Slack would silently have no routing.
    */
   onConnected?: (slug: string) => Promise<void>;
+  /**
+   * Where a *personal* provider credential is sealed (D7). `undefined` means this deployment cannot
+   * hold them, and a user-scoped connect is refused rather than falling back to the shared
+   * connection — a silent fallback would write one human's token where everyone spends it.
+   *
+   * Required rather than optional, and deliberately so: it was optional, every registration site
+   * omitted it, and the connect flow was therefore dead in production while `CredentialResolver`
+   * went on denying human calls with "connect it from Settings › Integrations" — a prompt pointing
+   * at a route that always answered 409. An omission that disables half of a two-sided protocol
+   * must be a compile error, not a default.
+   */
+  tokens: PrincipalProviderTokenRepo | undefined;
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
@@ -89,10 +103,26 @@ export function registerIntegrationAuthRoutes(
           required: ["name", "step"],
           properties: { name: { type: "string" }, step: { type: "integer", minimum: 0 } },
         },
+        // Nullable because every business-scoped caller posts no body at all, and this route
+        // predates having one. Requiring an object here would break the default path to document
+        // the exception.
+        body: {
+          type: ["object", "null"],
+          properties: {
+            scope: {
+              type: "string",
+              enum: ["business", "user"],
+              description:
+                "`business` (default) connects the deployment's shared credential and requires an administrator. `user` connects the caller's own credential and requires only authentication; only an oauth2 authorization_code step declaring `personal: true` can issue one.",
+            },
+          },
+          additionalProperties: false,
+        },
         response: {
           200: StartActionSchema,
           400: ErrorSchema,
           401: ErrorSchema,
+          403: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
           502: ErrorSchema,
@@ -107,6 +137,31 @@ export function registerIntegrationAuthRoutes(
       const manifest = resolveManifest(name);
       if (!manifest) return reply.code(404).send({ error: `integration not found: ${name}` });
 
+      const scope = (req.body as { scope?: string } | undefined)?.scope ?? "business";
+      // The principal is taken from the authenticated request, never from the body: a caller must
+      // not be able to name whose credential a flow will mint.
+      const caller = req.principal;
+      if (caller === undefined) {
+        return reply.code(401).send({ error: "unauthorized" });
+      }
+      // The two scopes are not the same act and cannot share one guard.
+      //
+      // `user` is self-service: it mints a credential for the caller alone, bounded by whatever the
+      // provider already grants them, so authentication is the whole requirement — demanding an
+      // operator role here would make personal credentials unusable and push every Tool back onto
+      // the shared bot, which is exactly the attribution collapse this layer exists to end.
+      //
+      // `business` configures the deployment-wide credential every unattended Run and every
+      // service-mode Tool then spends. Any member completing it would be re-pointing the whole
+      // business's provider identity, so it takes the same fail-closed operator gate as the
+      // authorization admin API.
+      if (scope === "business" && (caller.kind !== "user" || caller.role !== "admin")) {
+        return reply.code(403).send({ error: "forbidden" });
+      }
+      if (scope === "user" && deps.tokens === undefined) {
+        return reply.code(409).send({ error: "this deployment cannot store personal credentials" });
+      }
+
       try {
         const action = await startAuthStep({
           slug: name,
@@ -116,6 +171,9 @@ export function registerIntegrationAuthRoutes(
           endpoints: deps.endpoints,
           repo: deps.repo,
           fetchImpl: deps.fetchImpl,
+          ...(scope === "user" && caller !== undefined
+            ? { principal: { kind: caller.kind, id: caller.id } }
+            : {}),
         });
 
         // A server-side step produced credentials rather than a browser instruction. Seal them the
@@ -172,7 +230,23 @@ export function registerIntegrationAuthRoutes(
         });
 
         const manifest = resolveManifest(outcome.slug);
-        if (manifest && Object.keys(outcome.env).length > 0) {
+        // Two destinations, never both. A personal credential must not reach `connection.yaml` —
+        // that file is committed to the customer's soul git repo and is what every unattended
+        // caller spends, so merging one human's token there would publish it and share it at once.
+        if (outcome.principal !== undefined) {
+          if (deps.tokens === undefined) {
+            throw new AuthBrokerError(
+              "missing_credentials",
+              "this deployment cannot store personal credentials",
+              outcome.slug
+            );
+          }
+          await sealPrincipalCredential({
+            outcome,
+            secrets: deps.secrets,
+            tokens: deps.tokens,
+          });
+        } else if (manifest && Object.keys(outcome.env).length > 0) {
           const { connectedNow } = await mergeConnectionEnv(deps, {
             slug: outcome.slug,
             manifest,

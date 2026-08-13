@@ -3,6 +3,7 @@ import { INVOCATION_STORAGE_STATEMENTS } from "@tulipfarm/run-kernel";
 import { SOUL_BUNDLE_STORAGE_STATEMENTS } from "@tulipfarm/soul";
 import {
   ARTIFACT_STORAGE_STATEMENTS,
+  AUTHORIZATION_STORAGE_STATEMENTS,
   BUDGET_STORAGE_STATEMENTS,
   CHANNEL_DELIVERY_STORAGE_STATEMENTS,
   CHANNEL_INBOUND_STORAGE_STATEMENTS,
@@ -892,6 +893,49 @@ const INTEGRATION_AUTH_REQUEST_STATEMENTS: string[] = [
     ON integration_auth_requests (expires_at)`,
 ];
 
+/**
+ * Per-principal provider credentials (D7). A Tool declaring `credentialMode: "user"` or
+ * `"user_preferred"` spends *the calling human's* token so the provider sees that human — and so
+ * the provider's own ACLs, which we cannot reproduce, do the narrowing we would otherwise have to
+ * guess at.
+ *
+ * The table holds **no credential material**. Values live in the encrypted secrets store under
+ * `principal.<kind>.<id>.<provider>.<ENV>` and this row carries only the key, so a database dump
+ * without the DEK is inert — the same posture `connection.yaml`'s `secret://` refs take.
+ *
+ * `revoked_at` rather than a delete: a token that was withdrawn is evidence. Resolution treats a
+ * revoked row as absent, so revocation is immediate without losing the record that it happened.
+ */
+const PRINCIPAL_PROVIDER_TOKEN_STATEMENTS: string[] = [
+  `CREATE TABLE IF NOT EXISTS principal_provider_tokens (
+    business_id        text NOT NULL,
+    principal_kind     text NOT NULL,
+    principal_id       text NOT NULL,
+    provider           text NOT NULL,
+    secret_key         text NOT NULL,
+    refresh_secret_key text,
+    external_subject   text,
+    scopes             text[] NOT NULL DEFAULT '{}',
+    connected_at       timestamptz NOT NULL DEFAULT now(),
+    updated_at         timestamptz NOT NULL DEFAULT now(),
+    expires_at         timestamptz,
+    revoked_at         timestamptz,
+    PRIMARY KEY (business_id, principal_kind, principal_id, provider)
+  )`,
+  `CREATE INDEX IF NOT EXISTS principal_provider_tokens_provider_idx
+    ON principal_provider_tokens (business_id, provider)`,
+  // The auth broker's one-use request must remember whose connect this was. Null means the
+  // business-wide flow, which is what every row written before per-user connect existed was.
+  //
+  // The table is re-asserted rather than assumed: these ALTERs are the only cross-migration
+  // dependency in the file, and a migration that reads as "runs only if an earlier one did" fails
+  // loudly and late. Both creation statements are `IF NOT EXISTS`, so on any real deployment —
+  // where 39 always ran — this is a no-op.
+  ...INTEGRATION_AUTH_REQUEST_STATEMENTS,
+  "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS principal_kind text",
+  "ALTER TABLE integration_auth_requests ADD COLUMN IF NOT EXISTS principal_id text",
+];
+
 /*
  * GitHub App credentials moved from bespoke flat keys to the same `integration.<slug>.<ENV>` space
  * every other integration's credentials live in, so the declarative auth flow writes exactly what
@@ -963,6 +1007,222 @@ async function ensureSurfaceStorage(q: Queryable): Promise<void> {
   const retiredPrefix = ["a", "2", "u", "i"].join("");
   await q.query(`DROP TABLE IF EXISTS ${retiredPrefix}_surfaces`);
   await q.query(`DROP TABLE IF EXISTS ${retiredPrefix}_action_nonces`);
+}
+
+async function hasTableColumns(
+  q: Queryable,
+  table: string,
+  columns: readonly string[]
+): Promise<boolean> {
+  const present = await q.query(
+    `SELECT column_name FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = $1 AND column_name = ANY($2)`,
+    [table, columns]
+  );
+  return present.rows.length === columns.length;
+}
+
+async function seedBootstrapRole(
+  q: Queryable,
+  roleId: string,
+  grants: ReadonlyArray<{
+    readonly action: string;
+    readonly resourceType: string;
+    readonly domain?: string;
+    readonly effect: "allow" | "deny";
+  }>
+): Promise<void> {
+  await q.query(
+    `INSERT INTO roles (business_id, id, assignable_to)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (business_id, id) DO UPDATE SET
+       assignable_to = EXCLUDED.assignable_to,
+       updated_at = now()`,
+    [DEPLOYMENT_BUSINESS_ID, roleId, ["user"]]
+  );
+  for (const [index, grant] of grants.entries()) {
+    await q.query(
+      `INSERT INTO role_grants (
+         business_id, role_id, grant_index, action, resource_type, domain, effect
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (business_id, role_id, grant_index) DO UPDATE SET
+         action = EXCLUDED.action,
+         resource_type = EXCLUDED.resource_type,
+         domain = EXCLUDED.domain,
+         effect = EXCLUDED.effect`,
+      [
+        DEPLOYMENT_BUSINESS_ID,
+        roleId,
+        index,
+        grant.action,
+        grant.resourceType,
+        grant.domain ?? null,
+        grant.effect,
+      ]
+    );
+  }
+}
+
+async function seedAuthorizationBootstrap(q: Queryable): Promise<void> {
+  for (const sql of AUTHORIZATION_STORAGE_STATEMENTS) {
+    await q.query(sql);
+  }
+
+  await q.query("DROP INDEX IF EXISTS users_single_admin_idx");
+
+  const hasUsersForSeed = await hasTableColumns(q, "users", ["id", "role", "status", "created_at"]);
+  if (hasUsersForSeed) {
+    await q.query(
+      "ALTER TABLE users ADD COLUMN IF NOT EXISTS setup_bootstrap boolean NOT NULL DEFAULT false"
+    );
+    await q.query(`WITH owner_user AS (
+      SELECT id
+        FROM users
+       WHERE role = 'admin' AND status = 'active'
+         AND NOT EXISTS (SELECT 1 FROM users WHERE setup_bootstrap)
+       ORDER BY created_at, id
+       LIMIT 1
+    )
+    UPDATE users
+       SET setup_bootstrap = true
+     WHERE id IN (SELECT id FROM owner_user)`);
+    await q.query(`CREATE UNIQUE INDEX IF NOT EXISTS users_setup_bootstrap_admin_idx
+      ON users (setup_bootstrap) WHERE setup_bootstrap AND role = 'admin'`);
+  }
+
+  await seedBootstrapRole(q, "owner", [
+    { action: "*", resourceType: "authz.role", effect: "allow" },
+    { action: "*", resourceType: "authz.role", domain: "*", effect: "allow" },
+    { action: "*", resourceType: "authz.assignment", effect: "allow" },
+    { action: "*", resourceType: "authz.assignment", domain: "*", effect: "allow" },
+    { action: "*", resourceType: "authz.relation", effect: "allow" },
+    { action: "*", resourceType: "authz.relation", domain: "*", effect: "allow" },
+  ]);
+  await seedBootstrapRole(q, "admin", [
+    { action: "*", resourceType: "*", effect: "allow" },
+    { action: "*", resourceType: "*", domain: "*", effect: "allow" },
+  ]);
+  await seedBootstrapRole(q, "member", []);
+  await q.query(
+    `INSERT INTO principal_groups (business_id, id)
+     VALUES ($1, 'owners')
+     ON CONFLICT (business_id, id) DO NOTHING`,
+    [DEPLOYMENT_BUSINESS_ID]
+  );
+
+  if (!hasUsersForSeed) return;
+
+  await q.query(
+    `INSERT INTO principals (business_id, id, kind, status)
+     SELECT $1, id::text, 'user',
+            CASE WHEN status = 'active' THEN 'active' ELSE 'disabled' END
+       FROM users
+     ON CONFLICT (business_id, id) DO UPDATE SET
+       kind = EXCLUDED.kind,
+       status = EXCLUDED.status,
+       updated_at = now()`,
+    [DEPLOYMENT_BUSINESS_ID]
+  );
+  await q.query(
+    `INSERT INTO role_assignments (business_id, principal_id, role_id)
+     SELECT $1, id::text, role
+       FROM users
+      WHERE role IN ('admin', 'member')
+     ON CONFLICT (business_id, principal_id, role_id) DO UPDATE SET
+       expires_at = NULL,
+       assigned_at = now()`,
+    [DEPLOYMENT_BUSINESS_ID]
+  );
+  await q.query(
+    `WITH owner_user AS (
+       SELECT id::text AS principal_id
+         FROM users
+        WHERE role = 'admin' AND status = 'active'
+        ORDER BY created_at, id
+        LIMIT 1
+     )
+     INSERT INTO role_assignments (business_id, principal_id, role_id)
+     SELECT $1, principal_id, 'owner' FROM owner_user
+     ON CONFLICT (business_id, principal_id, role_id) DO UPDATE SET
+       expires_at = NULL,
+       assigned_at = now()`,
+    [DEPLOYMENT_BUSINESS_ID]
+  );
+  await q.query(
+    `WITH owner_user AS (
+       SELECT id::text AS principal_id
+         FROM users
+        WHERE role = 'admin' AND status = 'active'
+        ORDER BY created_at, id
+        LIMIT 1
+     )
+     INSERT INTO principal_group_members (business_id, group_id, principal_id)
+     SELECT $1, 'owners', principal_id FROM owner_user
+     ON CONFLICT (business_id, group_id, principal_id) DO UPDATE SET
+       expires_at = NULL,
+       assigned_at = now()`,
+    [DEPLOYMENT_BUSINESS_ID]
+  );
+
+  const businessIdLiteral = DEPLOYMENT_BUSINESS_ID.replaceAll("'", "''");
+  await q.query(`
+    CREATE OR REPLACE FUNCTION sync_user_authorization()
+      RETURNS trigger LANGUAGE plpgsql AS $$
+    DECLARE
+      deployment_business_id text := '${businessIdLiteral}';
+      principal_status text;
+    BEGIN
+      IF TG_OP = 'DELETE' THEN
+        DELETE FROM principals
+         WHERE business_id = deployment_business_id AND id = OLD.id::text;
+        RETURN OLD;
+      END IF;
+
+      principal_status := CASE WHEN NEW.status = 'active' THEN 'active' ELSE 'disabled' END;
+
+      INSERT INTO principals (business_id, id, kind, status)
+      VALUES (deployment_business_id, NEW.id::text, 'user', principal_status)
+      ON CONFLICT (business_id, id) DO UPDATE SET
+        kind = EXCLUDED.kind,
+        status = EXCLUDED.status,
+        updated_at = now();
+
+      IF TG_OP = 'UPDATE' AND OLD.role IS DISTINCT FROM NEW.role THEN
+        DELETE FROM role_assignments
+         WHERE business_id = deployment_business_id
+           AND principal_id = NEW.id::text
+           AND role_id = OLD.role;
+
+        IF OLD.role = 'admin' AND NEW.role IS DISTINCT FROM 'admin' THEN
+          DELETE FROM role_assignments
+           WHERE business_id = deployment_business_id
+             AND principal_id = NEW.id::text
+             AND role_id = 'owner';
+
+          DELETE FROM principal_group_members
+           WHERE business_id = deployment_business_id
+             AND group_id = 'owners'
+             AND principal_id = NEW.id::text;
+        END IF;
+      END IF;
+
+      IF NEW.role IN ('admin', 'member') THEN
+        INSERT INTO role_assignments (business_id, principal_id, role_id)
+        VALUES (deployment_business_id, NEW.id::text, NEW.role)
+        ON CONFLICT (business_id, principal_id, role_id) DO UPDATE SET
+          expires_at = NULL,
+          assigned_at = now();
+      END IF;
+
+      RETURN NEW;
+    END;
+    $$`);
+  await q.query("DROP TRIGGER IF EXISTS users_sync_authorization ON users");
+  await q.query(`
+    CREATE TRIGGER users_sync_authorization
+    AFTER INSERT OR DELETE OR UPDATE OF role, status ON users
+    FOR EACH ROW EXECUTE FUNCTION sync_user_authorization()
+  `);
 }
 
 export const PG_MIGRATIONS: PgMigration[] = [
@@ -1894,6 +2154,20 @@ export const PG_MIGRATIONS: PgMigration[] = [
           COALESCE((SELECT MAX(activation_sequence) FROM soul_active_bundles), 0)
         ) > 0
       )`);
+    },
+  },
+  {
+    version: 50,
+    description: "durable authorization roles, groups, and assignments",
+    up: seedAuthorizationBootstrap,
+  },
+  {
+    version: 51,
+    description: "per-principal provider credentials for user-scoped Tool calls",
+    up: async (q) => {
+      for (const sql of PRINCIPAL_PROVIDER_TOKEN_STATEMENTS) {
+        await q.query(sql);
+      }
     },
   },
 ];

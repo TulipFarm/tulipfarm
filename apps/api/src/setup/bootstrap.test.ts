@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import type { UserDoc, UserRepo } from "../auth/users";
 import { bootstrapFromEnv } from "./bootstrap";
+import type { SetupAdminCreator } from "./first-admin";
 
 class FakeUserRepo implements UserRepo {
   users: UserDoc[] = [];
@@ -27,6 +28,17 @@ class FakeUserRepo implements UserRepo {
   }
   async insert(u: UserDoc) {
     this.users.push(u);
+  }
+}
+
+class FakeSetupAdminCreator implements SetupAdminCreator {
+  ownerPrincipalIds: string[] = [];
+
+  constructor(private readonly users: FakeUserRepo) {}
+
+  async create(user: UserDoc): Promise<void> {
+    await this.users.insert(user);
+    this.ownerPrincipalIds.push(user._id);
   }
 }
 
@@ -64,8 +76,11 @@ class FakeSecretRepo implements SecretRepo {
 
 let dir: string;
 function deps() {
+  const userRepo = new FakeUserRepo();
+  const setupAdminCreator = new FakeSetupAdminCreator(userRepo);
   return {
-    userRepo: new FakeUserRepo(),
+    userRepo,
+    setupAdminCreator,
     secretsService: new SecretsService(new FakeSecretRepo(), {
       dekId: randomUUID(),
       key: randomBytes(32),
@@ -100,6 +115,7 @@ describe("bootstrapFromEnv", () => {
     await bootstrapFromEnv(d);
     await bootstrapFromEnv(d); // second call is a no-op (user already exists)
     expect(await d.userRepo.count()).toBe(1);
+    expect(d.setupAdminCreator.ownerPrincipalIds).toHaveLength(1);
     const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
       businessName?: string;
       setupComplete?: boolean;

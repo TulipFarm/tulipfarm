@@ -22,7 +22,7 @@ describe("scaffoldSoul", () => {
   it("creates the stub directory layout and root files", async () => {
     await scaffoldSoul(soulPath);
 
-    for (const dir of ["resources", "routines", "agents", "skills", "integrations"]) {
+    for (const dir of ["resources", "routines", "agents", "skills", "integrations", "roles"]) {
       expect(existsSync(join(soulPath, dir))).toBe(true);
     }
     expect(readFileSync(join(soulPath, "soul.yaml"), "utf8")).toContain(

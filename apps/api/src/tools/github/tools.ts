@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { GITHUB_TOOL_CONTRACTS, GITHUB_TOOL_IDS, type GitHubToolId } from "@tulipfarm/integrations";
+import {
+  GITHUB_ORGANIZATION_TARGET,
+  GITHUB_REPOSITORY_TARGET,
+  GITHUB_TOOL_CONTRACTS,
+  GITHUB_TOOL_IDS,
+  type GitHubToolId,
+} from "@tulipfarm/integrations";
 import {
   EffectDispatcher,
   type EffectStore,
@@ -8,10 +14,12 @@ import {
   ToolCatalog,
   ToolDispatchError,
   type ToolIntent,
+  type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
+import { defineApiTool, toToolDef } from "../define";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
 import type { GitHubTooling } from "./compose";
-import { GITHUB_INSTALLATION_SECRET_REF } from "./credentials";
+import { type GitHubInstallationSelector, githubInstallationSecretRef } from "./credentials";
 
 /**
  * The chat-facing GitHub Tool family — one `ToolDef` per `GITHUB_TOOL_CONTRACTS` entry, tier
@@ -24,6 +32,9 @@ import { GITHUB_INSTALLATION_SECRET_REF } from "./credentials";
  */
 
 const GITHUB_CATALOG = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
+const GITHUB_INSTALLATION_TARGET = "github.installation";
+const GITHUB_ALL_REPOSITORIES_TARGET_ID = "all-repositories";
+const GITHUB_RESOURCE = "integration.github";
 
 interface GitHubToolSpec {
   readonly name: string;
@@ -132,6 +143,21 @@ function mapDispatchError(error: ToolDispatchError, toolId: GitHubToolId): ToolC
         "which repositories are installed, then retry with one of those."
     );
   }
+  // The `credentialRef` names the installation covering the call's repository or account, so the
+  // credential is denied for the same reason the context would be unresolvable — no installation
+  // matches, or more than one does and we refuse to guess. It reaches the model first only because
+  // the credential is leased before the adapter resolves scope. The remaining causes (an
+  // unconfigured App, an unreadable private key) point at the same next step: the discovery tool
+  // reports exactly which repositories this business can actually reach, and reports none when the
+  // App itself is the problem.
+  if (error.detail === "credential_denied") {
+    return err(
+      "not_found",
+      "No active GitHub installation could supply a credential for that repository. Call " +
+        "github_repository_list to see which repositories are installed, then retry with one " +
+        "of those."
+    );
+  }
   if (error.detail === "installation_scope_denied" && toolId === GITHUB_TOOL_IDS.repositoryCreate) {
     return err(
       "not_found",
@@ -139,6 +165,12 @@ function mapDispatchError(error: ToolDispatchError, toolId: GitHubToolId): ToolC
         "isn't granted by default. Ask an org admin to upgrade the App's permissions from its " +
         "GitHub installation settings page, then retry."
     );
+  }
+  // Transient by definition, and the ledger has already spent this contract's retry budget on it.
+  // Classifying it as infrastructure is what stops the model treating a busy provider as a
+  // malformed request and rewording arguments that were never wrong.
+  if (error.detail === "provider_rate_limited" || error.detail === "provider_unavailable") {
+    return err("unavailable", `GitHub is temporarily unavailable; try again shortly.`);
   }
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
 }
@@ -162,6 +194,112 @@ function replayed(state: string): ToolCallResult {
   }
 }
 
+function recordArgs(args: unknown): Record<string, unknown> {
+  return args !== null && typeof args === "object" && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
+}
+
+function stringValue(source: Record<string, unknown>, key: string): string | undefined {
+  const value = source[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * The authorization namespace is the Tool's declared resource, not the provider's target namespace.
+ *
+ * `GITHUB_REPOSITORY_TARGET` and friends name targets on the *provider* side — they are what
+ * `packages/integrations/src/github/adapter.ts` and the installation entitlement check compare
+ * against, and they must keep their values. The authorization gate is a different namespace: a
+ * grant is written against the two-level resource grammar (`integration.<slug>`, `platform.<area>`,
+ * `record.<type>`), and `grantMatches` compares `resourceType` as an exact string. A derived target
+ * typed `github.repository` is therefore unmatchable by any grant an operator can author, and —
+ * because derived targets *replace* the Tool's static `resources` at the gate — it also stops
+ * `integration.github` from being checked at all.
+ *
+ * So the derived type is the declared resource and the provider identity moves into the id, where
+ * `recordSelector` scopes it. The kind prefix keeps a repository, an organization and the
+ * installation-wide sentinel from colliding in that one id space, so a grant naming one repository
+ * still cannot satisfy an installation-wide search.
+ */
+const GITHUB_AUTHZ_RESOURCE = "integration.github";
+
+const repositoryRef = (id: string) => ({ type: GITHUB_AUTHZ_RESOURCE, id: `repo:${id}` });
+
+function repositoryTargets(args: unknown): readonly ToolTargetRef[] {
+  const source = recordArgs(args);
+  const repository = stringValue(source, "repository");
+  if (repository !== undefined) return [repositoryRef(repository)];
+
+  const repositories = source.repositories;
+  if (!Array.isArray(repositories)) return [];
+  if (repositories.some((candidate) => typeof candidate !== "string")) return [];
+  return repositories
+    .filter((candidate): candidate is string => typeof candidate === "string")
+    .map((candidate) => repositoryRef(candidate));
+}
+
+function allRepositoriesTarget(): readonly ToolTargetRef[] {
+  // This is deliberately not "*": grant matching treats "*" as a grant-side wildcard sentinel.
+  return [{ type: GITHUB_AUTHZ_RESOURCE, id: `installation:${GITHUB_ALL_REPOSITORIES_TARGET_ID}` }];
+}
+
+function searchRepositoryTargets(args: unknown): readonly ToolTargetRef[] {
+  const source = recordArgs(args);
+  const repository = stringValue(source, "repository");
+  if (repository !== undefined) return [repositoryRef(repository)];
+
+  const repositories = source.repositories;
+  if (Array.isArray(repositories) && repositories.length > 0) return repositoryTargets(source);
+
+  // Empty, absent, or wrong-typed repository selectors make the adapter search every installed
+  // repository. A concrete repo grant must not satisfy that installation-wide read.
+  return allRepositoriesTarget();
+}
+
+function repositoryCreateTargets(args: unknown): readonly ToolTargetRef[] {
+  const owner = stringValue(recordArgs(args), "owner");
+  return owner === undefined ? [] : [{ type: GITHUB_AUTHZ_RESOURCE, id: `org:${owner}` }];
+}
+
+/**
+ * Which installation's credential this call needs, from the same arguments the context resolver
+ * reads. Repository creation names an account (the repo does not exist yet); everything else names
+ * a repository. A call that names neither — an installation-wide search — falls back to the bare
+ * `any` ref, which resolves only when the business has one installation and refuses otherwise. That
+ * refusal is correct: a search spanning every installed repository has no single installation whose
+ * credential could honestly carry it.
+ */
+function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubInstallationSelector {
+  const source = recordArgs(args);
+  if (toolId === GITHUB_TOOL_IDS.repositoryCreate) {
+    const owner = stringValue(source, "owner");
+    return owner === undefined ? { kind: "any" } : { kind: "account", owner };
+  }
+  const repository = stringValue(source, "repository");
+  if (repository !== undefined) return { kind: "repository", repository };
+
+  const repositories = source.repositories;
+  if (Array.isArray(repositories)) {
+    const named = repositories.filter((entry): entry is string => typeof entry === "string");
+    // Several repositories may still resolve to one installation, but only if they all do — the
+    // first that disagrees makes the call uncarryable by any single credential.
+    const first = named[0];
+    if (first !== undefined && named.every((entry) => entry === first)) {
+      return { kind: "repository", repository: first };
+    }
+  }
+  return { kind: "any" };
+}
+
+function githubTargets(toolId: GitHubToolId, args: unknown): readonly ToolTargetRef[] {
+  if (toolId === GITHUB_TOOL_IDS.repositoryCreate) return repositoryCreateTargets(args);
+  if (toolId === GITHUB_TOOL_IDS.issueSearch || toolId === GITHUB_TOOL_IDS.pullRequestSearch) {
+    return searchRepositoryTargets(args);
+  }
+  return repositoryTargets(args);
+}
+
 function buildToolDef(
   toolId: GitHubToolId,
   businessId: string,
@@ -173,13 +311,29 @@ function buildToolDef(
   }
   const spec = GITHUB_TOOL_SPECS[toolId];
 
-  return {
+  const definition = defineApiTool<RequestContext>({
     name: spec.name,
     tier: "integration",
     mutating: contract.mutating,
     description: spec.description,
     inputSchema: contract.inputSchema,
-    async execute(args, ctx: RequestContext): Promise<ToolCallResult> {
+    outputSchema: contract.outputSchema,
+    authorization: {
+      action: contract.action,
+      resources: [GITHUB_RESOURCE],
+      targets: (args) => githubTargets(toolId, args),
+      dataClasses: contract.dataClasses,
+      allowedDestinations: contract.allowedDestinations,
+    },
+    riskClass: contract.riskClass,
+    credentialMode: "user_preferred",
+    provider: "github",
+    idempotency: contract.idempotency.strategy,
+    retry: contract.retry,
+    timeout: contract.timeout,
+    compensation: contract.compensation,
+    version: contract.toolVersion,
+    async handler(args, ctx): Promise<ToolCallResult> {
       const runId = ctx.runId;
       if (runId === undefined) return err("internal_error", "no run context for this tool call");
       // Falls back to a fresh call identity when none is supplied (e.g. a direct registry test) —
@@ -196,9 +350,12 @@ function buildToolDef(
         toolId,
         toolVersion: contract.toolVersion,
         action: toolId,
-        targetRefs: [],
+        // The Tool's own declared derivation, not a second one written here: `targetsFor` is what
+        // the gate reads, so building the intent from anything else would let the recorded effect
+        // and the authorization decision describe different targets.
+        targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
-        credentialRef: GITHUB_INSTALLATION_SECRET_REF,
+        credentialRef: githubInstallationSecretRef(githubCredentialSelector(toolId, args)),
         idempotencyKey: derivedId("github-idempotency", runId, stateId, toolId),
       };
       const intent = normalizeToolIntent(rawIntent);
@@ -234,7 +391,9 @@ function buildToolDef(
         throw error;
       }
     },
-  };
+  });
+
+  return toToolDef(definition, (ctx) => ctx);
 }
 
 const EMPTY_SCHEMA: Record<string, unknown> = {
@@ -252,7 +411,7 @@ export const GITHUB_REPOSITORY_LIST_TOOL_NAME = "github_repository_list";
  * so this is what lets the model resolve "my github issues" into a concrete repository first.
  */
 function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
-  return {
+  const definition = defineApiTool<RequestContext>({
     name: GITHUB_REPOSITORY_LIST_TOOL_NAME,
     tier: "integration",
     mutating: false,
@@ -260,7 +419,18 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
       "List the GitHub repositories this business has an active installation for. Call this " +
       "first when the user names no repository, or names one you're not sure is installed.",
     inputSchema: EMPTY_SCHEMA,
-    async execute(): Promise<ToolCallResult> {
+    authorization: {
+      action: "github.repository.list",
+      resources: [GITHUB_RESOURCE],
+      // A catalog of which repositories are installed, not the contents of any of them.
+      dataClasses: ["directory"],
+      // Listing enumerates every installed repository, so require installation-wide authority.
+      targets: allRepositoriesTarget,
+    },
+    credentialMode: "user_preferred",
+    provider: "github",
+    idempotency: "none",
+    async handler(): Promise<ToolCallResult> {
       const installations = await tooling.installations.list();
       const repositories = installations.flatMap((installation) =>
         installation.repositories.map((repository) => ({
@@ -271,7 +441,9 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
       );
       return ok({ repositories });
     },
-  };
+  });
+
+  return toToolDef(definition, (ctx) => ctx);
 }
 
 export interface GitHubToolingContext extends GitHubTooling {

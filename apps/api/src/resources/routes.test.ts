@@ -10,7 +10,9 @@ import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
 import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
+import { DEPLOYMENT_ROLES } from "../identity/roles";
 import type { PaginatedResult } from "../pagination";
+import { LiveRecordAuthorizer } from "./authorize";
 import type {
   CounterStore,
   ListOpts,
@@ -893,6 +895,129 @@ describe("resource domain events", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0].resourceType).toBe("ticket");
     expect(seen[0].resourceId).toBe(res.json<{ id: string }>().id);
+    await app.close();
+  });
+});
+
+/**
+ * The REST door under the same authority the Tool door uses. These drive the real
+ * `LiveRecordAuthorizer` over the real shipped `member` grants — a fake authorizer would prove the
+ * routes call *something*, not that they reach the verdict the gate reaches.
+ */
+describe("record authority on the REST routes", () => {
+  async function buildGuardedApp() {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const soulLoader = makeFakeSoulLoader([
+      { name: "ticket", schema: TICKET_SCHEMA, hasHooks: false, hooksEnabled: true },
+      {
+        name: "salary_review",
+        schema: TICKET_SCHEMA,
+        hasHooks: false,
+        hooksEnabled: true,
+        domain: "hr",
+      } as SoulResource,
+    ]);
+    const user = await createUser(userRepo, "member@example.com", "pass", "member");
+    const sid = await store.create(user._id);
+    const memberRole = DEPLOYMENT_ROLES.find((role) => role.id === "member");
+    if (memberRole === undefined) throw new Error("member role missing");
+    const hrRepo = new FakeResourceRepo();
+    await hrRepo.insert({
+      _id: "rec-1",
+      version: 1,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      title: "Raise",
+    });
+    const app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      soulLoader,
+      resourceRepoFactory: new FakeResourceRepoFactory(
+        new Map([
+          ["ticket", new FakeResourceRepo()],
+          ["salary_review", hrRepo],
+        ])
+      ),
+      counterStore: stubCounterStore,
+      recordAuthorizer: new LiveRecordAuthorizer(soulLoader, {
+        async resolvePrincipalLayer(name: string) {
+          return { name, grants: memberRole.grants };
+        },
+      }),
+    });
+    return { app, sid };
+  }
+
+  const authed = (sid: string) => ({
+    cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+    headers: { [CSRF_HEADER]: TEST_CSRF },
+  });
+
+  it("refuses a member every verb on an hr-domained Resource", async () => {
+    const { app, sid } = await buildGuardedApp();
+    const calls: Array<{ method: "POST" | "GET" | "PUT" | "PATCH" | "DELETE"; url: string }> = [
+      { method: "POST", url: "/api/v1/resources/salary_review" },
+      { method: "GET", url: "/api/v1/resources/salary_review" },
+      { method: "GET", url: "/api/v1/resources/salary_review/rec-1" },
+      { method: "PUT", url: "/api/v1/resources/salary_review/rec-1" },
+      { method: "PATCH", url: "/api/v1/resources/salary_review/rec-1" },
+      { method: "DELETE", url: "/api/v1/resources/salary_review/rec-1" },
+    ];
+    for (const call of calls) {
+      const res = await app.inject({
+        ...call,
+        ...authed(sid),
+        headers: { ...authed(sid).headers, "if-match": "1" },
+        payload: { title: "x" },
+      });
+      expect([call.method, call.url, res.statusCode]).toEqual([call.method, call.url, 403]);
+    }
+    await app.close();
+  });
+
+  it("still lets the same member reach an undomained Resource", async () => {
+    const { app, sid } = await buildGuardedApp();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/resources/ticket",
+      ...authed(sid),
+      payload: { title: "Bug" },
+    });
+    expect(res.statusCode).toBe(201);
+    await app.close();
+  });
+
+  it("refuses rather than passes when the request carries no modellable principal", async () => {
+    const store = new MemorySessionStore();
+    const userRepo = new FakeUserRepo();
+    const soulLoader = makeFakeSoulLoader([
+      { name: "ticket", schema: TICKET_SCHEMA, hasHooks: false, hooksEnabled: true },
+    ]);
+    const user = await createUser(userRepo, "m2@example.com", "pass", "member");
+    const sid = await store.create(user._id);
+    const app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo: new FakeTokenRepo(),
+      soulLoader,
+      resourceRepoFactory: new FakeResourceRepoFactory(),
+      counterStore: stubCounterStore,
+      recordAuthorizer: {
+        async authorize() {
+          return false;
+        },
+      },
+    });
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/resources/ticket",
+      cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
+      headers: { [CSRF_HEADER]: TEST_CSRF },
+    });
+    expect(res.statusCode).toBe(403);
     await app.close();
   });
 });

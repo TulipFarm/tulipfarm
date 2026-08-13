@@ -9,9 +9,11 @@ import {
   ToolCatalog,
   ToolDispatchError,
   type ToolIntent,
+  type ToolTargetRef,
 } from "@tulipfarm/tool-broker";
 import type { IntegrationConversationsRepo } from "../../ingress/repo";
 import { externalThreadKey } from "../../internal/channel-routes";
+import { defineApiTool, toToolDef } from "../define";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../types";
 import type { SlackTooling } from "./compose";
 import { SLACK_BOT_TOKEN_SECRET_REF } from "./credentials";
@@ -33,6 +35,9 @@ import { SLACK_BOT_TOKEN_SECRET_REF } from "./credentials";
  */
 
 const SLACK_CATALOG = ToolCatalog.load(SLACK_TOOL_CONTRACTS);
+const SLACK_RESOURCE = "integration.slack";
+const SLACK_CHANNEL_TARGET = "slack.channel";
+const SLACK_UNRESOLVED_CHANNEL_NAME_TARGET = "slack.channel_name";
 
 interface SlackToolSpec {
   readonly name: string;
@@ -72,6 +77,12 @@ function mapDispatchError(error: ToolDispatchError): ToolCallResult {
   if (error.detail === "channel_not_found") {
     return err("not_found", "No Slack channel by that name — check the bot has joined it.");
   }
+  // Infrastructure, not the request. Left as `internal_error` these read as `business` faults and
+  // are handed to the model as a repair signal, which spends its budget rewording arguments that
+  // were never wrong. Mirrors `../github/tools.ts` and `../declarative/tools.ts`.
+  if (error.detail === "provider_rate_limited" || error.detail === "provider_unavailable") {
+    return err("unavailable", "Slack is temporarily unavailable; try again shortly.");
+  }
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
 }
 
@@ -104,6 +115,26 @@ function isSendMessageOutput(
   );
 }
 
+/** See the note in `tools/github/tools.ts`: the gate's namespace is the declared resource. */
+const SLACK_AUTHZ_RESOURCE = "integration.slack";
+
+function slackChannelTargets(args: unknown): readonly ToolTargetRef[] {
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return [];
+  const channel = (args as Record<string, unknown>).channel;
+  if (typeof channel !== "string" || channel.length === 0) return [];
+  const normalized = channel.trim();
+  if (normalized.length === 0) return [];
+  if (/^[CGD][A-Z0-9]{8,}$/.test(normalized)) {
+    return [{ type: SLACK_AUTHZ_RESOURCE, id: `channel:${normalized}` }];
+  }
+  // Names cannot be resolved to Slack's stable channel id without an API call. Keep #name/name as
+  // one explicit ambiguous-name target instead of silently aliasing it to a channel id target; this
+  // prevents a grant or deny written for `slack.channel:C...` from being bypassed by switching to a
+  // name spelling unless policy also deliberately grants this unresolved-name namespace.
+  const name = normalized.startsWith("#") ? normalized.slice(1) : normalized;
+  return name.length === 0 ? [] : [{ type: SLACK_AUTHZ_RESOURCE, id: `channel-name:${name}` }];
+}
+
 export interface SlackToolingContext extends SlackTooling {
   readonly effects: EffectStore;
   readonly threads: IntegrationConversationsRepo;
@@ -121,13 +152,29 @@ function buildToolDef(
   }
   const spec = SLACK_TOOL_SPECS[toolId];
 
-  return {
+  const definition = defineApiTool<RequestContext>({
     name: spec.name,
     tier: "integration",
     mutating: contract.mutating,
     description: spec.description,
     inputSchema: contract.inputSchema,
-    async execute(args, ctx: RequestContext): Promise<ToolCallResult> {
+    outputSchema: contract.outputSchema,
+    authorization: {
+      action: contract.action,
+      resources: [SLACK_RESOURCE],
+      targets: slackChannelTargets,
+      dataClasses: contract.dataClasses,
+      allowedDestinations: contract.allowedDestinations,
+    },
+    riskClass: contract.riskClass,
+    credentialMode: "service",
+    provider: "slack",
+    idempotency: contract.idempotency.strategy,
+    timeout: contract.timeout,
+    compensation: contract.compensation,
+    retry: contract.retry,
+    version: contract.toolVersion,
+    async handler(args, ctx): Promise<ToolCallResult> {
       const runId = ctx.runId;
       if (runId === undefined) return err("internal_error", "no run context for this tool call");
       const callId = ctx.toolCallId ?? crypto.randomUUID();
@@ -141,7 +188,10 @@ function buildToolDef(
         toolId,
         toolVersion: contract.toolVersion,
         action: toolId,
-        targetRefs: [],
+        // The Tool's own declared derivation, not a second one written here: `targetsFor` is what
+        // the gate reads, so building the intent from anything else would let the recorded effect
+        // and the authorization decision describe different targets.
+        targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
         credentialRef: SLACK_BOT_TOKEN_SECRET_REF,
         idempotencyKey: derivedId("slack-idempotency", runId, stateId, toolId),
@@ -203,7 +253,9 @@ function buildToolDef(
         throw error;
       }
     },
-  };
+  });
+
+  return toToolDef(definition, (ctx) => ctx);
 }
 
 export function buildSlackTools(businessId: string, tooling: SlackToolingContext): ToolDef[] {

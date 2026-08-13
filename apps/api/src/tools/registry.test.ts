@@ -39,12 +39,14 @@ describe("ToolRegistry", () => {
     expect(reg.getAll().map((t) => t.name)).toEqual(["tool_a", "tool_b"]);
   });
 
-  it("duplicate name overwrites previous registration", () => {
+  it("duplicate name is refused instead of silently overwriting", () => {
     const reg = new ToolRegistry();
     reg.register(makeTool({ name: "dup", description: "first" }));
-    reg.register(makeTool({ name: "dup", description: "second" }));
+    expect(() => reg.register(makeTool({ name: "dup", description: "second" }))).toThrow(
+      'Tool "dup" is already registered'
+    );
     expect(reg.getAll()).toHaveLength(1);
-    expect(reg.getAll()[0].description).toBe("second");
+    expect(reg.getAll()[0]?.description).toBe("first");
   });
 
   it("getAll returns empty array when nothing registered", () => {
@@ -262,6 +264,9 @@ describe("ToolRegistry", () => {
             properties: { component: { type: "object" } },
           },
           execute,
+          // The corrective limit applies to Tools that present, and that is now read from the
+          // declaration rather than matched by name.
+          definition: { availableTo: { requiresPresentation: true } } as ToolDef["definition"],
         })
       );
       const presentationContext: RequestContext = {

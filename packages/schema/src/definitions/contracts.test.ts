@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SchemaRegistry, SchemaValidationError } from "../index";
+import { PRINCIPAL_KINDS } from "../principals";
 import { FormActionDescriptorSchema, FormSchema } from "./form";
 import { GuardrailSchema } from "./guardrail";
 import {
@@ -105,13 +106,14 @@ describe("authored definition schemas", () => {
         kind: "Role",
         metadata: metadata("support-operator"),
         spec: {
-          principalTypes: ["user", "agent"],
+          principalTypes: [...PRINCIPAL_KINDS],
           grants: [
             {
               effect: "allow",
               actions: ["ticket.read"],
               resource: { types: ["ticket"], recordIds: ["ticket-42"] },
               fields: ["title", "status"],
+              domains: ["support"],
               conditions: [{ attribute: "context.channel", operator: "equals", value: "support" }],
               delegable: false,
             },
@@ -328,6 +330,87 @@ describe("authored definition schemas", () => {
     expectInvalidAt(grant, "/spec/externalTargets/0/type", "pattern");
   });
 
+  it("rejects both unbounded authority and grants that would match nothing", () => {
+    // Two rules pulling opposite ways — see `role.ts`. Unbounded authority (`*` on actions or
+    // types) is refused so authored roles enumerate and least privilege is the default. Dead forms
+    // (`record.*`, `fields: ["*"]`) are refused because `grantMatches` compares them literally, so
+    // they would match no request at all and silently deny every call under default-deny. Both
+    // fail loudly at authoring time, which is the point.
+    function roleGranting(grant: Record<string, unknown>): unknown {
+      return {
+        apiVersion,
+        kind: "Role",
+        metadata: metadata("scoped-role"),
+        spec: {
+          principalTypes: ["agent"],
+          grants: [
+            {
+              effect: "allow",
+              actions: ["ticket.read"],
+              resource: { types: ["ticket"] },
+              delegable: false,
+              ...grant,
+            },
+          ],
+        },
+      };
+    }
+
+    // Unbounded: an authored Role must not express blanket authority.
+    expectInvalidAt(roleGranting({ actions: ["*"] }), "/spec/grants/0/actions/0", "pattern");
+    // Omitting `resource` entirely used to be the quiet door to the same thing: the compiler
+    // substituted `["*"]`, producing a grant row byte-identical to the one the pattern below
+    // refuses. A grant must name what it is over.
+    expectInvalidAt(
+      {
+        apiVersion,
+        kind: "Role",
+        metadata: metadata("resourceless-role"),
+        spec: {
+          principalTypes: ["agent"],
+          grants: [{ effect: "allow", actions: ["ticket.read"], delegable: false }],
+        },
+      },
+      "/spec/grants/0",
+      "required"
+    );
+    expectInvalidAt(
+      roleGranting({ resource: { types: ["*"] } }),
+      "/spec/grants/0/resource/types/0",
+      "pattern"
+    );
+
+    // Dead: compared literally by the matcher, so these would match nothing.
+    for (const dead of ["record.*", "tool.*", "*.employee"]) {
+      expectInvalidAt(
+        roleGranting({ resource: { types: [dead] } }),
+        "/spec/grants/0/resource/types/0",
+        "pattern"
+      );
+    }
+    expectInvalidAt(roleGranting({ fields: ["*"] }), "/spec/grants/0/fields/0", "pattern");
+    expectInvalidAt(
+      roleGranting({ destinations: ["*"] }),
+      "/spec/grants/0/destinations/0",
+      "pattern"
+    );
+    expectInvalidAt(
+      roleGranting({ dataClasses: ["*"] }),
+      "/spec/grants/0/dataClasses/0",
+      "pattern"
+    );
+
+    // Honoured by the matcher, or the ordinary way to say "covers anything": still authorable.
+    for (const valid of [
+      { resource: { types: ["record.employee"] } },
+      { resource: { types: ["ticket"], recordIds: ["*"] } },
+      { domains: ["*"] },
+      { fields: ["title"] },
+    ]) {
+      expect(() => validationRegistry.validate(roleGranting(valid))).not.toThrow();
+    }
+  });
+
   it("rejects wildcard authority and unknown grant properties", () => {
     const base = {
       apiVersion,
@@ -358,6 +441,28 @@ describe("authored definition schemas", () => {
       "/spec/grants/0",
       "additionalProperties"
     );
+  });
+
+  it("accepts the named-domain wildcard sentinel on Role grants", () => {
+    expect(() =>
+      validationRegistry.validate({
+        apiVersion,
+        kind: "Role",
+        metadata: metadata("domain-wildcard"),
+        spec: {
+          principalTypes: ["user"],
+          grants: [
+            {
+              effect: "allow",
+              actions: ["ticket.read"],
+              resource: { types: ["ticket"] },
+              domains: ["*"],
+              delegable: false,
+            },
+          ],
+        },
+      })
+    ).not.toThrow();
   });
 
   it("requires explicit independent approval categories instead of a global bypass", () => {

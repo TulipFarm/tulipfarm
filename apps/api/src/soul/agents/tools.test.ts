@@ -1,6 +1,8 @@
 import type { GitSyncService, SoulAgent, SoulLoader } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AGENT_TOOLS, type AgentTool, type AgentToolContext } from "./tools";
+import { AGENT_TOOLS, type AgentToolContext } from "./tools";
+
+type AgentTool = (typeof AGENT_TOOLS)[number];
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
 vi.mock("node:fs/promises", () => ({
@@ -38,6 +40,31 @@ const updateTool = AGENT_TOOLS.find((t) => t.name === "agent_update") as AgentTo
 const getTool = AGENT_TOOLS.find((t) => t.name === "agent_get") as AgentTool;
 const listTool = AGENT_TOOLS.find((t) => t.name === "agent_list") as AgentTool;
 const deleteTool = AGENT_TOOLS.find((t) => t.name === "agent_delete") as AgentTool;
+
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
+describe("AGENT_TOOLS authorization declarations", () => {
+  it("uses the canonical Soul Agent target type", () => {
+    for (const tool of [createTool, updateTool, getTool, deleteTool]) {
+      expect(tool.targetsFor({ name: "task-planner" }), tool.name).toEqual([
+        { type: "soul.agent", id: "task-planner" },
+      ]);
+    }
+    expect(listTool.targetsFor({})).toEqual([]);
+  });
+
+  it("keeps target derivation total for raw model output", () => {
+    const rawInputs: unknown[] = [{}, { unexpected: true }, { name: 7 }, null, []];
+    for (const tool of [createTool, updateTool, getTool, deleteTool]) {
+      for (const input of rawInputs) {
+        expect(() => tool.targetsFor(input), `${tool.name} target derivation`).not.toThrow();
+        expectNoNullishTargetText(tool.targetsFor(input));
+      }
+    }
+  });
+});
 
 // ── agent_create ──────────────────────────────────────────────────────────────
 

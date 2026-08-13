@@ -15,7 +15,7 @@ function role(overrides: Partial<Role> = {}): Role {
   return {
     id: "role-1",
     businessId: "business-1",
-    assignableTo: "user",
+    assignableTo: ["user"],
     parentRoleIds: [],
     grants: [],
     ...overrides,
@@ -59,26 +59,37 @@ describe("assertRoleAssignable", () => {
 
   it("allows a user role for a user and an agent role for an Agent", () => {
     expect(() => assertRoleAssignable(role(), user, NOW)).not.toThrow();
-    expect(() => assertRoleAssignable(role({ assignableTo: "agent" }), agent, NOW)).not.toThrow();
+    expect(() => assertRoleAssignable(role({ assignableTo: ["agent"] }), agent, NOW)).not.toThrow();
   });
 
-  it("allows a both role for either kind", () => {
-    expect(() => assertRoleAssignable(role({ assignableTo: "both" }), user, NOW)).not.toThrow();
-    expect(() => assertRoleAssignable(role({ assignableTo: "both" }), agent, NOW)).not.toThrow();
+  it("allows a role with multiple kinds for any listed kind", () => {
+    expect(() =>
+      assertRoleAssignable(role({ assignableTo: ["user", "agent"] }), user, NOW)
+    ).not.toThrow();
+    expect(() =>
+      assertRoleAssignable(role({ assignableTo: ["user", "agent"] }), agent, NOW)
+    ).not.toThrow();
+  });
+
+  it("allows a role for any canonical principal kind it lists", () => {
+    const service = { kind: "service", businessId: "business-1" } as const;
+    expect(() =>
+      assertRoleAssignable(role({ assignableTo: ["service"] }), service, NOW)
+    ).not.toThrow();
   });
 
   it("denies a user role for an Agent and vice versa", () => {
     expect(() => assertRoleAssignable(role(), agent, NOW)).toThrow(RoleAssignmentError);
-    expect(() => assertRoleAssignable(role({ assignableTo: "agent" }), user, NOW)).toThrow(
+    expect(() => assertRoleAssignable(role({ assignableTo: ["agent"] }), user, NOW)).toThrow(
       RoleAssignmentError
     );
   });
 
-  it("denies kinds outside user/agent even for a both role", () => {
+  it("denies a canonical kind that is not listed", () => {
     const service = { kind: "service", businessId: "business-1" } as const;
-    expect(() => assertRoleAssignable(role({ assignableTo: "both" }), service, NOW)).toThrow(
-      RoleAssignmentError
-    );
+    expect(() =>
+      assertRoleAssignable(role({ assignableTo: ["user", "agent"] }), service, NOW)
+    ).toThrow(RoleAssignmentError);
   });
 
   it("denies assignment across a business boundary", () => {

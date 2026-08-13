@@ -50,6 +50,7 @@ function protectedRequests(intent: ToolIntent, contract: PublishedToolContract) 
       action,
       resourceType: target.type,
       recordId: target.id,
+      ...("domain" in target && target.domain !== undefined ? { domain: target.domain } : {}),
       dataClass: contract.dataClasses[0],
       destination: intent.destination,
     }))

@@ -1,5 +1,6 @@
 import { CHAT_REQUEST_SCHEMA } from "@tulipfarm/schema";
 import type { PresentationContext } from "@tulipfarm/surface";
+import type { ToolAvailability } from "@tulipfarm/tool-broker";
 import type { FastifyReply } from "fastify";
 import type { ToolRegistry } from "../broker/tool-adapter";
 import type { KnowledgeService } from "../knowledge/service";
@@ -82,31 +83,42 @@ export function allowedToolNamesFor(
   const agentAllowed = pa?.toolAllowlist
     ? new Set(pa.toolAllowlist)
     : new Set(toolRegistry.getAll().map((toolDefinition) => toolDefinition.name));
+  const availability = new Map(
+    toolRegistry.getAll().map((tool) => [tool.name, tool.definition?.availableTo])
+  );
   return new Set(
     [...agentAllowed].filter((name) => {
       if (excluded?.has(name)) return false;
-      if (!presentationContext && PRESENTATION_TOOL_NAMES.has(name)) return false;
-      if (
-        WEB_ONLY_TOOL_NAMES.has(name) &&
-        (presentationContext?.target.channel !== "web" ||
-          presentationContext.target.surface !== "chat")
-      ) {
-        return false;
-      }
-      return true;
+      return offerable(availability.get(name), presentationContext);
     })
   );
 }
 
-export const PRESENTATION_TOOL_NAMES = new Set(["present", "update_presentation", "request_input"]);
-
-/** Imperative client Tools are available only to the browser Chat surface. */
-export const WEB_ONLY_TOOL_NAMES = new Set([
-  "get_client_context",
-  "navigate_to",
-  "prefill_form",
-  "invoke_action",
-]);
+/**
+ * Whether a Tool's own `availableTo` lets it be offered to this turn.
+ *
+ * Read from the declaration rather than from a name list kept beside it. The two lists this
+ * replaced named the same seven Tools their definitions already describe, so a Tool added to one
+ * and not the other was offered on a surface that cannot run it — a failure that shows up as a
+ * model calling `navigate_to` in Slack, far from the list that caused it.
+ *
+ * This is *visibility*, not authority: a Tool that passes here is offered, not permitted. The gate
+ * still decides every call.
+ */
+function offerable(
+  availability: ToolAvailability | undefined,
+  presentationContext?: PresentationContext
+): boolean {
+  if (availability === undefined) return true;
+  if (availability.requiresPresentation === true && !presentationContext) return false;
+  if (
+    availability.requiresWebChat === true &&
+    (presentationContext?.target.channel !== "web" || presentationContext.target.surface !== "chat")
+  ) {
+    return false;
+  }
+  return true;
+}
 
 /**
  * Whether to instruct knowledge grounding + citation (and surface pinned pages) for an agent this

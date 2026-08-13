@@ -13,6 +13,7 @@ import { DEFAULT_SESSION_TTL_SECONDS, type SessionStore } from "../auth/session-
 import { AdminAlreadyExistsError, createUser, toPublicUser, type UserRepo } from "../auth/users";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 import { commitActorFromRequest } from "../soul/commit-actor";
+import type { SetupAdminCreator } from "./first-admin";
 import { isHeadlessBoot } from "./service";
 import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
@@ -31,6 +32,7 @@ export interface SetupDeps {
   gitSync: GitSyncService;
   soulPath: string;
   requireAuth: PreHandler;
+  setupAdminCreator?: SetupAdminCreator;
   ttlSeconds?: number;
 }
 
@@ -116,6 +118,7 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     gitSync,
     soulPath,
     requireAuth,
+    setupAdminCreator,
     ttlSeconds = DEFAULT_SESSION_TTL_SECONDS,
   } = deps;
 
@@ -177,13 +180,15 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       if (pwErr) {
         return reply.code(400).send({ error: pwErr.message });
       }
-      // requireSetupOpen's count() check is a fast-path only — it cannot prevent two
-      // concurrent requests both observing zero users. The database's single-admin
-      // invariant (users_single_admin_idx) is what actually closes the race: the loser's
-      // insert throws AdminAlreadyExistsError here and gets no session (#172).
+      // requireSetupOpen's count() check is a fast-path only. The setup_bootstrap unique index
+      // closes the race without limiting later admins: one first-admin claim wins; the loser gets
+      // AdminAlreadyExistsError and no session (#172).
       let user: Awaited<ReturnType<typeof createUser>>;
       try {
-        user = await createUser(userRepo, email, password, "admin");
+        user = await createUser(userRepo, email, password, "admin", {
+          setupBootstrap: true,
+          ...(setupAdminCreator ? { insert: (record) => setupAdminCreator.create(record) } : {}),
+        });
       } catch (err) {
         if (err instanceof AdminAlreadyExistsError) {
           return reply.code(403).send({ error: "setup already complete" });

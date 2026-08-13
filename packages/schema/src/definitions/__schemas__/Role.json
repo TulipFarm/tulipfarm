@@ -70,7 +70,7 @@
             "properties": {
               "actions": {
                 "items": {
-                  "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)+$",
+                  "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+$",
                   "type": "string"
                 },
                 "minItems": 1,
@@ -148,7 +148,7 @@
               },
               "dataClasses": {
                 "items": {
-                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "pattern": "^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$",
                   "type": "string"
                 },
                 "minItems": 1,
@@ -161,6 +161,16 @@
               "destinations": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "^(?!\\*$).+$",
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "domains": {
+                "items": {
+                  "pattern": "^(?:\\*|[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*)$",
                   "type": "string"
                 },
                 "minItems": 1,
@@ -186,6 +196,7 @@
               "fields": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "^(?!\\*$).+$",
                   "type": "string"
                 },
                 "minItems": 1,
@@ -206,7 +217,7 @@
                   },
                   "types": {
                     "items": {
-                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                      "pattern": "^[a-z][a-z0-9_-]*(?:\\.[a-z0-9_-]+)?$",
                       "type": "string"
                     },
                     "minItems": 1,
@@ -223,6 +234,7 @@
             "required": [
               "effect",
               "actions",
+              "resource",
               "delegable"
             ],
             "type": "object"
@@ -240,16 +252,15 @@
         },
         "principalTypes": {
           "items": {
-            "anyOf": [
-              {
-                "const": "user",
-                "type": "string"
-              },
-              {
-                "const": "agent",
-                "type": "string"
-              }
-            ]
+            "enum": [
+              "user",
+              "agent",
+              "routine",
+              "integration_adapter",
+              "api",
+              "service"
+            ],
+            "type": "string"
           },
           "minItems": 1,
           "type": "array",

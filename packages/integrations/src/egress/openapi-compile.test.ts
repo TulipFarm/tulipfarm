@@ -89,6 +89,7 @@ describe("compileOpenApiEgress", () => {
     expect(compiled).toHaveLength(1);
     expect(compiled[0]?.name).toBe("search_acme");
     expect(compiled[0]?.toolId).toBe("openapi.acme.search_acme");
+    expect(compiled[0]?.contract.spec.action).toBe("acme.search_acme");
   });
 
   it("resolves local $refs so the schema can be compiled by AJV", () => {

@@ -64,6 +64,10 @@
     "spec": {
       "additionalProperties": false,
       "properties": {
+        "domain": {
+          "pattern": "^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$",
+          "type": "string"
+        },
         "hooks": {
           "additionalProperties": false,
           "properties": {

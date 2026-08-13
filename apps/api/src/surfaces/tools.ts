@@ -11,7 +11,8 @@ import {
   surfaceActionsForArtifact,
   targetKey,
 } from "@tulipfarm/surface";
-import type { ToolDef } from "../tools/types";
+import { defineApiTool, toToolDef } from "../tools/define";
+import type { RequestContext, ToolDef } from "../tools/types";
 import { err, ok } from "../tools/types";
 import { surfaceRendererRegistry } from "./renderer-registry";
 
@@ -104,6 +105,14 @@ const componentSchema = (
 
 const INPUT_COMPONENT_NAMES = new Set(["Choices", "Form"]);
 
+function surfaceArtifactTarget(args: unknown) {
+  const artifactId =
+    typeof args === "object" && args !== null && "artifactId" in args ? args.artifactId : undefined;
+  return typeof artifactId === "string" && artifactId.length > 0
+    ? [{ type: "platform.surface", id: `artifact:${artifactId}` }]
+    : [];
+}
+
 function awaitedSchemaFor(component: {
   readonly name: string;
   readonly props: Readonly<Record<string, unknown>>;
@@ -177,7 +186,7 @@ const PRESENT_SCHEMA: Record<string, unknown> = {
   },
 };
 
-export const presentTool: ToolDef = {
+const presentToolDefinition = defineApiTool<RequestContext>({
   name: "present",
   tier: "platform",
   mutating: false,
@@ -194,7 +203,14 @@ export const presentTool: ToolDef = {
       ),
     },
   }),
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "surface.present",
+    resources: ["platform.surface"],
+    targets: surfaceArtifactTarget,
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresPresentation: true },
+  handler: async (args, ctx) => {
     if (!ctx.presentationContext || !ctx.surfaceStore) {
       return err("presentation_unavailable", "This Turn has no presentation target.");
     }
@@ -245,7 +261,9 @@ export const presentTool: ToolDef = {
       throw error;
     }
   },
-};
+});
+
+export const presentTool: ToolDef = toToolDef(presentToolDefinition, (ctx) => ctx);
 
 const UPDATE_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -258,14 +276,21 @@ const UPDATE_SCHEMA: Record<string, unknown> = {
   },
 };
 
-export const updatePresentationTool: ToolDef = {
+const updatePresentationToolDefinition = defineApiTool<RequestContext>({
   name: "update_presentation",
   tier: "platform",
   mutating: false,
   description:
     "Replace a Surface Artifact's validated props using optimistic revision concurrency.",
   inputSchema: UPDATE_SCHEMA,
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "surface.update",
+    resources: ["platform.surface"],
+    targets: surfaceArtifactTarget,
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresPresentation: true },
+  handler: async (args, ctx) => {
     if (!ctx.presentationContext || !ctx.surfaceStore) {
       return err("presentation_unavailable", "This Turn has no presentation target.");
     }
@@ -306,11 +331,17 @@ export const updatePresentationTool: ToolDef = {
       );
     }
   },
-};
+});
 
-export const requestInputTool: ToolDef = {
-  ...presentTool,
+export const updatePresentationTool: ToolDef = toToolDef(
+  updatePresentationToolDefinition,
+  (ctx) => ctx
+);
+
+const requestInputToolDefinition = defineApiTool<RequestContext>({
   name: "request_input",
+  tier: "platform",
+  mutating: false,
   description:
     "Ask the user for a choice or typed response. This is the only Tool to use when the response must wait for user input; it presents the interactive component and suspends the same Run.",
   inputSchema: {
@@ -336,7 +367,14 @@ export const requestInputTool: ToolDef = {
       },
     };
   },
-  execute: async (args, ctx) => {
+  authorization: {
+    action: "surface.request_input",
+    resources: ["platform.surface"],
+    targets: surfaceArtifactTarget,
+    dataClasses: ["operational"],
+  },
+  availableTo: { requiresPresentation: true },
+  handler: async (args, ctx) => {
     const value = args as {
       artifactId?: string;
       component: {
@@ -355,6 +393,8 @@ export const requestInputTool: ToolDef = {
       suspendRun: true,
     });
   },
-};
+});
 
-export const SURFACE_TOOLS = [presentTool, updatePresentationTool, requestInputTool] as const;
+export const requestInputTool: ToolDef = toToolDef(requestInputToolDefinition, (ctx) => ctx);
+
+export const SURFACE_TOOLS: ToolDef[] = [presentTool, updatePresentationTool, requestInputTool];

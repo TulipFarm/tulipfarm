@@ -1,6 +1,6 @@
 import type { EgressHttpPort, IntegrationHttpResponse } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { IntegrationManifest, SoulIntegration } from "@tulipfarm/soul";
+import type { IntegrationManifest, Logger, SoulIntegration } from "@tulipfarm/soul";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import { beforeEach, describe, expect, it } from "vitest";
 import { ToolRegistry } from "../../broker/tool-adapter";
@@ -26,6 +26,22 @@ const SPEC = {
   },
 };
 
+const AJV_INVALID_PATTERN_SPEC = {
+  openapi: "3.0.3",
+  servers: [{ url: "https://api.bad.test/v1" }],
+  paths: {
+    "/pages/{page_id}": {
+      get: {
+        operationId: "getPage",
+        parameters: [
+          { name: "page_id", in: "path", required: true, schema: { type: "string", pattern: "[" } },
+        ],
+        responses: { "200": { content: { "application/json": { schema: { type: "object" } } } } },
+      },
+    },
+  },
+};
+
 const EGRESS: IntegrationManifest["egress"] = {
   type: "openapi",
   spec: "spec.json",
@@ -36,7 +52,12 @@ const EGRESS: IntegrationManifest["egress"] = {
   auth: { token_env: "ACME_TOKEN" },
 };
 
-function integration(slug: string, connected: boolean): SoulIntegration {
+function integration(
+  slug: string,
+  connected: boolean,
+  document: unknown = SPEC,
+  egress: IntegrationManifest["egress"] = EGRESS
+): SoulIntegration {
   return {
     slug,
     sourceIntegration: slug,
@@ -44,9 +65,9 @@ function integration(slug: string, connected: boolean): SoulIntegration {
       name: slug,
       version: "1.0.0",
       description: "",
-      egress: EGRESS,
+      egress,
     } as IntegrationManifest,
-    egressSpec: SPEC,
+    egressSpec: document,
     ...(connected ? { connection: { enabled: true, env: {} } } : {}),
   } as SoulIntegration;
 }
@@ -144,6 +165,41 @@ describe("DeclarativeToolSync", () => {
     expect(names().sort()).toEqual(["acme_read_page", "acme_search_docs"]);
   });
 
+  it("reports an AJV-invalid Tool without throwing or corrupting tracked registrations", () => {
+    const errors: string[] = [];
+    const logger = {
+      error(message: string) {
+        errors.push(message);
+      },
+    } as unknown as Logger;
+    sync = new DeclarativeToolSync({
+      registry,
+      integrations: () => installed,
+      businessId: "biz",
+      effects: new MemoryEffectStore(),
+      secrets: async () => ({}) as SecretsService,
+      http: noopHttp,
+      logger: () => logger,
+    });
+    installed = [
+      integration("bad-regex", true, AJV_INVALID_PATTERN_SPEC, {
+        ...EGRESS,
+        operations: [{ operation: "getPage", name: "read_page", description: "Read one page." }],
+      }),
+      integration("acme", true),
+    ];
+
+    expect(() => sync.sync()).not.toThrow();
+    expect(names().sort()).toEqual(["acme_read_page", "acme_search_docs"]);
+    expect(sync.countFor("bad-regex")).toBe(0);
+    expect(sync.countFor("acme")).toBe(2);
+    expect(errors.some((message) => message.includes('Integration "bad-regex"'))).toBe(true);
+
+    installed = [integration("bad-regex", false), integration("acme", false)];
+    expect(sync.sync()).toBe(0);
+    expect(names()).toEqual([]);
+  });
+
   it("counts only the named integration's Tools", () => {
     installed = [integration("acme", true), integration("globex", true)];
     sync.sync();
@@ -151,6 +207,20 @@ describe("DeclarativeToolSync", () => {
     expect(sync.countFor("acme")).toBe(2);
     expect(sync.countFor("globex")).toBe(2);
     expect(sync.countFor("initech")).toBe(0);
+  });
+
+  it("counts by owning slug, not by normalized name prefix", () => {
+    installed = [integration("google", true), integration("google-docs", true)];
+    sync.sync();
+
+    expect(names().sort()).toEqual([
+      "google_docs_read_page",
+      "google_docs_search_docs",
+      "google_read_page",
+      "google_search_docs",
+    ]);
+    expect(sync.countFor("google")).toBe(2);
+    expect(sync.countFor("google-docs")).toBe(2);
   });
 
   it("reports zero for an integration whose Tools were just revoked", () => {

@@ -14,6 +14,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { loadBundledIntegrations } from "../soul/integrations/bundled";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
+import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
 /*
  * Drives the real shipped `integrations/slack/manifest.yml` end to end through the generic broker.
@@ -123,6 +124,7 @@ describe("slack declarative auth flow", () => {
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
   let repo: MemoryAuthRequestRepo;
+  let principalTokens: InMemoryPrincipalProviderTokenRepo;
   let fetchImpl: ReturnType<typeof vi.fn>;
   let store: FakeIntegrationStore;
   const temps: string[] = [];
@@ -130,7 +132,10 @@ describe("slack declarative auth flow", () => {
   beforeEach(async () => {
     const sessions = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
-    const user = await createUser(userRepo, "user@example.com", "pass", "member");
+    // Connecting the *deployment's* shared credential is an operator act — these flows all
+    // exercise `scope: "business"`, so the fixture must be an administrator. A `member` here
+    // would assert a reach the deployment does not grant.
+    const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await sessions.create(user._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "slack-auth-soul-"));
@@ -178,6 +183,7 @@ describe("slack declarative auth flow", () => {
 
     secretsService = new FakeSecretsService();
     repo = new MemoryAuthRequestRepo();
+    principalTokens = new InMemoryPrincipalProviderTokenRepo();
     fetchImpl = vi.fn();
     store = new FakeIntegrationStore();
 
@@ -189,7 +195,11 @@ describe("slack declarative auth flow", () => {
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations: bundled,
-      integrationAuth: { repo, fetchImpl: fetchImpl as never },
+      integrationAuth: {
+        repo,
+        fetchImpl: fetchImpl as never,
+        tokens: principalTokens,
+      },
       slackBind: {
         integrations: store as never,
         businessId: "biz-1",

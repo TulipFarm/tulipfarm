@@ -1,10 +1,12 @@
 import type { SecretsService } from "@tulipfarm/secrets";
 import { createUser, normalizeEmail, type UserRepo } from "../auth/users";
+import type { SetupAdminCreator } from "./first-admin";
 import { isProductionMode } from "./service";
 import { patchSoulConfig } from "./soul-config";
 
 export interface BootstrapDeps {
   userRepo: UserRepo;
+  setupAdminCreator?: SetupAdminCreator;
   secretsService: SecretsService;
   soulPath: string;
   log?: { info: (msg: string) => void; error: (msg: string) => void };
@@ -41,7 +43,14 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
   }
 
   if ((await deps.userRepo.count()) === 0) {
-    await createUser(deps.userRepo, adminEmail, adminPass, "admin");
+    const setupAdminCreator = deps.setupAdminCreator;
+    const insert = setupAdminCreator
+      ? (record: Parameters<SetupAdminCreator["create"]>[0]) => setupAdminCreator.create(record)
+      : undefined;
+    await createUser(deps.userRepo, adminEmail, adminPass, "admin", {
+      setupBootstrap: true,
+      ...(insert ? { insert } : {}),
+    });
     deps.log?.info(`Bootstrapped admin user ${normalizeEmail(adminEmail)}`);
   }
 

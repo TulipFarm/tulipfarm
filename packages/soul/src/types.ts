@@ -1,3 +1,5 @@
+import type { RoleDefinition } from "@tulipfarm/schema";
+
 export interface SoulAgent {
   name: string;
   frontmatter: Record<string, unknown>;
@@ -12,6 +14,7 @@ export interface SoulSkill {
 
 export interface SoulResource {
   name: string;
+  domain?: string;
   schema: Record<string, unknown>;
   hasHooks: boolean;
   hookSource?: string;
@@ -25,6 +28,11 @@ export interface SoulRoutine {
   hasHooks: boolean;
   hookSource?: string;
   hookHash?: string;
+}
+
+export interface SoulRole {
+  name: string;
+  definition: RoleDefinition;
 }
 
 export type McpEntry =
@@ -309,6 +317,20 @@ export interface AuthOAuth2Step {
   description?: string;
   /** Default `authorization_code`. `client_credentials` skips the browser redirect. */
   grant?: "authorization_code" | "client_credentials";
+  /**
+   * Whether the token this step returns represents **the person who authorized it** rather than the
+   * installation. Default `false`.
+   *
+   * This must be declared and cannot be inferred from `grant`. Slack's install step is
+   * `authorization_code` and returns a workspace *bot* token with bot scopes; treating the grant
+   * type as the discriminator would seal that shared token as one person's own credential and
+   * attribute the bot's whole reach to them in the audit trail. OAuth2 says how the token was
+   * obtained, never whose access it carries — only the manifest author knows that.
+   *
+   * `true` is what makes a provider eligible for `credentialMode: "user"` / `"user_preferred"`:
+   * without a step that can mint a personal credential, a Tool demanding one is a dead end.
+   */
+  personal?: boolean;
   /** Required for `authorization_code`; unused for `client_credentials`. */
   authorization_url?: string;
   token_url: string;

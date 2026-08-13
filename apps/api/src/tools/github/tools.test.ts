@@ -1,12 +1,12 @@
 import { generateKeyPairSync } from "node:crypto";
-import type { IntegrationHttpRequest } from "@tulipfarm/integrations";
+import { GITHUB_TOOL_CONTRACTS, type IntegrationHttpRequest } from "@tulipfarm/integrations";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { IntegrationStore, PersistedRoutingSnapshot } from "@tulipfarm/storage";
 import { MemoryEffectStore } from "@tulipfarm/tool-broker";
 import { describe, expect, it } from "vitest";
 import type { RequestContext } from "../types";
 import { buildGitHubTooling } from "./compose";
-import { buildGitHubTools } from "./tools";
+import { buildGitHubTools, GITHUB_REPOSITORY_LIST_TOOL_NAME } from "./tools";
 
 /**
  * Exercises `buildGitHubTools()`'s `ToolDef.execute()` against a real `buildGitHubTooling()`
@@ -222,7 +222,130 @@ function context(overrides: Partial<RequestContext> = {}): RequestContext {
   return { userId: "user-1", runId: "run-1", toolCallId: "call-1", ...overrides };
 }
 
+function expectNoNullishTargetText(targets: unknown): void {
+  expect(JSON.stringify(targets)).not.toMatch(/undefined|null/);
+}
+
 describe("buildGitHubTools", () => {
+  it("derives egress destinations from the published GitHub contracts", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const destinationsByAction = new Map(
+      GITHUB_TOOL_CONTRACTS.map((contract) => [
+        contract.spec.action,
+        contract.spec.allowedDestinations,
+      ])
+    );
+
+    for (const tool of tools.filter(
+      (candidate) => candidate.name !== GITHUB_REPOSITORY_LIST_TOOL_NAME
+    )) {
+      const action = tool.definition?.authorization.action;
+      if (action === undefined) throw new Error(`${tool.name} missing authorization action`);
+      expect(tool.definition?.authorization.allowedDestinations, tool.name).toEqual(
+        destinationsByAction.get(action)
+      );
+    }
+  });
+
+  it("uses an installation-scoped target for all-repository searches", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+
+    for (const name of ["github_issue_search", "github_pull_request_search"]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool?.definition === undefined) throw new Error(`${name} not registered`);
+      const targets = tool.definition.targetsFor({ query: "is:open" });
+
+      expect(targets, name).toEqual([
+        { type: "integration.github", id: "installation:all-repositories" },
+      ]);
+      // A concrete repository grant must not satisfy an installation-wide search. Since both now
+      // live under `integration.github`, the separation is carried by the id prefix, so that is
+      // what this asserts — checking the old `github.repository` type would be vacuous.
+      expect(
+        targets.filter((target) => target.id?.startsWith("repo:")),
+        name
+      ).toEqual([]);
+      expectNoNullishTargetText(targets);
+    }
+  });
+
+  it("mirrors the adapter's all-repository search fallback for malformed selectors", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const allRepositoriesTarget = [
+      { type: "integration.github", id: "installation:all-repositories" },
+    ];
+    const cases: unknown[] = [
+      { query: "is:open", repositories: [] },
+      { query: "is:open", repository: 42 },
+      { query: "is:open", repository: null },
+      { query: "is:open", repository: "" },
+      { query: "is:open", repositories: "tulip/farm" },
+    ];
+
+    for (const name of ["github_issue_search", "github_pull_request_search"]) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool?.definition === undefined) throw new Error(`${name} not registered`);
+      for (const args of cases) {
+        expect(tool.definition.targetsFor(args), `${name} ${JSON.stringify(args)}`).toEqual(
+          allRepositoriesTarget
+        );
+      }
+      expect(tool.definition.targetsFor({ query: "is:open", repository: "tulip/farm" })).toEqual([
+        { type: "integration.github", id: "repo:tulip/farm" },
+      ]);
+      expect(
+        tool.definition.targetsFor({ query: "is:open", repositories: ["tulip/farm"] })
+      ).toEqual([{ type: "integration.github", id: "repo:tulip/farm" }]);
+    }
+  });
+
+  it("keeps GitHub target derivation total for raw model output", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const names = ["github_issue_search", "github_pull_request_search", "github_issue_read"];
+    const rawInputs: unknown[] = [
+      {},
+      { unexpected: true },
+      { repository: 7 },
+      { repository: null, repositories: null },
+      { repositories: [1, null] },
+      null,
+      [],
+    ];
+
+    for (const name of names) {
+      const tool = tools.find((candidate) => candidate.name === name);
+      if (tool?.definition === undefined) throw new Error(`${name} not registered`);
+      for (const input of rawInputs) {
+        expect(() => tool.definition?.targetsFor(input), `${name} target derivation`).not.toThrow();
+        expectNoNullishTargetText(tool.definition.targetsFor(input));
+      }
+    }
+  });
+
   it("dispatches a read tool through the effect ledger and returns the adapter output", async () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,
@@ -336,6 +459,25 @@ describe("buildGitHubTools", () => {
     expect(await effects.list(BUSINESS_ID)).toEqual([]);
   });
 
+  it("requires installation-wide authority to list installed repositories", () => {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeIntegrationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeHttp({ number: 1, title: "t", state: "open" }),
+    });
+    const tools = buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() });
+    const tool = tools.find((t) => t.name === "github_repository_list");
+    if (tool?.definition === undefined) throw new Error("github_repository_list not registered");
+
+    expect(tool.definition.targetsFor({})).toEqual([
+      { type: "integration.github", id: "installation:all-repositories" },
+    ]);
+    expect(tool.definition.targetsFor(null)).toEqual([
+      { type: "integration.github", id: "installation:all-repositories" },
+    ]);
+  });
+
   it("tells the model to call github_repository_list when the repository isn't installed", async () => {
     const tooling = buildGitHubTooling({
       businessId: BUSINESS_ID,
@@ -438,5 +580,202 @@ describe("buildGitHubTools", () => {
     if (!result.success) {
       expect(result.error.message).toContain("administration:write");
     }
+  });
+});
+
+/**
+ * Two active installations on two accounts, each covering its own repository — the state that made
+ * every GitHub Tool unusable before the credential ref carried a selector. `install-1` mints one
+ * token, `install-2` another, and the assertions turn on *which* token reached the API, because a
+ * credential minted for the wrong installation is the failure that would otherwise look like
+ * success.
+ */
+function twoInstallationSnapshot(): PersistedRoutingSnapshot {
+  return {
+    apps: [
+      {
+        id: "app-1",
+        businessId: BUSINESS_ID,
+        provider: "github",
+        externalAppId: "123456",
+        credentialRefs: [],
+        status: "active",
+      },
+    ],
+    integrations: [
+      {
+        id: "integration-1",
+        businessId: BUSINESS_ID,
+        appId: "app-1",
+        externalTenantId: "install-1",
+        externalAccountId: "tulip",
+        status: "active",
+      },
+      {
+        id: "integration-2",
+        businessId: BUSINESS_ID,
+        appId: "app-1",
+        externalTenantId: "install-2",
+        externalAccountId: "acme",
+        status: "active",
+      },
+    ],
+    accessGrants: [
+      {
+        id: "grant-1",
+        businessId: BUSINESS_ID,
+        integrationId: "integration-1",
+        definition: {
+          externalTargets: { ids: ["tulip/farm"] },
+          permissions: { issues: "write", metadata: "read" },
+        },
+        status: "active",
+      },
+      {
+        id: "grant-2",
+        businessId: BUSINESS_ID,
+        integrationId: "integration-2",
+        definition: {
+          externalTargets: { ids: ["acme/widgets"] },
+          permissions: { issues: "write", metadata: "read" },
+        },
+        status: "active",
+      },
+    ],
+    routes: [],
+  };
+}
+
+function fakeTwoInstallationStore(): IntegrationStore {
+  return {
+    async loadProviderSnapshot() {
+      return twoInstallationSnapshot();
+    },
+    // biome-ignore lint/suspicious/noExplicitAny: only `loadProviderSnapshot` is exercised
+  } as any;
+}
+
+/** Mints a distinct token per installation so a cross-installation credential is observable. */
+function fakeTwoInstallationHttp(seen: { credentials: string[] }) {
+  return {
+    async send(request: IntegrationHttpRequest, credential?: string) {
+      const accessToken = /^\/app\/installations\/(.+)\/access_tokens$/.exec(request.path);
+      if (accessToken !== null) {
+        return {
+          status: 201,
+          headers: {},
+          body: {
+            token: `ghs_${accessToken[1]}`,
+            expires_at: "2026-08-06T01:00:00.000Z",
+          },
+        };
+      }
+      if (credential !== undefined) seen.credentials.push(credential);
+      if (request.path === "/repos/tulip/farm/issues/1" && request.method === "GET") {
+        return {
+          status: 200,
+          headers: {},
+          body: {
+            number: 1,
+            title: "tulip issue",
+            body: "",
+            state: "open",
+            html_url: "https://github.com/tulip/farm/issues/1",
+            labels: [],
+            assignees: [],
+          },
+        };
+      }
+      if (request.path === "/repos/acme/widgets/issues/2" && request.method === "GET") {
+        return {
+          status: 200,
+          headers: {},
+          body: {
+            number: 2,
+            title: "acme issue",
+            body: "",
+            state: "open",
+            html_url: "https://github.com/acme/widgets/issues/2",
+            labels: [],
+            assignees: [],
+          },
+        };
+      }
+      throw new Error(`unexpected request: ${request.method} ${request.path}`);
+    },
+  };
+}
+
+describe("buildGitHubTools with several active installations", () => {
+  function build(seen: { credentials: string[] }) {
+    const tooling = buildGitHubTooling({
+      businessId: BUSINESS_ID,
+      integrations: fakeTwoInstallationStore(),
+      secrets: fakeSecretsService(),
+      http: fakeTwoInstallationHttp(seen),
+    });
+    return {
+      tooling,
+      tools: buildGitHubTools(BUSINESS_ID, { ...tooling, effects: new MemoryEffectStore() }),
+    };
+  }
+
+  it("reads a repository from each installation with that installation's own credential", async () => {
+    const seen = { credentials: [] as string[] };
+    const { tools } = build(seen);
+    const read = tools.find((t) => t.name === "github_issue_read");
+    if (read === undefined) throw new Error("github_issue_read not registered");
+
+    const first = await read.execute(
+      { repository: "tulip/farm", issueNumber: 1 },
+      context({ toolCallId: "call-a" })
+    );
+    expect(first.success).toBe(true);
+    expect(seen.credentials).toEqual(["ghs_install-1"]);
+
+    const second = await read.execute(
+      { repository: "acme/widgets", issueNumber: 2 },
+      context({ toolCallId: "call-b" })
+    );
+    expect(second.success).toBe(true);
+    // The second call must not reuse the first installation's cached token.
+    expect(seen.credentials).toEqual(["ghs_install-1", "ghs_install-2"]);
+  });
+
+  it("refuses a repository no installation covers rather than borrowing another's credential", async () => {
+    const seen = { credentials: [] as string[] };
+    const { tools } = build(seen);
+    const read = tools.find((t) => t.name === "github_issue_read");
+    if (read === undefined) throw new Error("github_issue_read not registered");
+
+    const result = await read.execute(
+      { repository: "other/repo", issueNumber: 1 },
+      context({ toolCallId: "call-c" })
+    );
+
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.message).toContain("github_repository_list");
+    expect(seen.credentials).toEqual([]);
+  });
+
+  it("mints the installation covering the account a repository is created under", async () => {
+    const seen = { credentials: [] as string[] };
+    const { tooling } = build(seen);
+    const ref = await tooling.installations.list();
+    expect(ref.map((entry) => entry.accountLogin).sort()).toEqual(["acme", "tulip"]);
+  });
+
+  it("scopes the entitlement credential to the installation covering the repository", async () => {
+    const seen = { credentials: [] as string[] };
+    const { tooling } = build(seen);
+    const repo = (repository: string) => ({ kind: "repository", repository }) as const;
+    expect(await tooling.installationToken(repo("tulip/farm"))).toBe("ghs_install-1");
+    expect(await tooling.installationToken(repo("acme/widgets"))).toBe("ghs_install-2");
+    expect(await tooling.installationToken(repo("other/repo"))).toBeUndefined();
+    // The org-membership probe asks over the installation covering the *account*, since the
+    // repository it is about to create does not exist yet.
+    expect(await tooling.installationToken({ kind: "account", owner: "acme" })).toBe(
+      "ghs_install-2"
+    );
   });
 });

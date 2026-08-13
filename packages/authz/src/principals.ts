@@ -4,13 +4,15 @@
  * authenticating or substituting for another (SPEC §12 non-amplification, §24 confused-deputy).
  */
 
-export type PrincipalKind =
-  | "user"
-  | "agent"
-  | "routine"
-  | "integration_adapter"
-  | "api"
-  | "service";
+import { PRINCIPAL_KINDS, type PrincipalKind as SchemaPrincipalKind } from "@tulipfarm/schema";
+
+export { PRINCIPAL_KINDS };
+
+export type PrincipalKind = SchemaPrincipalKind;
+
+export function isPrincipalKind(kind: string): kind is PrincipalKind {
+  return (PRINCIPAL_KINDS as readonly string[]).includes(kind);
+}
 
 export type PrincipalStatus = "active" | "disabled" | "expired";
 

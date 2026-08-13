@@ -68,6 +68,8 @@ export type {
 export {
   assertPrincipalAuthenticatable,
   assertSessionMatchesPrincipal,
+  isPrincipalKind,
+  PRINCIPAL_KINDS,
   PrincipalDeniedError,
 } from "./principals";
 export type {

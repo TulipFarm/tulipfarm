@@ -6,8 +6,12 @@ import { KV_TOOLS } from "../kv/tools";
 import type { MemoryLifecycleService } from "../memory/lifecycle-service";
 import type { MemoryRecallService } from "../memory/recall-service";
 import type { MemoryService } from "../memory/service";
-import type { PlatformTool } from "../memory/tools";
-import { MEMORY_TOOLS, recallMemoryTool, rememberCorrectionTool } from "../memory/tools";
+import {
+  MEMORY_TOOLS,
+  recallMemoryTool,
+  rememberCorrectionTool,
+  type ToolContext,
+} from "../memory/tools";
 import { FRONTEND_TOOLS } from "../platform/frontend-tools";
 import { PLATFORM_TOOLS, type PlatformToolContext } from "../platform/tools";
 import { RESOURCE_TOOLS, type ResourceServices } from "../resources/tools.js";
@@ -19,7 +23,8 @@ import {
   type SurfaceComponentToolContext,
 } from "../soul/surface-components/tools.js";
 import { SURFACE_TOOLS } from "../surfaces/tools";
-import type { ToolDef } from "./types";
+import { type ApiToolDefinition, toToolDef } from "./define";
+import type { RequestContext, ToolDef } from "./types";
 
 /**
  * Builds the startup ToolRegistry by adapting module-specific tool definitions to the
@@ -49,187 +54,108 @@ export function buildToolRegistry(services: {
 }): ToolRegistry {
   const registry = new ToolRegistry({ defaultDeny: true });
 
+  /**
+   * Registers a family, binding the per-request context its handlers were written against.
+   *
+   * Every family previously repeated this loop with its own hand-written `ToolDef` literal, which
+   * is how tier, `requiresApproval` and the authorization declaration could drift apart from the
+   * Tool they described. The declaration now travels with the Tool, so registration has nothing
+   * left to restate.
+   */
+  function registerFamily<Ctx>(
+    definitions: readonly ApiToolDefinition<Ctx>[],
+    contextFor: (ctx: RequestContext) => Ctx
+  ): void {
+    for (const definition of definitions) {
+      registry.register(toToolDef(definition, contextFor));
+    }
+  }
+
   if (services.memory) {
     const svc = services.memory;
     const recall = services.memoryRecall;
     const lifecycle = services.memoryLifecycle;
     // A tool that cannot run should not be offered: without the service it needs wired, the tool is
     // left unregistered rather than registered to report itself unavailable.
-    const unavailable = new Set<PlatformTool>();
+    const unavailable = new Set<ApiToolDefinition<ToolContext>>();
     if (recall === undefined) unavailable.add(recallMemoryTool);
     if (lifecycle === undefined) unavailable.add(rememberCorrectionTool);
-    const memoryTools = MEMORY_TOOLS.filter((t) => !unavailable.has(t));
-    for (const t of memoryTools) {
-      registry.register({
-        name: t.name,
-        tier: "platform",
-        mutating: t.mutating,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId }) =>
-          t.handler(args, {
-            userId,
-            service: svc,
-            agentId,
-            ...(recall === undefined ? {} : { recall }),
-            ...(lifecycle === undefined ? {} : { lifecycle }),
-          }),
-      });
-    }
+    registerFamily(
+      MEMORY_TOOLS.filter((t) => !unavailable.has(t)),
+      ({ userId, agentId }) => ({
+        userId,
+        service: svc,
+        agentId,
+        ...(recall === undefined ? {} : { recall }),
+        ...(lifecycle === undefined ? {} : { lifecycle }),
+      })
+    );
   }
 
   if (services.kv) {
     const svc = services.kv;
-    for (const t of KV_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "platform",
-        mutating: t.mutating,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId }) => t.handler(args, { userId, agentId, service: svc }),
-      });
-    }
+    registerFamily(KV_TOOLS, ({ userId, agentId }) => ({ userId, agentId, service: svc }));
   }
 
   if (services.knowledge) {
     const svc = services.knowledge;
-    for (const t of KNOWLEDGE_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "platform",
-        mutating: t.mutating,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId, guardrailRevision, runId, conversationId }) =>
-          t.handler(args, {
-            userId,
-            service: svc,
-            agentId,
-            guardrailRevision,
-            runId,
-            conversationId,
-          }),
-      });
-    }
+    registerFamily(
+      KNOWLEDGE_TOOLS,
+      ({ userId, agentId, guardrailRevision, runId, conversationId }) => ({
+        userId,
+        service: svc,
+        agentId,
+        guardrailRevision,
+        runId,
+        conversationId,
+      })
+    );
   }
 
   if (services.resources) {
     const res = services.resources;
-    for (const t of RESOURCE_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "system",
-        mutating: t.mutating,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, { userId, agentId }) => t.handler(args, { ...res, userId, agentId }),
-      });
-    }
+    registerFamily(RESOURCE_TOOLS, ({ userId, agentId }) => ({ ...res, userId, agentId }));
   }
 
   if (services.resourceTypes) {
     const ctx = services.resourceTypes;
-    for (const t of RESOURCE_TYPE_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "system",
-        mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, _ctx) => t.handler(args, ctx),
-      });
-    }
+    registerFamily(RESOURCE_TYPE_TOOLS, () => ctx);
   }
 
   if (services.agentTools) {
     const ctx = services.agentTools;
-    for (const t of AGENT_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "system",
-        mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, _ctx) => t.handler(args, ctx),
-      });
-    }
+    registerFamily(AGENT_TOOLS, () => ctx);
   }
 
   if (services.skillTools) {
     const ctx = services.skillTools;
-    for (const t of SKILL_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "system",
-        mutating: t.mutating,
-        requiresApproval: false, // soul write — never gated
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, _ctx) => t.handler(args, ctx),
-      });
-    }
+    registerFamily(SKILL_TOOLS, () => ctx);
   }
 
   if (services.surfaceComponents) {
     const ctx = services.surfaceComponents;
-    for (const t of SURFACE_COMPONENT_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "system",
-        mutating: t.mutating,
-        requiresApproval: false,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        execute: (args, _ctx) => t.handler(args, ctx),
-      });
-    }
+    registerFamily(SURFACE_COMPONENT_TOOLS, () => ctx);
   }
 
   if (services.platform !== undefined) {
     const ctx = services.platform;
-    for (const t of PLATFORM_TOOLS) {
-      registry.register({
-        name: t.name,
-        tier: "platform",
-        mutating: t.mutating,
-        description: t.description,
-        inputSchema: t.inputSchema,
-        // routineContext is per-call (routine-spawned headless turns), not a service —
-        // merge it from the RequestContext so call_skill/complete_state see their run.
-        execute: (args, reqCtx) =>
-          t.handler(
-            args,
-            reqCtx.routineContext
-              ? { ...ctx, routineContext: reqCtx.routineContext, requestContext: reqCtx }
-              : { ...ctx, requestContext: reqCtx }
-          ),
-      });
-    }
+    // routineContext is per-call (routine-spawned headless turns), not a service — merge it from
+    // the RequestContext so call_skill/complete_state see the run they belong to.
+    registerFamily(PLATFORM_TOOLS, (reqCtx) =>
+      reqCtx.routineContext
+        ? { ...ctx, routineContext: reqCtx.routineContext, requestContext: reqCtx }
+        : { ...ctx, requestContext: reqCtx }
+    );
   }
 
-  for (const tool of SURFACE_TOOLS) {
+  // Surface and frontend Tools read the per-request RequestContext directly (client context) and
+  // return client-action descriptors, so they are already `ToolDef`s with no services to close over.
+  for (const tool of [...SURFACE_TOOLS, ...FRONTEND_TOOLS]) {
     registry.register(tool);
   }
 
-  // Frontend tools are already ToolDefs — they read the per-request RequestContext directly
-  // (client context) and return client-action descriptors. No services to close over.
-  for (const t of FRONTEND_TOOLS) {
-    registry.register(t);
-  }
-
-  if (services.github) {
-    for (const t of services.github) {
-      registry.register(t);
-    }
-  }
-
-  if (services.slack) {
-    for (const t of services.slack) {
-      registry.register(t);
-    }
+  for (const tool of [...(services.github ?? []), ...(services.slack ?? [])]) {
+    registry.register(tool);
   }
 
   return registry;

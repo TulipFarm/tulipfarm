@@ -13,7 +13,7 @@ export type {
   PrincipalRepo,
   PrincipalStatus,
 } from "./principal-repo";
-export { InMemoryPrincipalRepo } from "./principal-repo";
+export { InMemoryPrincipalRepo, PgPrincipalRepo } from "./principal-repo";
 export type {
   RecertificationDueRecord,
   RecertificationRepo,
@@ -22,11 +22,21 @@ export { InMemoryRecertificationRepo } from "./recertification-repo";
 export type {
   GrantEffect,
   GrantRecord,
+  GroupMembershipRecord,
+  GroupRecord,
+  GroupRepo,
+  GroupRoleAssignmentRecord,
   RoleAssignableTo,
   RoleAssignmentRecord,
   RoleRecord,
   RoleRepo,
 } from "./role-repo";
-export { InMemoryRoleRepo } from "./role-repo";
+export {
+  AUTHORIZATION_STORAGE_STATEMENTS,
+  InMemoryGroupRepo,
+  InMemoryRoleRepo,
+  PgGroupRepo,
+  PgRoleRepo,
+} from "./role-repo";
 export type { SessionRecord, SessionRepo } from "./session-repo";
 export { InMemorySessionRepo } from "./session-repo";

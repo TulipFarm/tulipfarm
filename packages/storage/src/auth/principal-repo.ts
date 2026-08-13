@@ -4,13 +4,10 @@
  * mechanics; `@tulipfarm/authz` owns the authenticate/substitute decision.
  */
 
-export type PrincipalKind =
-  | "user"
-  | "agent"
-  | "routine"
-  | "integration_adapter"
-  | "api"
-  | "service";
+import type { PrincipalKind as SchemaPrincipalKind } from "@tulipfarm/schema";
+import type { TransactionPort } from "../ports";
+
+export type PrincipalKind = SchemaPrincipalKind;
 
 export type PrincipalStatus = "active" | "disabled" | "expired";
 
@@ -25,6 +22,12 @@ export interface PrincipalRecord {
 export interface PrincipalRepo {
   get(businessId: string, id: string): Promise<PrincipalRecord | undefined>;
   put(record: PrincipalRecord): Promise<void>;
+  /**
+   * Every principal in a business, ordered by id. Needed because non-human principals are
+   * *registered*, not derived from a user row, so nothing else can enumerate them — without this
+   * an operator granting a Slack adapter its authority would have to already know the exact id.
+   */
+  list(businessId: string): Promise<readonly PrincipalRecord[]>;
 }
 
 /**
@@ -44,5 +47,74 @@ export class InMemoryPrincipalRepo implements PrincipalRepo {
 
   async put(record: PrincipalRecord): Promise<void> {
     this.records.set(this.key(record.businessId, record.id), Object.freeze({ ...record }));
+  }
+
+  async list(businessId: string): Promise<readonly PrincipalRecord[]> {
+    return [...this.records.values()]
+      .filter((record) => record.businessId === businessId)
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+}
+
+interface PrincipalRow {
+  id: string;
+  business_id: string;
+  kind: PrincipalKind;
+  status: PrincipalStatus;
+  expires_at: Date | null;
+}
+
+function principalFromRow(row: PrincipalRow): PrincipalRecord {
+  return {
+    id: row.id,
+    businessId: row.business_id,
+    kind: row.kind,
+    status: row.status,
+    ...(row.expires_at === null ? {} : { expiresAt: row.expires_at }),
+  };
+}
+
+export class PgPrincipalRepo implements PrincipalRepo {
+  constructor(private readonly transactions: TransactionPort) {}
+
+  async get(businessId: string, id: string): Promise<PrincipalRecord | undefined> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<PrincipalRow>(
+        `SELECT id, business_id, kind, status, expires_at
+           FROM principals
+          WHERE business_id = $1 AND id = $2`,
+        [businessId, id]
+      );
+      const row = result.rows[0];
+      return row ? principalFromRow(row) : undefined;
+    });
+  }
+
+  async put(record: PrincipalRecord): Promise<void> {
+    await this.transactions.withTransaction(async (transaction) => {
+      await transaction.query(
+        `INSERT INTO principals (business_id, id, kind, status, expires_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, now())
+         ON CONFLICT (business_id, id) DO UPDATE SET
+           kind = EXCLUDED.kind,
+           status = EXCLUDED.status,
+           expires_at = EXCLUDED.expires_at,
+           updated_at = now()`,
+        [record.businessId, record.id, record.kind, record.status, record.expiresAt ?? null]
+      );
+    });
+  }
+
+  async list(businessId: string): Promise<readonly PrincipalRecord[]> {
+    return this.transactions.withTransaction(async (transaction) => {
+      const result = await transaction.query<PrincipalRow>(
+        `SELECT id, business_id, kind, status, expires_at
+           FROM principals
+          WHERE business_id = $1
+          ORDER BY id`,
+        [businessId]
+      );
+      return result.rows.map(principalFromRow);
+    });
   }
 }

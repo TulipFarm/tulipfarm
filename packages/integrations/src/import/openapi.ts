@@ -141,6 +141,11 @@ function definition(
     riskClass: mutating ? "high" : "medium",
     mutating,
     allowedDestinations: [...request.allowedDestinations],
+    // A compiled tool reaches a third-party API, so the data it moves is that provider's content —
+    // the same class the hand-written GitHub, Slack and Jira contracts already declare for exactly
+    // this. It is not a placeholder: `checkDlpBoundary` denies `unclassified_data` before it reads
+    // a single rule, so a compiler that omits this emits tools no authority can ever run.
+    dataClasses: ["source_content"],
     idempotency: { strategy: mutating ? "reconcile" : "none" },
     retry: { maxAttempts: 1, safeToRetry: false },
     dryRun: false,
