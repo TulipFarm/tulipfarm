@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { brotliCompressSync } from "node:zlib";
 import type { FastifyInstance } from "fastify";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./app";
@@ -10,6 +11,7 @@ import { buildApp } from "./app";
 // Dockerfile runtime stage; unset in native `pnpm dev`, where Vite serves the SPA).
 
 const INDEX_MARKER = "<!-- tulipfarm-spa-test -->";
+const ASSET_BODY = `export const ok = ${"1".repeat(4096)};\n`;
 
 describe("SPA static serving (WEB_DIST set)", () => {
   let dir: string;
@@ -25,6 +27,8 @@ describe("SPA static serving (WEB_DIST set)", () => {
     );
     mkdirSync(join(dir, "assets"));
     writeFileSync(join(dir, "assets", "app.js"), "export const ok = 1;\n");
+    writeFileSync(join(dir, "assets", "big.js"), ASSET_BODY);
+    writeFileSync(join(dir, "assets", "big.js.br"), brotliCompressSync(Buffer.from(ASSET_BODY)));
     process.env.WEB_DIST = dir;
     app = await buildApp();
   });
@@ -67,6 +71,49 @@ describe("SPA static serving (WEB_DIST set)", () => {
     const res = await app.inject({ method: "GET", url: "/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ status: "ok" });
+  });
+
+  it("content-hashed assets are cached forever; index.html always revalidates", async () => {
+    const asset = await app.inject({ method: "GET", url: "/assets/app.js" });
+    expect(asset.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+
+    for (const url of ["/", "/resources/abc/edit"]) {
+      const doc = await app.inject({ method: "GET", url });
+      expect(doc.headers["cache-control"]).toBe("no-cache");
+    }
+  });
+
+  it("serves the build's precompressed sibling when the client accepts brotli", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/assets/big.js",
+      headers: { "accept-encoding": "br" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-encoding"]).toBe("br");
+    expect(Number(res.headers["content-length"])).toBeLessThan(ASSET_BODY.length);
+    expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+  });
+
+  it("falls back to the plain asset when the client cannot decode brotli", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/assets/big.js",
+      headers: { "accept-encoding": "identity" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-encoding"]).toBeUndefined();
+    expect(res.body).toBe(ASSET_BODY);
+  });
+
+  it("compresses dynamic JSON responses", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/openapi.json",
+      headers: { "accept-encoding": "gzip" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-encoding"]).toBe("gzip");
   });
 
   it("the SPA document gets a self-allowing CSP (not helmet's default-src 'none')", async () => {

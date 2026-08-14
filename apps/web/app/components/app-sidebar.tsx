@@ -421,7 +421,12 @@ export function AppShell({
   user?: SessionUser;
 }) {
   const [open, setOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  // Seeded from the [data-sidebar] the pre-hydration script in root.tsx already resolved, so the
+  // real shell adopts the persisted width on its first render — matching the HydrateFallback
+  // skeleton instead of rendering expanded and snapping to collapsed in an effect.
+  const [collapsed, setCollapsed] = useState(
+    () => document.documentElement.dataset.sidebar === "collapsed"
+  );
   const { pathname } = useLocation();
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle } = useConversations();
@@ -429,10 +434,6 @@ export function AppShell({
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))
     : titleForPath(pathname);
-
-  useEffect(() => {
-    setCollapsed(localStorage.getItem("context-sidebar-collapsed") === "true");
-  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -450,6 +451,8 @@ export function AppShell({
     setCollapsed((current) => {
       const next = !current;
       localStorage.setItem("context-sidebar-collapsed", String(next));
+      // Keep [data-sidebar] authoritative for the skeleton token and this component's own seed.
+      document.documentElement.dataset.sidebar = next ? "collapsed" : "expanded";
       return next;
     });
   }

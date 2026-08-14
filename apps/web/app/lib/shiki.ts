@@ -1,20 +1,37 @@
-import type { Highlighter } from "shiki";
+import type { HighlighterCore } from "shiki/core";
 
 /*
- * Lazy, single-instance Shiki highlighter for the Soul Explorer file viewer. Shiki (and its
- * oniguruma WASM) is dynamically imported so it stays out of the main bundle — loaded only when
- * the Soul tab opens a file.
+ * Lazy, single-instance Shiki highlighter for the Soul Explorer file viewer.
+ *
+ * Built on `shiki/core` with the five grammars and two themes this app actually uses. The bundled
+ * `shiki` entry instead pulls the full registry, which makes Vite emit ~500 grammar chunks plus a
+ * 600 kB Oniguruma WASM chunk. The JavaScript regex engine removes the WASM entirely; `forgiving`
+ * downgrades a grammar pattern it cannot compile to no highlighting rather than throwing.
  */
 
 const THEMES = { light: "github-light", dark: "github-dark" } as const;
 const LANGS = ["yaml", "markdown", "typescript", "json", "bash"] as const;
 
-let instance: Promise<Highlighter> | null = null;
+let instance: Promise<HighlighterCore> | null = null;
 
-function getHighlighter(): Promise<Highlighter> {
+function getHighlighter(): Promise<HighlighterCore> {
   if (!instance) {
-    instance = import("shiki").then(({ createHighlighter }) =>
-      createHighlighter({ themes: [THEMES.light, THEMES.dark], langs: [...LANGS] })
+    instance = Promise.all([
+      import("shiki/core"),
+      import("shiki/engine/javascript"),
+      import("@shikijs/themes/github-light"),
+      import("@shikijs/themes/github-dark"),
+      import("@shikijs/langs/yaml"),
+      import("@shikijs/langs/markdown"),
+      import("@shikijs/langs/typescript"),
+      import("@shikijs/langs/json"),
+      import("@shikijs/langs/bash"),
+    ]).then(([core, engine, light, dark, ...langs]) =>
+      core.createHighlighterCore({
+        themes: [light.default, dark.default],
+        langs: langs.map((l) => l.default),
+        engine: engine.createJavaScriptRegexEngine({ forgiving: true }),
+      })
     );
   }
   return instance;

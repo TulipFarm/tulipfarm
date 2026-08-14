@@ -31,9 +31,12 @@ export const links = (): HtmlLinkDescriptor[] => [
 
 /*
  * Runs before hydration: resolves the stored preference ("system" or absent means follow the OS)
- * and sets [data-theme] on <html> so there is no flash of the wrong palette.
+ * and sets [data-theme] on <html> so there is no flash of the wrong palette. It also mirrors the
+ * persisted sidebar width onto [data-sidebar], which both the HydrateFallback skeleton (baked into
+ * index.html, painted before any JS runs) and AppShell's initial state read — so the shell never
+ * snaps from expanded to collapsed on load.
  */
-const themeInit = `(function(){try{var p=localStorage.getItem("theme");var t=(p==="light"||p==="dark")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);}catch(e){}})();`;
+const themeInit = `(function(){try{var p=localStorage.getItem("theme");var t=(p==="light"||p==="dark")?p:(window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t);document.documentElement.setAttribute("data-sidebar",localStorage.getItem("context-sidebar-collapsed")==="true"?"collapsed":"expanded");}catch(e){}})();`;
 
 function Document({ children }: { children: ReactNode }) {
   return (
@@ -84,11 +87,31 @@ export default function App() {
   );
 }
 
-// Required in Remix SPA mode: rendered into build/client/index.html at build time.
+/*
+ * Required in Remix SPA mode: rendered into build/client/index.html at build time, so this markup is
+ * the very first thing the browser can paint — before a single byte of route JS is parsed, and long
+ * before the shell's clientLoader resolves. It must therefore stay static: no hooks, no data, no
+ * imports beyond the document shell. It mirrors AppShell's frame (sidebar + 52px header + main) so
+ * the real UI fills into the same boxes instead of replacing a blank page.
+ */
 export function HydrateFallback() {
   return (
     <Document>
-      <div />
+      <div className="flex min-h-svh bg-background lg:h-svh lg:overflow-hidden">
+        <div className="hidden shrink-0 border-sidebar-border border-r md:block md:w-14 lg:w-[var(--shell-sidebar-width)]">
+          <div className="flex h-[52px] items-center justify-center border-sidebar-border border-b">
+            <span className="size-6 rounded-md bg-muted" />
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col lg:h-svh">
+          <div className="flex h-[52px] shrink-0 items-center gap-2 border-border border-b px-3 sm:px-4">
+            <span className="size-9 rounded-md bg-muted" />
+            <span className="h-4 w-32 rounded-sm bg-muted" />
+            <span className="ml-auto size-8 rounded-full bg-muted" />
+          </div>
+          <div className="min-h-0 flex-1" />
+        </div>
+      </div>
     </Document>
   );
 }

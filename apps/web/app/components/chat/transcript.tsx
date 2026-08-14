@@ -1,5 +1,5 @@
 import { Check, ChevronsUp, Copy, RotateCcw, ThumbsDown, ThumbsUp } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownView } from "~/components/markdown-view";
 import { nextEffortPreset } from "~/lib/chat/effort-escalation";
 import type { ChatMessage, ChatStatus, ModelReceipt, TimelinePart } from "~/lib/chat/types";
@@ -269,7 +269,7 @@ function UserMessage({ message, mentions }: { message: ChatMessage; mentions?: M
   );
 }
 
-function Message({
+function MessageRow({
   message,
   status,
   isLast,
@@ -364,6 +364,12 @@ function Message({
   );
 }
 
+/**
+ * Every streamed token produces a new `messages` array. Without this boundary React re-renders —
+ * and `MarkdownView` re-parses — every historical message on every token.
+ */
+const Message = memo(MessageRow);
+
 function Loader() {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground" aria-live="polite">
@@ -407,9 +413,12 @@ export function Transcript({
     if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
   }
 
+  // Auto-scroll is layout-forcing, so coalesce bursts of stream updates into one write per frame.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-pin on any transcript change
   useEffect(() => {
-    if (stick.current) endRef.current?.scrollIntoView({ block: "end" });
+    if (!stick.current) return;
+    const frame = requestAnimationFrame(() => endRef.current?.scrollIntoView({ block: "end" }));
+    return () => cancelAnimationFrame(frame);
   }, [messages, status]);
 
   return (

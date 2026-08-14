@@ -10,6 +10,9 @@ import { rehypeMentions } from "./chat/mention-highlight";
 import type { MentionEntry } from "./chat/use-mention-catalog";
 
 const TAG_BASE = "/knowledge/tags/";
+const REMARK_PLUGINS: NonNullable<Options["remarkPlugins"]> = [remarkGfm];
+const NO_MENTIONS: MentionEntry[] = [];
+const NO_CITATIONS: { ref: number; url: string }[] = [];
 
 const wikiUrlTransform = (url: string) =>
   /^tf:(page|agent|resource)\//.test(url) ? url : defaultUrlTransform(url);
@@ -202,11 +205,11 @@ export function MarkdownView({
   wikiLinks?: boolean;
   citations?: { ref: number; url: string }[];
 }) {
-  const list = mentions ?? [];
+  const list = mentions ?? NO_MENTIONS;
   const active = list.length > 0;
   const byPhrase = useMemo(() => new Map(list.map((m) => [m.phrase, m] as const)), [list]);
   const refs = useMemo(
-    () => new Map((citations ?? []).map((c) => [c.ref, c.url] as const)),
+    () => new Map((citations ?? NO_CITATIONS).map((c) => [c.ref, c.url] as const)),
     [citations]
   );
   const citationsOn = refs.size > 0;
@@ -214,17 +217,25 @@ export function MarkdownView({
     () => makeAnchorRenderer({ wikiLinks: Boolean(wikiLinks), citations: citationsOn }),
     [wikiLinks, citationsOn]
   );
-  const rehypePlugins: Options["rehypePlugins"] = [rehypeCallouts];
-  if (active) rehypePlugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
-  if (wikiLinks) rehypePlugins.push([rehypeTags, { tagBase: TAG_BASE }]);
-  if (citationsOn) rehypePlugins.push([rehypeCitations, { refs }]);
-  let resolvedComponents: Components = components;
-  if (active) resolvedComponents = { ...resolvedComponents, ...mentionComponents(byPhrase) };
-  if (wikiLinks || citationsOn) resolvedComponents = { ...resolvedComponents, a: anchor };
+  // Rebuilding these arrays/objects each render hands ReactMarkdown new plugin and component
+  // identities every time, which forces a full re-parse — once per token while a turn streams.
+  const rehypePlugins = useMemo<Options["rehypePlugins"]>(() => {
+    const plugins: NonNullable<Options["rehypePlugins"]> = [rehypeCallouts];
+    if (active) plugins.push([rehypeMentions, { phrases: list.map((m) => m.phrase) }]);
+    if (wikiLinks) plugins.push([rehypeTags, { tagBase: TAG_BASE }]);
+    if (citationsOn) plugins.push([rehypeCitations, { refs }]);
+    return plugins;
+  }, [active, list, wikiLinks, citationsOn, refs]);
+  const resolvedComponents = useMemo<Components>(() => {
+    let resolved: Components = components;
+    if (active) resolved = { ...resolved, ...mentionComponents(byPhrase) };
+    if (wikiLinks || citationsOn) resolved = { ...resolved, a: anchor };
+    return resolved;
+  }, [active, byPhrase, wikiLinks, citationsOn, anchor]);
   return (
     <div className="text-sm">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={rehypePlugins}
         components={resolvedComponents}
         urlTransform={wikiLinks ? wikiUrlTransform : undefined}
