@@ -9,6 +9,12 @@
   Your business' control panel where autonomous agents run your operations.
 </p>
 
+<p align="center">
+  <img src="https://shieldcn.dev/badge/status-research%20preview-orange.svg" alt="Research Preview" />
+  <img src="https://shieldcn.dev/github/release/TulipFarm/tulipfarm.svg?label=docker" alt="Docker Version" />
+  <a href="https://tulipfarm.site"><img src="https://shieldcn.dev/badge/website-tulipfarm.site-blue.svg" alt="Website" /></a>
+</p>
+
 ## Install (self-host)
 
 One line stands up the full stack (the `app` image + bundled PostgreSQL 17 + pgvector)
