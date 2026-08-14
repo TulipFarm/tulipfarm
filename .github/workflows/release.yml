@@ -122,10 +122,18 @@ jobs:
       - name: Start CI when using the workflow token
         if: ${{ env.RELEASE_TOKEN == '' }}
         run: |
+          set -euo pipefail
           # GitHub suppresses push/PR workflows created by GITHUB_TOKEN. A
-          # workflow_dispatch is allowed, so attach the normal CI checks to the
+          # workflow_dispatch is allowed, so attach the normal checks to the
           # release branch explicitly when no RELEASE_TOKEN is configured.
+          #
+          # Both are required: publish-image.yml's `Verify merged source` asserts the
+          # recorded conclusions of `CI Success`, `Docker build`, `Compose parity`, and
+          # `Installer smoke` on the release commit. `CI Success` comes from ci.yml; the
+          # other three come from container.yml. Dispatching only ci.yml would leave
+          # three required checks unreported and block publication.
           gh workflow run ci.yml --ref "release/v$VERSION"
+          gh workflow run container.yml --ref "release/v$VERSION"
       - name: Summarize
         run: |
           {

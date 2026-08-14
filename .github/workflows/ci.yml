@@ -25,6 +25,7 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
@@ -81,11 +82,14 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache-key: lint
       - name: Lint
         run: |
           set -o pipefail
@@ -129,11 +133,14 @@ jobs:
   typecheck:
     name: Typecheck
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache-key: typecheck
       - name: Typecheck
         run: |
           set -o pipefail
@@ -172,11 +179,14 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
+        with:
+          turbo-cache-key: build
       - name: Build (api + web; docs has its own job)
         run: |
           set -o pipefail
@@ -217,6 +227,7 @@ jobs:
   architecture:
     name: Architecture
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     steps:
@@ -263,6 +274,7 @@ jobs:
   schema-fixtures:
     name: Schema fixtures
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: changes
     if: ${{ needs.changes.outputs.non_docs == 'true' }}
     steps:
@@ -305,6 +317,7 @@ jobs:
   docs-build:
     name: Docs checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: changes
     if: ${{ needs.changes.outputs.docs == 'true' }}
     steps:
@@ -357,22 +370,27 @@ jobs:
           retention-days: 7
 
   test-api:
-    name: Test API (${{ matrix.shard }}/5)
+    name: Test API (${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
+    # Four shards, not five. The org is on the Free plan, whose hard ceiling is 20
+    # concurrent jobs; one push used to start 23, so runs queued for hours. Every shard
+    # removed is a slot returned to the rest of the pipeline, and the extra ~40s of wall
+    # time is far cheaper than waiting for a runner.
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5]
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - name: Test API shard ${{ matrix.shard }}/5 with coverage
+      - name: Test API shard ${{ matrix.shard }}/4 with coverage
         run: |
           set -o pipefail
           pnpm --filter @tulipfarm/api exec vitest run \
-            --shard=${{ matrix.shard }}/5 \
+            --shard=${{ matrix.shard }}/4 \
             --coverage \
             --coverage.reporter=json \
             --reporter=default \
@@ -385,7 +403,7 @@ jobs:
           STATUS: ${{ job.status }}
         run: |
           {
-            echo "## Test API (${{ matrix.shard }}/5)"
+            echo "## Test API (${{ matrix.shard }}/4)"
             if [ "$STATUS" = "success" ]; then
               echo "✅ **API shard passed with coverage**"
             else
@@ -420,6 +438,7 @@ jobs:
   test-packages:
     name: Test packages
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
@@ -485,6 +504,7 @@ jobs:
   test-apps:
     name: Test other apps
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     needs: changes
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
@@ -552,6 +572,7 @@ jobs:
   coverage:
     name: Coverage report
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [changes, test-api, test-packages, test-apps]
     if: ${{ needs.changes.outputs.code == 'true' }}
     steps:
@@ -605,6 +626,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs:
       [
         changes,
@@ -680,7 +702,7 @@ jobs:
                 nonDocsChanged,
               ],
               ["Docs checks", "docs-build", process.env.DOCS_BUILD_RESULT, docsChanged],
-              ["Test API (5 shards)", "test-api", process.env.TEST_API_RESULT, codeChanged],
+              ["Test API (4 shards)", "test-api", process.env.TEST_API_RESULT, codeChanged],
               ["Test packages", "test-packages", process.env.TEST_PACKAGES_RESULT, codeChanged],
               ["Test other apps", "test-apps", process.env.TEST_APPS_RESULT, codeChanged],
               ["Coverage report", "coverage", process.env.COVERAGE_RESULT, codeChanged],

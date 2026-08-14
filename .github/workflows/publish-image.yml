@@ -7,9 +7,20 @@ name: Publish release
 on:
   pull_request:
     types: [closed]
+    branches: [main]
 
+# Only a genuine merged release branch takes the shared `release-publish` lock. Every
+# other closed pull request instantiates this workflow too (GitHub offers no head-branch
+# trigger filter) and skips every job in ~2s — but it used to claim the same group first,
+# so an ordinary merge could sit queued behind a running release. Giving those no-op runs
+# a per-run group keeps them out of the queue entirely.
 concurrency:
-  group: release
+  group: >-
+    release-${{
+      (github.event.pull_request.merged == true &&
+       startsWith(github.event.pull_request.head.ref, 'release/v'))
+      && 'publish' || github.run_id
+    }}
   cancel-in-progress: false
 
 permissions:
@@ -111,30 +122,99 @@ jobs:
             echo "source_sha=$source_sha"
             echo "candidate=ghcr.io/tulipfarm/tulipfarm:sha-$RELEASE_SHA"
           } >> "$GITHUB_OUTPUT"
+  # This used to re-run `pnpm lint && typecheck && test && build` against a commit whose
+  # CI run was already green — ~16 minutes of duplicated work on the release critical
+  # path, gated on root `pnpm test`, which is the least reliable command in the repo. A
+  # single spurious worker-suite hook timeout killed releases that had nothing wrong with
+  # them. Assert the recorded verdict for that exact SHA instead: same guarantee, seconds.
   quality:
     name: Verify merged source
     needs: metadata
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    permissions:
+      checks: read
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - name: Require green required checks on the release commit
+        uses: actions/github-script@v9
+        env:
+          RELEASE_SHA: ${{ needs.metadata.outputs.release_sha }}
         with:
-          ref: ${{ needs.metadata.outputs.release_sha }}
-      - uses: ./.github/actions/setup
-      - name: Lint
-        run: pnpm lint
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Test
-        run: pnpm test
-      - name: Build
-        run: pnpm build
+          script: |
+            // Exactly the contexts `main` branch protection requires.
+            const required = [
+              "CI Success",
+              "Docker build",
+              "Compose parity",
+              "Installer smoke",
+            ];
+            const sha = process.env.RELEASE_SHA;
+            const { owner, repo } = context.repo;
+            // A skipped job is a legitimate pass: its workflow decided the diff could
+            // not affect it. Anything else — including a still-running check — is not.
+            const passing = new Set(["success", "skipped", "neutral"]);
+            const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+            // Check runs are eventually consistent right after a merge, and a check can
+            // still be in flight. Poll for up to ~5 minutes before giving up.
+            const deadline = Date.now() + 5 * 60_000;
+            let latest = new Map();
+            let pending = [];
+            for (;;) {
+              const runs = await github.paginate(github.rest.checks.listForRef, {
+                owner, repo, ref: sha, per_page: 100,
+              });
+              latest = new Map();
+              for (const run of runs) {
+                if (!required.includes(run.name)) continue;
+                const seen = latest.get(run.name);
+                // Keep the most recent attempt for each context.
+                if (!seen || new Date(run.started_at) >= new Date(seen.started_at)) {
+                  latest.set(run.name, run);
+                }
+              }
+              pending = required.filter((name) => {
+                const run = latest.get(name);
+                return !run || run.status !== "completed";
+              });
+              if (pending.length === 0 || Date.now() >= deadline) break;
+              core.info(`Waiting on: ${pending.join(", ")}`);
+              await sleep(15_000);
+            }
+
+            const lines = required.map((name) => {
+              const run = latest.get(name);
+              if (!run) return `| ${name} | ❌ not reported |`;
+              if (run.status !== "completed") return `| ${name} | ⏳ ${run.status} |`;
+              const ok = passing.has(run.conclusion);
+              return `| ${name} | ${ok ? "✅" : "❌"} ${run.conclusion} |`;
+            });
+            await core.summary
+              .addRaw(
+                `## Required checks on \`${sha}\`\n\n| Check | Result |\n| --- | --- |\n${lines.join("\n")}\n`
+              )
+              .write();
+
+            const bad = required.filter((name) => {
+              const run = latest.get(name);
+              return !run || run.status !== "completed" || !passing.has(run.conclusion);
+            });
+            if (bad.length) {
+              core.setFailed(
+                `Release commit ${sha} does not have green required checks: ${bad.join(", ")}`
+              );
+            }
+
+  # Each platform builds on a runner of its own architecture. arm64 previously built
+  # under QEMU on an amd64 runner, where Vite's native Rollup binary plus worker threads
+  # deadlock — no crash, no output, just a job pinned until the timeout. Native runners
+  # remove that failure mode and cut the arm64 build from ~10m to ~3m.
   build-candidate-arch:
     name: Build candidate (${{ matrix.platform }})
     needs: [metadata, quality]
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -144,13 +224,14 @@ jobs:
         include:
           - platform: linux/amd64
             arch: amd64
+            runner: ubuntu-latest
           - platform: linux/arm64
             arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.metadata.outputs.release_sha }}
-      - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
         uses: docker/login-action@v4

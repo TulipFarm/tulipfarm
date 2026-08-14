@@ -1,6 +1,15 @@
 name: "Setup pnpm + Node"
 description: "Install pnpm and Node, restore the pnpm store cache, and run a frozen install"
 
+inputs:
+  turbo-cache-key:
+    description: >-
+      Opt in to carrying Turborepo's local cache between runs. Set it to a stable
+      per-job slug (for example `lint`). Leave it empty for jobs that run no turbo
+      tasks, so they do not pay the cache upload cost for nothing.
+    required: false
+    default: ""
+
 runs:
   using: "composite"
   steps:
@@ -20,3 +29,16 @@ runs:
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
+
+    # Turborepo's local cache lives in `.turbo/cache`. Restoring it makes an
+    # unchanged workspace a cache hit instead of a cold re-run. The key is unique
+    # per commit so every run writes a fresh entry, while `restore-keys` falls
+    # back to the most recent entry for the same job.
+    - name: Restore Turborepo cache
+      if: ${{ inputs.turbo-cache-key != '' }}
+      uses: actions/cache@v6
+      with:
+        path: .turbo/cache
+        key: turbo-${{ runner.os }}-${{ inputs.turbo-cache-key }}-${{ github.sha }}
+        restore-keys: |
+          turbo-${{ runner.os }}-${{ inputs.turbo-cache-key }}-

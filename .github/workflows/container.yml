@@ -1,0 +1,358 @@
+name: Container
+
+# The single container pipeline for pull requests and main pushes. It replaces the
+# former `Docker build`, `Compose parity` and `Installer smoke` workflows, which each
+# built the same amd64 image independently and concurrently — three builds of identical
+# bytes, all writing one BuildKit cache scope, so the cache never stayed warm.
+#
+# Here the amd64 image is built ONCE and handed to the parity and smoke jobs as a
+# tarball artifact, so those jobs test the exact bytes the build produced.
+#
+# arm64 builds on a native `ubuntu-24.04-arm` runner. It used to build under QEMU on an
+# amd64 runner, where Vite's native Rollup binary plus worker threads deadlock: no crash,
+# no output, and the job sat until the 6-hour default timeout. Native runners remove that
+# failure mode and cut the build from ~10m to ~3m.
+#
+# Job names are load-bearing: `Docker build`, `Compose parity` and `Installer smoke` are
+# required status checks on `main`. Do not rename them.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # The tag both smoke scripts resolve. Keeping it here and in the artifact keeps
+  # `docker load` and `docker compose` pointing at the same image.
+  IMAGE_TAG: ghcr.io/tulipfarm/tulipfarm:ci
+
+jobs:
+  # Skip the expensive image work for changes that cannot reach the build context.
+  # `.dockerignore` already excludes `docs/`, `specs/` and `references/`, so a change
+  # confined to those (or to any markdown) provably cannot alter the image.
+  changes:
+    name: Detect container changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            head="${{ github.sha }}"
+            base="$(git merge-base origin/main "$head")"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+          fi
+
+          image=false
+          changed_files() {
+            if git cat-file -e "$base^{commit}" 2>/dev/null; then
+              git diff --name-only "$base" "$head" --
+            else
+              git diff-tree --no-commit-id --name-only -r "$head" --
+            fi
+          }
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            case "$f" in
+              docs/*|specs/*|references/*|apps/docs/*) ;;
+              *.md|*.mdx) ;;
+              *) image=true ;;
+            esac
+          done < <(changed_files)
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+
+  validate:
+    name: Validate container definitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: ${{ needs.changes.outputs.image == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Validate Dockerfile, Compose files, and test harnesses
+        run: |
+          set -euo pipefail
+          docker buildx build --check .
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml config --quiet
+          bash -n \
+            scripts/install.sh \
+            scripts/uninstall.sh \
+            scripts/test/compose-parity.sh \
+            scripts/test/installer-smoke.sh
+
+  # The one amd64 build. Its output tarball is the input to every downstream job.
+  build-amd64:
+    name: Build image (linux/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: changes
+    if: ${{ needs.changes.outputs.image == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build and export the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # `type=docker` writes a daemon-loadable archive already tagged, so the
+          # downstream jobs only need `docker load`.
+          outputs: type=docker,dest=${{ runner.temp }}/tulipfarm-amd64.tar
+          tags: ${{ env.IMAGE_TAG }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=tulipfarm-amd64
+          cache-to: type=gha,mode=min,ignore-error=true,scope=tulipfarm-amd64
+      - name: Upload image archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: container-image-amd64
+          path: ${{ runner.temp }}/tulipfarm-amd64.tar
+          if-no-files-found: error
+          # Docker layers in a `type=docker` archive are uncompressed, so light
+          # compression pays for itself; heavier levels cost more than they save.
+          compression-level: 1
+          retention-days: 1
+
+  # Native arm64. No QEMU, no emulated Vite build. Nothing consumes the result, so it
+  # is built into the cache only — this job exists to prove the Dockerfile still builds
+  # for arm64 and to keep the arm64 release cache warm.
+  build-arm64:
+    name: Build image (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    needs: changes
+    if: ${{ needs.changes.outputs.image == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          outputs: type=cacheonly
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=tulipfarm-arm64
+          cache-to: type=gha,mode=min,ignore-error=true,scope=tulipfarm-arm64
+
+  # Required status check — do not rename.
+  #
+  # Boots the FULL bundled compose stack and proves the health probes pass in-container
+  # (INST-008 / AC-007). The container path, not native `pnpm dev`, is the tested release
+  # path. Three phases, all against the one image built above:
+  #   1. zero-env   — no `.env` at all, the paste-and-run path (INST-002). Also proves the
+  #                   generated secrets survive a restart.
+  #   2. key-loss   — data volume wiped, database intact: the app must REFUSE to boot rather
+  #                   than silently orphan every encrypted secret.
+  #   3. configured — the installer's path, with real secrets supplied in `.env`.
+  compose-parity:
+    name: Compose parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [changes, build-amd64]
+    # This is a required status check, so the JOB must always report — a job skipped
+    # wholesale leaves the context unreported. The work inside is what gets skipped.
+    # `!cancelled()` is needed because `needs` on a skipped job otherwise skips this one.
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
+    env:
+      # `--pull missing` in the compose files plus this pinned tag make compose reuse the
+      # loaded image instead of pulling the not-yet-published tag from GHCR. Exported
+      # rather than written to `.env` so phase 1 genuinely runs with no `.env` on disk.
+      TULIPFARM_VERSION: ci
+      RUN_PARITY: ${{ needs.changes.outputs.image }}
+    steps:
+      - name: Require a successful image build
+        if: ${{ needs.changes.outputs.image == 'true' && needs['build-amd64'].result != 'success' }}
+        run: |
+          echo "Image build did not succeed: ${{ needs['build-amd64'].result }}"
+          exit 1
+      - name: Skip — the diff cannot reach the build context
+        if: ${{ needs.changes.outputs.image != 'true' }}
+        run: echo "No container-relevant changes; nothing to verify." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        if: ${{ env.RUN_PARITY == 'true' }}
+      - name: Download image archive
+        if: ${{ env.RUN_PARITY == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: container-image-amd64
+          path: ${{ runner.temp }}
+      - name: Load image
+        if: ${{ env.RUN_PARITY == 'true' }}
+        run: docker load --input "${{ runner.temp }}/tulipfarm-amd64.tar"
+      - name: Run Compose parity test
+        if: ${{ env.RUN_PARITY == 'true' }}
+        run: |
+          set -o pipefail
+          bash scripts/test/compose-parity.sh 2>&1 | tee compose-parity.log
+      - name: Job summary
+        if: ${{ always() && env.RUN_PARITY == 'true' }}
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Compose parity"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Zero-env boot, key-loss guard, and configured stack all passed**"
+            else
+              echo "❌ **Compose parity failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 compose-parity.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: ${{ always() && env.RUN_PARITY == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-compose-parity
+          path: compose-parity.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Required status check — do not rename.
+  #
+  # Exercises the real OCI installer end to end. It needs no registry writes and no
+  # secrets, so it is safe for fork and Dependabot pull requests.
+  installer-smoke:
+    name: Installer smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: [changes, build-amd64]
+    # Required status check — the job always reports; only the work is conditional.
+    # See the equivalent note on `compose-parity`.
+    if: ${{ !cancelled() && needs.changes.result == 'success' }}
+    env:
+      RUN_SMOKE: ${{ needs.changes.outputs.image }}
+    steps:
+      - name: Require a successful image build
+        if: ${{ needs.changes.outputs.image == 'true' && needs['build-amd64'].result != 'success' }}
+        run: |
+          echo "Image build did not succeed: ${{ needs['build-amd64'].result }}"
+          exit 1
+      - name: Skip — the diff cannot reach the build context
+        if: ${{ needs.changes.outputs.image != 'true' }}
+        run: echo "No container-relevant changes; nothing to smoke." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v7
+        if: ${{ env.RUN_SMOKE == 'true' }}
+      - uses: ./.github/actions/setup
+        if: ${{ env.RUN_SMOKE == 'true' }}
+      # The browser smoke (step 6 of the script) drives the shipped SPA in real Chromium.
+      - name: Install Chromium for the browser smoke
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        run: pnpm exec playwright install --with-deps chromium
+      - name: Download image archive
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          name: container-image-amd64
+          path: ${{ runner.temp }}
+      - name: Load image
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        run: docker load --input "${{ runner.temp }}/tulipfarm-amd64.tar"
+      - name: Run installer smoke test
+        if: ${{ env.RUN_SMOKE == 'true' }}
+        run: |
+          set -o pipefail
+          bash scripts/test/installer-smoke.sh 2>&1 | tee installer-smoke.log
+      - name: Job summary
+        if: ${{ always() && env.RUN_SMOKE == 'true' }}
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          {
+            echo "## Installer smoke"
+            if [ "$STATUS" = "success" ]; then
+              echo "✅ **Installer brought up the stack and /health passed**"
+            else
+              echo "❌ **Installer smoke failed** — last 100 lines:"
+              echo ""
+              echo '<details><summary>Log tail</summary>'
+              echo ""
+              echo '```'
+              tail -n 100 installer-smoke.log 2>/dev/null || echo "(no log captured)"
+              echo '```'
+              echo ""
+              echo '</details>'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload log
+        if: ${{ always() && env.RUN_SMOKE == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: log-installer-smoke
+          path: installer-smoke.log
+          if-no-files-found: ignore
+          retention-days: 7
+      # Written by browser-smoke.mjs when it fails — the fastest way to see what the SPA
+      # actually rendered, since the failure is in a browser CI never shows you.
+      - name: Upload browser smoke screenshot
+        if: ${{ failure() && env.RUN_SMOKE == 'true' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-smoke-failure
+          path: browser-smoke-failure.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Required status check — do not rename. Always runs so the check reports even when
+  # every image job was skipped as irrelevant to the diff.
+  docker-success:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: always()
+    needs: [changes, validate, build-amd64, build-arm64, compose-parity, installer-smoke]
+    steps:
+      - name: Gate container validation and platform builds
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          AMD64_RESULT: ${{ needs['build-amd64'].result }}
+          ARM64_RESULT: ${{ needs['build-arm64'].result }}
+          PARITY_RESULT: ${{ needs['compose-parity'].result }}
+          SMOKE_RESULT: ${{ needs['installer-smoke'].result }}
+        run: |
+          set -euo pipefail
+          [ "$CHANGES_RESULT" = "success" ] || {
+            echo "Change detection: $CHANGES_RESULT"
+            exit 1
+          }
+          failed=0
+          # `skipped` is a pass: the diff provably cannot reach the build context.
+          check() {
+            case "$2" in
+              success|skipped) echo "✅ $1: $2" ;;
+              *) echo "❌ $1: $2"; failed=1 ;;
+            esac
+          }
+          check "Container definition validation" "$VALIDATE_RESULT"
+          check "Build image (linux/amd64)" "$AMD64_RESULT"
+          check "Build image (linux/arm64)" "$ARM64_RESULT"
+          check "Compose parity" "$PARITY_RESULT"
+          check "Installer smoke" "$SMOKE_RESULT"
+          [ "$failed" -eq 0 ]
