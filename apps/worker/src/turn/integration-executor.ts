@@ -59,7 +59,7 @@ export interface IntegrationExecutorOptions {
 }
 
 export function createIntegrationExecutor(options: IntegrationExecutorOptions): RunExecutor {
-  return async (run: PersistedRun): Promise<RunOutcome> => {
+  return async (run: PersistedRun, signal?: AbortSignal): Promise<RunOutcome> => {
     const delivery = await options.deliveries.describe(run.id);
     if (delivery === undefined) {
       // The Run is gone, already terminal, or was never a delivery. Nothing is owed, and failing
@@ -116,7 +116,7 @@ export function createIntegrationExecutor(options: IntegrationExecutorOptions): 
         : classify(writer, { decision: "ignore", reason: recorded.reason });
     }
 
-    return runChat(run, decision, delivery, writer, options);
+    return runChat(run, decision, delivery, writer, options, signal);
   };
 }
 
@@ -144,7 +144,8 @@ async function runChat(
   decision: Extract<IngressDecision, { kind: "chat" }>,
   delivery: RemoteDelivery,
   writer: TurnEventWriter,
-  options: IntegrationExecutorOptions
+  options: IntegrationExecutorOptions,
+  signal?: AbortSignal
 ): Promise<RunOutcome> {
   if (!delivery.chatEnabled) {
     return classify(writer, { decision: "ignore", reason: "chat_not_declared" });
@@ -170,7 +171,7 @@ async function runChat(
 
   await writer.emit("delivery.classified", { decision: "chat" }, "classified");
 
-  const outcome = await options.turn(run);
+  const outcome = await options.turn(run, signal);
   const reply = replyOutcome(outcome);
   if (reply === null) {
     // Parked on an approval, or being cancelled by whoever owns the Run. Either way the turn has

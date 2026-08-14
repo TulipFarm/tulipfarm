@@ -24,14 +24,38 @@ import { functionTools, type RenderedImage, renderTranscript } from "./transcrip
  * entirely; the credential and everything else the subprocess can see is scoped by `jail.ts`.
  */
 
-const CLAUDE_ENV_PASSTHROUGH = [
-  "ANTHROPIC_API_KEY",
-  "ANTHROPIC_AUTH_TOKEN",
-  "ANTHROPIC_BASE_URL",
-  "CLAUDE_CODE_OAUTH_TOKEN",
-] as const;
+/**
+ * The credential is handed to the child explicitly (`CLAUDE_CODE_OAUTH_TOKEN` in `extraVars`), so
+ * nothing Anthropic-shaped is inherited from the host.
+ *
+ * `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` were passed through here
+ * once and must not come back. TulipFarm's own `api_key_ref: env://ANTHROPIC_API_KEY` escape hatch
+ * makes that variable a *supported* way to configure the API-keyed `anthropic` provider, so any
+ * deployment running both providers has it set — and the CLI changes credential selection when it
+ * sees one. Verified against the vendored `claude` 0.3.211 with a jailed `HOME` and `env -i`:
+ * with the OAuth token alone it authenticates as the subscription; add `ANTHROPIC_API_KEY` and it
+ * refuses with "a non-OAuth Anthropic credential cannot satisfy the org pin". On a host without
+ * that pin the failure is worse than loud — the API key answers, billing the operator's account
+ * for a turn TulipFarm reports as unpriced. An ambient `ANTHROPIC_BASE_URL` is the same class of
+ * hazard: it silently redirects subscription traffic to a third party.
+ */
+const CLAUDE_ENV_PASSTHROUGH = [] as const;
 
 const MCP_SERVER_NAME = "tulipfarm";
+
+/**
+ * Tools reach the model through an in-process MCP server, and Claude Code namespaces every MCP
+ * tool as `mcp__<server>__<tool>` — that is the name the model puts in its `tool_use` blocks.
+ * TulipFarm's AgentLoop resolves a call against the bare names it exposed
+ * (`exposed.get(call.name)`, `packages/agent-runtime/src/loop/loop.ts`), so handing the namespaced
+ * form straight through refuses *every* call as `tool_not_available`. Strip the one prefix this
+ * adapter is responsible for; anything else passes untouched rather than being mangled.
+ */
+const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
+
+export function stripMcpPrefix(name: string): string {
+  return name.startsWith(MCP_TOOL_PREFIX) ? name.slice(MCP_TOOL_PREFIX.length) : name;
+}
 
 function userMessage(text: string, images: readonly RenderedImage[]): SDKUserMessage {
   return {
@@ -66,9 +90,39 @@ function deltaText(message: SDKMessage): string | undefined {
   return undefined;
 }
 
-function isAuthFailure(text: string): boolean {
-  return /invalid api key|oauth token|unauthorized|authentication|401/i.test(text);
+/**
+ * A failed turn arrives as a `result` message whose `result` string is the raw provider error —
+ * there is no status code to switch on. Classifying it matters more than it looks: an
+ * unclassified credential failure becomes a generic `model_error`, which `isHardFailure`
+ * (`packages/llm/src/fallback.ts`) treats as transient, so one expired token walks the entire
+ * fallback chain instead of stopping at the provider that actually needs re-authenticating.
+ *
+ * These patterns are the observed wordings, not guesses — notably Claude Code reports a rejected
+ * credential as "Not a valid API key for this workspace", which no "invalid api key" match would
+ * ever catch. They are frozen in `claude-code.test.ts` so an SDK rewording fails in CI.
+ */
+const AUTH_FAILURE_PATTERNS = [
+  /not a valid api key/i,
+  /invalid api key/i,
+  /invalid x-api-key/i,
+  /oauth/i,
+  /unauthorized/i,
+  /authentication/i,
+  /authentication_error/i,
+  /\b401\b/,
+  /\b403\b/,
+  /credit balance/i,
+  /please run \/login/i,
+  /run `claude setup-token`/i,
+] as const;
+
+export function isAuthFailure(text: string): boolean {
+  return AUTH_FAILURE_PATTERNS.some((pattern) => pattern.test(text));
 }
+
+/** Remediation the operator can act on, surfaced alongside the classified failure. */
+const REAUTH_HINT =
+  "Claude Code credential rejected — run `claude setup-token` and paste the new token in Settings.";
 
 /** Tools are declared to the SDK so it can emit `tool_use` blocks, but never actually executed —
  * every real call is captured off the assistant message and dispatched through the Tool Broker
@@ -117,9 +171,7 @@ export class ClaudeCodeModel extends CliLanguageModel {
         tools: declared,
         alwaysLoad: true,
       });
-      const allowedTools = declared.map(
-        (definition) => `mcp__${MCP_SERVER_NAME}__${definition.name}`
-      );
+      const allowedTools = declared.map((definition) => `${MCP_TOOL_PREFIX}${definition.name}`);
 
       const controller = new AbortController();
       signal.addEventListener("abort", () => controller.abort(), { once: true });
@@ -140,9 +192,13 @@ export class ClaudeCodeModel extends CliLanguageModel {
           settingSources: [],
           strictMcpConfig: true,
           mcpServers: { [MCP_SERVER_NAME]: server },
+          // `allowedTools` is the whole permission story here. Nothing this adapter declares is
+          // ever meant to run — the assistant message carrying `tool_use` is captured and the
+          // query aborted before the SDK reaches execution — so the `bypassPermissions` /
+          // `allowDangerouslySkipPermissions` pair qm needs (its bridged tools genuinely execute)
+          // would be pure attack surface. An explicit allowlist also means a stray call to
+          // anything else cannot silently park the subprocess on an interactive prompt.
           allowedTools,
-          permissionMode: "bypassPermissions",
-          allowDangerouslySkipPermissions: true,
           persistSession: false,
           includePartialMessages: true,
           systemPrompt: systemPrompt || undefined,
@@ -150,8 +206,13 @@ export class ClaudeCodeModel extends CliLanguageModel {
         },
       });
 
-      let inputTokens = 0;
-      let outputTokens = 0;
+      /**
+       * The SDK re-reports a message's cumulative usage on every `assistant` message it emits for
+       * that message id, so summing naively inflates input tokens — and with them every budget and
+       * metric derived from them. Keep the highest figure seen per id and sum the ids at the end
+       * (ported from `qm/src/harness/claude-harness.ts`).
+       */
+      const usageById = new Map<string, { input: number; output: number }>();
       let buffered = "";
       let sawToolCall = false;
 
@@ -175,11 +236,24 @@ export class ClaudeCodeModel extends CliLanguageModel {
               }
             | undefined;
           if (usage) {
-            inputTokens +=
-              (usage.input_tokens ?? 0) +
-              (usage.cache_read_input_tokens ?? 0) +
-              (usage.cache_creation_input_tokens ?? 0);
-            outputTokens += usage.output_tokens ?? 0;
+            const id = message.message.id ?? "unknown";
+            const seen = {
+              input:
+                (usage.input_tokens ?? 0) +
+                (usage.cache_read_input_tokens ?? 0) +
+                (usage.cache_creation_input_tokens ?? 0),
+              output: usage.output_tokens ?? 0,
+            };
+            const known = usageById.get(id);
+            usageById.set(
+              id,
+              known
+                ? {
+                    input: Math.max(known.input, seen.input),
+                    output: Math.max(known.output, seen.output),
+                  }
+                : seen
+            );
           }
           const content = message.message.content as Array<{
             type: string;
@@ -193,7 +267,7 @@ export class ClaudeCodeModel extends CliLanguageModel {
               yield {
                 type: "tool-call",
                 toolCallId: block.id,
-                toolName: block.name,
+                toolName: stripMcpPrefix(block.name),
                 input: block.input,
               };
             }
@@ -212,10 +286,19 @@ export class ClaudeCodeModel extends CliLanguageModel {
             result?: string;
             is_error?: boolean;
           };
+          // A rejected credential still reports `subtype: "success"` — only `is_error` and the
+          // `result` text distinguish it from a real completion, so both must be checked.
           if (result.subtype !== "success" || result.is_error) {
-            const text = result.result ?? result.subtype ?? "CLI provider turn failed";
-            if (isAuthFailure(text))
-              throw new LlmProviderError("model_authentication_failed", new Error(text));
+            const text = result.result ?? result.subtype ?? "Claude Code turn failed";
+            if (isAuthFailure(text)) {
+              // `LlmProviderError` keeps only its reason participant-visible; the cause is
+              // operator-only, and `AgentLoop`'s `deepestErrorMessage` surfaces it in the log —
+              // so it carries both the remediation and the provider's own wording.
+              throw new LlmProviderError(
+                "model_authentication_failed",
+                new Error(`${REAUTH_HINT} (provider said: ${text})`)
+              );
+            }
             throw new Error(text);
           }
         }
@@ -225,6 +308,12 @@ export class ClaudeCodeModel extends CliLanguageModel {
         yield { type: "text-delta", delta: firstJsonObject(buffered) ?? buffered };
       }
 
+      let inputTokens = 0;
+      let outputTokens = 0;
+      for (const seen of usageById.values()) {
+        inputTokens += seen.input;
+        outputTokens += seen.output;
+      }
       yield { type: "usage", inputTokens, outputTokens };
     } finally {
       jail.cleanup();

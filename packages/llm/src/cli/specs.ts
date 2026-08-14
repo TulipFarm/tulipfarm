@@ -40,6 +40,41 @@ const CLI_MODEL_SPECS: Record<string, Record<string, ModelSpec>> = {
       supports_reasoning: false,
     },
   },
+  /**
+   * Codex model slugs as published by `@openai/codex` 0.147.0. The three GPT-5.6 tiers map onto the
+   * same shape as the Claude aliases above — `sol` is the flagship, `terra` the balanced tier,
+   * `luna` the low-latency one — so an operator picking "the big one" or "the fast one" gets a
+   * comparable choice on either subscription.
+   */
+  codex: {
+    "gpt-5.6-sol": {
+      max_input_tokens: 272_000,
+      max_output_tokens: 128_000,
+      mode: "chat",
+      supports_function_calling: true,
+      supports_vision: true,
+      supports_prompt_caching: true,
+      supports_reasoning: true,
+    },
+    "gpt-5.6-terra": {
+      max_input_tokens: 272_000,
+      max_output_tokens: 128_000,
+      mode: "chat",
+      supports_function_calling: true,
+      supports_vision: true,
+      supports_prompt_caching: true,
+      supports_reasoning: true,
+    },
+    "gpt-5.6-luna": {
+      max_input_tokens: 272_000,
+      max_output_tokens: 128_000,
+      mode: "chat",
+      supports_function_calling: true,
+      supports_vision: true,
+      supports_prompt_caching: true,
+      supports_reasoning: false,
+    },
+  },
 };
 
 /** Match a CLI model id against the static table, tolerating an alias like `claude-sonnet-4-6`. */
@@ -62,4 +97,17 @@ export function cliModelSpec(provider: string, model: string): ModelSpec | undef
 export function cliModelIds(provider: string): string[] {
   const models = CLI_MODEL_SPECS[provider];
   return models ? Object.keys(models) : [];
+}
+
+/**
+ * Whether a provider id is a Subscription Provider — i.e. billed by a personal plan, not per token.
+ *
+ * Cost must be suppressed for these, and suppression cannot be left to "the model id happens to
+ * miss the price map": `priceFor` falls back to a longest-family-prefix match, so an operator who
+ * types `claude-sonnet-4-6` instead of the `sonnet` alias would have the full Anthropic API price
+ * billed into the cost budget and `llm_cost_usd_total` for a turn that cost nothing per token.
+ * Derived from the spec table so a provider added there is unpriced by construction.
+ */
+export function isSubscriptionProvider(provider: string): boolean {
+  return provider in CLI_MODEL_SPECS;
 }

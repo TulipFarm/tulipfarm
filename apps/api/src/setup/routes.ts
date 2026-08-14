@@ -1,4 +1,4 @@
-import { createModel } from "@tulipfarm/llm";
+import { createModel, LlmProviderError, parseCodexAuth } from "@tulipfarm/llm";
 import { LlmCredentialError } from "@tulipfarm/schema";
 import { llmProviderById, providerField, type SecretsService } from "@tulipfarm/secrets";
 import type { GitSyncService } from "@tulipfarm/soul";
@@ -22,7 +22,15 @@ const PROBE_MODEL: Record<string, string> = {
   anthropic: "claude-haiku-4-5-20251001",
   openai: "gpt-4o-mini",
   "claude-code": "haiku",
+  codex: "gpt-5.6-luna",
 };
+
+/**
+ * The probe runs inside the wizard's HTTP request. An API-keyed provider answers in seconds, but a
+ * Subscription Provider spawns a CLI subprocess whose default per-call budget is ten minutes —
+ * long enough that a bad token would look like a hung wizard rather than a rejected credential.
+ */
+const PROBE_TIMEOUT_MS = 30_000;
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -267,7 +275,10 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           type: "object",
           required: ["provider", "apiKey"],
           properties: {
-            provider: { type: "string", enum: ["anthropic", "openai", "claude-code"] },
+            provider: {
+              type: "string",
+              enum: ["anthropic", "openai", "claude-code", "codex"],
+            },
             apiKey: { type: "string", minLength: 1 },
           },
         },
@@ -282,9 +293,24 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
     async (req, reply) => {
       const body = (req.body ?? {}) as { provider?: unknown; apiKey?: unknown };
       const provider =
-        body.provider === "openai" || body.provider === "claude-code" ? body.provider : "anthropic";
+        body.provider === "openai" || body.provider === "claude-code" || body.provider === "codex"
+          ? body.provider
+          : "anthropic";
       const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
       if (!apiKey) return reply.code(400).send({ error: "apiKey is required" });
+
+      // Codex's credential is a JSON file, not a token, and only a subscription-mode one works.
+      // Reject a malformed or API-key-mode blob here rather than storing it and letting the probe
+      // fail thirty seconds later with a less specific message.
+      if (provider === "codex") {
+        try {
+          parseCodexAuth(apiKey);
+        } catch (err) {
+          return reply
+            .code(400)
+            .send({ error: err instanceof Error ? err.message : "auth.json is invalid" });
+        }
+      }
 
       const providerInfo = llmProviderById(provider);
       const secretKey = providerInfo
@@ -297,7 +323,8 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
       try {
         const model = await createModel(
           { provider, model: probeModelId, api_key_ref: secretKey },
-          secretsService
+          secretsService,
+          { timeoutMs: PROBE_TIMEOUT_MS }
         );
         await generateText({ model, prompt: "ping" });
       } catch (err) {
@@ -305,6 +332,13 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           // Key is wrong — clean up and report the problem
           await secretsService.delete(secretKey).catch(() => {});
           return reply.code(400).send({ error: `API key is invalid: ${err.message}` });
+        }
+        // A Subscription Provider never produces LlmCredentialError — it rejects a bad token from
+        // inside the turn, as a hard LlmProviderError. Without this branch the wizard would file a
+        // known-bad credential under "transient" and keep it.
+        if (err instanceof LlmProviderError && err.reason === "model_authentication_failed") {
+          await secretsService.delete(secretKey).catch(() => {});
+          return reply.code(400).send({ error: `Credential is invalid: ${err.message}` });
         }
         // Transient (network, 5xx, rate-limit) — keep the key, let first chat surface any real issue
         app.log.warn({ err }, "LLM probe returned a transient error during setup; key kept");
@@ -376,10 +410,21 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           204: { type: "null" },
           401: ErrorSchema,
           403: ErrorSchema,
+          422: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
+      // Completing hides the wizard permanently, and the wizard is the only surface that writes
+      // `llm:`. Marking an instance complete with no model chain therefore strands it: every Run
+      // fails routing, and a participant sees a generic model failure with nothing to act on.
+      const cfg = (await readSoulConfig(soulPath)) as { llm?: unknown };
+      if (cfg.llm === undefined) {
+        return reply.code(422).send({
+          error:
+            "Cannot complete setup without an LLM configuration. Configure a model provider first.",
+        });
+      }
       await patchSoulConfig(soulPath, { setupComplete: true });
       await gitSync
         .commit("chore: complete first-run setup", commitActorFromRequest(req))

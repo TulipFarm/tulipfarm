@@ -1,3 +1,4 @@
+import { CODEX_AUTH_SECRET_KEY, parseCodexAuth } from "@tulipfarm/llm";
 import type { SecretsService, SecretType } from "@tulipfarm/secrets";
 import { InvalidSecretKeyError } from "@tulipfarm/secrets";
 import type { CommitActor } from "@tulipfarm/soul";
@@ -103,6 +104,20 @@ export function registerSecretsRoutes(
 
       const type =
         body.type === "auto-generated" ? ("auto-generated" as SecretType) : "user-provided";
+
+      // The Codex credential is the only secret with an internal shape the product depends on: a
+      // subscription-mode auth.json. Validating on write means Settings rejects a paste of the
+      // wrong file (or an API-key-mode blob, which this provider deliberately does not support)
+      // with a useful message, instead of storing it and failing inside a chat turn later.
+      if (key === CODEX_AUTH_SECRET_KEY) {
+        try {
+          parseCodexAuth(value);
+        } catch (err) {
+          return reply
+            .code(400)
+            .send({ error: err instanceof Error ? err.message : "auth.json is invalid" });
+        }
+      }
 
       try {
         await secretsService.set(key, value, type);

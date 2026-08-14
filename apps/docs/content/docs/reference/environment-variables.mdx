@@ -44,7 +44,7 @@ Production refuses to boot when `ADMIN_EMAIL` and `ADMIN_PASSWORD` are set witho
 | `ADMIN_EMAIL` | No | — | Email for the first admin account during headless boot. |
 | `ADMIN_PASSWORD` | No | — | Password for the first admin account during headless boot. |
 | `LLM_API_KEY` | Required with admin creds in production | — | Seeded into the selected provider secret during headless boot. |
-| `LLM_PROVIDER` | No | `anthropic` | Headless provider for `LLM_API_KEY`; `openai` is the other accepted value. |
+| `LLM_PROVIDER` | No | `anthropic` | Headless provider for `LLM_API_KEY`; `openai` is the other accepted value. Subscription providers cannot be seeded headlessly. |
 | `BUSINESS_NAME` | No | — | Written to Soul business metadata during headless boot. |
 | `BUSINESS_DESCRIPTION` | No | Empty string when `BUSINESS_NAME` is set | Written to Soul business metadata during headless boot. |
 | `NODE_ENV` | No | Depends on process manager | Enables production-only headless validation and non-dev route behavior. |
@@ -79,6 +79,7 @@ files are only a fallback for container installs sharing the data volume.
 | `WORKER_OUTBOX_POLL_MS` | No | `1000` | Event outbox delivery poll interval. |
 | `WORKER_BATCH_SIZE` | No | `25` | Maximum Runs claimed per dispatch batch. |
 | `WORKER_LEASE_MS` | No | `60000` | Run lease duration; must exceed `WORKER_RUN_POLL_MS`. |
+| `WORKER_RUN_MAX_LIFETIME_MS` | No | `900000` | Longest a single Run keeps renewing its lease before the worker abandons it for reclaim; must exceed `WORKER_LEASE_MS`. |
 | `WORKER_DRAIN_TIMEOUT_MS` | No | `15000` | Worker shutdown drain budget. |
 | `WORKER_MAINTENANCE` | No | `false` | Enables singleton maintenance consumers on one worker replica. |
 | `INTEGRATION_WORKER_PORT` | No | `4030` | Integration-worker health probe port. |

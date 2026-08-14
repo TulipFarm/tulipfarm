@@ -1,8 +1,10 @@
+import { mkdir } from "node:fs/promises";
 import type { SecretsService } from "@tulipfarm/secrets";
 import { createUser, normalizeEmail, type UserRepo } from "../auth/users";
+import { writeLlmConfigToSoulYaml } from "../soul/llm-config/soul-yaml-io";
 import type { SetupAdminCreator } from "./first-admin";
 import { isProductionMode } from "./service";
-import { patchSoulConfig } from "./soul-config";
+import { patchSoulConfig, readSoulConfig } from "./soul-config";
 
 export interface BootstrapDeps {
   userRepo: UserRepo;
@@ -14,6 +16,40 @@ export interface BootstrapDeps {
 
 function llmProvider(): "anthropic" | "openai" {
   return process.env.LLM_PROVIDER === "openai" ? "openai" : "anthropic";
+}
+
+/** Matches the setup wizard's per-provider default, so both first-run paths seed the same model. */
+const DEFAULT_MODEL: Record<"anthropic" | "openai", string> = {
+  anthropic: "claude-sonnet-4-6",
+  openai: "gpt-4o",
+};
+
+/**
+ * Seeds a one-provider chain across all three tiers — the same shape the wizard's
+ * `buildSetupLlmConfig` writes. Because this path also sets `setupComplete`, the wizard never runs,
+ * so without this a headless instance holds a credential and no chain: every Run then fails
+ * routing with `unknown_profile`, which reads to a participant as a plain model failure.
+ *
+ * Only ever seeds when `llm:` is absent. Bootstrap runs on every boot, and overwriting a chain the
+ * operator has since tuned in Business > Models would silently revert their configuration.
+ */
+async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "openai"): Promise<void> {
+  const existing = (await readSoulConfig(deps.soulPath)) as { llm?: unknown };
+  if (existing.llm !== undefined) return;
+
+  // `writeLlmConfigToSoulYaml` assumes the soul directory exists. Nothing guarantees that here:
+  // the only earlier writer is the BUSINESS_NAME patch, which is optional.
+  await mkdir(deps.soulPath, { recursive: true });
+  const entry = { provider, model: DEFAULT_MODEL[provider] };
+  await writeLlmConfigToSoulYaml(deps.soulPath, {
+    tiers: {
+      quick: { providers: [entry] },
+      standard: { providers: [entry] },
+      complex: { providers: [entry] },
+    },
+    presets: { default: "balanced" },
+  });
+  deps.log?.info(`Seeded LLM config: ${provider}/${entry.model} on all tiers`);
 }
 
 // Seeds the instance from env vars on first boot. Idempotent (no-op once users exist).
@@ -62,8 +98,10 @@ export async function bootstrapFromEnv(deps: BootstrapDeps): Promise<void> {
   }
 
   if (llmKey) {
-    await deps.secretsService.set(`${llmProvider()}-api-key`, llmKey);
-    deps.log?.info(`Seeded ${llmProvider()} LLM API key from env`);
+    const provider = llmProvider();
+    await deps.secretsService.set(`${provider}-api-key`, llmKey);
+    deps.log?.info(`Seeded ${provider} LLM API key from env`);
+    await seedLlmConfig(deps, provider);
   } else {
     deps.log?.info("LLM_API_KEY not set — configure models via Operate > Business > Models");
   }

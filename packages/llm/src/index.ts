@@ -1,4 +1,5 @@
-export { cliModelIds, cliModelSpec } from "./cli/specs";
+export { CODEX_AUTH_SECRET_KEY, CodexAuthError, parseCodexAuth } from "./cli/codex-auth";
+export { cliModelIds, cliModelSpec, isSubscriptionProvider } from "./cli/specs";
 export { createEmbeddingModel } from "./embedding-provider";
 export {
   EMBEDDING_UNAVAILABLE_WARNING,
@@ -12,6 +13,7 @@ export {
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
   litellmModelsForProvider,
+  type ModelSpec,
   resolveModelSpec,
   resolveModelSpecCandidate,
   type SpecResolution,

@@ -21,6 +21,7 @@ describe("loadConfig", () => {
       outboxPollMs: 1_000,
       batchSize: 25,
       leaseDurationMs: 60_000,
+      runMaxLifetimeMs: 900_000,
       drainTimeoutMs: 15_000,
       maintenance: false,
     });
@@ -64,6 +65,15 @@ describe("loadConfig", () => {
     expect(() =>
       loadConfig({ ...MINIMAL, WORKER_LEASE_MS: "1000", WORKER_RUN_POLL_MS: "1000" })
     ).toThrow("WORKER_LEASE_MS (1000) must exceed WORKER_RUN_POLL_MS (1000)");
+  });
+
+  it("rejects a lifetime ceiling that a lease could outlast", () => {
+    // A ceiling at or below the lease would let the lease expire before the heartbeat ever
+    // yields, so a reclaim could race a still-heartbeating executor — the duplicate the ceiling
+    // exists to bound.
+    expect(() =>
+      loadConfig({ ...MINIMAL, WORKER_RUN_MAX_LIFETIME_MS: "60000", WORKER_LEASE_MS: "60000" })
+    ).toThrow("WORKER_RUN_MAX_LIFETIME_MS (60000) must exceed WORKER_LEASE_MS (60000)");
   });
 
   it("honours an explicit owner so two processes on one host stay distinguishable", () => {

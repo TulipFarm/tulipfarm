@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import type { UserDoc, UserRepo } from "../auth/users";
+import { writeLlmConfigToSoulYaml } from "../soul/llm-config/soul-yaml-io";
 import { bootstrapFromEnv } from "./bootstrap";
 import type { SetupAdminCreator } from "./first-admin";
 
@@ -119,10 +120,38 @@ describe("bootstrapFromEnv", () => {
     const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
       businessName?: string;
       setupComplete?: boolean;
+      llm?: { tiers?: Record<string, { providers?: { provider: string; model: string }[] }> };
     };
     expect(cfg.businessName).toBe("Acme");
     expect(cfg.setupComplete).toBe(true);
     expect(await d.secretsService.get("anthropic-api-key")).toBe("sk-ant-xyz");
+    // A credential alone leaves the instance unroutable: this path also hides the wizard, so it
+    // must publish a chain too or every Run fails with `unknown_profile`.
+    expect(Object.keys(cfg.llm?.tiers ?? {}).sort()).toEqual(["complex", "quick", "standard"]);
+    expect(cfg.llm?.tiers?.standard?.providers?.[0]).toEqual({
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+    });
+  });
+
+  it("never overwrites an LLM config the operator already tuned", async () => {
+    vi.stubEnv("ADMIN_EMAIL", "admin@acme.io");
+    vi.stubEnv("ADMIN_PASSWORD", "supersecret");
+    vi.stubEnv("LLM_API_KEY", "sk-ant-xyz");
+    const d = deps();
+    await bootstrapFromEnv(d);
+    await writeLlmConfigToSoulYaml(path.join(dir, "soul"), {
+      tiers: {
+        quick: { providers: [{ provider: "openai", model: "gpt-4o" }] },
+        standard: { providers: [{ provider: "openai", model: "gpt-4o" }] },
+        complex: { providers: [{ provider: "openai", model: "gpt-4o" }] },
+      },
+    });
+    await bootstrapFromEnv(d); // a later boot must not revert it
+    const cfg = parse(await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8")) as {
+      llm?: { tiers?: Record<string, { providers?: { provider: string; model: string }[] }> };
+    };
+    expect(cfg.llm?.tiers?.standard?.providers?.[0]?.model).toBe("gpt-4o");
   });
 
   it("production: admin creds set but LLM_API_KEY missing → fail loud", async () => {

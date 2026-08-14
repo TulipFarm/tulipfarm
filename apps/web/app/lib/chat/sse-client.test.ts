@@ -263,6 +263,11 @@ test("turns allowlisted model failures into actionable participant-safe messages
   expect(modelFailureMessage("untrusted_provider_detail")).toBe(
     "The model request failed. Try again."
   );
+  // An instance with no `llm:` config denies routing with `unknown_profile`. That must not land on
+  // the generic default above: it is the one failure the reader can actually fix themselves.
+  expect(modelFailureMessage("model_not_configured")).toBe(
+    "No model is configured for this business. Add a model chain under Business → Models."
+  );
 });
 
 test("releases a held Tool call when the decision lets it report", () => {

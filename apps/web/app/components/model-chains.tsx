@@ -1,6 +1,6 @@
 import { Link } from "@remix-run/react";
 import { ArrowDown, ArrowUp, KeyRound, Plus, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { FormStatus } from "~/components/form-status";
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
@@ -583,6 +583,11 @@ function ModelSheet({
   // custom id) falls to the "Custom…" branch so the free-text input stays in control.
   const isSuggested = hasSuggestions && !!row?.model && options.models.includes(row.model);
   const showCustomInput = !hasSuggestions || !isSuggested;
+  // The field renders two conditional controls, so `Field` cannot auto-wire its label — it only
+  // clones a single child. The id therefore has to be placed by hand, on whichever control the
+  // label names: the free-text input when it is showing, otherwise the suggestion dropdown.
+  const modelFieldId = useId();
+  const modelHelpId = `${modelFieldId}-help`;
 
   return (
     <Sheet open={open} onClose={onClose} title="Model">
@@ -605,6 +610,7 @@ function ModelSheet({
 
           <Field
             label="Model ID"
+            htmlFor={modelFieldId}
             help={
               options?.source === "live"
                 ? "Listed from your configured endpoint."
@@ -615,6 +621,9 @@ function ModelSheet({
           >
             {hasSuggestions ? (
               <Select
+                id={showCustomInput ? undefined : modelFieldId}
+                aria-label={showCustomInput ? "Model ID suggestions" : undefined}
+                aria-describedby={showCustomInput ? undefined : modelHelpId}
                 value={isSuggested ? row.model : CUSTOM_MODEL}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -638,6 +647,8 @@ function ModelSheet({
             ) : null}
             {showCustomInput ? (
               <Input
+                id={modelFieldId}
+                aria-describedby={modelHelpId}
                 value={row.model}
                 onChange={(e) => {
                   onChange({ model: e.target.value, spec: undefined });

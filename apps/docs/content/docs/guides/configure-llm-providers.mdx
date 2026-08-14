@@ -18,7 +18,7 @@ reload the model service without restarting the app.
     Open **Operate → Business → Secrets**.
   </Step>
   <Step>
-    Under **Configure a provider**, choose one of the four shipped provider ids:
+    Under **Configure a provider**, choose a provider id:
 
     | Provider id | UI label | Secret/config keys |
     | --- | --- | --- |
@@ -26,9 +26,15 @@ reload the model service without restarting the app.
     | `openai` | OpenAI | `openai-api-key` |
     | `azure` | Azure Foundry | `azure-openai-api-key`, `azure-openai-resource-name`, `azure-foundry-endpoint` |
     | `openai-compatible` | OpenAI-compatible | `openai-compatible-api-key`, `openai-compatible-base-url` |
+    | `claude-code` | Claude Code (subscription) | `claude-code-oauth-token` |
+    | `codex` | Codex (subscription) | `codex-auth-json` |
 
     The `openai-compatible-api-key` is optional for proxies that do not require one; the
     base URL is required so TulipFarm knows where to send requests.
+
+    The last two run on a Claude or ChatGPT **subscription** rather than an API key, and their
+    credential is minted in a terminal instead of copied from a dashboard — see
+    [Run on a subscription plan](/docs/guides/run-on-a-subscription).
   </Step>
   <Step>
     Fill the fields and choose **Save provider**. Secret values are encrypted and
@@ -51,6 +57,13 @@ reload the model service without restarting the app.
     - `anthropic` and `openai`: bare ids or provider-prefixed ids.
     - `azure`: `azure_ai/`, `azure/`, or bare deployment ids.
     - `openai-compatible`: bare ids sent to the configured `base_url`.
+    - `claude-code`: `opus`, `sonnet`, or `haiku`.
+    - `codex`: `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna`.
+
+    The two subscription providers are the exception to the LiteLLM rule above: they have no
+    catalog price, so their capability metadata comes from a static table instead and their
+    turns are reported as unpriced. See
+    [Model routing](/docs/concepts/llm#subscription-providers).
   </Step>
   <Step>
     Put the preferred provider first. Runtime fallback tries rows in order. A hard

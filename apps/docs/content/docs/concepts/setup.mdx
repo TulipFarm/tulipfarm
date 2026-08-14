@@ -23,6 +23,12 @@ stores the provider credentials as [secrets](/docs/concepts/secrets) and writes 
 `llm` block in `soul.yaml` with all three provider chains pointing at the chosen model and
 **Auto** resolving to **Balanced**; skipping it leaves that to **Operate → Business → Models**.
 
+The LLM step accepts a Claude or ChatGPT
+[subscription](/docs/concepts/llm#subscription-providers) in place of an API key, so an operator
+with a paid plan and no API budget can finish setup. Whichever kind is chosen, the credential is
+validated with one real model call before it is stored — a credential that cannot answer is
+rejected in the wizard rather than kept and discovered at the first chat message.
+
 Finishing calls `POST /api/v1/setup/complete`, which writes `setupComplete: true` to `soul.yaml`.
 The wizard step routes return `403` from then on, while `GET /api/v1/setup/status` remains available
 so the web app can decide whether setup is still open.
@@ -42,6 +48,11 @@ admin credentials without `LLM_API_KEY` are refused so the instance does not sta
 
 `BUSINESS_NAME` and related business environment values can seed the Soul profile. The bootstrap is
 idempotent: once any user exists, it does not create another admin.
+
+Headless bootstrap seeds API-key providers only. Minting a
+[subscription](/docs/concepts/llm#subscription-providers) credential needs an interactive browser
+sign-in, so `claude-code` and `codex` are configured in the wizard or in **Operate → Business →
+Secrets** afterwards.
 
 ## Recovery shape
 

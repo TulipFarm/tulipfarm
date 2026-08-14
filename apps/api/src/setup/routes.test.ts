@@ -12,7 +12,7 @@ import {
 import { GitSyncService } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { parse } from "yaml";
+import { parse, stringify } from "yaml";
 import { buildApp } from "../app";
 import type { TokenDoc, TokenRepo } from "../auth/api-tokens";
 import { CSRF_COOKIE, CSRF_HEADER } from "../auth/csrf";
@@ -20,6 +20,44 @@ import { MemorySessionStore } from "../auth/session-store";
 import { AdminAlreadyExistsError, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { SetupAdminCreator } from "./first-admin";
+
+/**
+ * The setup probe is a live model call, which makes the branch that *rejects* a credential the one
+ * hardest to test and the one that matters most — it is the whole reason the step exists. Stubbing
+ * `createModel` lets the outcome be chosen deterministically, with no network and no real CLI.
+ */
+const probeOutcome: { mode: "accepts" | "auth-failure" | "transient" } = { mode: "accepts" };
+
+vi.mock("@tulipfarm/llm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tulipfarm/llm")>();
+  return {
+    ...actual,
+    createModel: async () => ({
+      specificationVersion: "v4",
+      provider: "stub",
+      modelId: "stub",
+      supportedUrls: {},
+      async doGenerate() {
+        if (probeOutcome.mode === "auth-failure") {
+          throw new actual.LlmProviderError(
+            "model_authentication_failed",
+            new Error("token expired")
+          );
+        }
+        if (probeOutcome.mode === "transient") throw new Error("socket hang up");
+        return {
+          content: [{ type: "text" as const, text: "pong" }],
+          finishReason: { unified: "stop" as const, raw: "stop" },
+          usage: {
+            inputTokens: { total: 1, noCache: 1, cacheRead: undefined, cacheWrite: undefined },
+            outputTokens: { total: 1, text: 1, reasoning: undefined },
+          },
+          warnings: [],
+        };
+      },
+    }),
+  };
+});
 
 class FakeUserRepo implements UserRepo {
   users: UserDoc[] = [];
@@ -134,6 +172,7 @@ let ownerPrincipalIds: string[];
 beforeEach(async () => {
   dir = await fs.mkdtemp(path.join(os.tmpdir(), "setup-"));
   ownerPrincipalIds = [];
+  probeOutcome.mode = "accepts";
   app = await makeApp(dir);
 });
 afterEach(async () => {
@@ -150,6 +189,32 @@ async function createAdmin(): Promise<{ name: string; value: string }[]> {
   });
   expect(res.statusCode).toBe(201);
   return res.cookies;
+}
+
+/**
+ * Writes a minimal `llm:` key straight into the fixture soul.yaml. `POST /setup/complete` refuses
+ * without one, and going through the real LLM config route would drag a live provider probe into
+ * tests that are about setup completion, not model routing.
+ */
+async function seedLlmConfig(): Promise<void> {
+  const file = path.join(dir, "soul", "soul.yaml");
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const current = parse(await fs.readFile(file, "utf8").catch(() => "")) ?? {};
+  await fs.writeFile(
+    file,
+    stringify({
+      ...current,
+      llm: {
+        tiers: {
+          quick: { providers: [{ provider: "anthropic", model: "claude-3" }] },
+          standard: { providers: [{ provider: "anthropic", model: "claude-3" }] },
+          complex: { providers: [{ provider: "anthropic", model: "claude-3" }] },
+        },
+        presets: { default: "balanced" },
+      },
+    }),
+    "utf8"
+  );
 }
 
 function authHeaders(cookies: { name: string; value: string }[]) {
@@ -234,17 +299,91 @@ describe("setup routes", () => {
     expect(cfg.businessWebsite).toBe("https://acmetulips.example");
   });
 
-  it("llm step stores the key (no live call in unit tests)", async () => {
+  const submitLlm = async (
+    cookies: { name: string; value: string }[],
+    provider: string,
+    apiKey: string
+  ) =>
+    app.inject({
+      method: "POST",
+      url: "/api/v1/setup/llm",
+      headers: authHeaders(cookies),
+      payload: { provider, apiKey },
+    });
+
+  /**
+   * There is no `GET /api/v1/secrets/:key` — values are write-only — so presence is read from the
+   * status listing. An earlier version of these tests fetched the key directly, which always 404s,
+   * making every assertion about a *kept* credential vacuously true.
+   */
+  const secretExists = async (cookies: { name: string; value: string }[], key: string) => {
+    const res = await app.inject({
+      method: "GET",
+      url: "/api/v1/secrets/status",
+      headers: authHeaders(cookies),
+    });
+    const body = res.json() as { secrets?: Array<{ key: string }> };
+    return (body.secrets ?? []).some((secret) => secret.key === key);
+  };
+
+  it("keeps a key the probe accepted", async () => {
+    const cookies = await createAdmin();
+    probeOutcome.mode = "accepts";
+
+    const res = await submitLlm(cookies, "anthropic", "sk-ant-test");
+
+    expect(res.statusCode).toBe(204);
+    expect(await secretExists(cookies, "anthropic-api-key")).toBe(true);
+  });
+
+  it("deletes a Subscription Provider credential the probe rejected as a hard auth failure", async () => {
+    // A Subscription Provider never raises LlmCredentialError — the CLI rejects a stale token from
+    // inside the turn, as an LlmProviderError. Before this branch existed the wizard filed that
+    // under "transient" and kept the credential, so the step whose only job is to validate a
+    // credential never actually rejected one.
+    const cookies = await createAdmin();
+    probeOutcome.mode = "auth-failure";
+
+    const res = await submitLlm(cookies, "claude-code", "sk-ant-oat01-stale");
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/invalid/i);
+    expect(await secretExists(cookies, "claude-code-oauth-token")).toBe(false);
+  });
+
+  it("keeps a key when the probe failed for a transient reason", async () => {
+    // The opposite error: a network blip must not throw away a credential that may be perfectly
+    // good, or an offline install could never finish setup.
+    const cookies = await createAdmin();
+    probeOutcome.mode = "transient";
+
+    const res = await submitLlm(cookies, "anthropic", "sk-ant-test");
+
+    expect(res.statusCode).toBe(204);
+    expect(await secretExists(cookies, "anthropic-api-key")).toBe(true);
+  });
+
+  it("rejects a Codex credential that is not a subscription auth.json", async () => {
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/setup/llm",
       headers: authHeaders(cookies),
-      payload: { provider: "anthropic", apiKey: "sk-ant-test" },
+      payload: {
+        provider: "codex",
+        apiKey: JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: "sk-live" }),
+      },
     });
-    // In unit tests the generateText call will fail (no real API); it's a transient error
-    // so the route returns 204 anyway (key kept)
-    expect(res.statusCode).toBe(204);
+
+    // Rejected before it is stored, and before the probe spends thirty seconds discovering it.
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/subscription-only/);
+    const stored = await app.inject({
+      method: "GET",
+      url: "/api/v1/secrets/codex-auth-json",
+      headers: authHeaders(cookies),
+    });
+    expect(stored.statusCode).toBe(404);
   });
 
   it("llm step rejects an empty key", async () => {
@@ -308,6 +447,7 @@ describe("setup routes", () => {
 
   it("wizard steps lock once setup is complete", async () => {
     const cookies = await createAdmin();
+    await seedLlmConfig();
     await app.inject({
       method: "POST",
       url: "/api/v1/setup/complete",
@@ -322,8 +462,24 @@ describe("setup routes", () => {
     expect(after.statusCode).toBe(403);
   });
 
+  it("complete refuses while soul.yaml has no llm config", async () => {
+    const cookies = await createAdmin();
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/v1/setup/complete",
+      headers: authHeaders(cookies),
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toMatch(/without an LLM configuration/i);
+    // Refusing must not half-complete the wizard. Nothing configured yet, so soul.yaml may not
+    // even exist — what matters is that no `setupComplete` flag was written.
+    const raw = await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8").catch(() => "");
+    expect((parse(raw || "{}") as { setupComplete?: boolean }).setupComplete).toBeUndefined();
+  });
+
   it("complete marks setupComplete=true in soul.yaml", async () => {
     const cookies = await createAdmin();
+    await seedLlmConfig();
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/setup/complete",

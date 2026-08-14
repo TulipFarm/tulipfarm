@@ -8,7 +8,13 @@
  * (over HTTP). Grows as new providers/integrations are added.
  */
 
-export type LlmProviderId = "anthropic" | "openai" | "azure" | "openai-compatible" | "claude-code";
+export type LlmProviderId =
+  | "anthropic"
+  | "openai"
+  | "azure"
+  | "openai-compatible"
+  | "claude-code"
+  | "codex";
 
 /** Semantic role of a field, so the LLM layer can resolve it without hard-coding key strings. */
 export type ProviderFieldRole = "api_key" | "resource_name" | "base_url";
@@ -108,6 +114,27 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
         kind: "secret",
         placeholder: "sk-ant-oat01-…",
         hint: "Run `claude setup-token` in a terminal (requires a Claude Pro/Max subscription), then paste the printed token here.",
+      },
+    ],
+  },
+  {
+    // Runs the Codex CLI as the model on a ChatGPT Plus/Pro/Business plan. Unlike every other
+    // provider the credential is a *file*, not a token: `codex login` writes ~/.codex/auth.json and
+    // the CLI reads it back from $CODEX_HOME, so the whole blob is stored as one secret and
+    // materialised into the per-turn jail. Subscription-only on purpose — an API-key blob is
+    // rejected on save, because accepting it would bill the operator's OpenAI account for turns
+    // TulipFarm reports as unpriced. Reuses role: "api_key" so Settings, /setup, and the
+    // delete-key-prunes-config cascade all work unchanged.
+    id: "codex",
+    label: "Codex (subscription)",
+    fields: [
+      {
+        key: "codex-auth-json",
+        label: "auth.json",
+        role: "api_key",
+        kind: "secret",
+        placeholder: '{"tokens":{"refresh_token":"…"}}',
+        hint: "Run `codex login` in a terminal (requires a ChatGPT Plus/Pro/Business plan), then paste the entire contents of ~/.codex/auth.json here.",
       },
     ],
   },

@@ -30,6 +30,13 @@ export interface WorkerConfig {
   readonly outboxPollMs: number;
   readonly batchSize: number;
   readonly leaseDurationMs: number;
+  /**
+   * Ceiling on how long one Run may keep renewing its lease before this worker presumes its
+   * executor hung and lets the lease expire for reclaim. Must exceed the lease so a healthy turn
+   * renews freely; without it a hung executor would either hold the Run forever or, unrenewed,
+   * hand a live one to a second worker.
+   */
+  readonly runMaxLifetimeMs: number;
   readonly drainTimeoutMs: number;
   /** Only one replica enables scheduled maintenance consumers. */
   readonly maintenance: boolean;
@@ -97,6 +104,7 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
     outboxPollMs: positiveInt(env, "WORKER_OUTBOX_POLL_MS", 1_000),
     batchSize: positiveInt(env, "WORKER_BATCH_SIZE", 25),
     leaseDurationMs: positiveInt(env, "WORKER_LEASE_MS", 60_000),
+    runMaxLifetimeMs: positiveInt(env, "WORKER_RUN_MAX_LIFETIME_MS", 900_000),
     drainTimeoutMs: positiveInt(env, "WORKER_DRAIN_TIMEOUT_MS", 15_000),
     maintenance: booleanValue(env, "WORKER_MAINTENANCE", false),
   };
@@ -108,6 +116,13 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
   if (config.leaseDurationMs <= config.runPollMs) {
     throw new WorkerConfigError(
       `WORKER_LEASE_MS (${config.leaseDurationMs}) must exceed WORKER_RUN_POLL_MS (${config.runPollMs})`
+    );
+  }
+  // A ceiling below the lease would abandon a Run before its first renewal was even due, so a
+  // healthy long turn could never keep its lease. It must leave room for renewals to run.
+  if (config.runMaxLifetimeMs <= config.leaseDurationMs) {
+    throw new WorkerConfigError(
+      `WORKER_RUN_MAX_LIFETIME_MS (${config.runMaxLifetimeMs}) must exceed WORKER_LEASE_MS (${config.leaseDurationMs})`
     );
   }
   return config;

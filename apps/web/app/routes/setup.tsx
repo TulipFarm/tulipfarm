@@ -374,6 +374,7 @@ const DEFAULT_MODEL: Record<string, string> = {
   azure: "gpt-4o",
   "openai-compatible": "",
   "claude-code": "sonnet",
+  codex: "gpt-5.6-terra",
 };
 
 type LlmDraft = { providerId: string; model: string; fieldValues: Record<string, string> };

@@ -50,9 +50,12 @@ export function jailedEnv(
   extraPassthrough: readonly string[] = [],
   extraVars: NodeJS.ProcessEnv = {}
 ): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { HOME: home };
+  const env: NodeJS.ProcessEnv = {};
   for (const name of [...BASE_ENV_PASSTHROUGH, ...extraPassthrough]) {
     if (source[name] !== undefined) env[name] = source[name];
   }
-  return { ...env, ...extraVars };
+  // `HOME` is applied last, after both the passthrough copy and the caller's own vars, so the jail
+  // holds by construction: no future addition to a provider's passthrough list can hand a CLI
+  // subprocess the host user's home, and with it the operator's own CLI session.
+  return { ...env, ...extraVars, HOME: home };
 }
