@@ -222,6 +222,16 @@ Broker's reconciliation story, not a second ledger here.
   (delivery targets land in PR 6), and the Routine Tool port's adapter map is empty for the same
   reason — never register an adapter here that reaches a provider by a route other than an
   installed Integration.
+- **Effort is inferred once per Run, then pinned.** `src/effort-classifier.ts` is the only place
+  that spends a model call to decide *which* model to spend — it runs at the `fast` rung with
+  `maxOutputTokens: 8` under a timeout, because paying a strong model to pick a model defeats the
+  point. `src/effort-inference.ts` composes it with the pin read off `model.routed`, so a replayed
+  attempt reuses the recorded rung and calls nothing. `LlmModelPort` memoises the answer for its own
+  lifetime, and Chat builds one port per Turn attempt: a turn making six model calls through its
+  Tool loop pays for at most one inference and finishes at the rung it opened with. Only `auto` is
+  inferred; a Routine's `agent` State has no participant prompt and keeps the declared default.
+  The classifier's own tokens are **unmetered** — it runs outside `ModelPort`, so it emits no
+  `ModelUsageEvent`. Its latency is recorded; its cost is not.
 
 `TurnContextPort`, `TurnCompletionStore`, and the delivery host are all backed over HTTP by the
 API's `/api/v1/internal/*` routes (`internal/turn-host.ts`, `internal/delivery-host.ts`). The

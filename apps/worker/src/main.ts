@@ -43,6 +43,7 @@ import { loadConfig, REQUIRED_SCHEMA_VERSION, type WorkerConfig } from "./config
 import { resolveDataDir, waitForDataDirEnv } from "./data-dir";
 import { connectPg, transactionPort } from "./db";
 import { DeliveryTargetRegistry } from "./delivery";
+import { createEffortInference, runEventEffortPin } from "./effort-inference";
 import { EventOutboxDispatcher } from "./event-dispatcher";
 import { RunExecutorRegistry } from "./executors";
 import { createHookExecutor } from "./hooks/executor";
@@ -278,7 +279,16 @@ export async function main(): Promise<void> {
     waits: turnHost,
     model: ({ events, budgets, businessId, runId }) =>
       new LlmModelPort({
-        model: (selector, requirements) => llm.resolveModel(selector, requirements),
+        model: (selector, requirements, inference) =>
+          llm.resolveModel(selector, requirements, inference),
+        effort: createEffortInference({
+          models: llm,
+          pinned: runEventEffortPin(runEventStore, businessId, runId),
+          log: (decision) =>
+            logger.info(
+              `effort routed run=${runId} rung=${decision.rung} score=${decision.score} band=${decision.band} classifier=${decision.usedClassifier} prompt=${decision.promptHash} signals=${decision.firedSignals.join("+")}`
+            ),
+        }),
         routingEvents: events,
         budgets: {
           open: (limits) =>

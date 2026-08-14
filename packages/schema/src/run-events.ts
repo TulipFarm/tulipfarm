@@ -315,6 +315,45 @@ const MODEL_ROUTED_BUDGET_LIMITS_SCHEMA = {
 } as const;
 
 /**
+ * How a selector became a ModelProfile.
+ *
+ * `effort_inferred` is `auto` resolved *from the prompt* by the effort router rather than from the
+ * deployment's declared default. It is a separate value rather than a flag on `effort_preset`
+ * because the two answer different questions on replay: a preset resolves the same way forever,
+ * while an inferred rung is only reproducible because this event recorded it.
+ */
+const MODEL_ROUTED_PROFILE_RESOLUTIONS = [
+  "effort_preset",
+  "effort_inferred",
+  "profile_ref",
+] as const;
+
+/**
+ * Why the effort router chose the rung it chose.
+ *
+ * This is the calibration record: without the score and the signals behind it, a badly routed turn
+ * can be noticed but never explained. `promptHash` stands in for the prompt deliberately — this
+ * event is durable, operator-visible evidence, and a routing record carries reasons, never
+ * payloads. The hash still groups repeat prompts and ties a complaint about one answer back to the
+ * decision that produced it.
+ */
+const MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA = {
+  type: "object",
+  required: ["rung", "score", "band", "firedSignals", "usedClassifier", "promptHash"],
+  additionalProperties: false,
+  properties: {
+    rung: { type: "string", enum: [...EFFORT_RUNGS] },
+    score: { type: "number" },
+    /** `unsure` records that the heuristic did not separate the prompt, so stage 2 was consulted. */
+    band: { type: "string", enum: [...EFFORT_RUNGS, "unsure"] },
+    firedSignals: { type: "array", items: { type: "string", minLength: 1 } },
+    usedClassifier: { type: "boolean" },
+    promptHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    classifierLatencyMs: { type: "integer", minimum: 0 },
+  },
+} as const;
+
+/**
  * Operator evidence for the model routing decision. Selection and denial share one event type so
  * a replay checks one deterministic key for "the model decision for this invocation" regardless of
  * which side of the router it landed on.
@@ -336,12 +375,13 @@ const MODEL_ROUTED_SCHEMA = {
       properties: {
         outcome: { type: "string", enum: ["selected"] },
         selector: { type: "string", minLength: 1 },
-        resolution: { type: "string", enum: ["effort_preset", "profile_ref"] },
+        resolution: { type: "string", enum: [...MODEL_ROUTED_PROFILE_RESOLUTIONS] },
         profileId: { type: "string", minLength: 1 },
         chain: { type: "array", minItems: 1, items: MODEL_ROUTED_CHAIN_ENTRY_SCHEMA },
         cacheAllowed: { type: "boolean" },
         rejectedFallbacks: { type: "array", items: MODEL_ROUTED_ATTEMPT_SCHEMA },
         budgetLimits: MODEL_ROUTED_BUDGET_LIMITS_SCHEMA,
+        effortInference: MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA,
       },
     },
     {
@@ -351,10 +391,11 @@ const MODEL_ROUTED_SCHEMA = {
       properties: {
         outcome: { type: "string", enum: ["denied"] },
         selector: { type: "string", minLength: 1 },
-        resolution: { type: "string", enum: ["effort_preset", "profile_ref"] },
+        resolution: { type: "string", enum: [...MODEL_ROUTED_PROFILE_RESOLUTIONS] },
         profileId: { type: "string", minLength: 1 },
         reason: { type: "string", enum: MODEL_PROFILE_DENIAL_REASONS },
         attempts: { type: "array", minItems: 1, items: MODEL_ROUTED_ATTEMPT_SCHEMA },
+        effortInference: MODEL_ROUTED_EFFORT_INFERENCE_SCHEMA,
       },
     },
     {
@@ -446,6 +487,28 @@ export type RunEventGuardrailStage = "input" | "tool_call" | "output";
 
 /** Which layer a Tool belongs to. Mirrors the registry's own tiering, not a rendering hint. */
 export type RunEventToolTier = "system" | "platform" | "integration";
+
+/** How a selector became a ModelProfile. See {@link MODEL_ROUTED_PROFILE_RESOLUTIONS}. */
+export type RunEventModelResolution = (typeof MODEL_ROUTED_PROFILE_RESOLUTIONS)[number];
+
+/**
+ * Why the effort router chose the rung it chose, recorded on the `model.routed` event.
+ *
+ * Present only when `resolution` is `effort_inferred`. It is what makes an inferred rung
+ * reproducible: a replayed attempt reads `rung` back from here instead of asking a model again,
+ * so a Run routes the same way on its second execution as on its first.
+ */
+export interface RunEventEffortInference {
+  readonly rung: EffortRung;
+  readonly score: number;
+  /** `unsure` means the heuristic did not separate the prompt and the classifier was consulted. */
+  readonly band: EffortRung | "unsure";
+  readonly firedSignals: readonly string[];
+  readonly usedClassifier: boolean;
+  /** SHA-256 of the scored text. The text itself never enters this record. */
+  readonly promptHash: string;
+  readonly classifierLatencyMs?: number;
+}
 
 /**
  * A bounded, redaction-aware view of a Tool's arguments or output.
@@ -540,7 +603,7 @@ export interface RunEventPayloads {
     | {
         readonly outcome: "selected";
         readonly selector: string;
-        readonly resolution: "effort_preset" | "profile_ref";
+        readonly resolution: RunEventModelResolution;
         readonly profileId: string;
         readonly chain: readonly {
           readonly profileId: string;
@@ -579,17 +642,19 @@ export interface RunEventPayloads {
               | "model";
           };
         };
+        readonly effortInference?: RunEventEffortInference;
       }
     | {
         readonly outcome: "denied";
         readonly selector: string;
-        readonly resolution: "effort_preset" | "profile_ref";
+        readonly resolution: RunEventModelResolution;
         readonly profileId: string;
         readonly reason: (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
         readonly attempts: readonly {
           readonly profileId: string;
           readonly reason: (typeof MODEL_PROFILE_DENIAL_REASONS)[number];
         }[];
+        readonly effortInference?: RunEventEffortInference;
       }
     | {
         readonly outcome: "raw_model";

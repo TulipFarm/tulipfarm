@@ -232,4 +232,80 @@ describe("run event vocabulary", () => {
     expect(accepts("text.delta", { text: "hi", index: -1 })).toBe(false);
     expect(accepts("turn.started", { turnId: "t1", attempt: 1.5, agentId: "a" })).toBe(false);
   });
+
+  describe("inferred effort evidence", () => {
+    const inference = {
+      rung: "thorough",
+      score: 4.5,
+      band: "unsure",
+      firedSignals: ["design_keywords", "long_prompt"],
+      usedClassifier: true,
+      promptHash: "a".repeat(64),
+      classifierLatencyMs: 210,
+    };
+
+    const selected = {
+      outcome: "selected",
+      selector: "auto",
+      resolution: "effort_inferred",
+      profileId: "thorough",
+      chain: [{ profileId: "thorough", modelId: "claude-opus-5" }],
+      cacheAllowed: true,
+      rejectedFallbacks: [],
+    };
+
+    it("accepts an inferred selection carrying its calibration record", () => {
+      expect(accepts("model.routed", { ...selected, effortInference: inference })).toBe(true);
+    });
+
+    it("accepts a denial that names the rung it inferred", () => {
+      expect(
+        accepts("model.routed", {
+          outcome: "denied",
+          selector: "auto",
+          resolution: "effort_inferred",
+          profileId: "thorough",
+          reason: MODEL_PROFILE_DENIAL_REASONS[0],
+          attempts: [{ profileId: "thorough", reason: MODEL_PROFILE_DENIAL_REASONS[0] }],
+          effortInference: inference,
+        })
+      ).toBe(true);
+    });
+
+    it("still accepts an event recorded before inference existed", () => {
+      expect(accepts("model.routed", { ...selected, resolution: "effort_preset" })).toBe(true);
+    });
+
+    it("rejects a retired tier name as an inferred rung", () => {
+      expect(
+        accepts("model.routed", {
+          ...selected,
+          effortInference: { ...inference, rung: "complex" },
+        })
+      ).toBe(false);
+    });
+
+    it("rejects `unsure` as an outcome — it is a band, never a rung", () => {
+      expect(
+        accepts("model.routed", {
+          ...selected,
+          effortInference: { ...inference, rung: "unsure" },
+        })
+      ).toBe(false);
+    });
+
+    it("rejects a prompt where a hash belongs", () => {
+      expect(
+        accepts("model.routed", {
+          ...selected,
+          effortInference: { ...inference, promptHash: "design me a system" },
+        })
+      ).toBe(false);
+    });
+
+    it("rejects an inference record missing the rung it chose", () => {
+      const { rung: _rung, ...withoutRung } = inference;
+      expect(accepts("model.routed", { ...selected, effortInference: withoutRung })).toBe(false);
+    });
+  });
 });

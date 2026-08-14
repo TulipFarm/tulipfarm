@@ -1,8 +1,10 @@
 import type { ModelInvocationRequest, ModelStreamChunk } from "@tulipfarm/agent-runtime";
 import { LlmProviderError } from "@tulipfarm/llm";
+import type { EffortRung, RunEventEffortInference } from "@tulipfarm/schema";
 import type { LanguageModel } from "ai";
 import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 import { LlmModelPort } from "./model";
 
@@ -542,5 +544,153 @@ describe("LlmModelPort", () => {
         ],
       },
     ]);
+  });
+});
+
+describe("LlmModelPort effort inference", () => {
+  /** A resolution that reports back whatever rung was inferred, as `SoulLlm` does. */
+  function inferringPort(
+    effort: EffortInferencePort | undefined,
+    onResolve: (inference: RunEventEffortInference | undefined) => void
+  ): LlmModelPort {
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream<StreamPart>({
+          chunks: [...textParts("t1", ["ok"]), FINISH],
+        }),
+      }),
+    });
+    return new LlmModelPort({
+      ...(effort === undefined ? {} : { effort }),
+      model: async (selector, _requirements, inference): Promise<LlmModelResolution> => {
+        onResolve(inference);
+        const profileId = inference?.rung ?? selector;
+        return {
+          kind: "available",
+          model: mock as unknown as LanguageModel,
+          routing: {
+            outcome: "selected",
+            selector,
+            resolution: inference === undefined ? "effort_preset" : "effort_inferred",
+            profileId,
+            chain: [{ profileId, modelId: "claude-sonnet-5" }],
+            cacheAllowed: true,
+            rejectedFallbacks: [],
+            ...(inference === undefined ? {} : { effortInference: inference }),
+          },
+        };
+      },
+      now: () => 0,
+    });
+  }
+
+  const inference = (rung: EffortRung): RunEventEffortInference => ({
+    rung,
+    score: 4,
+    firedSignals: ["design_keywords"],
+    band: rung,
+    usedClassifier: false,
+    promptHash: "c".repeat(64),
+  });
+
+  it("infers the rung for a turn that asked for auto", async () => {
+    const seen: (RunEventEffortInference | undefined)[] = [];
+    const effort = { infer: vi.fn(async () => inference("thorough")) };
+    const port = inferringPort(effort, (value) => seen.push(value));
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+
+    expect(effort.infer).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([inference("thorough")]);
+  });
+
+  it("infers once per attempt, however many model calls the Tool loop makes", async () => {
+    const effort = { infer: vi.fn(async () => inference("balanced")) };
+    const port = inferringPort(effort, () => {});
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+    await port.invoke(request({ modelProfileId: "auto", requestId: "request-2" }));
+    await port.invoke(request({ modelProfileId: "auto", requestId: "request-3" }));
+
+    expect(effort.infer).toHaveBeenCalledTimes(1);
+  });
+
+  it("scores the latest user message, not the assistant's own words", async () => {
+    const scored: string[] = [];
+    const effort: EffortInferencePort = {
+      infer: async (prompt) => {
+        scored.push(prompt);
+        return inference("fast");
+      },
+    };
+    const port = inferringPort(effort, () => {});
+
+    await port.invoke(
+      request({
+        modelProfileId: "auto",
+        messages: [
+          { role: "system", content: "You are a careful assistant." },
+          { role: "user", content: "first question" },
+          { role: "assistant", content: "a long architectural essay about trade-offs" },
+          { role: "user", content: "and the follow-up" },
+        ],
+      })
+    );
+
+    expect(scored).toEqual(["and the follow-up"]);
+  });
+
+  it("leaves a rung the participant picked alone", async () => {
+    const effort = { infer: vi.fn(async () => inference("thorough")) };
+    const port = inferringPort(effort, () => {});
+
+    await port.invoke(request({ modelProfileId: "fast" }));
+
+    expect(effort.infer).not.toHaveBeenCalled();
+  });
+
+  it("leaves a named ModelProfile alone", async () => {
+    const effort = { infer: vi.fn(async () => inference("thorough")) };
+    const port = inferringPort(effort, () => {});
+
+    await port.invoke(request({ modelProfileId: "house-counsel" }));
+
+    expect(effort.infer).not.toHaveBeenCalled();
+  });
+
+  it("does not re-ask when a turn has no user text to score", async () => {
+    const effort = { infer: vi.fn(async () => inference("balanced")) };
+    const port = inferringPort(effort, () => {});
+    const blank = {
+      messages: [
+        { role: "assistant" as const, content: "Anything else?" },
+        { role: "user" as const, content: "   " },
+      ],
+    };
+
+    await port.invoke(request({ modelProfileId: "auto", ...blank }));
+    await port.invoke(request({ modelProfileId: "auto", requestId: "request-2", ...blank }));
+
+    expect(effort.infer).not.toHaveBeenCalled();
+  });
+
+  it("routes as before when no inference is wired at all", async () => {
+    const seen: (RunEventEffortInference | undefined)[] = [];
+    const port = inferringPort(undefined, (value) => seen.push(value));
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+
+    expect(seen).toEqual([undefined]);
+  });
+
+  it("keeps the receipt reporting auto and the rung the router landed on", async () => {
+    const port = inferringPort({ infer: async () => inference("thorough") }, () => {});
+
+    await port.invoke(request({ modelProfileId: "auto" }));
+
+    expect(port.latestModelCallReceipt()).toMatchObject({
+      effortPreset: "auto",
+      effortApplied: "thorough",
+    });
   });
 });

@@ -25,6 +25,40 @@ May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`,
 package submits child-Run commands through the public `run-kernel` port; `run-kernel` never
 imports this package.
 
+## `auto` is inferred by a two-stage funnel, and only the cheap stage always runs
+
+`effort-signals.ts` + `effort-router.ts` resolve the Effort Preset `auto` to an Effort Rung
+(`fast` | `balanced` | `thorough`) from the participant's own words. Every other selector is passed
+through untouched — a participant who picked a rung gets it.
+
+- **Stage 1 is free and pure.** `EFFORT_SIGNALS` is an exported array of
+  `{ name, weight, test(features) }`, so the scoring policy is config you can read, reweight, or
+  delete a line from — not branches to unpick. `scoreEffortSignals` sums the weights of the signals
+  that fired against a single precomputed `PromptFeatures`, so no signal re-scans the string.
+- **Stage 2 costs one small call, and most prompts never reach it.** `routeByScore` answers
+  `unsure` only inside a narrow `EFFORT_UNSURE_MARGIN` either side of each threshold. Ambiguity
+  lives at the boundaries; a score dead-centre in `balanced` is the most confident `balanced` there
+  is, and paying a model to confirm it would buy nothing.
+- **Every unexpected classifier answer means `balanced`.** A wrong word, an empty string, prose, a
+  refusal, a timeout, a thrown provider error — all resolve to `EFFORT_CLASSIFIER_FALLBACK`. Never
+  `fast`, which answers a hard question weakly; never `thorough`, where one parser bug quietly bills
+  every ambiguous turn at the top rung.
+- **The classifier arrives as `EffortClassifierPort`.** This package may not import
+  `@tulipfarm/llm`, and the decision does not need a provider — only an answer. The Worker supplies
+  the hand that makes the call (`apps/worker/src/effort-classifier.ts`).
+- **Determinism is bought back by pinning, not by pretending.** Stage 1 replays identically. Stage 2
+  does not, so the Worker records the decision on `model.routed` and a replayed attempt passes it
+  back as `pinned` — `route` short-circuits on it and never calls the classifier twice for one Run.
+  This is what keeps the `deriveModelRequirements` invariant intact.
+- **Hash, never the prompt.** `EffortRoutingDecision` carries `promptHash` (SHA-256), the score, the
+  signals that fired, the band, and whether stage 2 ran. It lands in a durable, operator-visible
+  event; the text does not. `EffortRoutingLogger` is a calibration hook — wired now, consumed later.
+
+Known limit, recorded rather than papered over: only the latest user message is scored, so a terse
+follow-up in a hard thread scores low. Scoring the transcript instead would make effort climb with
+conversation age rather than with difficulty, which is worse. The recorded score and signals are
+exactly the data needed to fix this properly.
+
 ## Prompt inputs are declared structurally
 
 `src/context/assemble.ts` names only the fields it renders (`MemoryEntry`, `GovernancePage`,

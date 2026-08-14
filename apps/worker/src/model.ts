@@ -1,6 +1,7 @@
 import type {
   ModelInvocationRequest,
   ModelInvocationResult,
+  ModelMessage,
   ModelOutput,
   ModelPort,
   ModelRequirements,
@@ -15,6 +16,7 @@ import {
   type EffortPreset,
   type EffortRung,
   isEffortRung,
+  type RunEventEffortInference,
   type RunEventPayloads,
 } from "@tulipfarm/schema";
 import {
@@ -27,6 +29,7 @@ import {
   type ToolSet,
   tool,
 } from "ai";
+import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 
 /**
@@ -49,7 +52,20 @@ export interface LlmModelPortOptions {
    * Requirements travel with the request because routing must re-check them per call: a turn that
    * gains a Tool halfway through is a different question of the model than the one that started it.
    */
-  model(selector: string, requirements: ModelRequirements): Promise<LlmModelResolution>;
+  model(
+    selector: string,
+    requirements: ModelRequirements,
+    inference?: RunEventEffortInference
+  ): Promise<LlmModelResolution>;
+  /**
+   * Resolves `auto` from the prompt instead of from the deployment's declared default.
+   *
+   * Optional: without it `auto` keeps its non-adaptive meaning, which is a correct answer, just a
+   * less well-aimed one. Consulted **once per port instance** — Chat builds one port per Turn
+   * attempt, so a turn that makes six model calls through its Tool loop pays for at most one
+   * inference, and the rung it opened with is the rung it finishes on.
+   */
+  readonly effort?: EffortInferencePort;
   /**
    * Optional because tests and non-Run callers may use this port, but Chat wires it from the
    * per-attempt writer so the routing event is keyed with the Run/State identity that selected it.
@@ -100,6 +116,12 @@ export interface ModelCallReceiptSource {
 
 export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   private receipt: ModelCallReceipt | undefined;
+  /**
+   * The effort decision for this attempt, once made. Wrapped rather than stored bare because
+   * "inferred nothing" is a real outcome — a turn with no user text to score must not re-ask on
+   * every call in its Tool loop.
+   */
+  private effort: { readonly value: RunEventEffortInference | undefined } | undefined;
 
   constructor(private readonly options: LlmModelPortOptions) {}
 
@@ -116,10 +138,9 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 
   async *stream(request: ModelInvocationRequest): AsyncIterable<ModelStreamChunk> {
-    const resolution = await this.options.model(
-      request.modelProfileId,
-      deriveModelRequirements(request, this.options.policy)
-    );
+    const requirements = deriveModelRequirements(request, this.options.policy);
+    const inference = await this.inferEffort(request, requirements);
+    const resolution = await this.options.model(request.modelProfileId, requirements, inference);
     if (resolution.kind === "available" && resolution.budgetLimits !== undefined) {
       await this.options.budgets?.open(resolution.budgetLimits);
     }
@@ -139,6 +160,31 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     } catch (error) {
       throw new ModelInvocationError(classifyProviderError(error), error);
     }
+  }
+
+  /**
+   * The rung this turn should run at, when it asked for `auto`.
+   *
+   * Only `auto` is inferred: a participant who picked a rung gets that rung, and a ModelProfile ref
+   * or a raw model id names its own answer. Scored from the latest **user** message rather than the
+   * whole transcript — otherwise every turn late in a conversation would score as long, and effort
+   * would climb with conversation age instead of with difficulty. The cost is that a terse
+   * follow-up in a hard thread scores low; the recorded score and signals are what will let that be
+   * measured and fixed.
+   */
+  private async inferEffort(
+    request: ModelInvocationRequest,
+    requirements: ModelRequirements
+  ): Promise<RunEventEffortInference | undefined> {
+    if (this.options.effort === undefined) return undefined;
+    if (asEffortPreset(request.modelProfileId) !== "auto") return undefined;
+    if (this.effort !== undefined) return this.effort.value;
+
+    const prompt = latestUserPrompt(request.messages);
+    const value =
+      prompt === undefined ? undefined : await this.options.effort.infer(prompt, requirements);
+    this.effort = { value };
+    return value;
   }
 
   private async *streamProvider(
@@ -240,10 +286,41 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 }
 
+/**
+ * The newest thing the participant actually asked, or `undefined` when the transcript holds none.
+ *
+ * System instructions are excluded because they are the same on every turn, and assistant and tool
+ * messages because scoring the model's own output would let a verbose answer escalate the next
+ * turn's effort by itself.
+ */
+function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message?.role !== "user") continue;
+    if (message.content.trim().length === 0) continue;
+    return message.content;
+  }
+  return undefined;
+}
+
 function pricingModelId(routing: RunEventPayloads["model.routed"]): string | undefined {
-  if (routing.outcome === "raw_model") return routing.modelId;
   if (routing.outcome === "selected") return routing.chain[0]?.modelId;
   return undefined;
+}
+
+/**
+ * The rung a selected route actually ran at, or `undefined` when it ran at a ModelProfile that is
+ * not one.
+ *
+ * An inferred route names its own rung, because the router chose it before any profile was
+ * resolved — a deployment that points `fast` at a custom ModelProfile would otherwise lose the
+ * answer to a name check it was never going to pass.
+ */
+function appliedRung(
+  routing: Extract<RunEventPayloads["model.routed"], { outcome: "selected" }>
+): EffortRung | undefined {
+  if (routing.resolution === "effort_inferred") return routing.effortInference?.rung;
+  return isEffortRung(routing.profileId) ? routing.profileId : undefined;
 }
 
 function receiptFromRouting(
@@ -252,13 +329,21 @@ function receiptFromRouting(
 ): ModelCallReceipt | undefined {
   const modelId = pricingModelId(routing);
   if (modelId === undefined) return undefined;
-  const selectedByPreset = routing.outcome === "selected" && routing.resolution === "effort_preset";
-  const effortPreset = selectedByPreset ? asEffortPreset(routing.selector) : undefined;
+  // An inferred rung is still an effort selection, and the selector it reports is still what the
+  // participant asked for — `auto`. Reading it as anything else would tell the client the
+  // participant picked the rung the router picked, and "Try harder" would then escalate from a
+  // choice they never made.
+  const byEffort =
+    routing.outcome === "selected" &&
+    (routing.resolution === "effort_preset" || routing.resolution === "effort_inferred")
+      ? routing
+      : undefined;
+  const effortPreset = byEffort === undefined ? undefined : asEffortPreset(byEffort.selector);
   // `deriveModelProfiles` ids a preset's head profile by the preset's own name, so the resolved
   // profile id *is* the rung whenever the deployment routes on derived profiles. When a preset
-  // points at a non-rung ModelProfile instead, the id names that profile and no rung is claimed.
-  const effortApplied =
-    selectedByPreset && isEffortRung(routing.profileId) ? routing.profileId : undefined;
+  // points at a non-rung ModelProfile instead, the id names that profile and no rung is claimed —
+  // except for an inferred route, where the router named the rung itself.
+  const effortApplied = byEffort === undefined ? undefined : appliedRung(byEffort);
   return {
     modelId,
     ...(effortPreset === undefined ? {} : { effortPreset }),
