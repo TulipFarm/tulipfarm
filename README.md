@@ -13,7 +13,70 @@
   <img src="https://shieldcn.dev/badge/status-research%20preview-orange.svg" alt="Research Preview" />
   <img src="https://shieldcn.dev/github/release/TulipFarm/tulipfarm.svg?label=docker" alt="Docker Version" />
   <a href="https://tulipfarm.site"><img src="https://shieldcn.dev/badge/website-tulipfarm.site-blue.svg" alt="Website" /></a>
+  <a href="LICENSE"><img src="https://shieldcn.dev/badge/license-MIT-lightgrey.svg" alt="License: MIT" /></a>
 </p>
+
+<p align="center">
+  <a href="https://tulipfarm.site/docs">Documentation</a> ·
+  <a href="#install-self-host">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+## What is TulipFarm
+
+TulipFarm is a self-hosted control panel where autonomous agents run your business
+operations. You **describe what you want in chat** — "track our customers", "create a
+support agent", "review this pull request" — and agents build and run it for you. You do
+not configure it by editing files or writing code.
+
+It runs entirely on your own infrastructure, against your own model provider keys. Nothing
+about your business data leaves your instance unless an agent's job is to send it somewhere
+you've authorized.
+
+## Features
+
+Once a model is configured, everything below is created by asking for it in chat:
+
+- **Resource types** — the things your business tracks. Describe one and its tables, forms,
+  and list screens appear.
+- **Agents** — named owners for a job, each with its own instructions, tools, and bounded
+  authority.
+- **Routines** — repeatable operations that run on a schedule, on an event, or on request.
+- **Knowledge** — a wiki your agents read from and cite, with provenance attached to every
+  answer.
+- **Skills** — installable capability packages from a git repository, audited before they
+  run.
+- **Integrations** — reach your agents where work already happens: GitHub, Slack, Telegram,
+  Notion, Confluence, and Google Workspace ship in the box, and any provider can be added as
+  a manifest.
+
+See the [full documentation](https://tulipfarm.site/docs) for a guided tour, or
+[docs/concepts](https://tulipfarm.site/docs/concepts) for how these fit together.
+
+## Architecture
+
+A TulipFarm instance has two halves:
+
+- **The soul** — a git-backed configuration store. Your resource schemas, agents, skills,
+  routines, and integrations live here as files. Agents write to the soul when you ask them
+  to build something; the git history is your audit trail.
+- **The runtime** — the API and workers that load the soul, store your records, index your
+  knowledge, and run agent turns against your configured LLM providers.
+
+The codebase is a TypeScript pnpm/Turborepo monorepo:
+
+| App / package | What it does |
+| --- | --- |
+| `apps/api` | Fastify API server. PostgreSQL (pgvector + pg-boss), migration-on-boot, soul git store. |
+| `apps/web` | Remix + React web UI. |
+| `apps/worker` | Durable Run dispatch, Agent/Tool States, timers, reconciliation. |
+| `apps/integration-worker` | Integration ingress, sync, delivery, retries, reconciliation. |
+| `packages/*` | Domain packages (auth, agent runtime, tool broker, knowledge, memory, soul, and more) — see [AGENTS.md](AGENTS.md) for the full layout. |
+
+Accepted architecture decisions and the boundaries between packages are recorded in
+[`docs/architecture`](docs/architecture/decision-index.md).
 
 ## Install (self-host)
 
@@ -47,188 +110,56 @@ its generated secrets.
 > `TF_BASE_URL=https://raw.githubusercontent.com/TulipFarm/tulipfarm` together with
 > `TF_REF=<tag-or-branch>`. To test a local build, set `TF_LOCAL_SRC=1`.
 
+**Compose by hand** (Portainer, Coolify, Dokploy, Unraid, or a plain `docker compose`) —
+grab `docker-compose.yml` from <https://tulipfarm.site/docker-compose.yml> and run it
+as-is; no `.env` and no key generation are needed. See the header of `docker-compose.yml`
+for every knob (TLS, `POSTGRES_PASSWORD`, `PUBLIC_URL`).
+
+**Updating**: releases publish `ghcr.io/tulipfarm/tulipfarm:v<version>` (+ `:latest` for
+stable). Updates are always **manual** (no auto-update by design) — re-run the install
+command, or `docker compose pull && docker compose up -d`. Database migrations run
+automatically on boot; there are **no down-migrations**, so back up before updating. See
+the [update guide](https://tulipfarm.site/docs/deploy/updating) for the full procedure and
+every deployment target.
+
 **Uninstall permanently** (deletes the database, soul, secrets, backups, volumes, and
 TulipFarm images after a typed confirmation):
 ```bash
 curl -fsSL https://tulipfarm.site/uninstall.sh | bash
 ```
-Docker/Podman itself and externally managed databases are left untouched. See the
-[uninstall guide](https://tulipfarm.site/docs/uninstall) before running it.
+See the [uninstall guide](https://tulipfarm.site/docs/uninstall) before running it.
 
-**Compose by hand** (Portainer, Coolify, Dokploy, Unraid, or a plain `docker compose`) —
-grab `docker-compose.yml` from <https://tulipfarm.site/docker-compose.yml> and run it
-as-is; no `.env` and no key generation are needed.
-The app generates its bootstrap secrets on first boot and persists them to the
-`tulipfarm-data` volume, so **back that volume up** — it holds the key that decrypts every
-secret the instance stores. The bundled database uses the default password `tulipfarm`
-(safe only because port 5432 is never published — don't publish it); set
-`POSTGRES_PASSWORD` to change it. For TLS, put a reverse proxy in front and set
-`PUBLIC_URL` to the external `https://` origin. See the header of `docker-compose.yml` for
-every knob.
+> You never need to clone this repository to run TulipFarm — every path above pulls a
+> published image. The source tree here is for contributors — see
+> [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Local Development
+## Security & secrets
 
-### Prerequisites
+- The app generates its bootstrap secrets on first boot and persists them to the
+  `tulipfarm-data` volume — **back that volume up**, it holds the key that decrypts every
+  secret the instance stores.
+- The bundled database uses a default password, safe only because port 5432 is never
+  published by default — don't publish it; set `POSTGRES_PASSWORD` to change it.
+- Secrets (integration credentials, API keys) are stored encrypted and only decrypted
+  immediately before an authorized use — see
+  [`packages/secrets`](packages/secrets/AGENTS.md) and the
+  [security docs](https://tulipfarm.site/docs/security).
+- Found a vulnerability? See [SECURITY.md](SECURITY.md) — please don't file a public issue.
 
-- **Node.js** (see `.node-version`)
-- **pnpm** (`npm install -g pnpm`)
-- **Docker** (Docker Desktop or Docker Engine, with the Compose v2 plugin)
+## Contributing
 
-### Quick Start
+Bug reports, feature requests, and PRs are welcome. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md) for local dev setup, how the test/lint gates work, commit
+conventions, and how to open a PR. Please also read the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
-Postgres always runs as the bundled `pgvector/pgvector:pg17` container — the same image CI
-and production use, so dev cannot drift from the tested path. App processes run on the host
-(`pnpm dev`, hot reload).
+## Releases
 
-1. **Provision Postgres** — run the setup script:
-   ```bash
-   bash scripts/setup-dev.sh
-   ```
-   It starts the container (exposed on `localhost:5432`, password generated into `.env`),
-   wires `DATABASE_URL` into `.env.local`, initializes the soul directory, and generates the
-   rest of `.env.local`. No prompts.
+Releases use a release PR and a gated publication pipeline; a maintainer requests an exact
+version with `pnpm release 0.5.0`. See [docs/RELEASES.md](docs/RELEASES.md) for the
+complete release contract, and [CONTRIBUTING.md](CONTRIBUTING.md#commit-messages) for the
+commit convention that drives it.
 
-2. **Verify the datastore is running:**
-   ```bash
-   pg_isready -h localhost -p 5432 -U tulipfarm
-   ```
+## License
 
-3. **Install dependencies and start development:**
-   ```bash
-   pnpm install
-   pnpm dev
-   ```
-   - API will start on `http://localhost:4010` (default, configurable via `PORT` env var)
-   - Web UI will start on `http://localhost:4000` (default, configurable via `VITE_PORT` env var)
-
-   **Individual app development:**
-   ```bash
-   pnpm dev:api   # Run only the API server
-   pnpm dev:web   # Run only the Web UI
-   ```
-
-4. **Check API health:**
-   ```bash
-   curl http://localhost:4010/health
-   ```
-
-### Environment Setup
-
-The `scripts/setup-dev.sh` script automatically:
-- Starts the bundled PostgreSQL 17 + pgvector container on `localhost:5432`
-- Generates `POSTGRES_PASSWORD` into `.env` and points `DATABASE_URL` at the container
-- Initializes the soul git repository at `~/.tulipfarm/soul` with the required directory structure
-- Generates `.env.local` with random bootstrap env config (`ENCRYPTION_KEY`, `JWT_SECRET`, `WEBHOOK_SIGNING_SECRET`)
-
-**Manual adjustments:** Edit `.env.local` to customize the datastore or add optional variables like `SOUL_GIT_REMOTE_URL` for syncing soul changes to a remote repository.
-
-### Soul Repository
-
-The soul lives at `~/.tulipfarm/soul` — a git repository that stores your system configuration (resources, routines, agents, skills, integrations). By default, it is local-only. To enable remote sync:
-
-1. Create a private GitHub repository for your soul
-2. Add the remote and set `SOUL_GIT_REMOTE_URL` in `.env.local`:
-   ```bash
-   git -C ~/.tulipfarm/soul remote add origin https://github.com/your-org/your-soul.git
-   git -C ~/.tulipfarm/soul push -u origin main
-   ```
-3. Update `.env.local`: `SOUL_GIT_REMOTE_URL=https://github.com/your-org/your-soul.git`
-
-Or configure it from the Settings UI setup wizard, which persists the remote + credential and syncs immediately (no restart needed).
-
-### Testing a marketplace branch (integrations / skills)
-
-The marketplace endpoints clone their source repo per request, so you can point an instance
-at any repo **and branch** without code changes — useful for testing an integrations or
-skills branch before merging it to main:
-
-```bash
-# integrations marketplace (default: tulipfarm/integrations, remote default branch)
-INTEGRATIONS_MARKETPLACE_SOURCE=tulipfarm/integrations#my-feature-branch
-
-# skills marketplace (default: tulipfarm/skills)
-MARKETPLACE_SOURCE=tulipfarm/skills#my-feature-branch
-```
-
-Accepted forms: `owner/repo`, `owner/repo#branch-or-tag`, a full `https://` git URL (also with
-`#ref`), or `file:///abs/path` for a local checkout. Set in `.env.local` for local dev; on a
-hosted instance (e.g. Azure App Service) set the app setting and restart:
-
-```bash
-az webapp config appsettings set -n <app> -g <rg> \
-  --settings INTEGRATIONS_MARKETPLACE_SOURCE=tulipfarm/integrations#my-feature-branch
-```
-
-Installs record provenance (source URL + resolved commit SHA + content hash) in
-`integrations-lock.json` / `skills-lock.json`; the marketplace shows **Update** when the
-locked hash differs from the source's current content — reinstalling from a branch and later
-from main both flow through the same update path.
-
-### Updating TulipFarm (self-host)
-
-Releases publish the image `ghcr.io/tulipfarm/tulipfarm:v<version>` (+ `:latest` for stable).
-Updates are always **manual** (no auto-update by design):
-
-- **OCI lane (installer):** re-run the install command — it preserves `.env` and the Postgres
-  volume, pulls the pinned `TULIPFARM_VERSION` (default `latest`), and restarts.
-- **Compose by hand:** `docker compose pull && docker compose up -d`.
-- **Azure App Service (sitecontainer on `:latest`):** `az webapp restart -n <app> -g <rg>` —
-  the restart pulls the newest image.
-- **Pinned installs:** bump `TULIPFARM_VERSION` in `.env`, then pull + up.
-
-**Database migrations run automatically on boot** — pulling a new image applies pending
-schema migrations before the API starts serving. The corollaries:
-
-- There are **no down-migrations**: rolling back to an older image after a migration ran
-  requires restoring a database backup, not just repointing the image tag.
-- A failed boot migration restart-loops the app — fix forward (patched release) or restore.
-- **Back up before updating**: `pg_dump` the database (or rely on your managed Postgres
-  point-in-time restore) so a bad update is a restore away from recovery.
-
-Installed **integrations and skills** update independently of the app: the marketplace pages
-show an **Update** button when the source repo has newer content (lock-hash comparison).
-Updating a connected integration restarts its MCP server automatically.
-
-### Stopping Services
-
-To stop PostgreSQL (keeps the data volume):
-```bash
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down
-```
-
-To stop the dev servers, press `Ctrl+C` in the terminal running `pnpm dev`.
-
-## Commits & Releases
-
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/). They're
-enforced in two places: a `commit-msg` git hook (commitlint, via lefthook) locally, and
-the **PR Title** check in CI. The commit/PR `type` drives the next version bump.
-
-Releases use a release PR and a gated publication pipeline. A maintainer requests an exact
-version:
-
-```bash
-pnpm release 0.5.0
-```
-
-The command dispatches **Prepare release**, which opens a PR containing only the generated
-`package.json` and `CHANGELOG.md` changes for a frozen `main` snapshot. Merging that PR
-automatically validates and builds the reviewed snapshot, runs Compose parity against that exact
-multi-architecture image, promotes it to `v<version>` and `latest`, and creates the Git tag and
-GitHub Release with the matching changelog section. The GitHub Release is created last; no
-post-merge command or approval is required.
-
-See [docs/RELEASES.md](docs/RELEASES.md) for setup, retry semantics, and the complete release
-contract.
-
-### Canary / prereleases
-
-Prereleases use the same release-PR and verification path. Pass the complete version:
-
-```bash
-pnpm release:canary 0.5.0-alpha.0
-pnpm release:canary 0.5.0-beta.0
-```
-
-They are marked as prereleases on GitHub and publish `ghcr.io/tulipfarm/tulipfarm:v<version>`
-without moving `latest`.
+[MIT](LICENSE)
