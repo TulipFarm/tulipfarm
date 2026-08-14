@@ -1,4 +1,5 @@
 import type { EgressHttpPort } from "@tulipfarm/integrations";
+import type { MutationGuard } from "@tulipfarm/observability";
 import type { SecretsService } from "@tulipfarm/secrets";
 import type { Logger, SoulIntegration } from "@tulipfarm/soul";
 import type { EffectStore } from "@tulipfarm/tool-broker";
@@ -20,6 +21,7 @@ export interface DeclarativeToolSyncDeps {
   readonly effects: EffectStore;
   readonly secrets: () => Promise<SecretsService>;
   readonly http: EgressHttpPort;
+  readonly mutationGuard?: MutationGuard;
   /**
    * Resolved lazily: Fastify's logger does not exist until `buildApp`, and this syncer must be
    * constructed before it so `createApp` can receive it.
@@ -46,6 +48,9 @@ export class DeclarativeToolSync {
         effects: this.deps.effects,
         secrets: this.deps.secrets,
         http: this.deps.http,
+        ...(this.deps.mutationGuard === undefined
+          ? {}
+          : { mutationGuard: this.deps.mutationGuard }),
       },
       logger
     );

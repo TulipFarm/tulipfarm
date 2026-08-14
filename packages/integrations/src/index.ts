@@ -1,19 +1,393 @@
-export * from "./channels";
-export * from "./confluence";
-export * from "./egress";
-export * from "./external-protocol";
-export * from "./generic";
-export * from "./github";
-export * from "./google-docs";
-export * from "./google-drive";
-export * from "./grants";
-export * from "./http";
-export * from "./import";
-export * from "./ingress";
-export * from "./jira";
-export * from "./knowledge";
-export * from "./model";
-export * from "./notion";
-export * from "./postgres";
-export * from "./slack";
-export * from "./telegram";
+export type {
+  ChannelDeliveryAttempt,
+  ChannelDeliveryAuthorizationPort,
+  ChannelDeliveryLedger,
+  ChannelDeliveryRecord,
+  ChannelDeliveryStatus,
+  ChannelIdentityPort,
+  ChannelInboundEvent,
+  ChannelInboundStore,
+  ChannelMediaReference,
+  ChannelRoutingSource,
+  ChannelRunStarter,
+} from "./channels";
+export type {
+  ConfluenceApiPort,
+  ConfluenceChange,
+  ConfluenceKnowledgeSyncDeps,
+  ConfluenceKnowledgeSyncOptions,
+  ConfluenceKnowledgeSyncResult,
+  ConfluencePage,
+  ConfluencePagePermission,
+  ConfluenceSyncCheckpoint,
+  ConfluenceSyncCheckpointStore,
+  ConfluenceSyncFailureCode,
+} from "./confluence";
+export {
+  CONFLUENCE_PROVIDER,
+  confluenceSourceId,
+  InMemoryConfluenceCheckpointStore,
+  syncConfluenceKnowledge,
+} from "./confluence";
+export type {
+  CompiledEgressTool,
+  CompileOpenApiEgressInput,
+  EgressCompileErrorCode,
+  EgressHttpPort,
+  EgressHttpRequest,
+  EgressInput,
+  OpenApiEgress,
+  OpenApiEgressAuth,
+  OpenApiEgressOperation,
+  OpenApiOperationBinding,
+  OpenApiParamBinding,
+  OpenApiToolAdapterDeps,
+  UnsupportedEgress,
+} from "./egress";
+export { compileOpenApiEgress, EgressCompileError, OpenApiToolAdapter } from "./egress";
+export type {
+  ExternalIntegrationAccessPort,
+  ExternalIntegrationAuditEvent,
+  ExternalIntegrationAuditPort,
+  ExternalIntegrationAuthentication,
+  ExternalIntegrationCapability,
+  ExternalIntegrationConformanceCheck,
+  ExternalIntegrationConformanceReport,
+  ExternalIntegrationConformanceRequest,
+  ExternalIntegrationDescriptor,
+  ExternalIntegrationGatewayDependencies,
+  ExternalIntegrationIdentity,
+  ExternalIntegrationInvocation,
+  ExternalIntegrationOperation,
+  ExternalIntegrationProtocolErrorCode,
+  ExternalIntegrationProtocolTransport,
+  ExternalIntegrationRpcErrorCode,
+  ExternalIntegrationRpcRequest,
+  ExternalIntegrationRpcResponse,
+} from "./external-protocol";
+export {
+  EXTERNAL_INTEGRATION_OPERATIONS,
+  EXTERNAL_INTEGRATION_PROTOCOL_VERSION,
+  ExternalIntegrationActivationRegistry,
+  ExternalIntegrationGateway,
+  ExternalIntegrationProtocolError,
+  externalIntegrationIdentityKey,
+  runExternalIntegrationConformance,
+  sameExternalIntegrationIdentity,
+} from "./external-protocol";
+export type {
+  GenericWebhookAcceptance,
+  GenericWebhookConfig,
+  GenericWebhookDependencies,
+  GenericWebhookErrorCode,
+  GenericWebhookEvent,
+  GenericWebhookRequest,
+  OutboundHttpConfig,
+  OutboundHttpDependencies,
+  OutboundHttpErrorCode,
+  OutboundHttpFailurePhase,
+  OutboundHttpRequest,
+  OutboundHttpResult,
+  OutboundHttpTransport,
+  OutboundHttpTransportRequest,
+  OutboundHttpTransportResponse,
+} from "./generic";
+export {
+  acceptGenericWebhook,
+  GenericWebhookError,
+  isPrivateNetworkAddress,
+  OutboundHttpAdapter,
+  OutboundHttpError,
+  renderOutboundHttpTemplate,
+} from "./generic";
+export type {
+  CachingInstallationTokenMinterDeps,
+  GitHubAdapterDeps,
+  GitHubCheckRunAction,
+  GitHubCheckRunEvent,
+  GitHubContextResolver,
+  GitHubCredentialErrorReason,
+  GitHubEffectContext,
+  GitHubEventErrorCode,
+  GitHubInstallationScope,
+  GitHubIssueAction,
+  GitHubIssueEvent,
+  GitHubPermissionLevel,
+  GitHubPermissionNeed,
+  GitHubPullRequestAction,
+  GitHubPullRequestEvent,
+  GitHubPushCommit,
+  GitHubPushEvent,
+  GitHubRepositoryRef,
+  GitHubScopeDenialReason,
+  GitHubToolId,
+  GitHubWebhookVerification,
+  InstallationTokenMintContext,
+  MintedInstallationToken,
+} from "./github";
+export {
+  assertAccountInScope,
+  assertRepositoryInScope,
+  createCachingInstallationTokenMinter,
+  GITHUB_ADAPTER_REF,
+  GITHUB_CHECK_RUN_ACTIONS,
+  GITHUB_CHECK_RUN_TARGET,
+  GITHUB_DELIVERY_HEADER,
+  GITHUB_ISSUE_ACTIONS,
+  GITHUB_ISSUE_TARGET,
+  GITHUB_ORGANIZATION_TARGET,
+  GITHUB_PULL_REQUEST_ACTIONS,
+  GITHUB_PULL_REQUEST_TARGET,
+  GITHUB_RECONCILIATION_OPERATIONS,
+  GITHUB_REPOSITORY_TARGET,
+  GITHUB_SIGNATURE_HEADER,
+  GITHUB_TOOL_CONTRACTS,
+  GITHUB_TOOL_IDS,
+  GitHubAdapter,
+  GitHubCredentialError,
+  GitHubEventError,
+  GitHubScopeDeniedError,
+  githubEffectMarker,
+  githubExternalSubject,
+  githubSenderSubject,
+  githubWebhookVerification,
+  mintInstallationToken,
+  normalizeGitHubCheckRunEvent,
+  normalizeGitHubIssueEvent,
+  normalizeGitHubPullRequestEvent,
+  normalizeGitHubPushEvent,
+  parseRepositoryRef,
+  repositoryRef,
+  resolveGitHubActor,
+  signAppJwt,
+} from "./github";
+export type {
+  GoogleDocsApiPort,
+  GoogleDocsChange,
+  GoogleDocsDocument,
+  GoogleDocsKnowledgeSyncDeps,
+  GoogleDocsKnowledgeSyncOptions,
+  GoogleDocsKnowledgeSyncResult,
+  GoogleDocsPermission,
+  GoogleDocsSyncCheckpoint,
+  GoogleDocsSyncCheckpointStore,
+  GoogleDocsSyncFailureCode,
+} from "./google-docs";
+export {
+  GOOGLE_DOCS_PROVIDER,
+  googleDocsSourceId,
+  InMemoryGoogleDocsCheckpointStore,
+  syncGoogleDocsKnowledge,
+} from "./google-docs";
+export type {
+  DriveApiPort,
+  DriveChange,
+  DriveExtractionDecision,
+  DriveExtractionRequest,
+  DriveFile,
+  DriveKnowledgeSyncDeps,
+  DriveKnowledgeSyncOptions,
+  DriveKnowledgeSyncResult,
+  DrivePermission,
+  DriveSyncCheckpoint,
+  DriveSyncCheckpointStore,
+  DriveSyncFailureCode,
+} from "./google-drive";
+export {
+  DRIVE_PROVIDER,
+  decideDriveExtraction,
+  InMemoryDriveCheckpointStore,
+  syncDriveKnowledge,
+} from "./google-drive";
+export type {
+  IntegrationAccessDecision,
+  IntegrationAccessDenialReason,
+  IntegrationAccessRequest,
+  IntegrationExternalTarget,
+  IntegrationPrincipalRef,
+} from "./grants";
+export {
+  assertIntegrationAccess,
+  decideIntegrationAccess,
+  IntegrationAccessDeniedError,
+} from "./grants";
+export type {
+  HttpFailureClassification,
+  IntegrationHttpFailureCode,
+  IntegrationHttpMethod,
+  IntegrationHttpPort,
+  IntegrationHttpRequest,
+  IntegrationHttpResponse,
+  PageResult,
+  PaginationBound,
+  PaginationBounds,
+} from "./http";
+export { classifyHttpFailure, collectPages, PaginationBoundError } from "./http";
+export type {
+  DiscoveredMcpTool,
+  GovernedImportErrorCode,
+  GovernedImportRequestBase,
+  GovernedImportResult,
+  GovernedToolContractProposal,
+  GovernedToolContractProposalPort,
+  McpDiscoveryPort,
+  McpDiscoverySource,
+  McpImportDependencies,
+  McpImportRequest,
+  OpenApiImportDependencies,
+  OpenApiImportRequest,
+} from "./import";
+export {
+  GovernedImportError,
+  importMcpAsProposal,
+  importOpenApiAsProposal,
+  kebabCase,
+  requireDestinations,
+  requireExplicitSelection,
+} from "./import";
+export type { IngressDecision } from "./ingress";
+export { parseDecision } from "./ingress";
+export type {
+  JiraAdapterDeps,
+  JiraContextResolver,
+  JiraEffectContext,
+  JiraIssueKey,
+  JiraPermissionLevel,
+  JiraPermissionNeed,
+  JiraScopeDenialReason,
+  JiraSiteScope,
+  JiraToolId,
+} from "./jira";
+export {
+  assertProjectInScope,
+  JIRA_ADAPTER_REF,
+  JIRA_ISSUE_TARGET,
+  JIRA_PROJECT_TARGET,
+  JIRA_RECONCILIATION_OPERATIONS,
+  JIRA_TOOL_CONTRACTS,
+  JIRA_TOOL_IDS,
+  JiraAdapter,
+  JiraScopeDeniedError,
+  jiraEffectLabel,
+  jiraExternalSubject,
+  jiraIssueUrl,
+  parseIssueKey,
+  resolveJiraActor,
+} from "./jira";
+export type {
+  EmittedAccessControl,
+  EmittedAclSnapshot,
+  EmittedLiveAccessControl,
+  EmittedPrincipalRef,
+  EmittedProvenance,
+  EmittedSnapshotAccessControl,
+  EmittedSourceStatus,
+  EmittedSourceVerification,
+  KnowledgeChunkEmission,
+  KnowledgeEmissionSink,
+  KnowledgeIdentityMapPort,
+  KnowledgeSourceEmission,
+} from "./knowledge";
+export { knowledgeSourceId, strongestClassification } from "./knowledge";
+export type {
+  ChannelApp,
+  ChannelIntegration,
+  ChannelProjectionStatus,
+  ChannelRoute,
+  ChannelRouteDenialReason,
+  ChannelRouteRequest,
+  ChannelRoutingSnapshot,
+  ResolvedChannelRoute,
+} from "./model";
+export { ChannelRouteDeniedError, resolveChannelRoute } from "./model";
+export type {
+  NotionApiPort,
+  NotionChange,
+  NotionKnowledgeSyncDeps,
+  NotionKnowledgeSyncOptions,
+  NotionKnowledgeSyncResult,
+  NotionPage,
+  NotionPagePermission,
+  NotionSyncCheckpoint,
+  NotionSyncCheckpointStore,
+  NotionSyncFailureCode,
+} from "./notion";
+export {
+  InMemoryNotionCheckpointStore,
+  NOTION_PROVIDER,
+  notionSourceId,
+  syncNotionKnowledge,
+} from "./notion";
+export type {
+  PostgresAdapterContext,
+  PostgresAdapterContextResolver,
+  PostgresAdapterDependencies,
+  PostgresConnectionPort,
+  PostgresGrantAction,
+  PostgresIdempotencyPort,
+  PostgresIntegrationGrant,
+  PostgresIntegrationSession,
+  PostgresQueryResult,
+  PostgresTransactionFailurePhase,
+} from "./postgres";
+export {
+  POSTGRES_ADAPTER_REF,
+  POSTGRES_MUTATION_TOOL_CONTRACT,
+  POSTGRES_READ_TOOL_CONTRACT,
+  POSTGRES_TOOL_CONTRACTS,
+  POSTGRES_TOOL_IDS,
+  PostgresAdapter,
+  PostgresTransactionError,
+} from "./postgres";
+export type {
+  SlackChannelAdapterDeps,
+  SlackChannelKind,
+  SlackDeliveryAdapterDeps,
+  SlackDeliveryRequest,
+  SlackEventEnvelope,
+  SlackFile,
+  SlackKnowledgeApiPort,
+  SlackKnowledgeChannel,
+  SlackKnowledgeCheckpoint,
+  SlackKnowledgeCheckpointStore,
+  SlackKnowledgeMessage,
+  SlackKnowledgeSyncDeps,
+  SlackKnowledgeSyncOptions,
+  SlackKnowledgeSyncResult,
+  SlackMentionResolverPort,
+  SlackMessageEvent,
+  SlackReceiveResult,
+  SlackSyncFailureCode,
+  SlackToolAdapterDeps,
+  SlackToolId,
+  SlackUserLookupPort,
+} from "./slack";
+export {
+  encodeMentionsInText,
+  InMemorySlackKnowledgeCheckpointStore,
+  resolveMentionsInText,
+  SLACK_ADAPTER_REF,
+  SLACK_MESSAGE_TARGET,
+  SLACK_PROVIDER,
+  SLACK_RECONCILIATION_OPERATIONS,
+  SLACK_TOOL_CONTRACTS,
+  SLACK_TOOL_IDS,
+  SlackChannelAdapter,
+  SlackDeliveryAdapter,
+  SlackDeliveryError,
+  SlackToolAdapter,
+  syncSlackKnowledge,
+} from "./slack";
+export type {
+  TelegramChannelAdapterDeps,
+  TelegramChat,
+  TelegramDeliveryAdapterDeps,
+  TelegramDeliveryRequest,
+  TelegramMedia,
+  TelegramMessage,
+  TelegramPhotoSize,
+  TelegramReceiveResult,
+  TelegramUpdate,
+  TelegramUser,
+} from "./telegram";
+export { TelegramChannelAdapter, TelegramDeliveryAdapter, TelegramDeliveryError } from "./telegram";

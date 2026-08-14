@@ -6,6 +6,7 @@ import {
   GITHUB_TOOL_IDS,
   type GitHubToolId,
 } from "@tulipfarm/integrations";
+import type { MutationGuard } from "@tulipfarm/observability";
 import {
   EffectDispatcher,
   type EffectStore,
@@ -331,6 +332,12 @@ function buildToolDef(
         catalog: GITHUB_CATALOG,
         adapters: tooling.adapters,
         credentialDispatcher: tooling.credentials,
+        ...(tooling.mutationGuard === undefined
+          ? {}
+          : {
+              mutationGuard: tooling.mutationGuard,
+              mutationIdentity: { integrationId: "github" },
+            }),
       });
 
       try {
@@ -393,6 +400,7 @@ function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
 
 export interface GitHubToolingContext extends GitHubTooling {
   readonly effects: EffectStore;
+  readonly mutationGuard?: MutationGuard;
 }
 
 export function buildGitHubTools(businessId: string, tooling: GitHubToolingContext): ToolDef[] {

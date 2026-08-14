@@ -63,5 +63,8 @@ reconciliation, turn execution, delivery classification, projections, and outbox
 - Worker process tests can leak dev env through `apps/worker/.env.local`; check before blaming code.
 - May import listed `@tulipfarm/*` packages, never another app; see dependency rules below.
 - Soul access is only signed-bundle reads; never load live Soul, alias, publish, or git sync.
+- `BrokerRoutineToolPort` gets a `MutationKillSwitchGuard` reading the same table as the API, so an
+  operator's stop covers Worker-dispatched effects too. Its audit port only logs: the API owns the
+  audit ledger, and the denial's durable evidence is the Run's own event ledger.
 
 See [`../../docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md).

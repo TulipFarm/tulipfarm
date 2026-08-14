@@ -14,6 +14,7 @@ import {
   CONCURRENCY_STORAGE_STATEMENTS,
   EVENT_STORAGE_STATEMENTS,
   INTEGRATION_STORAGE_STATEMENTS,
+  KILL_SWITCH_STORAGE_STATEMENTS,
   RUN_BROWSE_STORAGE_STATEMENTS,
   RUN_EVENT_NOTIFY_STATEMENTS,
   RUN_EVENT_STORAGE_STATEMENTS,
@@ -1972,6 +1973,15 @@ export const PG_MIGRATIONS: PgMigration[] = [
     description: "per-principal provider credentials for user-scoped Tool calls",
     up: async (q) => {
       for (const sql of PRINCIPAL_PROVIDER_TOKEN_STATEMENTS) {
+        await q.query(sql);
+      }
+    },
+  },
+  {
+    version: 52,
+    description: "durable mutation kill switches for the effect plane",
+    up: async (q) => {
+      for (const sql of KILL_SWITCH_STORAGE_STATEMENTS) {
         await q.query(sql);
       }
     },

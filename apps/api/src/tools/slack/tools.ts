@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { SLACK_TOOL_CONTRACTS, SLACK_TOOL_IDS, type SlackToolId } from "@tulipfarm/integrations";
+import type { MutationGuard } from "@tulipfarm/observability";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 import {
   EffectDispatcher,
@@ -116,6 +117,7 @@ export interface SlackToolingContext extends SlackTooling {
   readonly effects: EffectStore;
   readonly threads: IntegrationConversationsRepo;
   readonly mentionedThreads: ChannelMentionedThreadStore;
+  readonly mutationGuard?: MutationGuard;
 }
 
 function buildToolDef(
@@ -194,6 +196,9 @@ function buildToolDef(
         catalog: SLACK_CATALOG,
         adapters: tooling.adapters,
         credentialDispatcher: tooling.credentials,
+        ...(tooling.mutationGuard === undefined
+          ? {}
+          : { mutationGuard: tooling.mutationGuard, mutationIdentity: { integrationId: "slack" } }),
       });
 
       try {

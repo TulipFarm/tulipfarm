@@ -6,6 +6,7 @@ import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { EmbeddingService, LlmService } from "@tulipfarm/llm";
 import {
   BatchingLogSink,
+  MutationKillSwitchGuard,
   PgResourceWriter,
   processResourceProbe,
   ResourceSampler,
@@ -48,6 +49,7 @@ import {
   ChildLinkStore,
   EventStore,
   IntegrationStore,
+  KillSwitchRepo,
   PgGroupRepo,
   PgPrincipalRepo,
   PgRoleRepo,
@@ -123,6 +125,7 @@ import { RegistryToolDispatcher } from "./internal/tool-dispatch";
 import { LiveToolGate } from "./internal/tool-gate";
 import { ChatTurnContextResolver } from "./internal/turn-context";
 import { InternalTurnHost } from "./internal/turn-host";
+import { KillSwitchService } from "./kill-switches/service";
 import { PgKnowledgeChunkRepo } from "./knowledge/chunks-repo";
 import { buildDefaultRegistry } from "./knowledge/connectors/registry";
 import { PgConnectorStateRepo } from "./knowledge/connectors/state-repo";
@@ -618,6 +621,14 @@ async function boot() {
     // Persisted to an append-only ledger the runtime role cannot rewrite (see `audit/repo.ts`).
     const auditRepo = new PgAuditEventRepo(pool);
     const auditService = new AuditService(auditRepo);
+    // The emergency stop's own state. Read live on every mutating effect by the guard below, and
+    // armed only through the admin-gated routes.
+    const killSwitchRepo = new KillSwitchRepo(transactionPort(pool));
+    const killSwitches = new KillSwitchService(killSwitchRepo, auditService);
+    const mutationGuard = new MutationKillSwitchGuard({
+      listEnabled: (businessId) => killSwitchRepo.listEnabled(businessId),
+      audit: killSwitches.auditPort(),
+    });
     // Stage 3 admin authorization surface. Reuses the same Pg repos and the live authority resolver
     // the gate will later consume, so `explain` runs the one decision function, not a copy. Role
     // *definitions* stay Soul-authored — this service never writes durable Role rows.
@@ -716,6 +727,7 @@ async function boot() {
     const githubTools = buildGitHubTools(DEPLOYMENT_BUSINESS_ID, {
       ...githubTooling,
       effects: githubEffects,
+      mutationGuard,
     });
 
     const slackTooling = buildSlackTooling({
@@ -727,6 +739,7 @@ async function boot() {
       effects: slackEffects,
       threads: integrationThreads,
       mentionedThreads: channelMentionedThreads,
+      mutationGuard,
     });
 
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
@@ -781,6 +794,7 @@ async function boot() {
       effects: slackEffects,
       secrets: async () => secretsService,
       http: new FetchEgressHttp(),
+      mutationGuard,
       logger: () => app.log,
     });
 
@@ -951,6 +965,7 @@ async function boot() {
       auditService,
       auditReadService,
       authzAdmin,
+      killSwitches,
       observabilityService,
       observabilityConfig: obsConfig,
       invocations,

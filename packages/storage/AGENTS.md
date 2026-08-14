@@ -19,6 +19,7 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 | `src/auth/` | Principals, roles, sessions, guests, JIT users, recertification, identities. |
 | `src/integrations/` | Integration install/state and channel inbound/delivery stores. |
 | `src/approvals/`, `src/events/` | Approval persistence and generic event store. |
+| `src/kill-switches/` | Durable mutation kill switches backing the effect-plane emergency stop. |
 
 ## Rules
 
@@ -38,3 +39,5 @@ publication, approvals, integrations, events, and blob/vector/cache/queue ports.
 - Run budgets are write-once; concurrency and wait resolution are lock-guarded.
 - Child links are authority-immutable and detach-final; Run events are append-only,
   audience-scoped, and gapless per Run.
+- Kill switch rows are never deleted or re-enabled: standing one down stamps `disabled_at`, because
+  whether a stop was live at a given instant is incident evidence.

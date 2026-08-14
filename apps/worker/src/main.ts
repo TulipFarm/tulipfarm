@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   BatchingLogSink,
   describeError,
+  MutationKillSwitchGuard,
   PgLogWriter,
   PgResourceWriter,
   processResourceProbe,
@@ -33,6 +34,7 @@ import {
   EventStore,
   FileSystemBlobPort,
   IntegrationStore,
+  KillSwitchRepo,
   RunEventStore,
   RunStore,
   WaitStore,
@@ -176,6 +178,19 @@ export async function main(): Promise<void> {
   consumersReady = true;
 
   const transactions = transactionPort(pool);
+  const killSwitchRepo = new KillSwitchRepo(transactions);
+  // The API owns the audit ledger, so a Worker-side denial leaves its evidence in the Run's own
+  // event history plus this log line; the stop itself is enforced identically either way.
+  const mutationGuard = new MutationKillSwitchGuard({
+    listEnabled: (businessId) => killSwitchRepo.listEnabled(businessId),
+    audit: {
+      record: async (evidence) => {
+        logger.warn(
+          `kill switch ${evidence.switchId} (${evidence.scopeKind}) denied effect ${evidence.effectId ?? "?"}: ${evidence.reasonCode}`
+        );
+      },
+    },
+  });
   const runStore = new RunStore(transactions);
   const waitStore = new WaitStore(transactions);
   const eventStore = new EventStore(transactions, randomUUID);
@@ -295,6 +310,7 @@ export async function main(): Promise<void> {
             ...(sandboxRuntimeImage === undefined ? {} : { runtimeImage: sandboxRuntimeImage }),
           }),
         credentials: githubTooling.credentials,
+        mutationGuard,
       }),
       // Approval resume tokens stay API-side; Worker gets only wait id and later decision.
       approvals: new HttpRoutineApprovalPort(internalApi),

@@ -51,6 +51,12 @@ export const ADMIN_ONLY_SURFACES: readonly {
   { type: "kv_system", actions: ["*"], enforcedIn: "kv/routes.ts" },
   { type: "setup", actions: ["*"], enforcedIn: "setup/routes.ts" },
   { type: "operations", actions: ["*"], enforcedIn: "admin/runtime.ts; index.ts" },
+  /** Arming the effect-plane emergency stop halts other people's work, so it is never self-service. */
+  {
+    type: "kill_switch",
+    actions: ["kill_switch.read", "kill_switch.enable", "kill_switch.disable"],
+    enforcedIn: "kill-switches/routes.ts",
+  },
   { type: "audit", actions: ["*"], enforcedIn: "audit/routes.ts" },
   { type: "soul.business_profile", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },

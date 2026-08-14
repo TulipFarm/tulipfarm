@@ -26,6 +26,7 @@ client data loading, schema-driven resource UI, and browser rendering of Surface
 | `app/lib/surface/` | Tulip Surface Protocol browser integration. |
 | `app/lib/agents.ts`, `app/lib/skills.ts` | Typed API wrappers for Agents and Skills. |
 | `app/lib/nav.ts`, `app/lib/badges.ts` | Sidebar navigation and mocked V1 badge counts. |
+| `app/lib/kill-switches.ts` | Emergency-stop client; the scope picker is built from the API's enforceable list. |
 | `components.json` | shadcn config. |
 | `vite.config.ts`, `vitest.config.ts` | SPA Remix/Vite and jsdom Vitest config. |
 | `public/`, `scripts/` | Static files and web-local scripts. |

@@ -30,6 +30,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | `src/knowledge/`, `src/knowledge-sources/` | RAG pages/chunks/search and source ingestion API. |
 | `src/memory/`, `src/kv/`, `src/secrets/` | Memory Assertions, scoped KV, secret storage routes. |
 | `src/approvals/`, `src/broker/` | Approval routes and Tool effect dispatch composition. |
+| `src/kill-switches/` | Operator-armed emergency stop over mutating effects; admin-gated routes. |
 | `src/surfaces/`, `src/forms/` | Tulip Surface Protocol and form APIs. |
 | `src/ingress/`, `src/triggers/`, `src/schedule/` | Ingress, triggers, schedules. |
 | `src/admin/`, `src/setup/`, `src/onboarding/`, `src/system/` | Admin, setup, health. |
@@ -57,6 +58,12 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   a new bypass. Raw `fs` writes plus a commit are not an alternative.
 - Third-party provider Tools come from Integration manifest `egress`, not handwritten TypeScript;
   `tools/github/` and `tools/slack/` are exceptions.
+- Every `EffectDispatcher` built here is given the `MutationKillSwitchGuard` from `src/index.ts`.
+  The guard shipped inert once — present, unit-tested, and constructed nowhere — so
+  `scripts/mutation-kill-switch.test.ts` now pins it installed.
+- `ENFORCEABLE_SCOPE_KINDS` (`src/kill-switches/service.ts`) is the list of scopes a guard can
+  actually evaluate, and arming anything else is refused with 422. Widen it only after a dispatch
+  site supplies the matching identity, never to make the picker look complete.
 - Guardrail enforcement lives in `@tulipfarm/agent-runtime` and the Worker. API owns config loading
   and must ship `guardrailPolicy`; missing or invalid config falls back to `DEFAULT_GUARDRAILS`.
 - A Run-minting request must go through `DurableInvocationGateway.start()` with a real request

@@ -5,6 +5,7 @@ import {
   type GuardrailPolicy,
   GuardrailPolicyError,
 } from "@tulipfarm/authz";
+import type { MutationGuard } from "@tulipfarm/observability";
 import type { ToolDispatchPlan } from "@tulipfarm/run-kernel";
 import type { GuardrailDefinition, ToolContractDefinition } from "@tulipfarm/schema";
 import type { RuntimeBundle } from "@tulipfarm/soul";
@@ -57,6 +58,8 @@ export interface BrokerRoutineToolPortOptions {
   /** Bundle-scoped adapters are built only from the Run's verified immutable package. */
   readonly adaptersFor?: (request: RoutineToolRequest) => ReadonlyMap<string, ToolAdapter>;
   readonly credentialsFor?: (request: RoutineToolRequest) => CredentialDispatcher | undefined;
+  /** Emergency stop over mutating effects; absent leaves Routine Tools ungoverned. */
+  readonly mutationGuard?: MutationGuard;
   readonly now?: () => Date;
 }
 
@@ -186,6 +189,9 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       catalog,
       adapters,
       ...(credentials === undefined ? {} : { credentialDispatcher: credentials }),
+      ...(this.options.mutationGuard === undefined
+        ? {}
+        : { mutationGuard: this.options.mutationGuard }),
       now: () => this.now().toISOString(),
     });
     try {

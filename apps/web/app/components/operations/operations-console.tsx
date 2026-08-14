@@ -210,15 +210,20 @@ function QuarantinePanel({ items }: { items: readonly OperationalItem[] }) {
   );
 }
 
+/**
+ * Deployment-level flags such as `HOOKS_DISABLED`. Named apart from the Kill switches panel above
+ * it, which is the durable, operator-armed stop over mutating effects — during an incident two
+ * panels reading "Kill switches" would be one ambiguity too many.
+ */
 function KillSwitchesPanel({ items }: { items: readonly OperationalItem[] }) {
   return (
     <Section
-      title="Kill switches"
+      title="Deployment flags"
       count={items.length}
       icon={<Ban aria-hidden="true" className="size-3.5" />}
     >
       {items.length === 0 ? (
-        <EmptyPanel>No kill switches enabled</EmptyPanel>
+        <EmptyPanel>No deployment flags set</EmptyPanel>
       ) : (
         <ul className="divide-y divide-border">
           {items.map((item, index) => {
