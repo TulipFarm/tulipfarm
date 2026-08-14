@@ -27,31 +27,18 @@ export interface PlatformToolContext {
   soulPath?: string;
   gitSync?: GitSyncService;
   routineContext?: { routineId: string; runId: string };
-  /** Starts a routine run (agent trigger, v0.11). Errors are thrown with a `.code`-like name. */
   triggerRoutine?: (slug: string, inputs?: Record<string, unknown>) => Promise<{ runId: string }>;
-  /** Post-write hook after routine_forge: registry revalidate + cron schedule reconcile. */
   onRoutinesChanged?: () => Promise<void>;
-  /** Read-only bundled Skill overlay, resolved after Soul Skills by name. */
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
-  /** Bundled Skill names hidden persistently by an operator delete. */
   disabledBundledSkills?: ReadonlySet<string>;
-  /** Reserved names of the code-defined platform agents, valid `transfer_to_agent` targets. */
   platformAgentNames?: ReadonlySet<string>;
-  /** Per-call state supplied by the Tool registry, never captured at startup. */
   requestContext?: RequestContext;
-  /** Best-effort metrics bus; listeners must never affect tool correctness. */
   events?: EventEmitter;
 }
 
 type AjvErrors = ReturnType<typeof ajv.compile>["errors"];
 
-/**
- * Delegation acts on the *platform* capability to hand a conversation to an Agent, which is what
- * these Tools declare. Deriving `soul.agent` here — the resource the Soul CRUD Tools own — both
- * escaped the declared resource (silencing the `platform.agent` check, since derived targets
- * replace static resources at the gate) and conflated "may route work to this Agent" with "may edit
- * this Agent's definition".
- */
+/** Delegation authorizes `platform.agent`, not Soul edits to `soul.agent`. */
 const SOUL_AGENT_TARGET = "platform.agent";
 const SOUL_ROUTINE_TARGET = "soul.routine";
 const SOUL_SKILL_TARGET = "soul.skill";
@@ -77,9 +64,7 @@ function wholeSoulRepoTarget() {
   return [{ type: SOUL_REPO_TARGET, id: SOUL_REPO_ALL_TARGET_ID }];
 }
 
-// `oneOf` fan-out can make AJV report the failure
-// against the outermost branch it tried first, not the field that's actually wrong several
-// levels down. Prefer the deepest non-"oneOf" error so the message points at the real defect.
+// Prefer deepest non-oneOf AJV errors so users see the real schema defect.
 function bestError(errors: AjvErrors): NonNullable<AjvErrors>[number] | undefined {
   if (!errors || errors.length === 0) return undefined;
   const specific = errors.filter((e) => e.keyword !== "oneOf");
@@ -95,8 +80,6 @@ function firstError(errors: AjvErrors): string {
     ? `${e.instancePath || "(root)"} ${e.message ?? "is invalid"}`.trim()
     : "invalid arguments";
 }
-
-// ── load_skill ────────────────────────────────────────────────────────────────
 
 const LOAD_SKILL_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -118,7 +101,6 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
   authorization: {
     action: "platform.skill.load",
     resources: ["soul.skill"],
-    // Soul targets use the same two-level name as their static resource (`soul.<thing>`).
     targets: (args) => soulTarget(SOUL_SKILL_TARGET, args, "name"),
     dataClasses: ["soul_definition"],
   },
@@ -136,8 +118,6 @@ export const loadSkillTool = defineApiTool<PlatformToolContext>({
     return err("not_found", `Skill "${name}" not found.`);
   },
 });
-
-// ── load_skill_reference ──────────────────────────────────────────────────────
 
 const LOAD_SKILL_REFERENCE_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -189,8 +169,7 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
           ? resolve(ctx.soulPath, "skills", skill, "references")
           : undefined;
     if (!base) return err("not_found", `Skill "${skill}" references directory not available.`);
-    // Contain the read to the selected Skill's references directory — `reference` is
-    // LLM-controlled, so a `../` escape must not read outside either Soul or bundled storage.
+    // `reference` is model-controlled; contain reads to the selected Skill references directory.
     const refPath = resolve(base, reference);
     const rel = relative(base, refPath);
     if (rel === "" || rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
@@ -206,8 +185,6 @@ export const loadSkillReferenceTool = defineApiTool<PlatformToolContext>({
     }
   },
 });
-
-// ── validate_artifact ─────────────────────────────────────────────────────────
 
 const VALIDATE_ARTIFACT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -257,8 +234,6 @@ export const validateArtifactTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── transfer_to_agent ─────────────────────────────────────────────────────────
-
 const TRANSFER_TO_AGENT_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -299,8 +274,6 @@ export const transferToAgentTool = defineApiTool<PlatformToolContext>({
     return ok({ agentId, agentName, status: "transferred", message: message ?? null });
   },
 });
-
-// ── delegate_to_agent ─────────────────────────────────────────────────────────
 
 const DELEGATE_TO_AGENT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -347,8 +320,6 @@ export const delegateToAgentTool = defineApiTool<PlatformToolContext>({
     return ok({ agentId, task, context: context ?? null, status: "delegated" });
   },
 });
-
-// ── trigger_routine ───────────────────────────────────────────────────────────
 
 const TRIGGER_ROUTINE_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -397,8 +368,6 @@ export const triggerRoutineTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── routine_forge ─────────────────────────────────────────────────────────────
-
 const ROUTINE_NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
@@ -427,19 +396,12 @@ const ROUTINE_FORGE_SCHEMA: Record<string, unknown> = {
 };
 const validateRoutineForge = ajv.compile(ROUTINE_FORGE_SCHEMA);
 
-/**
- * The V1 meta-schema accepts any `agent:<name>` operation string (it only resolves `refName`
- * against the declared `functions[]`, not the name against the real Agent registry) — so a
- * hallucinated Agent name would otherwise only surface as a Run failure at Trigger time. Checking
- * it here, against the same Soul-loaded agent map `agent_list` reads, lets the author's pre-write
- * `agent_list` call be optional instead of load-bearing.
- */
+/** Validate Routine-forged Agent names now; the V1 meta-schema cannot prove they exist. */
 function findUnknownAgentRef(
   definition: Record<string, unknown>,
   ctx: PlatformToolContext
 ): string | undefined {
-  // Nothing to check against — this is "cannot verify", not "unknown". Never block on a context
-  // that has no Soul loaded (e.g. the schema's own unit tests construct a bare context).
+  // No Soul means cannot verify, not unknown; never block bare schema tests.
   if (!ctx.soulLoader) return undefined;
   const functions = definition.functions;
   if (!Array.isArray(functions)) return undefined;
@@ -523,7 +485,6 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
       return soulCommitError(e, e instanceof Error ? e.message : String(e));
     }
 
-    // withSync does not emit soul.synced — revalidate + reconcile schedules explicitly.
     try {
       await ctx.onRoutinesChanged?.();
     } catch (e) {
@@ -532,8 +493,6 @@ export const routineForgeTool = defineApiTool<PlatformToolContext>({
     return ok({ name, committed: true, hasHooks: Boolean(hooks) });
   },
 });
-
-// ── routine_picker ────────────────────────────────────────────────────────────
 
 const ROUTINE_PICKER_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -552,7 +511,6 @@ export const routinePickerTool = defineApiTool<PlatformToolContext>({
   authorization: {
     action: "platform.routine.list",
     resources: ["soul.routine"],
-    // This lists the routine catalog only; the coarse soul.routine read is the intended check.
     targets: () => [],
     dataClasses: ["operational"],
   },
@@ -568,8 +526,6 @@ export const routinePickerTool = defineApiTool<PlatformToolContext>({
     return ok({ routines: items });
   },
 });
-
-// ── begin_soul_batch ──────────────────────────────────────────────────────────
 
 const BEGIN_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -597,8 +553,6 @@ export const beginSoulBatchTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── end_soul_batch ────────────────────────────────────────────────────────────
-
 const END_SOUL_BATCH_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -623,7 +577,6 @@ export const endSoulBatchTool = defineApiTool<PlatformToolContext>({
   authorization: {
     action: "platform.soul_batch.end",
     resources: ["soul.repo"],
-    // A batch commit can publish writes across every Soul artifact family, not one named artifact.
     targets: wholeSoulRepoTarget,
     dataClasses: ["soul_definition"],
   },
@@ -640,8 +593,6 @@ export const endSoulBatchTool = defineApiTool<PlatformToolContext>({
     }
   },
 });
-
-// ── soul_repo_commit ──────────────────────────────────────────────────────────
 
 const SOUL_REPO_COMMIT_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -683,8 +634,6 @@ export const soulRepoCommitTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── soul_repo_push ────────────────────────────────────────────────────────────
-
 const SOUL_REPO_PUSH_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -702,7 +651,7 @@ export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
   authorization: {
     action: "platform.soul_repo.push",
     resources: ["soul.repo"],
-    // Push publishes the repository's current committed state, so narrow artifact grants cannot apply.
+    // Push publishes the whole repo state, so narrow artifact grants cannot apply.
     targets: wholeSoulRepoTarget,
     dataClasses: ["soul_definition"],
   },
@@ -718,8 +667,6 @@ export const soulRepoPushTool = defineApiTool<PlatformToolContext>({
     }
   },
 });
-
-// ── call_skill (routine-spawned only) ────────────────────────────────────────
 
 const CALL_SKILL_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -770,8 +717,6 @@ export const callSkillTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── complete_state (routine-spawned only) ─────────────────────────────────────
-
 const COMPLETE_STATE_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -807,8 +752,6 @@ export const completeStateTool = defineApiTool<PlatformToolContext>({
     });
   },
 });
-
-// ── complete_task ─────────────────────────────────────────────────────────────
 
 const COMPLETE_TASK_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -862,8 +805,6 @@ export const completeTaskTool = defineApiTool<PlatformToolContext>({
   },
 });
 
-// ── get_current_time ──────────────────────────────────────────────────────────
-
 const GET_CURRENT_TIME_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -879,15 +820,7 @@ const GET_CURRENT_TIME_SCHEMA: Record<string, unknown> = {
 };
 const validateGetCurrentTime = ajv.compile(GET_CURRENT_TIME_SCHEMA);
 
-/**
- * A fresh clock reading mid-turn. The `<current-context>` block is resolved once at turn start, so
- * a long Tool loop can outlive it — this is how an Agent re-reads the time instead of computing
- * from a stale snapshot. Deliberately stateless: the zone is an argument rather than a lookup, so
- * this Tool needs no access to the user's working memory.
- *
- * Shares `formatTemporalContext` with the block on purpose. A fresh reading that disagreed in
- * format with the one the Agent was already given would read as a different kind of fact.
- */
+/** Fresh stateless clock Tool shares the turn-context format to avoid conflicting time facts. */
 export const getCurrentTimeTool = defineApiTool<PlatformToolContext>({
   name: "get_current_time",
   description:
@@ -909,8 +842,6 @@ export const getCurrentTimeTool = defineApiTool<PlatformToolContext>({
     return ok({ current: formatTemporalContext({ now: new Date(), timezone }) });
   },
 });
-
-// ── Registry ──────────────────────────────────────────────────────────────────
 
 export const PLATFORM_TOOLS: ApiToolDefinition<PlatformToolContext>[] = [
   loadSkillTool,

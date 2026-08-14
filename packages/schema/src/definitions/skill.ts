@@ -8,13 +8,7 @@ import {
   refListSchema,
 } from "./common";
 
-/**
- * Skill authored definition (SPEC §7.1, invariant 4). A Skill contains instructions and assets and
- * *declares* the Tool abilities it needs; it NEVER contains a permission grant, Tool grant, role,
- * or access grant. Authority comes only from the invoking user/Agent intersection at runtime — a
- * Skill can never add it (invariant 3). `additionalProperties: false` fails closed on any attempt
- * to smuggle a grant-shaped field into a Skill.
- */
+/** Skill definition; it declares needed Tool abilities but never grants authority. */
 
 const KIND = "Skill";
 
@@ -64,8 +58,7 @@ const skillCommandSchema = Type.Object(
           { additionalProperties: false }
         ),
         {
-          // V1 Tool intents carry one opaque Credential reference. A future multi-Credential intent
-          // can widen this without changing the per-binding shape.
+          // V1 Tool intents carry one opaque Credential reference.
           maxItems: 1,
         }
       )

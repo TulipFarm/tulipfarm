@@ -16,15 +16,7 @@ import { loadBundledIntegrations } from "../soul/integrations/bundled";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
 import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
-/*
- * Drives the real shipped `integrations/slack/manifest.yml` end to end through the generic broker.
- *
- * Slack is the migration's proof: before this, connecting it meant pasting a bot token that an
- * operator had obtained out-of-band. These tests assert the two things that migration could
- * plausibly have broken — that a purely declarative manifest still produces every value Slack
- * channel routing depends on, and that routing is still wired when those values arrive from an
- * OAuth redirect instead of a form POST.
- */
+/* Drives the shipped Slack manifest through the generic broker and OAuth callback path. */
 
 const TEST_CSRF = "a".repeat(64);
 const logger = { info() {}, warn() {}, error() {}, debug() {} };
@@ -132,9 +124,7 @@ describe("slack declarative auth flow", () => {
   beforeEach(async () => {
     const sessions = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
-    // Connecting the *deployment's* shared credential is an operator act — these flows all
-    // exercise `scope: "business"`, so the fixture must be an administrator. A `member` here
-    // would assert a reach the deployment does not grant.
+    // Business-scoped shared credentials require an admin fixture.
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await sessions.create(user._id);
 

@@ -9,13 +9,7 @@ import { EPISODE_MEMORY_SETTINGS } from "./episode-store";
 import { PgPendingMemoryStore } from "./pending-store";
 import { PgMemoryRecallIndex } from "./recall-index";
 
-/**
- * Relevance recall over durable Memory, for the `recall_memory` tool and the retrieved prompt tier.
- *
- * Thin by design: it owns wiring, not policy. Authorization, exclusion accounting, and ranking all
- * live in `@tulipfarm/memory`, so there is exactly one place where "may this caller see this
- * assertion" is decided.
- */
+/** Relevance recall wrapper; authorization and provenance stay in MemoryService. */
 export class MemoryRecallService {
   private readonly deps: MemoryDeps;
 

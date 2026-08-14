@@ -1,20 +1,4 @@
-/**
- * Extraction of Memory candidates from a completed turn (SPEC §14.3).
- *
- * Extraction is where memory is most easily poisoned: the text being mined is, by definition, not
- * yet trusted, and an Agent that can write what it infers can bootstrap a belief into memory by
- * inferring it. Two rules hold the line, and both live here rather than in the caller:
- *
- * - **A candidate is a statement, never an instruction.** Memory records what is true, not what to
- *   do. Anything phrased as a directive is refused outright, because a stored imperative is
- *   indistinguishable from a system prompt once it is recalled.
- * - **A candidate is never durable.** Everything that survives screening is proposed as *inferred*,
- *   which {@link rememberMemory} parks as a pending record for its scope owner to confirm.
- *
- * The model that does the extracting is a port, not an import: `packages/memory` may not depend on
- * `packages/llm` (see `docs/architecture/dependency-rules.md`), and keeping it a port also means
- * screening cannot be bypassed by swapping the model.
- */
+/** Extraction proposes inferred Pending Memory only; candidates are statements, not instructions. */
 
 import type {
   MemoryDeps,
@@ -38,10 +22,7 @@ import {
 export const MAX_CANDIDATE_STATEMENT_CHARS = 256;
 /** The longest subject worth storing — a short noun phrase, not a sentence. */
 export const MAX_CANDIDATE_SUBJECT_CHARS = 64;
-/**
- * Below this, the model is guessing. Set high deliberately: a wrong candidate costs the user a
- * review decision every time, and a review queue people stop reading is worse than no queue.
- */
+/** High confidence threshold: bad candidates create review toil, and ignored queues are worse. */
 export const MIN_CANDIDATE_CONFIDENCE = 0.6;
 
 /** One statement an extractor believes is worth remembering. Not yet screened, never yet durable. */
@@ -67,11 +48,7 @@ export interface MemoryExtractionPort {
   extract(input: MemoryExtractionInput): Promise<readonly MemoryCandidate[]>;
 }
 
-/**
- * Screens a candidate before it can be proposed. Implemented in `apps/api` over the guardrails
- * service, so extraction reuses the same prompt-injection detection the turn itself does rather
- * than growing a second, weaker copy.
- */
+/** Injection screening is supplied by the app guardrails service, not a weaker local copy. */
 export interface MemoryCandidateScreen {
   /** True when the text carries an injection attempt and must not be proposed. */
   isInjection(text: string): boolean | Promise<boolean>;
@@ -90,17 +67,7 @@ export type CandidateScreening =
   | { readonly accepted: true }
   | { readonly accepted: false; readonly reason: CandidateRejectionReason };
 
-/**
- * Phrasings that make a statement into a directive.
- *
- * Matched at the start of the statement, because that is where a directive puts its verb, and
- * anchoring is what keeps "she said we should always use the staging key" — a fact *about* an
- * instruction — from being confused with the instruction itself.
- *
- * This is a heuristic and is treated as one: it is the last of several defenses, not the only one.
- * Everything that gets past it is still inferred, still pending, and still shown to a human before
- * it can be recalled.
- */
+/** Directive heuristic anchors at the start and is only one defense before human review. */
 const IMPERATIVE_OPENERS = [
   /^(?:please\s+)?(?:always|never|don'?t|do\s+not|avoid|make\s+sure|ensure|remember\s+to)\b/i,
   /^(?:you|the\s+assistant|the\s+agent)\s+(?:must|should|shall|will|need\s+to|have\s+to|are\s+to)\b/i,
@@ -115,10 +82,7 @@ export function isImperativeStatement(statement: string): boolean {
   return IMPERATIVE_OPENERS.some((pattern) => pattern.test(trimmed));
 }
 
-/**
- * Screens one candidate. Pure apart from the injection check, and ordered cheapest-first so an
- * obviously malformed candidate never reaches the screen.
- */
+/** Screens one candidate cheapest-first; only injection screening is impure. */
 export async function screenMemoryCandidate(
   candidate: MemoryCandidate,
   screen?: MemoryCandidateScreen
@@ -158,10 +122,7 @@ export interface ProposeCandidatesRequest {
   readonly authorPrincipalId: string;
   readonly authorAgentId?: string;
   readonly runId?: string;
-  /**
-   * Where the text came from. `agent_inferred` for a normal turn; `external_derived` when the
-   * conversation carried content from an external source, which the caller alone can know.
-   */
+  /** Caller alone knows whether text was agent-inferred or externally derived. */
   readonly trustTier?: MemoryTrustTier;
   readonly evidence?: readonly { readonly kind: "message"; readonly ref: string }[];
 }
@@ -181,14 +142,7 @@ export interface ProposeCandidatesResult {
   readonly rejected: readonly RejectedCandidate[];
 }
 
-/**
- * Screens candidates and proposes the survivors as pending memory.
- *
- * Every candidate is forced to `origin: "inferred"` regardless of what the extractor claimed, so
- * there is no path through this function that writes directly to the assertion store. An Agent
- * whose MemorySettings disable inferred memory therefore proposes nothing at all — `rememberMemory`
- * refuses each one, and they come back as rejections rather than silently vanishing.
- */
+/** Extracted candidates are forced to inferred Pending Memory; disabled inferred memory returns refusals. */
 export async function proposeMemoryCandidates(
   deps: MemoryDeps,
   request: ProposeCandidatesRequest,
@@ -266,11 +220,7 @@ export async function proposeMemoryCandidates(
   return { proposed, rejected };
 }
 
-/**
- * Why a proposal did not become pending. `saved` is included as a refusal on purpose: an inferred
- * candidate reaching the assertion store would mean the confirmation gate had been bypassed, so it
- * is reported rather than quietly accepted as success.
- */
+/** Refusal reason; `saved` means the pending-memory gate was bypassed and is reported. */
 function describeRefusal(result: RememberResult): string {
   if (result.outcome === "denied") return result.reason;
   if (result.outcome === "saved") return "unexpected_direct_save";

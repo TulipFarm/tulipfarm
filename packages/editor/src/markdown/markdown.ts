@@ -6,14 +6,8 @@ import {
 } from "../extensions/build-extensions";
 
 /*
- * DOM-free markdown ⇄ ProseMirror-JSON bridge. Built on `@tiptap/markdown`'s `MarkdownManager`, fed
- * the same canonical content schema the React editor uses (`buildContentExtensions`), flattened via
- * `resolveExtensions` (StarterKit expands to its children; the manager expects a flat, priority-sorted
- * list). No editor/DOM is mounted, so this is unit-testable in plain node.
- *
- * Markdown is the canonical store; these helpers are the boundary. Note: serialization NORMALIZES
- * (bullet markers, emphasis chars, table padding) — the first round-trip rewrites a body to its
- * canonical form, which is then stable (idempotent).
+ * DOM-free markdown ⇄ ProseMirror bridge. Markdown is canonical; first serialization normalizes,
+ * then round-trips are stable.
  */
 
 let cached: MarkdownManager | null = null;
@@ -28,7 +22,7 @@ function manager(): MarkdownManager {
   return cached;
 }
 
-/** Build a one-off manager with extra (e.g. mention) extensions — used when the host injects them. */
+/** Build a one-off manager with host-injected extensions such as mentions. */
 export function createMarkdownManager(opts: BuildExtensionsOptions = {}): MarkdownManager {
   return new MarkdownManager({
     extensions: resolveExtensions(buildContentExtensions(opts)),

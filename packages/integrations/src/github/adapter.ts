@@ -33,24 +33,8 @@ import {
 } from "./scope";
 
 /**
- * GitHub Integration adapter (SPEC §11.3, §15).
- *
- * Implements the Tool Broker's adapter port; the broker never imports this package. Three
- * properties matter here and each is enforced before a single byte reaches GitHub:
- *
- * 1. **Default deny, non-amplifying.** Installation scope bounds the request, the AccessGrant
- *    narrows it further, and the credential must already have been leased. Any of these failing
- *    is a `before_dispatch` denial with no provider call — an unauthorized close never happens
- *    "just to find out".
- * 2. **Stable idempotency without provider support.** GitHub has no idempotency key, so a
- *    mutation carries a hidden marker derived from the effect's key, and provider state is read
- *    back before writing. A duplicate delivery returns the original effect instead of a second one.
- * 3. **Honest ambiguity.** A 5xx on a write is reported as `after_dispatch`, which the effect
- *    ledger records as ambiguous and hands to reconciliation. Nothing here retries a mutation or
- *    guesses that it did not apply.
- *
- * The leased credential is passed straight to the HTTP port and never stored, logged, or attached
- * to a raised error.
+ * Default-deny GitHub adapter: installation scope, AccessGrant, and leased credential are checked
+ * before provider calls; mutations use effect markers and reconcile ambiguous 5xx writes.
  */
 
 export interface GitHubEffectContext {
@@ -274,11 +258,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     }
   }
 
-  /**
-   * Installation scope first, then the AccessGrant: the installation is the hard provider-side
-   * bound, and reporting it first keeps an out-of-installation repository from being described as
-   * merely ungranted.
-   */
+  /** Check installation scope before AccessGrant to avoid misreporting out-of-scope repos. */
   private async authorize(
     intent: ToolIntent,
     repository: string,
@@ -320,11 +300,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     }
   }
 
-  /**
-   * Authorizes an org-level action whose target repo does not exist yet (repo creation): the
-   * installation scope check is against the account, not a specific repository, and the
-   * AccessGrant target is the org rather than a repository.
-   */
+  /** Authorize repo creation against the account and org grant because the repo does not exist. */
   private async authorizeAccount(intent: ToolIntent, owner: string): Promise<void> {
     const context = await this.deps.context.resolve(intent);
     if (context === undefined) {
@@ -363,16 +339,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
   }
 
   /**
-   * Resolves which repositories a search spans, authorizing each one exactly as a single-repo call
-   * would: `authorize()` already re-checks installation scope and the AccessGrant per repository,
-   * so looping it here means a multi-repo search widens nothing an equivalent series of single-repo
-   * searches wouldn't already have been allowed to see.
-   *
-   * When neither `repository` nor `repositories` is given, an installation with an explicit
-   * repository list searches all of it (each still individually authorized). An account-wide
-   * ("all") installation has no enumerable list to check AccessGrants against here, so it is asked
-   * to name repositories explicitly rather than silently searching everything the App can reach —
-   * never widen on absent data.
+   * Authorize every searched repo individually; account-wide installs must name repos explicitly.
    */
   private async resolveSearchRepositories(
     intent: ToolIntent,
@@ -944,14 +911,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return { repository, branch, sha, htmlUrl: `https://github.com/${repository}/commit/${sha}` };
   }
 
-  /**
-   * Committing via the Git Data API needs no `git` subprocess and no sandbox: it is HTTP calls.
-   * Pages up to `MARKER_SEARCH_MAX_PAGES` pages of `MARKER_SEARCH_PER_PAGE` commits looking for a
-   * redelivered effect's own earlier push. Not found after that bound is read as "never pushed"
-   * rather than an error — unlike a caller enumerating *every* matching item (`collectPages`'s
-   * contract), the common case here is a marker that legitimately doesn't exist yet, so silently
-   * stopping the search is correct, not a truncation to hide.
-   */
+  /** Bounded marker lookup for duplicate pushes; not found means the effect likely never pushed. */
   private async findCommitByMarker(
     repository: string,
     branch: string,
@@ -1120,11 +1080,7 @@ export class GitHubAdapter implements ToolAdapter, ToolReconciliationAdapter {
     return this.repositoryOutput(owner, name, record(response.body));
   }
 
-  /**
-   * Resolve an ambiguous effect against provider state. The credential is optional because
-   * reconciliation may run long after the leasing dispatch: with no way to read GitHub, the honest
-   * answer is `ambiguous`, never an assumed `not_applied`.
-   */
+  /** With no credential, reconciliation must stay `ambiguous`, never assume `not_applied`. */
   async reconcile(
     request: ToolReconciliationRequest,
     credential?: string

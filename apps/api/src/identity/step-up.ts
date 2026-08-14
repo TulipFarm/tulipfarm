@@ -2,11 +2,9 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import type { AuthMethod } from "../auth/session-store";
 
 /**
- * Step-up authentication (SPEC §12: "passkeys/MFA where the identity provider supports them").
- *
- * TulipFarm ships the boundary, not a factor implementation: a deployment registers a verifier
- * per method. With no verifier registered the step-up route denies — an unimplemented factor is
- * never treated as a satisfied one.
+ * Step-up authentication (SPEC §12: "passkeys/MFA where the identity provider supports them"). With
+ * no verifier registered the step-up route denies — an unimplemented factor is never treated as a
+ * satisfied one.
  */
 
 export interface MfaChallenge {
@@ -18,11 +16,9 @@ export interface MfaChallenge {
 
 export interface MfaVerifier {
   readonly method: AuthMethod;
-  /** Returns true only for a proof that is valid, unexpired, and bound to `userId`. */
   verify(challenge: MfaChallenge): Promise<boolean>;
 }
 
-/** Registry of the second factors a deployment supports. Empty means step-up is unavailable. */
 export class MfaVerifierRegistry {
   private readonly verifiers = new Map<AuthMethod, MfaVerifier>();
 
@@ -46,7 +42,6 @@ export class MfaVerifierRegistry {
 }
 
 export interface StepUpPolicy {
-  /** Methods that satisfy the requirement; any one of them is enough. */
   readonly methods: readonly AuthMethod[];
   /** How recently the factor must have been proven, in seconds. */
   readonly maxAgeSeconds: number;

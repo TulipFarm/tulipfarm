@@ -48,15 +48,7 @@ function defaultOpenWebSocket(url: string): MinimalWebSocket {
   return new WebSocket(url) as unknown as MinimalWebSocket;
 }
 
-/**
- * Concrete `SlackSocketTransport`: mints a WSS URL via `apps.connections.open`, opens the socket,
- * acks every envelope inside Slack's window, and hands the decoded envelope to `onEnvelope` —
- * dispatch (`dispatch.ts`) decides what an `events_api` vs `interactive` envelope means.
- *
- * Acking happens before `onEnvelope` runs: a slow downstream (Run start, identity resolution)
- * must never cost Slack's ack window, so `SlackChannelAdapter.receive`'s own `ack` callback layers
- * on top of this transport's ack, not instead of it — both fire, this one first.
- */
+/** Acks each Slack envelope before downstream work so slow Run starts cannot miss the window. */
 export class SlackSocketTransport {
   constructor(private readonly options: SlackSocketTransportOptions) {}
 

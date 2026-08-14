@@ -88,7 +88,6 @@ describe("authz admin routes", () => {
     principals = new InMemoryPrincipalRepo();
     audits = [];
 
-    // A reserved (built-in) Role and an authored one, so `listRoles` can distinguish them.
     await roles.putRole({
       id: "admin",
       businessId: BUSINESS,
@@ -103,7 +102,6 @@ describe("authz admin routes", () => {
       parentRoleIds: [],
       grants: [{ action: "record.read", resourceType: "ticket", effect: "allow" }],
     });
-    // A Role a user principal may not hold — drives the not_assignable path.
     await roles.putRole({
       id: "agent-only",
       businessId: BUSINESS,
@@ -114,8 +112,7 @@ describe("authz admin routes", () => {
 
     await principals.put({ id: "p-user", businessId: BUSINESS, kind: "user", status: "active" });
     await principals.put({ id: "p-two", businessId: BUSINESS, kind: "user", status: "active" });
-    // A real, durable Agent principal that holds no roles. Explain must distinguish this — an
-    // Agent that genuinely grants nothing — from an id that names no principal at all.
+    // Durable Agent with no roles must differ from a missing principal.
     await principals.put({ id: "a-bare", businessId: BUSINESS, kind: "agent", status: "active" });
     await roles.assign({ businessId: BUSINESS, principalId: "p-user", roleId: "support" });
 
@@ -135,8 +132,6 @@ describe("authz admin routes", () => {
   afterEach(async () => {
     await app.close();
   });
-
-  // ── Admin gate ────────────────────────────────────────────────────────────
 
   describe("admin gate", () => {
     it("returns 401 without auth", async () => {
@@ -163,8 +158,6 @@ describe("authz admin routes", () => {
       expect(res.statusCode).toBe(200);
     });
   });
-
-  // ── Read ──────────────────────────────────────────────────────────────────
 
   it("lists roles distinguishing built-in from authored", async () => {
     const res = await app.inject({
@@ -218,8 +211,6 @@ describe("authz admin routes", () => {
     expect(missing.statusCode).toBe(404);
   });
 
-  // ── Explain ─────────────────────────────────────────────────────────────────
-
   describe("explain", () => {
     const explain = (body: Record<string, unknown>) => ({
       method: "POST" as const,
@@ -248,13 +239,7 @@ describe("authz admin routes", () => {
       });
     });
 
-    /**
-     * `decideEffectivePermission` allows only when EVERY layer allows, so evaluating a subset can
-     * only ever be more permissive than the real gate. This endpoint reaches the live layers but
-     * not the pinned run/guardrail/credential ones, which makes an `allowed` an upper bound rather
-     * than a guarantee. A diagnostic tool that silently answers "yes" where the gate says "no" is
-     * worse than no tool, because it is trusted — so the partiality must travel in the response.
-     */
+    /** This partial diagnostic can only report an upper-bound allow, never a gate guarantee. */
     it("marks an allow as partial and names the layers it could not reach", async () => {
       const res = await app.inject(
         explain({ principalId: "p-user", action: "record.read", resourceType: "ticket" })
@@ -264,8 +249,7 @@ describe("authz admin routes", () => {
       expect(body.allowed).toBe(true);
       expect(body.partial).toBe(true);
       expect(body.evaluatedLayers).toEqual(["user"]);
-      // The agent layer is unevaluated because no agentId was supplied; the other three are
-      // structurally unreachable outside a Run.
+      // No agentId means agent/run layers are intentionally unevaluated.
       expect(body.unevaluatedLayers).toEqual(["agent", "run", "guardrail", "credential"]);
     });
 
@@ -282,18 +266,13 @@ describe("authz admin routes", () => {
       const body = res.json();
       expect(body.evaluatedLayers).toEqual(["user", "agent"]);
       expect(body.unevaluatedLayers).not.toContain("agent");
-      // An Agent holding no roles resolves to an empty layer, and intersection narrows: the same
-      // request the caller layer allows is denied once the Agent layer joins it. This is the whole
-      // reason a one-layer answer cannot be trusted as a gate answer.
+      // An empty Agent layer narrows the caller layer, proving one-layer answers are unsafe.
       expect(body.allowed).toBe(false);
       expect(body.deniedLayer).toBe("agent");
     });
 
     it("names why an evaluated layer is empty instead of passing a data fault off as policy", async () => {
-      // A principal whose only assignment names a Role the durable store does not have. The
-      // resolver correctly fails the whole layer closed, so the observable result is identical to
-      // a principal who simply holds nothing — and an operator told "holds nothing, expected" at
-      // the moment of an unrecoverable lockout will go looking in the wrong place entirely.
+      // Missing Role definitions fail closed but must be explained differently from no roles.
       await principals.put({
         id: "p-dangling",
         businessId: BUSINESS,
@@ -341,9 +320,7 @@ describe("authz admin routes", () => {
           agentId: "no-such-agent",
         })
       );
-      // The empty layer a missing principal resolves to would otherwise render as a confident
-      // `deniedLayer: "agent"`, sending an operator to author grants for a principal that is not
-      // there. A typo is a 404, not a policy finding.
+      // Missing principals are 404, not confident policy findings.
       expect(res.statusCode).toBe(404);
       expect(res.json().error).toContain("no-such-agent");
     });
@@ -356,8 +333,6 @@ describe("authz admin routes", () => {
     });
   });
 
-  // ── Role definition authoring is Soul-only ───────────────────────────────────
-
   it("returns 501 for role definition authoring", async () => {
     const res = await app.inject({
       method: "POST",
@@ -368,8 +343,6 @@ describe("authz admin routes", () => {
     expect(res.statusCode).toBe(501);
     expect(res.json().error).toMatch(/authored in Soul/i);
   });
-
-  // ── Assign / revoke ───────────────────────────────────────────────────────
 
   describe("assign / revoke roles", () => {
     it("assigns a role, audits it, then revokes", async () => {
@@ -431,8 +404,6 @@ describe("authz admin routes", () => {
     });
   });
 
-  // ── Groups ────────────────────────────────────────────────────────────────
-
   describe("groups", () => {
     it("creates, inspects, mutates, and deletes a group", async () => {
       const created = await app.inject({
@@ -467,10 +438,7 @@ describe("authz admin routes", () => {
       );
       expect(detail.json().roles.map((r: { roleId: string }) => r.roleId)).toContain("support");
 
-      // Membership in a group holding `support` grants the member the group role's grants.
-      // Asserted against `p-two`, which holds NO direct assignment — `p-user` is directly assigned
-      // `support` in the fixture, so the same assertion on it would pass with group inheritance
-      // entirely broken and prove nothing.
+      // Assert against `p-two`, which has no direct assignment, to prove group inheritance.
       await app.inject({
         method: "POST",
         url: "/api/v1/authz/groups/ops/members",
@@ -497,8 +465,7 @@ describe("authz admin routes", () => {
     });
 
     it("re-stating a group answers 200 and records the expiry it overwrote", async () => {
-      // `putGroup` is a full upsert, so re-posting without `expiresAt` clears a deliberate expiry.
-      // A 201 there would report "created" for a silent widening of a time-boxed group.
+      // Full upsert without `expiresAt` clears expiry; report 200, not created.
       const created = await app.inject({
         method: "POST",
         url: "/api/v1/authz/groups",
@@ -545,11 +512,7 @@ describe("authz admin routes", () => {
     });
   });
 
-  // The gap that made default-deny unrecoverable. Production mints subjects that are not users —
-  // `integration:<slug>` for a Slack or Telegram delivery, `agent:assistant` for a chat-started
-  // Routine, `service:cron-scheduler` for a schedule fire — and a principal with no durable row
-  // resolves to an empty authority layer, which under intersection denies everything. Nothing
-  // could write those rows, so no UI could restore a deployment that had locked its channels out.
+  // Register non-user principals so default-deny deployments can recover channel/schedule access.
   describe("non-human principals", () => {
     const register = (body: { readonly id: string; readonly kind: string }) => ({
       method: "POST" as const,
@@ -568,7 +531,6 @@ describe("authz admin routes", () => {
         status: "active",
       });
 
-      // Grantable is the point: a registered principal can now hold a Role authored for its kind.
       await roles.putRole({
         id: "channel-ingress",
         businessId: BUSINESS,
@@ -614,16 +576,14 @@ describe("authz admin routes", () => {
       expect(res.json().map((p: { id: string }) => p.id)).toContain("agent:assistant");
     });
 
-    // Those rows are owned by the `sync_user_authorization()` trigger. A hand-written one would be
-    // overwritten without notice, or drift from the account it claims to represent.
+    // User principal rows belong to the sync trigger, not handwritten state.
     it("refuses to register a user principal", async () => {
       const res = await app.inject(register({ id: "p-three", kind: "user" }));
       expect(res.statusCode).toBe(400);
       expect(await principals.get(BUSINESS, "p-three")).toBeUndefined();
     });
 
-    // Silently re-pointing an id at a different kind would re-interpret every Role assignment
-    // already made against it, because `assertRoleAssignable` is evaluated per kind.
+    // Re-pointing a principal kind would reinterpret existing Role assignments.
     it("refuses to change an existing principal's kind", async () => {
       const res = await app.inject(register({ id: "a-bare", kind: "service" }));
       expect(res.statusCode).toBe(409);
@@ -649,9 +609,7 @@ describe("authz admin routes", () => {
   });
 
   describe("last-owner protection", () => {
-    // `owner` is the only Role that can grant `authz.*`, and Role *definitions* are Soul-owned — this
-    // API answers 501 to authoring one. So an owner set that reaches zero cannot be repaired from the
-    // product at all. There are four doors to emptying it, not one, and each is tested here.
+    // Owner-empty states cannot be repaired through the product; test every door.
     async function seedOwner() {
       await roles.putRole({
         id: "owner",
@@ -733,9 +691,7 @@ describe("authz admin routes", () => {
     });
 
     it("does not block ordinary group mutations when no owner exists at all", async () => {
-      // The invariant is "do not be the action that drops ownership to zero", not "an owner must
-      // exist". A deployment with no owner yet must stay operable, or the operator cannot reach the
-      // state that satisfies the invariant.
+      // The guard blocks dropping the last owner, not deployments that start with none.
       await groups.putGroup({ businessId: BUSINESS, id: "ops" });
       const res = await app.inject({
         method: "DELETE",

@@ -13,7 +13,6 @@ export const INVOCATION_SOURCES = [
 
 export type InvocationSource = (typeof INVOCATION_SOURCES)[number];
 
-/** Closed Worker executor selectors. Invocation sources map onto one of these explicitly. */
 export const RUN_SOURCES = ["chat", "integration", "routine"] as const;
 export type RunSource = (typeof RUN_SOURCES)[number];
 
@@ -22,30 +21,20 @@ export interface InvocationPrincipal {
   readonly id: string;
 }
 
-/** Default first State for non-Routine invocations and its request Artifact producer. */
 export const INVOKE_STATE_KEY = "invoke";
 
-/** Principal the Run executor reads request Artifacts as; every request ACL must include it. */
 export const RUN_EXECUTOR_PRINCIPAL_REF = "service:run-executor";
 
-/** Identity of the Artifact holding the request that minted `runId`. */
 export function requestArtifactId(runId: string): string {
   return `${runId}:request`;
 }
 
-/** The `payloadRef` a State carries for `runId`, resolvable through `ArtifactService.read`. */
 export function requestPayloadRef(runId: string): string {
   return `artifact:${requestArtifactId(runId)}`;
 }
 
 /**
- * Identity of the Artifact holding the Chat request a non-Chat Run was normalized into.
- *
- * An Integration delivery is not a Chat request: its request Artifact holds the provider envelope
- * exactly as it arrived, which is what keeps the delivery replayable. Turning it into a turn
- * produces a *second*, derived Artifact under this id, carrying `derived_from` lineage back to the
- * envelope — so the question "what did the model actually answer, and what raw delivery produced
- * it?" has one recorded answer rather than a reconstruction.
+ * Derived Chat request Artifact id; Integration envelopes stay raw, with `derived_from` lineage.
  */
 export function chatRequestArtifactId(runId: string): string {
   return `${runId}:chat-request`;
@@ -53,9 +42,7 @@ export function chatRequestArtifactId(runId: string): string {
 
 export interface DurableInvocationRecord {
   readonly runId: string;
-  /** What accepted the invocation: manual, schedule, Integration delivery, and so on. */
   readonly source: InvocationSource;
-  /** Selects the Worker executor without overloading the pinned Routine identity. */
   readonly runSource: RunSource;
   readonly businessId: string;
   readonly initiator: InvocationPrincipal;
@@ -73,11 +60,7 @@ export interface DurableInvocationRecord {
     readonly definitionRef: string;
     readonly resolvedInput: { readonly payloadRef: string };
   };
-  /**
-   * The request itself, published as an immutable Artifact in the same transaction as the Run. This
-   * is what makes the Run reconstructable: the State's `payloadRef` names this Artifact, so a Worker
-   * that picks the Run up after an API crash can read the exact input the request carried.
-   */
+  /** Request Artifact committed with the Run so a restarted Worker can read the exact input. */
   readonly requestArtifact: PublishArtifactInput;
 }
 
@@ -87,7 +70,6 @@ export interface DurableInvocationStore {
   ): Promise<{ readonly outcome: "started" | "duplicate"; readonly runId: string }>;
 }
 
-/** Exact active Routine identity and start State resolved before a Routine Run is minted. */
 export interface ResolvedRoutineInvocation {
   readonly bundle: {
     readonly digest: string;
@@ -100,11 +82,7 @@ export interface ResolvedRoutineInvocation {
   };
 }
 
-/**
- * Package-neutral port to the active Soul publication authority. `@tulipfarm/run-kernel` owns the
- * invocation boundary but cannot import `@tulipfarm/soul`; the composing app supplies the verified
- * active Routine resolution.
- */
+/** Port for verified active Routine resolution; run-kernel must not import `@tulipfarm/soul`. */
 export interface RoutineInvocationResolver {
   resolve(input: {
     readonly businessId: string;
@@ -113,18 +91,14 @@ export interface RoutineInvocationResolver {
 }
 
 export interface StartInvocationInput {
-  /** What accepted the invocation: manual, schedule, Integration delivery, and so on. */
   readonly source: InvocationSource;
-  /** Selects the Worker executor without overloading the pinned Routine identity. */
   readonly runSource: RunSource;
   readonly businessId: string;
   readonly initiator: InvocationPrincipal;
   readonly effectiveSubject: InvocationPrincipal;
   readonly identityMappingEvidenceRef?: string;
   readonly definitionRef: string;
-  /** The request payload, stored verbatim as the Run's request Artifact. */
   readonly payload: unknown;
-  /** Which registered schema the payload must satisfy; an unregistered ref is denied. */
   readonly payloadSchemaRef: string;
   readonly idempotencyKey: string;
 }
@@ -145,7 +119,6 @@ export class InvocationDeniedError extends Error {
 
 export interface DurableInvocationGatewayOptions {
   readonly store: DurableInvocationStore;
-  /** Compiled over `INVOCATION_REQUEST_SCHEMAS`; the gateway accepts no unregistered schema. */
   readonly validator: TypedOutputValidator;
   /** Required for Routine Runs. Its absence denies rather than manufacturing a nominal pin. */
   readonly routineDefinitions?: RoutineInvocationResolver;
@@ -158,13 +131,8 @@ function samePrincipal(left: InvocationPrincipal, right: InvocationPrincipal): b
 }
 
 /**
- * One persist-first boundary for every interactive, Trigger, channel, and Integration invocation.
- *
- * Protected input crosses this boundary only by Artifact reference, and the gateway is what creates
- * that Artifact: the caller hands over the payload plus the schema it claims to satisfy, and the
- * store commits the Artifact, the Run, and its first State together. Identity substitution is
- * denied unless the mapping service supplied an opaque evidence reference; the evidence grants no
- * authority by itself and remains available to downstream authorization and audit.
+ * Persist-first invocation boundary: protected input becomes an Artifact committed with the Run
+ * and first State; identity substitution needs opaque evidence, not authority.
  */
 export class DurableInvocationGateway {
   private readonly nextId: () => string;

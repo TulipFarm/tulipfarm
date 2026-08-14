@@ -4,13 +4,6 @@ import { copyText } from "~/lib/clipboard";
 import { type DebugContext, getDebugContext } from "~/lib/conversations";
 import { cn } from "~/lib/utils";
 
-// Minimal, dependency-free JSON syntax highlighter. Tokenizes strings (key vs value), numbers, and
-// literals into React spans — text content is React-escaped, so there is no innerHTML/XSS surface.
-// Structural chars (braces, commas, colons) inherit the <pre>'s muted color so the values pop.
-//
-// This drawer deliberately keeps a flat <pre> rather than reusing `json-view.tsx`: that viewer
-// auto-collapses below depth 2, which is right for a bounded Tool preview and wrong for a raw dump
-// a dev reads top to bottom and copies whole. Only the token colours are shared, through `--code-*`.
 const JSON_TOKEN =
   /"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\btrue\b|\bfalse\b|\bnull\b/g;
 
@@ -24,7 +17,6 @@ function highlightJson(json: string): ReactNode[] {
     if (m.index > last) out.push(json.slice(last, m.index));
     let cls: string;
     if (tok[0] === '"') {
-      // A string immediately followed by `:` is an object key.
       cls = /^\s*:/.test(json.slice(m.index + tok.length)) ? "text-code-key" : "text-code-string";
     } else if (tok === "true" || tok === "false") {
       cls = "text-code-boolean";
@@ -46,12 +38,12 @@ function highlightJson(json: string): ReactNode[] {
 }
 
 /**
- * Dev-only chat debug drawer. A floating button opens a non-blocking right slide-over that dumps the
- * full raw conversation state — the system prompt the LLM receives (reconstructed server-side) plus
- * every persisted row (all roles, tool calls/results, metadata) — as copyable JSON, so a dev can paste
- * the exact agent context into external pipelines. Gated on `import.meta.env.DEV`: the whole component
- * (and its dynamic imports) dead-code-strips out of the production bundle, and the backing API route is
- * registered only outside production.
+ * A floating button opens a non-blocking right slide-over that dumps the full raw conversation
+ * state — the system prompt the LLM receives (reconstructed server-side) plus every persisted
+ * row (all roles, tool calls/results, metadata) — as copyable JSON, so a dev can paste the
+ * exact agent context into external pipelines. Gated on `import.meta.env.DEV`: the whole
+ * component (and its dynamic imports) dead-code-strips out of the production bundle, and the
+ * backing API route is registered only outside production.
  */
 export function ChatDebugDrawer({ conversationId }: { conversationId?: string }) {
   if (!import.meta.env.DEV) return null;
@@ -80,13 +72,10 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
     }
   }, [conversationId]);
 
-  // Snapshot on open (and on Refresh). A turn streaming right now shows up once it persists.
   useEffect(() => {
     if (open) void load();
   }, [open, load]);
 
-  // Close on Escape or an outside click — no blocking backdrop, so the chat stays interactive
-  // (mirrors the model-selector dropdown). The listeners attach only while open.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -104,8 +93,6 @@ function DebugDrawer({ conversationId }: { conversationId?: string }) {
     };
   }, [open]);
 
-  // Compose the displayed payload in the ticket's shape: the system prompt as the first role:"system"
-  // entry (clearly marked synthetic — it is reconstructed, not a stored row), then the raw rows.
   const json = data
     ? JSON.stringify(
         {

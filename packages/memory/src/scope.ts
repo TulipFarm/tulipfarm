@@ -1,13 +1,6 @@
 /**
- * Memory scope authorization (SPEC §14.2).
- *
- * Every scope names *whose* memory an assertion is. Authorization is therefore an identity match
- * against that owner, never a capability the caller carries: a principal with broad Business
- * authority still cannot read another user's `user_private` memory, because that scope's owner is
- * a different person.
- *
- * Default-deny throughout — an unrecognised scope, a scope the Agent's MemorySettings does not
- * enable, or a target missing the identity its scope requires all deny.
+ * Memory scopes authorize by owner identity, not broad business authority; unknown, disabled, or
+ * identity-missing scopes deny.
  */
 
 import type { MemoryScope } from "@tulipfarm/schema";
@@ -55,13 +48,7 @@ const DENY = (reason: MemoryScopeDenialReason): MemoryScopeDecision => ({
 });
 const ALLOW: MemoryScopeDecision = { allowed: true };
 
-/**
- * Decide whether `request` may read or write memory owned by `target`.
- *
- * `enabledScopes` comes from the Agent's MemorySettings; a scope absent from it is denied even
- * when the identity would otherwise match, so narrowing an Agent's settings immediately narrows
- * what it can remember and recall.
- */
+/** Agent `enabledScopes` narrow memory access even when target identity matches. */
 export function authorizeMemoryScope(
   enabledScopes: readonly MemoryScope[],
   target: MemoryScopeTarget,

@@ -92,13 +92,7 @@ function reservedKeyError(
   return undefined;
 }
 
-/**
- * Validate a SKILL.md candidate at a write boundary without throwing.
- *
- * `content` must be the exact raw or serialized value the caller will write. Keeping it explicit
- * prevents raw marketplace files with large comments or whitespace from bypassing the size limit
- * through parse-and-reserialize normalization.
- */
+/** Validate SKILL.md without throwing; `content` must be the exact value to be written. */
 export function validateSkill(input: SkillValidationInput): SkillValidationResult {
   if (!checkFrontmatter(input.frontmatter)) {
     return { valid: false, error: firstSchemaError() };
@@ -129,12 +123,7 @@ export function validateSkill(input: SkillValidationInput): SkillValidationResul
   return { valid: true, frontmatter };
 }
 
-/**
- * Serialize a validated Skill consistently for soul write boundaries.
- *
- * Internal server fields may be present in `frontmatter`; callers validate the public frontmatter
- * separately and pass this exact result back to `validateSkill` for content-size enforcement.
- */
+/** Serialize a validated Skill; pass this exact output back to `validateSkill` for size checks. */
 export function serializeSkill(frontmatter: Record<string, unknown>, body: string): string {
   return `---\n${stringify(frontmatter)}---\n${body}`;
 }

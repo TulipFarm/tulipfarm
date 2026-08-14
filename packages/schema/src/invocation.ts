@@ -1,10 +1,4 @@
-/**
- * Request schemas for the persist-first invocation boundary.
- *
- * Every Run minted through the invocation gateway commits with an immutable Artifact holding the
- * request that produced it, validated against one of these schemas. They live here rather than in
- * `apps/api` because the worker that later reconstructs the Turn cannot import an app.
- */
+/** Persist-first invocation request schemas; gateways must deny unregistered refs. */
 
 /** A schema paired with the stable reference stored on the Artifact. */
 export interface InvocationRequestSchema {
@@ -16,10 +10,7 @@ export const CHAT_REQUEST_SCHEMA_REF = "tulip.invocation.chat-request.v1";
 export const MANUAL_REQUEST_SCHEMA_REF = "tulip.invocation.manual-request.v1";
 export const INTEGRATION_REQUEST_SCHEMA_REF = "tulip.invocation.integration-request.v1";
 
-/**
- * One interactive Chat turn as submitted. Also serves as the Fastify body schema for
- * `POST /api/v1/chat`, so the stored Artifact cannot drift from what the route accepts.
- */
+/** Chat request schema shared by storage and `POST /api/v1/chat`. */
 export const CHAT_REQUEST_SCHEMA = {
   type: "object",
   required: ["message"],
@@ -62,15 +53,7 @@ export const MANUAL_REQUEST_SCHEMA = {
   },
 } as const;
 
-/**
- * One verified Integration delivery, stored exactly as received.
- *
- * Provider-agnostic on purpose: the ingress route is driven entirely by the Integration manifest,
- * so Slack's Events API, Telegram webhooks, and any future channel all publish through this one
- * schema — adding a channel means adding a manifest, not a schema. Normalizing a delivery into a
- * Chat turn happens downstream and produces its own derived Artifact, which keeps the raw payload
- * replayable and auditable.
- */
+/** Verified Integration delivery stored raw; channel behavior comes from the manifest. */
 export const INTEGRATION_REQUEST_SCHEMA = {
   type: "object",
   required: ["slug", "body"],
@@ -82,10 +65,7 @@ export const INTEGRATION_REQUEST_SCHEMA = {
   },
 } as const;
 
-/**
- * Every schema the gateway will accept. A `payloadSchemaRef` outside this set is denied, so a new
- * request shape cannot reach storage without being declared here first.
- */
+/** Closed set of request schemas; gateways deny refs outside this registry. */
 export const INVOCATION_REQUEST_SCHEMAS: readonly InvocationRequestSchema[] = [
   { ref: CHAT_REQUEST_SCHEMA_REF, schema: CHAT_REQUEST_SCHEMA },
   { ref: MANUAL_REQUEST_SCHEMA_REF, schema: MANUAL_REQUEST_SCHEMA },

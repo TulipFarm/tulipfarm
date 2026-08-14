@@ -15,22 +15,9 @@ import {
 import type { Queryable } from "../db";
 
 /**
- * The generic Integration auth broker: it executes the declarative `auth` step list a manifest
- * declares (`packages/soul/src/integration-auth.ts`) so no Integration needs bespoke connect
- * routes. Every provider URL, request body, and response mapping is data, not code.
- *
- * Two properties matter more than anything else here:
- *
- * 1. **One callback for every Integration.** Providers require the redirect URI to be registered
- *    up front, so it must be stable: `/api/v1/integrations/auth/callback`. Which Integration and
- *    which step a callback belongs to is carried by the one-use `state`, never by the path.
- * 2. **State lives server-side and is consumed exactly once.** The PKCE verifier never leaves this
- *    process, so a captured callback URL cannot be replayed and a code obtained in one browser
- *    cannot be redeemed in another — the same posture as `identity/oidc.ts`. A stateless signed
- *    `state` cannot do this: it has nowhere to hide a verifier and nothing to mark as spent.
+ * Generic manifest-declared auth broker: one stable callback for every Integration.
+ * One-use server-side state holds PKCE verifier and is consumed exactly once.
  */
-
-// ── Templating ────────────────────────────────────────────────────────────────
 
 /**
  * Substitutes `{name}` placeholders. Unknown placeholders are left untouched rather than blanked,
@@ -40,7 +27,6 @@ export function renderTemplate(template: string, vars: Record<string, string>): 
   return template.replace(/\{([A-Za-z0-9_.]+)\}/g, (whole, name: string) => vars[name] ?? whole);
 }
 
-/** Renders every string in a nested manifest value, leaving non-strings structurally intact. */
 export function renderDeep(value: unknown, vars: Record<string, string>): unknown {
   if (typeof value === "string") return renderTemplate(value, vars);
   if (Array.isArray(value)) return value.map((item) => renderDeep(item, vars));
@@ -52,7 +38,6 @@ export function renderDeep(value: unknown, vars: Record<string, string>): unknow
   return value;
 }
 
-/** Reads a dot-path out of a provider response, e.g. `authed_user.access_token`. */
 export function readPath(source: unknown, path: string): unknown {
   let current = source;
   for (const segment of path.split(".")) {
@@ -62,14 +47,11 @@ export function readPath(source: unknown, path: string): unknown {
   return current;
 }
 
-/** Provider values arrive as strings, numbers, or booleans; anything else is not a credential. */
 function asEnvValue(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return undefined;
 }
-
-// ── One-use authorization requests ────────────────────────────────────────────
 
 export interface IntegrationAuthRequestDoc {
   state: string;
@@ -79,21 +61,12 @@ export interface IntegrationAuthRequestDoc {
   createdAt: Date;
   expiresAt: Date;
   consumedAt: Date | null;
-  /**
-   * Whose connect this is. Null is the business-wide flow — credentials land in `connection.yaml`
-   * and every caller spends them. A principal means the resulting token is *that principal's own*
-   * (D7) and must be sealed into `principal_provider_tokens`, never into the shared connection.
-   *
-   * It is recorded at issue time rather than read from the session at callback time because the
-   * callback is deliberately unauthenticated (a cross-site top-level navigation carries no
-   * `SameSite=Strict` cookie), so the callback has no trustworthy notion of who is connecting.
-   */
+  /** Null means business-wide; otherwise the callback must seal a principal-owned credential. */
   principal: { readonly kind: string; readonly id: string } | null;
 }
 
 export interface IntegrationAuthRequestRepo {
   create(request: IntegrationAuthRequestDoc): Promise<void>;
-  /** Atomically consumes the request; null when unknown, expired, or already consumed. */
   consume(state: string): Promise<IntegrationAuthRequestDoc | null>;
 }
 
@@ -110,8 +83,7 @@ function rowToRequest(row: Record<string, unknown>): IntegrationAuthRequestDoc {
     createdAt: row.created_at as Date,
     expiresAt: row.expires_at as Date,
     consumedAt: (row.consumed_at as Date | null) ?? null,
-    // Both or neither: a half-written pair cannot name a principal, and guessing one half would
-    // attribute a credential to the wrong subject.
+    // Both or neither: half a principal would attribute credentials to the wrong subject.
     principal: kind !== null && id !== null ? { kind, id } : null,
   };
 }
@@ -150,8 +122,6 @@ export class PgIntegrationAuthRequestRepo implements IntegrationAuthRequestRepo 
   }
 }
 
-// ── Errors ────────────────────────────────────────────────────────────────────
-
 export type AuthBrokerDenialReason =
   | "unknown_step"
   | "invalid_state"
@@ -159,7 +129,6 @@ export type AuthBrokerDenialReason =
   | "exchange_failed";
 
 export class AuthBrokerError extends Error {
-  /** Set once the state is consumed, so a mid-flow failure can be shown on the right page. */
   slug?: string;
 
   constructor(
@@ -173,29 +142,17 @@ export class AuthBrokerError extends Error {
   }
 }
 
-// ── Starting a step ───────────────────────────────────────────────────────────
-
-/**
- * What the browser must do to advance a step. `collect_fields` needs no provider round trip — the
- * operator types the values and posts them to the existing connect route.
- */
+/** Browser instruction for the next auth step; `collect_fields` has no provider round trip. */
 export type AuthStartAction =
   | { action: "collect_fields"; fields: RequiredEnvVar[] }
   | { action: "redirect"; url: string }
   | { action: "form_post"; url: string; field: string; value: string }
-  /**
-   * The server already did the work and produced connection env; the browser only has to move on.
-   * `env` never reaches the browser — the route strips it after sealing, exactly as it does for a
-   * provider callback's outcome.
-   */
+  /** Server-side steps return only browser action; env is sealed server-side. */
   | { action: "completed"; env: Record<string, string> };
 
 export interface AuthEndpoints {
-  /** Stable provider redirect target, e.g. `https://api.example.com/api/v1/integrations/auth/callback`. */
   callbackUrl: string;
-  /** Origin users reach the web app on. */
   webUrl: string;
-  /** Origin the API answers on. */
   apiUrl: string;
 }
 
@@ -203,21 +160,13 @@ export interface StartAuthStepInput {
   slug: string;
   manifest: IntegrationManifest;
   stepIndex: number;
-  /** Connection env resolved to plaintext — earlier steps' output feeds later steps. */
   env: Record<string, string>;
   endpoints: AuthEndpoints;
   repo: IntegrationAuthRequestRepo;
   ttlSeconds?: number;
   now?: () => Date;
-  /** Only the `webhook` step calls a provider from here; every other step round-trips the browser. */
+  /** User-scoped connect is allowed only for personal OAuth2 steps; never downgrade to shared. */
   fetchImpl?: typeof globalThis.fetch;
-  /**
-   * Connect *as this principal* rather than for the deployment (D7). Absent is the business-wide
-   * flow. Only an `oauth2` authorization-code step can produce a personal credential; asking for a
-   * user-scoped run of any other step kind is rejected rather than silently downgraded, because a
-   * downgrade would write the deployment's shared credential in response to a request to connect
-   * a personal one.
-   */
   principal?: { readonly kind: string; readonly id: string };
 }
 
@@ -279,27 +228,14 @@ export function buildAuthorizeUrl(
   return url.toString();
 }
 
-/**
- * The address this deployment receives deliveries on, which is what the provider must be told.
- *
- * Derived from the API origin rather than declared per manifest so it cannot disagree with the
- * route that actually serves `/api/v1/hooks/integrations/:name`.
- */
+/** Delivery URL is derived from the API origin so it matches the served hook route. */
 export function ingressWebhookUrl(endpoints: AuthEndpoints, slug: string): string {
   return `${endpoints.apiUrl.replace(/\/+$/, "")}/api/v1/hooks/integrations/${slug}`;
 }
 
 /**
- * Executes a `webhook` step: mint the delivery secret, tell the provider where to deliver, and
- * keep whatever identifiers it returned.
- *
- * The secret is generated rather than collected. A provider that lets us choose it is a provider
- * where the operator would otherwise invent one, and an operator-chosen webhook secret is the
- * single most predictable credential in any deployment.
- *
- * A provider that answers non-2xx, or that answers `{"ok": false}`, produces no env at all: half a
- * registration — a stored secret with nothing registered against it — would leave the integration
- * looking connected while every delivery bounced.
+ * Webhook steps mint the delivery secret, register the hook, and keep returned ids.
+ * Non-2xx or `{ ok: false }` writes no env, avoiding half-connected integrations.
  */
 async function registerWebhook(
   step: AuthWebhookStep,
@@ -316,8 +252,7 @@ async function registerWebhook(
 
   const url = renderTemplate(step.url, vars);
   if (!url.startsWith("https://")) {
-    // A templated env var could otherwise turn this into a plaintext or file URL, and this
-    // request carries both a provider credential and the secret we just minted.
+    // Templated env cannot make credential-bearing webhook calls plaintext or file URLs.
     throw new AuthBrokerError("exchange_failed", "webhook registration url must be https");
   }
   if (/\{[A-Za-z0-9_.]+\}/.test(url)) {
@@ -371,12 +306,7 @@ async function readJsonBody(response: Response): Promise<Record<string, unknown>
 export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStartAction> {
   const step = stepAt(input.manifest, input.stepIndex);
 
-  // A personal credential may only come from a step that declares itself personal. Grant type is
-  // not the test: Slack's install step is `authorization_code` and returns a workspace bot token,
-  // so accepting the grant alone would seal a shared bot credential under one person's name.
-  // Refusing here is what keeps "connect my GitHub" from quietly re-running the operator flow, and
-  // it reads the identical predicate the Tool compiler uses, so a Tool can never demand a
-  // credential this route would refuse to mint.
+  // Personal credentials must come from personal steps; grant type alone is insufficient.
   if (input.principal !== undefined && !isPersonalCredentialStep(step)) {
     throw new AuthBrokerError(
       "unknown_step",
@@ -436,14 +366,9 @@ export async function startAuthStep(input: StartAuthStepInput): Promise<AuthStar
   }
 }
 
-// ── Completing a step ─────────────────────────────────────────────────────────
-
 export interface CompleteAuthStepInput {
-  /** Every query param the provider sent back. */
   query: Record<string, string>;
-  /** Resolves the manifest for the slug recorded in the consumed state. */
   loadManifest: (slug: string) => IntegrationManifest | undefined;
-  /** Connection env resolved to plaintext, for the client credentials an exchange needs. */
   loadEnv: (slug: string) => Promise<Record<string, string>>;
   endpoints: AuthEndpoints;
   repo: IntegrationAuthRequestRepo;
@@ -454,15 +379,9 @@ export interface CompleteAuthStepInput {
 export interface AuthStepOutcome {
   slug: string;
   stepIndex: number;
-  /** Connection env values this step produced, to be merged and sealed by the caller. */
+  /** Present means seal under that principal, never into shared `connection.yaml`. */
   env: Record<string, string>;
-  /**
-   * Whose credential this is, echoed from the consumed request. Present means the caller must seal
-   * it under that principal instead of merging it into the shared `connection.yaml` — the whole
-   * point of the user-scoped flow, and the one decision the callback route cannot make for itself.
-   */
   principal?: { readonly kind: string; readonly id: string };
-  /** The OAuth2 step this outcome came from, when it was one. Names the token env vars. */
   oauth2Step?: AuthOAuth2Step;
 }
 
@@ -553,8 +472,7 @@ export async function completeAuthStep(input: CompleteAuthStepInput): Promise<Au
   try {
     return await completeStep({ input, request, manifest, fetchImpl, now, outcome });
   } catch (err) {
-    // Everything past the consume knows which Integration it belongs to, so failures can be shown
-    // on that Integration's page instead of a generic error.
+    // After state consume, failures can be shown on the Integration page.
     if (err instanceof AuthBrokerError) err.slug ??= request.integrationSlug;
     throw err;
   }
@@ -577,8 +495,7 @@ async function completeStep(ctx: {
       throw new AuthBrokerError("unknown_step", "fields steps do not use the callback");
 
     case "webhook":
-      // Registration completes inside `startAuthStep`; nothing is left for a provider to call back
-      // about, so a callback naming this step is a forged or stale state rather than a flow.
+      // Server-side registration has no provider callback; such state is forged or stale.
       throw new AuthBrokerError("unknown_step", "webhook steps do not use the callback");
 
     case "install": {
@@ -636,8 +553,6 @@ async function completeStep(ctx: {
   }
 }
 
-// ── Refresh ───────────────────────────────────────────────────────────────────
-
 /** The OAuth2 steps in a manifest, paired with their index. */
 export function oauth2Steps(manifest: IntegrationManifest): AuthOAuth2Step[] {
   return resolveAuthSteps(manifest).filter(
@@ -645,10 +560,7 @@ export function oauth2Steps(manifest: IntegrationManifest): AuthOAuth2Step[] {
   );
 }
 
-/**
- * Whether an access token lapses within `withinMs`. A step with no `expires_at_env`, or an env
- * with no recorded expiry, reports false — a non-expiring token must not be refreshed on a guess.
- */
+/** No `expires_at_env` or recorded expiry means non-expiring; never refresh on a guess. */
 export function credentialsExpireWithin(
   step: AuthOAuth2Step,
   env: Record<string, string>,
@@ -670,9 +582,7 @@ export async function refreshOAuth2Credentials(
 ): Promise<Record<string, string>> {
   const refreshTokenEnv = oauth2RefreshTokenEnv(step);
   const refreshToken = env[refreshTokenEnv];
-  // Providers that never issued a refresh token leave nothing to spend. That is the normal state
-  // for a long-lived token, not a misconfiguration, so a sweep over every step can call this
-  // blindly and get "nothing to do" rather than an error it would have to special-case.
+  // Missing refresh token is normal for long-lived tokens; sweep callers can no-op.
   if (!refreshToken) return {};
 
   const clientId = env[step.client_id_env];
@@ -690,22 +600,15 @@ export async function refreshOAuth2Credentials(
       client_secret: clientSecret,
     }
   );
-  // Providers that rotate refresh tokens return a new one; those that don't keep the stored one,
-  // so the merge that follows must not blank it out.
+  // Preserve stored refresh tokens when providers do not rotate them.
   const mapped = mapTokenResponse(step, response, options.now ?? new Date());
   return mapped[refreshTokenEnv] ? mapped : { ...mapped, [refreshTokenEnv]: refreshToken };
 }
 
-// ── Endpoint resolution ───────────────────────────────────────────────────────
-
 /** The path every provider redirects back to. Registered with providers, so it must never vary. */
 export const INTEGRATION_AUTH_CALLBACK_PATH = "/api/v1/integrations/auth/callback";
 
-/**
- * Providers validate the redirect URI against what was registered, so the callback origin has to be
- * the public API origin — not the web origin `PUBLIC_URL` describes, and not a request-derived host
- * an attacker could spoof via `Host`/`X-Forwarded-Host`.
- */
+/** Redirect origin must be PUBLIC_API_URL, never web origin or spoofable request host. */
 export function resolveAuthEndpoints(env: NodeJS.ProcessEnv = process.env): AuthEndpoints {
   const apiUrl = (env.PUBLIC_API_URL ?? `http://localhost:${env.PORT ?? 4010}`).replace(/\/+$/, "");
   const webUrl = (env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "");

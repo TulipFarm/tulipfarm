@@ -1,33 +1,32 @@
-# Run Kernel — Agent Conventions
+# Run kernel (`@tulipfarm/run-kernel`)
+Durable Run and State machines: attempts, scheduling, waits, retries, cancellation, child Runs,
+typed outputs, Artifacts, limits, budgets, and concurrency.
 
-`@tulipfarm/run-kernel` — Run and State state machines, attempts, scheduling, durable waits,
-retries, cancellation, child Runs, and concurrency. **Today:** `src/model` (state machines),
-`src/invocation` (the single persist-first Run/request-Artifact gateway and PostgreSQL adapter),
-`src/lease` (worker leases), `src/outputs` (AJV-validated typed State outputs + canonical hashes),
-`src/artifacts` (immutable Artifact publish/read with ACL, classification, retention, redaction,
-and tamper checks), `src/lineage` (named State-output mappings resolved into downstream
-Context), and `src/waits`, `src/timers`, `src/resume` (durable timer/event/Approval/human-task/
-form/child-Run waits with `first`/`all`/`quorum`/window aggregation, deadline sweeps, and
-unguessable one-use resume tokens), and `src/limits`, `src/budgets`, `src/concurrency`
-(narrowest-wins limit resolution, non-amplifying Agent requests, durable per-Run budget ledgers
-with a declared exhaustion disposition, and `serialize`/`queue`/`coalesce`/`reject`/`supersede`
-target-concurrency admission over a deterministic target key), and `src/children`, `src/cancel`,
-`src/reconcile-state` (never-broadening child authority with explicit detach, cancellation that
-cancels future work and parks in-flight effects, and evidence-driven reconciliation where an
-ambiguous effect never becomes `cancelled`), and `src/resilience` (crash/duplicate/recovery proofs
-over a `SimulatedRunStore` that injects failure before and after each durable write). tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md` for commands/lint.
+## Read on / Skip
+- **Read on if** you touch Run/State transitions, invocation, Artifacts, leases, waits, timers,
+  resume tokens, budgets, limits, child Runs, cancellation, or reconciliation.
+- **Skip if** you touch Agent prompts/loops (`../agent-runtime/AGENTS.md`), Tool adapters
+  (`../tool-broker/AGENTS.md`), API routes (`../../apps/api/AGENTS.md`), or Worker dispatch.
 
-May import: `@tulipfarm/schema`, `@tulipfarm/audit`, `@tulipfarm/storage`,
-`@tulipfarm/observability`. See
-[`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). Every
-Chat turn and automation is a durable Run through this package; it never imports
-`@tulipfarm/agent-runtime` (the agent runtime submits child-Run commands through this package's
-public port, not the reverse).
+## Map
+| Path | Owns |
+| --- | --- |
+| `src/model/`, `src/routine/`, `src/triggers/` | Run/State, Routine, and trigger models. |
+| `src/invocation/` | Persist-first Run/request-Artifact gateway and PostgreSQL adapter. |
+| `src/{lease,outputs,artifacts,lineage}.ts` | Leases, typed outputs, Artifacts, lineage. |
+| `src/{waits,timers,resume}.ts` | Durable waits, deadline sweeps, one-use resume tokens. |
+| `src/{limits,budgets,concurrency}.ts` | Limits, budget ledgers, concurrency admission. |
+| `src/{children,cancel,reconcile-state}.ts` | Child Runs, cancellation, reconciliation. |
+| `src/resilience/` | Crash/duplicate/recovery proofs over `SimulatedRunStore`. |
 
-`src/invocation` is composed by `apps/api`: its gateway publishes every request Artifact through
-`ArtifactService` inside the transaction that creates the Run, and PR 3's worker reads it back as
-`service:run-executor`. Artifact rows are append-only (a trigger rejects UPDATE/DELETE), so an ACL
-or classification must be correct on the first write — there is no correcting write.
-Routine Runs additionally require the package-neutral `RoutineInvocationResolver` port. The API
-implements it against the verified active Soul publication; the gateway fails closed when exact
-bundle identity and the canonical start State cannot be resolved, before allocating a Run id.
+## Rules
+- May import only `@tulipfarm/schema`, `audit`, `storage`, and `observability`; see
+  [dependency rules](../../docs/architecture/dependency-rules.md).
+- Every Chat turn and automation is a durable Run here; never import `@tulipfarm/agent-runtime`.
+- `src/invocation` is composed by API: publish the request Artifact through `ArtifactService` in
+  the same transaction that creates the Run; Worker reads it as `service:run-executor`.
+- Artifact rows are append-only; ACL and classification must be correct on first write.
+- Routine Runs require `RoutineInvocationResolver`; fail closed before Run id allocation unless
+  exact bundle identity and canonical start State resolve from verified active Soul publication.
+- Child authority never broadens; detach must be explicit. Cancellation parks in-flight effects.
+  Ambiguous effect evidence never becomes `cancelled`.

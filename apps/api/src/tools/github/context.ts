@@ -13,13 +13,7 @@ import type { ToolIntent } from "@tulipfarm/tool-broker";
 import { selectGitHubInstallation } from "./credentials";
 import type { GitHubInstallationDirectory } from "./installation";
 
-/**
- * Installation-scope-only authorization for chat's GitHub Tool calls, mirroring
- * `apps/worker/src/routine/github-context.ts` (a deliberate local copy — an application may not
- * import another application). No Soul-authored AccessGrant compilation exists yet, so this
- * resolver synthesizes an AccessGrant that trivially matches its own principal and exactly the one
- * repository the intent names; the real narrowing is `GitHubAdapter`'s installation-scope check.
- */
+/** Installation-scope-only authorization for GitHub Tool calls from Chat. */
 
 const SYNTHETIC_PRINCIPAL: { readonly kind: "user" | "agent" | "role"; readonly id: string } = {
   kind: "role",
@@ -85,12 +79,7 @@ function syntheticOrgGrant(integrationId: string, owner: string): AccessGrantDef
   };
 }
 
-/**
- * Resolves a Tool intent's repository against this business's active GitHub installations
- * (`GitHubInstallationDirectory`) and builds the scope + synthesized grant `GitHubAdapter` needs.
- * `undefined` when no installation covers the named repository — the adapter reports that as
- * `integration_context_unresolved`, never a guessed scope.
- */
+/** Resolves a Tool intent's repo against active GitHub App installations. */
 export class InstallationScopeGitHubContextResolver implements GitHubContextResolver {
   constructor(
     private readonly businessId: string,

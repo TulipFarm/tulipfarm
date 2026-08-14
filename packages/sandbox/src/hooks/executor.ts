@@ -24,13 +24,7 @@ export interface HookExecutorOptions {
   readonly workerData?: unknown;
 }
 
-/**
- * Locate an application's hook worker entrypoint, given the directory it ships in.
- *
- * A production image bundles the worker to a sibling `.cjs` (the runtime ships neither TS source
- * nor tsx); dev and tests run the `.ts` source under tsx. The convention lives here so every host
- * spawns its worker the same way.
- */
+/** Resolves bundled `.cjs` workers in production and `.ts` workers under tsx in dev/tests. */
 export function resolveHookWorkerPath(directory: string, basename: string): string {
   const bundled = join(directory, `${basename}.cjs`);
   return existsSync(bundled) ? bundled : join(directory, `${basename}.ts`);
@@ -185,11 +179,7 @@ export class HookExecutor {
     }
   }
 
-  /**
-   * Evaluate a routine data-flow expression in the sandbox (100ms, no host/fs/net).
-   * Throws HookError on evaluation failure/timeout. `breakerKey` should identify the
-   * routine (e.g. `routine:{slug}`) so a hot-looping expression trips its own breaker.
-   */
+  /** Evaluates routine data-flow expressions in sandbox with timeout and routine-scoped breaker. */
   async runExpression(
     code: string,
     scope: Record<string, unknown>,
@@ -224,10 +214,7 @@ export class HookExecutor {
     return "value" in res ? res.value : undefined;
   }
 
-  /**
-   * Run a named function from a routine's hooks.ts (2s budget). Same static-analysis +
-   * hash-integrity + circuit-breaker guards as resource hooks.
-   */
+  /** Runs a routine hook with the same analysis, hash, and breaker guards as resource hooks. */
   async runRoutineHook(
     hookSource: string,
     fnName: string,

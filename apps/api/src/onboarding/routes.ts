@@ -8,18 +8,7 @@ import { buildChecklist } from "./checklist";
 import { getPersonalizedOnboarding } from "./personalize";
 import { deriveSuggestions } from "./suggestions";
 
-/*
- * Read-only HTTP surface for the normal-chat onboarding layer (ONBOARDING ONB-V1).
- *
- * - `/suggestions` — the adaptive empty-state chips, derived from the soul resource set (a candidate
- *   is omitted once the resource it would create already exists). No persistence.
- * - `/checklist` — the "Getting started" card: the core build-block steps (status auto-derived from
- *   real soul/knowledge state) plus deterministic "recommended next" items, plus the user's
- *   dismissed flag (persisted in the user-scoped KV store, namespace `onboarding`, key `checklist`).
- *   Registered only when a KvService is wired so the suggestions route stays dependency-light.
- *
- * Non-blocking by design: the chat landing surface renders whatever these return.
- */
+/* ONB-V1 read-only routes; checklist dismissal lives in user KV `onboarding/checklist`. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -29,7 +18,7 @@ const KV_KEY = "checklist";
 interface OnboardingDeps {
   /** Cheap "any active knowledge page?" check for the knowledge step (absent → treated as none). */
   hasAnyKnowledgePage?: () => Promise<boolean>;
-  /** User-scoped store for the dismissed flag; the checklist route is registered only when present. */
+  /** User-scoped dismissed flag store; checklist route registers only when present. */
   kvService?: KvService;
   /** Powers LLM personalization; absent → static catalog/rules fallback. */
   llmService?: LlmService;

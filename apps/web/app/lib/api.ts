@@ -1,9 +1,4 @@
-/*
- * Read-only client for the resource API. React/Remix-free so it is unit-testable by mocking the
- * global `fetch`. Auth is cookie-first (`credentials: "include"`) with an optional dev bearer token
- * from `VITE_API_TOKEN`. Every non-2xx response throws an `ApiError` carrying the HTTP status so
- * routes can branch on 401 (auth) vs 404 (not found).
- */
+/* Cookie-first resource API client; non-2xx responses throw `ApiError` with status. */
 
 export const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:4010";
 

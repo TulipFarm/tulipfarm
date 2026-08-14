@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Queryable } from "../db";
 
-/** Mapping row: one external chat thread (provider thread, DM) ↔ one TulipFarm conversation. */
 export interface IntegrationConversation {
   integrationSlug: string;
   externalKey: string;
@@ -9,7 +8,6 @@ export interface IntegrationConversation {
   userId: string;
 }
 
-/** Persisted webhook-kind ingress record; its creation raises an integration.event domain event. */
 export interface IntegrationEvent {
   id: string;
   integrationSlug: string;
@@ -79,18 +77,16 @@ export class IntegrationEventsRepo {
   }
 }
 
-/** Rows older than this are eligible for opportunistic pruning (providers stop retrying long before). */
 const DELIVERY_RETENTION = "7 days";
-/** Prune on roughly 1% of recordDelivery calls — no dedicated scheduler needed for V1. */
 const PRUNE_PROBABILITY = 0.01;
 
 export class IngressDeliveriesRepo {
   constructor(private readonly db: Queryable) {}
 
   /**
-   * Record a delivery attempt. Returns true when this is the FIRST time the key was seen
-   * (caller should process) and false on a duplicate (caller should ack + skip). Atomic under
-   * concurrent retries via ON CONFLICT DO NOTHING.
+   * Record a delivery attempt. Returns true when this is the FIRST time the key was seen (caller
+   * should process) and false on a duplicate (caller should ack + skip). Atomic under concurrent
+   * retries via ON CONFLICT DO NOTHING.
    */
   async recordDelivery(integrationSlug: string, dedupKey: string): Promise<boolean> {
     const r = await this.db.query(

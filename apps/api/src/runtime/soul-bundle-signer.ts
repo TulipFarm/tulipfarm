@@ -19,11 +19,7 @@ export interface SoulBundleKeyStore {
   list(): Promise<readonly { readonly key: string }[]>;
   get(key: string): Promise<string>;
   set(key: string, plaintext: string, type: "auto-generated"): Promise<void>;
-  /**
-   * Required, not optional: provisioning generates a keypair whose loss orphans every signed
-   * bundle, so a composition that forgets mutual exclusion must fail to compile rather than
-   * silently race two replicas into divergent keys.
-   */
+  /** Required: losing this keypair orphans every signed bundle. */
   withProvisioningLock<T>(operation: () => Promise<T>): Promise<T>;
 }
 
@@ -129,16 +125,12 @@ async function ensureBundleKeyPairUnlocked(secrets: SoulBundleKeyStore): Promise
 async function ensureBundleKeyPair(secrets: SoulBundleKeyStore): Promise<string> {
   return secrets.withProvisioningLock(async () => {
     await ensureBundleKeyPairUnlocked(secrets);
-    // Read inside the critical section so the signer is built from exactly the material that was
-    // just validated, rather than from whatever a concurrent writer left behind afterwards.
+    // Read inside the critical section so validation and signer material match.
     return secrets.get(SOUL_BUNDLE_PRIVATE_KEY);
   });
 }
 
-/**
- * Resolve the API-only private signing key. The paired public key is stored separately so workers
- * can verify bundles without holding material that can forge them.
- */
+/** Resolves the API-only private signing key; workers receive only public verification keys. */
 export async function resolveSoulBundleSigner(secrets: SoulBundleKeyStore): Promise<BundleSigner> {
   return createEd25519BundleSigner(SOUL_BUNDLE_SIGNING_KEY_ID, await ensureBundleKeyPair(secrets));
 }

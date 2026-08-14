@@ -32,9 +32,7 @@ export interface AuthorityLayerResolverOptions {
   readonly principals: PrincipalRepo;
   readonly roles: RoleRepo;
   /**
-   * Optional. When present, a principal's grants include the Roles held by every unexpired group
-   * it belongs to. When absent, group-held Roles contribute nothing — fail closed: a resolver
-   * without a group repo can only ever grant less, never more.
+   * Optional group expansion fails closed: without a group repo, group-held Roles grant nothing.
    */
   readonly groups?: GroupRepo;
   now?(): Date;
@@ -89,20 +87,7 @@ function principalFromRecord(record: PrincipalRecord): Principal {
   };
 }
 
-/**
- * Why a layer resolved to no grants. Six structurally different situations produce the identical
- * empty layer, and only one of them ("holds roles, they grant nothing") is unremarkable. The rest
- * are faults an operator needs to see: a principal that is not there, one that cannot authenticate,
- * a repo read that threw, or — the dangerous one — a Role assignment naming a Role the durable
- * store does not have, or one the principal is not assignable to.
- *
- * That last pair is the reason this type exists. The resolver fails the *whole* layer closed on a
- * single bad assignment, which is correct: a partially-understood role set must not be treated as
- * the full one. But the observable result is a principal who silently holds nothing, reported by
- * the admin surfaces as "holds nothing, this is expected" — telling the operator all is well at the
- * exact moment of lockout. The reason travels alongside the layer so the surfaces can say which
- * of the six it was. It never changes what is granted.
- */
+/** Empty-layer reasons expose faults, especially missing or unassignable Roles. */
 export type LayerEmptyReason =
   | "no-such-principal"
   | "not-authenticatable"
@@ -113,15 +98,9 @@ export type LayerEmptyReason =
   | "role-not-assignable"
   | "grant-collection-failed";
 
-/**
- * A resolved layer plus, when it came out empty, why. `resolvePrincipalLayer` discards the reason
- * so the gate path is unchanged; diagnostic surfaces call {@link
- * LiveAuthorityLayerResolver.diagnosePrincipalLayer} instead.
- */
 export interface DiagnosedAuthorityLayer {
   readonly layer: AuthorityLayer;
   readonly emptyReason?: LayerEmptyReason;
-  /** Role ids named by an assignment that the durable store could not honour. */
   readonly unresolvedRoleIds?: readonly string[];
 }
 
@@ -145,11 +124,7 @@ export function agentAuthorityPrincipal(businessId: string, agentId: string): Au
   return { id: agentId, businessId, kind: "agent" };
 }
 
-/**
- * Resolves live Role assignments for principals into the `AuthorityLayer` shape the Stage 4 gate
- * will consume. It only reads durable principal/role rows; Soul artifact compilation into those
- * rows stays owned by the shared compiler path.
- */
+/** Resolve durable principal and role rows only; Soul compilation stays on the shared path. */
 export class LiveAuthorityLayerResolver {
   private readonly now: () => Date;
 
@@ -164,10 +139,7 @@ export class LiveAuthorityLayerResolver {
     return (await this.diagnosePrincipalLayer(name, principal)).layer;
   }
 
-  /**
-   * The same resolution, carrying why an empty layer emptied. Every `return` below is byte-for-byte
-   * the layer `resolvePrincipalLayer` used to return; only the accompanying reason is new.
-   */
+  /** Diagnostic resolution keeps empty-layer reasons without changing gate layers. */
   async diagnosePrincipalLayer(
     name: string,
     principal: AuthorityPrincipal
@@ -233,10 +205,8 @@ export class LiveAuthorityLayerResolver {
   }
 
   /**
-   * The Roles a principal effectively holds: its direct assignments unioned with the Roles held by
-   * every unexpired group it is an unexpired member of. Fails closed at every ambiguity — an
-   * expired group, an expired membership, or an expired group-Role holding contributes nothing,
-   * and duplicates collapse so a Role reached two ways is resolved once.
+   * Effective Roles are direct plus unexpired group-derived holdings; ambiguous edges grant
+   * nothing.
    */
   private async collectAssignedRoleIds(
     principal: AuthorityPrincipal,

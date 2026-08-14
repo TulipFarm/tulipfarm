@@ -1,12 +1,4 @@
-/**
- * Secret redaction for text that is about to cross a log, error, Artifact, sandbox, or audit
- * boundary (SPEC §13, §24). These helpers are the last line of defence, not the first: the Secret
- * Broker already keeps plaintext inside a single callback. They exist because callee-produced
- * strings — upstream error messages, stack frames, Tool output — can carry a Credential that the
- * caller never chose to reveal.
- *
- * Everything here is pure. Nothing is logged, stored, or reported.
- */
+/** Redacts secrets before logs/errors/artifacts/sandbox/audit boundaries; pure last-line defense. */
 
 export const REDACTED = "[redacted]";
 
@@ -24,11 +16,7 @@ export function redactSecrets(text: string, secrets: Iterable<string>): string {
   return output;
 }
 
-/**
- * True when any secret appears in `value` — inside a string, an array element, or an object key or
- * property, at any depth. Non-string scalars never match: a secret is a string, and coercing
- * numbers or symbols would only produce false positives.
- */
+/** Recursively detects secrets in strings, arrays, object keys, and properties; scalars do not coerce. */
 export function containsSecret(value: unknown, secrets: Iterable<string>): boolean {
   const needles = usableSecrets(secrets);
   if (needles.length === 0) {
@@ -70,12 +58,7 @@ export function containsSecret(value: unknown, secrets: Iterable<string>): boole
   return visit(value);
 }
 
-/**
- * Returns a redacted copy of a thrown value. The copy keeps the original prototype so `instanceof`
- * checks and typed-error handling still work; the original object is left untouched because the
- * caller may hold other references to it. Non-`Error` throws become an `Error` with a redacted
- * message.
- */
+/** Returns a redacted copy of a throw while preserving Error prototypes and the original object. */
 export function redactError(thrown: unknown, secrets: Iterable<string>): Error {
   if (!(thrown instanceof Error)) {
     return new Error(redactSecrets(String(thrown), secrets));

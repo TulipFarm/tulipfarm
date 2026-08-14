@@ -32,39 +32,16 @@ import {
 import type { EffortInferencePort } from "./effort-inference";
 import type { LlmModelResolution } from "./llm";
 
-/**
- * `ModelPort` over the Soul's configured providers (plan §2).
- *
- * The Agent loop owns the Tool loop, so the Tools declared here deliberately have **no** `execute`:
- * the provider stops at the tool call and hands it back, and dispatch goes through the Tool Broker
- * where authorization and effects belong. Letting the SDK run a Tool would put an effect path
- * beside the broker, which is exactly the second authority the architecture forbids.
- *
- * Streaming is the primary path because a participant should see text as it is produced; `invoke`
- * is the same call drained to its result, so a caller that only wants the outcome behaves
- * identically.
- */
+/** ModelPort over Soul providers; SDK Tools never execute, so Broker remains sole effect path. */
 
 export interface LlmModelPortOptions {
-  /**
-   * The provider for a resolved selector. Asked per call rather than held, so a Soul that
-   * republishes its providers mid-turn is honoured on the next iteration instead of on restart.
-   * Requirements travel with the request because routing must re-check them per call: a turn that
-   * gains a Tool halfway through is a different question of the model than the one that started it.
-   */
+  /** Resolve per call; requirements can change between loop iterations. */
   model(
     selector: string,
     requirements: ModelRequirements,
     inference?: RunEventEffortInference
   ): Promise<LlmModelResolution>;
-  /**
-   * Resolves `auto` from the prompt instead of from the deployment's declared default.
-   *
-   * Optional: without it `auto` keeps its non-adaptive meaning, which is a correct answer, just a
-   * less well-aimed one. Consulted **once per port instance** — Chat builds one port per Turn
-   * attempt, so a turn that makes six model calls through its Tool loop pays for at most one
-   * inference, and the rung it opened with is the rung it finishes on.
-   */
+  /** Optional `auto` effort inference; consulted once per Turn-attempt port instance. */
   readonly effort?: EffortInferencePort;
   /**
    * Optional because tests and non-Run callers may use this port, but Chat wires it from the
@@ -93,34 +70,19 @@ export interface ModelCallReceipt {
   readonly modelId: string;
   /** What the participant asked for — including `auto`, which is a request, not an outcome. */
   readonly effortPreset?: EffortPreset;
-  /**
-   * The rung the call actually ran at, when it can be named.
-   *
-   * Without this, a client that wants the *next* rung up from an `auto` answer has to guess which
-   * rung `auto` meant, and guessing wrong skips a rung. Absent when a preset maps to an authored
-   * ModelProfile that is not itself a rung, where no honest rung name exists.
-   */
+  /** Actual rung, when knowable, so clients can escalate `auto` without guessing. */
   readonly effortApplied?: EffortRung;
   readonly modelCallLatencyMs: number;
 }
 
-/**
- * Reads the receipt for the most recent model call a port served. Chat builds one port per Turn
- * attempt, so the receipt is scoped by that instance rather than by a process-wide registry: a
- * registry keyed by Run would outlive the turns that wrote it, and a Turn that parks on an approval
- * and resumes would attach the pre-approval call's receipt to the reply that followed it.
- */
+/** Latest-call receipt is scoped to this Turn-attempt port, not a process registry. */
 export interface ModelCallReceiptSource {
   latestModelCallReceipt(): ModelCallReceipt | undefined;
 }
 
 export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   private receipt: ModelCallReceipt | undefined;
-  /**
-   * The effort decision for this attempt, once made. Wrapped rather than stored bare because
-   * "inferred nothing" is a real outcome — a turn with no user text to score must not re-ask on
-   * every call in its Tool loop.
-   */
+  /** Cached effort decision; `undefined` is a real inferred result and must not re-run. */
   private effort: { readonly value: RunEventEffortInference | undefined } | undefined;
 
   constructor(private readonly options: LlmModelPortOptions) {}
@@ -162,16 +124,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
     }
   }
 
-  /**
-   * The rung this turn should run at, when it asked for `auto`.
-   *
-   * Only `auto` is inferred: a participant who picked a rung gets that rung, and a ModelProfile ref
-   * or a raw model id names its own answer. Scored from the latest **user** message rather than the
-   * whole transcript — otherwise every turn late in a conversation would score as long, and effort
-   * would climb with conversation age instead of with difficulty. The cost is that a terse
-   * follow-up in a hard thread scores low; the recorded score and signals are what will let that be
-   * measured and fixed.
-   */
+  /** Infer only `auto`, from the latest user message so effort tracks difficulty, not age. */
   private async inferEffort(
     request: ModelInvocationRequest,
     requirements: ModelRequirements
@@ -231,11 +184,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
       receiptFromRouting(resolution.routing, Math.max(0, Math.round(finishedAt - startedAt))) ??
       this.receipt;
 
-    // A stream that ended cleanly (no `error` part above) but produced no tool calls, no text, and
-    // no usage is not a real completion — the provider call never actually ran (`ai@7`'s internal
-    // step pipeline can reach `finish` this way on certain setup failures without ever emitting an
-    // `error` part). Surfacing it as `completed` with blank text sends the loop into its
-    // silent-retry repair budget instead of the real diagnosis.
+    // ai@7 can emit `finish` without running the provider; treat empty calls/text/usage as a fault.
     if (
       calls.length === 0 &&
       text.length === 0 &&
@@ -286,13 +235,7 @@ export class LlmModelPort implements ModelPort, ModelCallReceiptSource {
   }
 }
 
-/**
- * The newest thing the participant actually asked, or `undefined` when the transcript holds none.
- *
- * System instructions are excluded because they are the same on every turn, and assistant and tool
- * messages because scoring the model's own output would let a verbose answer escalate the next
- * turn's effort by itself.
- */
+/** Latest user text only; never let system text or model output escalate effort. */
 function latestUserPrompt(messages: readonly ModelMessage[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -308,14 +251,7 @@ function pricingModelId(routing: RunEventPayloads["model.routed"]): string | und
   return undefined;
 }
 
-/**
- * The rung a selected route actually ran at, or `undefined` when it ran at a ModelProfile that is
- * not one.
- *
- * An inferred route names its own rung, because the router chose it before any profile was
- * resolved — a deployment that points `fast` at a custom ModelProfile would otherwise lose the
- * answer to a name check it was never going to pass.
- */
+/** Actual rung, including inferred routes that name the rung before profile resolution. */
 function appliedRung(
   routing: Extract<RunEventPayloads["model.routed"], { outcome: "selected" }>
 ): EffortRung | undefined {
@@ -329,20 +265,14 @@ function receiptFromRouting(
 ): ModelCallReceipt | undefined {
   const modelId = pricingModelId(routing);
   if (modelId === undefined) return undefined;
-  // An inferred rung is still an effort selection, and the selector it reports is still what the
-  // participant asked for — `auto`. Reading it as anything else would tell the client the
-  // participant picked the rung the router picked, and "Try harder" would then escalate from a
-  // choice they never made.
+  // Preserve `auto` as the participant's selector; the inferred rung is not what they picked.
   const byEffort =
     routing.outcome === "selected" &&
     (routing.resolution === "effort_preset" || routing.resolution === "effort_inferred")
       ? routing
       : undefined;
   const effortPreset = byEffort === undefined ? undefined : asEffortPreset(byEffort.selector);
-  // `deriveModelProfiles` ids a preset's head profile by the preset's own name, so the resolved
-  // profile id *is* the rung whenever the deployment routes on derived profiles. When a preset
-  // points at a non-rung ModelProfile instead, the id names that profile and no rung is claimed —
-  // except for an inferred route, where the router named the rung itself.
+  // Claim a rung only when the resolved profile or inferred route honestly names one.
   const effortApplied = byEffort === undefined ? undefined : appliedRung(byEffort);
   return {
     modelId,
@@ -352,12 +282,7 @@ function receiptFromRouting(
   };
 }
 
-/**
- * A model answer as the loop reads it.
- *
- * Tool calls win over text when both are present: a provider that narrates before calling has not
- * answered yet, and treating that narration as the answer would end the turn one step early.
- */
+/** Tool calls outrank text; narration before a call is not the final answer. */
 function toOutput(
   calls: Awaited<ReturnType<typeof streamText>["toolCalls"]>,
   text: string
@@ -375,20 +300,7 @@ function toOutput(
   return { kind: "text", text };
 }
 
-/**
- * The loop's flat transcript as a provider prompt.
- *
- * System messages are separated out: the SDK refuses them inside `messages` and takes them through
- * `instructions`, which is also the honest shape — an instruction is not a turn in the
- * conversation, and their order relative to the transcript carries no meaning.
- *
- * An `assistant` message that records the loop's own proposed tool calls (see
- * `assistantToolCallMessage` in the loop) is rendered as real `tool-call` parts, and the `tool`
- * messages answering them are rendered as `tool-result` parts on the toolCallId they name. Without
- * this the result would arrive as an unattributed user message and the provider — and the model
- * reading it — would have no way to tell it is feedback on the model's own last action, which is
- * why a rejected call used to repeat forever instead of being corrected.
- */
+/** Convert loop transcript to SDK prompt; tool results stay attributed to their tool calls. */
 function splitPrompt(transcript: readonly { role: string; content: string }[]): {
   instructions: SystemModelMessage[];
   messages: SdkMessage[];
@@ -451,7 +363,7 @@ function splitPrompt(transcript: readonly { role: string; content: string }[]): 
   return { instructions, messages };
 }
 
-/** Recognizes the loop's `assistantToolCallMessage` encoding; any other assistant text passes through. */
+/** Recognizes loop-encoded Tool calls; other assistant text passes through. */
 function parseToolCalls(
   content: string
 ): readonly { callId: string; name: string; arguments: unknown }[] | undefined {

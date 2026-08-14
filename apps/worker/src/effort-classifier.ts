@@ -1,42 +1,20 @@
 import type { EffortClassifierPort, ModelRequirements } from "@tulipfarm/agent-runtime";
 import { generateText, type LanguageModel } from "ai";
 
-/**
- * Stage 2 of the effort router: the quick-tier model, asked for one word.
- *
- * It lives in this app because it needs a provider and a credential, and the Worker is the only
- * process that holds them. The decision itself stays in `@tulipfarm/agent-runtime` — this is the
- * hand that makes the call, not the head that reads the answer.
- *
- * The classifier always runs at the **weakest** configured rung. Paying a strong model to decide
- * which model to pay would defeat the funnel entirely.
- */
+/** Stage 2 effort routing: ask the weakest configured model for one label. */
 
 /** Resolves a selector to an executable model. Satisfied by `SoulLlm.model`. */
 export interface EffortClassifierModelSource {
   model(selector: string, requirements: ModelRequirements): Promise<LanguageModel>;
 }
 
-/**
- * The rung the classifier itself runs at.
- *
- * A rung, never `auto` — routing `auto` here would ask the router to route the router.
- */
+/** A concrete rung, never `auto`, so the router does not route itself. */
 const CLASSIFIER_RUNG = "fast";
 
-/**
- * One word is one to three tokens; the headroom absorbs a leading newline or a stray quote without
- * paying for a sentence. A model that wants to explain itself is cut off, and an answer that is not
- * a bare label resolves to the middle rung — which is the correct reading of "it did not answer".
- */
+/** Allows a label plus tiny formatting noise, but cuts off explanations. */
 const CLASSIFIER_MAX_OUTPUT_TOKENS = 8;
 
-/**
- * How much of the prompt the classifier is shown.
- *
- * Length is already scored by the heuristic, so sending a 50,000-character brief in full would buy
- * nothing and bill for it. The opening is what carries the intent.
- */
+/** The heuristic scores length already; send only the opening intent. */
 const CLASSIFIER_PROMPT_CHARS = 2_000;
 
 /** Bounded so a stalled provider costs a few seconds, not the turn. */
@@ -53,11 +31,7 @@ const CLASSIFIER_SYSTEM_PROMPT = [
 
 export interface EffortClassifierOptions {
   readonly models: EffortClassifierModelSource;
-  /**
-   * Governance the classifier inherits from the turn it is routing — residency, retention,
-   * training. The classifier sends the participant's own words to a provider, so it must be held
-   * to exactly the constraints the turn itself is held to, never to a laxer default.
-   */
+  /** Same residency/retention/training constraints as the turn being routed. */
   readonly requirements: ModelRequirements;
   readonly timeoutMs?: number;
 }
@@ -78,13 +52,7 @@ export function createEffortClassifier(options: EffortClassifierOptions): Effort
   };
 }
 
-/**
- * What the classifier's own call needs from a model — nothing beyond text.
- *
- * Derived from the turn's requirements so governance carries over, but with capability stripped:
- * the classifier calls no Tool and returns no structured output, and demanding either would deny
- * the weak profile that is the whole point of running here.
- */
+/** Carries governance forward while stripping Tool and structured-output needs. */
 export function classifierRequirements(turn: ModelRequirements): ModelRequirements {
   return {
     ...turn,

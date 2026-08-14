@@ -14,12 +14,7 @@ const EMBEDDING_TABLE_ORIGINS = [
   { table: "memory_chunks", dimColumn: "embedding_dim", createdAt: 35 },
 ] as const;
 
-/**
- * v45 indexes every embedding column, so a fixture that starts mid-history has to stand in for the
- * embedding tables that already existed at its cutoff. Only those: the later ones are created by
- * the sweep itself, and pre-creating them would shadow their real definitions behind
- * `CREATE TABLE IF NOT EXISTS` and quietly test the wrong schema.
- */
+/** Mid-history fixtures need embedding tables before v45 adds their indexes. */
 async function seedEmbeddingTablesAsOf(db: PGlite, version: number): Promise<void> {
   await db.query("CREATE EXTENSION IF NOT EXISTS vector");
   for (const origin of EMBEDDING_TABLE_ORIGINS.filter((o) => o.createdAt <= version)) {
@@ -43,8 +38,7 @@ describe("runPgMigrations", () => {
   });
 
   it("repairs Surface storage for databases that already recorded schema version 14", async () => {
-    // A stand-in for a database that stopped at 14, holding only what the later migrations touch.
-    // v27's `knowledge_source_chunks.embedding` needs pgvector, normally created by baseline (v1).
+    // Stand-in for a database stopped at v14; v27 needs pgvector.
     await db.query("CREATE EXTENSION IF NOT EXISTS vector");
     await db.query("CREATE TABLE conversations (id uuid PRIMARY KEY)");
     await seedEmbeddingTablesAsOf(db, 14);
@@ -62,8 +56,7 @@ describe("runPgMigrations", () => {
       user_id          uuid NOT NULL REFERENCES users(id),
       PRIMARY KEY (provider, external_subject)
     )`);
-    // Minimal stand-in for the real `integrations` table (created at v11, well before this
-    // database's v14 cutoff) — v26's `soul_repositories` FK needs it to exist.
+    // v26's soul_repositories FK needs a stand-in integrations table.
     await db.query(`CREATE TABLE integrations (
       business_id text NOT NULL,
       id          text NOT NULL,
@@ -101,8 +94,7 @@ describe("runPgMigrations", () => {
     });
 
     it("keys a Turn completion by attempt, not by Turn", async () => {
-      // A Worker killed mid-turn is retried under a new attempt. Keyed by Turn alone, that retry
-      // would collide with the dead attempt's row and the turn could never complete.
+      // Retried Worker attempts must not collide on Turn-only keys.
       const key = await db.query<{ column_name: string }>(`SELECT key_column.column_name
         FROM information_schema.table_constraints AS constraints
         JOIN information_schema.key_column_usage AS key_column
@@ -125,8 +117,7 @@ describe("runPgMigrations", () => {
       await insertUser(first, "first@example.com");
       await insertUser(second, "second@example.com");
 
-      // Channels bind through `external_identity_mappings` like every other external subject, with
-      // the integration slug as the provider — `verified_via` is what migration 17 adds.
+      // Channels bind through external_identity_mappings with provider = integration slug.
       const link = (userId: string) =>
         db.query(
           `INSERT INTO external_identity_mappings
@@ -135,8 +126,7 @@ describe("runPgMigrations", () => {
           [userId]
         );
       await link(first);
-      // An inbound Slack message resolves to exactly one person or to nobody — never to whichever
-      // row a query happened to return first.
+      // Inbound Slack resolves to exactly one person or none, never an arbitrary first row.
       await expect(link(second)).rejects.toThrow();
     });
 
@@ -412,7 +402,7 @@ describe("runPgMigrations", () => {
 
   describe("migration 21", () => {
     it("backfills the Run source from the formerly overloaded Routine id", async () => {
-      // v27's `knowledge_source_chunks.embedding` needs pgvector, normally created by baseline (v1).
+      // v27 needs pgvector for `knowledge_source_chunks.embedding`; baseline v1 usually creates it.
       await db.query("CREATE EXTENSION IF NOT EXISTS vector");
       await db.query(`CREATE TABLE runs (
         id uuid PRIMARY KEY,
@@ -427,9 +417,7 @@ describe("runPgMigrations", () => {
       )`);
       await db.query("INSERT INTO schema_version (id, version) VALUES (true, 20)");
       await seedEmbeddingTablesAsOf(db, 20);
-      // Minimal stand-in for the real `users` table (created well before v20): later migrations
-      // past 21 run in the same sweep and need it to exist with the columns they touch (v25 adds
-      // one, v27 relaxes `password_hash`), even though this test only exercises migration 21.
+      // Later migrations need the real users-table shape, even when testing v21.
       await db.query(`CREATE TABLE users (
         id uuid PRIMARY KEY,
         password_hash text NOT NULL
@@ -456,8 +444,7 @@ describe("runPgMigrations", () => {
   });
 
   describe("migration 32", () => {
-    // Every migration from 32 up runs against these fixtures, so they hold a stand-in for each
-    // baseline table a later migration touches — v42 adds a column to `users`.
+    // Fixtures stand in for every baseline table later migrations touch.
     const seedUsers = () => db.query("CREATE TABLE users (id uuid PRIMARY KEY)");
 
     it("moves GitHub App credentials onto integration.github.* without touching ciphertext", async () => {
@@ -520,11 +507,7 @@ describe("runPgMigrations", () => {
   });
 });
 
-/**
- * Wraps the test database so a test can watch the SQL a run issues, and stand in for events that
- * are otherwise unreachable from a single process — a peer holding the lock, a statement failing
- * mid-migration.
- */
+/** Wraps the DB so tests can observe migration SQL and inject synthetic results. */
 function watch(db: PGlite, intercept?: Intercept) {
   const statements: string[] = [];
   const queryable: Queryable = {
@@ -574,8 +557,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
 
     await runPgMigrations(queryable, undefined, NOOP_LOG);
 
-    // The lock must precede even `CREATE TABLE IF NOT EXISTS schema_version` — that statement is
-    // itself racy between replicas — and outlive the last migration.
+    // The lock must precede even `CREATE TABLE IF NOT EXISTS schema_version`.
     expect(statements[0]).toContain("pg_try_advisory_lock");
     expect(statements.filter((s) => s.includes("pg_try_advisory_lock"))).toHaveLength(1);
     expect(statements.at(-1)).toContain("pg_advisory_unlock");
@@ -622,8 +604,7 @@ describe("runPgMigrations concurrency and atomicity", () => {
   });
 
   it("rolls back every statement of a failed migration, and frees the lock for the retry", async () => {
-    // Fails partway through the baseline, after `resource_sample` itself was created — so passing
-    // this proves the whole migration was undone, not merely the statement that threw.
+    // Passing proves the whole failed migration rolled back.
     const failing: Intercept = (sql) =>
       sql.includes("resource_sample_ts_idx") ? Promise.reject(new Error("disk full")) : undefined;
     const { queryable } = watch(db, failing);

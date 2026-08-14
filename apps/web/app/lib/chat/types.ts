@@ -1,15 +1,11 @@
 /*
- * Hand-written types for the chat SSE wire and the timeline model the reducer folds events into.
- * These mirror the live backend contract (see the chat route): the wire `ChatEvent` union is what
- * the SSE parser yields, and the timeline (`ChatMessage` / `TimelinePart` / `ChatState`) is the
- * immutable shape components render. Several event kinds are CONTRACT-ONLY (reasoning/plan/task/
- * sources/agent-handoff/surface) — typed and reduced now so renderers can light up when the backend
- * starts emitting them. No Zod: validate by hand at the parse boundary.
+ * Hand-written types for the chat SSE wire and the timeline model the reducer folds events
+ * into. These mirror the live backend contract (see the chat route): the wire `ChatEvent` union
+ * is what the SSE parser yields, and the timeline (`ChatMessage` / `TimelinePart` /
+ * `ChatState`) is the immutable shape components render.
  */
 
 import type { EffortPreset, EffortRung, RunEventToolPreview } from "@tulipfarm/schema";
-
-// ----- Wire: SSE events ------------------------------------------------------------------------
 
 export type ChatEventType =
   | "text"
@@ -36,11 +32,8 @@ export type ToolTier = "system" | "platform" | "integration";
 
 /**
  * The bounded, redaction-aware view of a Tool's arguments or output that the wire carries.
- *
- * `json` is already redacted and already truncated when it arrives; the client never un-redacts it.
- * `redactedPaths` names each withheld leaf so the UI can show an explicit gap instead of a hole it
- * cannot explain, and `bytes` is the size of the original so "truncated" can say how much is
- * missing. The full value is fetched on demand, never streamed.
+ * `json` is already redacted and already truncated when it arrives; the client never un-redacts
+ * it.
  */
 export type ToolPreview = RunEventToolPreview;
 
@@ -60,10 +53,8 @@ export type ToolMeta = {
 };
 
 export type PlanStep = { id: string; label: string; status: StepStatus };
-// `ref` is the inline citation number the agent wrote (`[ref]`); it ties a source to its `[n]` marker.
 export type SourceRef = { id?: string; title?: string; url?: string; ref?: number; path?: string };
 
-// Discriminated union over every event the wire can carry; `data` is typed per `type`.
 export type ChatEvent =
   | { type: "text"; data: { delta: string } }
   | { type: "reasoning"; data: { delta: string } }
@@ -94,8 +85,6 @@ export type ChatEvent =
         toolCallId: string;
         toolName?: string;
         args?: unknown;
-        // Absent when the Run event stream carries no deadline for the wait; the card then shows no
-        // countdown rather than a fabricated one.
         expiresAt?: string;
       };
     }
@@ -111,24 +100,16 @@ export type ChatEvent =
       type: "surface";
       data: {
         artifactId: string;
-        // Present when the caller already has the full Artifact (e.g. after an interaction);
-        // absent on the live `surface.emitted` wire event, which names only the id — the renderer
-        // fetches the rest itself.
         artifact?: SurfaceArtifact;
         actionHandles?: Readonly<Record<string, string>>;
         resolvedView?: ResolvedSurfaceViewNode;
       };
     }
-  // Imperative agent→client action (navigate, …). Executed by the chat hook, not rendered as a part.
   | { type: "client-action"; data: { action: string; to?: string; reason?: string | null } }
-  // `guard` is withheld from a participant on purpose — naming the guard that refused teaches a
-  // reader what to write around — so it is optional here and absent on the live wire.
   | {
       type: "guardrail_block";
       data: { stage: "input" | "output"; guard?: string; reason: string; message?: string };
     }
-  // `messageId` is the persisted reply the turn produced; the turn's own finish event names it, so a
-  // reply can be given feedback without a separate header.
   | {
       type: "finish";
       data: {
@@ -139,10 +120,7 @@ export type ChatEvent =
     }
   | { type: "error"; data: { message: string } };
 
-// Raw output of the frame parser, before mapping to a typed `ChatEvent`.
 export type ParsedFrame = { seq: number; type: string; data: unknown };
-
-// ----- Request shape knobs ---------------------------------------------------------------------
 
 export type Autonomy = "full" | "supervised" | "approval-required" | "manual";
 export type ChatModelSelector = EffortPreset;
@@ -151,10 +129,8 @@ export type ChatTurnOptions = {
   model?: ChatModelSelector;
   autonomy?: Autonomy;
   agentId?: string;
-  // Per-turn `/skill` + `#resource` tags from the composer (ephemeral, eagerly injected server-side).
   skills?: string[];
   resources?: string[];
-  // Per-turn `~knowledge` page pins (pageIds) — full page content injected server-side this turn.
   knowledgePages?: string[];
 };
 
@@ -162,8 +138,6 @@ export type ChatTurnSource = {
   text: string;
   options?: ChatTurnOptions;
 };
-
-// ----- Timeline model --------------------------------------------------------------------------
 
 export type Role = "user" | "assistant";
 export type ToolStatus = "running" | "done";
@@ -176,16 +150,11 @@ export type ApprovalState = {
 
 export type ModelReceipt = {
   modelId: string;
-  /** What was asked for. `auto` means the deployment chose — see `effortApplied` for what it chose. */
   effortPreset?: EffortPreset;
-  /** The rung the call actually ran at, when the backend could name one. */
   effortApplied?: EffortRung;
   modelCallLatencyMs: number;
 };
 
-// A renderable segment of one message. The reducer appends/merges these as events arrive; order is
-// first-seen and stable. Tool parts carry an optional `approval` so the UI can distinguish a denied
-// approval from a genuine tool crash via `approval.status`, not the result payload.
 export type TimelinePart =
   | { kind: "text"; text: string }
   | {
@@ -211,8 +180,6 @@ export type TimelinePart =
   | {
       kind: "surface";
       artifactId: string;
-      // Absent until the live fetch (triggered by the missing `artifact`) resolves it; a restored
-      // conversation always has it, since the persisted `surface` tool-result part carries one.
       revision?: number;
       artifact?: SurfaceArtifact;
       actionHandles?: Readonly<Record<string, string>>;
@@ -231,16 +198,10 @@ export type ChatMessage = {
   id: string;
   role: Role;
   parts: TimelinePart[];
-  // True once a terminal `finish` has been folded in; a sealed message takes no more deltas.
   sealed: boolean;
-  // The persisted message id (assistant turns): from the X-Message-Id header live, or `_id` on
-  // restore. Distinct from the React-key `id` (kept stable to avoid a remount). Feedback targets it.
   serverId?: string;
-  // The caller's current thumbs vote on this reply, if any (persisted, see message_feedback).
   feedback?: "up" | "down";
-  // Quiet post-hoc receipt for the model call that produced the reply.
   receipt?: ModelReceipt;
-  // The user turn and per-turn context that produced this message, for user-driven retries.
   sourceTurn?: ChatTurnSource;
 };
 
@@ -248,16 +209,10 @@ export type ChatStatus = "idle" | "submitted" | "streaming" | "error";
 
 export type ChatState = {
   messages: ChatMessage[];
-  // approvalId -> the tool part it targets, so `approval-resolved` can find it in O(1).
   pendingApprovals: Record<string, { toolCallId: string; messageId: string }>;
   status: ChatStatus;
   conversationId?: string;
-  // The Run answering the in-flight turn (X-Run-Id). Stopping the turn cancels this Run, and a
-  // reconnect resumes its event stream by cursor.
   runId?: string;
-  // The agent currently handling the conversation, updated live by `agent-handoff` events so the
-  // header indicator follows transfers. Undefined until the first handoff — callers fall back to the
-  // restored conversation's persisted agent.
   currentAgent?: string;
   error?: string;
 };

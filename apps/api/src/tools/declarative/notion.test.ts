@@ -9,12 +9,6 @@ import { parse as parseYaml } from "yaml";
 import { bundledIntegrationsDir } from "../../soul/integrations/bundled";
 import { buildDeclarativeTools } from "./tools";
 
-/**
- * Notion is the proof that the declarative framework is real: it ships a manifest and an OpenAPI
- * document and no TypeScript, so if these files alone do not yield working Tools, the framework
- * does not work. Reads the shipped files rather than a fixture — a fixture would keep passing
- * after the real manifest broke.
- */
 describe("notion bundled integration", () => {
   let manifest: IntegrationManifest;
   let spec: unknown;
@@ -78,8 +72,6 @@ describe("notion bundled integration", () => {
     expect(mutating.notion_append_page_content).toBe(true);
     expect(mutating.notion_search).toBe(false);
     expect(mutating.notion_read_page).toBe(false);
-    // Notion models this read as a POST; the manifest's explicit `mutating: false` must win over
-    // the method-derived default, or a plain listing would ask the operator for approval.
     expect(mutating.notion_query_database).toBe(false);
   });
 
@@ -96,14 +88,10 @@ describe("notion bundled integration", () => {
     const search = tools.get("notion_search")?.inputSchema as {
       properties: { body?: { properties?: Record<string, unknown> } };
     };
-    // Request bodies nest under `body` so they cannot collide with a path or query parameter of
-    // the same name — which Notion has (`page_id`).
     expect(search.properties.body?.properties).toHaveProperty("query");
   });
 
   it("leaves no $ref in any published schema", () => {
-    // A surviving pointer throws inside `ajv.compile` at registration, which would take down the
-    // whole registry — not just this integration's tools.
     for (const tool of build().tools) {
       expect(JSON.stringify(tool.inputSchema)).not.toContain("$ref");
     }
@@ -117,8 +105,6 @@ describe("notion bundled integration", () => {
       secrets: async () => ({}) as SecretsService,
       http: { send: async () => ({ status: 200, headers: {}, body: {} }) },
     });
-    // `buildDeclarativeTools` compiles whatever it is handed; the connected filter lives in the
-    // syncer. Compiling cleanly here is what lets connect publish without a restart.
     expect(tools).toHaveLength(8);
   });
 });

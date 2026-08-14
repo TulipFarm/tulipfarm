@@ -1,9 +1,9 @@
 import { apiGet, apiWrite } from "./api";
 
 /*
- * Read-only client for the onboarding suggestion layer (ONBOARDING ONB-V1-002/003). The API derives
- * an adaptive chip set from the current soul state; the chat landing surface renders them. Mirrors
- * lib/agents.ts conventions (cookie-first auth via apiGet, ApiError on non-2xx).
+ * Read-only client for the onboarding suggestion layer (ONBOARDING ONB-V1-002/003). The API
+ * derives an adaptive chip set from the current soul state; the chat landing surface renders
+ * them.
  */
 
 export type Suggestion = { id: string; label: string; prompt: string };
@@ -14,9 +14,8 @@ export async function listOnboardingSuggestions(): Promise<Suggestion[]> {
 }
 
 /*
- * "Getting started" checklist (ONB-V1). Steps are the core build blocks with status auto-derived
- * server-side from real soul/knowledge state; recommendations are the deterministic "next" items.
- * Dismissal persists in the user-scoped KV store (the same flag the checklist GET reads back).
+ * Steps are the core build blocks with status auto-derived server-side from real soul/knowledge
+ * state; recommendations are the deterministic "next" items.
  */
 
 export type ChecklistStatus = "done" | "todo" | "coming-soon";

@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import { normalizeMarkdown, parseMarkdownToDoc } from "./markdown";
 
 /*
- * Round-trip corpus. Each sample exercises one markdown construct. We assert (a) IDEMPOTENCY — the
- * first normalize yields the canonical form and normalizing again is a no-op — and (b) the canonical
- * form still carries the construct's defining token. This is robust to the serializer's cosmetic
- * normalization (bullet/emphasis chars, table padding) without pinning exact byte output.
+ * Round-trip corpus asserts idempotent canonical markdown while allowing cosmetic serializer
+ * normalization.
  */
 const SAMPLES: Array<{ name: string; md: string; contains: RegExp }> = [
   { name: "h1", md: "# Title", contains: /^# Title/m },

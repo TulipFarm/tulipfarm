@@ -1,21 +1,6 @@
 import type { Queryable } from "../db";
 
-/**
- * Re-embeds rows that were stored without an embedding.
- *
- * Every write path here degrades the same way: if the embedding provider is unavailable, or fails
- * mid-flight, the row is still written — with a NULL embedding — so ingestion never blocks on the
- * LLM. That is the right call, and `knowledge-index` already retries the *job*. But the job did not
- * fail: it completed and reported success, having stored lexical-only rows. pg-boss therefore has
- * nothing to retry, and those rows stay invisible to every vector query until something unrelated
- * happens to rewrite them. The code comments promised "picked up by a later resync"; no resync
- * existed.
- *
- * This is that resync. It is deliberately a sweep over `embedding IS NULL` rather than a queue of
- * remembered failures, because the failures are not the only source of such rows — a corpus
- * ingested while no provider was configured at all produces them too, and no queue would hold a
- * record of it.
- */
+/** Re-embeds rows missing vectors; provider failure leaves rows for the next sweep. */
 
 export interface BackfillTarget {
   readonly table: string;
@@ -26,12 +11,7 @@ export interface BackfillTarget {
   readonly embeddingColumn: string;
   readonly modelColumn: string;
   readonly dimColumn: string;
-  /**
-   * How this table records which model produced the vector. The knowledge tables store the bare
-   * model name (`index-service.ts` compares `prior.model === activeModel`); both memory stores
-   * write `` `${provider}:${model}` `` (`assertion-store.ts`, `episode-store.ts`). Writing the
-   * wrong form makes a backfilled row look like a foreign-model row to every such comparison.
-   */
+  /** Stores bare embedding model names; analytics infer the provider from Soul config. */
   readonly modelFormat: "bare" | "provider-qualified";
 }
 
@@ -56,9 +36,7 @@ export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
     modelFormat: "bare",
   },
   {
-    // Matches `embeddableText()` in ../memory/embedder.ts: subject and statement are joined because
-    // either alone loses meaning. A different join here would embed memory differently on the
-    // backfill path than on the write path, and the two vectors would not be comparable.
+    // Memory backfill must match write-path embedding text exactly.
     table: "memory_assertions",
     keys: ["business_id", "assertion_id"],
     textSql: "subject || ': ' || statement",
@@ -68,10 +46,7 @@ export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
     modelFormat: "provider-qualified",
   },
   {
-    // `episode-store.ts` embeds `embeddableText("episode", text)`, not the bare column — the
-    // wrapper is applied inside `embedChunk`, one call deeper than the visible `embedChunk(text)`.
-    // Embedding the bare column here would put two incomparable vector populations in one column,
-    // and `recall-index.ts` ranks by `min(distance)` across both.
+    // Episodes embed wrapped text; backfill must match or recall ranks incomparable vectors.
     table: "memory_chunks",
     keys: ["business_id", "chunk_id"],
     textSql: "'episode: ' || text",
@@ -108,16 +83,7 @@ function toVectorLiteral(values: number[]): string {
   return `[${values.join(",")}]`;
 }
 
-/**
- * Embeds the batch in one call, falling back to one call per row if that fails.
- *
- * Without the fallback a single row the provider refuses — an over-length input is the realistic
- * case, and none of these text columns has a length bound — fails `embedMany` for the whole batch.
- * Since the sweep re-selects the same unembedded rows every run, that means: no progress, ever, on
- * that table, the same rejected (and possibly billed) request every five minutes, and every other
- * row behind it starved indefinitely. Retrying per row costs one extra round of calls only on the
- * failure path, and isolates the poison row so the other 99 make progress.
- */
+/** Batch-embeds first, then falls back per row so one bad row does not block the rest. */
 async function embedBatchOrPerRow(
   embeddings: BackfillEmbedder,
   rows: Record<string, unknown>[],
@@ -154,13 +120,7 @@ async function embedBatchOrPerRow(
   return { embeddings: embedded, dimension };
 }
 
-/**
- * A bounded, whole-number batch size.
- *
- * `LIMIT` takes a bind parameter, so this is not an injection guard — it stops a mis-set config
- * value (a float, a negative, or something enormous) from either erroring at the database or
- * pulling an unbounded number of rows into one provider call.
- */
+/** Bounded integer batch size; this protects provider calls, not SQL injection. */
 function safeBatchSize(batchSize: number): number {
   if (!Number.isFinite(batchSize)) return DEFAULT_BACKFILL_BATCH;
   return Math.min(Math.max(Math.trunc(batchSize), 1), MAX_BACKFILL_BATCH);
@@ -194,19 +154,8 @@ async function backfillTable(
   for (const [i, row] of rows.entries()) {
     const vector = out.embeddings[i];
     if (vector === undefined) continue;
-    // Two guards, against two different races, both of which end in a vector that does not
-    // describe the row it sits on:
-    //
-    //   `embedding IS NULL`  -- a concurrent writer filled the row while the provider was
-    //                           working. Its vector came from the current text, this one from a
-    //                           snapshot, so the concurrent writer wins.
-    //   text unchanged       -- the row's *text* was replaced while the embedding stayed NULL.
-    //                           `index-store` upserts `content = EXCLUDED.content, embedding =
-    //                           EXCLUDED.embedding` and writes NULL when the provider is down,
-    //                           which is exactly that shape. Without this guard the new content
-    //                           gets the old content's vector, and because the row is no longer
-    //                           NULL nothing ever revisits it -- the corruption is permanent and
-    //                           silent. The row simply stays NULL and the next sweep retries it.
+    // Two race guards: skip if a concurrent writer filled the vector, or if text changed while
+    // the provider was working. Otherwise stale vectors can become permanent corruption.
     const where = target.keys.map((k, j) => `${k} = $${j + 4}`).join(" AND ");
     const textParam = `$${target.keys.length + 4}`;
     const { rows: updated } = await q.query(
@@ -238,13 +187,7 @@ async function backfillTable(
   return { embedded, remaining: (left[0]?.remaining as number) ?? 0 };
 }
 
-/**
- * Embeds one bounded batch per table. Returns what it did, so the caller can log it and a test can
- * assert on it.
- *
- * Does nothing when no provider is available — the rows are already stored and lexical search still
- * finds them, so there is no value in failing here. The next run picks them up.
- */
+/** Embeds one bounded batch per table and returns counts for logs/tests. */
 export async function backfillEmbeddings(
   q: Queryable,
   embeddings: BackfillEmbedder,
@@ -278,8 +221,7 @@ export async function backfillEmbeddings(
       embedded += result.embedded;
       remaining += result.remaining;
     } catch (error) {
-      // One table must not stop the others: a missing table (a deployment mid-migration) or a
-      // provider that dropped out partway is not a reason to leave the remaining tables unswept.
+      // One failing table must not stop the remaining tables from being swept.
       options.log?.(
         `embedding backfill failed for ${target.table}: ${
           error instanceof Error ? error.message : String(error)
@@ -296,11 +238,7 @@ export async function backfillEmbeddings(
 
 export const EMBEDDING_BACKFILL_QUEUE = "embedding-backfill";
 
-/**
- * Every 5 minutes. Frequent enough that a provider outage costs minutes of missing recall rather
- * than hours; infrequent enough that a permanently-unconfigured deployment is doing one cheap
- * `count(*)`-shaped scan per table, and no LLM calls at all.
- */
+/** Five-minute cadence limits provider-outage recall gaps without constant polling. */
 export const EMBEDDING_BACKFILL_CRON = "*/5 * * * *";
 
 export interface RegisterEmbeddingBackfillDeps {
@@ -313,13 +251,7 @@ export interface RegisterEmbeddingBackfillDeps {
   readonly batchSize?: number;
 }
 
-/**
- * Registers the periodic backfill on pg-boss.
- *
- * `exclusive`, so a slow sweep on a large corpus delays the next one instead of stacking, and — the
- * reason it is on pg-boss at all rather than a timer — exactly one replica runs it. Two replicas
- * embedding the same rows would double the provider spend to reach the same state.
- */
+/** Registers one exclusive periodic sweep, so slow backfills do not overlap. */
 export async function registerEmbeddingBackfill(
   boss: {
     createQueue(name: string, options?: { policy?: string }): Promise<unknown>;
@@ -342,8 +274,7 @@ export async function registerEmbeddingBackfill(
         );
       }
     } catch (error) {
-      // Swallowed rather than rethrown, as with the schedule dispatcher: pg-boss would retry, but
-      // the next run is five minutes away and re-reads the same `embedding IS NULL` rows anyway.
+      // The next scheduled run rereads the same NULL rows, so pg-boss retry adds no value.
       deps.log?.error({ error }, "embedding backfill failed");
     }
   });

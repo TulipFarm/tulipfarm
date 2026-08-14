@@ -1,13 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { candidatesFromResponse, MAX_CANDIDATES_PER_TURN } from "./extractor";
 
-/**
- * Everything here is about one question: what does a *misbehaving* model do to the memory store?
- *
- * The extractor is the only place untrusted model output becomes structured data, so the parsing
- * has to fail into "no candidates" rather than into a malformed candidate that later stages then
- * have to defend against.
- */
+/** Untrusted model output must fail into no candidates, not malformed candidates. */
 
 function response(candidates: unknown): string {
   return JSON.stringify({ candidates });

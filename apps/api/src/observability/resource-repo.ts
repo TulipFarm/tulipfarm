@@ -1,7 +1,6 @@
 import { RESOURCE_SERVICES, type ResourceService } from "@tulipfarm/observability";
 import type { Queryable } from "../db";
 
-/** The windows the dashboard offers, each paired with a bucket that keeps the point count sane. */
 export const RESOURCE_WINDOWS = {
   "1h": { minutes: 60, bucketSeconds: 60 },
   "6h": { minutes: 360, bucketSeconds: 300 },
@@ -31,7 +30,6 @@ export interface ResourceSeries {
 export interface ResourceUsage {
   window: ResourceWindow;
   bucketSeconds: number;
-  /** ISO bucket-start timestamps, ascending. */
   buckets: string[];
   series: ResourceSeries[];
 }
@@ -60,10 +58,7 @@ export class PgResourceRepo implements ResourceRepo {
     const { minutes, bucketSeconds } = RESOURCE_WINDOWS[window];
     const since = new Date(now.getTime() - minutes * 60_000);
 
-    // `date_trunc` only accepts named units, so anything other than a whole minute needs the
     // epoch-floor form. Bucket width is a bound param taken from the table above, never user input.
-    // AVG collapses replicas of one service into one line: summing would report a fleet's combined
-    // CPU as if one process were burning it, and MAX would hide a quiet majority behind one hot pod.
     const result = await this.q.query(
       `SELECT to_timestamp(floor(extract(epoch FROM ts) / $2::float8) * $2::float8) AS bucket,
               service,
@@ -80,10 +75,6 @@ export class PgResourceRepo implements ResourceRepo {
   }
 }
 
-/**
- * Pivots (bucket, service) rows into per-service arrays aligned to a shared bucket axis. Exported
- * for tests: the alignment is the part that silently breaks, not the SQL.
- */
 export function shapeUsage(
   rows: readonly QueryRow[],
   window: ResourceWindow,
@@ -102,8 +93,6 @@ export function shapeUsage(
   const byService = new Map<string, ResourceSeries>();
   for (const row of rows) {
     const name = String(row.service);
-    // A service name outside the known three would be a row from a future or renamed process. The
-    // typed contract only promises the closed set, so it is skipped rather than charted unlabelled.
     if (!RESOURCE_SERVICES.includes(name as ResourceService)) continue;
     let series = byService.get(name);
     if (!series) {
@@ -120,7 +109,6 @@ export function shapeUsage(
     series.rssBytes[i] = toNumber(row.rss_bytes);
   }
 
-  // Stable order so a service does not swap colours between refreshes.
   const series = RESOURCE_SERVICES.map((s) => byService.get(s)).filter(
     (s): s is ResourceSeries => s !== undefined
   );

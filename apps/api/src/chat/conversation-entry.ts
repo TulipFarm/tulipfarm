@@ -9,14 +9,7 @@ import type { ConversationDoc, ConversationRepo } from "./conversations";
 import { buildAndStoreTitle } from "./title";
 import type { ChatBody } from "./turn-helpers";
 
-/**
- * Where a chat turn is addressed, resolved before anything durable is written.
- *
- * The Worker executes the turn but cannot open the conversation it belongs to: a Turn names a
- * conversation, so the conversation has to exist before the Run is minted. This is the whole of what
- * the API still decides about a turn — everything after it (history, prompt, model, tools) is
- * resolved from the Run's own request Artifact, in the process that answers it.
- */
+/** Chat destination resolved before durable writes; the conversation must exist before the Run. */
 
 export interface ResolvedConversation {
   readonly conversation: ConversationDoc;
@@ -50,12 +43,7 @@ export interface ConversationEntryInput {
   readonly log: FastifyBaseLogger;
 }
 
-/**
- * Loads the addressed conversation, or opens one, and applies a `@mention` hand-off.
- *
- * Nothing here is the turn: no Message, no Turn, and no Run exist yet, so a request refused at this
- * point leaves only an empty conversation behind at worst.
- */
+/** Opens or loads the conversation before Message, Turn, or Run creation. */
 export async function resolveConversationEntry(
   deps: ConversationEntryDeps,
   input: ConversationEntryInput
@@ -77,8 +65,8 @@ export async function resolveConversationEntry(
     return { status: 404, error: "conversation not found" };
   }
 
-  // Sticky `@mention` hand-off: a mid-conversation mention re-targets the conversation's Agent until
-  // a different one is mentioned. An unknown name is ignored — the composer only offers real Agents,
+  // Sticky `@mention` hand-off: a mid-conversation mention re-targets the Agent until a
+  // different mention. Unknown names are ignored — the composer only offers real Agents,
   // so persisting one would leave a dangling reference.
   const currentAgentId = found.agentId ?? DEFAULT_ASSISTANT_NAME;
   const mentioned =

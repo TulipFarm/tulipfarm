@@ -19,20 +19,12 @@ import { makePglite } from "../test/pglite";
 import { RoutineApprovalService } from "./routine-approvals";
 import { ApprovalsRepo } from "./runtime-repo";
 
-/**
- * A Routine State's approval, over real SQL.
- *
- * The claim under test is the same one Tool approvals make — the Run parks and the *same* Run is
- * requeued — plus the one this path adds: authority is a **role**, not a person. Both are only
- * provable against the real `runs` / `run_waits` / `approvals` tables, because what makes them true
- * is the kernel's compare-and-swap under the wait's lock, not anything either service remembers.
- */
+/** Proves SQL-backed Routine approval uses role authority and requeues the same Run. */
 
 const SUBJECT = { kind: "user", id: "user-1" } as const;
 const STATE_KEY = "Fanout#0/Approve";
 const APPROVER_ROLE = "admin";
 
-/** The plan the Worker sends: the wait as the run-kernel derived it from the authored State. */
 function waitPlan(
   overrides: Partial<RegisterWaitInput> = {}
 ): Omit<RegisterWaitInput, "businessId" | "runId"> {
@@ -103,7 +95,6 @@ describe("routine approvals as durable waits", () => {
     await db.close();
   });
 
-  /** Mints a Routine Run and drives it to `running`, where a State asks for an approval. */
   async function startRoutineRun(idempotencyKey = "key-1"): Promise<string> {
     const started = await invocations.start({
       source: "manual",
@@ -121,7 +112,6 @@ describe("routine approvals as durable waits", () => {
     return started.runId;
   }
 
-  /** Moves the Run one step, against whatever version it currently carries. */
   async function step(
     runId: string,
     from: "queued" | "claimed" | "running",
@@ -139,13 +129,11 @@ describe("routine approvals as durable waits", () => {
     });
   }
 
-  /** A dispatcher picking the Run up: claimed, then executing. */
   async function reclaim(runId: string): Promise<void> {
     await step(runId, "queued", "claimed");
     await step(runId, "claimed", "running");
   }
 
-  /** What the executor does after opening the approval: park the Run holding no lease. */
   async function park(runId: string): Promise<void> {
     await step(runId, "running", "waiting");
   }

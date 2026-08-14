@@ -1,17 +1,4 @@
-/**
- * Provider-neutral HTTP boundary shared by the maintained Integration adapters (SPEC §15).
- *
- * Adapters describe *what* they want from a provider; the concrete transport (fetch, retries at
- * the socket level, TLS, base URL, auth header shape) lives in the composing application. That
- * keeps provider SDKs out of the control plane and lets every adapter be exercised deterministically
- * without a network.
- *
- * The classification below is the single place where an HTTP status becomes a durability decision.
- * The distinction that matters is `before_dispatch` versus `after_dispatch`: the Tool Broker turns
- * an `after_dispatch` failure on a mutating contract into an *ambiguous* effect that must be
- * reconciled, never into a silent retry. A status we cannot prove was rejected before the provider
- * acted is therefore classified as `after_dispatch` for mutations.
- */
+/** HTTP status maps to durability here; mutating 5xx is ambiguous and must reconcile. */
 
 export type IntegrationHttpMethod = "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
 
@@ -57,10 +44,7 @@ function retryAfterMs(headers: Readonly<Record<string, string>>): number | undef
   return Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : undefined;
 }
 
-/**
- * Map one provider response onto a durability classification, or `null` when it succeeded.
- * `mutating` is the contract's own declaration, not a guess from the HTTP verb.
- */
+/** Classify by contract `mutating`, not guessed HTTP verb. */
 export function classifyHttpFailure(
   response: IntegrationHttpResponse,
   mutating: boolean
@@ -121,11 +105,7 @@ export interface PageResult<T> {
   readonly nextCursor?: string;
 }
 
-/**
- * Walk a cursor-paged provider read under explicit bounds. Exceeding either bound is an error, not
- * a truncation: a caller reasoning over "every matching issue" must never be handed a silent
- * prefix of the answer.
- */
+/** Cursor pagination must throw on bounds instead of returning a silent prefix. */
 export async function collectPages<T>(
   fetchPage: (cursor: string | undefined) => Promise<PageResult<T>>,
   bounds: PaginationBounds

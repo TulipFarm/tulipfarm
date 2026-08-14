@@ -40,8 +40,7 @@ function resolverFor(
   entries: readonly SoulIntegration[],
   tokens = new InMemoryPrincipalProviderTokenRepo()
 ) {
-  // The real loader carries far more than this resolver reads — it reaches for exactly one map —
-  // so a narrow fake keeps the test about credential mode rather than about building a whole Soul.
+  // Narrow fake: credential mode only reads one loader map.
   const soulLoader = {
     integrations: new Map(entries.map((i) => [i.slug, i])),
   } as unknown as SoulLoader;
@@ -67,13 +66,7 @@ describe("providerSupportsPersonalCredential", () => {
     ).toBe(true);
   });
 
-  /**
-   * The Slack shape, and the reason grant type cannot be the discriminator. Slack's "Install to
-   * your workspace" step is a textbook `authorization_code` exchange that returns a workspace *bot*
-   * token carrying bot scopes. Treating the grant as proof of personhood would seal that shared
-   * token under whoever happened to click Install, credit the bot's entire reach to them in the
-   * audit trail, and leave every "acting as the human" Tool in fact acting as the bot.
-   */
+  /** Slack uses a team-level OAuth step; grant type is not a credential-mode discriminator. */
   it("is false for an authorization_code step that does not declare itself personal", () => {
     expect(
       providerSupportsPersonalCredential(
@@ -82,13 +75,7 @@ describe("providerSupportsPersonalCredential", () => {
     ).toBe(false);
   });
 
-  /**
-   * A legacy manifest declares its flow in the deprecated `oauth` block and leaves `auth`
-   * undefined. Reading `manifest.auth` directly would call such a provider service-only and spend
-   * the business credential for a call the caller believes is their own, so the answer must come
-   * through `resolveAuthSteps` — which synthesizes the step but cannot invent a `personal` flag
-   * nobody declared, so the safe answer is still false.
-   */
+  /** Legacy manifests may declare only deprecated `oauth`; classification must not throw. */
   it("reads through resolveAuthSteps rather than manifest.auth, so a legacy block is not misread", () => {
     const legacy = {
       slug: "legacy",
@@ -174,8 +161,7 @@ describe("CredentialResolver", () => {
   });
 
   it("refuses rather than downgrading under user_preferred when the provider can issue one", async () => {
-    // This is the D7 case that matters: "preferred" must not quietly mean "never" for everyone who
-    // has not connected, because that is exactly the silent fallback to the bot.
+    // `preferred` must not silently fall back to the bot for unconnected users.
     const r = resolverFor([oauthProvider]);
     expect(
       (

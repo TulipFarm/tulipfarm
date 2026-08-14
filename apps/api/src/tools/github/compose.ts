@@ -23,13 +23,7 @@ import {
 import type { GitHubInstallationDirectory } from "./installation";
 import { StoreGitHubInstallationDirectory } from "./installation";
 
-/**
- * Composes the chat GitHub Tool family's adapter map and `CredentialDispatcher`. Mirrors
- * `apps/worker/src/routine/adapters.ts`'s `buildGitHubTooling` (a deliberate local copy — an
- * application may not import another application; see `docs/architecture/dependency-rules.md`).
- * Installation-scope-only, same as the Routine path: see `context.ts`'s header for why
- * AccessGrant compilation is deferred.
- */
+/** Compose chat GitHub Tooling locally; apps must not import other apps. */
 
 export interface BuildGitHubToolingOptions {
   readonly businessId: string;
@@ -48,21 +42,9 @@ export interface GitHubTooling {
   readonly installations: GitHubInstallationDirectory;
 }
 
-/**
- * What composition gets back, which is more than the Tools need.
- *
- * `installationToken` is kept off `GitHubTooling` deliberately: that interface is what a Tool is
- * handed, and a Tool has no business minting a raw token — it dispatches through `credentials`,
- * which leases per effect and records one. The entitlement check is the exception because it
- * performs no effect; it is the question asked before deciding whether an effect may happen.
- */
+/** Composition result; raw installation tokens stay off Tool-facing `GitHubTooling`. */
 export interface GitHubToolingBundle extends GitHubTooling {
-  /**
-   * The installation token covering one repository. Scoped rather than installation-blind because
-   * a business may hold several installations, and the entitlement check must ask GitHub over the
-   * credential of the installation that actually covers the repository in question — asking with
-   * another account's token yields a 404 the check would have to read as "could not determine".
-   */
+  /** Token for the installation covering this repository; never use another account. */
   readonly installationToken: (selector: GitHubInstallationSelector) => Promise<string | undefined>;
 }
 
@@ -105,8 +87,7 @@ export function buildGitHubTooling(options: BuildGitHubToolingOptions): GitHubTo
   const secretBroker = new SecretBroker({ provider, authorizer: githubOnlyAuthorizer });
   const credentials = new CredentialDispatcher({
     secrets: secretBroker,
-    // Installation-scope-only for this phase: `GitHubAdapter.authorize` already re-checks scope +
-    // the synthesized grant on every dispatch, so there is no separate reauthorization decision.
+    // Installation-scope-only; `GitHubAdapter.authorize` re-checks scope on dispatch.
     reauthorize: () => true,
   });
 

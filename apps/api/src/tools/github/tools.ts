@@ -21,15 +21,7 @@ import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from 
 import type { GitHubTooling } from "./compose";
 import { type GitHubInstallationSelector, githubInstallationSecretRef } from "./credentials";
 
-/**
- * The chat-facing GitHub Tool family — one `ToolDef` per `GITHUB_TOOL_CONTRACTS` entry, tier
- * `"integration"`. Every call goes through the same effect-ledger idempotency path a Routine's
- * `tool` State uses (`EffectStore.reserve` -> `EffectDispatcher.dispatch`), so a crash mid-call
- * never double-posts a comment or double-merges a PR. Approval gating is the existing chat-turn
- * coarse gate (`RegistryToolDispatcher.needsApproval`, keyed on `ToolDef.mutating`) — this family
- * does not re-derive a Broker-catalog/GuardrailPolicy authorization decision the way a Routine's
- * `tool` State does, per the scope decision in `docs/plans/2026-08-07-github-chat-tool-access.md`.
- */
+/** Chat GitHub Tools use the effect-ledger path; approval stays the chat mutating gate. */
 
 const GITHUB_CATALOG = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
 const GITHUB_INSTALLATION_TARGET = "github.installation";
@@ -119,7 +111,7 @@ const GITHUB_TOOL_SPECS: Record<GitHubToolId, GitHubToolSpec> = {
   },
 };
 
-/** Dresses a digest as an RFC 4122 v4 uuid, same technique run-kernel uses for durable effect ids. */
+/** Dresses a digest as an RFC 4122 v4 uuid for durable effect ids. */
 function derivedId(...parts: readonly string[]): string {
   const digest = createHash("sha256").update(parts.join(":")).digest("hex");
   const version = `4${digest.slice(13, 16)}`;
@@ -143,13 +135,7 @@ function mapDispatchError(error: ToolDispatchError, toolId: GitHubToolId): ToolC
         "which repositories are installed, then retry with one of those."
     );
   }
-  // The `credentialRef` names the installation covering the call's repository or account, so the
-  // credential is denied for the same reason the context would be unresolvable — no installation
-  // matches, or more than one does and we refuse to guess. It reaches the model first only because
-  // the credential is leased before the adapter resolves scope. The remaining causes (an
-  // unconfigured App, an unreadable private key) point at the same next step: the discovery tool
-  // reports exactly which repositories this business can actually reach, and reports none when the
-  // App itself is the problem.
+  // Credential denial means no unique covering installation, or the GitHub App cannot mint tokens.
   if (error.detail === "credential_denied") {
     return err(
       "not_found",
@@ -166,21 +152,14 @@ function mapDispatchError(error: ToolDispatchError, toolId: GitHubToolId): ToolC
         "GitHub installation settings page, then retry."
     );
   }
-  // Transient by definition, and the ledger has already spent this contract's retry budget on it.
-  // Classifying it as infrastructure is what stops the model treating a busy provider as a
-  // malformed request and rewording arguments that were never wrong.
+  // Retry budget is spent; classify provider transient failures as infrastructure, not bad args.
   if (error.detail === "provider_rate_limited" || error.detail === "provider_unavailable") {
     return err("unavailable", `GitHub is temporarily unavailable; try again shortly.`);
   }
   return err("internal_error", error.detail ? `${error.code}:${error.detail}` : error.message);
 }
 
-/**
- * A rediscovered effect from an earlier attempt at this exact call (same run + call id) — the
- * ledger keeps only whether it landed, not the GitHub response body, so a replay can't hand the
- * model the original output back. Mirrors `apps/worker/src/routine/tool-port.ts`'s `replayed()`:
- * `confirmed` is success without repeating the call, anything else is a definitive negative.
- */
+/** Replayed effect: `confirmed` is success without repeating; no response body is retained. */
 function replayed(state: string): ToolCallResult {
   switch (state) {
     case "confirmed":
@@ -205,23 +184,7 @@ function stringValue(source: Record<string, unknown>, key: string): string | und
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/**
- * The authorization namespace is the Tool's declared resource, not the provider's target namespace.
- *
- * `GITHUB_REPOSITORY_TARGET` and friends name targets on the *provider* side — they are what
- * `packages/integrations/src/github/adapter.ts` and the installation entitlement check compare
- * against, and they must keep their values. The authorization gate is a different namespace: a
- * grant is written against the two-level resource grammar (`integration.<slug>`, `platform.<area>`,
- * `record.<type>`), and `grantMatches` compares `resourceType` as an exact string. A derived target
- * typed `github.repository` is therefore unmatchable by any grant an operator can author, and —
- * because derived targets *replace* the Tool's static `resources` at the gate — it also stops
- * `integration.github` from being checked at all.
- *
- * So the derived type is the declared resource and the provider identity moves into the id, where
- * `recordSelector` scopes it. The kind prefix keeps a repository, an organization and the
- * installation-wide sentinel from colliding in that one id space, so a grant naming one repository
- * still cannot satisfy an installation-wide search.
- */
+/** Derived targets use Tool grant namespace; provider identity moves into the selector id. */
 const GITHUB_AUTHZ_RESOURCE = "integration.github";
 
 const repositoryRef = (id: string) => ({ type: GITHUB_AUTHZ_RESOURCE, id: `repo:${id}` });
@@ -252,8 +215,7 @@ function searchRepositoryTargets(args: unknown): readonly ToolTargetRef[] {
   const repositories = source.repositories;
   if (Array.isArray(repositories) && repositories.length > 0) return repositoryTargets(source);
 
-  // Empty, absent, or wrong-typed repository selectors make the adapter search every installed
-  // repository. A concrete repo grant must not satisfy that installation-wide read.
+  // Missing repository selectors become installation-wide search; repo grants must not satisfy it.
   return allRepositoriesTarget();
 }
 
@@ -262,14 +224,7 @@ function repositoryCreateTargets(args: unknown): readonly ToolTargetRef[] {
   return owner === undefined ? [] : [{ type: GITHUB_AUTHZ_RESOURCE, id: `org:${owner}` }];
 }
 
-/**
- * Which installation's credential this call needs, from the same arguments the context resolver
- * reads. Repository creation names an account (the repo does not exist yet); everything else names
- * a repository. A call that names neither — an installation-wide search — falls back to the bare
- * `any` ref, which resolves only when the business has one installation and refuses otherwise. That
- * refusal is correct: a search spanning every installed repository has no single installation whose
- * credential could honestly carry it.
- */
+/** Resolve the covering installation credential; installation-wide search requires exactly one. */
 function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubInstallationSelector {
   const source = recordArgs(args);
   if (toolId === GITHUB_TOOL_IDS.repositoryCreate) {
@@ -282,8 +237,7 @@ function githubCredentialSelector(toolId: GitHubToolId, args: unknown): GitHubIn
   const repositories = source.repositories;
   if (Array.isArray(repositories)) {
     const named = repositories.filter((entry): entry is string => typeof entry === "string");
-    // Several repositories may still resolve to one installation, but only if they all do — the
-    // first that disagrees makes the call uncarryable by any single credential.
+    // Multi-repo calls require all repositories to resolve to the same installation.
     const first = named[0];
     if (first !== undefined && named.every((entry) => entry === first)) {
       return { kind: "repository", repository: first };
@@ -336,9 +290,7 @@ function buildToolDef(
     async handler(args, ctx): Promise<ToolCallResult> {
       const runId = ctx.runId;
       if (runId === undefined) return err("internal_error", "no run context for this tool call");
-      // Falls back to a fresh call identity when none is supplied (e.g. a direct registry test) —
-      // idempotency then only holds within this one call, not across a crash/replay, which is the
-      // same guarantee a non-integration ToolDef already gives.
+      // Without a call id, idempotency lasts only for this direct call, not crash/replay.
       const callId = ctx.toolCallId ?? crypto.randomUUID();
       const stateId = `invoke:${callId}`;
 
@@ -350,9 +302,7 @@ function buildToolDef(
         toolId,
         toolVersion: contract.toolVersion,
         action: toolId,
-        // The Tool's own declared derivation, not a second one written here: `targetsFor` is what
-        // the gate reads, so building the intent from anything else would let the recorded effect
-        // and the authorization decision describe different targets.
+        // Build intent from `targetsFor`; the gate reads the same derivation.
         targetRefs: definition.targetsFor(args, ctx),
         arguments: args,
         credentialRef: githubInstallationSecretRef(githubCredentialSelector(toolId, args)),
@@ -404,12 +354,7 @@ const EMPTY_SCHEMA: Record<string, unknown> = {
 
 export const GITHUB_REPOSITORY_LIST_TOOL_NAME = "github_repository_list";
 
-/**
- * Local-only discovery tool: no GitHub API call, no effect ledger reservation — it just projects
- * this business's active installations. Every other GitHub tool requires an `owner/repo` argument
- * the model otherwise has no way to learn (see `context.ts`'s `integration_context_unresolved`),
- * so this is what lets the model resolve "my github issues" into a concrete repository first.
- */
+/** Local-only repository discovery; no GitHub API call or effect ledger reservation. */
 function buildRepositoryListTool(tooling: GitHubTooling): ToolDef {
   const definition = defineApiTool<RequestContext>({
     name: GITHUB_REPOSITORY_LIST_TOOL_NAME,
@@ -459,9 +404,7 @@ export function buildGitHubTools(businessId: string, tooling: GitHubToolingConte
   ];
 }
 
-/** Every chat tool name this family registers — the set excluded from a turn's allowlist while
- * GitHub is not installed (see `tools/github/visibility.ts`). Independent of any built `ToolDef[]`
- * so the exclusion can be computed without a live tooling composition. */
+/** GitHub chat tool names, computable without live tooling composition. */
 export const GITHUB_TOOL_NAMES: ReadonlySet<string> = new Set([
   GITHUB_REPOSITORY_LIST_TOOL_NAME,
   ...Object.values(GITHUB_TOOL_SPECS).map((spec) => spec.name),

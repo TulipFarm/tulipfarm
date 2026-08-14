@@ -2,12 +2,6 @@ import { ValueCell } from "~/components/schema-table";
 import type { ResourceRecord } from "~/lib/api";
 import { type FieldDescriptor, renderValue } from "~/lib/schema";
 
-/*
- * Schema-driven record detail. Renders a definition list of every field (`detailFields`), with the
- * system block (id/version/timestamps) visually separated under a `[system]` label. object/array
- * values fall to a mono <pre>. No per-resource code. `deletedAt` is shown only when present.
- */
-
 function Row({
   field,
   record,
@@ -18,7 +12,6 @@ function Row({
   linkLabels?: Record<string, string>;
 }) {
   const value = record[field.name];
-  // deletedAt is part of the system block but only meaningful when the record is soft-deleted.
   if (field.name === "deletedAt" && (value === undefined || value === null)) return null;
 
   const cell = renderValue(field, value, linkLabels);

@@ -2,13 +2,7 @@
 
 import { ImageZoom } from "fumadocs-ui/components/image-zoom";
 
-/**
- * A product screenshot with a caption. Framed with the site's hairline border rather than a
- * shadow, and click-to-zoom so a dense screen stays readable inside the docs measure.
- *
- * `src` is a path under `public/`, so it survives the static export untouched. Image
- * optimisation is off globally in `next.config.mjs` — required for `output: "export"`.
- */
+/** Static-export-safe screenshot frame with click-to-zoom for dense docs images. */
 export function Screenshot({
   src,
   alt,

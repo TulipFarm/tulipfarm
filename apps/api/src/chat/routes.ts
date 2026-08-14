@@ -53,32 +53,18 @@ export interface ChatRoutesOptions {
   readonly rateLimiter?: RateLimiter;
 }
 
-/**
- * Per-caller budget on submitting a turn. A turn is the most expensive thing this API accepts —
- * it mints a Run, spends model tokens, and occupies a Worker — so it is capped by principal
- * rather than by IP: behind a proxy every caller shares one address, and a budget keyed on that
- * would let one participant exhaust everyone's.
- */
+/** Per-principal turn budget; IP keys would let one proxied caller exhaust everyone. */
 const CHAT_LIMIT = 60;
 const CHAT_WINDOW_MS = 60_000;
 
-/**
- * The Chat turn over HTTP: submit durably, then read back the Run's own event stream.
- *
- * Nothing about the turn happens in this process any more. The route opens the conversation, hands
- * the request to the submission path every channel shares, and then becomes a reader of
- * `run_events` — the same rows, in the same vocabulary, that `GET /api/v1/runs/:id/events` serves on
- * reconnect and that a Slack or Telegram reader would consume. Losing this connection therefore
- * loses nothing: the Worker is executing the Run regardless, and the client reattaches by cursor.
- */
+/** HTTP chat turn: durably submit, then read the Run event stream; clients reattach by cursor. */
 export function registerChatRoutes(
   app: FastifyInstance,
   options: ChatRoutesOptions,
   requireAuth: PreHandler
 ): void {
   const { stream } = options;
-  // Authenticated, so the key is the principal — `req.ip` only stands in before `requireAuth` has
-  // resolved one, which is a request that is refused anyway.
+  // Authenticated requests key the budget by principal; `req.ip` only covers rejected requests.
   const rateLimitHook = makeRateLimitHook(
     options.rateLimiter ?? new MemoryRateLimiter(),
     (req) => `rl:chat:${req.principal?.id ?? req.ip}`,
@@ -98,8 +84,7 @@ export function registerChatRoutes(
           "(tier name or model id) overrides the model for this turn only; it is never persisted.",
         tags: ["chat"],
         security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        // The key a replayed turn is deduplicated by. Bounded because it is stored verbatim as the
-        // Turn's identity — an unbounded client value would reach the database as-is.
+        // Bounded because the Turn stores this client value verbatim.
         headers: {
           type: "object",
           properties: { "idempotency-key": { type: "string", minLength: 1, maxLength: 200 } },
@@ -124,8 +109,7 @@ export function registerChatRoutes(
       }
       const body = req.body as ChatBody;
       const idempotencyHeader = req.headers["idempotency-key"];
-      // A client that sends no key still gets idempotency, just only within its own retry of this
-      // request — `req.id` is unique per delivery, so a second POST is a second Turn.
+      // Without a client key, idempotency is only within this delivered request.
       const clientKey =
         typeof idempotencyHeader === "string" && idempotencyHeader.length > 0
           ? idempotencyHeader
@@ -136,15 +120,12 @@ export function registerChatRoutes(
         principal: { kind: principal.kind, id: principal.id, businessId: principal.businessId },
         payload: body,
         agentId: body.agentId ?? "assistant",
-        // Scoped to the submitter. Turn keys are unique deployment-wide, and the value is whatever a
-        // client chose to send, so an unscoped key lets one caller claim another's: their turn would
-        // be refused as a duplicate and answered with a Run id that is not theirs.
+        // Scope the client key to the submitter; unscoped keys let callers claim each other's Runs.
         idempotencyKey: `${principal.kind}:${principal.id}:${clientKey}`,
         log: req.log,
       });
 
-      // Asked before the conversation is opened: a retried first message must not leave an empty
-      // conversation (and a generated title) behind for a turn that was already answered.
+      // Check replay before opening a Conversation so retries do not leave empty shells.
       const replayed = await submitter.findSubmitted?.();
       if (replayed) {
         return reply.code(409).send({ error: "duplicate chat invocation", runId: replayed.runId });
@@ -168,8 +149,7 @@ export function registerChatRoutes(
         content: body.message.content,
       });
       if (submission.outcome === "duplicate") {
-        // Already submitted and already answered by a Run. Streaming a second reply would answer one
-        // message twice; the client reattaches to the Run it is given here.
+        // Replayed turn: return the existing Run so one message is not answered twice.
         return reply
           .code(409)
           .send({ error: "duplicate chat invocation", runId: submission.runId });
@@ -182,14 +162,12 @@ export function registerChatRoutes(
       const grant = await stream.authorize(req, runId);
       if (!grant) return reply.code(403).send({ error: "run stream not authorized" });
 
-      // The reply is hijacked below, so every header a client needs goes onto the raw response too —
-      // Fastify's collection is not written once the socket is taken over.
+      // Hijacking bypasses Fastify's header collection; write required headers to raw too.
       reply.header("X-Run-Id", runId);
       writeSseHeaders(reply.raw, {
         "X-Run-Id": runId,
         "X-Conversation-Id": entry.conversation._id,
-        // Only a user-selected Soul Agent is exposed to the client: normal chat has no Agent
-        // identity, and a removed Agent resolves back to normal chat.
+        // Only user-selected Soul Agents are exposed; normal chat has no Agent identity.
         ...(entry.agentId === DEFAULT_ASSISTANT_NAME ? {} : { "X-Agent-Id": entry.agentId }),
         ...corsPassthrough(reply),
       });
@@ -240,8 +218,7 @@ export function registerChatRoutes(
       if (!options.cancel) {
         return reply.code(503).send({ error: "run cancellation is not available" });
       }
-      // The same grant that lets this caller read the Run is what lets them stop it: both are
-      // "is this your turn?", and answering them differently would let one reader halt another's.
+      // Stop uses the same grant as Run reads so one reader cannot halt another's Run.
       const grant = await stream.authorize(req, runId);
       if (!grant) return reply.code(403).send({ error: "run not yours to stop" });
 

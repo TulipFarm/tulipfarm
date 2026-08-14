@@ -2,21 +2,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 
-/**
- * routine.yaml meta-schema (ROUT-V1-004/005). CNCF Serverless Workflow 0.8
- * subset + `x-` extensions. Deferred constructs (`parallel`/`event` states, `subFlowRef`,
- * `integration` triggers) are detected in a pre-pass and rejected with an
- * explicit "deferred in V1" error before AJV runs, so authors see the real reason instead
- * of a union-mismatch message.
- *
- * Expressions (switch conditions, foreach inputCollection, data filters, `${...}` argument
- * values) are opaque JS strings here — evaluated at runtime in isolated-vm (100ms).
- *
- * hooks.ts contract (documented, not schema-enforced): an object-literal expression
- * `({ beforeHook(ctx){}, afterHook(ctx){}, before<StateName>(ctx){}, after<StateName>(ctx){},
- * <fnName>(ctx, args){} })` — step-callable fns are referenced by functions with
- * `operation: "hook:<fnName>"`.
- */
+/** routine.yaml schema; deferred V1 constructs are pre-rejected before AJV union errors. */
 
 export const ROUTINE_STATE_TYPES = ["operation", "switch", "foreach", "sleep", "inject"] as const;
 export const ROUTINE_TRIGGER_TYPES = [
@@ -33,11 +19,7 @@ export const ROUTINE_APPROVAL_CHANNELS = ["ui", "slack", "email", "sms"] as cons
 export const DEFERRED_STATE_TYPES = ["parallel", "event"] as const;
 export const DEFERRED_TRIGGER_TYPES = ["integration"] as const;
 
-/**
- * Domain-event names a routine `event` trigger may subscribe to. Mirrors
- * `DOMAIN_EVENTS` in apps/api/src/domain-events.ts (kept as a literal list here —
- * validation cannot depend on the api app).
- */
+/** Mirrors API domain events; validation cannot depend on the API app. */
 export const ROUTINE_EVENT_NAMES = [
   "resource.created",
   "resource.updated",
@@ -57,8 +39,6 @@ const ApprovalChannel = Type.Unsafe<(typeof ROUTINE_APPROVAL_CHANNELS)[number]>(
   type: "string",
   enum: [...ROUTINE_APPROVAL_CHANNELS],
 });
-
-// ── Triggers (x-triggers) ─────────────────────────────────────────────────────
 
 const EventTrigger = Type.Object(
   {
@@ -89,7 +69,7 @@ const IntervalTrigger = Type.Object(
     type: Type.Literal("interval"),
     /** Fixed UTC period in milliseconds between fires. */
     everyMs: Type.Integer({ minimum: 1 }),
-    /** ISO-8601 instant the interval is anchored to; occurrences fall at `startAt + n * everyMs`. */
+    /** ISO-8601 anchor; occurrences fall at `startAt + n * everyMs`. */
     startAt: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false }
@@ -107,7 +87,7 @@ const DatetimeTrigger = Type.Object(
 const WebhookTrigger = Type.Object(
   {
     type: Type.Literal("webhook"),
-    /** Secret name resolved via SecretsService; requests without the matching header are rejected. */
+    /** SecretsService name; requests without the matching header are rejected. */
     secret_ref: Type.String({ minLength: 1 }),
   },
   { additionalProperties: false }
@@ -125,8 +105,6 @@ const Trigger = Type.Union([
   AgentTrigger,
 ]);
 
-// ── Functions ─────────────────────────────────────────────────────────────────
-
 const FunctionDef = Type.Object(
   {
     name: Type.String({ minLength: 1 }),
@@ -135,8 +113,6 @@ const FunctionDef = Type.Object(
   },
   { additionalProperties: false }
 );
-
-// ── Errors / retries ──────────────────────────────────────────────────────────
 
 const OnError = Type.Object(
   {
@@ -158,8 +134,6 @@ const RetryPolicy = Type.Object(
   },
   { additionalProperties: false }
 );
-
-// ── States ────────────────────────────────────────────────────────────────────
 
 const StateDataFilter = Type.Object(
   {
@@ -267,8 +241,6 @@ const InjectState = Type.Object(
 
 const State = Type.Union([OperationState, SwitchState, ForeachState, SleepState, InjectState]);
 
-// ── Root ──────────────────────────────────────────────────────────────────────
-
 export const RoutineDefinitionSchema = Type.Object(
   {
     id: Type.String({ minLength: 1 }),
@@ -300,10 +272,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/**
- * Pre-pass: find deferred CNCF SW constructs and throw a "deferred in V1" error with a
- * JSON pointer, before AJV turns them into opaque union-mismatch messages.
- */
+/** Reject deferred CNCF SW constructs with JSON pointers before AJV union errors. */
 function rejectDeferredConstructs(data: unknown): void {
   if (!isRecord(data)) return;
 
@@ -344,10 +313,7 @@ function rejectDeferredConstructs(data: unknown): void {
   }
 }
 
-/**
- * Structural checks AJV cannot express: start/transition targets exist, retryRef /
- * functionRef names resolve, human_approval only on operation/foreach states.
- */
+/** Checks AJV cannot express: references resolve and human approval is on allowed states. */
 function checkReferences(def: RoutineDefinition): void {
   const stateNames = new Set(def.states.map((s) => s.name));
   if (!stateNames.has(def.start)) {
@@ -409,11 +375,7 @@ function checkReferences(def: RoutineDefinition): void {
   }
 }
 
-/**
- * Validate a routine.yaml document against the V1 meta-schema. Returns the typed
- * definition on success; throws `TulipFarmValidationError` (boundary `"soul"`) — with a
- * "deferred in V1" message for post-V1 constructs — on failure.
- */
+/** Validate routine.yaml; deferred constructs fail with explicit V1 errors. */
 export function validateRoutineDefinition(data: unknown): RoutineDefinition {
   rejectDeferredConstructs(data);
   if (!check(data)) {

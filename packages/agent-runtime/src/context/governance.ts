@@ -1,7 +1,4 @@
-/**
- * The part of a knowledge page this block renders. Structural on purpose: a store's page record
- * carries far more (ids, versions, tags, OKF fields), and none of it belongs in a prompt.
- */
+/** Structural prompt page input; store-only fields must not reach prompts. */
 export interface GovernancePage {
   readonly title: string;
   readonly plainText: string;
@@ -12,14 +9,7 @@ export const PER_DOC_CHAR_CAP = 4000;
 export const BLOCK_CHAR_CAP = 16000;
 const WRAPPER_OVERHEAD = "<governance-knowledge>\n".length + "\n</governance-knowledge>".length;
 
-/**
- * Build the `<governance-knowledge>` context block (KN-V1-005). Input is the set of
- * active `alwaysLoadForAgents` pages. Scoping: pages matching `domain` first, then
- * tenant-wide (`domain === null`); other domains are excluded. Budget: a page longer
- * than `PER_DOC_CHAR_CAP` is skipped entirely (never truncated mid-page), and pages are
- * added until the next would exceed `BLOCK_CHAR_CAP` — overflow is skipped, not
- * partially rendered. Returns "" when nothing qualifies.
- */
+/** Build `<governance-knowledge>` from scoped pages; skip over-budget pages whole. */
 export function buildGovernanceBlock(
   pages: readonly GovernancePage[],
   domain: string | null = null

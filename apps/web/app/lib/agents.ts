@@ -1,10 +1,6 @@
 import { apiCommand, apiGet } from "./api";
 
-/*
- * Read-only client for the agents API (AGENTS / UI-V1-003). Agents are AGENT.md files in the soul
- * repo; the list view carries frontmatter only, the detail view adds the markdown `body` (the agent's
- * system prompt). Mirrors lib/api.ts conventions (cookie-first auth, ApiError on non-2xx).
- */
+/* Cookie-first read client for soul-backed Agents; non-2xx responses throw `ApiError`. */
 
 export type Autonomy = "full" | "supervised" | "approval-required" | "manual";
 

@@ -32,13 +32,7 @@ export interface SlackIntegrationSyncResult extends SlackKnowledgeSyncResult {
   readonly integrationId: string;
 }
 
-/**
- * Sync every active Slack Integration this (single-tenant) deployment has connected — mirrors
- * `../knowledge/connectors/sync.ts`'s `registerConnectorSync`, but keyed off `IntegrationStore`
- * rather than the generic `Connector` registry, since Slack's per-channel checkpoint model doesn't
- * fit that shape. One Integration's failure is isolated by `syncSlackKnowledge` itself (it never
- * throws — failures come back as result entries), so it cannot stall another workspace's sync.
- */
+/** Sync active Slack Integrations; per-Integration failures return as results and do not stall. */
 export async function runSlackKnowledgeSync(
   deps: SlackKnowledgeSyncScheduleDeps
 ): Promise<readonly SlackIntegrationSyncResult[]> {

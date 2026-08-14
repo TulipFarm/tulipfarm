@@ -29,13 +29,7 @@ function rowToCandidate(row: KnowledgeSourceChunkRow, score: number): KnowledgeC
   };
 }
 
-/**
- * Postgres storage for `KnowledgeIndexEntry` (`knowledge_source_chunks`). `search` is vector-primary
- * with a lexical fallback, mirroring `../knowledge/search-service.ts`; the `allowedSourceIds` filter
- * is applied inside the SQL itself, so a candidate outside the authorized set is never scored, never
- * read, and never returned — `retrieve()` in `@tulipfarm/knowledge` re-checks anyway as defence in
- * depth, but this store must not rely on that second check.
- */
+/** Postgres Knowledge index; search is vector-first with lexical fallback. */
 export class PgKnowledgeIndexStore implements MutableKnowledgeIndexPort {
   constructor(
     private readonly q: Queryable,

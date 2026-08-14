@@ -1,8 +1,6 @@
 /**
- * Extended Memory security matrices for trust tiers, Pending Memory, point-in-time recall, and the
- * M6 erase shape. These cases keep the same zero-disclosure stance as leakage.test.ts: a withheld
- * Assertion may contribute only abstract exclusion reasons, never subject, statement, ids, evidence,
- * audit payload content, or result-slot pressure.
+ * Extended security matrices must not disclose withheld Assertion details through results,
+ * exclusion reasons, slot pressure, or audit payloads.
  */
 
 import type { AuditEventInput } from "@tulipfarm/audit";

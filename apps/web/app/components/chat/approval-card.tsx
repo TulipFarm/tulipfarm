@@ -14,11 +14,7 @@ const OUTCOME_LABEL: Record<ApprovalState["status"], string> = {
   timeout: "timed out",
 };
 
-/**
- * Live tool-approval confirmation (driven by the `approval-request` → `approval-resolved` SSE pair).
- * Pending shows Approve / Deny plus a countdown to the 5-min auto-deny; once resolved it shows the
- * outcome. The denial state comes from `approval.status`, distinct from a genuine tool failure.
- */
+/** Denial is `approval.status`, not a tool failure. */
 export function ApprovalCard({
   toolName,
   approval,

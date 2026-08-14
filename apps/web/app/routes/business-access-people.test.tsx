@@ -173,11 +173,6 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-/*
- * The single defect that made the old page unusable: members were listed as raw principal UUIDs
- * with no name, no email and no face, because nothing joined `users` to `principals`. If a UUID
- * ever reaches this list again, this test fails.
- */
 test("lists people by name and email, never by principal id", () => {
   renderPage();
 
@@ -188,8 +183,6 @@ test("lists people by name and email, never by principal id", () => {
 });
 
 test("shows the email as the name when nobody has set one", () => {
-  // Names are self-authored, so an account can legitimately have none. It appears twice — once as
-  // the headline, once as the supporting line — rather than leaving the headline blank.
   renderPage();
   expect(screen.getAllByText("rahul@cafe.test")).toHaveLength(2);
 });
@@ -240,12 +233,6 @@ test("shows what a person holds in plain words, not as grant strings", () => {
   expect(screen.getByText("View Customer records")).toBeInTheDocument();
 });
 
-/*
- * `admin` and `member` role rows are written by the `sync_user_authorization` trigger from
- * `users.role`. Granting or revoking one through this API writes a row the trigger owns, so the
- * two would desync — the revoke appears to work and is undone on the next account change. The
- * account row is shown instead, pointing at the surface that really owns it.
- */
 test("never offers the account-derived Roles as something to give or take away", () => {
   renderPage(loaderData({ selectedId: PRIYA_ID }));
 
@@ -261,11 +248,6 @@ test("never offers the account-derived Roles as something to give or take away",
   expect(screen.getByText(/not something to give or take away/)).toBeInTheDocument();
 });
 
-/*
- * Team-inherited access belongs to the team. A "take away" button here could not remove it, so
- * offering one would be a lie — the previous page's group/principal split made this easy to get
- * wrong.
- */
 test("explains team access instead of offering to remove it from the person", () => {
   renderPage(loaderData({ selectedId: PRIYA_ID }));
 
@@ -286,10 +268,6 @@ test("gives access with no expiry when no date is chosen", async () => {
   );
 });
 
-/*
- * "Until the 5th" means the whole of the 5th. Expiring at its first second would cut the last day
- * off every temporary grant an owner sets.
- */
 test("treats a chosen date as the end of that day", async () => {
   const user = userEvent.setup();
   renderPage(loaderData({ selectedId: PRIYA_ID }));
@@ -324,11 +302,6 @@ test("takes access away only after a confirmation step", async () => {
   await waitFor(() => expect(revokeRole).toHaveBeenCalledWith("support-operators", PRIYA_ID));
 });
 
-/*
- * The old warning fired over any direct Role at all, on a page where the owner's real power comes
- * from their account and is untouched by this button. A warning that is usually false teaches
- * people to click past the one that is true.
- */
 test("does not warn about a Role that is not what gives someone their access", () => {
   sessionUserId = PRIYA_ID;
   renderPage(
@@ -361,9 +334,8 @@ test("warns when the Role really is the only thing holding someone up", () => {
 });
 
 /*
- * Whoever holds unrestricted access is the only one who can hand it back. Stripping the last one
- * is not undoable by anything in the product — not this page, not the API — so the button is
- * absent rather than merely warned about.
+ * Stripping the last one is not undoable by anything in the product — not this page, not the
+ * API — so the button is absent rather than merely warned about.
  */
 test("will not take away the last unrestricted access in the business", () => {
   renderPage(
@@ -430,8 +402,7 @@ test("takes away an ordinary Role when nobody holds full access at all", () => {
 
 /*
  * The sole admin holding Owner on top of their own account: the Role is takeable, because the
- * account still carries full access and this button cannot touch it. Blocking here would strand
- * a Role nobody could ever remove.
+ * account still carries full access and this button cannot touch it.
  */
 test("takes away a Role when the same person still has full access from their account", () => {
   sessionUserId = RAHUL_ID;
@@ -488,12 +459,6 @@ test("says so plainly when nobody has an account yet", () => {
   expect(screen.getByText(/Nobody yet/)).toBeInTheDocument();
 });
 
-/*
- * The rest of this file covers what used to be `/business/people`. Inviting somebody, turning an
- * account off and deciding what they can do are one job, so they are one page — and the tests that
- * proved each half still has to pass here.
- */
-
 test("invites someone and shows the link exactly once, with the token in the fragment", async () => {
   const user = userEvent.setup();
   vi.mocked(createUser).mockResolvedValue({
@@ -508,7 +473,6 @@ test("invites someone and shows the link exactly once, with the token in the fra
 
   await waitFor(() => expect(createUser).toHaveBeenCalledWith("new@cafe.test"));
   const link = await screen.findByText(/\/accept-invite#token=tok-123$/);
-  // The token must never sit in the query string, where a proxy would log it.
   expect(link.textContent).not.toContain("?token=");
 });
 
@@ -572,7 +536,6 @@ test("offers no sign-in link for an account that is turned off", () => {
     })
   );
 
-  // Once on the row and once inside, so the state is visible before and after opening them.
   expect(screen.getAllByText("Cannot sign in")).toHaveLength(2);
   expect(screen.queryByRole("button", { name: /link/i })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Let them sign in again" })).toBeInTheDocument();
@@ -610,10 +573,6 @@ test("turns a disabled account back on in one click", async () => {
   await waitFor(() => expect(setUserStatus).toHaveBeenCalledWith(PRIYA_ID, "active"));
 });
 
-/*
- * One admin resetting or locking out another is how a workspace gets taken. There is no approval
- * step here that would make it safe, so the controls are absent rather than guarded.
- */
 test("offers no account controls for another admin", () => {
   renderPage(loaderData({ selectedId: RAHUL_ID }));
 
@@ -636,10 +595,6 @@ test("issues a fresh sign-in link and surfaces it for sharing", async () => {
   expect(await screen.findByText(/#token=tok-fresh$/)).toBeInTheDocument();
 });
 
-/*
- * What each level means used to be a separate page listing raw grant strings, which answered the
- * question only for somebody who already knew the schema.
- */
 test("explains each access level in the same words as the rest of the page", () => {
   renderPage();
 
@@ -650,12 +605,7 @@ test("explains each access level in the same words as the rest of the page", () 
   expect(screen.getByText("Covers records.")).toBeInTheDocument();
 });
 
-/*
- * A brand-new invite is `not-authenticatable`, which the layer model classes as a fault. It is
- * nothing of the sort — it is what every account looks like before its owner opens the link, and
- * "The principal is suspended or expired" over each new hire is both false and the fastest way to
- * teach an owner that red banners on this page mean nothing.
- */
+/* A brand-new invite is `not-authenticatable`, which the layer model classes as a fault. */
 test("does not raise a fault for an invite nobody has opened yet", () => {
   renderPage(
     loaderData({
@@ -737,11 +687,7 @@ test("still raises the fault when the account status does not explain it", () =>
   expect(screen.getByRole("alert")).toHaveTextContent(/suspended or expired/);
 });
 
-/*
- * The status explains *one* emptiness — the account cannot authenticate yet. It explains nothing
- * about a dangling Role reference, which locks a principal out by bad data rather than by policy.
- * Suppressing on status alone would swallow that at the exact moment it matters.
- */
+/* The status explains *one* emptiness — the account cannot authenticate yet. */
 test("an unopened invite does not silence an unrelated fault", () => {
   renderPage(
     loaderData({

@@ -18,12 +18,7 @@ function fireAndForget(p: Promise<unknown>): void {
   );
 }
 
-/**
- * Run a synchronous listener body, swallowing any throw. Domain events are emitted synchronously from
- * the chat turn (`events.emit(...)` inside `onStepFinish`), so an unguarded throw here — from the
- * price map, a metrics/traces sink, etc. — would propagate back and break the turn. Observability
- * must never do that.
- */
+/** Run a synchronous listener body, swallowing any throw. Observability must never do that. */
 function guard(fn: () => void): void {
   try {
     fn();
@@ -47,18 +42,17 @@ function compact(obj: Record<string, unknown>): Record<string, unknown> {
  * Wire the observability spine to the domain-event bus: each finished model step becomes an
  * `llm_call` row (cost computed + frozen here via the price map) and each finished turn a `turn`
  * summary row. `ObservabilityService.record` is best-effort, so a failed write only logs and never
- * affects the chat turn. Mirrors `subscribeActivityLogging`.
+ * affects the chat turn.
  */
 export function subscribeObservability(
   emitter: EventEmitter,
   obs: ObservabilityService,
   opts: {
-    /** Fallback price map (built-in families + config overrides) used only when the served model has
+    /** Fallback price map, used only when the served model has
      *  no pinned per-token cost on its soul spec. */
     pricingOverrides?: Record<string, ModelPrice>;
     metrics?: MetricsSink;
     traces?: TracesSink;
-    /** Opt-in: persist prompt/completion/tool bodies into attributes. Off by default (privacy). */
     captureContent?: boolean;
   } = {}
 ): void {
@@ -94,7 +88,6 @@ export function subscribeObservability(
   function onLlmStep(p: LlmStepFinishedPayload): void {
     const costUsd = computeCost(p);
     // Queue the durable DB writes FIRST, so a later-throwing metrics/traces sink can't cost us the
-    // row (the whole body is also guard()-wrapped, so nothing here can break the chat turn).
     fireAndForget(
       obs.record({
         type: "llm_call",
@@ -117,8 +110,6 @@ export function subscribeObservability(
         }),
       })
     );
-    // One tool_call row per tool invoked in this step. Arg/result bodies only when content capture
-    // is enabled; otherwise metadata-only (name + status + error code).
     for (const tool of p.tools ?? []) {
       fireAndForget(
         obs.record({
@@ -135,7 +126,6 @@ export function subscribeObservability(
         })
       );
     }
-    // OTLP export sinks last (in-memory; only run when export is enabled). Bounded labels only.
     metrics?.recordLlmCall({
       model: p.model,
       provider: p.provider,
@@ -180,7 +170,7 @@ export function subscribeObservability(
         agentId: p.agentId,
         model: p.model ?? null,
         tier: p.tier ?? null,
-        // Display rollups only — never summed into cost/token totals (those come from llm_call rows).
+        // Display rollups only; cost/token totals come from llm_call rows.
         tokensIn: p.tokensIn,
         tokensOut: p.tokensOut,
         durationMs: p.durationMs ?? null,

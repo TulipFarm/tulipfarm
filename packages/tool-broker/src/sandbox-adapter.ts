@@ -77,11 +77,7 @@ function preflight(code: string): AdapterDispatchError {
   return new AdapterDispatchError("before_dispatch", code, false);
 }
 
-/**
- * Tool adapter for one published Skill command. The EffectDispatcher reaches this only after the
- * Tool Broker authorized and durably reserved the effect. It converts the Tool's JSON arguments
- * into an immutable input Artifact and never puts credential plaintext on the sandbox wire.
- */
+/** Authorized Skill Tool adapter; sends immutable input Artifacts, never credential plaintext. */
 export class SandboxToolAdapter implements ToolAdapter {
   private readonly now: () => number;
   private readonly nonce: () => string;

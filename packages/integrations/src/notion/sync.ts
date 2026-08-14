@@ -1,10 +1,4 @@
-/**
- * Notion Knowledge sync.
- *
- * The sync mirrors Confluence's ACL-preserving shape: one Notion page is one Knowledge source,
- * ACLs are explicit snapshot allow-lists of mapped Notion users, unreadable/missing ACL data
- * emits an unverifiable source and removes text, and checkpoints advance only after emission.
- */
+/** Uses proven Notion user ACL snapshots; unreadable ACLs remove indexed text. */
 
 import { canonicalHash } from "@tulipfarm/schema";
 import type {

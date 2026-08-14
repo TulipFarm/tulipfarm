@@ -2,12 +2,7 @@ import type { ChannelRoutingSnapshot, ChannelRoutingSource } from "@tulipfarm/in
 import type { AccessGrantDefinition } from "@tulipfarm/schema";
 import type { IntegrationStore } from "@tulipfarm/storage";
 
-/**
- * Adapts `IntegrationStore.loadRoutingSnapshot` to the `ChannelRoutingSource` port. The persisted
- * rows and the port's snapshot types are structurally identical except for how an unset
- * `channelId`/`threadId` is spelled — `null` at rest, `undefined` on the port — so this is a pure
- * reshape, no query logic of its own.
- */
+/** Reshapes routing rows from null-at-rest to undefined-on-port fields. */
 export function channelRoutingSource(store: IntegrationStore): ChannelRoutingSource {
   return {
     async load(input): Promise<ChannelRoutingSnapshot> {

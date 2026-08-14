@@ -1,11 +1,6 @@
 import type { TransactionPort } from "../ports";
 
-/**
- * One business maps to exactly one Soul repository — `business_id` is the primary key, not a
- * foreign key into `integrations`, since a business only ever has one Soul checkout regardless of
- * how many GitHub integrations it has installed. `integration_id` records which installation's
- * credentials authenticate git operations against it.
- */
+/** One business has one Soul repository; `integration_id` names the git credential installation. */
 export interface PersistedSoulRepository {
   businessId: string;
   integrationId: string;

@@ -7,10 +7,7 @@ import {
 } from "@tulipfarm/observability";
 import type { Queryable } from "../db";
 
-/**
- * A log record as served to the UI: ISO timestamps, never a `Date`.
- * Mirrors `LogEventRecord` minus the write-side field types.
- */
+/** UI log record: ISO timestamps, never `Date`. */
 export interface LogEventView {
   id: string;
   ts: string;
@@ -52,13 +49,7 @@ export function encodeCursor(ts: string, id: string): string {
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * Parse a client-supplied cursor. Returns null for anything malformed, so a tampered or truncated
- * value degrades to "first page" instead of throwing a 500 at the operator.
- *
- * The id is shape-checked as a UUID because it is bound against a `uuid` column: Postgres rejects
- * anything else outright, and that error would surface as a 500 rather than the intended fallback.
- */
+/** Parse a cursor; malformed or non-UUID ids fall back to the first page. */
 export function decodeCursor(cursor: string): { ts: Date; id: string } | null {
   const idx = cursor.lastIndexOf("|");
   if (idx <= 0) return null;
@@ -98,7 +89,7 @@ export class PgLogRepo implements LogRepo {
     this.writer = new PgLogWriter(q);
   }
 
-  /** Delegated so the INSERT exists once, shared with the worker processes that also emit records. */
+  /** Shared INSERT path for API and worker log emitters. */
   insertMany(rows: readonly LogEventRecord[]): Promise<void> {
     return this.writer.insertMany(rows);
   }
@@ -118,8 +109,7 @@ export class PgLogRepo implements LogRepo {
 
     const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
     if (cursor) {
-      // Row-value comparison keeps the scan on the (ts DESC, id DESC) index and stays stable when
-      // several records share a timestamp — a plain `ts <` would skip or repeat them.
+      // Row-value comparison keeps pagination stable when timestamps tie.
       where.push(`(ts, id) < (${bind(cursor.ts)}, ${bind(cursor.id)})`);
     }
 
@@ -143,8 +133,7 @@ export class PgLogRepo implements LogRepo {
   }
 
   async deleteOlderThan(cutoff: Date): Promise<number> {
-    // RETURNING id so the count works across the Queryable contract (pg + PGlite), which exposes
-    // only `rows`, not `rowCount`. Mirrors PgObsRepo.deleteOlderThan.
+    // `RETURNING id` works across pg and PGlite Queryable, which exposes only `rows`.
     const res = await this.q.query("DELETE FROM log_event WHERE ts < $1 RETURNING id", [cutoff]);
     return res.rows.length;
   }

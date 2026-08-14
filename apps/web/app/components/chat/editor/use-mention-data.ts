@@ -6,15 +6,12 @@ import type { MentionKind } from "./mention-config";
 import type { MentionItem } from "./serialize";
 
 /**
- * Fetch the `@agent` / `/skill` / `#resource` menus once on mount and expose a stable `getItems(kind)`
- * reader. Lists live in a ref (not state) so the value updates without re-running the editor's
- * `useMemo`'d extensions — the suggestion plugin closes over `getItems`, which reads the latest ref on
- * every keystroke. Failures degrade to an empty menu for that kind (the composer still works).
+ * Lists live in a ref (not state) so the value updates without re-running the editor's
+ * `useMemo`'d extensions — the suggestion plugin closes over `getItems`, which reads the latest
+ * ref on every keystroke.
  */
 export type GetItems = (kind: MentionKind) => MentionItem[];
 
-// `knowledge` is search-powered (server fuzzy search per keystroke), not a static list — its menu
-// items come from `searchKnowledge` in mentions.ts, so this static reader always returns [] for it.
 const EMPTY: Record<MentionKind, MentionItem[]> = {
   agent: [],
   skill: [],
@@ -27,8 +24,6 @@ export function useMentionData(): GetItems {
 
   useEffect(() => {
     let active = true;
-    // Wrapped so any failure (network, or a partially-mocked client in tests) leaves the menus empty
-    // rather than surfacing an unhandled rejection — the composer stays fully usable without them.
     void (async () => {
       try {
         const [agents, skills, types] = await Promise.all([
@@ -48,12 +43,9 @@ export function useMentionData(): GetItems {
           })),
           skill: skills.map((s) => ({ id: s.name, label: s.name, description: s.description })),
           resource: types.map((t) => ({ id: t.name, label: t.name, description: "resource type" })),
-          // Populated per-keystroke via server search (mentions.ts), not from this one-shot fetch.
           knowledge: [],
         };
-      } catch {
-        // menus unavailable — leave them empty
-      }
+      } catch {}
     })();
     return () => {
       active = false;

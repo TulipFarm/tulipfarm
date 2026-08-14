@@ -5,20 +5,7 @@ import type { RoutineApprovalPayload } from "../internal/routine-approval-host";
 import type { ApprovalsRepo } from "./runtime-repo";
 import type { ApprovalSignalOutcome } from "./tool-approvals";
 
-/**
- * Deciding a Routine State's approval (SPEC §7.2).
- *
- * The shape is the Tool approval's, for the same reason: the Run is parked on a durable kernel
- * wait holding no lease, so a decision is a signal that requeues that Run in whichever process
- * picks it up — never a call into the executor. What differs is *who may decide*. A Tool approval
- * belongs to the person the turn acts as; a Routine State names **roles** on the State itself, so
- * the wait allows `role:<role>` principals and a decider is authorized by the roles they hold.
- *
- * The deployment's only role authority today is the user's own recorded role, so an authored
- * `approverRoles` naming anything else has no members and the decision is refused. That is the
- * fail-closed reading: an approval nobody can be shown to hold the role for is not one to accept
- * on trust.
- */
+/** SPEC §7.2 approval decisions are durable wait signals; roles are user-role grants only. */
 
 /** The roles a deciding principal actually holds, canonicalized to the wait's principal form. */
 export function rolePrincipals(roles: readonly string[]): readonly string[] {
@@ -47,15 +34,7 @@ export class RoutineApprovalService {
     this.now = options.now ?? (() => new Date());
   }
 
-  /**
-   * Records a human decision on a Routine State and resumes the Run.
-   *
-   * Row first, wait second, exactly as a Tool approval: the settled row is what the replayed State
-   * reads, so a Run that woke before it was written would park all over again. And the role check
-   * runs before the row is settled — the kernel checks the principal again under the wait's lock
-   * and is the authority, but a decision the wait would then refuse must not leave the approval
-   * settled and the Run parked until its deadline.
-   */
+  /** Write the decision before resuming; check the role before settling the row. */
   async signal(input: {
     businessId: string;
     approvalId: string;
@@ -91,8 +70,7 @@ export class RoutineApprovalService {
         token: resumeToken,
         // The wait authorizes the role; the evidence records the person who exercised it.
         principal: asRole,
-        // The State authored what its approval is, so the wait's own schema reference is the one a
-        // decision must declare — not this process's idea of what an approval signal looks like.
+        // A decision must declare the wait's schema, not this process's local signal shape.
         schemaRef: wait.schemaRef,
         // One decision per approval: a replayed request redeems nothing a second time.
         correlationKey: `approval:${input.approvalId}`,
@@ -104,8 +82,7 @@ export class RoutineApprovalService {
         receivedAt: this.now().toISOString(),
       });
     } catch (error) {
-      // The decision is recorded either way — a wait already resolved by the deadline sweep, or by
-      // a racing decision, must not turn a settled approval into a failed request.
+      // A raced or swept wait must not turn a settled approval into a failed request.
       if (!(error instanceof DurableWaitError)) throw error;
       return "already_settled";
     }

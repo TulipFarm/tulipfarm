@@ -11,12 +11,7 @@ import {
   refListSchema,
 } from "./common";
 
-/**
- * ModelProfile bundle definition (SPEC §7.1, §17). Provider/model, capability class, reasoning
- * level, Tool/structured-output/context support, cost/latency/data-retention/training/residency
- * constraints, fallback order, budgets, and whether caching is permitted. Model output is
- * untrusted; AJV validation, Guardrail, and Tool authorization remain independent of the model.
- */
+/** ModelProfile definition; model output stays untrusted and never bypasses validation/policy. */
 
 const KIND = "ModelProfile";
 
@@ -96,8 +91,7 @@ const modelSpecSchema = Type.Object(
         { additionalProperties: false }
       )
     ),
-    // Ordered fallback ModelProfile references; fallback occurs only when the replacement meets the
-    // same Tool/structured-output/context/data/residency/budget constraints (SPEC §17).
+    // Fallbacks must satisfy the same Tool, data, residency, and budget constraints.
     fallbacks: Type.Optional(refListSchema),
     // Sensitive caching is off by default (SPEC §17); authors must state intent explicitly.
     allowCaching: Type.Boolean(),

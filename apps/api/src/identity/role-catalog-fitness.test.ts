@@ -1,16 +1,4 @@
-/**
- * Fitness check: the deployment role catalog must cite the code that enforces it.
- *
- * The Roles view is generated from `roles.ts`, but the actual gates live in route and service
- * files. This ratchet keeps those two sources from drifting apart: stale `enforcedIn` paths fail,
- * and a new admin role check must be connected to an admin-only or owner-scoped catalog entry.
- *
- * This intentionally does not try to prove every handler in a cited file has one reachability
- * shape. Files such as `secrets/routes.ts` and `identity/routes.ts` legitimately contain both
- * member-reachable handlers and admin-only handlers; file-level scanning cannot split them without
- * false positives. The sound check is narrower: a file cited only as member-allowed must not also
- * contain an admin role gate.
- */
+/** Ratchets role catalog `enforcedIn` paths against real admin gates. */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -18,14 +6,7 @@ import { describe, expect, it } from "vitest";
 import { ADMIN_ONLY_SURFACES, MEMBER_ALLOWED_SURFACES, OWNER_SCOPED_SURFACES } from "./roles";
 
 const SRC_ROOT = resolve(process.cwd(), "src");
-/**
- * Both admin-gate idioms in use. The literal comparison is what every `requireAdmin` helper
- * currently expands to, so matching it alone would be sufficient *today* — each helper is defined
- * locally in the file that uses it. Matching `requireAdmin` as well keeps the ratchet honest if
- * anyone later extracts it into a shared module: the shared file would still carry the literal,
- * but every importing file would silently drop off this scan, which is exactly the drift this
- * test exists to prevent.
- */
+/** Match both local `requireAdmin` helpers and their literal role comparison. */
 const ADMIN_ROLE_GATE = /\brole\s*(?:!==|===)\s*["']admin["']|\brequireAdmin\b/;
 
 interface EnforcedSurface {

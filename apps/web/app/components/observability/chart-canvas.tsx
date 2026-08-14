@@ -10,10 +10,7 @@ function themeColor(name: string, fallback: string): string {
 
 export type Series = { labels: string[]; values: number[] };
 
-/**
- * Several datasets sharing one x axis. `null` is a genuine absence — a bucket the source reported
- * nothing for — and is drawn as a break in the line, never interpolated across.
- */
+/** `null` is a real missing bucket and must break the line, not interpolate. */
 export type MultiSeries = {
   labels: string[];
   series: { label: string; values: (number | null)[] }[];
@@ -54,12 +51,7 @@ export type ChartColors = {
   data: readonly string[];
 };
 
-/**
- * Builds the chart.js config. Pure and exported so the options that decide whether the chart is
- * actually readable — hover behaviour, gap handling, tick formatting — are unit-testable; a canvas
- * cannot be instantiated under jsdom, so anything left inside the effect is untested by
- * construction.
- */
+/** Pure builder keeps chart readability options testable without a jsdom canvas. */
 export function buildChartConfig({
   kind,
   labels,
@@ -150,11 +142,7 @@ export function buildChartConfig({
   };
 }
 
-/**
- * Minimal first-party chart.js canvas (line or bar) for the observability dashboard. Owns the Chart
- * lifecycle (create on mount/data change, destroy on cleanup) so there are no leaked instances. Flat
- * styling, ruby for a lone data series, muted axes — consistent with the design language.
- */
+/** Owns Chart lifecycle so instances are destroyed on cleanup. */
 export function ChartCanvas({
   kind,
   data,

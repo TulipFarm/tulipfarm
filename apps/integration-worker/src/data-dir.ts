@@ -1,12 +1,5 @@
-// Zero-required-env boot, integration-worker half: read what the API wrote to the shared data
-// volume. Same shape as apps/worker/src/data-dir.ts — see that file's header for the rationale.
-// `INTEGRATION_WORKER_API_CREDENTIAL` is the one value this process needs from the volume, written
-// by the API's `setup/worker-credential.ts` (`provisionIntegrationWorkerCredential`) as
-// `integration-worker.env`.
-//
-// The environment always wins. A deployment that sets this itself never touches the volume, and a
-// development checkout has no `/data` at all, so it still fails with the familiar "X is required"
-// rather than a confusing error about a directory nobody asked for.
+// Zero-required-env boot: env wins, else read the API-written integration-worker.env from the
+// shared data volume. No data volume still fails as normal missing env.
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -22,10 +15,7 @@ type Filled = keyof typeof SOURCES;
 
 type Env = Record<string, string | undefined>;
 
-/**
- * Where the API persists what it generated. `TF_DATA_DIR` wins; otherwise the container default,
- * and only when it already exists.
- */
+/** Data dir source: `TF_DATA_DIR`, else existing container default only. */
 export function resolveDataDir(env: Env = process.env): string | undefined {
   if (env.TF_DATA_DIR) return env.TF_DATA_DIR;
   try {
@@ -51,13 +41,7 @@ function readKey(contents: string, key: string): string | undefined {
   return undefined;
 }
 
-/**
- * Fills `INTEGRATION_WORKER_API_CREDENTIAL` from the data volume if it is still missing from the
- * environment. Mutates `env` — callers run this before `loadConfig`.
- *
- * Returns the names it filled, for the boot log. Nothing is invented here: a value that is on
- * neither the environment nor the volume stays missing, and `loadConfig` says so by name.
- */
+/** Mutates `env` with data-volume credentials only when missing; returns filled key names. */
 export function loadDataDirEnv(env: Env = process.env): Filled[] {
   const missing = (Object.keys(SOURCES) as Filled[]).filter((name) => !env[name]);
   if (missing.length === 0) return [];
@@ -82,29 +66,11 @@ export interface WaitForDataDirOptions {
   delayMs: number;
   sleep?: (delayMs: number) => Promise<void>;
   onRetry?: (missing: Filled[], attempt: number) => void;
-  /**
-   * Optional extra check once every key is present. Presence alone isn't enough for
-   * `INTEGRATION_WORKER_API_CREDENTIAL`: `reset-dev.sh` can leave a stale file on disk from before
-   * a database wipe, and this process can read it before the API's fresh mint overwrites it — a
-   * value that satisfies the missing-keys check but does not actually authenticate. Return `false`
-   * to force a fresh read next attempt instead of trusting the cached value again.
-   */
+  /** Local reset can leave a stale credential file until the API remints it. */
   verify?: (env: Env) => Promise<boolean>;
 }
 
-/**
- * Retries `loadDataDirEnv` until `INTEGRATION_WORKER_API_CREDENTIAL` is filled (and, if `verify`
- * is given, passes it), or attempts are exhausted. This primarily handles local `pnpm dev`, where
- * Turbo starts the API and this process concurrently: the API needs a database round trip before
- * it (re)writes the credential file — on a freshly reset database the old file is stale until that
- * happens — so this process reading the directory in that window sees nothing yet, not a permanent
- * absence.
- *
- * A no-op single read when no data dir resolves at all: nothing here can turn a real
- * misconfiguration (no `TF_DATA_DIR`, no env var) into a value, so there is nothing to wait for —
- * and `verify` never runs, so an env-supplied credential in a managed deployment fails fast as
- * before rather than spending the retry budget on it.
- */
+/** Retries local API startup races without masking missing data dirs or invalid env credentials. */
 export async function waitForDataDirEnv(
   options: WaitForDataDirOptions,
   env: Env = process.env

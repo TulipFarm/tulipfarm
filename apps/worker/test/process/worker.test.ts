@@ -12,12 +12,7 @@ import {
 } from "./scratch-database";
 import { buildWorkerBundle, startWorker, type WorkerHandle, waitFor } from "./worker-process";
 
-/**
- * Process-level acceptance for the bootable worker: a real child process, a real socket, a real
- * database. Every claim this PR makes — boots, refuses an old schema, claims Runs, drains on
- * SIGTERM, recovers what a killed worker abandoned — is behavioral, so none of it can be proven
- * by a unit test over the same code.
- */
+/** Process acceptance over a real child process, socket, and database. */
 const TIMEOUT = 60_000;
 
 let scratch: ScratchDatabase | undefined;
@@ -74,8 +69,7 @@ describe("worker process", () => {
     async () => {
       const handle = await bootWorker({ schemaVersion: REQUIRED_SCHEMA_VERSION - 1 });
       const runId = randomUUID();
-      // Inserted before the exit is awaited so a worker that ignored the floor would have had a
-      // Run to claim. A clean exit with the Run still queued is the assertion.
+      // Insert before exit so a worker ignoring the schema floor could claim it.
       const scratchDb = scratch as ScratchDatabase;
       await insertQueuedRun(scratchDb, { businessId: DEPLOYMENT_BUSINESS_ID, runId });
 
@@ -112,8 +106,7 @@ describe("worker process", () => {
         { describe: `Run ${runId} to reach needs_reconciliation` }
       );
 
-      // No executor owns this source, so the honest terminal status is "parked with a named
-      // cause" — never a silent success, and never a failure nobody can explain.
+      // Unknown source parks with a named cause, never silent success.
       expect(run?.status).toBe("needs_reconciliation");
       expect(run?.leaseOwner).toBeNull();
       expect(run?.leaseExpiresAt).toBeNull();
@@ -185,8 +178,7 @@ describe("worker process", () => {
       const scratchDb = scratch as ScratchDatabase;
 
       const runId = randomUUID();
-      // A source no executor owns, so the Run's fate depends only on lease recovery — the subject
-      // of this test — and not on whether a turn host happened to answer.
+      // Unknown source isolates this test to lease recovery.
       await insertQueuedRun(scratchDb, {
         businessId: DEPLOYMENT_BUSINESS_ID,
         runId,
@@ -198,12 +190,11 @@ describe("worker process", () => {
         { describe: "the first worker to finish the Run" }
       );
 
-      // SIGKILL: no drain, no lease release, no chance to write anything.
+      // SIGKILL gives no drain, lease release, or final write.
       handle.signal("SIGKILL");
       await expect(handle.exited).resolves.toBeNull();
 
-      // The row a crash mid-batch leaves behind. Written directly because with no executor
-      // registered the batch cannot be held open long enough to time a real kill inside it.
+      // Write the crash row directly; timing a real mid-batch kill is nondeterministic.
       await abandonRunWithExpiredLease(scratchDb, {
         businessId: DEPLOYMENT_BUSINESS_ID,
         runId,

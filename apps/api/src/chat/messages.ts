@@ -34,10 +34,7 @@ export class InvalidMessageError extends Error {
   }
 }
 
-/**
- * Enforces the per-role content constraints from the design spec (§3) so that no
- * document that cannot round-trip to a `ModelMessage` is ever persisted.
- */
+/** Enforces per-role content constraints before persisting MessageDoc rows. */
 export function assertValidMessage(role: MessageRole, content: string | MessagePart[]): void {
   const isString = typeof content === "string";
 
@@ -61,7 +58,6 @@ export function assertValidMessage(role: MessageRole, content: string | MessageP
     return;
   }
 
-  // role === "tool"
   if (isString) {
     throw new InvalidMessageError("tool message content must be an array of tool-result parts");
   }
@@ -79,11 +75,6 @@ export function assertValidMessage(role: MessageRole, content: string | MessageP
   }
 }
 
-/**
- * Maps a stored `MessageDoc` to the AI SDK's `ModelMessage`, resolving the SDK's
- * per-role content rules (spec §6.1). Relies on the write-time validation above
- * so it never meets an illegal state.
- */
 export function toModelMessage(doc: MessageDoc): ModelMessage {
   const { role, content } = doc;
 
@@ -118,7 +109,6 @@ export function toModelMessage(doc: MessageDoc): ModelMessage {
     return { role: "assistant", content: parts };
   }
 
-  // role === "tool"
   const toolParts: ToolResultPart[] = [];
   if (typeof content !== "string") {
     for (const part of content) {
@@ -146,8 +136,7 @@ export function fromUserText(conversationId: string, text: string): MessageDoc {
   };
 }
 
-// `id` lets the chat route persist the final reply under a pre-generated, client-known id (delivered
-// via the X-Message-Id header) so feedback can attach to the just-streamed message; defaults random.
+// Optional client-known id lets feedback attach to the just-streamed message.
 export function fromAssistantText(conversationId: string, text: string, id?: string): MessageDoc {
   return {
     _id: id ?? randomUUID(),
@@ -158,12 +147,7 @@ export function fromAssistantText(conversationId: string, text: string, id?: str
   };
 }
 
-/**
- * Build the durable `summary` row that replaces the oldest turns during compaction
- * (CTX-V1-001). `createdAt` is pinned to the cutoff turn's time so natural
- * `(created_at, id)` ordering places the summary right before the first kept verbatim
- * turn; `compactedThrough` records the newest original turn it covers.
- */
+/** Summary rows sort at the cutoff turn and record the newest compacted turn they cover. */
 export function fromSummary(
   conversationId: string,
   text: string,
@@ -179,7 +163,6 @@ export function fromSummary(
   };
 }
 
-/** Build an assistant turn that called tools — `parts` are text and/or tool-call parts. */
 export function fromAssistantParts(conversationId: string, parts: MessagePart[]): MessageDoc {
   return {
     _id: randomUUID(),
@@ -190,7 +173,6 @@ export function fromAssistantParts(conversationId: string, parts: MessagePart[])
   };
 }
 
-/** Build the tool turn carrying the results of an assistant's tool calls. */
 export function fromToolResult(conversationId: string, parts: MessagePart[]): MessageDoc {
   return {
     _id: randomUUID(),

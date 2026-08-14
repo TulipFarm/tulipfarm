@@ -106,11 +106,7 @@ const CSRF = "csrf-token-for-tests";
 const IDEMPOTENCY_KEY = "client-turn-key-1";
 const BODY = { message: { role: "user" as const, content: "hi there" } };
 
-/**
- * End-to-end proof of the PR 2 submission path over real SQL: one `POST /api/v1/chat` must leave a
- * Turn, a Run, an immutable request Artifact, and exactly one user Message behind — and a replay of
- * the same request must add none of them a second time.
- */
+/** Proves `POST /api/v1/chat` persists the Turn, Run, request Artifact, and stream. */
 describe("durable chat submission over HTTP", () => {
   let app: FastifyInstance;
   let db: PGlite;
@@ -164,8 +160,7 @@ describe("durable chat submission over HTTP", () => {
       messageRepo: new PgMessageRepo(queryable),
       invocations,
       conversationStore: new PgConversationStore(queryable),
-      // The route streams the Run back out of `run_events`, so the reader is part of what makes a
-      // turn submittable at all — a half-composed API refuses the turn rather than running it here.
+      // Streaming reads `run_events`; without it the API refuses instead of executing locally.
       runEvents: {
         events: new RunEventStore(runTransactions),
         runs: runStore,
@@ -236,14 +231,6 @@ describe("durable chat submission over HTTP", () => {
     );
   }
 
-  /**
-   * One turn, start to finish: submit, settle the Run, and read back the closed stream.
-   *
-   * The route hands the turn to a Worker and then only reads `run_events`, so the response does not
-   * arrive until the Run is terminal. Nothing in this process executes Runs, so the test plays the
-   * Worker's last step — which is what makes the stream's ending a fact about the Run rather than
-   * about the request handler finishing something itself.
-   */
   async function chat(session = sid) {
     const response = postChat(session);
     const run = await awaitRun();
@@ -264,8 +251,7 @@ describe("durable chat submission over HTTP", () => {
     const response = await postChat();
 
     expect(response.statusCode).toBe(429);
-    // The budget is worth having only if it is spent before the Run is: a refusal that still
-    // committed a Run would cap nothing a Worker or a model actually does.
+    // Budget refusal must happen before committing a Run.
     expect(await count("runs")).toBe(0);
     expect(await count("conversation_turns")).toBe(0);
     expect(await count("messages")).toBe(0);
@@ -280,8 +266,7 @@ describe("durable chat submission over HTTP", () => {
     expect(await count("runs")).toBe(1);
     expect(await count("conversation_turns")).toBe(1);
 
-    // The §4 seam: `prepareChatTurn` no longer writes the user Message, so exactly one row exists
-    // and it names the Turn it belongs to. Two rows here would mean two submission paths.
+    // Exactly one user Message proves there is only one submission path.
     const messages = await db.query<{ turn_id: string | null; content: string }>(
       "SELECT turn_id, content FROM messages WHERE role = 'user'"
     );
@@ -345,8 +330,7 @@ describe("durable chat submission over HTTP", () => {
 
     expect(replay.statusCode).toBe(409);
     expect(replay.json()).toEqual({ error: "duplicate chat invocation", runId });
-    // Refused before the turn prepares: a retry of a first-message request must not leave an empty
-    // conversation (and a generated title) behind for a turn that never runs.
+    // Refusal before prepare must not create an empty Conversation.
     expect(await count("conversations")).toBe(1);
     expect(await count("conversation_turns")).toBe(1);
     expect(await count("runs")).toBe(1);
@@ -395,8 +379,7 @@ describe("durable chat submission over HTTP", () => {
 
     expect(stopped.statusCode).toBe(200);
     expect(stopped.json()).toEqual({ status: "stopped" });
-    // Stop is not "close my connection": the Run itself is cancelled, so the turn halts in whichever
-    // process is executing it and every other reader of the same Run sees the same ending.
+    // Stop cancels the Run, not just this connection.
     const response = await pending;
     expect(response.body).toContain('"status":"cancelled"');
     const runs = await db.query<{ status: string }>("SELECT status FROM runs");
@@ -418,8 +401,7 @@ describe("durable chat submission over HTTP", () => {
 
   it("keeps one caller's idempotency key from claiming another's turn", async () => {
     const first = await chat();
-    // The key is client-supplied and Turn keys are unique deployment-wide, so an unscoped key would
-    // let this second caller be refused as a duplicate — and answered with someone else's Run id.
+    // Idempotency keys are deployment-wide; scoping prevents cross-user duplicate replies.
     const second = await chat(otherSid);
 
     expect(second.statusCode).toBe(200);

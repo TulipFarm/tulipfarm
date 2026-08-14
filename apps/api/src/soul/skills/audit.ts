@@ -3,15 +3,10 @@ import { ajv } from "@tulipfarm/schema";
 import { generateObject, jsonSchema } from "ai";
 import type { Finding, GuardResult, SkillTrustLevel } from "./guard";
 
-/*
- * SkillAudit (SKL-V1-002/003). A built-in LLM reviewer that reads a skill's SKILL.md and produces an
- * ADVISORY safety report. It is NOT a boundary: a skill is natural-language instruction, not code, so
- * it cannot be sandboxed. The report informs the operator, who still explicitly confirms the install.
- */
+/** SkillAudit is advisory only; natural-language Skills are not sandboxable boundaries. */
 
 export interface SkillAuditFinding {
   severity: "info" | "warning" | "critical";
-  // e.g. "data-exfiltration", "destructive-action", "prompt-injection", "credential-access".
   category: string;
   detail: string;
 }
@@ -19,15 +14,12 @@ export interface SkillAuditFinding {
 export interface SkillAuditReport {
   riskRating: "low" | "medium" | "high";
   summary: string;
-  // Tools/data surfaces the skill would steer an agent toward (e.g. "filesystem", "network").
   toolsReach: string[];
   findings: SkillAuditFinding[];
   deterministicScan: GuardResult & { trustLevel: SkillTrustLevel };
 }
 
-// Plain JSON Schema (TypeBox is not importable in apps/api). Fed to AJV for post-validation and to
-// the AI SDK's `jsonSchema()` to constrain the model's structured output. The deterministic scan is
-// attached after model validation so the model cannot alter scanner findings or provenance.
+// Plain JSON Schema for AJV and AI SDK; scanner findings attach after model validation.
 const SKILL_AUDIT_MODEL_REPORT_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -129,10 +121,7 @@ function renderGuardFindings(findings: readonly Finding[]): string {
     .join("\n");
 }
 
-/**
- * Run the SkillAudit review for a single skill. Returns a validated {@link SkillAuditReport}.
- * Throws if the model produces output that does not satisfy the report schema.
- */
+/** Runs SkillAudit and returns a schema-validated report. */
 export async function buildAudit(
   model: LlmModel,
   skill: { name: string; description?: string; body: string },

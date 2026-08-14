@@ -1,12 +1,5 @@
-/**
- * Timezone and business-calendar primitives for scheduled Triggers.
- *
- * Every conversion goes through the platform's IANA database via `Intl`, so a schedule authored
- * in a named zone keeps its wall-clock meaning across DST transitions instead of drifting with
- * the host's local offset.
- */
+/** Use `Intl` IANA zones so authored wall-clock schedules survive DST changes. */
 
-/** A wall-clock instant with no offset attached — meaningless until paired with a zone. */
 export interface ZonedParts {
   readonly year: number;
   readonly month: number;
@@ -15,7 +8,6 @@ export interface ZonedParts {
   readonly minute: number;
 }
 
-/** `ZonedParts` plus the day of week it landed on (0 = Sunday). */
 export interface LocalParts extends ZonedParts {
   readonly weekday: number;
 }
@@ -23,9 +15,7 @@ export interface LocalParts extends ZonedParts {
 export interface BusinessCalendar {
   readonly id: string;
   readonly timezone: string;
-  /** Days of week the business is open, 0 = Sunday. */
   readonly openWeekdays: readonly number[];
-  /** Local `YYYY-MM-DD` dates the business is closed regardless of weekday. */
   readonly closedDates: readonly string[];
 }
 
@@ -59,7 +49,6 @@ function formatterFor(timezone: string): Intl.DateTimeFormat {
   return formatter;
 }
 
-/** Read the wall-clock fields an instant carries in `timezone`. */
 export function localPartsAt(instantMs: number, timezone: string): LocalParts {
   const parts: Record<string, string> = {};
   for (const part of formatterFor(timezone).formatToParts(instantMs)) {
@@ -92,12 +81,7 @@ function sameWallClock(instantMs: number, timezone: string, parts: ZonedParts): 
   );
 }
 
-/**
- * Map a wall-clock time in `timezone` to the instants that actually carry it, earliest first.
- *
- * The result length is the DST answer the caller must act on: `0` for a spring-forward gap the
- * clock skipped, `1` for an ordinary time, `2` for a fall-back hour the clock repeated.
- */
+/** Returns 0, 1, or 2 matching instants for DST gap, ordinary time, or repeated hour. */
 export function zonedPartsToUtc(parts: ZonedParts, timezone: string): readonly number[] {
   const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
   const found = new Set<number>();
@@ -110,13 +94,11 @@ export function zonedPartsToUtc(parts: ZonedParts, timezone: string): readonly n
   return [...found].sort((a, b) => a - b);
 }
 
-/** The local `YYYY-MM-DD` date an instant falls on in `timezone`. */
 export function localDateKey(instantMs: number, timezone: string): string {
   const { year, month, day } = localPartsAt(instantMs, timezone);
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-/** Whether the business is open at `instantMs`, judged in the calendar's own zone. */
 export function isCalendarOpenAt(calendar: BusinessCalendar, instantMs: number): boolean {
   const { weekday } = localPartsAt(instantMs, calendar.timezone);
   if (!calendar.openWeekdays.includes(weekday)) return false;

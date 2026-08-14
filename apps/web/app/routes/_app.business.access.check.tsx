@@ -1,21 +1,4 @@
-/*
- * Access › Check — "why couldn't they do that?"
- *
- * This screen is the only surface that can name the layer that refused a request, so it stays. What
- * changed is the way it asks. It used to open with ten free-text fields — a principal UUID, a raw
- * action string, a `resourceType` pattern, a domain, a data class, a `key=value` conditions
- * textarea — which is a policy debugger wearing a form. An owner cannot supply any of that, and
- * everything they *can* supply (a person, a verb, a thing) was absent.
- *
- * So the question is now a sentence built from real people and the business's own Resource types,
- * and the exact strings it compiles to are shown beneath it rather than demanded above it. Every
- * original field survives inside **More precise**, because an operator debugging a Run genuinely
- * needs them and taking them away would trade one unusable screen for another.
- *
- * The answer keeps its existing rigour verbatim. `allowed` is not symmetric with `!allowed` here:
- * a denial is authoritative, an allow is an upper bound over the layers this endpoint can reach.
- * The plain-language headline says "Probably" for a partial allow for exactly that reason.
- */
+/* Partial allows say “Probably”; this endpoint cannot prove every gate layer. */
 
 import { type MetaFunction, useLoaderData, useRevalidator, useRouteError } from "@remix-run/react";
 import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
@@ -110,10 +93,7 @@ const PLAIN_REASON: Record<ExplainResult["reason"], string> = {
   no_matching_allow: "Nobody has given them this yet.",
 };
 
-/**
- * People and Resource types are informational: a deployment that cannot serve either should still
- * let an operator run a check by typing the exact strings in **More precise**.
- */
+/** Missing people/types data must not block exact-string checks in More precise. */
 export async function clientLoader() {
   const [users, resourceTypes] = await Promise.all([
     listUsers().catch((): UserSummary[] => []),
@@ -149,11 +129,7 @@ export default function BusinessAccessCheck() {
 
   // The sentence drives the query unless the operator overrode a string by hand below.
   const resolvedResourceType = form.resourceType.trim() || thing;
-  /*
-   * Only verbs that mean something for the chosen thing: "add / Connected apps" used to compile
-   * `integration.create`, an action that exists nowhere, so it matched neither the allows nor the
-   * explicit deny and the page reported a confident denial with a remedy that could not work.
-   */
+  /* Offer only verbs that compile to real actions for the chosen target. */
   const verbs = verbsFor(thing);
   const activeVerb = verbs.some((option) => option.value === verb) ? verb : (verbs[0]?.value ?? "");
   const resolvedAction = form.action.trim() || (thing ? (actionFor(thing, activeVerb) ?? "") : "");
@@ -376,12 +352,7 @@ export default function BusinessAccessCheck() {
   );
 }
 
-/**
- * The answer in one sentence, before any layer vocabulary.
- *
- * A partial allow says "Probably", never "Yes". The gate intersects layers this endpoint cannot
- * reach, so an unqualified yes here would be a promise the product cannot keep.
- */
+/** Partial allows say “Probably”, not “Yes”, because unreachable layers may still deny. */
 function PlainAnswer({ result, party }: { result: ExplainResult; party: { name: string } }) {
   const tone = !result.allowed ? "danger" : result.partial ? "warning" : "success";
   const headline = !result.allowed ? "No." : result.partial ? "Probably." : "Yes.";
@@ -536,11 +507,7 @@ function ResultPanel({
   );
 }
 
-/**
- * A layer that resolved to nothing because of broken data denies exactly like a layer that resolved
- * to a considered "no". The reason panel would otherwise present the first as the second, and the
- * remedy it offers — author a grant — cannot work while the assignment is still dangling.
- */
+/** Dangling layer data denies differently from a considered no; remedies must not conflate them. */
 function LayerFaults({ result }: { result: ExplainResult }) {
   const faults = Object.entries(result.layerEmptyReasons ?? {}).filter(([, reason]) =>
     isLayerFault(reason)

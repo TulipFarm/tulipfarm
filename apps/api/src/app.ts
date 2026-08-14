@@ -134,19 +134,15 @@ export interface AppOptions {
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
   bundledIntegrations?: ReadonlyMap<string, BundledIntegration>;
-  /** Slack -> Agent routing-table bind route. Requires the Channel integration store + business id. */
   slackBind?: {
     integrations: IntegrationStore;
     businessId: string;
-    /** Test-only override for the live Slack auth.test call. */
     verifyBotToken?: SlackBindDeps["verifyBotToken"];
   };
-  /** GitHub App install flow. Requires the Channel integration store + business id. */
   githubInstall?: Pick<
     GitHubInstallDeps,
     "integrations" | "secretsService" | "businessId" | "http" | "soulRepositories"
   >;
-  /** Live GitHub-install check backing per-turn tool visibility on the conversation debug route. */
   githubStatus?: { integrations: IntegrationStore; businessId: string };
   /**
    * Generic Integration auth broker. Absent in tests that never exercise a provider round trip;
@@ -186,21 +182,16 @@ export interface AppOptions {
   runEvents?: RunEventRouteDeps;
   runReplay?: RunReplayDeps;
   memoryService?: MemoryService;
-  /** Enables the Memory confirmation queue. Absent leaves `/api/v1/memory/pending` unregistered. */
   memoryExtractionService?: MemoryExtractionService;
-  /** Enables procedural correction, forget-by-Assertion, and hard erasure routes. */
   memoryLifecycleService?: MemoryLifecycleService;
   kvService?: KvService;
-  /** Caller-initiated invocation of manual / internal-API Triggers. */
   triggerInvoke?: TriggerInvokeDeps;
-  /** Standalone and resumable governed form submissions. */
   forms?: FormsRoutesDeps;
   knowledgeService?: KnowledgeService;
   toolRegistry?: ToolRegistry;
   /**
-   * Reconciles manifest-declared egress Tools against `toolRegistry` when an integration connects,
-   * disconnects, or is removed. Composed in `index.ts`, where the effect ledger and secrets service
-   * live; absent in tests that never exercise integration Tools.
+   * Composed in `index.ts`, where the effect ledger and secrets service live; absent in tests that
+   * never exercise integration Tools.
    */
   declarativeTools?: { sync: () => number; countFor: (slug: string) => number };
   guardrailsService?: GuardrailsService;
@@ -211,14 +202,10 @@ export interface AppOptions {
   auditReadService?: AuditReadService;
   observabilityService?: ObservabilityService;
   observabilityConfig?: ObservabilityConfig;
-  /** Canonical proposal-only Routine authoring and simulation boundary. */
   routineAuthoring?: CanonicalRoutineAuthoringService;
-  /** Published Routine browser catalogue from the verified active bundle. */
   routineCatalog?: RoutineCatalog;
-  /** DB approvals store — enables routine_state approvals on the approvals routes. */
   approvalsRepo?: ApprovalsRepo;
   routineApprovals?: RoutineApprovalService;
-  /** Tool approvals as durable kernel waits — a decision signals the wait its Run parked on. */
   toolApprovals?: ToolApprovalService;
   /**
    * What `apps/integration-worker` calls back into for the Channel ports it cannot implement
@@ -227,13 +214,9 @@ export interface AppOptions {
    * exist until `buildApp` has run.
    */
   channels?(log: FastifyBaseLogger): ChannelInternalRouteDeps;
-  /** Integration ingress (v0.12): the generic /hooks/integrations/:name webhook receiver. */
   ingress?: IngressRoutesDeps;
-  /** Trigger ingress: the canonical signed /hooks/:provider/:trigger webhook receiver. */
   hookIngress?: HookIngressDeps;
-  /** System routes overrides (update-check fetch injection for tests). */
   systemRoutes?: SystemRoutesDeps;
-  /** Authorized Phase 9 browser read models and server-side command authorities. */
   operationalApi?: OperationalApiDeps;
   /** Stage 3 admin authorization surface — read/assign/group/explain over durable authority. */
   authzAdmin?: AuthzAdminService;
@@ -244,10 +227,6 @@ export interface AppOptions {
    * never recorded as a Turn is not reconstructable, so the chat routes refuse the half-wired pair.
    */
   conversationStore?: ConversationStore;
-  /**
-   * Stops a Run a chat participant abandoned. Absent means the stop control reports 503 rather than
-   * pretending a turn was halted.
-   */
   runCancel?: ChatRunCanceller;
   /**
    * The turn machinery the Worker calls back into while it cannot import this app. Service
@@ -255,44 +234,33 @@ export interface AppOptions {
    */
   internalTurns?: InternalTurnRouteDeps;
   /**
-   * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness
-   * reports ok on process liveness alone.
+   * Datastore handle backing `/readyz`. Absent (tests, partial assemblies) means readiness reports
+   * ok on process liveness alone.
    */
   readiness?: QueryableProbeTarget;
   /**
-   * Tees `error`/`fatal` log records into `log_event` so the observability UI can show them.
-   * Absent (tests, partial assemblies) leaves logging on stdout exactly as it was.
+   * Tees `error`/`fatal` log records into `log_event` so the observability UI can show them. Absent
+   * (tests, partial assemblies) leaves logging on stdout exactly as it was.
    */
   logSink?: BatchingLogSink;
-  /** Backs `GET /api/v1/observability/logs`. Absent hides the route rather than serving an empty one. */
   logRepo?: LogRepo;
-  /** Backs `GET /api/v1/observability/resources`. Absent hides the route for the same reason. */
   resourceRepo?: ResourceRepo;
 }
 
 export async function buildApp(opts: AppOptions = {}) {
-  // forceCloseConnections: destroy lingering keep-alive / SSE (chat stream) connections on close,
-  // so `app.close()` frees the port immediately instead of hanging on an open EventSource.
-  // maxParamLength: lift the find-my-way default (100) so path params like a memory `:key` (up to
-  // MAX_KEY_CHARS=128) route instead of 404ing.
   const app = Fastify({
-    // A sink tees error/fatal records to Postgres while still writing every line to stdout, so
     // enabling it never costs the operator output they had before.
     logger: opts.logSink ? { stream: createLogTeeStream(opts.logSink) } : true,
     forceCloseConnections: true,
     maxParamLength: 512,
   });
 
-  // Single-image SPA serving: when the built web client is
-  // bundled into the image, the Dockerfile sets WEB_DIST and Fastify serves it. Unset
-  // in native `pnpm dev` (Vite serves the SPA), so this whole layer is inert there.
   const webDist = process.env.WEB_DIST;
   const serveSpa = !!webDist;
   if (serveSpa && webDist && !existsSync(webDist)) {
     throw new Error(`WEB_DIST does not exist: ${webDist}`);
   }
 
-  // Read and validate the full CSP header value written after the complete production web build.
   // A served production bundle without this artifact is a startup error (SEC-V1-002).
   const spaCspHeader = (() => {
     if (!serveSpa || !webDist) return null;
@@ -317,8 +285,6 @@ export async function buildApp(opts: AppOptions = {}) {
       );
     }
   })();
-  // Non-SPA surfaces keep their own handling: the API (JSON), the Scalar docs UI, the
-  // OpenAPI doc, and the health probes. Everything else is a client-routed SPA path.
   const isAppApiPath = (url: string) =>
     url.startsWith("/api") ||
     url.startsWith("/docs") ||
@@ -341,7 +307,6 @@ export async function buildApp(opts: AppOptions = {}) {
   });
 
   await app.register(cors, {
-    // PUBLIC_URL is the origin users actually reach in a deployed install; CORS_ORIGIN stays an
     // independent override for split-origin setups. The localhost fallback is the dev SPA.
     origin:
       process.env.CORS_ORIGIN ??
@@ -358,8 +323,6 @@ export async function buildApp(opts: AppOptions = {}) {
       "If-Match",
       "Idempotency-Key",
     ],
-    // The chat SSE response carries these; the browser can only read them cross-origin if exposed.
-    // X-Message-Id is the just-streamed reply's persisted id, so the client can attach feedback to it.
     exposedHeaders: ["X-Conversation-Id", "X-Stream-Id", "X-Message-Id", "X-Agent-Id", "X-Run-Id"],
   });
 
@@ -371,7 +334,6 @@ export async function buildApp(opts: AppOptions = {}) {
 
   await app.register(cookie);
 
-  // Relax CSP for the Scalar UI page so it can load its scripts and styles.
   // Scoped to known CDN origins — never wildcard — so an XSS in Scalar cannot
   // load arbitrary external scripts (SEC-AUDIT H-1).
   app.addHook("onSend", async (req, reply) => {
@@ -389,10 +351,6 @@ export async function buildApp(opts: AppOptions = {}) {
         ].join("; ")
       );
     } else if (serveSpa && !isAppApiPath(req.url)) {
-      // helmet's API-grade `default-src 'none'` would render the SPA blank. Relax CSP
-      // for the app shell + its assets to a same-origin policy.
-      // script-src uses build-time SHA-256 hashes from the completed web build
-      // so only the exact inline scripts Remix bakes into index.html are allowed (SEC-V1-002).
       if (!spaCspHeader) throw new Error("SPA CSP header is unavailable while serving WEB_DIST");
       reply.header("content-security-policy", spaCspHeader);
     }
@@ -403,13 +361,7 @@ export async function buildApp(opts: AppOptions = {}) {
   app.addHook("preHandler", opts.sessionStore ? makeCsrfHook(opts.sessionStore) : csrfHook);
 
   // Kubernetes-shaped probe trio. Liveness must never consult a dependency — a Postgres
-  // outage should not make the orchestrator kill and restart an otherwise-fine process.
   // Readiness does, so an instance that cannot reach its datastore is pulled out of the
-  // load balancer instead of serving errors.
-  //
-  // Migration completion needs no explicit signal: `index.ts` runs `runPgMigrations` before
-  // `buildApp`, and the server does not listen until that resolves, so anything able to
-  // answer these routes at all is already migrated.
   const probeStatusSchema = {
     type: "object",
     properties: { status: { type: "string" } },
@@ -449,8 +401,6 @@ export async function buildApp(opts: AppOptions = {}) {
   } as const;
 
   app.get("/readyz", { schema: readySchema }, readyHandler);
-  // Retained alias: the installer's health poll, the compose healthcheck, and every published
-  // doc reference /health. It tracks readiness, which is what those callers actually mean.
   app.get(
     "/health",
     { schema: { ...readySchema, description: "Alias of /readyz." } },
@@ -464,14 +414,12 @@ export async function buildApp(opts: AppOptions = {}) {
     configuration: { spec: { url: "/api/v1/openapi.json" } },
   });
 
-  // Integration ingress is deliberately outside the session-auth block: the hook route carries
   // its own per-integration HMAC verification and must work without session deps (mirrors the
   // routines webhook posture — no session auth, no CSRF).
   if (opts.ingress) {
     await registerIngressRoutes(app, opts.ingress);
   }
 
-  // Same posture as integration ingress: the Trigger hook route carries its own signature
   // verification and must work without any session dependency.
   if (opts.hookIngress) {
     await registerHookIngressRoutes(app, {
@@ -495,10 +443,7 @@ export async function buildApp(opts: AppOptions = {}) {
       tokenRepo: opts.tokenRepo,
       ...(opts.identity?.apiClientRepo && { apiClientRepo: opts.identity.apiClientRepo }),
     });
-    // Setup status: always registered so the web app gets an explicit 200 in all boot modes. Read
-    // off `gitSync.path` (not `process.env.SOUL_PATH`) so this keeps working once boot resolves a
-    // per-business path under `SOUL_ROOT` instead of the legacy flat `SOUL_PATH`.
-    // In headless boot the wizard step routes below are absent (404), but status is always reachable.
+    // Headless boot omits wizard routes (404), but status stays reachable.
     const soulPath = opts.gitSync?.path;
     if (soulPath) {
       registerSetupStatusRoute(app, {
@@ -507,7 +452,6 @@ export async function buildApp(opts: AppOptions = {}) {
         rateLimiter: opts.rateLimiter,
       });
     }
-    // Wizard step routes: only registered when NOT in headless boot.
     if (!isHeadlessBoot() && opts.secretsService && opts.gitSync && soulPath) {
       registerSetupRoutes(app, {
         userRepo: opts.userRepo,
@@ -592,9 +536,6 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.auditService
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
-        // Access-level authoring needs all three: Soul to write the Role into, the Tool registry to
-        // build the capability catalog from, and the reconciler to project it. Missing any one
-        // would leave a surface that can create a level nobody can be granted.
         if (opts.toolRegistry && opts.reconcileSoulRoles) {
           const toolRegistry = opts.toolRegistry;
           const reconcileRoles = opts.reconcileSoulRoles;
@@ -602,9 +543,6 @@ export async function buildApp(opts: AppOptions = {}) {
             gitSync: opts.gitSync,
             requireAuth,
             auditWrite: makeSoulAuditWriter(opts.auditService),
-            // Rebuilt per request, not captured: declarative integration Tools register and
-            // unregister when an integration connects or disconnects, so a catalog cached at boot
-            // would offer capabilities that no longer exist and hide ones that now do.
             catalog: () => buildCapabilityCatalog(toolRegistry.getAll()),
             reconcile: reconcileRoles,
             ...(opts.rateLimiter === undefined ? {} : { rateLimiter: opts.rateLimiter }),
@@ -622,11 +560,7 @@ export async function buildApp(opts: AppOptions = {}) {
                 requireAuth,
               }
             : undefined;
-          // Shared by the connect route and the auth broker's callback: an integration is wired the
-          // same way whether its credentials were pasted or came back from a provider redirect.
           const onConnected = async (name: string) => {
-            // Manifest-declared Tools become callable the moment credentials land, whichever way
-            // they arrived — a paste or an OAuth redirect. Runs first so a provider-specific step
             // below cannot leave an integration connected but toolless.
             opts.declarativeTools?.sync();
             if (name === "slack" && slackBindDeps) {
@@ -780,7 +714,6 @@ export async function buildApp(opts: AppOptions = {}) {
         },
         requireAuth
       );
-      // Submitting a turn needs the durable trio: the Run, the Turn it answers, and the event stream
       // it is read back from. A half-composed assembly serves conversation history but refuses to
       // start a turn it could not reconstruct — it never falls back to running one in this process.
       if (opts.invocations && opts.conversationStore && opts.runEvents) {
@@ -854,9 +787,6 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.feedbackRepo) {
       registerFeedbackRoutes(app, opts.feedbackRepo, requireAuth);
     }
-    // The retrieval spine is optional — only the page-search branch needs it (index.ts wires it in
-    // prod). Knowledge routes register whenever the service is present; page mode degrades to chunk
-    // search if the spine is absent, rather than dropping the whole knowledge surface.
     if (opts.knowledgeService) {
       registerKnowledgeRoutes(
         app,
@@ -869,8 +799,6 @@ export async function buildApp(opts: AppOptions = {}) {
   }
 
   // SPA last, so it never shadows an API/docs/health route. `wildcard: false` serves
-  // only real files (index.html, /assets/*, favicon) and lets unknown paths fall
-  // through to the not-found handler below — which returns the SPA shell for client
   // routes and a JSON 404 for the API.
   if (serveSpa && webDist) {
     await app.register(fastifyStatic, { root: webDist, wildcard: false });

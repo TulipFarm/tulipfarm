@@ -49,8 +49,6 @@ afterEach(() => {
   document.documentElement.removeAttribute("data-theme");
 });
 
-// --- Profile ---
-
 test("shows administered identity as facts, not as editable inputs", () => {
   renderRoute(<ProfileSettings />);
   expect(screen.getByText("rhea@acme.dev")).toBeInTheDocument();
@@ -91,8 +89,6 @@ test("a failed save reports the API's reason instead of a generic error", async 
 
   expect(await screen.findByRole("alert")).toHaveTextContent("name is too long");
 });
-
-// --- Appearance ---
 
 test("theme is a three-way preference, with system as its own choice", async () => {
   renderRoute(<AppearanceSettings />);

@@ -2,11 +2,7 @@ import { ok, type ToolCallResult } from "./types";
 
 export const RESULT_CAP = 20;
 
-/**
- * Truncate a large tool result for LLM context (TOOL-V1-010). Caps list-shaped
- * data at RESULT_CAP items and annotates with total_count + truncated flag so
- * the agent knows it can paginate. Error results are passed through unchanged.
- */
+/** Truncates list-shaped Tool results with `total_count` and `truncated`; errors pass through. */
 export function truncateResult(result: ToolCallResult): ToolCallResult {
   if (!result.success) return result;
   const { data } = result;

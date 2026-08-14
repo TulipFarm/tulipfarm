@@ -32,7 +32,7 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 const CATALOG_TTL_MS = 60 * 60 * 1000;
 let catalogCache: { at: number; catalog: LiteLlmCatalog | null } | null = null;
 
-/** Test-only: clear the module-level catalog cache so each test controls its own stubbed catalog. */
+/** Test-only: clears module-level catalog cache so each test controls its stubbed catalog. */
 export function __resetLlmCatalogCache(): void {
   catalogCache = null;
 }
@@ -42,14 +42,14 @@ async function getCatalog(force = false): Promise<LiteLlmCatalog | null> {
     return catalogCache.catalog;
   }
   const catalog = await fetchLiteLlmCatalog();
-  // Cache even a null (failed) result briefly so a flaky network doesn't hammer GitHub per keystroke
+  // Cache null failures briefly so a flaky network does not hammer GitHub per keystroke.
   // (a `force` refresh always re-fetches first, so a transient failure isn't sticky for the UI).
   if (catalog || !catalogCache) catalogCache = { at: Date.now(), catalog };
   return catalog;
 }
 
-// Returned by GET when soul.yaml has no `llm:` key yet, so the editor opens with empty tiers instead
-// of erroring. Not itself schema-valid for PUT (tiers need ≥1 provider) — the user fills it in and saves.
+// Returned by GET when soul.yaml has no `llm:` key, so the editor opens empty instead of
+// erroring. Not schema-valid for PUT; the user fills tiers in and saves.
 const EMPTY_LLM_CONFIG = {
   tiers: { quick: { providers: [] }, standard: { providers: [] }, complex: { providers: [] } },
 } as const;
@@ -149,12 +149,7 @@ const LlmConfigRouteSchema = {
   },
 } as const;
 
-/**
- * For `openai-compatible` providers pointed at a self-hosted LiteLLM proxy, the static LiteLLM
- * catalog lists every model that ever existed rather than what the operator actually deployed.
- * Best-effort: any missing base_url, network error, non-200, or unparseable body returns null so
- * the caller falls back to the catalog (the field stays usable as free-text entry either way).
- */
+/** Best-effort live LiteLLM model fetch; failure falls back to catalog/free text. */
 async function fetchLiveModelOptions(
   secrets: SecretsService,
   log: { warn: (obj: unknown, msg?: string) => void }
@@ -196,13 +191,7 @@ async function fetchLiveModelOptions(
   }
 }
 
-/**
- * Auto-resolve + pin a LiteLLM spec onto every model that doesn't already have one, so that simply
- * adding a model and saving is enough for cost tracking (no per-model "Fetch spec" click). Best-effort:
- * if the catalog is unreachable, the config is saved unchanged; models with no LiteLLM match are left
- * spec-less (and show as "unpriced"). Existing specs are preserved — use the form's Refresh to update.
- * `force` re-resolves ALL models against a freshly-fetched catalog.
- */
+/** Pins LiteLLM specs best-effort; `force` re-resolves existing specs. */
 async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig> {
   const tiers = config.tiers;
   if (!tiers) return config; // defensive for unchecked callers; validation requires chains
@@ -262,16 +251,7 @@ function validateRoutingCapacity(config: LlmConfig): string | null {
   return null;
 }
 
-/*
- * LLM config editing (UI-V1-003 / LLM-V1-003). Reads and full-replaces soul.yaml's `llm:` key.
- *
- * Write path safety (LLM-V1-003 AC4): the incoming config is validated with `validateLlmConfig`
- * BEFORE it is written, and `LlmService.init` re-validates and rebuilds before mutating its own
- * state, so a structurally invalid config is rejected (422) with the running service untouched.
- * `gitSync.withSync` does not emit `soul.synced`, so we reload + re-init the LlmService inline here.
- * Embeddings are round-tripped untouched by the structured form, so the EmbeddingService is not
- * re-initialised.
- */
+/* Validate before writing LLM config; inline reload because `withSync` emits no sync event. */
 export function registerLlmConfigRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
@@ -523,7 +503,7 @@ export function registerLlmConfigRoutes(
         return reply.code(422).send({ error: presetProblem });
       }
 
-      // Auto-pin specs for any model missing one (or all, with ?refresh=true) so cost tracking works
+      // Auto-pin specs for models missing one (or all, with ?refresh=true) for cost tracking.
       // without a per-model click. Best-effort — a LiteLLM outage saves the config unchanged.
       const { refresh } = req.query as { refresh?: boolean };
       config = await enrichSpecs(config, refresh === true);

@@ -87,11 +87,7 @@ function isAuthMethod(value: unknown): value is AuthMethod {
   return typeof value === "string" && (AUTH_METHODS as string[]).includes(value);
 }
 
-/**
- * Identity surface (SPEC §12): OIDC sign-in, step-up authentication, API clients as service
- * identities, and the external identity link flow. Every route is default-deny — an unconfigured
- * provider, an unregistered factor, and a non-admin caller are all refusals, never fallbacks.
- */
+/** Identity routes default-deny unconfigured providers, missing factors, and non-admins. */
 export function registerIdentityRoutes(
   app: FastifyInstance,
   deps: IdentityRouteDeps,
@@ -705,12 +701,7 @@ const ChannelBindOfferSchema = {
   required: ["slug", "senderId", "expiresAt", "account"],
 } as const;
 
-/**
- * The reverse link flow: an unknown channel sender is sent a signed, single-use link, and whoever
- * opens it inside their own session claims that sender as themselves. Both routes require a *user*
- * session — the token proves only that we issued it, never who is holding it, so the account being
- * bound comes from the session and nothing else.
- */
+/** Reverse link tokens prove issuance only; binding always uses the user session. */
 function registerChannelBindRoutes(
   app: FastifyInstance,
   deps: IdentityRouteDeps,

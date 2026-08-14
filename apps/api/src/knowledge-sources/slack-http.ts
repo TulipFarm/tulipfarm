@@ -6,13 +6,7 @@ import {
   type SlackKnowledgeMessage,
 } from "@tulipfarm/integrations";
 
-/**
- * Slack Web API transport for `SlackKnowledgeApiPort`. Not the chat adapter's transport — that's
- * `apps/integration-worker/src/slack/http.ts`, and this app never imports another app
- * (`apps/integration-worker/AGENTS.md`), so this is a deliberate small app-local copy, same
- * justification as `apps/api/src/integrations/github-http.ts`. Read-only: list channels/members/
- * history for indexing, nothing that posts or mutates.
- */
+/** App-local, read-only Slack Web API transport for knowledge indexing; never posts or mutates. */
 
 const SLACK_API_BASE_URL = "https://slack.com/api";
 

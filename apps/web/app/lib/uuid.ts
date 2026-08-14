@@ -1,8 +1,4 @@
-/*
- * `crypto.randomUUID` is a secure-context-only API — it is undefined when the app is served over
- * plain http from a LAN IP (a common prod/self-host setup). `crypto.getRandomValues` has no such
- * restriction, so fall back to building a v4 UUID from it.
- */
+/* `crypto.randomUUID` needs secure context; `getRandomValues` does not. */
 
 export function randomUUID(): string {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();

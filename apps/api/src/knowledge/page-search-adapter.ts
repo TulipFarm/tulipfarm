@@ -1,6 +1,5 @@
-// Page-level lexical retrieval — the human-search spine (Plan 1). Groups chunk hits up to whole pages,
-// fuses a title-tsv rank with the best body chunk, applies recency decay, and (optionally) widens recall
-// with a pg_trgm typo-tolerance pass. Chunk-level search stays in search-service.ts; this is page mode.
+// Page-level lexical retrieval: groups chunk hits up to pages, fuses title/body/recency,
+// and optionally widens recall with pg_trgm. Chunk search stays in search-service.ts.
 
 import type { Queryable } from "../db";
 import { pageFilterConditions } from "./chunks-repo";
@@ -20,10 +19,7 @@ export interface PageHit {
   score: number;
 }
 
-/**
- * ACL seam (out of scope for Plan 1): who is searching. Threaded through `searchPages`/`recentPages` so a
- * future permission filter can add an `AND <acl predicate>` to the WHERE clause without changing callers.
- */
+/** ACL seam: searcher is threaded so future SQL can add permission predicates. */
 export type Principal = { userId?: string | null };
 
 export interface PageSearchInput {
@@ -33,22 +29,17 @@ export interface PageSearchInput {
   principal?: Principal;
 }
 
-// ts_headline wraps matches in these (unlikely-in-prose) markers; we convert them to highlightRanges.
+// ts_headline uses unlikely markers; convert them to highlightRanges.
 const SEL_START = "<<";
 const SEL_STOP = ">>";
 
-/**
- * Build a prefix tsquery for as-you-type search: each alphanumeric term becomes a `term:*` prefix
- * pattern, AND-joined (`frid` → `frid:*`, matching "friday"; `deploy frid` → `deploy:* & frid:*`).
- * Non-word characters are dropped, so the result is always valid to_tsquery input. Empty when the
- * input has no usable terms (caller skips the FTS pass).
- */
+/** Builds a valid prefix tsquery from alphanumeric terms; empty means skip FTS. */
 export function toPrefixTsQuery(query: string): string {
   const terms = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
   return terms.map((t) => `${t}:*`).join(" & ");
 }
 
-/** Strip `<<…>>` markers from a ts_headline snippet, returning the clean text + matched char ranges. */
+/** Strip `<<…>>` markers, returning clean text and match ranges. */
 export function extractHighlights(marked: string): {
   snippet: string;
   highlightRanges: Array<[number, number]>;
@@ -95,21 +86,21 @@ export class PageRetrievalService {
     private readonly cfg: RankingConfig = DEFAULT_RANKING
   ) {}
 
-  /** Whole-page lexical search: grouped + title/body/recency-fused, with an optional trgm recall pass. */
+  /** Whole-page lexical search, with optional trgm recall. */
   async searchPages(input: PageSearchInput): Promise<PageHit[]> {
     const { query, filters, limit } = input;
-    // Prefix FTS for as-you-type matching; skip the FTS pass entirely when there are no usable terms.
+    // Prefix FTS for as-you-type matching; skip when there are no usable terms.
     const tsq = toPrefixTsQuery(query);
     const primary = tsq === "" ? [] : await this.runPrimary(tsq, filters, limit);
     if (!this.cfg.trgmFallback || primary.length >= this.cfg.trgmThreshold) return primary;
 
     const seen = new Set(primary.map((h) => h.pageId));
     const fuzzy = (await this.runTrgm(query, filters, limit)).filter((h) => !seen.has(h.pageId));
-    // Primary (relevance-ranked) hits stay on top; trgm-only hits fill the tail, sorted by similarity.
+    // Primary hits stay on top; trgm-only hits fill the tail by similarity.
     return [...primary, ...fuzzy].slice(0, limit);
   }
 
-  /** Zero-query state: the most-recently-updated pages (mirrors the Knowledge home "Recently edited"). */
+  /** Zero-query state: most-recently-updated pages. */
   async recentPages(limit: number, filters: SearchFilters = {}): Promise<PageHit[]> {
     const params: unknown[] = [];
     const filterSql = this.filterSql(filters, params);
@@ -164,7 +155,7 @@ export class PageRetrievalService {
   }
 
   private async runTrgm(query: string, filters: SearchFilters, limit: number): Promise<PageHit[]> {
-    // pg_trgm recall pass — `%` uses the title trigram index + the default 0.3 similarity threshold.
+    // pg_trgm recall pass: `%` uses title trigram index and default 0.3 threshold.
     const params: unknown[] = [query];
     const filterSql = this.filterSql(filters, params);
     params.push(limit);
@@ -182,7 +173,7 @@ export class PageRetrievalService {
     return rows.map((r) => rowToPageHit(r, Number((r as { sim: number }).sim)));
   }
 
-  /** Build the `{filterSql}` fragment (reuses pageFilterConditions — `p.`-aliased, type/space/etc.). */
+  /** Build the `p.`-aliased filter SQL fragment. */
   private filterSql(filters: SearchFilters, params: unknown[]): string {
     const conds = pageFilterConditions(filters, params);
     return conds.length > 0 ? ` AND ${conds.join(" AND ")}` : "";

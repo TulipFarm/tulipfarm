@@ -4,11 +4,7 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * Concrete GitHub REST transport for this app's `IntegrationHttpPort`. A deliberate local copy of
- * `apps/integration-worker/src/github/http.ts` / `apps/api/src/integrations/github-http.ts` — an
- * application may not import another application (see `AGENTS.md`).
- */
+/** Local `IntegrationHttpPort` copy; applications may not import other applications. */
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";

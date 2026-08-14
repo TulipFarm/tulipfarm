@@ -1,15 +1,12 @@
 /**
- * Pure, DOM-free serialization of the Tiptap composer document. The editor's contenteditable can't be
- * driven under jsdom, so all message-shaping logic lives here as plain functions over the ProseMirror
- * JSON (`editor.getJSON()`) and is unit-tested directly.
- *
- * `serializeDoc` produces the wire payload for a turn:
- *   - `text`     — markdown (bold/italic/code/strike/link) with mentions kept as literal `@/ / /#` tokens
- *   - `agentId`  — the first `@agent` mention (routes the turn); undefined if none
- *   - `skills`   — every `/skill` mention id, in order, de-duplicated
- *   - `resources`— every `#resource` mention id, in order, de-duplicated
- *
- * `filterItems` is the suggestion-menu filter (prefix matches rank above substring matches).
+ * The editor's contenteditable can't be driven under jsdom, so all message-shaping logic lives
+ * here as plain functions over the ProseMirror JSON (`editor.getJSON()`) and is unit-tested
+ * directly. `serializeDoc` produces the wire payload for a turn: - `text` — markdown
+ * (bold/italic/code/strike/link) with mentions kept as literal `@/ / /#` tokens - `agentId` —
+ * the first `@agent` mention (routes the turn); undefined if none - `skills` — every `/skill`
+ * mention id, in order, de-duplicated - `resources`— every `#resource` mention id, in order,
+ * de-duplicated `filterItems` is the suggestion-menu filter (prefix matches rank above
+ * substring matches).
  */
 
 import type { Autonomy } from "~/lib/agents";
@@ -36,26 +33,18 @@ export interface MentionItem {
   id: string;
   label: string;
   description?: string;
-  // Agent-only glyph inputs (undefined for skill/resource mentions); see components/agent-glyph.
   domain?: string;
   autonomy?: Autonomy;
-  // Agent-only: the agent's configured selector (frontmatter `model`; raw string, may be an effort
-  // preset, a retired alias, or a model id). Lets the composer reflect a mentioned agent's preset.
   model?: string;
 }
 
-// Only embed a link whose href uses a safe scheme. Keeps `javascript:`/`data:`/other URIs out of the
-// serialized message text — which is persisted, fed to the LLM, and re-rendered as markdown in the
-// transcript. An unsafe or absent href degrades to plain text (the run is still emitted, just unlinked).
+/** Only http(s)/mailto links survive serialization; unsafe schemes become plain text. */
 function safeHref(href: unknown): string | null {
   if (typeof href !== "string") return null;
   const trimmed = href.trim();
   return /^(https?:|mailto:)/i.test(trimmed) ? trimmed : null;
 }
 
-// Wrap a text node's content in markdown delimiters for whichever marks it carries. Code is innermost
-// (its content is literal), then emphasis, with the link wrapping outermost so its `[text](href)` spans
-// the fully-decorated run.
 function applyMarks(text: string, marks: PMNode["marks"]): string {
   if (!marks || marks.length === 0) return text;
   const has = (type: string) => marks.some((m) => m.type === type);
@@ -69,7 +58,6 @@ function applyMarks(text: string, marks: PMNode["marks"]): string {
   return out;
 }
 
-// Serialize one block's inline children to a markdown string, pushing mention ids into `collected`.
 function serializeInline(
   nodes: PMNode[] | undefined,
   collected: Record<MentionKind, string[]>
@@ -119,11 +107,6 @@ export function serializeDoc(doc: PMNode): SerializedMessage {
   };
 }
 
-/**
- * The id of the first `@agent` mention in a composer doc, or undefined if there is none. Pure (no
- * DOM) so the composer can read it from a `useEditorState` selector to drive the preset — without
- * the full `serializeDoc` pass. Mirrors `serializeDoc`'s "first agent mention wins" rule.
- */
 export function firstAgentMentionId(doc: PMNode): string | undefined {
   for (const block of doc.content ?? []) {
     for (const node of block.content ?? []) {
@@ -136,11 +119,6 @@ export function firstAgentMentionId(doc: PMNode): string | undefined {
   return undefined;
 }
 
-/**
- * Filter suggestion items by a (char-stripped) query. Empty query returns the head of the list. A
- * non-empty query keeps items whose label or id contains it (case-insensitive), ranking prefix
- * matches first so typing `cop` surfaces `copywriting` before `scope`. Capped to `limit`.
- */
 export function filterItems(query: string, items: MentionItem[], limit = 8): MentionItem[] {
   const q = query.trim().toLowerCase();
   if (q === "") return items.slice(0, limit);
@@ -149,7 +127,6 @@ export function filterItems(query: string, items: MentionItem[], limit = 8): Men
     const hay = `${item.label} ${item.id}`.toLowerCase();
     const idx = hay.indexOf(q);
     if (idx === -1) continue;
-    // 0 = label/id starts with the query, 1 = matches further in.
     const rank =
       item.label.toLowerCase().startsWith(q) || item.id.toLowerCase().startsWith(q) ? 0 : 1;
     scored.push({ item, rank });

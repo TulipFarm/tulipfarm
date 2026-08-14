@@ -224,12 +224,9 @@ import { buildSlackTooling } from "./tools/slack/compose";
 import { buildSlackTools } from "./tools/slack/tools";
 import { ensureEmbeddingIndexes } from "./vector-search";
 
-// Load .env.local (symlinked from root by setup script)
 config({ path: ".env.local" });
 
 // Fill any bootstrap secret the operator did not supply, from the data volume or fresh
-// randomness, so the shipped compose file needs no `.env` at all. Runs before
-// validateEnvironment, which requires all three to be present.
 const secretsBootstrap = ((): BootstrapSecretsResult => {
   try {
     return bootstrapSecrets();
@@ -249,8 +246,6 @@ const SYSTEM_SOUL_COMMIT_ACTOR: CommitActor = {
   name: "TulipFarm (system)",
   email: "",
 };
-// Attribution for reconciliation publications — HEAD that moved by boot or remote sync, not by a
-// local user write — so a GitHub author's change is not credited to the API.
 const SOUL_SYNC_COMMIT_ACTOR: CommitActor = {
   principalId: "service:tulipfarm-soul-sync",
   name: "TulipFarm Soul Sync",
@@ -376,29 +371,23 @@ async function boot() {
     /**
      * One instance, shared by the two halves of D7's personal-credential protocol: the connect
      * route that seals a credential and the resolver that decides a call needs one. They are a
-     * protocol, not two features — a resolver that denies with "connect it from Settings" while
-     * the connect route is unwired is a dead end for the person reading it, so neither may be
+     * protocol, not two features — a resolver that denies with "connect it from Settings" while the
+     * connect route is unwired is a dead end for the person reading it, so neither may be
      * configured without the other.
      */
     const principalTokens = new PgPrincipalProviderTokenRepo(pool);
 
-    // Second half of the key-loss guard: a KEK invented this boot against a database that
-    // already holds wrapped DEKs means the real key was lost, not that this is a first boot.
     await assertNoOrphanedDeks((sql) => pool.query(sql), secretsBootstrap);
 
     const secretRepo = new PgSecretRepo(pool);
     const dekRepo = new PgDekRepo(pool);
     const encryptionKeys = loadEncryptionKeys();
     // Fail-fast boot canary: unwrap the active DEK under the env KEK (auto-provisioning one on
-    // first boot to preserve zero-setup) and verify its canary. A wrong/missing key or corrupt
     // wrap throws KeyManagerError → the catch below logs and exits 1, rather than failing later at
     // first secret access. Pre-cutover rows must already have been backfilled to the active DEK.
     const activeDek = await loadOrProvisionActiveDek(dekRepo, encryptionKeys);
     const secretsService = new SecretsService(secretRepo, activeDek);
 
-    // env.ts guarantees exactly one of SOUL_PATH/SOUL_ROOT is set. SOUL_PATH is the legacy flat
-    // single-tenant checkout (local dev always uses it); SOUL_ROOT is the hosted/production
-    // per-business layout (`resolveSoulPath` -> `<root>/<businessId>/soul`), authenticated via a
     // GitHub App installation token instead of a static PAT.
     const integrationStore = new IntegrationStore(transactionPort(pool));
     const soulRepositoryStore = new SoulRepositoryStore(transactionPort(pool));
@@ -409,9 +398,7 @@ async function boot() {
 
     if (process.env.SOUL_PATH) {
       soulPath = process.env.SOUL_PATH;
-      // SOUL_GIT_REMOTE_URL/SOUL_GIT_CREDENTIAL only seed the very first boot. Once Settings →
       // Soul persists a remote (soul.yaml's gitRemoteUrl + the "soul-git-credential" secret),
-      // that takes over — otherwise a restart would forget a remote configured after boot.
       const persistedSoulConfig = await readSoulConfig(soulPath);
       gitRemoteUrl = persistedSoulConfig.gitRemoteUrl ?? process.env.SOUL_GIT_REMOTE_URL;
       const gitCredential =
@@ -471,7 +458,6 @@ async function boot() {
       defaultCommitActor: () => SYSTEM_SOUL_COMMIT_ACTOR,
     });
     // A stale/invalid remote (revoked PAT, unreachable host) must never crash-loop boot — fall
-    // back to whatever soul state is already on disk and keep serving. `configureRemote` (the
     // Business → Soul PUT route) still throws on the same failure so the user sees it there.
     try {
       await gitSync.bootSync();
@@ -482,7 +468,6 @@ async function boot() {
     }
 
     // Nothing published bundles before this producer existed, and remote-authored commits never
-    // fire the local commit hook — both leave `soul_active_bundles` behind git HEAD, with dead
     // Routines/Triggers. Reconcile HEAD into the active bundle at boot. Never fatal, same as above.
     try {
       await soulPublisher.reconcile(DEPLOYMENT_BUSINESS_ID, SOUL_SYNC_COMMIT_ACTOR);
@@ -504,7 +489,6 @@ async function boot() {
     const bundledIntegrations = await loadBundledIntegrations(console);
 
     // Per-type resource tables can't be created lazily (no `db.collection(type)`):
-    // materialise them for every loaded soul type before serving.
     await reconcileResourceTables(pool, soulLoader, console);
 
     const ttlSeconds = Number.parseInt(
@@ -518,7 +502,6 @@ async function boot() {
     const apiClientRepo = new PgApiClientRepo(pool);
     const externalIdentityRepo = new PgExternalIdentityRepo(pool);
     await syncDeploymentRoles(new PgRoleRepo(transactionPort(pool)));
-    // Project authored Soul Roles into durable rows after the bootstrap roles are seeded, so an
     // authored Role actually resolves through the authority layers (and a Role deleted from Soul is
     // reaped). Reserved bootstrap ids are never touched. See identity/role-reconcile.ts.
     await reconcileSoulRoles(
@@ -528,8 +511,6 @@ async function boot() {
       console
     );
     const rateLimiter = new PgRateLimiter(pool);
-    // One validator for the request boundary: the gateway rejects an unregistered schema reference
-    // before minting a Run, and the same instance re-validates on publish and on every later read.
     const invocationValidator = new TypedOutputValidator(INVOCATION_REQUEST_SCHEMAS);
     const invocations = new DurableInvocationGateway({
       store: new PgDurableInvocationStore(
@@ -543,9 +524,6 @@ async function boot() {
       validator: invocationValidator,
       routineDefinitions: new ActiveRoutineInvocationResolver(soulPublications, soulBundleVerifier),
     });
-    // Ticks every `cron`/`interval`/`datetime` `x-triggers` entry across active Routines and starts
-    // a Run for whatever's due. Lives here (not the Worker) since only this process holds the live
-    // Soul checkout. See docs/plans/2026-08-08-routine-cron-scheduler-design.md.
     const scheduleDispatcher = new ScheduleDispatcher({
       soulLoader,
       stateStore: new RoutineScheduleStateStore(pool),
@@ -553,8 +531,6 @@ async function boot() {
       businessId: DEPLOYMENT_BUSINESS_ID,
       log: console,
     });
-    // Canonical event intake/outbox for Trigger invocation, shared in shape (not process) with the
-    // Worker's own `EventStore` — this is the first API-side instantiation of it.
     const events = new EventStore(runTransactions, randomUUID);
     const triggerDefinitions = new ActiveTriggerInvocationResolver(
       soulPublications,
@@ -566,13 +542,9 @@ async function boot() {
       soulBundleVerifier,
       DEPLOYMENT_BUSINESS_ID
     );
-    // Same DEK `SecretsService` encrypts stored secrets with — no separate key material.
     const webhookRawPayloadVault = new PgRawPayloadVault(pool, activeDek.key);
-    // Read side of the same canonical `runs` / `run_states` tables the gateway writes.
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
-    // Stopping a turn is cancelling its Run: the process executing it observes the cancellation and
-    // halts, so a participant can stop a turn no request handler here is holding.
     const runCancel = runCanceller(
       new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
     );
@@ -592,12 +564,8 @@ async function boot() {
     const surfaceActionStore = new PgSurfaceActionStore(pool);
     const observabilityService = new ObservabilityService(new PgObsRepo(pool));
     const logRepo = new PgLogRepo(pool);
-    // Tees error/fatal log records into `log_event` so the observability UI can show them. Started
-    // here (not in buildApp) because the flush timer belongs to the process, not to the app object.
     const logSink = new BatchingLogSink({ service: "api", writer: logRepo });
     logSink.start();
-    // Fixed-cadence CPU/RSS samples for the observability dashboard. Started here for the same
-    // reason as the log sink: the interval belongs to the process, not to the app object.
     const resourceSampler = new ResourceSampler({
       service: "api",
       instance: `${hostname()}:${process.pid}`,
@@ -606,8 +574,6 @@ async function boot() {
     });
     resourceSampler.start();
     const memoryTelemetry = createObservabilityTelemetryPort(observabilityService);
-    // `embeddingService` is initialized later (it needs the Soul LLM config), and both memory
-    // consumers only call it at request time — so passing it here wires the dense recall arm
     // without forcing the boot order to change.
     const memoryService = new MemoryService(
       new EngineMemoryRepo(pool, undefined, embeddingService, memoryTelemetry)
@@ -646,7 +612,6 @@ async function boot() {
     // *definitions* stay Soul-authored — this service never writes durable Role rows.
     // One resolver, shared. The admin surface's "why was this denied" and the gate's actual
     // decision must read the same grants through the same code, or the explanation describes a
-    // deployment that does not exist.
     const authorityLayerResolver = buildLiveAuthorityLayerResolver(pool);
     const authzAdmin = new AuthzAdminService({
       roles: new PgRoleRepo(transactionPort(pool)),
@@ -655,9 +620,6 @@ async function boot() {
       resolver: authorityLayerResolver,
       businessId: DEPLOYMENT_BUSINESS_ID,
       audit: auditService,
-      // Names come from the Soul artifacts themselves, so a level is called what its author called
-      // it rather than by the UUID its durable row is keyed on. `compileSoulRole` derives the row
-      // id from `metadata.id`, so this map keys on the same value the roles repo returns.
       roleNames: () =>
         new Map(
           [...soulLoader.roles.values()].map(
@@ -665,9 +627,6 @@ async function boot() {
               [
                 role.definition.metadata.id,
                 {
-                  // `role.name` is the artifact directory the loader keyed on, which is exactly the
-                  // slug the delete route addresses. Re-deriving it from the display name would
-                  // break the moment a level was named something that slugifies differently.
                   slug: role.name,
                   ...(role.definition.metadata.displayName === undefined
                     ? {}
@@ -685,12 +644,10 @@ async function boot() {
     const counterStore = new PgCounterStore(pool);
     const reconcileResources = () => reconcileResourceTables(pool, soulLoader, console);
 
-    // pg-boss starts before buildApp so the knowledge service's async-index callback can enqueue.
     const domainEventEmitter = new EventEmitter();
     const boss = new PgBoss({ connectionString: process.env.DATABASE_URL as string });
     await boss.start();
 
-    // Shared with registerSlackKnowledgeSync below — one store instance per process, not one per
     // caller, so ingestion and unified retrieval never disagree about what's indexed.
     const knowledgeSourceStore = new PgKnowledgeSourceStore(pool);
     const knowledgeIndexStore = new PgKnowledgeIndexStore(pool, embeddingService);
@@ -717,14 +674,10 @@ async function boot() {
     });
 
     const approvalsRepo = new ApprovalsRepo(pool);
-    // A Worker-executed turn asks for approval by parking its Run on a durable wait. The wait is
     // registered here rather than in the Worker because its one-use resume token must never leave
-    // the process that will redeem it — the Worker only ever learns the wait's id.
     const runResume = new RunResumeGateway(runStore);
     const runWaits = new DurableWaitManager(new WaitStore(runTransactions), runResume);
     const toolApprovals = new ToolApprovalService({ repo: approvalsRepo, waits: runWaits });
-    // The Routine side of the same surface: a State names approver roles rather than a person, so
-    // the decision is authorized by the roles the deciding principal holds.
     const routineApprovals = new RoutineApprovalService({ repo: approvalsRepo, waits: runWaits });
     const ingressDeliveries = new IngressDeliveriesRepo(pool);
     const integrationThreads = new IntegrationConversationsRepo(pool);
@@ -737,15 +690,12 @@ async function boot() {
     );
     const channelIntegrations = new IntegrationStore(runTransactions);
     // The bind link's HMAC key comes from the secret store, provisioned on first use — never a
-    // constant in the image, which every deployment would share.
     const channelBind = {
       repo: externalIdentityRepo,
       signingKey: channelBindKeyResolver(secretsService),
     };
 
     // GitHub chat tool family: registered unconditionally (each tool's own effect dispatch fails
-    // closed with no installation), visibility gated live per turn on install status elsewhere
-    // (chat/turn-helpers.ts) rather than here — see docs/plans/2026-08-07-github-chat-tool-access.md.
     const githubTooling = buildGitHubTooling({
       businessId: DEPLOYMENT_BUSINESS_ID,
       integrations: integrationStore,
@@ -757,9 +707,6 @@ async function boot() {
       effects: githubEffects,
     });
 
-    // Slack send tool: same effect-ledger dispatch pattern as GitHub. Writes an
-    // `integration_conversations` mapping on send (see `tools/slack/tools.ts`) so a human reply in
-    // the sent message's thread routes back to this conversation instead of starting a new one.
     const slackTooling = buildSlackTooling({
       secrets: async () => secretsService,
     });
@@ -771,10 +718,7 @@ async function boot() {
       mentionedThreads: channelMentionedThreads,
     });
 
-    // Full chat tool registry: memory + knowledge (platform) plus every forge family
     // (resource records/types, agents, skills, platform tools). Without this, a chat turn only
-    // sees memory+knowledge and no agent can create/curate soul artifacts. Per-agent allowlists
-    // (which tools each agent may actually call) are applied per-turn in the chat route.
     const toolRegistry = buildToolRegistry({
       memory: memoryService,
       memoryRecall: memoryRecallService,
@@ -811,14 +755,11 @@ async function boot() {
         onRoutinesChanged: async () => {
           await soulLoader.reload();
           // Ticks immediately so a newly-authored/edited schedule is reconciled without waiting up
-          // to SCHEDULE_DISPATCH_INTERVAL_MS for the next periodic tick.
           await scheduleDispatcher.tick();
         },
       },
     });
 
-    // Manifest-declared integrations publish their Tools here rather than through
-    // `buildToolRegistry`: what they publish depends on which are connected *now*, and an operator
     // who connects a provider expects its Tools without an API restart.
     const declarativeTools = new DeclarativeToolSync({
       registry: toolRegistry,
@@ -830,8 +771,6 @@ async function boot() {
       logger: () => app.log,
     });
 
-    // What the Worker calls back into while the history, the Soul artifacts, and the Tool catalog
-    // still live here. Every operation names a Run and acts as the subject that Run was minted
     // with, so a worker credential is a key to a Run rather than a principal of its own.
     const conversationStore = new PgConversationStore(pool);
     const runArtifacts = new ArtifactService(
@@ -868,16 +807,13 @@ async function boot() {
           surfaceActionStore,
           guardrails: guardrailsService,
           githubStatus: { integrations: integrationStore, businessId: DEPLOYMENT_BUSINESS_ID },
-          // The flip. Until these two are supplied the dispatcher runs every registered Tool on
           // the agent allowlist alone; with them, no chat Tool executes without a grant.
           gate: new LiveToolGate(),
           authorityLayers: authorityLayerResolver,
           // D7. Without this every provider Tool spends the deployment's shared credential and the
-          // provider sees one actor for the whole business, so its own ACLs stop discriminating.
           credentials: new CredentialResolver({ tokens: principalTokens, soulLoader }),
           // Authority layer L5. Every GitHub Tool spends the App installation's credential, so
           // without this the platform's answer to "may this person touch that repo" is whatever
-          // the bot can reach — the union of everyone's access.
           entitlements: new CompositeToolEntitlement([
             new GitHubEntitlementPort(
               externalIdentityRepo,
@@ -885,12 +821,9 @@ async function boot() {
             ),
           ]),
           // s6-ledger. Without this a mutating platform Tool — Record CRUD, Soul Forge, memory,
-          // key-value — has no reservation, so a duplicate delivery of the same tool call applies
-          // its write twice, and a Tool that throws leaves nothing for reconciliation to find.
           effects: new PgEffectStore(runTransactions),
         }),
         approvals: {
-          // The subject comes from the Run, so the principal allowed to decide is the one the Run
           // was minted with — never one the Worker names for itself.
           registerWait: (authority, input) =>
             toolApprovals.registerWait({
@@ -902,10 +835,6 @@ async function boot() {
             }),
         },
       }),
-      // The channel side of the same boundary: a delivery Run classifies in the Worker and comes
-      // back here for the conversation, the identity, and the reply. Built per-app rather than
-      // eagerly because it logs through Fastify's logger, which does not exist until `buildApp`
-      // has run.
       deliveries: (log: FastifyBaseLogger) =>
         new IngressDeliveryHost({
           runs: runStore,
@@ -924,15 +853,12 @@ async function boot() {
           toolRegistry,
           domainEvents: domainEventEmitter,
           // The link is redeemed inside an authenticated web session, so it must point at the
-          // origin users actually reach — not at this API's own host.
           bindLinkUrl: (token) =>
             `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
           log,
         }),
-      // Read through the loader on every call, so a `soul.synced` reload reaches the Worker
       // without restarting it.
       llmConfig: () => soulLoader.llmConfig,
-      // A Routine State that needs a human parks on a durable wait registered here, for the same
       // reason: the resume token stays in the process that redeems it.
       routineApprovals: new InternalRoutineApprovalHost({
         runs: runStore,
@@ -955,7 +881,6 @@ async function boot() {
       profileWriteRepo: userRepo,
       userInviteRepo: new PgUserInviteRepo(pool),
       tokenRepo,
-      // OIDC and MFA verifiers are adapter-supplied; absent means those routes stay closed.
       identity: {
         apiClientRepo,
         externalIdentityRepo,
@@ -980,11 +905,9 @@ async function boot() {
       hookExecutor,
       resourceRepoFactory,
       counterStore,
-      // The REST record API is the same records the Record Tools reach, by a different door. The
       // domain wall the gate enforces is only a wall if this door enforces it too.
       recordAuthorizer: new LiveRecordAuthorizer(soulLoader, authorityLayerResolver),
       reconcileResources,
-      // Reload Soul then project Roles, in that order — the reconciler reads the loader's catalog,
       // so projecting without reloading would write the state from before the level was committed.
       reconcileSoulRoles: async () => {
         await soulLoader.reload();
@@ -1045,17 +968,13 @@ async function boot() {
         surfaceActionStore,
         secrets: secretsService,
         soulLoader,
-        // Same construction as the webhook-ingress `deliveries` factory above — the link is
         // redeemed inside an authenticated web session, so it must point at the origin users
-        // actually reach, not this API's own host.
         bindLinkUrl: (token) =>
           `${(process.env.PUBLIC_URL ?? "http://localhost:4000").replace(/\/+$/, "")}/link-channel?token=${encodeURIComponent(token)}`,
       }),
       runEvents: {
         events: runEventStore,
         runs: runStore,
-        // Every authenticated principal of this single-business deployment may read its own Runs.
-        // Operator-audience events stay admin-only.
         authorize: async (req) => {
           const principal = req.principal;
           if (!principal) return null;
@@ -1080,8 +999,6 @@ async function boot() {
           soulPublicationProbe(pool),
           llmProbe(llmService),
         ],
-        // Routine-state Approvals resume through the routine wake queue, which has no consumer
-        // in this deployment (the Routine engine has been removed). Deciding one would silently
         // strand the Run, so the attempt fails loudly instead. Tool-call Approvals — the ones
         // this deployment actually produces — are resolved in-process and never reach here.
         enqueueWake: async () => {
@@ -1162,7 +1079,6 @@ async function boot() {
     logEnvironmentStatus(app.log);
     // Before the wizard, and independent of it: a deployment that never opens the wizard still
     // accepts Runs, so the Worker's and Integration Worker's credentials cannot wait on a human
-    // creating the first account.
     await provisionWorkerCredential(apiClientRepo, process.env, app.log);
     await provisionIntegrationWorkerCredential(apiClientRepo, process.env, app.log);
     await bootstrapFromEnv({
@@ -1202,7 +1118,6 @@ async function boot() {
     });
     subscribeKnowledgeIndexing(domainEventEmitter, boss);
     subscribeActivityLogging(domainEventEmitter, activityService);
-    // Optional Grafana Cloud OTLP metrics export (gated). Only constructed when enabled + targeted +
     // the token resolves — the default path loads nothing extra.
     let metricsSink: OtlpMetricsExporter | undefined;
     let tracesSink: OtlpTracesExporter | undefined;
@@ -1226,7 +1141,6 @@ async function boot() {
         console.warn("[observability] OTLP enabled but token unresolved — export disabled");
       }
     }
-    // Cost is computed primarily from each model's pinned soul spec (resolved from LiteLLM when the
     // model was added in Settings); the built-in price map + config overrides are the fallback.
     subscribeObservability(domainEventEmitter, observabilityService, {
       pricingOverrides: obsConfig.pricingOverrides,
@@ -1310,7 +1224,6 @@ async function boot() {
       shuttingDown = true;
       app.log.info(`Received ${signal} — shutting down gracefully`);
       // Watchdog: never let a hung dependency (e.g. pg-boss waiting on jobs) keep the process
-      // alive holding the port — force exit if graceful shutdown overruns.
       const force = setTimeout(() => {
         app.log.error("Shutdown timed out after 5s — forcing exit");
         process.exit(1);
@@ -1321,22 +1234,17 @@ async function boot() {
         clearInterval(soulPublicationDrainInterval);
         await app.close();
         await boss.stop({ graceful: false });
-        // Final flush so metrics/spans buffered since the last interval tick aren't lost on exit.
         await metricsSink?.flush();
         metricsSink?.stop();
         await tracesSink?.flush();
         tracesSink?.stop();
         await hookExecutor?.close();
-        // Before pool.end(): the sink writes through this pool, so draining after it closes would
-        // lose exactly the shutdown-path errors an operator most needs to see.
         await resourceSampler.stop();
         await logSink.stop();
         await pool.end();
       } catch (err) {
         app.log.error(`Shutdown error: ${err instanceof Error ? err.message : String(err)}`);
-        // The throw may have skipped the stop() above, and the next line exits the process. Flush
         // so the error explaining a failed shutdown is not the one record this feature loses; if
-        // the pool is already closed it degrades to stderr, which still beats dropping it.
         await resourceSampler.stop().catch(() => {});
         await logSink.stop().catch(() => {});
       }

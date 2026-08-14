@@ -3,7 +3,6 @@ import { apiGet, apiSend } from "./api";
 /*
  * Read-only client for the Soul Explorer API. The soul repo is a git directory on the API
  * server; these endpoints expose a recursive file tree and raw file contents for browsing.
- * Mirrors lib/api.ts conventions (cookie-first auth, ApiError on non-2xx).
  */
 
 export type SoulTreeNode = {
@@ -51,8 +50,7 @@ export function getGitConfig(): Promise<SoulGitConfig> {
   return apiGet<SoulGitConfig>("/api/v1/soul/git-config");
 }
 
-// `credential` (a PAT) is write-only: pass it only when the user typed a new one, since the API
-// never returns the stored value back.
+/** `credential` is write-only; pass it only when the user typed a new one. */
 export function putGitConfig(remoteUrl: string, credential?: string): Promise<void> {
   return apiSend("PUT", "/api/v1/soul/git-config", { remoteUrl, credential });
 }
@@ -61,9 +59,6 @@ export function syncSoul(): Promise<void> {
   return apiSend("POST", "/api/v1/soul/sync", {});
 }
 
-// Raw git stderr (e.g. "fatal: could not read Username for 'https://github.com': terminal
-// prompts disabled") is unreadable to a non-technical user. Translate the common auth-failure
-// shapes into a clear message with next steps; leave anything else as-is.
 const GIT_AUTH_FAILURE_PATTERN =
   /could not read username|authentication failed|terminal prompts disabled|support for password authentication was removed|invalid username or password/i;
 

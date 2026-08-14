@@ -13,18 +13,7 @@ import { createCliJail, jailedEnv } from "./jail";
 import { firstJsonObject, jsonModeInstruction } from "./structured";
 import { functionTools } from "./transcript";
 
-/**
- * `LanguageModelV4` over the `codex app-server` protocol — lets a user with a ChatGPT
- * Plus/Pro/Business plan (no API key) run TulipFarm. Same turn shape as `claude-code.ts`: Tools are
- * declared but never executed here, the call is captured and the turn interrupted, and real
- * dispatch stays on TulipFarm's Tool Broker.
- *
- * Two things differ from Claude Code and both are improvements. Codex takes `dynamicTools` at the
- * top level, so tool names arrive unnamespaced and the `mcp__` stripping `claude-code.ts` needs
- * cannot apply. And it accepts structured history through `thread/inject_items`, so prior turns
- * cross as real message/function_call/function_call_output items rather than the prose transcript
- * Claude Code's print mode forces.
- */
+/** Codex model adapter: captures Tool calls for TulipFarm and replays history structurally. */
 
 const CODEX_ENV_PASSTHROUGH = ["OPENAI_BASE_URL"] as const;
 
@@ -32,34 +21,16 @@ const CODEX_ENV_PASSTHROUGH = ["OPENAI_BASE_URL"] as const;
 const REAUTH_HINT =
   "Codex credential rejected — run `codex login`, then paste the new ~/.codex/auth.json in Settings.";
 
-/**
- * Wall clock for the handshake and thread setup, before the model is even asked anything. Separate
- * from the turn timeout because a `codex` binary that cannot start should fail in seconds — the
- * ten-minute turn budget exists for a model that is thinking, not for a subprocess that is dead.
- */
+/** Setup must fail fast; the long turn timeout is for model thinking, not dead subprocesses. */
 const SETUP_TIMEOUT_MS = 30_000;
 
-/** How long the turn waits for `turn/interrupt` to be acknowledged before tearing the child down. */
+/** Max wait for `turn/interrupt` before child teardown. */
 const INTERRUPT_TIMEOUT_MS = 2_000;
 
 const sleep = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms).unref?.());
 
-/**
- * Codex reports a rejected credential in a shape that punishes naive matching, and this was
- * verified against a live `codex app-server` 0.147.0 with an empty CODEX_HOME.
- *
- * The failure arrives first as `error` notifications whose `message` is literally
- * `"Reconnecting... 2/5"` — carrying no auth signal at all — with the real cause buried in
- * `codexErrorInfo.responseStreamDisconnected.httpStatusCode` and `additionalDetails`. It retries
- * five times over roughly forty seconds before the terminal `turn/completed` finally names it.
- *
- * So classification reads the structured status code, not the prose, and fires on the **first**
- * such notification. A missing bearer token does not become valid on retry: waiting out the
- * backoff would cost forty seconds per model in the fallback chain, and inspecting only `message`
- * would miss it entirely — leaving `isHardFailure` false and burning the whole chain on one
- * expired credential.
- */
+/** Codex 0.147.0 hides auth failures in structured status; fail on first 401/402/403. */
 const AUTH_STATUS_CODES = new Set([401, 402, 403]);
 
 const CODEX_AUTH_FAILURE_PATTERN =
@@ -81,7 +52,7 @@ export function codexErrorStatus(error: unknown): number | undefined {
   return typeof status === "number" ? status : undefined;
 }
 
-/** Whether a Codex error payload is a credential problem, reading the status code before the prose. */
+/** Detect credential errors from status code before prose. */
 export function isCodexAuthError(error: unknown): boolean {
   const status = codexErrorStatus(error);
   if (status !== undefined) return AUTH_STATUS_CODES.has(status);
@@ -93,23 +64,12 @@ export function isCodexAuthError(error: unknown): boolean {
   return text.length > 0 && isCodexAuthFailure(text);
 }
 
-/**
- * Locate `@openai/codex`'s launcher.
- *
- * `bin/codex.js` is a small ESM shim that maps platform/arch onto the right optional package and
- * execs the native binary out of it. Resolving the shim rather than reimplementing that mapping
- * means a Codex release that adds or renames a platform target keeps working. `TF_CODEX_BIN`
- * overrides it for tests, which drive a fake binary instead of the real one.
- */
+/** Resolve Codex's launcher shim so upstream platform-package mapping stays authoritative. */
 export function resolveCodexScript(): string {
   const override = process.env.TF_CODEX_BIN;
   if (override) return override;
 
-  // Anchored on runtime paths rather than `import.meta.url`, which is a syntax error once this
-  // package is compiled into the CommonJS api/worker bundles. Both anchors are tried because the
-  // consumers sit in different places: the running entrypoint covers the api and worker, whose
-  // package.json depends on @openai/codex for exactly this reason, while the working directory
-  // covers this package's own tests and any consumer that hoists the dependency higher.
+  // Avoid `import.meta.url`: this file is bundled into CommonJS consumers.
   const anchors = [process.argv[1], join(process.cwd(), "noop.js")].filter(
     (a): a is string => typeof a === "string" && a.length > 0
   );
@@ -157,18 +117,7 @@ export interface CodexPrompt {
   readonly images: string[];
 }
 
-/**
- * Split an AI SDK prompt into what Codex's three inputs actually want: system text as
- * `baseInstructions`, prior turns as structured `thread/inject_items`, and the trailing turn as
- * `turn/start` input.
- *
- * On the AgentLoop's second and later iterations the prompt ends in tool results rather than a user
- * message, because the loop dispatched the calls this adapter captured. Those replay as paired
- * `function_call`/`function_call_output` items — which is the whole reason to use structured
- * injection — and the turn is then started with an explicit continuation instruction, since
- * `turn/start` requires input and inventing a fake user message would misattribute it to the
- * participant.
- */
+/** Splits system, replay, and turn input; tool-result turns continue without fake user text. */
 export function buildCodexPrompt(prompt: LanguageModelV4Prompt): CodexPrompt {
   const instructions: string[] = [];
   const items: CodexItem[] = [];
@@ -277,23 +226,7 @@ export function buildCodexPrompt(prompt: LanguageModelV4Prompt): CodexPrompt {
   };
 }
 
-/**
- * Everything Codex can do on its own is turned off.
- *
- * This adapter is a *model*, not an agent: the only capabilities a turn may reach are the Tools
- * TulipFarm's broker authorized. Codex ships a shell, a file editor, web search, plugins,
- * marketplaces and subagents that all bypass that entirely — and the working directory is a
- * throwaway jail, so anything they touched would be meaningless as well as unauthorized.
- *
- * **This map is defence in depth, not the guarantee.** Verified against the real 0.147.0
- * app-server: `thread/start` rejects an unknown enum *value* (`sandbox: "bogus"` → `-32600 unknown
- * variant`) but silently accepts an unknown *key* — `config.features.not_a_feature` is taken
- * without complaint. So a feature rename upstream would turn an entry here into a no-op that no
- * test could catch. What actually contains the turn is the part the server echoes back and the
- * tests assert: `sandbox: {type: "readOnly", networkAccess: false}` and `approvalPolicy: "never"`.
- * A capability that slipped through still cannot write, reach the network, or park the subprocess
- * waiting on a human.
- */
+/** Disable Codex agent features; containment relies on read-only/no-network sandbox and `never`. */
 const DISABLED_FEATURES = {
   shell_tool: false,
   unified_exec: false,
@@ -331,11 +264,7 @@ function readUsageTotals(params: unknown): UsageTotals | undefined {
     }
     return 0;
   };
-  // Codex's `inputTokens` is the *total* input, cached reads included — the binary emits
-  // `non_cached_input_tokens` as a third sibling field, which is only meaningful if the plain
-  // `inputTokens` is inclusive. So `cachedInputTokens` is a breakdown of it, never an addend.
-  // Anthropic's shape is the opposite (`input_tokens` excludes `cache_read_input_tokens`, which is
-  // why `claude-code.ts` does add them) — do not copy this between the two providers.
+  // Codex `inputTokens` includes cached reads; `cachedInputTokens` is a breakdown, not an addend.
   return {
     input: num("inputTokens", "input_tokens"),
     output: num("outputTokens", "output_tokens"),
@@ -367,9 +296,7 @@ export class CodexModel extends CliLanguageModel {
       );
     }
 
-    // Resolved before the jail exists: this throws by design when `@openai/codex` cannot be
-    // resolved — the very condition the Dockerfile assertions guard — and a jail created first
-    // would leak its temp dir on every attempt, once per model in the fallback chain, forever.
+    // Resolve before jail creation so missing Codex cannot leak per-model temp dirs.
     const scriptPath = resolveCodexScript();
 
     const jail = createCliJail("tf-codex-");
@@ -462,9 +389,7 @@ export class CodexModel extends CliLanguageModel {
         }
       },
       onClose: (error) => {
-        // A crash mid-turn produces no `turn/completed`, so without this the drain loop below would
-        // block on `wake` until the whole per-call deadline expired. `finish` is idempotent, so the
-        // ordinary path (close() after the turn settled) is unaffected.
+        // A crash emits no `turn/completed`; finish so drain does not wait to deadline.
         finish({
           kind: "done",
           error: error.message,
@@ -484,14 +409,7 @@ export class CodexModel extends CliLanguageModel {
         };
       },
       onRequestReplied: () => {
-        // Interrupt *after* the reply is on the wire: ending the turn from inside `onRequest` would
-        // queue the interrupt ahead of the reply, and teardown could then cut the reply off — which
-        // parks the real app-server until its own timeout.
-        //
-        // The turn is held open until the interrupt is acknowledged, because ending it immediately
-        // would tear the subprocess down while that write was still in flight, leaving the server
-        // generating against the user's subscription for a turn nobody will read. Bounded, so a
-        // server that never answers costs the turn a second rather than stranding it.
+        // Interrupt after the tool reply is on the wire; wait briefly before teardown.
         if (!turnId) {
           finish({ kind: "done" });
           return;

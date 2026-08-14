@@ -17,11 +17,7 @@ import { SoulGitStore } from "./git-store";
 import type { Logger } from "./types";
 import { type SoulWrite, SoulWriteError, SoulWriter } from "./writer";
 
-/**
- * These tests drive a real git repository rather than a mock. The gateway's contract is atomicity
- * and compare-and-swap conflict detection — properties of git's object and ref model that a mocked
- * `simple-git` would assert against itself rather than against reality.
- */
+/** Tests use real Git to cover atomicity, base conflicts, path guards, and cleanup. */
 
 const ACTOR: CommitActor = {
   principalId: "principal-1",

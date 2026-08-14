@@ -1,15 +1,7 @@
 import type { RegisterWaitInput } from "@tulipfarm/run-kernel";
 import type { InternalApiClient } from "../internal/client";
 
-/**
- * What a Routine `approval` State parks on.
- *
- * The wait is planned here — the deadline, the approver roles, and the schema reference are
- * authored on the State, and the run-kernel is where authored semantics live — but it is
- * *registered* on the other side of this port. A wait's resume token is the capability to resume
- * that Run once, and the process that redeems it is the one holding the decision surface, so it
- * must never travel here. This side learns only the wait's id and, later, the decision.
- */
+/** Approval waits are planned here, but resume tokens never cross into the worker. */
 
 export type RoutineApprovalDecision = "pending" | "approved" | "denied" | "expired";
 
@@ -42,11 +34,7 @@ export interface RoutineApprovalPort {
   }): Promise<RoutineApprovalRecord | undefined>;
 }
 
-/**
- * The plan as the host takes it. Which business and which Run the wait belongs to are the route's
- * to state from the Run itself, so sending them here would be a claim this side is not entitled to
- * make — and the host refuses a body carrying them.
- */
+/** Drop business/Run ids from the body; the host derives them from the route's Run. */
 function waitPlan(wait: RegisterWaitInput): Omit<RegisterWaitInput, "businessId" | "runId"> {
   return {
     id: wait.id,
@@ -85,8 +73,7 @@ export class HttpRoutineApprovalPort implements RoutineApprovalPort {
     runId: string;
     stateKey: string;
   }): Promise<RoutineApprovalRecord | undefined> {
-    // `204` is the only absence: this occurrence has no approval open. A `404` is a Run that is
-    // gone and must stay an error, or a replay would read "no decision yet" from a dead Run.
+    // Only `204` means no approval; `404` is a dead Run and must stay an error.
     return this.client.find<RoutineApprovalRecord>(
       "GET",
       `/api/v1/internal/runs/${encodeURIComponent(input.runId)}/routine-approvals?stateKey=${encodeURIComponent(input.stateKey)}`,

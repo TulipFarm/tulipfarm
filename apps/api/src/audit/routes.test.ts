@@ -1,10 +1,4 @@
-/**
- * End-to-end tests through real HTTP requests.
- *
- * E2E rather than unit, because the failure mode that matters here is structural: a route that is
- * registered but never gated, or a service wired into `buildApp` and never reached, type-checks
- * perfectly and silently exposes — or silently hides — the entire ledger.
- */
+/** E2E route tests catch missing gates or wiring that unit tests would not. */
 
 import type { PGlite } from "@electric-sql/pglite";
 import { type AuditEventInput, AuditWriter } from "@tulipfarm/audit";

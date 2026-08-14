@@ -1,8 +1,4 @@
-/**
- * Canonical audit event shape (SPEC §20): actor/effective principal, correlation, lineage, and
- * safe (non-protected) evidence only. Protected contents never enter the event body — callers
- * pass a {@link BlobRef} under separate access control instead (SPEC §13 DLP boundary).
- */
+/** Audit events carry only safe evidence; protected contents stay behind `BlobRef` ACLs. */
 
 import type { BlobRef } from "@tulipfarm/storage";
 
@@ -158,11 +154,7 @@ function cloneSafeMetadata(value: unknown, ancestors = new Set<object>()): Recor
   return Object.freeze(result);
 }
 
-/**
- * Validate and snapshot an event before hashing or persistence. Runtime callers cannot smuggle
- * extra payload fields through TypeScript casts, principal attribution cannot cross a business,
- * and mutable caller-owned arrays/objects cannot change stored evidence after hashing.
- */
+/** Snapshots safe input before hashing; rejects extra payload fields and cross-business actors. */
 export function normalizeAuditEventInput(input: AuditEventInput): AuditEventInput {
   for (const key of Object.keys(input)) {
     if (!INPUT_KEYS.has(key)) protectedPayload();

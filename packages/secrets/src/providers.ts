@@ -1,20 +1,11 @@
-/**
- * Where the Secret Broker reads a current Credential from (SPEC §13). The port is provider-neutral:
- * a PostgreSQL-backed store, a cloud KMS-fronted store, or a Vault-compatible service all satisfy
- * it, and no adapter type leaks into the broker.
- *
- * The freshness contract is the point of this boundary. `resolveCurrent` must return the value that
- * is current *at call time* and must return `null` once the Credential is revoked or deleted. An
- * adapter that serves stale plaintext defeats "rotation and revocation apply to the next
- * invocation", so caching belongs behind an explicit invalidation the adapter controls.
- */
+/** Secret providers must return current plaintext at call time, or `null` after revoke/delete. */
 
 import type { SecretsService } from "./encrypted-store";
 import { SecretUnavailableError } from "./encrypted-store";
 
 export interface ResolvedSecret {
   readonly value: string;
-  /** Opaque rotation marker, when the backend has one. Safe to log; it is not derived from value. */
+  /** Opaque rotation marker, safe to log and not value-derived. */
   readonly version?: string;
 }
 
@@ -59,15 +50,7 @@ export function inMemorySecretProvider(
   };
 }
 
-/**
- * Adapter over {@link SecretsService}, the PostgreSQL-backed Secret store.
- *
- * `SecretsService` keeps a TTL cache of decrypted values, so this adapter is only as fresh as that
- * cache. It satisfies the freshness contract when the same service instance is the rotation and
- * revocation authority — `set` and `delete` clear the entry — which is the single-process case. A
- * deployment that rotates Secrets out of band must invalidate that cache, or resolve through an
- * uncached provider, before a lease can be trusted to see the rotation.
- */
+/** Fresh only with same-instance rotation/revocation; out-of-band changes must invalidate cache. */
 export function secretsServiceProvider(service: Pick<SecretsService, "get">): SecretProvider {
   return {
     async resolveCurrent(secretRef) {

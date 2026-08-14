@@ -8,11 +8,7 @@ type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
 const NOTE_MAX = 500;
 
-/**
- * Per-message feedback routes (FB-V1). Capture layer only — a thumbs up/down (with an optional
- * down-vote note) per (message, user). `conversation_id` is derived server-side from the message;
- * the GET returns only the caller's own votes (no cross-user visibility).
- */
+/** FB-V1 feedback is per (message, user); `conversation_id` is derived server-side. */
 export function registerFeedbackRoutes(
   app: FastifyInstance,
   feedbackRepo: FeedbackRepo,

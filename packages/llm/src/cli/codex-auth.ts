@@ -1,24 +1,12 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Codex authenticates from a file, not an environment variable: `$CODEX_HOME/auth.json`, written
- * by `codex login`. TulipFarm therefore stores the whole blob as one secret and materialises it
- * into the per-turn jail, rather than inventing a second credential format the CLI would not read.
- *
- * This provider is **subscription-only** by design (see `docs/plans/cli-agent-providers.md`): the
- * point is running on a personal ChatGPT plan with no API budget. An API-key blob is refused on
- * save rather than silently accepted, because accepting it would bill the operator's OpenAI
- * account for turns TulipFarm reports as unpriced.
- */
+/** Codex reads `$CODEX_HOME/auth.json`; API-key mode is refused to avoid API billing. */
 
 /** Where the blob lives inside the jail. `codex` reads `$CODEX_HOME/auth.json`. */
 export const CODEX_HOME_DIR = "codex-home";
 
-/**
- * Registry key the Codex auth.json blob is stored under. Exported so the write path can validate
- * the blob's shape without importing the whole provider registry, and so the two can never drift.
- */
+/** Registry key for the stored Codex auth.json blob; shared with the write validator. */
 export const CODEX_AUTH_SECRET_KEY = "codex-auth-json";
 const AUTH_FILE = "auth.json";
 /** Owner-only. The jail is already private, but the credential should not widen if that changes. */
@@ -45,12 +33,7 @@ interface CodexAuthBlob {
 const SIGNUP_HINT =
   "Sign in with `codex login` (requires a ChatGPT Plus/Pro/Business plan), then paste the contents of ~/.codex/auth.json here.";
 
-/**
- * Validate a pasted `auth.json` before it is stored.
- *
- * Fail here, at save time in Settings, or the operator learns their credential is unusable from a
- * chat turn that produced nothing. Returns the parsed blob so callers need not parse twice.
- */
+/** Validates pasted `auth.json` at save time and returns the parsed blob. */
 export function parseCodexAuth(raw: string): CodexAuthBlob {
   let blob: unknown;
   try {
@@ -84,15 +67,7 @@ export function writeCodexHome(jailHome: string, raw: string): string {
   return home;
 }
 
-/**
- * Read back the credential the CLI left behind, if it rotated one.
- *
- * Codex refreshes its own access token mid-turn and rewrites `auth.json`. The jail is deleted when
- * the turn ends, so without this the refreshed token dies with it and every turn re-authenticates
- * from an increasingly stale copy — until the refresh token itself is rotated out and the operator
- * is silently signed out. Returns `undefined` when nothing changed, so the common case writes no
- * secret.
- */
+/** Reads rotated auth.json from the jail; `undefined` means no secret rewrite. */
 export function readRotatedCodexAuth(codexHome: string, original: string): string | undefined {
   let current: string;
   try {

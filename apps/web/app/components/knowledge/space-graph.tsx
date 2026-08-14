@@ -4,12 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SpaceGraph, SpacePageRef } from "~/lib/knowledge-api";
 import { buildPageResolver, type PageResolver, pageHref } from "~/lib/page-href";
 
-/*
- * Force-directed view of a space's cross-link graph. Runs a headless d3-force simulation (ticked to
- * a stable layout, then frozen — no animation loop) and renders the result as SVG: nodes are circles
- * coloured by kind (page vs cross-space stub), edges are directed lines (dashed when `broken`). Clicking a node navigates to
- * its page detail. Pure render once the simulation settles; the parent owns the data fetch.
- */
+/* The d3-force simulation is ticked to stability, then frozen; there is no animation loop. */
 
 const WIDTH = 720;
 const HEIGHT = 480;

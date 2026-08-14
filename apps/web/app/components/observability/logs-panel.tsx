@@ -17,12 +17,6 @@ const PAGE_SIZE = 50;
 
 type Filters = { level?: LogEventLevel; service?: LogService; q: string };
 
-/**
- * Errors and fatals from every service, readable without shell access.
- *
- * Uses `run-*` tones throughout: these report the state of an execution, which is a different axis
- * from the `status-*` tones that report content lifecycle.
- */
 export function LogsPanel({
   initial,
 }: {

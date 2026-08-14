@@ -1,9 +1,6 @@
 /*
- * Shared presentation for access surfaces.
- *
- * Everything here exists to keep one promise: a person is shown as a person, and a capability is
- * shown as a sentence. The precise machine-readable form stays reachable one disclosure away, so an
- * operator debugging a policy is never blocked by copy written for an owner.
+ * The precise machine-readable form stays reachable one disclosure away, so an operator
+ * debugging a policy is never blocked by copy written for an owner.
  */
 
 import { ChevronDown, ShieldCheck, ShieldOff, ShieldQuestion, User } from "lucide-react";
@@ -14,7 +11,6 @@ import { describeGrant, type RoleSummary } from "~/lib/access-language";
 import type { AuthzGrant } from "~/lib/authz";
 import { cn } from "~/lib/utils";
 
-/** A monogram, sized to sit on one text line beside a name. */
 export function PartyAvatar({ party, className }: { party: Party; className?: string }) {
   return (
     <span
@@ -32,10 +28,6 @@ export function PartyAvatar({ party, className }: { party: Party; className?: st
   );
 }
 
-/**
- * Name over detail. The raw principal id is deliberately absent — it is an implementation
- * identifier, and putting it on every row is what made the previous screen unreadable.
- */
 export function PartyLine({ party }: { party: Party }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -49,13 +41,9 @@ export function PartyLine({ party }: { party: Party }) {
 }
 
 /**
- * What someone can do, as sentences.
- *
- * Three groups, because two would lie. Denies are listed apart from allows: a blocked capability
- * sitting mid-list reads as an allow at a glance, and this list is scanned far more often than it
- * is read. And a phrase that appears on both sides is neither — collapsing distinct resource types
- * into one area name is what makes them look identical, so it is shown once, as partial, rather
- * than twice, as a contradiction the reader has no way to resolve.
+ * And a phrase that appears on both sides is neither — collapsing distinct resource types into
+ * one area name is what makes them look identical, so it is shown once, as partial, rather than
+ * twice, as a contradiction the reader has no way to resolve.
  */
 export function CapabilityList({ grants }: { grants: readonly AuthzGrant[] }) {
   if (grants.length === 0) {
@@ -66,11 +54,6 @@ export function CapabilityList({ grants }: { grants: readonly AuthzGrant[] }) {
   const denyPhrases = new Set(phrasesFor(grants, "deny"));
   const partial = [...allowPhrases].filter((phrase) => denyPhrases.has(phrase)).sort(compare);
 
-  /*
-   * An unrestricted allow makes every other allow phrase redundant — the reader ends up scanning
-   * "Add to everything", "Change everything", "View everything" and learning nothing. Said once,
-   * the denies below it become the only real information, which is exactly what they are.
-   */
   const unrestricted = grants.some(
     (grant) => grant.effect === "allow" && grant.action === "*" && grant.resourceType === "*"
   );
@@ -169,7 +152,6 @@ export function TechnicalDetails({
   );
 }
 
-/** The raw grant strings the server built, for the disclosure above. */
 export function RawGrantList({ grants }: { grants: readonly AuthzGrant[] }) {
   if (grants.length === 0) {
     return <p className="font-mono text-xs text-muted-foreground">no grants</p>;
@@ -188,14 +170,10 @@ export function RawGrantList({ grants }: { grants: readonly AuthzGrant[] }) {
   );
 }
 
-/** A Role offered as a choice: its name, what it covers, and how broad it is. */
 /*
- * Title, badge, blurb — and deliberately no derived coverage line. A Role with hand-written copy
- * is better described by that copy than by a nine-item list of every area its allows touch, and a
- * Role without copy already gets its blurb derived from exactly those areas, so the line repeated
- * the sentence above it. Worse, the list reads allows only: `member` is "everything except…", so
- * it listed "people and access" directly under a blurb saying it cannot manage them. The exact
- * grants stay one disclosure away for anyone who wants them.
+ * Worse, the list reads allows only: `member` is "everything except…", so it listed "people and
+ * access" directly under a blurb saying it cannot manage them. The exact grants stay one
+ * disclosure away for anyone who wants them.
  */
 export function RoleCard({ summary, className }: { summary: RoleSummary; className?: string }) {
   return (
@@ -209,7 +187,6 @@ export function RoleCard({ summary, className }: { summary: RoleSummary; classNa
   );
 }
 
-/** When something stops working on a date, say so. Otherwise say nothing loud. */
 export function ExpiryNote({ expiresAt }: { expiresAt: string | null }) {
   if (!expiresAt) return null;
   return <Badge variant="warning">Until {formatDate(expiresAt)}</Badge>;

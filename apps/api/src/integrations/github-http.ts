@@ -4,15 +4,7 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * GitHub REST transport for this app: the install-callback flow (App JWT install lookup +
- * installation-token exchange, via `packages/integrations/src/github/credentials.ts`) and the
- * chat GitHub Tool family's adapter dispatch (`tools/github/compose.ts`). A deliberate local copy
- * of `apps/worker/src/routine/github-http.ts` / `apps/integration-worker/src/github/http.ts` — an
- * application may not import another application (`apps/integration-worker/AGENTS.md`). Kept
- * intentionally tiny: no pagination, no retry, mirrors just enough of `GitHubRestHttp` to satisfy
- * `IntegrationHttpPort`.
- */
+/** Local GitHub REST transport; no cross-app imports, pagination, retries, or rate-limit policy. */
 
 export const GITHUB_API_BASE_URL = "https://api.github.com";
 const GITHUB_API_VERSION = "2022-11-28";

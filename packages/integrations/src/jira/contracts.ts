@@ -4,15 +4,7 @@ import {
   type ToolContractSpec,
 } from "@tulipfarm/schema";
 
-/**
- * Published Jira ToolContracts (SPEC §11, §15).
- *
- * Typed issue, user, and availability Tools — the replacement for CLI/MCP-shaped access where an
- * Agent could phrase an arbitrary provider call. Every Tool names one operation, bounds its inputs
- * (page sizes, candidate counts), and routes through the Integration adapter so the Tool Broker
- * remains the only path to an external effect. Jira exposes no idempotency key, so mutating
- * contracts use `reconcile` plus a lookup that resolves an ambiguous write against provider state.
- */
+/** Typed Jira Tools; mutating contracts reconcile unknown outcomes instead of retrying. */
 
 export const JIRA_ADAPTER_REF = "integration:jira";
 

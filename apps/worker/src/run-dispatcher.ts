@@ -1,16 +1,7 @@
 import type { RunLeaseManager } from "@tulipfarm/run-kernel";
 import type { PersistedRun } from "@tulipfarm/storage";
 
-/**
- * How an executor left the Run.
- *
- * `succeeded`, `failed`, and `needs_reconciliation` are terminal-in-one-step and released here.
- * `waiting` parks the Run on a durable wait — the wait sweep requeues it, so releasing it as either
- * terminal status would drop work the Run is still owed. `cancelled` is the one outcome this
- * dispatcher must **not** write: `RunCancellationManager` owns Run cancellation and is already
- * driving `cancelling` -> `cancelled` with child propagation, so the executor stops and leaves the
- * transition to the authority that started it.
- */
+/** Executor outcome; `waiting` parks, and `cancelled` is left to RunCancellationManager. */
 export type RunOutcome = "succeeded" | "failed" | "waiting" | "needs_reconciliation" | "cancelled";
 
 export interface RunDispatcherOptions {
@@ -73,7 +64,7 @@ export class RunDispatcher {
       try {
         const outcome = await this.options.handler(started.run);
         if (outcome === "cancelled") {
-          // The cancellation manager holds this Run; touching it here would race that transition.
+          // Cancellation manager owns this transition; do not race it here.
           waiting += 1;
           continue;
         }

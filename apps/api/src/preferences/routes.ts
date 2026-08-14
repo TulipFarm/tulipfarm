@@ -19,14 +19,7 @@ const CustomInstructionsSchema = {
   required: ["instructions", "maxChars"],
 } as const;
 
-/**
- * Self-service standing instructions. Scope and owner come from the authenticated caller, so these
- * routes have no target parameter and cannot read or write anybody else's.
- *
- * The length cap is enforced here rather than left to the KV store's 256KB byte limit, because the
- * prompt drops an over-budget block whole: a value the store accepts but the prompt silently
- * discards would look saved and do nothing.
- */
+/** Standing instructions are caller-scoped and capped before prompts can silently drop them. */
 export function registerPreferenceRoutes(
   app: FastifyInstance,
   kvService: KvService,

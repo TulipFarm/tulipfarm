@@ -1,8 +1,4 @@
-/**
- * Fixed, observable instruction precedence (SPEC §10). Lower levels cannot override higher levels:
- * a Skill cannot overrule the Agent, an explicit user request cannot overrule the active business
- * Guardrail, and untrusted source content is data at the bottom of the ladder — never instruction.
- */
+/** Fixed instruction precedence; lower levels cannot override higher levels. */
 export const INSTRUCTION_PRECEDENCE = [
   "platform_safety",
   "business_guardrail",

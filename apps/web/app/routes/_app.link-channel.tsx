@@ -12,15 +12,12 @@ import { confirmChannelBind, previewChannelBind } from "~/lib/channel-links";
 export const meta: MetaFunction = () => [{ title: "Link channel · tulipfarm" }];
 
 /*
- * Confirms a channel bind link. The link arrives in a channel the sender controls, so holding it
- * proves nothing on its own — this page sits under the `_app` shell, whose loader bounces an
- * unauthenticated visitor to /login. What binds the sender is the signed-in session plus the
- * explicit confirm below, never the link alone.
+ * What binds the sender is the signed-in session plus the explicit confirm below, never the
+ * link alone.
  */
 export async function clientLoader({ request }: ClientLoaderFunctionArgs) {
   const token = new URL(request.url).searchParams.get("token");
   if (!token) throw new ApiError(400, "this link is missing its bind token");
-  // Preview is a read: nothing is bound until the button is pressed.
   return { token, offer: await previewChannelBind(token) };
 }
 
@@ -99,10 +96,6 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
-/*
- * Every refusal — forged, expired, already redeemed — comes back as the same coarse 400, so the copy
- * says what to do rather than guessing which one it was.
- */
 export function ErrorBoundary() {
   const error = useRouteError();
   const status = error instanceof ApiError ? error.status : undefined;

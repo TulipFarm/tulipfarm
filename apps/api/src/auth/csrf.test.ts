@@ -126,11 +126,7 @@ describe("csrfHook", () => {
   });
 });
 
-/**
- * The exemption has to hold *with* a session cookie present, which is the whole point: an invite is
- * redeemed in whatever browser opened the link, often one still holding a live session. Skipping
- * only on "no session cookie" would 403 exactly the person the link was issued to.
- */
+/** Invite redemption stays CSRF-exempt even when the browser has a live session cookie. */
 describe("pre-session exempt paths", () => {
   const exempt = [
     "/api/v1/auth/login",

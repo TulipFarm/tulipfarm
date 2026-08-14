@@ -221,11 +221,7 @@ export interface SlackDeliveryRequest extends ChannelDeliveryAttempt {
    * posting a new one — the "thinking" status indicator's message `ts`, captured at Run-mint time.
    */
   updateTs?: string;
-  /**
-   * Rendered Slack Block Kit blocks for a Surface Artifact presented during the Turn, if any.
-   * Provider-shape-agnostic here by design (this package stays free of `@tulipfarm/surface-slack`)
-   * — the caller renders, this adapter only forwards.
-   */
+  /** Caller-rendered Block Kit; this package stays free of `@tulipfarm/surface-slack`. */
   blocks?: readonly Record<string, unknown>[];
 }
 
@@ -343,12 +339,7 @@ export class SlackDeliveryAdapter {
     return this.deps.ledger.complete(attempt, providerMessageId);
   }
 
-  /**
-   * Cosmetic status-rotation `chat.update` for a still-pending placeholder (plan §10). Unlike
-   * `deliver()`, this never touches the delivery ledger — it is not the durable answer, just a
-   * rotating "thinking…" phrase, so a dropped update is never worth retrying or failing a Run
-   * over.
-   */
+  /** Best-effort placeholder update; never touches the durable delivery ledger. */
   async update(
     input: { destination: string; ts: string; text: string },
     credential: string
@@ -363,11 +354,7 @@ export class SlackDeliveryAdapter {
     );
   }
 
-  /**
-   * Native Agents & AI Apps status indicator (gradient name + animated status line) — replaces
-   * the `update()` cosmetic-message-rotation hack for apps with `assistant_view` enabled. Same
-   * best-effort contract: no ledger interaction, a dropped call is never worth retrying.
-   */
+  /** Best-effort native Slack assistant status; never touches the delivery ledger. */
   async setStatus(
     input: { destination: string; threadId: string; status: string },
     credential: string

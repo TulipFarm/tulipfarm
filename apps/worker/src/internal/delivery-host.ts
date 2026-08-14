@@ -1,20 +1,6 @@
 import type { InternalApiClient } from "./client";
 
-/**
- * The API-backed implementation of everything an Integration delivery needs from outside the
- * Worker (plan §6).
- *
- * A delivery Run arrives holding only its id. What arrived, on which Integration, and which
- * classifier is entitled to interpret it are all re-derived on the far side from the Run's
- * immutable request Artifact — so this client, exactly like `HttpTurnHost`, states which Run and
- * never claims what the delivery was.
- *
- * Two things it deliberately cannot do. It never learns the bind link offered to an unlinked
- * sender: that link attaches a channel identity to an account, so it is minted and posted inside
- * the API and this side is told only `unlinked`. And it never supplies reply text — it says which
- * attempt finished and how, and the API posts the assistant Message that attempt's completion
- * names.
- */
+/** API-backed delivery host; Run facts, bind links, and reply text stay on the API side. */
 
 /** What the Worker must know before it can classify one delivery. */
 export interface RemoteDelivery {
@@ -50,13 +36,7 @@ function deliveryPath(runId: string, suffix = ""): string {
 export class HttpDeliveryHost {
   constructor(private readonly client: InternalApiClient) {}
 
-  /**
-   * The delivery this Run carries, or `undefined` when there is none to answer.
-   *
-   * `404` is a Run that is gone, `409` a Run no executor may write for, `400` a Run that was not
-   * minted by a delivery at all. None of them is a fault this executor can fix, and all three mean
-   * the same thing here: this worker holds nothing.
-   */
+  /** `400`/`404`/`409` mean this executor has no delivery it can answer. */
   async describe(runId: string): Promise<RemoteDelivery | undefined> {
     return this.client.find<RemoteDelivery>("GET", deliveryPath(runId), [400, 404, 409]);
   }

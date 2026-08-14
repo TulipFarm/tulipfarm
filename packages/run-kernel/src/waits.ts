@@ -44,9 +44,7 @@ export interface RegisterWaitInput {
   readonly stateKey: string;
   readonly kind: PersistedWaitKind;
   readonly aggregation: WaitAggregation;
-  /** Schema reference every accepted signal must declare; a timer still names its wait schema. */
   readonly schemaRef: string;
-  /** Canonical `kind:id` principals authorized to signal; empty only for a timer. */
   readonly allowedPrincipals: readonly string[];
   readonly expectedSignals: number;
   readonly quorum: number | null;
@@ -67,7 +65,6 @@ export interface SignalWaitInput {
   readonly token: string;
   readonly principal: string;
   readonly schemaRef: string;
-  /** Stable identity of this signal; a repeat delivery of the same identity is deduplicated. */
   readonly correlationKey: string;
   readonly signalDigest: string;
   readonly receivedAt: string;
@@ -76,17 +73,12 @@ export interface SignalWaitInput {
 export type WaitSignalOutcome = "resumed" | "resolved_without_resume" | "recorded" | "duplicate";
 
 export interface WaitSignalResult {
-  /**
-   * `resumed` — the wait resolved and its Run left `waiting`. `resolved_without_resume` — the
-   * wait resolved exactly once but the Run was no longer `waiting`, so it needs reconciliation.
-   * `recorded` — counted toward aggregation. `duplicate` — already-seen correlation key.
-   */
+  /** `resolved_without_resume` means the wait resolved but its Run was not `waiting`. */
   readonly outcome: WaitSignalOutcome;
   readonly wait: PersistedWait;
   readonly signalCount: number;
 }
 
-/** Narrow surface `DurableWaitManager` needs; `@tulipfarm/storage`'s `WaitStore` satisfies it. */
 export interface DurableWaitStore {
   create(input: CreateWaitInput): Promise<PersistedWait>;
   find(businessId: string, waitId: string): Promise<PersistedWait | null>;
@@ -117,10 +109,8 @@ function assertDefinition(input: RegisterWaitInput): void {
 }
 
 /**
- * Default-deny authorization for one delivery, evaluated under the wait's lock. Identity checks
- * always apply, so a replayed correlation key from another Run, schema, or principal is still
- * denied. Lifecycle checks are skipped for a signal already recorded under this wait: an
- * at-least-once redelivery of accepted work is idempotent, not a late or duplicate resume.
+ * Delivery authorization always checks identity; already-recorded signals skip lifecycle checks
+ * so at-least-once redelivery is idempotent.
  */
 export function authorizeSignal(
   wait: PersistedWait,
@@ -137,7 +127,6 @@ export function authorizeSignal(
   return null;
 }
 
-/** SPEC §9.2 aggregation: `first`, `all`, `quorum`, or a bounded window closed by its deadline. */
 export function isWaitSatisfied(wait: PersistedWait, signalCount: number): boolean {
   switch (wait.aggregation) {
     case "first":
@@ -152,11 +141,8 @@ export function isWaitSatisfied(wait: PersistedWait, signalCount: number): boole
 }
 
 /**
- * Durable timer, event, Approval, human-task, form, and child-Run waits (SPEC §7.2, §9.2). A wait
- * is persisted before the Run stops consuming a worker; it is redeemed through an unguessable
- * one-use resume token whose digest alone is stored. Storage resolves the wait and consumes the
- * token under one row lock, so a duplicate delivery, a wrong-principal attempt, a concurrent
- * worker, or a restart still resumes the Run exactly once.
+ * Waits persist before worker release and redeem one-use token digests under one row lock, so
+ * duplicate delivery, wrong principals, concurrency, and restarts resume exactly once.
  */
 export class DurableWaitManager {
   constructor(
@@ -164,7 +150,6 @@ export class DurableWaitManager {
     private readonly resume: RunResumeGateway
   ) {}
 
-  /** Persists a wait and returns its resume token once. */
   async register(input: RegisterWaitInput): Promise<RegisteredWait> {
     assertDefinition(input);
     const { token, tokenHash } = mintResumeToken();
@@ -186,7 +171,6 @@ export class DurableWaitManager {
     return { wait, token };
   }
 
-  /** Redeems a resume token. Denials throw; accepted deliveries report their aggregation effect. */
   async signal(input: SignalWaitInput): Promise<WaitSignalResult> {
     const result = await this.store.deliverSignal(
       {

@@ -19,20 +19,12 @@ import type { LanguageModel } from "ai";
 import { type FallbackLogger, FallbackModel } from "./fallback";
 import { createModel } from "./provider";
 
-/**
- * Retired selection primitive, kept only as the shape `llm.config` is still *authored* in.
- *
- * Nothing selects a model by tier any more: effort presets are what the product exposes and
- * ModelProfiles are what the router decides on. The autonomy-to-tier map that used to live beside
- * this is gone outright — it handed a Run with `full` autonomy the *weakest* model, coupling
- * oversight to capability backwards. Risk and effort are orthogonal, and neither belongs to the
- * other.
- */
+/** Retired authored config shape; product routing now uses effort presets and ModelProfiles. */
 type Tier = "quick" | "standard" | "complex";
 
 const TIERS: Tier[] = ["quick", "standard", "complex"];
 
-/** One link in a resolved fallback chain: the configured provider + its model id, in config order. */
+/** One resolved fallback-chain link: provider plus model id, in config order. */
 export interface ResolvedModelEntry {
   provider: string;
   modelId: string;
@@ -43,7 +35,7 @@ export interface ResolvedModelEntry {
 export class LlmService {
   /** Whether any provider built. Every accessor refuses rather than pretending on an empty set. */
   private configured = false;
-  /** The logger the deployment configured at init; fallback events must not lose it at call time. */
+  /** Deployment logger captured at init so fallback events keep call-time context. */
   private logger: FallbackLogger = console;
   // Always a built provider model, never the bare model-id string `LanguageModel` also permits.
   private byModelId: Map<string, LanguageModelV4> = new Map();
@@ -126,16 +118,7 @@ export class LlmService {
     this.entryByModelId = entryByModelId;
   }
 
-  /**
-   * The model that serves one effort preset, with its whole fallback chain.
-   *
-   * This is what the API's own one-shot helpers ask for — titles, personalization, Skill
-   * authoring, health probes. They have no declared capability requirements to check, so they
-   * resolve straight to the chain the preset names; what matters is that they name *effort*, the
-   * concept the product exposes, instead of a tier, the primitive being retired. Preset resolution
-   * and the profile catalog are shared with the worker's router, so "fast" cannot mean one model
-   * here and another there.
-   */
+  /** Resolves one effort preset to the same fallback chain used by worker model routing. */
   effortModel(
     selector: EffortPreset | string,
     logger: FallbackLogger = this.logger
@@ -181,15 +164,7 @@ export class LlmService {
     return this.entryByModelId.get(id)?.spec;
   }
 
-  /**
-   * Build one `LanguageModel` that tries each model id in order.
-   *
-   * This is what a resolved ModelProfile chain executes as. It exists because a chain that is only
-   * ever collapsed to its head is not a fallback chain at all: the tier path returned a wrapped
-   * `FallbackModel` but shipped only `chain[0]`'s id across the process boundary, so the worker
-   * re-resolved a single model and every configured backup provider sat inert. Here the caller
-   * hands over the whole chain it selected, so what runs is what was chosen.
-   */
+  /** Builds a model that executes the whole selected fallback chain, not only its first id. */
   chainModel(modelIds: readonly string[], logger: FallbackLogger = this.logger): LanguageModel {
     if (!this.configured) throw new LlmNotConfiguredError();
     const built = modelIds.map((id) => this.byModelId.get(id)).filter((m) => m !== undefined);

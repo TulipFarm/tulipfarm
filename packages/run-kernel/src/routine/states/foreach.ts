@@ -9,7 +9,6 @@ import {
   type WorkStatus,
 } from "./step";
 
-/** The durable fan-out record: the pinned collection plus one status per item index. */
 export interface ForeachProgress {
   readonly total: number;
   /** Canonical hash of the collection as it was at fan-out — the iteration is immutable. */
@@ -22,11 +21,7 @@ export interface ForeachPlan {
   readonly settled: boolean;
 }
 
-/**
- * Resolve the authored collection expression under an explicit item bound. A non-array result
- * (including a missing reference) and an oversized collection are both denials: a `foreach`
- * never silently iterates zero items or an unbounded collection.
- */
+/** Non-array, missing, or oversized `foreach` collections deny instead of iterating silently. */
 export function resolveForeachItems(
   state: CompiledState,
   scope: Readonly<Record<string, unknown>>
@@ -52,11 +47,7 @@ export function initForeachProgress(
   };
 }
 
-/**
- * Prove a re-resolved collection is the one the fan-out was pinned to. A Run that resumes and
- * sees a different collection stops rather than fanning out over items the earlier attempt
- * never accounted for.
- */
+/** Resumed fan-out stops if the re-resolved collection differs from the pinned one. */
 export function assertUnchangedCollection(
   state: CompiledState,
   progress: ForeachProgress,
@@ -67,7 +58,6 @@ export function assertUnchangedCollection(
   }
 }
 
-/** Decide which item indices to start now; only `pending` items are ever dispatched. */
 export function planForeach(state: CompiledState, progress: ForeachProgress): ForeachPlan {
   const { indices, settled } = nextDispatchSlots(state, progress.entries);
   return { dispatch: indices, settled };
@@ -91,7 +81,6 @@ export function settleForeachItem(
   };
 }
 
-/** A `foreach` joins on every item: one failed item fails the State. */
 export function joinForeach(state: CompiledState, progress: ForeachProgress): JoinDecision {
   const keys = progress.entries.map((_, index) => String(index));
   return resolveJoin(state, keys, progress.entries, progress.total);

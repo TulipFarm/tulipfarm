@@ -18,15 +18,7 @@ import { ApiError } from "~/lib/api";
 import { type IntegrationSummary, listIntegrations } from "~/lib/integrations";
 import { cn } from "~/lib/utils";
 
-/*
- * The integration catalog: one list of everything an operator can connect.
- *
- * Deliberately not the Installed/Marketplace tabs this replaces. Every bundled integration is
- * "installed" by virtue of shipping in the image, so that tab listed things nobody installed while
- * hiding the ones they came to find. What an operator actually asks is whether something is
- * connected — a property of a row, not a page — so connection is what groups this list, and
- * installing is just the extra step the not-yet-cloned entries need.
- */
+/* Connection state is a row property; install is only for curated entries not yet cloned. */
 
 export const meta: MetaFunction = () => [{ title: "Integrations · tulipfarm" }];
 

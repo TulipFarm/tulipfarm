@@ -373,9 +373,7 @@ describe("buildDeclarativeTools", () => {
   });
 
   it("reads the credential the connect flow sealed under the install slug, not the manifest name", async () => {
-    // A second install of the same integration gets its own slug and its own credential
-    // (`SoulIntegration.slug` is user-assigned and may differ from `manifest.name`). Keying off the
-    // manifest name would have every instance share the first one's token.
+    // Credentials key by user-assigned slug; manifest names can repeat.
     const http = new RecordingHttp();
     const { tools } = buildDeclarativeTools(
       [integration(openApiEgress({ operations: [READ_OP] }), "acme-eu", SPEC, "acme")],
@@ -407,9 +405,7 @@ describe("buildDeclarativeTools", () => {
   });
 
   it("refuses rather than falling back to the business credential when the person has none", async () => {
-    // The whole point of acting as a person is that the provider gets to apply its own ACLs to
-    // them. Silently spending the shared bot credential here would hand back a result the person
-    // was never entitled to, and the gate upstream would believe a personal credential was used.
+    // Personal calls must not silently spend the shared bot credential.
     const http = new RecordingHttp();
     const { tools } = buildDeclarativeTools(
       [integration(openApiEgress({ operations: [READ_OP] }))],
@@ -457,13 +453,7 @@ describe("buildDeclarativeTools", () => {
   });
 });
 
-/*
- * The two halves of a manifest-driven channel: `egress` publishes the tools and `ingress.chat.reply`
- * binds to them by name. Nothing forced those names to agree — ingress resolved
- * `integration_{slug}_{tool}` while egress registered `{slug}_{tool}`, so every reply binding
- * returned `not_found` and a declarative channel could receive messages but never answer. Both
- * sides' own unit tests passed throughout, because each spelled the name it expected.
- */
+/** Reply bindings must use the same manifest Tool names egress registers. */
 describe("egress tools resolve through ingress reply bindings", () => {
   it("an ingress binding executes the tool the manifest's egress published", async () => {
     const http = new RecordingHttp();

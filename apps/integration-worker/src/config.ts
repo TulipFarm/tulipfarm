@@ -1,19 +1,11 @@
-/**
- * Lowest `schema_version` this process will run against. The API owns migrations and applies them
- * on boot; this process only reads. Set to the current migration floor since no query depends on a
- * specific table yet — raise it whenever a migration lands that a future query depends on.
- */
+/** Minimum DB schema version this read-only worker will run against. */
 export const REQUIRED_SCHEMA_VERSION = 24;
 
 export interface IntegrationWorkerConfig {
   readonly databaseUrl: string;
   readonly port: number;
   readonly drainTimeoutMs: number;
-  /**
-   * Deliberate local copy of `packages/constants`' `DEPLOYMENT_BUSINESS_ID` default — this app is
-   * not on that package's import allowlist (`docs/architecture/dependency-rules.md`), so the same
-   * `BUSINESS_ID` env var and fallback are read here rather than shared in-process.
-   */
+  /** Local copy of BUSINESS_ID default; apps cannot import packages/constants here. */
   readonly businessId: string;
   /** Base URL of `apps/api`, without a trailing slash — e.g. `http://localhost:4010`. */
   readonly internalApiUrl: string;
@@ -51,10 +43,7 @@ function positiveInt(env: Env, key: string, fallback: number): number {
   return value;
 }
 
-/**
- * Reads and validates this process's configuration. Called before any connection is opened, so a
- * misconfigured deployment fails at once with a named cause instead of half-starting.
- */
+/** Validates config before opening connections, so startup fails before half-starting. */
 export function loadConfig(env: Env = process.env): IntegrationWorkerConfig {
   return {
     databaseUrl: requireString(env, "DATABASE_URL"),

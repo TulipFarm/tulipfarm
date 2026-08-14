@@ -2,13 +2,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 
-/**
- * AGENT.md frontmatter meta-schema. Validated at the soul write boundary
- * (`agent_create` / `agent_update`) per VAL-V1-010 — there is no load-time validation
- * (VAL-V1-011). `name` is the directory (validated by the tool's NAME_RE), not a
- * frontmatter field; `domain` is display-only. Strict: unknown keys are
- * rejected so typos surface at write-time.
- */
+/** AGENT.md frontmatter schema: write-time only, strict, and name comes from directory. */
 
 export const AUTONOMY_VALUES = ["full", "supervised", "approval-required", "manual"] as const;
 
@@ -18,8 +12,7 @@ export const AgentFrontmatterSchema = Type.Object(
     domain: Type.Optional(Type.String({ minLength: 1 })),
     description: Type.Optional(Type.String({ minLength: 1 })),
     model: Type.Optional(Type.String({ minLength: 1, pattern: "^\\S+$" })),
-    // enum (not union-of-literals) so AJV emits "must be equal to one of the allowed
-    // values" — a message a forge can self-correct against (VAL-V1-010).
+    // Use enum, not union, so AJV emits self-correctable allowed-values errors.
     autonomy: Type.Optional(
       Type.Unsafe<(typeof AUTONOMY_VALUES)[number]>({ type: "string", enum: [...AUTONOMY_VALUES] })
     ),
@@ -33,10 +26,7 @@ export type AgentFrontmatter = Static<typeof AgentFrontmatterSchema>;
 
 const check = ajv.compile(AgentFrontmatterSchema);
 
-/**
- * Validate AGENT.md frontmatter against the agent meta-schema. Returns the typed object
- * on success; throws `TulipFarmValidationError` (boundary `"agent"`) on the first failure.
- */
+/** Validate AGENT.md frontmatter; throws `TulipFarmValidationError` on the first failure. */
 export function validateAgentFrontmatter(frontmatter: unknown): AgentFrontmatter {
   if (!check(frontmatter)) {
     const e = check.errors?.[0];

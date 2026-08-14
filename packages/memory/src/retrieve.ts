@@ -1,15 +1,4 @@
-/**
- * Memory recall (SPEC §14.2).
- *
- * Recall is not a lookup of what was saved — it is a fresh authorization of every candidate, twice
- * over: the assertion's scope is reauthorized against the caller's identities *now*, and any
- * Knowledge source the assertion was derived from is reauthorized through the evidence port. A
- * statement whose supporting source has since been revoked stops being recalled, even though it is
- * still stored.
- *
- * Exclusions are returned as reason counts. A caller who cannot see an assertion learns only that
- * something was excluded and why in the abstract — never its subject, statement, or id.
- */
+/** Recall reauthorizes assertion scope and evidence now; exclusions reveal reason counts only. */
 
 import type { AuditEventInput } from "@tulipfarm/audit";
 import type { MemoryAssertion, MemoryDeps } from "./memory";
@@ -29,18 +18,7 @@ import {
 
 export type { MemoryEvidenceAuthorizationPort } from "./memory";
 
-/**
- * Relevance retrieval over stored assertions.
- *
- * A port, not an implementation, for the same reason evidence authorization is one: the arms need
- * pgvector and full-text search, and this package may not depend on storage (see
- * `docs/architecture/dependency-rules.md`).
- *
- * The index is explicitly **not** an authorization boundary. It may return anything it matches;
- * `recallMemory` authorizes every candidate afterwards. Making the index filter by scope would
- * split the access decision across two places, and the one further from the audit trail would win
- * silently.
- */
+/** Retrieval is not an auth boundary; `recallMemory` authorizes every candidate after search. */
 export interface MemoryRecallIndex {
   search(request: MemoryRecallIndexRequest): Promise<readonly MemoryCandidateSignals[]>;
 }
@@ -75,14 +53,7 @@ export interface RecallRequest extends MemoryScopeRequest {
    * ranked by relevance instead of by recency.
    */
   readonly query?: string;
-  /**
-   * Ask what was true at a past moment rather than what is true now.
-   *
-   * This changes which assertions are eligible, not merely how they are ordered: a statement that
-   * has since been contradicted is *included* if `validAt` falls inside the interval it was true
-   * for, and one recorded afterwards is excluded. Without it, the history a contradiction preserves
-   * would be stored but unaskable.
-   */
+  /** Ask what was true at this instant, including facts later contradicted. */
   readonly validAt?: string;
 }
 
@@ -93,21 +64,10 @@ export interface RecallResult {
 
 const DEFAULT_LIMIT = 50;
 
-/**
- * How far past `limit` to retrieve before authorizing.
- *
- * Authorization runs after retrieval, so without widening, a caller whose top hits are all
- * withheld would get a short list while assertions they *can* see sit just below the cut. Widening
- * first and truncating last is also what keeps a withheld assertion from occupying a slot.
- */
+/** Retrieve past `limit` before auth so withheld hits cannot occupy visible slots. */
 const CANDIDATE_WIDENING = 4;
 
-/**
- * Whether an assertion was true at `moment`.
- *
- * Half-open on purpose: `validTo` is set to the instant the *next* fact became true, so treating
- * the interval as inclusive at both ends would make both facts true at that instant.
- */
+/** Half-open validity: `validTo` is when the next fact became true. */
 function validAtMoment(assertion: MemoryAssertion, moment: number): boolean {
   if (Date.parse(assertion.validFrom) > moment) return false;
   return assertion.validTo === undefined || Date.parse(assertion.validTo) > moment;
@@ -168,13 +128,7 @@ function recallAuditEvent(
   };
 }
 
-/**
- * Recall the assertions this caller is authorized to see right now.
- *
- * Ordered by relevance when a `query` is given and an index is wired, and by recency otherwise.
- * In both cases authorization runs over the widened candidate set *before* truncation, so what a
- * caller may not see cannot displace what they may.
- */
+/** Recall visible assertions; authorize widened candidates before truncating. */
 export async function recallMemory(
   deps: MemoryDeps,
   request: RecallRequest
@@ -184,9 +138,7 @@ export async function recallMemory(
   const limit = request.limit ?? DEFAULT_LIMIT;
   const validAt = request.validAt === undefined ? undefined : Date.parse(request.validAt);
 
-  // A historical question deliberately bypasses the index: the index holds only active rows, so
-  // ranking a `validAt` query through it would silently drop exactly the superseded assertions the
-  // question is asking about.
+  // Historical recall bypasses the active-row index so superseded assertions remain askable.
   const ranked = request.query !== undefined && deps.index !== undefined && validAt === undefined;
   const span = startMemorySpan(deps.telemetry, MEMORY_SPANS.recall, {
     ranked,
@@ -234,9 +186,7 @@ export async function recallMemory(
           continue;
         }
       } else {
-        // A point-in-time question asks about validity, not about what is current — so `superseded`
-        // stops being a reason to exclude and the valid interval becomes the only test. `forgotten`
-        // still excludes: forgetting is a decision about the record, not about when it was true.
+        // Point-in-time recall tests validity; forgotten records still stay hidden.
         if (assertion.status === "forgotten") {
           exclude("forgotten");
           continue;

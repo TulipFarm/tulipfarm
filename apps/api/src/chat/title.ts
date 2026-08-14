@@ -47,12 +47,7 @@ export async function buildConversationTitle(
   }
 }
 
-/**
- * Detached, best-effort title generation for a freshly created conversation. Fire-and-forget from
- * the chat route (`void buildAndStoreTitle(...)`) so it never blocks the stream. `getModel` is a thunk
- * so a quick-tier-not-configured throw degrades to the truncated-prompt fallback; a persistence
- * failure is swallowed with a warning (a missing title is non-fatal).
- */
+/** Fire-and-forget title generation; model or persistence failure must not block the stream. */
 export async function buildAndStoreTitle(args: {
   repo: Pick<ConversationRepo, "setTitle">;
   getModel: () => LanguageModel;

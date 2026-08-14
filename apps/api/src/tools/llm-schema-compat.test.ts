@@ -9,13 +9,7 @@ import { AGENT_TOOLS } from "../soul/agents/tools.js";
 import { RESOURCE_TYPE_TOOLS } from "../soul/resource-types/tools.js";
 import { SKILL_TOOLS } from "../soul/skills/tools.js";
 
-/*
- * LLM provider compatibility sweep for tool input schemas. Providers validate the JSON Schema
- * sent with each tool and reject unsupported regex features in `pattern` — e.g. Anthropic fails
- * the whole chat turn with "Invalid JSON schema: regex lookaround is not supported" if any tool
- * pattern uses (?=...), (?!...) or (?<...). Every statically-registered tool schema (the set
- * buildToolRegistry ships on each turn) must stay lookaround-free.
- */
+/* Provider schema sweep: statically registered Tool patterns must stay lookaround-free. */
 
 const ALL_TOOL_SETS: Array<[string, ReadonlyArray<{ name: string; inputSchema: unknown }>]> = [
   ["MEMORY_TOOLS", MEMORY_TOOLS],

@@ -1,6 +1,6 @@
 import type { Queryable } from "../db";
 
-/** Durable fire-state for one `x-triggers` entry, keyed by `(businessId, routineSlug, triggerIndex)`. */
+/** Durable fire-state for one `x-triggers` entry. */
 export interface RoutineScheduleStateRow {
   readonly routineSlug: string;
   readonly triggerIndex: number;
@@ -59,12 +59,7 @@ export class RoutineScheduleStateStore {
     );
   }
 
-  /**
-   * Drop rows for triggers that no longer exist on the Routine (deleted, edited away, or the
-   * Routine itself gone). `existing` is the caller's own `listForBusiness` read — a tick's
-   * upserts only touch rows already present in it, so the row keys stay current without a second
-   * read here.
-   */
+  /** Drop state rows for triggers missing from the caller's `listForBusiness` read. */
   async pruneMissing(
     businessId: string,
     stillLive: ReadonlyArray<{ readonly routineSlug: string; readonly triggerIndex: number }>,

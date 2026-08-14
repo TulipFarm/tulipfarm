@@ -1,14 +1,6 @@
 import type { IngestSourceInput, WritePageInput } from "../service";
 
-/**
- * Connector framework (V1: interface + sample + stubs, no live third-party connector).
- *
- * A connector is the only seam an external source needs to fill: pull credentials, enumerate what
- * changed since a cursor, fetch a record, and map it to a page. Everything downstream — upsert,
- * chunking, embedding, search — is the existing pipeline. A connector NEVER touches embeddings or
- * `knowledge_chunks`; it produces pages through the existing funnels (`ingestSource`/`writePage`)
- * and the indexer embeds them.
- */
+/** Source connector seam; callers must persist checkpoints and cursors. */
 
 /** A raw external record. `id` is the source-local identifier; the rest is connector-specific. */
 export interface ConnectorRecord {
@@ -16,10 +8,7 @@ export interface ConnectorRecord {
   [key: string]: unknown;
 }
 
-/**
- * The result of mapping a record to a page. `flat` routes through `ingestSource` (a standalone
- * page keyed by `(source, sourceId)`); `okf` routes through `writePage` (a page inside an OKF space).
- */
+/** Mapped page write target: flat `ingestSource` or OKF `writePage`. */
 export type ConnectorPage =
   | { kind: "flat"; input: IngestSourceInput }
   | { kind: "okf"; input: WritePageInput };
@@ -27,7 +16,7 @@ export type ConnectorPage =
 /** What `listChanged` returns: the ids that changed plus the cursor to persist for the next run. */
 export interface ConnectorChanges {
   ids: string[];
-  /** Opaque, connector-defined position to resume from next sync. Null = start from the beginning. */
+  /** Opaque resume position for the next sync. Null means start from the beginning. */
   cursor: string | null;
 }
 

@@ -23,15 +23,7 @@ import type { MemoryEmbedder } from "./embedder";
 import type { PgMemoryEpisodeStore } from "./episode-store";
 import { PgPendingMemoryStore } from "./pending-store";
 
-/**
- * Adapts the turn's own prompt-injection guard into the candidate screen.
- *
- * Reusing the guard rather than writing a second detector is the point: a pattern that would be
- * blocked on the way *in* must also be blocked on the way into memory, and two implementations
- * would inevitably drift into a gap between them. A guardrails failure screens nothing out, which
- * is safe here only because the candidate is still inferred, still pending, and still shown to a
- * human before it can ever be recalled.
- */
+/** Reuse the turn injection guard; failures leave candidates pending for human review. */
 export class GuardrailsCandidateScreen implements MemoryCandidateScreen {
   constructor(
     private readonly guardrails: GuardrailsService,
@@ -47,14 +39,7 @@ export class GuardrailsCandidateScreen implements MemoryCandidateScreen {
   }
 }
 
-/**
- * Settings for extraction-time proposals.
- *
- * Distinct from `KV_MEMORY_SETTINGS`, which disables inferred memory because the KV surface has no
- * confirmation UI. Here inference is the entire point, so it is enabled — and `confirmationRequired`
- * is `true` because there is no other value: an inferred statement that skipped confirmation would
- * make the pending table decorative.
- */
+/** Extraction infers candidates but always requires confirmation; KV memory has no review UI. */
 export const EXTRACTION_MEMORY_SETTINGS = {
   scopes: ["user_private"],
   inferredDurableMemory: { enabled: true, confirmationRequired: true },
@@ -69,15 +54,7 @@ export interface ExtractionRequest {
   readonly evidence?: readonly { readonly kind: "message"; readonly ref: string }[];
 }
 
-/**
- * Mines a finished turn for durable facts and parks them for the user to confirm.
- *
- * Nothing this service extracts as an Assertion can write to the assertion store. Extraction
- * produces candidates, screening removes the ones that must never be proposed, and
- * `proposeMemoryCandidates` forces the rest through the inferred path — so the only way one
- * becomes a durable fact is a person confirming it. M5 Run Episodes are separate historical
- * summaries and are recorded best-effort through their own store.
- */
+/** Extraction can only propose pending Assertions; a durable memory requires human confirmation. */
 export class MemoryExtractionService {
   private readonly store: PgMemoryAssertionStore;
   private readonly pendingStore: PgPendingMemoryStore;
@@ -147,16 +124,11 @@ export class MemoryExtractionService {
     return result;
   }
 
-  /** The candidates awaiting this user's decision. */
   listPending(userId: string): Promise<readonly PendingMemory[]> {
     return this.pendingStore.listForPrincipal(DEPLOYMENT_BUSINESS_ID, userId, this.now());
   }
 
-  /**
-   * Records a decision. The engine reauthorizes the deciding principal against the target scope,
-   * so a confirmation answered by the wrong person confirms nothing and leaves the record intact
-   * for its real owner.
-   */
+  /** Decision writes reauthorize the decider; wrong-person confirmations leave rows pending. */
   async resolve(
     userId: string,
     pendingId: string,
@@ -171,7 +143,6 @@ export class MemoryExtractionService {
     return result;
   }
 
-  /** Drops everything past its confirmation window. Safe to call on any schedule, or none. */
   async purgeExpired(): Promise<number> {
     const purged = await this.pendingStore.purgeExpired(DEPLOYMENT_BUSINESS_ID, this.now());
     await this.recordPendingQueue();

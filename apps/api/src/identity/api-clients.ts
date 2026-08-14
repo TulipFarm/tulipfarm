@@ -3,11 +3,10 @@ import { hashToken } from "../auth/api-tokens";
 import type { Queryable } from "../db";
 
 /**
- * API clients are service identities (SPEC §12): separate owner, own credential, rotation,
- * expiry, and disable. They are deliberately *not* user API tokens — a client authenticates as
- * itself and never inherits a user's session, so a leaked client secret cannot act as a person.
- *
- * Wire format: `Authorization: Bearer tfc_<clientId>.<secret>`. Only the secret's hash is stored.
+ * API clients are service identities (SPEC §12): separate owner, own credential, rotation, expiry,
+ * and disable. They are deliberately *not* user API tokens — a client authenticates as itself and
+ * never inherits a user's session, so a leaked client secret cannot act as a person. Wire format:
+ * `Authorization: Bearer tfc_<clientId>.<secret>`.
  */
 export const API_CLIENT_TOKEN_PREFIX = "tfc_";
 
@@ -187,8 +186,7 @@ export async function rotateApiClientSecret(
 
 /**
  * Resolves a raw credential to its client. Returns null for unknown client ids and for wrong
- * secrets alike — the caller cannot tell which, so this is not a client-id oracle. Status and
- * expiry are enforced by the caller through `assertApiClientAuthenticatable`.
+ * secrets alike — the caller cannot tell which, so this is not a client-id oracle.
  */
 export async function authenticateApiClient(
   repo: ApiClientRepo,

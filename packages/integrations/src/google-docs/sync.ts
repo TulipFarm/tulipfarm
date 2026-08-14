@@ -1,10 +1,4 @@
-/**
- * Google Docs Knowledge sync.
- *
- * Google Docs is indexed as its own Knowledge provider even though its ACLs come from Drive. Link
- * shares (`anyone`) grant no Tulip principal; domain permissions only grant access when the domain
- * subject is explicitly mapped in `external_identity_mappings`.
- */
+/** Indexes Docs as its own provider; link shares grant nothing without identity mappings. */
 
 import { canonicalHash } from "@tulipfarm/schema";
 import type {

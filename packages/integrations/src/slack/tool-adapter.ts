@@ -5,16 +5,8 @@ import { SLACK_TOOL_IDS } from "./contracts";
 import { encodeMentionsInText, type SlackUserLookupPort } from "./mentions";
 
 /**
- * Dispatches the `slack.message.send` Tool contract. Named `tool-adapter.ts` (not `adapter.ts`)
- * to avoid colliding with `./adapter.ts`'s `SlackChannelAdapter`/`SlackDeliveryAdapter`, which
- * serve the separate inbound-receive/reply-delivery ledger pipeline, not the Tool Broker's effect
- * pipeline this implements.
- *
- * Channel input may be a bare name, a `#name`, or a raw channel ID — resolved via
- * `conversations.list` when it doesn't already look like an ID. `client_msg_id` is set to the
- * effect's idempotency key so a redelivered attempt against the real Slack API naturally
- * deduplicates, in place of GitHub's invisible-marker technique (Slack has no equivalent
- * text-comment convention).
+ * Dispatches `slack.message.send`; resolves names to channel ids and uses `client_msg_id` for
+ * Slack-native idempotency.
  */
 export interface SlackToolAdapterDeps {
   readonly http: IntegrationHttpPort;
@@ -109,18 +101,7 @@ export class SlackToolAdapter implements ToolAdapter {
     return { channelId, ts, threadId: ts };
   }
 
-  /**
-   * `SlackUserLookupPort` backed by `users.list`, scoped to one dispatch call. The directory scan
-   * is memoized so `encodeMentionsInText`'s concurrent per-name lookups (`Promise.all`) share one
-   * paginated fetch instead of one each. A directory fetch failure resolves every name to
-   * undefined rather than throwing — matching mention resolution is best-effort and must never
-   * block the send.
-   *
-   * Falls back from an exact name match to a first-name match (`"shiv"` -> `"Shiv Soni"`), since
-   * the agent is at least as likely to write a bare first name as the full display name. The
-   * fallback only fires when exactly one directory member shares that first name — a first name
-   * two members share resolves to undefined rather than guessing which one was meant.
-   */
+  /** Memoized best-effort user lookup; first-name fallback only when exactly one match exists. */
   private userLookup(credential: string): SlackUserLookupPort {
     let directory:
       | Promise<{ exact: Map<string, string>; firstName: Map<string, string | null> }>

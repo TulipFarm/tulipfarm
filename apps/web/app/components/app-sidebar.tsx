@@ -30,8 +30,6 @@ import { cn } from "~/lib/utils";
 
 type ProductMode = NavProductMode;
 
-// The rail's logo band, the context-panel header, and the top bar share one 52px row so the three
-// shell columns line up across the whole width (design-system §9).
 const HEADER_ROW = "flex h-[52px] shrink-0 items-center";
 
 function modeForPath(pathname: string): ProductMode {
@@ -72,9 +70,9 @@ function SignOutButton({ compact = false }: { compact?: boolean }) {
 }
 
 /*
- * A single rail destination. The selected mode carries both a filled surface and a coral edge
- * marker so selection never depends on color alone, and the shared Tooltip replaces the native
- * `title` delay for these icon-only targets.
+ * The selected mode carries both a filled surface and a coral edge marker so selection never
+ * depends on color alone, and the shared Tooltip replaces the native `title` delay for these
+ * icon-only targets.
  */
 function RailLink({ mode, active }: { mode: ProductMode; active: boolean }) {
   const { label, to, icon: Icon } = MODE_META[mode];
@@ -245,10 +243,6 @@ function LinkList({
   );
 }
 
-/*
- * The contextual sidebar for the selected mode. Its header names the mode with the mode's own icon
- * (the top bar names the page), and carries the one mode-level create action when a mode has one.
- */
 function ContextPanel({
   mode,
   onNavigate,
@@ -311,8 +305,7 @@ export function AppSidebar({
     return () => query.removeEventListener("change", update);
   }, []);
 
-  // Off-canvas on mobile: `inert` both hides it from assistive tech and drops its links out of the
-  // tab order. `aria-hidden` alone would leave focusable content inside a hidden subtree.
+  /* `inert` also removes hidden mobile nav links from the tab order. */
   const hidden = !persistent && !open;
   return (
     <>
@@ -365,8 +358,6 @@ function initialsFor(identity: string): string {
   return initials.toUpperCase() || "?";
 }
 
-// The signed-in account, and the shell's only route to it. The top bar is wayfinding, not a profile
-// surface, so identity reduces to a monogram and the address moves into its tooltip.
 function AccountChip({ user }: { user?: SessionUser }) {
   if (!user) return null;
   const name = user.name?.trim() || user.email;
@@ -384,9 +375,8 @@ function AccountChip({ user }: { user?: SessionUser }) {
 }
 
 /*
- * Breadcrumb for the current page. The parent crumb only earns its place when it points somewhere
- * else and says something else, so the trail never repeats the page or links to it. Chat is exempt
- * outright: its mode landing route is itself a conversation, so "Chat >" is always self-referential.
+ * The parent crumb only earns its place when it points somewhere else and says something else,
+ * so the trail never repeats the page or links to it.
  */
 function Breadcrumb({ pathname, pageTitle }: { pathname: string; pageTitle: string }) {
   const mode = modeForPath(pathname);
@@ -435,9 +425,6 @@ export function AppShell({
   const { pathname } = useLocation();
   const openerRef = useRef<HTMLButtonElement>(null);
   const { activeChatTitle } = useConversations();
-  // Chat is the one mode whose page identity is user data rather than a route, so the top bar names
-  // the conversation. "Chat" is the placeholder while a restored chat's title resolves; a chat that
-  // has not been titled yet is genuinely a new one.
   const isConversation = pathname === "/" || pathname.startsWith("/chat/");
   const pageTitle = isConversation
     ? (activeChatTitle ?? (pathname === "/" ? "New chat" : "Chat"))

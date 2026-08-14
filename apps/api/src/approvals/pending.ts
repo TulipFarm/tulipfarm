@@ -1,12 +1,6 @@
 import type { ApprovalsRepo } from "./runtime-repo";
 
-/**
- * A pending Tool approval as the operator surfaces show it.
- *
- * Projected from the row rather than from anything in this process: the turn that asked for the
- * approval runs in the Worker, so there is no in-memory continuation here to read it off. Whichever
- * API instance serves the list renders the same answer.
- */
+/** Pending Tool approval projected from durable rows, not in-process Worker state. */
 export interface PendingToolApproval {
   readonly approvalId: string;
   readonly toolCallId: string;

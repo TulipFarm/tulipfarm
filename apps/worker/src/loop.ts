@@ -33,10 +33,7 @@ export function defaultWait(delayMs: number, signal: AbortSignal): Promise<void>
   });
 }
 
-/**
- * Exponential backoff with full jitter. Jitter matters here because every loop in a restarted
- * fleet would otherwise retry against a recovering database in lockstep.
- */
+/** Exponential backoff with jitter, so restarted fleets do not retry in lockstep. */
 export function backoffDelay(
   attempt: number,
   intervalMs: number,
@@ -47,14 +44,7 @@ export function backoffDelay(
   return Math.round(exponential * (0.5 + random() * 0.5));
 }
 
-/**
- * Drives `tick` until the signal aborts.
- *
- * A throwing tick is logged and retried with backoff rather than killing the process: one bad Run
- * or a brief database blip must not take the whole worker down, and readiness already reports the
- * dependency state. The returned promise resolves only after the in-flight tick settles, which is
- * what makes a clean drain possible.
- */
+/** Retry failed ticks with backoff; resolve only after the in-flight tick drains. */
 export async function runLoop(options: RunLoopOptions): Promise<void> {
   const wait = options.wait ?? defaultWait;
   const maxBackoffMs = options.maxBackoffMs ?? MAX_BACKOFF_MS;

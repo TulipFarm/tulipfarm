@@ -8,12 +8,7 @@ interface StartRunResponse {
 }
 
 export interface HttpChannelRunStarterOptions {
-  /**
-   * When supplied, sets the Agents & AI Apps status indicator right after a fresh Run mints.
-   * Omitted for providers (or test setups) that don't need the live status indicator — a missing
-   * status call never blocks the Run itself, so a failure here is swallowed rather than surfaced
-   * to the caller.
-   */
+  /** Optional status update; failure never blocks Run creation. */
   assistantStatus?: {
     http: IntegrationHttpPort;
     credential: string;
@@ -21,14 +16,7 @@ export interface HttpChannelRunStarterOptions {
   };
 }
 
-/**
- * Calls `POST /api/v1/internal/channels/runs` — Run minting, Conversation mapping, and the
- * `channel_run_deliveries` correlation row are all written together on the `apps/api` side of
- * this boundary, in the same transaction as the Turn itself.
- *
- * `ChannelRunStarter.start` carries no `provider` — this adapter is composed once per provider
- * (only Slack today, see `channels/index.ts`), so it closes over its own provider string.
- */
+/** Starts provider-scoped channel Runs; API writes Run, chat mapping, and delivery together. */
 export function httpChannelRunStarter(
   client: InternalApiClient,
   provider: string,

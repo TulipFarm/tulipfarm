@@ -4,17 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-/*
- * Shared rules for fetching soul artifacts (Skills, Integrations) from a git repo an operator
- * names. This lives in one place on purpose: it is the SSRF allowlist, and two copies would
- * eventually disagree about what is safe to hand to `git clone`.
- */
-
 const execFileP = promisify(execFile);
 
 const CLONE_TIMEOUT_MS = 60_000;
 
-// A source may carry an optional "#<ref>" suffix (branch or tag name — not a commit SHA) so
 // pre-merge branches can be scanned and tested: "owner/repo#my-branch". No "#" ⇒ default branch.
 export function splitSourceRef(source: string): { base: string; ref?: string } {
   const idx = source.indexOf("#");
@@ -39,7 +32,6 @@ export function isAllowedSource(source: string): boolean {
 export const ALLOWED_SOURCE_HINT =
   "source must be a github owner/repo slug or an http(s)/file URL, with an optional #branch suffix";
 
-// Normalize an allowed source (ref already split off) into something `git clone` accepts. A bare
 // "owner/repo" becomes a GitHub https URL; an http(s)/file URL is used as-is.
 export function normalizeGitUrl(base: string): string {
   if (/^[\w.-]+\/[\w.-]+$/.test(base)) return `https://github.com/${base}.git`;
@@ -61,7 +53,6 @@ export async function cloneToTemp(
 ): Promise<{ dir: string; ref: string }> {
   const { base, ref } = splitSourceRef(source);
   const dir = await mkdtemp(join(tmpdir(), prefix));
-  // --branch accepts branch or tag names (not commit SHAs) and still works with --depth 1.
   await execFileP(
     "git",
     ["clone", "--depth", "1", ...(ref ? ["--branch", ref] : []), normalizeGitUrl(base), dir],

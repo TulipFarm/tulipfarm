@@ -1,18 +1,6 @@
 import type { VersionedSchemaDocument } from "@tulipfarm/schema";
 
-/**
- * Semantic-graph and reference validation over a proposed Soul tree (SPEC §8.2 steps 6–8).
- *
- * A separate per-file pass validates each changeset file in isolation (shape → strict AJV →
- * canonical hash). This layer runs *after* those per-file checks, across the whole proposed tree: it proves
- * stable-identifier uniqueness, resolves every cross-definition reference and version
- * constraint against the proposed tree, checks the Routine State graph and role/fallback
- * cycles, and enforces non-amplification (a dependency or generated plan can never widen
- * authority — SPEC invariants 3 & §12).
- *
- * All issues are payload-safe: they carry only authored identifiers (kind, slug, id, ref,
- * state name) and JSON-pointer fields — never definition content, Secrets, or user data.
- */
+/** Semantic reference validation over the proposed Soul tree; issues carry no content or secrets. */
 
 export type SoulSemanticIssueCode =
   | "DUPLICATE_ID"
@@ -82,11 +70,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/**
- * Narrow a validated document to the fields the semantic layer reads. Inputs are already
- * schema-validated, so a malformed shape here is not an expected path; such a
- * document is skipped rather than crashing the whole proposal.
- */
+/** Narrow validated documents to semantic fields; skip impossible malformed shapes. */
 export function asAuthored(doc: VersionedSchemaDocument): AuthoredDefinition | undefined {
   const kind = doc.kind;
   const metadata = (doc as Record<string, unknown>).metadata;

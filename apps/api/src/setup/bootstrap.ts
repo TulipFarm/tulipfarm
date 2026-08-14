@@ -24,15 +24,7 @@ const DEFAULT_MODEL: Record<"anthropic" | "openai", string> = {
   openai: "gpt-4o",
 };
 
-/**
- * Seeds a one-provider chain across all three tiers — the same shape the wizard's
- * `buildSetupLlmConfig` writes. Because this path also sets `setupComplete`, the wizard never runs,
- * so without this a headless instance holds a credential and no chain: every Run then fails
- * routing with `unknown_profile`, which reads to a participant as a plain model failure.
- *
- * Only ever seeds when `llm:` is absent. Bootstrap runs on every boot, and overwriting a chain the
- * operator has since tuned in Business > Models would silently revert their configuration.
- */
+/** Headless bootstrap seeds an LLM chain only when `llm:` is absent, preserving operator edits. */
 async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "openai"): Promise<void> {
   const existing = (await readSoulConfig(deps.soulPath)) as { llm?: unknown };
   if (existing.llm !== undefined) return;

@@ -113,11 +113,7 @@ export class PgBundleStore implements BundleStore {
     });
   }
 
-  /**
-   * Delete only bundles that no durable reader can still need. Anything active, ever activated,
-   * pinned by any Run, named by sealed Audit, or still tied to a non-dead-lettered publication is
-   * deliberately retained.
-   */
+  /** Retain bundles any active, pinned, audited, or live publication path can still need. */
   async deleteUnreferencedBundles(input: BundleRetentionInput): Promise<number> {
     return this.transactions.withTransaction(async (transaction) => {
       const result = await transaction.query<{ digest: string }>(

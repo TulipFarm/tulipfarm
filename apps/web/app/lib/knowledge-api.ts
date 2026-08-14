@@ -1,7 +1,7 @@
 /*
  * Read/write client for the knowledge API (pages, spaces, search). Built on the shared
  * `apiGet`/`apiWrite`/`apiDelete` primitives in `api.ts` (cookie-first auth, CSRF echo, quoted
- * If-Match concurrency). React/Remix-free so it is unit-testable by mocking the global `fetch`.
+ * If-Match concurrency).
  */
 import { apiDelete, apiGet, apiWrite } from "./api";
 
@@ -19,14 +19,11 @@ export type KnowledgePage = {
   active: boolean;
   alwaysLoadForAgents: boolean;
   version: number;
-  // OKF-only; present on space pages so a tag-filtered listing can link to its page route.
   spaceId?: string | null;
   path?: string | null;
-  // OKF page metadata — also returned by `GET /pages/:id`, so a by-id load can render the view.
   resource?: string | null;
   createdAt: string;
   updatedAt: string;
-  // Derived server-side from the page's chunks (read-only). Absent on older payloads.
   indexingStatus?: IndexingStatus;
 };
 
@@ -60,8 +57,6 @@ function pageQuery(cursor: string | undefined, limit: number): string {
   return q.toString();
 }
 
-// ── pages ─────────────────────────────────────────────────────────────────────
-
 export function listPages(cursor?: string, limit = 50, tags?: string[]): Promise<PagePage> {
   const q = new URLSearchParams({ limit: String(limit) });
   if (cursor) q.set("cursor", cursor);
@@ -77,7 +72,6 @@ export function createPage(body: PageInput): Promise<KnowledgePage> {
   return apiWrite<KnowledgePage>("POST", `${BASE}/pages`, body);
 }
 
-// Full-replace update with optimistic concurrency; `version` becomes the quoted If-Match header.
 export function updatePage(
   id: string,
   version: number,
@@ -90,12 +84,10 @@ export function deletePage(id: string): Promise<void> {
   return apiDelete(`${BASE}/pages/${enc(id)}`);
 }
 
-// Semantic search is a POST that reads — it still carries the CSRF echo header via `apiWrite`.
 export function searchKnowledge(query: string, limit = 10): Promise<SearchResponse> {
   return apiWrite<SearchResponse>("POST", `${BASE}/search`, { query, limit });
 }
 
-// A whole-page search hit (granularity "page"). Distinct from the chunk-level SearchHit.
 export type PageSearchHit = {
   pageId: string;
   title: string;
@@ -108,7 +100,6 @@ export type PageSearchHit = {
 
 export type PageSearchResponse = { results: PageSearchHit[]; warnings: string[] };
 
-// Page-level human search (granularity "page"). A blank query returns recent pages server-side.
 export function searchPages(
   query: string,
   opts: { spaceId?: string; type?: string; limit?: number } = {}
@@ -122,8 +113,6 @@ export function searchPages(
   }).then((r) => r.results);
 }
 
-// ── OKF spaces ───────────────────────────────────────────────────────────────
-
 export type KnowledgeSpace = {
   id: string;
   name: string;
@@ -132,8 +121,6 @@ export type KnowledgeSpace = {
   updatedAt: string;
 };
 
-// A space member page. Carries the OKF-specific fields (path/resource) on top of the
-// base knowledge-page shape; `content` is the full OKF markdown (frontmatter + body).
 export type SpacePage = {
   id: string;
   title: string;
@@ -159,8 +146,6 @@ export type SpaceInput = {
   description?: string | null;
 };
 
-// A page write either creates/replaces a page, or — when the path's last segment is
-// `index`/`log` — records a directory override (200, no page returned).
 export type PageWriteResult = SpacePage | { override: true; path: string };
 
 export type SpaceGraphNode = {
@@ -208,8 +193,6 @@ export function listSpacePages(id: string): Promise<{ items: SpacePage[] }> {
   return apiGet<{ items: SpacePage[] }>(`${BASE}/spaces/${enc(id)}/pages`);
 }
 
-// Author/replace a page (or record a directory override). The server parses/validates the OKF
-// `content`; a 400 carries the validation message (surfaced by the form).
 export function writePage(id: string, path: string, content: string): Promise<PageWriteResult> {
   return apiWrite<PageWriteResult>("POST", `${BASE}/spaces/${enc(id)}/pages`, {
     path,
@@ -217,7 +200,6 @@ export function writePage(id: string, path: string, content: string): Promise<Pa
   });
 }
 
-// Markdown index listing for a directory in the space ("" = root).
 export function navigateSpace(id: string, dirPath = ""): Promise<{ listing: string }> {
   const q = dirPath ? `?dirPath=${enc(dirPath)}` : "";
   return apiGet<{ listing: string }>(`${BASE}/spaces/${enc(id)}/navigate${q}`);
@@ -227,8 +209,6 @@ export function getSpaceGraph(id: string): Promise<SpaceGraph> {
   return apiGet<SpaceGraph>(`${BASE}/spaces/${enc(id)}/graph`);
 }
 
-// A page that links to a page (the "Linked from" panel). `spaceName` lets the UI resolve the
-// source's space without an extra lookup; cross-space backlinks come back the same shape.
 export type Backlink = {
   sourceId: string;
   title: string;
@@ -237,7 +217,6 @@ export type Backlink = {
   spaceName: string;
 };
 
-// A flat reference to one OKF page across all spaces — feeds the editor's `@`-mention Pages section.
 export type SpacePageRef = {
   pageId: string;
   spaceId: string;
@@ -250,8 +229,6 @@ export function getBacklinks(pageId: string): Promise<{ items: Backlink[] }> {
   return apiGet<{ items: Backlink[] }>(`${BASE}/pages/${enc(pageId)}/backlinks`);
 }
 
-// One stored revision of a page's full OKF content (the API returns them newest-first). `content`
-// is the full markdown — enough to preview read-only and to Restore (re-POST via writePage).
 export type KnowledgeRevision = {
   id: string;
   pageId: string;
@@ -269,10 +246,7 @@ export function listAllPages(): Promise<{ items: SpacePageRef[] }> {
   return apiGet<{ items: SpacePageRef[] }>(`${BASE}/pages/mentions`);
 }
 
-// A space on the Knowledge home grid: space metadata + its active page count and last activity
-// (latest of the space's own update or any of its pages' updates).
 export type SpaceOverview = KnowledgeSpace & { pageCount: number; lastActivity: string };
-// A recently-edited page across all spaces, for the Knowledge home "Recently edited" list.
 export type RecentPage = {
   pageId: string;
   spaceId: string;

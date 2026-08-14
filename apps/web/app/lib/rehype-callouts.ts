@@ -1,10 +1,4 @@
-/*
- * Rehype plugin: render GitHub-alert blockquotes (`> [!NOTE] …`) as callouts. It tags a matching
- * blockquote with `properties.dataCallout = <KIND>` and strips the `[!KIND]` marker from the first
- * paragraph, so the `blockquote` renderer in markdown-view can branch on the kind. Mirrors the
- * canonical grammar in `@tulipfarm/editor` (CALLOUT_KINDS / CALLOUT_ALERT_RE) — kept inline here so
- * the read view doesn't pull the TipTap editor into its bundle.
- */
+/* Keep alert grammar inline so the read view does not bundle the TipTap editor. */
 
 const ALERT_RE = /^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][^\n]*\n?/i;
 

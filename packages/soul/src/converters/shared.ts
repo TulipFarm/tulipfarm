@@ -1,13 +1,7 @@
 import { createHash } from "node:crypto";
 import type { SoulFileChange } from "../changeset";
 
-/**
- * Shared building blocks for legacy Soul -> authored-definition conversion.
- *
- * Conversion is a pure, read-only transform: it never writes to disk, never calls the changeset
- * gateway, and never publishes. Callers get back proposed `SoulFileChange`s plus warnings and
- * decide what (if anything) to do with them.
- */
+/** Pure helpers for proposing legacy Soul -> authored-definition changes. */
 
 /** Why a legacy value did not make it into the converted definition. */
 export type ConversionWarningCode =
@@ -32,11 +26,7 @@ const SECRET_FIELD_PATTERN = /secret|token|password|credential|apikey|api_key/i;
 /** Fixed namespace so the same (kind, name) always derives the same id. */
 const ID_NAMESPACE = "tulipfarm.ai/soul/legacy-definition/v1";
 
-/**
- * Deterministically derive a UUID-shaped id from a legacy artifact's (kind, name). Not a real
- * UUIDv4/v5 — a documented SHA-256-derived hex string matching the schema's UUID-or-ULID id
- * pattern, which is what makes conversion idempotent without a new dependency.
- */
+/** Stable SHA-256-derived UUID-shaped id for idempotent legacy conversion. */
 export function deriveDefinitionId(kind: string, name: string): string {
   const digest = createHash("sha256")
     .update(`${ID_NAMESPACE}\0${kind}\0${name}`, "utf8")
@@ -50,12 +40,7 @@ function isSlugChar(char: string): boolean {
   return (char >= "a" && char <= "z") || (char >= "0" && char <= "9");
 }
 
-/**
- * Kebab-case-normalize a legacy name into a slug satisfying the schema's slug pattern. Built as a
- * single-pass character scan (no regex) so it stays linear-time regardless of input shape — the
- * legacy `name` is uncontrolled data, and CodeQL flags regex-based collapsing/trimming here as a
- * polynomial-ReDoS shape even when each step is individually anchored.
- */
+/** Linear-time slug normalization for uncontrolled legacy names; avoids regex ReDoS shapes. */
 export function slugify(name: string): string {
   const lower = name.toLowerCase();
   let base = "";
@@ -74,12 +59,7 @@ export function slugify(name: string): string {
     : `x-${base || "unnamed"}`;
 }
 
-/**
- * Allowlist-copy frontmatter fields onto the new spec shape. Any secret-shaped field name is
- * always dropped (defense in depth: legacy Soul data must never carry a real secret forward).
- * Any other field not on the allowlist is dropped with an `UNMAPPED_FIELD` warning. Nothing not
- * explicitly named on `allowlist` is ever copied through.
- */
+/** Copy only allowlisted fields; drop secret-shaped names and warn on other unmapped fields. */
 export function mapAllowlistedFields(
   frontmatter: Record<string, unknown>,
   allowlist: readonly string[]

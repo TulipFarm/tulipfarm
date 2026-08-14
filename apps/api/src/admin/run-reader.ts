@@ -1,13 +1,7 @@
 import type { PersistedRun, PersistedState, RunLineage, RunStore } from "@tulipfarm/storage";
 import type { RunReadModel, RunStateReadModel } from "./routes";
 
-/**
- * Read side of the operational Run browser.
- *
- * Runs are recorded by the durable invocation gateway into the canonical `runs` / `run_states`
- * tables owned by `@tulipfarm/storage`, so this reader goes through `RunStore` rather than
- * querying those tables directly — the API never reads another owner's schema.
- */
+/** Reads Runs through `RunStore`; the API must not query storage-owned tables directly. */
 export interface RunReader {
   list(
     businessId: string,
@@ -62,10 +56,7 @@ function runReadModel(
   };
 }
 
-/**
- * Runs are listed without their per-Run detail: one page must stay one round trip, and the
- * inspector fetches States and lineage when a Run is opened.
- */
+/** List pages omit per-Run detail to stay one round trip. */
 export function createRunReader(runs: RunStore): RunReader {
   return {
     async list(businessId, options) {

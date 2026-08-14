@@ -1,10 +1,6 @@
 /**
- * Proves that direct Soul writes actually reach the audit ledger.
- *
- * These routes bypass the Run path, so this is the only place the evidence can come from. The
- * failure mode worth guarding is not a wrong string — it is a route that was wired to accept an
- * `AuditService` but never calls it, which type-checks perfectly and records nothing. So every
- * assertion here goes through a real HTTP request against a real chain, never a spy on the helper.
+ * Proves direct Soul HTTP writes reach the audit ledger; spies would miss routes that accept but
+ * never call AuditService.
  */
 
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
@@ -26,7 +22,6 @@ function harness(log: (m: string) => void = () => {}) {
   return { repo, svc, write: makeSoulAuditWriter(svc) };
 }
 
-/** A request carrying only what the writer reads off it. */
 function req(userId?: string): FastifyRequest {
   return { user: userId ? { _id: userId } : undefined } as unknown as FastifyRequest;
 }
@@ -93,11 +88,7 @@ describe("makeSoulAuditWriter", () => {
   });
 });
 
-/**
- * Both the git-remote and skill-install flows take a free-form clone URL from an operator, and
- * write it into an append-only ledger. The audit package only rejects *recognised* token formats,
- * so a generic `https://user:password@host` would otherwise be kept forever.
- */
+/** Free-form clone URLs enter an append-only ledger, so generic masked hosts are redacted. */
 describe("redactRemoteUrl", () => {
   it("strips an embedded credential while keeping the repository identity", () => {
     expect(redactRemoteUrl("https://user:s3cret@github.com/acme/soul.git")).toBe(
@@ -120,9 +111,7 @@ describe("redactRemoteUrl", () => {
   });
 
   /**
-   * The WHATWG URL parser *silently deletes* tab, CR and LF and folds whatever followed into the
-   * path: `new URL("https://h/r\nAUTH: tok").pathname` is `/rAUTH:%20tok`. Stripping userinfo
-   * would then have been redaction theatre — the secret rides in on the path instead.
+   * Reject control characters: WHATWG URL parsing deletes them and can hide secrets in the path.
    */
   it("refuses input with control characters, which the URL parser folds into the path", () => {
     for (const smuggled of [
@@ -134,11 +123,7 @@ describe("redactRemoteUrl", () => {
     }
   });
 
-  /**
-   * `acme/skills` is how Skills and Integrations are actually installed — far more common than a
-   * full URL. An earlier version of this function collapsed every one of these to `"unparsed"`,
-   * which silently destroyed the one fact the audit event exists to record.
-   */
+  /** Keep owner/repo sources; collapsing them destroys audit provenance. */
   it("keeps credential-free shorthand, the commonest source form", () => {
     expect(redactRemoteUrl("acme/skills")).toBe("acme/skills");
     expect(redactRemoteUrl("acme/skills#main")).toBe("acme/skills#main");
@@ -187,10 +172,8 @@ describe("redactRemoteUrl", () => {
 });
 
 /**
- * `skills-lock.json` is committed to the Soul repo and served back out of the skills API, so an
- * install from a credential-bearing clone URL publishes that credential to git history. Unlike the
- * ledger, this field is *functional provenance*: `file://` and `owner/repo` sources must survive
- * byte-identical, which is why `redactRemoteUrl`'s strict policy cannot be used here.
+ * Redact credential-bearing clone URLs in skills-lock.json without changing file:// or owner/repo
+ * provenance.
  */
 describe("stripUrlCredentials", () => {
   it("removes an embedded credential", () => {
@@ -203,8 +186,7 @@ describe("stripUrlCredentials", () => {
   });
 
   /**
-   * A non-greedy match stops at the *first* `@` and leaves `b:tok@host` behind, which still
-   * carries the token. Matching greedily to the last `@` before the first `/` is what fixes it.
+   * Match greedily to the last @ before the first / so credentials containing @ are fully redacted.
    */
   it("removes the whole userinfo when it contains another @", () => {
     expect(stripUrlCredentials("https://a@b:ghp_tok@github.com/r")).toBe("https://github.com/r");

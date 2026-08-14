@@ -140,9 +140,6 @@ describe("integrations routes", () => {
     store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    // Connect, disconnect and remove write the deployment-wide provider credential, so they take
-    // the same operator gate as a `scope: "business"` auth step. The default session is therefore
-    // an admin; `memberSid` exists so the refusal itself is pinned rather than assumed.
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
@@ -166,13 +163,9 @@ describe("integrations routes", () => {
         let connection: SoulIntegration["connection"];
         try {
           connection = parseYaml(await readFile(join(dir, "connection.yaml"), "utf8"));
-        } catch {
-          // optional
-        }
+        } catch {}
         map.set("slack", { slug: "slack", sourceIntegration: "slack", manifest, connection });
-      } catch {
-        // not materialized yet
-      }
+      } catch {}
       return map;
     }
 
@@ -202,8 +195,6 @@ describe("integrations routes", () => {
           manifest: {
             name: "slack",
             egress: { type: "none" },
-            // No `grants`: this fixture proves they are derived from the oauth2 step's scopes,
-            // which is what spares an OAuth author from writing the same list twice.
             auth: [
               {
                 kind: "oauth2",
@@ -291,17 +282,12 @@ describe("integrations routes", () => {
       });
       expect(res.statusCode).toBe(200);
       const { integrations } = res.json();
-      // Asserted by subject rather than as an exact list: the catalog also carries curated
-      // listings from registry.yml, and every integration added there would otherwise break a
-      // test that is about bundled discovery.
       expect(integrations).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ name: "github", status: "disconnected", installed: true }),
           expect.objectContaining({ name: "slack", status: "disconnected", installed: true }),
         ])
       );
-      // Sorted by name: the catalog is one list an operator scans, so its base order has to be
-      // stable and predictable rather than however discovery happened to merge.
       const names = integrations.map((entry: { name: string }) => entry.name);
       expect(names).toEqual([...names].sort());
     });
@@ -318,14 +304,9 @@ describe("integrations routes", () => {
       );
       expect(byName.get("github")).toMatchObject({
         iconPath: expect.stringMatching(/^M/),
-        // GitHub's own hex, unmodified. Making it legible on a dark canvas is the client's job.
         iconColor: "181717",
       });
-      // Slack asked to be removed from Simple Icons, so it has no mark and the catalog must still
-      // list it — the absence is projected as absence, not as an error or a placeholder path.
       expect(byName.get("slack")).not.toHaveProperty("iconPath");
-      // ...but it still carries a colour, from the registry. One grey row among coloured logos
-      // reads as a broken image rather than as a brand without a mark.
       expect(byName.get("slack")).toMatchObject({ iconColor: "4A154B" });
     });
 
@@ -359,8 +340,6 @@ describe("integrations routes", () => {
     }
 
     it("carries the same brand identity the catalog row showed", async () => {
-      // Landing on a detail page that drops back to a bare slug reads as a different product
-      // than the one that was clicked.
       expect(await detail("github")).toMatchObject({
         title: "GitHub",
         iconPath: expect.stringMatching(/^M/),
@@ -379,8 +358,6 @@ describe("integrations routes", () => {
     });
 
     it("derives authority from declared OAuth scopes when the manifest states none", async () => {
-      // Slack authors no `grants`; its bot scopes are real declared data on the oauth2 step, so
-      // deriving them costs the author nothing and cannot drift from what is requested.
       const { grants } = await detail("slack");
       const labels = grants.map((grant: { label: string }) => grant.label);
       expect(labels).toContain("chat:write");
@@ -394,16 +371,6 @@ describe("integrations routes", () => {
   });
 
   describe("POST /api/v1/integrations/:name/connect", () => {
-    /**
-     * The bypass this gate closes. `auth-routes.ts` refuses a member a `scope: "business"` auth
-     * step because it re-points the credential every unattended Run spends — but this route
-     * performs that same write, and was on authentication alone. A member could seal the
-     * provider's client id and secret here instead, pointing the deployment's OAuth flow at an app
-     * they control, and the admin's later business connect would exchange against it.
-     *
-     * Asserted before the write, not just on the status: a 403 that still sealed the env would be
-     * worse than no gate, because it would look enforced.
-     */
     it("refuses a member, who could otherwise re-point the deployment credential", async () => {
       const res = await app.inject({
         method: "POST",
@@ -475,9 +442,6 @@ describe("integrations routes", () => {
       expect(detail.json().status).toBe("connected");
     });
 
-    // The secrets API deliberately never returns values. Connect must not become the way around
-    // that: env values are resolved and templated into the URLs the auth broker hands back, so a
-    // reference to someone else's key would come straight back to the caller in a redirect.
     it("refuses a value referencing a secret this integration does not own", async () => {
       await secretsService.set("soul-git-credential", "ghp_the_operators_git_token");
       const res = await app.inject({
@@ -499,7 +463,6 @@ describe("integrations routes", () => {
       ).rejects.toThrow();
     });
 
-    // Reconnect resubmits the stored form, so an integration's own reference must still pass.
     it("accepts a resubmitted reference to its own sealed value", async () => {
       await app.inject({
         method: "POST",
@@ -552,11 +515,6 @@ describe("integrations routes", () => {
     });
   });
 
-  /**
-   * These routes write the Soul repo directly, so the audit ledger is the only record of who
-   * granted or revoked an Agent's reach into an external system. Asserted through real requests:
-   * a route wired to accept an `AuditService` but never calling it type-checks perfectly.
-   */
   describe("audit evidence", () => {
     const chain = () => auditRepo.listChain(AUDIT_BUSINESS);
 
@@ -573,7 +531,6 @@ describe("integrations routes", () => {
       expect(event?.action).toBe("integration.connect");
       expect(event?.target).toBe("integration:slack");
       expect(event?.reasonCodes).toContain("SOUL_DIRECT_WRITE");
-      // Field names are evidence; values are credentials.
       expect(event?.safeMetadata?.fields).toEqual(["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"]);
       expect(JSON.stringify(event)).not.toContain("xoxb-secret");
     });

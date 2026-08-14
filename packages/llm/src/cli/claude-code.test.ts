@@ -2,11 +2,7 @@ import type { LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LlmProviderError } from "../provider-error";
 
-/**
- * The SDK is replaced wholesale with a scripted async generator (the pattern qm uses in
- * `test/claude-harness-turn.test.ts`): no subprocess, no credential, no network — just the exact
- * message sequence a real turn produces, so the adapter's translation of it is what is under test.
- */
+/** Scripted SDK generator: no subprocess, credentials, or network. */
 
 type ScriptMessage = Record<string, unknown>;
 
@@ -101,8 +97,7 @@ beforeEach(() => {
 });
 
 describe("stripMcpPrefix", () => {
-  // A1 — this is the bug that made every tool call unresolvable. Both directions are asserted:
-  // the SDK's namespaced form must be stripped, and anything else must survive untouched.
+  // A1: strip only the SDK namespaced form; preserve all other ids.
   it("strips the tulipfarm MCP namespace", () => {
     expect(stripMcpPrefix("mcp__tulipfarm__search_knowledge")).toBe("search_knowledge");
   });
@@ -121,9 +116,7 @@ describe("stripMcpPrefix", () => {
 });
 
 describe("isAuthFailure", () => {
-  // These strings are observed provider wordings, not guesses. If an SDK update reworded one and
-  // this table were not here, the failure would silently degrade to `model_error` and the fallback
-  // chain would burn every remaining provider on what is purely a credential problem.
+  // Observed provider wordings; missing them misclassifies credential failures as `model_error`.
   it.each([
     "API Error: 400 Not a valid API key for this workspace",
     "Invalid API key · Please run /login",
@@ -133,9 +126,7 @@ describe("isAuthFailure", () => {
     "403 Forbidden",
     "authentication_error",
     "Your credit balance is too low to access the Anthropic API",
-    // Captured verbatim from the shipped container image (linux-arm64 claude 2.1.211) by sending a
-    // deliberately invalid OAuth token. That turn also proves the trap the `result` handler guards:
-    // the SDK reported `subtype: "success"` alongside `is_error: true` and `api_error_status: 401`.
+    // Captured from linux-arm64 claude 2.1.211: invalid OAuth returned `success` plus 401 error.
     "Failed to authenticate. API Error: 401 OAuth access token is invalid",
   ])("classifies %j as an auth failure", (text) => {
     expect(isAuthFailure(text)).toBe(true);
@@ -216,8 +207,7 @@ describe("ClaudeCodeModel — turn translation", () => {
   });
 
   it("max-merges repeated usage per message id instead of summing it", async () => {
-    // A5 — the SDK re-reports a message's cumulative usage on every emission for that id. Summing
-    // inflates input tokens, and with them every budget and metric derived from them.
+    // A5: SDK usage is cumulative per message id; summing inflates budgets and metrics.
     script = [
       assistant("msg_1", [], { input_tokens: 100, output_tokens: 5 }),
       assistant("msg_1", [], { input_tokens: 100, output_tokens: 12 }),
@@ -297,8 +287,7 @@ describe("ClaudeCodeModel — turn translation", () => {
 
 describe("ClaudeCodeModel — failure classification", () => {
   it("raises a hard authentication failure for a rejected credential", async () => {
-    // A2 — the exact shape observed live: `subtype: "success"` with `is_error: true`. Anything
-    // less specific than checking both would let this through as a successful turn.
+    // A2: observed live shape was `success` plus `is_error`; both must be checked.
     script = [
       result({
         is_error: true,
@@ -398,14 +387,8 @@ describe("ClaudeCodeModel — subprocess isolation", () => {
   });
 
   it("withholds ambient Anthropic credentials that would override the subscription token", async () => {
-    // These three were once on the passthrough list. `api_key_ref: env://ANTHROPIC_API_KEY` is a
-    // supported way to configure the API-keyed `anthropic` provider, so any deployment running
-    // both providers has it set — and the CLI changes credential selection when it sees one.
-    // Verified against the vendored `claude` 0.3.211 with `env -i` and a jailed HOME: the OAuth
-    // token alone authenticates as the subscription, but adding ANTHROPIC_API_KEY makes it refuse
-    // with "a non-OAuth Anthropic credential cannot satisfy the org pin". On a host without that
-    // pin the API key simply answers — billing the operator for a turn reported as unpriced.
-    // ANTHROPIC_BASE_URL is the same class: it redirects subscription traffic to a third party.
+    // API-key env vars change Claude CLI credential selection; ANTHROPIC_BASE_URL can redirect
+    // subscription traffic to a third party. Verified against vendored claude 0.3.211.
     process.env.ANTHROPIC_API_KEY = "sk-ant-should-never-reach-the-child";
     process.env.ANTHROPIC_AUTH_TOKEN = "should-never-reach-the-child";
     process.env.ANTHROPIC_BASE_URL = "https://should-never-reach-the-child.example";
@@ -439,8 +422,7 @@ describe("ClaudeCodeModel — subprocess isolation", () => {
   });
 
   it("grants no permission bypass — nothing declared here is ever meant to execute", async () => {
-    // A7 — qm needs these because its bridged tools genuinely run. Here the turn is aborted before
-    // execution can be reached, so carrying them would be pure attack surface.
+    // A7: this adapter aborts before tool execution, so bridged-tool env would be attack surface.
     script = [result()];
     await new ClaudeCodeModel("sonnet", "tok").doGenerate(callOptions({ tools: [searchTool] }));
     const options = lastOptions();
@@ -468,13 +450,7 @@ describe("ClaudeCodeModel — subprocess isolation", () => {
   });
 
   it("fails a hung turn at the configured timeout instead of returning a partial answer", async () => {
-    // A8 — the setup wizard probes with a short timeout so a bad token fails the request fast
-    // instead of parking an HTTP handler for the ten-minute default.
-    //
-    // It must *fail*, not return early. An aborted turn ends its event stream normally, so a
-    // truncated turn used to be indistinguishable from a finished one: `finishReason` read `stop`
-    // and the AgentLoop committed the half-written text to the durable transcript as the final
-    // answer. Every other provider surfaces a timeout as an error, and so does this one.
+    // A8: probe timeouts must throw; aborted streams otherwise look complete.
     script = [textDelta("a"), textDelta("b"), textDelta("c"), textDelta("d"), result()];
     scriptDelayMs = 400;
 

@@ -1,13 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { ReactNode } from "react";
 
-/*
- * Shared page frame for the Resources section: a quiet breadcrumb trail header on a hairline-bordered
- * card, then a body slot. Depth comes from the border + card surface (no shadow). Full-width content
- * (list/detail), unlike the centered states. Breadcrumbs are a real `crumb / crumb` navigation trail
- * (links muted, the current crumb in foreground).
- */
-
 export type Crumb = { label: string; to?: string };
 
 export function ResourcePanel({ crumbs, children }: { crumbs: Crumb[]; children: ReactNode }) {

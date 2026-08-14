@@ -15,7 +15,6 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import { inferLanguage } from "./tree";
 
-// Override only the FS calls used by the soul tree/file routes; keep everything else real.
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
@@ -27,8 +26,6 @@ vi.mock("node:fs/promises", async (importOriginal) => {
   };
 });
 
-// soul-config.ts (git-config routes) reads/writes soul.yaml via `node:fs`'s `promises`, a
-// different module specifier than tree.ts's `node:fs/promises` — mock separately.
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
@@ -59,7 +56,6 @@ function dirent(name: string, kind: Kind) {
   };
 }
 
-// Configure the mocked FS to model a tiny soul repo on disk.
 function mockSoulFs() {
   vi.mocked(readdir).mockImplementation((async (p: string) => {
     const key = String(p);
@@ -87,8 +83,6 @@ function mockSoulFs() {
     return Buffer.from("name: demo\n", "utf8");
   }) as unknown as typeof readFile);
 }
-
-// ── Fake dependencies ─────────────────────────────────────────────────────────
 
 class FakeUserRepo implements UserRepo {
   private users: UserDoc[] = [];
@@ -146,8 +140,6 @@ function makeFakeGitSync(
   } as unknown as GitSyncService;
 }
 
-// ── Test setup ────────────────────────────────────────────────────────────────
-
 describe("soul routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
@@ -171,8 +163,6 @@ describe("soul routes", () => {
   afterEach(async () => {
     await app.close();
   });
-
-  // ── POST /api/v1/soul/commit ──────────────────────────────────────────────
 
   describe("POST /api/v1/soul/commit", () => {
     it("returns 401 without auth", async () => {
@@ -225,8 +215,6 @@ describe("soul routes", () => {
     });
   });
 
-  // ── POST /api/v1/soul/push ────────────────────────────────────────────────
-
   describe("POST /api/v1/soul/push", () => {
     it("returns 401 without auth", async () => {
       const res = await app.inject({ method: "POST", url: "/api/v1/soul/push" });
@@ -260,8 +248,6 @@ describe("soul routes", () => {
     });
   });
 
-  // ── POST /api/v1/soul/reload ──────────────────────────────────────────────
-
   describe("POST /api/v1/soul/reload", () => {
     it("returns 401 without auth", async () => {
       const res = await app.inject({ method: "POST", url: "/api/v1/soul/reload" });
@@ -279,8 +265,6 @@ describe("soul routes", () => {
       expect(gitSync.emit).toHaveBeenCalledWith("soul.synced");
     });
   });
-
-  // ── GET /api/v1/soul/tree ─────────────────────────────────────────────────
 
   describe("GET /api/v1/soul/tree", () => {
     beforeEach(() => mockSoulFs());
@@ -300,9 +284,7 @@ describe("soul routes", () => {
       type Node = { name: string; children?: Node[] };
       const { root } = res.json() as { root: Node[] };
       expect(root.map((n) => n.name)).toEqual(["agents", "soul.yaml"]);
-      // dirs sorted before files at each level
       expect(root[0].children?.map((c) => c.name)).toEqual(["demo", "AGENT.md"]);
-      // depth-2 children survive serialization (recursive response schema)
       expect(root[0].children?.[0].children?.map((c) => c.name)).toEqual(["AGENT.md"]);
     });
 
@@ -317,8 +299,6 @@ describe("soul routes", () => {
       expect(res.json()).toEqual({ root: [] });
     });
   });
-
-  // ── GET /api/v1/soul/file ─────────────────────────────────────────────────
 
   describe("GET /api/v1/soul/file", () => {
     beforeEach(() => mockSoulFs());
@@ -580,13 +560,6 @@ describe("soul routes", () => {
         expect(res.statusCode).toBe(400);
       });
 
-      /**
-       * The audit ledger is the only record of who pointed this deployment's Soul repo at a new
-       * remote. Both durable changes -- the config write and the credential store -- land *before*
-       * `configureRemote` is attempted, so returning 400 on a sync failure without emitting would
-       * leave a repointed deployment with no evidence of who repointed it. A remote that fails to
-       * connect is still a remote that was configured.
-       */
       it("records the remote change even when the sync attempt fails", async () => {
         await rebuild({
           configureRemote: vi.fn().mockRejectedValue(new Error("could not read Username")),
@@ -606,10 +579,6 @@ describe("soul routes", () => {
         expect(event?.safeMetadata?.synced).toBe(false);
       });
 
-      /**
-       * A remote URL can carry `user:token@` in its userinfo, and this ledger is append-only --
-       * a credential written here cannot be taken back out.
-       */
       it("keeps the credential out of the ledger entirely", async () => {
         await rebuild({});
         await app.inject({
@@ -667,8 +636,6 @@ describe("soul routes", () => {
     });
   });
 
-  // The web client reads and writes these exact field names. A rename on either side silently
-  // empties the form and 400s the save, so the wire shape is asserted literally here.
   describe("business profile routes", () => {
     let adminSid: string;
 

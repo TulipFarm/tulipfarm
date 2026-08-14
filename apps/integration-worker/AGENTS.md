@@ -1,49 +1,40 @@
-# Integration Worker App — Agent Conventions
+# Integration worker
 
-`@tulipfarm/integration-worker` — Integration ingress, sync, delivery, retries, reconciliation,
-and rate limits. Composition-only: this app wires published packages together and must not
-reimplement package-owned logic. tsconfig extends `@tulipfarm/tsconfig/node.json`. See root
-`AGENTS.md` for commands/lint.
+`@tulipfarm/integration-worker` owns Integration ingress, sync, delivery, retries,
+reconciliation, and rate limits for channel workers.
 
-## Running it
+## Read on / Skip
 
-`pnpm --filter @tulipfarm/integration-worker dev` (tsx watch) or `node dist/main.js` (built via
-`tsc`) / the bundle the Dockerfile entrypoint emits. Requires `DATABASE_URL`, `INTERNAL_API_URL`,
-and `INTEGRATION_WORKER_API_CREDENTIAL`; `INTEGRATION_WORKER_PORT` (default `4030`) and
-`INTEGRATION_WORKER_DRAIN_TIMEOUT_MS` (default `15_000`) have defaults — see `src/config.ts`.
+- **Read on if** your task touches Slack/Telegram/GitHub/Jira ingress, delivery retry,
+  channel loops, worker credentials, probes, or integration-worker process tests.
+- **Skip if** you are changing Run execution (`../worker/AGENTS.md`), HTTP routes or migrations
+  (`../api/AGENTS.md`), Integration contracts (`../../packages/integrations/AGENTS.md`), or UI
+  (`../web/AGENTS.md`).
 
-In a container the credential need not be set at all: `data-dir.ts` reads it back from the data
-volume the API wrote it to (`integration-worker.env`, minted by
-`apps/api/src/setup/worker-credential.ts`'s `provisionIntegrationWorkerCredential`) — same pattern
-as `apps/worker/src/data-dir.ts`, its own separate client and file. The environment always wins,
-and nothing is invented here — a value on neither the environment nor the volume stays missing, and
-`loadConfig` names it.
+## Map
 
-## Composition root (`src/main.ts`)
+| Path | Owns |
+| --- | --- |
+| `src/main.ts` | Composition root: schema preflight, probes, loops, shutdown. |
+| `src/config.ts`, `src/data-dir.ts` | Env/defaults and volume-backed worker credential loading. |
+| `src/channels/` | Channel loop registration; add `DrainableLoop`s here. |
+| `src/slack/`, `src/telegram/` | Transport scaffolds exported by `src/index.ts`. |
+| `src/github/`, `src/jira/` | Provider-specific Integration worker code. |
+| `src/internal/` | Internal API client/host ports. |
+| `test/process/` | Real compiled-process tests over PGlite socket. |
 
-Mirrors `apps/worker`'s shape: wait for the schema floor (`preflight.ts`, same fail-closed check as
-`apps/worker` — this process never migrates), serve `/livez`+`/readyz` (`probe-server.ts`), drain
-cleanly on `SIGTERM`/`SIGINT` (`shutdown.ts`). Slack Socket Mode ingress and its delivery poll loop
-(`channels/index.ts`) are registered on `loops`; Telegram long-poll and delivery retry land the
-same way — push a `DrainableLoop` onto that array.
+## Rules
 
-`db.ts` is a deliberate local copy of the same `pg` wiring `apps/worker` uses — an application may
-not import another application, and `@tulipfarm/storage` owns only the provider-neutral port, not
-the connection.
+- Composition-only: wire `@tulipfarm/*` packages; do not reimplement package-owned logic.
+- Requires `DATABASE_URL`, `INTERNAL_API_URL`, and `INTEGRATION_WORKER_API_CREDENTIAL`.
+- In containers, `data-dir.ts` may read `integration-worker.env`; env wins, nothing is invented.
+- This app never migrates; wait for the schema floor and fail closed like `apps/worker`.
+- Serve `/livez` and `/readyz`; drain cleanly on `SIGTERM`/`SIGINT`.
+- Slack Socket Mode ingress and delivery polling register loops through `src/channels/`.
+- Telegram long-poll and delivery retry should join the same loop array pattern.
+- `src/db.ts` is a deliberate local `pg` copy; apps must not import other apps.
+- Keep `src/index.ts` as the public barrel for transport scaffolds, separate from `main.ts`.
+- `test/process/` boots the compiled process; expand when loops claim work.
+- May import only allowed `@tulipfarm/*` packages, never another app; see dependency rules below.
 
-`src/index.ts` stays the public export barrel for the Slack/Telegram transport scaffolds
-(`slack/`, `telegram/`) — unrelated to `main.ts`, the same split `apps/worker` keeps between its
-own `index.ts` and `main.ts`.
-
-## Tests
-
-`test/process/` boots the compiled process as a real child against a scratch PGlite served over
-the wire protocol, mirroring `apps/worker/test/process/` — probes and schema-floor refusal today;
-claim/release and recovery tests land once a consumer loop exists to claim anything.
-
-## Imports
-
-May import: `schema`, `authz`, `audit`, `run-kernel`, `tool-broker`, `integrations`, `storage`,
-`observability` (all under `@tulipfarm/*`). See
-[`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). This app
-never imports another application (`apps/api`, `apps/worker`, `apps/web`).
+See [`../../docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md).

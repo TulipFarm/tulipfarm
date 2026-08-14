@@ -12,17 +12,7 @@ export const RESOURCE_DOMAIN_RE = /^[a-z][a-z0-9_]*(?:[-_][a-z0-9_]+)*$/;
 
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
-/**
- * Validates a `resource.yaml` envelope before it is written, returning the failure message or
- * `undefined`.
- *
- * The route/tool schema gate (`validateResourceSchema`) is laxer than the envelope's `recordSchema`,
- * which requires `type: "object"` *and* `properties`. That mismatch used to be survivable: the
- * loader swallowed an invalid envelope and fell back to treating the file as a bare record schema,
- * silently losing `spec.domain`. Now the loader fails loudly — correct, but it means writing an
- * envelope the loader rejects would break Soul boot for everyone. So writers check with the same
- * registry the loader uses: alignment by construction, not a copied re-implementation that drifts.
- */
+/** Validate envelopes before writing because the loader rejects invalid envelopes. */
 export function resourceEnvelopeError(yaml: string): string | undefined {
   try {
     definitionRegistry.validateYaml(yaml);

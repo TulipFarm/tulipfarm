@@ -18,11 +18,7 @@ interface StoredWait {
   tokenHash: string;
 }
 
-/**
- * In-memory `WaitStore` with the same one-use-token, deduplication, and resolution semantics, for
- * tests and local wiring. Single-threaded JavaScript gives the atomicity the row lock gives in
- * PostgreSQL: each delivery runs to completion before the next observes state.
- */
+/** In-memory WaitStore mirrors one-use-token and dedupe semantics for tests/local wiring. */
 export class MemoryWaitStore {
   private readonly waits = new Map<string, StoredWait>();
   private readonly signals = new Map<string, PersistedWaitSignal>();

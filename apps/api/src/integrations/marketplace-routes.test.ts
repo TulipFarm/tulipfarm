@@ -16,11 +16,7 @@ import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 
-/*
- * Browse + install-from-git. Every test clones a real local git repo (`git clone <path>` works
- * offline), so the clone/discover/validate/write path is exercised end to end rather than mocked —
- * the point of this feature is what actually lands in the soul repo.
- */
+/** Exercises browse and install through real local git clones, offline. */
 
 const execFileP = promisify(execFile);
 const TEST_CSRF = "a".repeat(64);
@@ -148,16 +144,14 @@ describe("integration marketplace routes", () => {
     const store = new MemorySessionStore();
     const userRepo = new FakeUserRepo();
     const tokenRepo = new FakeTokenRepo();
-    // `DELETE /:name` removes the deployment-wide connection, so it takes the operator gate that
-    // `integrations/routes.ts` applies alongside connect and disconnect.
+    // Deployment-wide connection deletion requires the operator gate.
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
 
     soulPath = await mkdtemp(join(tmpdir(), "integrations-soul-"));
     temps.push(soulPath);
 
-    // A curated registry that is NOT the repo's own, so these assertions never drift when the
-    // shipped catalog gains entries.
+    // Use a curated registry so tests do not drift with the shipped catalog.
     registryDir = await mkdtemp(join(tmpdir(), "integrations-registry-"));
     temps.push(registryDir);
     await writeFile(
@@ -239,8 +233,7 @@ describe("integration marketplace routes", () => {
   });
 
   afterEach(async () => {
-    // Assigning `undefined` would set the literal string "undefined", which resolves to a bogus
-    // directory for any later test that reads it.
+    // Avoid leaking literal `undefined` into later path resolution.
     delete process.env.BUNDLED_INTEGRATIONS_DIR;
     await app.close();
     for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
@@ -259,8 +252,7 @@ describe("integration marketplace routes", () => {
   }
 
   describe("GET /api/v1/integrations (catalog)", () => {
-    // Per apps/api/AGENTS.md every route carries a schema, and the published spec is generated
-    // from them — an endpoint missing here is invisible to the docs and to generated clients.
+    // Every route must appear in the generated OpenAPI spec.
     it("publishes the install endpoints in the OpenAPI spec", async () => {
       const res = await app.inject({ method: "GET", url: "/api/v1/openapi.json" });
       const paths = Object.keys(res.json().paths ?? {});
@@ -285,8 +277,7 @@ describe("integration marketplace routes", () => {
       });
     });
 
-    // Discovery is authoritative for what exists: github ships in the image but is absent from
-    // this registry, and must still be listed.
+    // Discovery, not the registry, is authoritative for installed bundled integrations.
     it("lists a bundled integration the registry does not mention", async () => {
       const res = await app.inject({
         method: "GET",
@@ -299,8 +290,7 @@ describe("integration marketplace routes", () => {
       expect(github).toMatchObject({ installed: true });
     });
 
-    // The whole point of one catalog instead of two tabs: something an operator can install is
-    // listed beside what they already have, rather than hidden behind a second page.
+    // Installable and installed items share one catalog.
     it("lists a curated third-party entry as not installed until it is cloned", async () => {
       const res = await app.inject({
         method: "GET",
@@ -607,8 +597,7 @@ describe("integration marketplace routes", () => {
       expect(res.statusCode).toBe(404);
     });
 
-    // A bundled manifest wins over the soul copy in mergeIntegrations, so an install under a
-    // bundled slug would appear to succeed while changing nothing.
+    // Bundled manifests win over Soul copies, so bundled slugs must be refused.
     it("refuses to shadow a bundled integration", async () => {
       const repo = await makeTemp({ slack: declarativeManifest("slack") });
       const res = await app.inject({
@@ -642,8 +631,7 @@ describe("integration marketplace routes", () => {
       expect(second.statusCode).toBe(409);
     });
 
-    // A guide is committed and pushed to the operator's own git remote, so following a symlink
-    // out of the clone would publish host files to their git host.
+    // Guide symlinks could publish host files to the operator's git remote.
     it("does not follow a symlinked setup guide out of the clone", async () => {
       const secretFile = join(tmpdir(), `host-secret-${Date.now()}.txt`);
       await writeFile(secretFile, "TOP SECRET HOST FILE", "utf8");
@@ -666,8 +654,7 @@ describe("integration marketplace routes", () => {
       ).rejects.toThrow();
     });
 
-    // The loader reads the integrations directory and never consults the lock, so anything left
-    // behind by a failed install would be loaded and trusted on the next boot.
+    // Failed partial installs must not be loadable on the next boot.
     it("leaves nothing behind when the commit fails", async () => {
       const repo = await makeTemp({ linear: declarativeManifest("linear") });
       withSync.mockRejectedValueOnce(new Error("git push rejected"));

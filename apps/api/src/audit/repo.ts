@@ -1,16 +1,4 @@
-/**
- * PostgreSQL adapter for the `@tulipfarm/audit` storage contract (SPEC §20).
- *
- * `packages/audit` already models audit correctly — chained hashes, safe-evidence-only events,
- * sealing and export — but shipped with only an in-memory repository, so nothing was ever
- * persisted. This is the missing half.
- *
- * The contract requires compare-and-append enforced "in the same durable transaction as the
- * insert". Here that is a single `INSERT ... SELECT ... WHERE` guarded by a unique index on
- * `(business_id, chain_index)`: the `WHERE` rejects a stale tail, and the index settles the race
- * that the `WHERE` alone cannot, because two concurrent transactions under READ COMMITTED can both
- * observe the same tail before either commits.
- */
+/** PostgreSQL audit repo; unique `(business_id, chain_index)` closes append races. */
 
 import {
   AuditAppendConflictError,
@@ -59,11 +47,7 @@ function principal(principalId: string, businessId: string): AuditPrincipalRef {
   return Object.freeze({ principalId, businessId });
 }
 
-/**
- * Drops keys whose stored value is NULL, so an absent field stays absent rather than reappearing
- * as an explicit `undefined`. The hash covers `x ?? null` either way, but `listChain` results are
- * compared against freshly normalized events in tests and exports, and shape must match.
- */
+/** Drops NULL fields so absent fields do not reappear as explicit `undefined`. */
 function optional<T>(key: string, value: T | null | undefined): Record<string, T> {
   return value === null || value === undefined ? {} : { [key]: value };
 }
@@ -101,29 +85,13 @@ function rowToEvent(row: Record<string, unknown>): AuditEvent {
 }
 
 export class PgAuditEventRepo implements AuditEventRepo {
-  /**
-   * `inTransaction` must be set when `db` is a transaction rather than a pool.
-   *
-   * A unique-violation conflict aborts the *entire* enclosing Postgres transaction, not just the
-   * failed statement — so without a savepoint, the retry's `getLatest` comes back `25P02 current
-   * transaction is aborted`, the conflict never gets retried, and the caller's business
-   * transaction is lost. Measured: three concurrent transactional appends landed one row and
-   * rolled back two. With a savepoint the conflict rolls back only the audit insert.
-   */
+  /** Set `inTransaction` for transaction clients so conflicts use a savepoint. */
   constructor(
     private readonly db: Queryable,
     private readonly inTransaction = false
   ) {}
 
-  /**
-   * Appends `event` only if it still extends the current tail.
-   *
-   * The guard lives in the `WHERE` of the insert's `SELECT` so that check and write are one
-   * statement, and so one atomic unit, regardless of whether the caller opened a transaction. That
-   * matters because an audit write should be able to join the *business* transaction it describes:
-   * an event must not survive a rolled-back action, nor an action survive a failed event. Joining
-   * one requires `inTransaction` — see the constructor for why.
-   */
+  /** Appends only if `event` extends the current tail; joins caller tx with `inTransaction`. */
   async append(event: AuditEvent): Promise<void> {
     if (recomputeEventHash(event) !== event.hash) {
       // The event was altered after it was hashed. Refuse rather than persist evidence that would
@@ -213,18 +181,7 @@ export class PgAuditEventRepo implements AuditEventRepo {
     return rows.map(rowToEvent);
   }
 
-  /**
-   * Reads one page of the chain, newest first.
-   *
-   * Separate from {@link listChain} rather than a parameter on it because the two have opposite
-   * requirements: verification needs the *whole* chain in ascending order — a filtered or
-   * truncated read would report false `missing`/`reordered` issues — while a reader needs a
-   * bounded slice. Keeping them apart makes it impossible to accidentally verify a page.
-   *
-   * The cursor is the last `chain_index` returned. Chain indexes are unique per business and
-   * assigned by compare-and-append, so they are a total order with no ties: unlike a timestamp
-   * cursor, this cannot skip or repeat a row.
-   */
+  /** Reads one newest-first page; cursor is the unique per-business `chain_index`. */
   async listPage(businessId: string, options: AuditPageQuery = {}): Promise<AuditPage> {
     const limit = pageLimit(options.limit);
     const filters = ["business_id = $1"];

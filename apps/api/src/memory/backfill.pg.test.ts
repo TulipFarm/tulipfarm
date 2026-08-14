@@ -5,12 +5,7 @@ import { PG_MIGRATIONS } from "../pg-migrations/index";
 import { makePglite } from "../test/pglite";
 import { EngineMemoryRepo } from "./engine-repo";
 
-/**
- * Migration v33's backfill is the one irreversible step in the M1 cutover: it is the only thing
- * standing between an existing deployment's `working_memory` rows and the new engine. A fresh
- * PGlite database migrates from empty, so the ordinary test suite never exercises it — this
- * simulates the upgrade path by stopping short of it, seeding the legacy table, then applying it.
- */
+/** Simulate v33 upgrade by seeding legacy rows before the irreversible backfill. */
 
 /** The Memory cutover migration, and the version a database sits at just before it. */
 const MEMORY_MIGRATION = 33;

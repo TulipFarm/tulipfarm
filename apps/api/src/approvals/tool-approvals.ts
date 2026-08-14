@@ -4,31 +4,12 @@ import { DurableWaitError, type DurableWaitManager } from "@tulipfarm/run-kernel
 import { canonicalHash } from "@tulipfarm/schema";
 import type { ApprovalRow, ApprovalsRepo } from "./runtime-repo";
 
-/**
- * Tool approvals as durable Run waits (plan §5; blocker §2).
- *
- * The Worker executes turns, so an approval can no longer be a promise a request handler awaits:
- * the process holding it may not be the process that resumes. What survives instead is a row and a
- * kernel wait — the Run parks in `waiting` holding no lease, a human decides whenever they get to
- * it, and the wait's resolution requeues **that same Run**. Nothing about the decision depends on
- * either process still being alive.
- *
- * Two identities do the work. An approval is keyed by the *intent* — this Run, this Tool, these
- * arguments — because the resumed loop re-proposes the call under a new call id, and matching on
- * the call id would ask the human twice for one decision. The wait is keyed by its one-use resume
- * token, which is what makes a replayed decision a no-op rather than a second resume.
- */
+/** Durable Tool approvals: intent-keyed rows park the Run; one-use wait tokens resume it. */
 
 /** The schema every approval signal declares. Identity only — a decision carries no payload. */
 export const APPROVAL_SIGNAL_SCHEMA_REF = "tulipfarm.approval.decision.v1";
 
-/**
- * How long an approval stays open.
- *
- * A day, not the five minutes the in-process gate used: that timeout existed because a suspended
- * HTTP handler could not be held longer, and a durable wait has no such limit. What bounds it now
- * is the human — an approval nobody looked at within a day is one the Run should stop waiting for.
- */
+/** Approval deadline: one day; durable waits are not bound by HTTP handler lifetime. */
 export const APPROVAL_WAIT_TTL_MS = 24 * 60 * 60_000;
 
 /** What the dispatcher does with a Tool call that needs a human. */
@@ -88,14 +69,7 @@ export class ToolApprovalService {
     this.ttlMs = options.ttlMs ?? APPROVAL_WAIT_TTL_MS;
   }
 
-  /**
-   * The standing decision for one Tool intent, requesting one when none exists.
-   *
-   * Called on every dispatch of a gated call, including the one the resumed loop re-proposes. That
-   * is the whole point: the second time round the row is already settled, so the same code path
-   * that asked for the approval is the one that honours it — there is no separate "resume" branch
-   * that could disagree with the first.
-   */
+  /** Returns or requests the standing decision for one Tool intent. */
   async decide(input: {
     businessId: string;
     runId: string;
@@ -124,18 +98,7 @@ export class ToolApprovalService {
     return { status: "pending", approvalId };
   }
 
-  /**
-   * Parks the Run on a durable wait for an approval already requested.
-   *
-   * Separate from `decide` because a request is not a park: the loop may still fail, be cancelled,
-   * or be superseded between proposing the call and stopping on it, and a wait registered for a Run
-   * that never parked would be a resume nothing is waiting for. Registering is idempotent — a
-   * redelivered park redeems the wait the Run is already on rather than minting a second one.
-   *
-   * The resume token is stored beside the approval it belongs to. It is a capability to resume this
-   * one Run once, never returned to a client and never placed in an event; the wait itself holds
-   * only its digest, so redemption is still single-use and still checked against the principal.
-   */
+  /** Parks idempotently; stores a one-use server-only token, while the wait stores its digest. */
   async registerWait(input: {
     businessId: string;
     runId: string;
@@ -171,10 +134,7 @@ export class ToolApprovalService {
     return { waitId: registered.wait.id };
   }
 
-  /**
-   * The pending Tool approval a Run is currently parked on, if any — what a Channel host reads to
-   * decide whether to post an Approve/Deny prompt.
-   */
+  /** Pending approval a Channel host can prompt for. */
   async pendingForRun(
     runId: string
   ): Promise<{ approvalId: string; toolName: string; args: unknown } | null> {
@@ -188,17 +148,7 @@ export class ToolApprovalService {
     };
   }
 
-  /**
-   * Records a human decision and resumes the Run.
-   *
-   * The row is settled first and the wait signalled second, and the order matters: the settled row
-   * is what the resumed dispatch reads, so a Run that woke before it was written would re-propose
-   * the call and park all over again.
-   *
-   * Which is also why the principal is checked *before* the row is settled. The kernel checks it
-   * again under the wait's lock and is the authority — but a decision recorded by someone the wait
-   * then refuses would leave the approval settled and the Run parked until its deadline.
-   */
+  /** Checks principal, settles row, then signals wait so resumed dispatch does not re-park. */
   async signal(input: {
     businessId: string;
     approvalId: string;
@@ -255,13 +205,7 @@ export class UnknownApprovalError extends Error {
   }
 }
 
-/**
- * What a human is actually being asked about: this Run calling this Tool with these arguments.
- *
- * Not the call id. The Worker's loop resumes by re-assembling the Context and letting the model
- * propose again, so the approved call comes back wearing a new call id — keyed by that, every
- * resume would ask the same question again and the Run could never proceed.
- */
+/** Approval intent: this Run, Tool, and arguments; never the call id. */
 export function intentOf(runId: string, toolName: string, args: unknown): string {
   return canonicalHash({ runId, toolName, args: args ?? null });
 }

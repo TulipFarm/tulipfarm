@@ -95,12 +95,7 @@ function persistedSlot(row: SlotRow): PersistedConcurrencySlot {
 
 const SLOT_COLUMNS = "run_id, status, sequence";
 
-/**
- * PostgreSQL persistence for target-concurrency slots (SPEC §9.1). Every admission and every
- * release runs inside the target key's row lock, so `serialize`, `queue`, `coalesce`, `reject`,
- * and `supersede` hold across workers and restarts, FIFO promotion is deterministic, and a
- * superseded slot stays visible instead of disappearing.
- */
+/** Target-key locks preserve concurrency policy, FIFO promotion, and superseded visibility. */
 export class ConcurrencyStore {
   constructor(private readonly transactions: TransactionPort) {}
 

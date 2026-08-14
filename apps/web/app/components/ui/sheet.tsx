@@ -3,12 +3,7 @@ import type * as React from "react";
 import { useEffect, useRef } from "react";
 import { cn } from "~/lib/utils";
 
-/*
- * Sheet — a right-anchored drawer, built on the native <dialog> element (same approach as Modal, so we
- * get focus-trap, Escape-to-close, and the ::backdrop for free with no extra dependency). `showModal()`
- * normally centers the dialog; we override the margins to pin it full-height against the right edge.
- * Flat/hairline aesthetic: no shadow, a left hairline border, square corners.
- */
+/* Native <dialog> is re-pinned full-height to the right instead of centered. */
 export function Sheet({
   open,
   onClose,

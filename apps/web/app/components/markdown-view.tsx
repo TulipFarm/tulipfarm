@@ -11,18 +11,9 @@ import type { MentionEntry } from "./chat/use-mention-catalog";
 
 const TAG_BASE = "/knowledge/tags/";
 
-// react-markdown strips unknown URL schemes to "" by default — keep only our three KNOWN `tf:` forms
-// (unresolved cross-space links) intact so `wikiAnchor` can render them as muted, non-navigable text.
-// Restricting to the known schemas keeps the sanitizer bypass narrow (no open-ended `tf:` allow).
 const wikiUrlTransform = (url: string) =>
   /^tf:(page|agent|resource)\//.test(url) ? url : defaultUrlTransform(url);
 
-// A single anchor renderer that branches on the rendered node, so wiki-mode link handling and inline
-// `[n]` citation linkification compose instead of overriding each other. In priority order:
-//   1. citation markers (`.tf-citation`, always an internal `/knowledge/…` href) → in-app `<Link>`;
-//   2. wiki internal hrefs (`/…` from rewriteWikiLinks + rehypeTags) → in-app `<Link>`;
-//   3. wiki unresolved `tf:` hrefs → muted, non-navigable text;
-//   4. everything else → opens in a new tab (markdown link title/attrs preserved via `...p`).
 function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): Components["a"] {
   return ({ node: _n, children, href, className, ...p }) => {
     const target = typeof href === "string" ? href : "";
@@ -75,15 +66,13 @@ function makeAnchorRenderer(opts: { wikiLinks: boolean; citations: boolean }): C
   };
 }
 
-// Border accent for a GitHub-alert callout by kind.
 function calloutBorder(kind: string): string {
   return kind === "WARNING" || kind === "CAUTION" ? "border-destructive" : "border-primary";
 }
 
 /*
- * Renders markdown (AGENT.md / SKILL.md bodies) styled to the terminal aesthetic — everything stays
- * JetBrains Mono; hierarchy comes from weight, color, and 1px borders, never shadows. GFM enabled for
- * tables/strikethrough/task-lists. Links open in a new tab (skill/agent bodies may reference sources).
+ * Renders markdown (AGENT.md / SKILL.md bodies) styled to the terminal aesthetic — everything
+ * stays JetBrains Mono; hierarchy comes from weight, color, and 1px borders, never shadows.
  * Each renderer drops react-markdown's `node` prop so it is not spread onto the DOM element.
  */
 
@@ -156,7 +145,6 @@ const components: Components = {
     );
   },
   code: ({ node: _n, children, className, ...p }) => {
-    // Inline code (no language class) vs. fenced block (rendered inside <pre>).
     const isBlock = typeof className === "string" && className.includes("language-");
     if (isBlock) {
       return (
@@ -209,11 +197,9 @@ export function MarkdownView({
   citations,
 }: {
   children: string;
-  /** When set, `@agent`/`/skill`/`#resource` tags are highlighted as chips with a hover card. */
   mentions?: MentionEntry[];
   /** Knowledge-wiki mode: render internal `/…` hrefs as client links and `#tag` text as chip links. */
   wikiLinks?: boolean;
-  /** Inline `[n]` → cited-page link map (ref number → wiki url). Linkifies citation markers in prose. */
   citations?: { ref: number; url: string }[];
 }) {
   const list = mentions ?? [];
@@ -224,8 +210,6 @@ export function MarkdownView({
     [citations]
   );
   const citationsOn = refs.size > 0;
-  // Memoize the custom anchor so its identity is stable across streaming re-renders (a fresh
-  // component type each render would remount every link); recompute only when a mode toggles.
   const anchor = useMemo(
     () => makeAnchorRenderer({ wikiLinks: Boolean(wikiLinks), citations: citationsOn }),
     [wikiLinks, citationsOn]
@@ -236,8 +220,6 @@ export function MarkdownView({
   if (citationsOn) rehypePlugins.push([rehypeCitations, { refs }]);
   let resolvedComponents: Components = components;
   if (active) resolvedComponents = { ...resolvedComponents, ...mentionComponents(byPhrase) };
-  // One anchor renderer handles both wiki internal links and citation linkification (no longer
-  // mutually exclusive), so a surface rendering wiki prose with citations keeps both.
   if (wikiLinks || citationsOn) resolvedComponents = { ...resolvedComponents, a: anchor };
   return (
     <div className="text-sm">

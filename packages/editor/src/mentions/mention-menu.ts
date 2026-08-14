@@ -11,14 +11,10 @@ import {
 } from "./mention-popup";
 
 /*
- * The unified `@` mention menu (Pages / Agents / Resources) and the `#` tag menu. Both reuse the
- * `@tiptap/suggestion` machinery (same as the slash menu) and a shared grouped popup. Crucially,
- * neither leaves a custom ProseMirror node: `@` inserts a standard markdown LINK (so the canonical
- * body stays pure markdown and round-trips), and `#` inserts plain `#tag` text. This sidesteps the
- * `@tiptap/markdown` custom-tokenizer pitfall entirely.
+ * Mentions insert markdown links and tags insert plain text, avoiding custom tokenizer state.
  */
 
-/** Insert `[label](href)` as a Link mark, then a trailing unmarked space so typing continues plain. */
+/** Insert `[label](href)` as a Link mark, then an unmarked space so typing stays plain. */
 function insertLink(label: string, href: string) {
   return (editor: Editor, range: MenuRange) => {
     editor

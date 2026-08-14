@@ -15,13 +15,7 @@ export class UnregisteredRunSourceError extends Error {
   }
 }
 
-/**
- * Maps a claimed Run to the executor that owns its source.
- *
- * Composition registers each source the process owns. An unmatched Run throws, which
- * `RunDispatcher` turns into `needs_reconciliation` — a Run parked for an operator, never a silent
- * success and never a Run quietly marked failed for work this process does not understand.
- */
+/** Unmatched Run sources throw so dispatch parks them for reconciliation, never success. */
 export class RunExecutorRegistry {
   private readonly executors = new Map<string, RunExecutor>();
 

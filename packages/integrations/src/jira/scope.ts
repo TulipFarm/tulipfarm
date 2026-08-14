@@ -1,13 +1,6 @@
 import { assertExternalIdentityMapped, type ExternalIdentityMapping } from "@tulipfarm/authz";
 
-/**
- * Jira site installation scope (SPEC §15).
- *
- * The Jira equivalent of a GitHub App installation: one Atlassian site (cloudId), the projects the
- * Integration was installed against, and the permission set granted at install time. Same rule as
- * everywhere else — this is the outer bound, AccessGrants only narrow it, and denials name a
- * reason code without echoing the target.
- */
+/** Jira site scope is the outer bound; AccessGrants may only narrow it. */
 
 export interface JiraIssueKey {
   readonly projectKey: string;

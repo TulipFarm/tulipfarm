@@ -17,7 +17,6 @@ export const meta: MetaFunction = () => [{ title: "Graph · Knowledge · tulipfa
 export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   const id = params.id;
   if (!id) throw new ApiError(404, "missing space id");
-  // listAllPages → resolver so cross-space stub nodes can link to the target page's UUID route.
   const [graph, pages] = await Promise.all([
     getSpaceGraph(id),
     listAllPages().then((r) => r.items),
@@ -25,11 +24,6 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return { graph, pages };
 }
 
-/*
- * Space cross-link graph as a content-pane route — the persistent page tree stays beside it. The
- * d3-force layout + SVG render live in SpaceGraphView; this route only fetches the graph and frames
- * it with a breadcrumb. Space metadata comes from the workspace outlet context.
- */
 export default function SpaceGraphRoute() {
   const { graph, pages } = useLoaderData<typeof clientLoader>();
   const { space } = useOutletContext<SpaceOutletContext>();

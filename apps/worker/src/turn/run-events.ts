@@ -9,15 +9,7 @@ import {
   runEventSchemaRef,
 } from "@tulipfarm/schema";
 
-/**
- * The turn's window onto the durable event stream (SPEC §§18, 19).
- *
- * Everything a reader ever learns about a running turn arrives through here — the web client, a
- * Slack or Telegram renderer, an operator console. That makes this the one place where "what the
- * worker knows" is narrowed to "what an audience may see", so the narrowing is enforced rather than
- * left to each call site: the event type fixes the audience, and the payload is validated against
- * the published schema before it can be appended.
- */
+/** Durable event writer; event type fixes audience and payload schema before append. */
 
 export interface AppendedRunEvent {
   readonly sequence: number;
@@ -44,12 +36,7 @@ export interface TurnEventWriterOptions {
   readonly businessId: string;
   readonly runId: string;
   readonly turnId: string;
-  /**
-   * The Run attempt these events belong to. It must differ for every `AgentLoop.run` invocation:
-   * the loop numbers its events from 1 on each call, so two calls sharing an attempt would mint
-   * the same idempotency keys and the second call's events would be silently swallowed as
-   * duplicates. `appendLoopEvent` refuses a repeated sequence rather than trusting that.
-   */
+  /** Must be unique per `AgentLoop.run`, or loop event idempotency keys collide. */
   readonly attempt: number;
   now?(): Date;
 }
@@ -96,17 +83,7 @@ function validatorFor(type: RunEventType, schema: Record<string, unknown>): Comp
   return compiled;
 }
 
-/**
- * Writes one turn's events, and projects the Agent loop's own events onto the same vocabulary.
- *
- * The projection is deliberately narrow. The loop's internal bookkeeping — iteration boundaries,
- * dispatch outcomes, terminal status — is either private to the engine or already owned by a
- * component that knows more than the loop does: the driver holds the wait id and the assistant
- * `messageId`, and the `ToolDispatchPort` holds the arguments and output a `tool.call` /
- * `tool.result` pair needs. So the loop contributes exactly the two things only it observes, model
- * text and a call it refused before dispatch, and everything else is emitted by whoever has the
- * facts. That is what keeps Tool arguments out of a participant's stream.
- */
+/** Project only loop text and pre-dispatch rejections; Tool args stay out of participant events. */
 export class TurnEventWriter implements AgentLoopEventSink {
   private cursorSequence = 0;
   private lastLoopSequence = 0;
@@ -120,13 +97,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
     return this.cursorSequence;
   }
 
-  /**
-   * Participant-visible Tool timeline emitted during this turn.
-   *
-   * Persist exactly what was already streamed to the participant: redaction-aware previews and
-   * receipts, never verbatim Tool arguments or outputs. If it was safe to show live, it is safe to
-   * show after a refresh.
-   */
+  /** Participant Tool timeline: redacted previews/receipts only, never raw args or outputs. */
   get toolCalls(): readonly ParticipantToolCall[] {
     return this.toolCallOrder.flatMap((callId) => {
       const call = this.toolCallsById.get(callId);
@@ -134,13 +105,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
     });
   }
 
-  /**
-   * Appends one event.
-   *
-   * `key` distinguishes events the driver emits at named points in the turn (`started`,
-   * `finished`, …) so a redelivered job re-derives the same idempotency key and appends nothing
-   * twice.
-   */
+  /** Append one event; `key` makes redelivery derive the same idempotency key. */
   async emit<T extends RunEventType>(
     type: T,
     payload: RunEventPayloads[T],
@@ -180,7 +145,7 @@ export class TurnEventWriter implements AgentLoopEventSink {
     }
 
     if (event.type === "tool_call_rejected") {
-      // The loop refused the call before dispatch, so no dispatcher exists to report it.
+      // Rejected before dispatch, so no dispatcher can report it.
       await this.emit(
         "tool.result",
         {

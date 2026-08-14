@@ -1,12 +1,20 @@
-# Types — Agent Conventions
+# Types (`@tulipfarm/types`)
 
-`@tulipfarm/types` — shared TypeScript types. **Scaffold today:** `src/index.ts` is `export {}`.
-Type-only — no runtime code, no build. tsconfig extends `@tulipfarm/tsconfig/base.json`.
-See root `AGENTS.md` for commands/lint.
+Shared TypeScript-only types. It currently exposes only an empty `src/index.ts` barrel.
 
-## Convention (when adding types)
+## Read on / Skip
 
-- Group by domain in separate files (`src/auth.ts`, `src/soul.ts`, `src/llm.ts`, …) and
-  re-export everything from `src/index.ts`.
-- Consume with `import type { … } from "@tulipfarm/types"` (Biome's `useImportType`).
-- Put a type here only when it's shared across packages; keep package-local types in-package.
+- **Read on if** a type is shared across multiple packages.
+- **Skip if** the type is local to one package; keep it with that package.
+
+## Map
+
+| Path | Owns |
+| --- | --- |
+| `src/index.ts` | Public type barrel; currently `export {}`. |
+
+## Rules
+
+- Type-only package: no runtime code.
+- Group by domain in separate files and re-export from `src/index.ts`.
+- Consumers should use `import type { ... } from "@tulipfarm/types"`.

@@ -7,21 +7,9 @@ import {
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Queryable } from "../db";
 
-/**
- * External identity linking (SPEC §12): Slack/Telegram/GitHub/etc. subjects only act for a
- * TulipFarm user through a verified mapping. Unmapped senders are denied — there is no implicit
- * provisioning. A link is established by an authenticated user minting a one-use, expiring link
- * token and the external side redeeming it with the subject it proved, so redeeming a captured
- * token twice cannot create a second mapping (SPEC §24 replay).
- */
+/** External subjects act only through verified mappings; link tokens are one-use and expiring. */
 
-/**
- * How a mapping came to exist. Not every link is equally strong evidence: `link_token` is a service
- * identity asserting a subject it verified, `manifest_email` is an address the integration reported
- * matching a known account, and `bind_link` is a signed-in human confirming the binding themselves.
- * An audit that cannot tell them apart cannot judge any of them. Null on rows minted before the
- * distinction existed.
- */
+/** Link provenance is audit evidence; null means the row predates this distinction. */
 export type IdentityVerificationMethod = "link_token" | "manifest_email" | "bind_link";
 
 export interface ExternalIdentityMappingDoc {
@@ -42,12 +30,7 @@ export interface ExternalLinkTokenDoc {
   consumedAt: Date | null;
 }
 
-/**
- * An outstanding bind offer. The row exists so the nonce can be *spent*: the link is signed, but a
- * signature alone cannot be revoked, so without a consumable record a captured link would re-bind
- * the sender every time it was opened. No user id — at issue time no account is known, which is the
- * whole reason the link is being sent.
- */
+/** Bind offers are spendable rows because signatures alone cannot be revoked. */
 export interface ChannelBindTokenDoc {
   nonceHash: string;
   integrationSlug: string;
@@ -257,10 +240,7 @@ export class LinkRedemptionDeniedError extends Error {
   }
 }
 
-/**
- * Redeems a link token for one external subject. The token is consumed atomically before the
- * mapping is written, so a replayed token — even concurrently — never produces a second mapping.
- */
+/** Consume link tokens atomically before writing mappings so replays create no second mapping. */
 export async function redeemLinkToken(
   repo: ExternalIdentityRepo,
   input: { raw: string; provider: string; externalSubject: string }
@@ -298,11 +278,7 @@ function toAuthzMapping(doc: ExternalIdentityMappingDoc): ExternalIdentityMappin
   };
 }
 
-/**
- * Resolves an external subject to the user it is verified for, or throws
- * `ExternalIdentityDeniedError`. Unmapped and expired subjects are denied — membership of a
- * channel or thread never stands in for a mapping.
- */
+/** Deny unmapped and expired external subjects; channel membership is never a mapping. */
 export async function resolveExternalIdentity(
   repo: ExternalIdentityRepo,
   provider: string,

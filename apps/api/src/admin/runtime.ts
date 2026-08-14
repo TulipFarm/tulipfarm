@@ -19,7 +19,7 @@ import type { RunReader } from "./run-reader";
 type RuntimeOperationalDeps = {
   activity: Pick<ActivityService, "list">;
   approvals: Pick<ApprovalsRepo, "findById" | "listPending" | "settle">;
-  /** Settles a Tool approval and resumes the Run parked on it. Absent leaves only the routine path. */
+  /** Settles a Tool approval and resumes its parked Run; absent leaves only routine approvals. */
   toolApprovals?: Pick<ToolApprovalService, "signal">;
   runs: RunReader;
   healthProbes: readonly HealthProbe[];
@@ -32,12 +32,7 @@ type RuntimeOperationalDeps = {
   guardrailsConfig(): unknown;
 };
 
-/**
- * An administrator holds every operational authority this deployment defines, including the
- * control permissions. Commands that the deployment cannot yet carry out fail as `501
- * not_implemented`, never as `403` — telling an administrator they lack access to a capability
- * that does not exist would send them looking for a permission to grant.
- */
+/** Admins get every defined operational permission; missing capabilities still return 501. */
 const ADMIN_PERMISSIONS: readonly OperationalPermission[] = [
   "runs:read",
   "runs:control",
@@ -56,12 +51,7 @@ function digest(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-/**
- * Authoring and Run control are carried out by subsystems this deployment does not run yet: the
- * durable worker executes Run commands, and the Soul changeset gateway is the only writer for
- * Guardrail, Agent, and role proposals. Until those are composed, each command names the missing
- * capability instead of pretending to accept the request.
- */
+/** Throws 501 for capabilities this deployment has not composed yet. */
 function notImplemented(capability: string, blockedBy: string): never {
   throw new OperationalNotImplementedError(
     `${capability} is not available in this deployment: ${blockedBy}.`
@@ -232,9 +222,7 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       const cached = decisions.get(input.idempotencyKey);
       if (cached) return cached;
 
-      // A Tool approval is settled by signalling the wait its Run parked on, so the decision reaches
-      // the turn wherever it is executing. `not_found` means the row is not a Tool approval — the
-      // routine branch below owns those.
+      // Tool approvals resume through their wait; `not_found` falls back to routine approvals.
       const signalled = await deps.toolApprovals?.signal({
         businessId: grant.businessId,
         approvalId: input.approvalId,

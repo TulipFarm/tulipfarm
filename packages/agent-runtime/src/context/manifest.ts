@@ -5,13 +5,7 @@ import {
   precedenceRank,
 } from "./precedence";
 
-/**
- * Context assembly (SPEC §10 step 3). Context is built only from authorized Messages,
- * source-referenced summaries, confirmed Memory, permitted Knowledge, prior typed State outputs,
- * and instructions. The manifest records sources, versions, classifications, taint, and the
- * authorization decision behind every entry — and records no Message content, source text, or
- * private chain-of-thought.
- */
+/** Manifest records evidence and digests only; never Message text, source text, or CoT. */
 
 export type ContextEntryKind =
   | "message"
@@ -149,11 +143,7 @@ function toEntry(candidate: ContextCandidate): ContextEntry {
   };
 }
 
-/**
- * Builds the Context manifest. A summary is additive evidence about the transcript, never a
- * replacement for it and never a way around an ACL: a summary derived from a source the caller may
- * not read is dropped, even though the summary text itself looks harmless.
- */
+/** Summary entries cannot bypass ACL; unauthorized sources drop the summary too. */
 export function assembleContext(input: AssembleContextInput): ContextManifest {
   if (input.guardrailDigest.length === 0) {
     throw new ContextAssemblyError("missing_guardrail_digest");

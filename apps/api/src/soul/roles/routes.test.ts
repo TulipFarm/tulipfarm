@@ -1,10 +1,4 @@
-/**
- * Access-level routes.
- *
- * These tests are almost entirely about the gate. The endpoints let one person change what every
- * other person in the business is allowed to do, so "who may call this" is the whole security
- * property — including the read, which is a complete map of grantable authority.
- */
+/** Access-level route tests pin the gate for reads and writes of grantable authority. */
 
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -180,11 +174,7 @@ describe("access level routes", () => {
       expect(withSync).not.toHaveBeenCalled();
     });
 
-    /*
-     * The catalog is not "just a read". It enumerates every action the deployment can grant and
-     * which Tool needs it — a map of where authority lives, useful only to someone able to author
-     * a level, and worth withholding from someone who is not.
-     */
+    /* The catalog maps grantable authority, so it is owner-only. */
     it("keeps the capability catalog behind the same gate as the writes", async () => {
       const denied = await app.inject(as(memberSid, "GET", "/api/v1/authz/capabilities"));
       expect(denied.statusCode).toBe(403);
@@ -345,11 +335,7 @@ describe("access level routes", () => {
     });
   });
 
-  /*
-   * An access level decides what everybody else may do, so it is the Soul artifact a deployment
-   * would most want a name and a timestamp against. Every sibling `soul/*` write route records
-   * one; these did not until this was asserted.
-   */
+  /* Access-level writes must record actor and timestamp like sibling Soul write routes. */
   describe("writes are recorded in the audit ledger", () => {
     it("records who created a level", async () => {
       const res = await app.inject(

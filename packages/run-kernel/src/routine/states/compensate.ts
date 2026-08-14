@@ -2,18 +2,12 @@ import type { CompiledState } from "../compiler";
 import { RoutineStepError } from "./step";
 import { continueState, resolveErrorPath, type StateResumeDecision } from "./wait-plan";
 
-/**
- * Compensation crosses a package boundary: the Tool broker owns effects, and the Run kernel may
- * not import it (`docs/architecture/dependency-rules.md`). A `compensate` State therefore names
- * *what* to undo and the caller injects a port that knows *how*.
- */
+/** Run kernel names what to compensate; the caller injects the Tool-broker port. */
 export interface CompensationRequest {
   readonly businessId: string;
   readonly runId: string;
   readonly stateKey: string;
-  /** The reversing operation the State declared. */
   readonly targetRef: string;
-  /** The State whose effect is being undone, when the graph named one. */
   readonly forState: string | null;
   readonly effectId: string;
   /** Stable across retries so a replayed compensation never undoes twice. */
@@ -56,10 +50,8 @@ export function planCompensation(
 }
 
 /**
- * Run the compensation. Only a *confirmed* compensation lets the Run continue: a failure, an
- * ambiguous result, and a port that threw all park the Run for attention, because an effect that
- * may still exist must never be recorded as undone. The port's error is never surfaced in the
- * decision — it may carry Secret or protected values.
+ * Only confirmed compensation continues; failure, ambiguity, or port errors park attention, and
+ * port errors are not surfaced because they may contain protected data.
  */
 export async function runCompensation(
   state: CompiledState,

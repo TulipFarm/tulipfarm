@@ -146,11 +146,7 @@ function rpcBound(
   );
 }
 
-/**
- * Exercise the external boundary before activation. A declaration alone is insufficient: the
- * adapter must reject an unauthenticated RPC, answer an authenticated capability challenge, and
- * report health under the same pinned protocol.
- */
+/** Verify unauthenticated rejection, authenticated capabilities, and pinned-protocol health. */
 export async function runExternalIntegrationConformance(
   input: ExternalIntegrationConformanceRequest
 ): Promise<ExternalIntegrationConformanceReport> {

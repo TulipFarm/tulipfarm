@@ -3,13 +3,7 @@ import { PluginKey } from "@tiptap/pm/state";
 import Suggestion, { type SuggestionOptions } from "@tiptap/suggestion";
 import { filterSlashItems, type SlashItem } from "./slash-items";
 
-/*
- * `/` slash-command extension. Uses @tiptap/suggestion to detect `/query`, and renders a small
- * self-contained popup (vanilla DOM — no React/icon deps, so the package stays light). Block commands
- * come from the pure `slash-items` catalog. Keyboard: ↑/↓ move, Enter picks, Esc closes. The active
- * popup is also torn down on editor destroy (suggestion's `onExit` does NOT fire when the editor
- * unmounts mid-session — without this the popup div leaks into document.body).
- */
+/* Slash menu popup; destroy tears down an open popup because suggestion onExit can be skipped. */
 
 interface SlashRenderProps {
   items: SlashItem[];

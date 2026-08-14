@@ -26,12 +26,7 @@ export interface ChannelCredentialSecretStore {
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/**
- * `/api/v1/internal/channels/*` — what `apps/integration-worker` calls back into to satisfy the
- * Channel ports (`packages/integrations/src/channels/ports.ts`) it cannot implement locally: it may
- * not import `apps/api`, so identity resolution, Run minting, reply reading, and approval decisions
- * all cross this boundary. Service-principal-only, same two gates as `registerInternalTurnRoutes`.
- */
+/** Service-principal-only Worker callbacks for API-owned channel ports. */
 export interface ChannelInternalRouteDeps {
   readonly store: ConversationStore;
   readonly invocations: DurableInvocationGateway;
@@ -44,20 +39,12 @@ export interface ChannelInternalRouteDeps {
   readonly surfaceStore?: SurfaceArtifactStore;
   /** Recovers the button/select handles minted when the Artifact was presented, for rendering. */
   readonly surfaceActionStore?: SurfaceActionStore;
-  /**
-   * Resolves the Slack bot/app-level tokens sealed at connect time (`sealConnectionEnv`) via the
-   * fixed `integration.slack.SLACK_*_TOKEN` secret keys. Omitted routes report `credential/slack`
-   * as unconfigured rather than failing app boot.
-   */
+  /** Resolves fixed sealed Slack app/bot token keys; omitted routes report unconfigured. */
   readonly secrets?: ChannelCredentialSecretStore;
-  /** Resolves an Agent's human-readable `frontmatter.label` for `.../reply`'s `agentDisplayName`. */
+  /** Resolves an Agent label for `.../reply`'s `agentDisplayName`. */
   readonly soulLoader?: SoulLoader;
   readonly newId?: () => string;
-  /**
-   * Builds the user-facing bind-link URL from a raw token. Reused by the bind-offer route below —
-   * see `bindLinkUrl` in `apps/api/src/index.ts` for why it must point at the web origin, not this
-   * API's own host.
-   */
+  /** Bind links must point at the web origin, not the API host. */
   readonly bindLinkUrl: (token: string) => string;
 }
 
@@ -76,13 +63,7 @@ export function externalThreadKey(provider: string, message: ChannelMessageBody)
   return `${provider}:${message.channelId}:${message.threadId ?? message.channelId}`;
 }
 
-/**
- * The Slack Block Kit blocks for whatever Surface Artifact `present`/`update_presentation` last
- * produced for this Run, or `null` when there is none (no Artifact, not a Slack message target, or
- * a render the renderer itself refused — e.g. a provider limit). Rendering here, server-side, keeps
- * `apps/surface-slack` the only place that knows Block Kit shape; `integration-worker` stays a pure
- * transport for whatever this returns.
- */
+/** Server-renders last Surface Artifact to Slack Block Kit, or `null` when none can be rendered. */
 async function slackBlocksForReply(
   deps: ChannelInternalRouteDeps,
   businessId: string,
@@ -115,11 +96,7 @@ async function slackBlocksForReply(
   }
 }
 
-/**
- * The Agent's human-readable `frontmatter.label` for a Conversation, falling back to its raw
- * `agentId` when the Agent (or its label) cannot be resolved — never the unlisted default
- * harness's internal slug (`DEFAULT_ASSISTANT_NAME`), which must never reach a delivery surface.
- */
+/** Delivery labels fall back to raw Agent ids, never the unlisted default harness slug. */
 async function agentDisplayNameFor(
   deps: ChannelInternalRouteDeps,
   conversationId: string

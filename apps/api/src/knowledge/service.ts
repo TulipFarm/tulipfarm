@@ -96,7 +96,7 @@ export interface WritePageInput {
   path: string;
   /** Full OKF page markdown (frontmatter + body). */
   content: string;
-  /** Reason recorded on the history revision this write snapshots (internal callers, e.g. rename). */
+  /** Reason recorded on the history revision this write snapshots. */
   reason?: string | null;
 }
 
@@ -137,13 +137,13 @@ export interface KnowledgeServiceDeps {
   retrieval?: PageRetrievalService;
   /** When set, page writes enqueue async (re)indexing instead of indexing inline. */
   enqueueIndex?: (pageId: string) => Promise<void>;
-  /** Operational stats for the async index queue (pg-boss). Absent → index-status omits queue info. */
+  /** Async index queue stats; absent means index-status omits queue info. */
   indexQueueStats?: () => Promise<IndexQueueStats>;
   /** OKF space repos — optional; required only for the OKF space/page methods. */
   spaces?: KnowledgeSpaceRepo;
   links?: KnowledgeLinksRepo;
   overrides?: KnowledgeSpaceOverrideRepo;
-  /** ACL-first source retrieval (`knowledge_source_*`) fused into `query_knowledge` when present. */
+  /** ACL-first source retrieval fused into `query_knowledge` when present. */
   sourceRetrieval?: RetrievalDeps;
 }
 
@@ -157,11 +157,7 @@ export interface HybridSearchContext {
   readonly runId?: string;
 }
 
-/**
- * The one tested core every caller (routes, agent tools, governance injection, source
- * adapters) goes through. Composes the repos + chunker + index/search services + the
- * embedding provider. V1: `plainText` is the trimmed markdown (proper stripping later).
- */
+/** Shared Knowledge core; V1 `plainText` is trimmed markdown. */
 export class KnowledgeService {
   constructor(private readonly deps: KnowledgeServiceDeps) {}
 
@@ -194,10 +190,7 @@ export class KnowledgeService {
     return this.deps.pages.getById(id);
   }
 
-  /**
-   * A page fetched only when live — a missing OR soft-deleted page reads as null. Agent tools use
-   * this so a deleted page is never surfaced or cited (its wiki url would 404 for the user).
-   */
+  /** Fetch only live pages; missing or soft-deleted pages read as null. */
   async getActivePage(id: string): Promise<KnowledgePage | null> {
     const page = await this.deps.pages.getById(id);
     return page?.active ? page : null;
@@ -282,10 +275,7 @@ export class KnowledgeService {
 
   // ── search + governance ──────────────────────────────────────────────────────
 
-  /**
-   * Vector/lexical search. With `expandGraph`, each hit's directly-linked OKF neighbors are
-   * appended (score 0) so related pages travel together (graph-aware retrieval).
-   */
+  /** Vector/lexical search; `expandGraph` appends direct OKF neighbors with score 0. */
   async search(
     query: string,
     filters: SearchFilters,
@@ -305,8 +295,7 @@ export class KnowledgeService {
     const neighbors = await Promise.all(neighborIds.map((id) => this.deps.pages.getById(id)));
     const extra = neighbors
       .filter((p): p is KnowledgePage => Boolean(p?.active))
-      // Scope-preserving: a space-scoped search must not leak neighbors from other spaces. Graph
-      // links cross spaces, so without this a s1 page that links to a s2 page would surface s2.
+      // Space-scoped graph expansion must not leak neighbors from other spaces.
       .filter((p) => !filters.spaceId || p.spaceId === filters.spaceId)
       .map((p) => ({
         pageId: p._id,
@@ -319,12 +308,7 @@ export class KnowledgeService {
     return { results: [...base.results, ...extra], warnings: base.warnings };
   }
 
-  /**
-   * Page-level hybrid retrieval for the `query_knowledge` tool. Runs a vector arm (chunk hits
-   * grouped to their max-score page) and a lexical arm (whole-page FTS) in parallel, then fuses them
-   * with Reciprocal Rank Fusion (k=60, by rank not score) so neither arm's score scale dominates.
-   * The top `limit` pages are hydrated and passed through the (default no-op) rerank seam.
-   */
+  /** Tool retrieval fuses vector and lexical arms with RRF (k=60) before hydration/rerank. */
   async hybridSearchPages(
     query: string,
     filters: SearchFilters,
@@ -348,7 +332,7 @@ export class KnowledgeService {
     const N = Math.max(limit * 4, 20);
     const warnings: string[] = [];
 
-    // ── vector arm: chunk hits → max-score-per-page, keeping that chunk's content as the snippet ──
+    // Vector arm: chunk hits → max-score-per-page, keeping that chunk as the snippet.
     const vectorSnippet = new Map<string, string>();
     let pagesV: string[] = [];
     if (this.deps.embeddings.isAvailable()) {
@@ -563,9 +547,7 @@ export class KnowledgeService {
     try {
       updated = await okf.spaces.update(id, patch, new Date());
     } catch (err) {
-      // The UNIQUE(name) index is the backstop if the pre-check raced a concurrent rename. Only a
-      // name-column violation maps to "taken" — scoped here so 23505s from the rename rewrite below
-      // (knowledge_links / knowledge_pages) propagate as real errors, not a misleading 409.
+      // Only name-column UNIQUE races map to "taken"; rewrite 23505s must propagate.
       if (patch.name && (err as { code?: string }).code === "23505") {
         throw new SpaceNameTakenError(patch.name);
       }
@@ -577,22 +559,14 @@ export class KnowledgeService {
     return updated;
   }
 
-  /**
-   * After a space is renamed, rewrite the `tf:page/<old>/…` links embedded in every page that
-   * references it (across all spaces) to the new name, re-running `writePage` so each page's
-   * body AND its `knowledge_links` rows re-extract consistently. Each rewritten page gets a tagged
-   * history revision. A final global resolve pass backfills any ids the per-page writes missed.
-   * No DB transaction (none available): order is rename → rewrite → resolve, so a partial failure
-   * leaves at most a few stale inbound links rather than a half-renamed space.
-   */
+  /** Rename order is space → inbound link rewrites → global resolve; no DB transaction exists. */
   private async renameCrossLinks(oldName: string, newName: string): Promise<void> {
     const okf = this.okf();
     if (!okf) return;
     const sourceIds = await okf.links.listSourceIdsByTargetSpaceName(oldName);
     for (const sourceId of sourceIds) {
       const page = await this.deps.pages.getById(sourceId);
-      // Skip soft-deleted sources: their link rows persist, but re-writing one would flip it back to
-      // active (upsertBySource forces active=true) — a rename must not resurrect a deleted page.
+      // Do not rewrite soft-deleted sources; `upsertBySource` would resurrect them.
       if (!page?.spaceId || page.path == null || !page.active) continue;
       const next = rewriteCrossPageSpaceName(page.content, oldName, newName);
       if (next === page.content) continue;
@@ -603,9 +577,7 @@ export class KnowledgeService {
         reason: `space renamed ${oldName} → ${newName}`,
       });
     }
-    // Safety net: a rename leaves the space's id (and each target page's id) intact, so any link row
-    // still naming the old space — e.g. a page whose body rewrite was skipped — only has a stale name
-    // column. Fix it directly so backlinks/graph stay consistent regardless of the per-page rewrites.
+    // Resolve stale old-space names directly so skipped body rewrites do not break the graph.
     await okf.links.renameTargetSpace(oldName, newName);
     await okf.links.resolveCrossSpaceLinks();
   }
@@ -619,11 +591,7 @@ export class KnowledgeService {
     return this.deps.pages.listBySpace(spaceId);
   }
 
-  /**
-   * Author or update one OKF page from its full markdown. A reserved final path segment
-   * (`index`/`log`) is stored as a directory override instead of a page. Recomputes the
-   * page's outbound cross-links and (re)indexes only when the body changed.
-   */
+  /** Write an OKF page; final `index`/`log` path segments become directory overrides. */
   async writePage(input: WritePageInput): Promise<WritePageResult> {
     const okf = this.okf();
     if (!okf) return { ok: false, reason: "okf_unavailable" };
@@ -652,8 +620,7 @@ export class KnowledgeService {
       title: parsed.title ?? last ?? path,
       content: input.content,
       plainText: parsed.body,
-      // Space pages are always authored content — keeps the (source, source_id) upsert key
-      // stable so it can't collide with the partial unique (space_id, path) index.
+      // Space pages use stable authored source keys and cannot collide with `(space_id, path)`.
       source: "authored",
       sourceId: `okf:${input.spaceId}:${path}`,
       domain: parsed.tf.domain,
@@ -671,9 +638,7 @@ export class KnowledgeService {
     };
     const { _id } = await this.deps.pages.upsertBySource(draft);
 
-    // History: snapshot the prior content as a revision whenever an existing page's content
-    // actually changes (creates have no prior; unchanged re-writes stay silent). `reason` is set by
-    // internal callers like space rename; ordinary edits leave it null.
+    // Snapshot history only when existing content changes; creates and no-op rewrites stay silent.
     if (prior && prior.content !== input.content) {
       await this.deps.revisions.append(
         randomUUID(),
@@ -714,7 +679,7 @@ export class KnowledgeService {
     return { ok: true, page: canonical };
   }
 
-  /** Progressive-disclosure listing for a directory: an authored index.md override, else synthesized. */
+  /** Directory listing: authored index.md override, else synthesized. */
   async navigateSpace(spaceId: string, dirPath: string): Promise<string | null> {
     const okf = this.okf();
     if (!okf) return null;
@@ -776,14 +741,14 @@ export class KnowledgeService {
     });
   }
 
-  /** Flat list of every OKF page across all spaces — feeds the editor's `@`-mention Pages section. */
+  /** Flat list of every OKF page across spaces for editor `@`-mentions. */
   async listAllPages(): Promise<SpacePageRef[]> {
     const okf = this.okf();
     if (!okf) return [];
     return this.deps.pages.listAllSpacePages();
   }
 
-  /** Knowledge home overview: every space with page count + last activity, plus recently-edited pages. */
+  /** Knowledge home overview: spaces with counts/activity plus recently-edited pages. */
   async getKnowledgeOverview(
     recentLimit: number
   ): Promise<{ spaces: SpaceWithActivity[]; recent: RecentPage[] }> {
@@ -835,10 +800,7 @@ export class KnowledgeService {
     return reindexAll(this.deps.pages, this.deps.chunks, this.deps.embeddings);
   }
 
-  /**
-   * Manual re-index. `pageId` re-indexes one page; `spaceId` re-indexes a whole space; neither
-   * falls back to a full re-index. Returns the number of pages re-indexed.
-   */
+  /** Manual re-index; `pageId` and `spaceId` never fall back to full re-index. */
   async reindexTargeted(opts: { pageId?: string; spaceId?: string }): Promise<number> {
     if (opts.pageId) {
       const page = await this.deps.pages.getById(opts.pageId);
@@ -854,12 +816,7 @@ export class KnowledgeService {
     return this.reindexAll();
   }
 
-  /**
-   * One-shot backfill: (re)index every active page that has a chunk which is unembedded or embedded
-   * under a stale model (covers pages authored while no provider was configured). No-op (returns 0)
-   * when no embedding provider is available. Enqueues async (non-blocking) when a queue is wired,
-   * else indexes inline — same dispatch as a normal write. Returns the number of pages dispatched.
-   */
+  /** Backfill active pages with missing/stale embeddings; no provider returns 0. */
   async backfillMissing(): Promise<number> {
     const active = this.deps.embeddings.isAvailable() ? this.deps.embeddings.getActive() : null;
     if (!active?.model) return 0;

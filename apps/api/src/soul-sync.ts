@@ -5,10 +5,7 @@ interface SoulSyncer {
   syncOnce(): Promise<void>;
 }
 
-/**
- * The subset of `SoulLoader` this module diffs: the four named-artifact maps + a `reload()` to
- * refresh them from disk after a pull. Kept structural so tests can pass a plain fake.
- */
+/** Structural SoulLoader subset for diffing named artifacts after reload. */
 export interface SoulArtifacts {
   agents: Map<string, unknown>;
   routines: Map<string, unknown>;
@@ -22,15 +19,12 @@ export interface SoulSyncOptions {
   soulLoader?: SoulArtifacts;
   log?: { error(obj: unknown, msg?: string): void };
   /**
-   * Reconcile the active bundle with git HEAD after each pull. A remote-authored commit moves HEAD
-   * without firing the local commit hook, so without this the draft read side reloads the new
-   * rules while `soul_active_bundles` stays pinned to the last locally-committed tree.
+   * After git pull, reconcile active bundles because remote commits bypass the local commit hook.
    */
   reconcile?: () => Promise<void>;
 }
 
 export const SOUL_SYNC_JOB = "soul-sync";
-/** Every 5 minutes — the periodic soul down-sync cadence. */
 export const SOUL_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // Singular activity "kind" → the plural SoulArtifacts map key.
@@ -52,7 +46,6 @@ function snapshot(soul: SoulArtifacts): SoulSnapshot {
   };
 }
 
-/** Record one `soul.<kind>.created` row for every artifact present after the sync but not before. */
 async function recordSoulDiff(
   activity: ActivityService,
   before: SoulSnapshot,
@@ -73,15 +66,7 @@ async function recordSoulDiff(
   }
 }
 
-/**
- * Registers the periodic soul git-sync in this process. Gated on a configured git remote —
- * without one there is nothing to sync. Returns the interval so shutdown can stop future pulls.
- *
- * When an activity service + soul loader are supplied, each run is recorded (category 'job') and
- * newly-added agents/routines/integrations/skills are detected by diffing the loader's artifact
- * key sets before vs after the pull (an explicit `reload()` makes the "after" snapshot deterministic;
- * the redundant reload is harmless — `load()` replaces whole maps).
- */
+/** Register remote-gated periodic Soul sync and return its interval for shutdown. */
 export function registerSoulSync(
   syncer: SoulSyncer,
   gitRemoteUrl: string | undefined,

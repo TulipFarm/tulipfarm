@@ -42,12 +42,7 @@ export interface RecordObsInput {
   attributes?: Record<string, unknown>;
 }
 
-/**
- * The single write path for the AI observability event spine. `record` is **best-effort**: it
- * builds the row and inserts it, but never throws into the caller — a failed observability write
- * must not break or stall the chat turn that triggered it (callers also fire-and-forget). Mirrors
- * `ActivityService.record`.
- */
+/** Best-effort AI observability write path; failures must not affect chat turns. */
 export class ObservabilityService {
   constructor(private readonly repo: ObsRepo) {}
 

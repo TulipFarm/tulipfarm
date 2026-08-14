@@ -36,10 +36,7 @@ export class EmbeddingUnavailableError extends Error {
   }
 }
 
-// Curated model spec, resolved from LiteLLM's model_prices_and_context_window.json at config time and
-// pinned into the soul (deterministic + git-audited). Field names follow LiteLLM's where they map, so
-// the shape is a recognizable standard. Costs are USD per token (LiteLLM's unit). `additionalProperties`
-// stays open so future LiteLLM fields don't fail validation.
+// Curated LiteLLM spec pinned into Soul; costs are USD/token and future fields stay allowed.
 const ModelSpecSchema = Type.Object(
   {
     litellm_key: Type.Optional(Type.String()),
@@ -74,15 +71,7 @@ const TierConfigSchema = Type.Object({
   providers: Type.Array(ProviderEntrySchema, { minItems: 1 }),
 });
 
-/**
- * A named set of provider credentials, addressed by ModelProfiles via `spec.connection`.
- *
- * Credentials are separated from routing because they answer a different question and have a
- * different audience: a connection is admin/secret-bearing infrastructure, while a ModelProfile is
- * git-audited governance. Keying by name rather than by provider preserves multi-account setups —
- * two Azure resources with different keys are two connections, which per-entry `api_key_ref` in the
- * tier config could express and a provider-keyed map could not.
- */
+/** Named provider credentials; name keys preserve multi-account setups. */
 const ProviderConnectionSchema = Type.Object({
   provider: Type.String({ minLength: 1 }),
   api_key_ref: Type.Optional(Type.String()),
@@ -104,10 +93,9 @@ const EmbeddingsConfigSchema = Type.Object({
 });
 
 export const LlmConfigSchema = Type.Object({
-  /** Named provider credentials. ModelProfiles reference these by name; secrets never leave here. */
+  /** Named provider credentials. ModelProfiles reference these; secrets never leave here. */
   connections: Type.Optional(Type.Record(Type.String({ minLength: 1 }), ProviderConnectionSchema)),
-  // Authoring shape for the three ordered provider chains. Runtime and publication both derive
-  // ModelProfiles from it (see `model-catalog.ts`); no second models/ representation exists.
+  // Sole authored model source; runtime and publication derive ModelProfiles from it.
   tiers: Type.Optional(
     Type.Object({
       quick: TierConfigSchema,
@@ -144,8 +132,7 @@ export function validateLlmConfig(data: unknown): LlmConfig {
     throw new LlmConfigValidationError(`${path}${e.message ?? "invalid config"}`);
   }
   const config = data as LlmConfig;
-  // Provider chains are the sole authored model source. Effort Presets name the derived profiles;
-  // without chains they point at nothing and would fail only when the first turn routes.
+  // Effort Presets name derived profiles; without chains they point at nothing.
   if (config.tiers === undefined) {
     throw new LlmConfigValidationError("config must declare provider chains in tiers");
   }

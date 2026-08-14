@@ -1,10 +1,6 @@
 import type { ModelPrice } from "@tulipfarm/llm";
 
-/**
- * Runtime observability config, parsed from `soul/observability.config.yaml` (all fields optional;
- * an absent file ⇒ disabled defaults, zero setup). The OTLP `token` is an `env://VAR` / secret ref
- * resolved at exporter-setup time, not here. snake_case YAML → camelCase here.
- */
+/** Observability config; OTLP `token` resolves at exporter setup, not parse time. */
 export interface ObservabilityConfig {
   /** Master switch for the Grafana Cloud OTLP export. Off ⇒ no OTel deps loaded, no push. */
   enabled: boolean;
@@ -33,7 +29,7 @@ function asNumber(v: unknown, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
-/** Parse + coerce raw YAML (or null) into a fully-defaulted config. Lenient: bad fields are dropped. */
+/** Parses raw YAML (or null) into defaults. Lenient: bad fields are dropped. */
 export function parseObservabilityConfig(raw: unknown): ObservabilityConfig {
   if (!raw || typeof raw !== "object") return { ...DEFAULT_OBSERVABILITY_CONFIG };
   const r = raw as Record<string, unknown>;

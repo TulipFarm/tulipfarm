@@ -2,12 +2,7 @@
 
 import { type CSSProperties, type ReactNode, useEffect, useRef } from "react";
 
-/**
- * Scroll-entrance wrapper: children start translated/transparent (see the
- * `[data-reveal]` rules in global.css) and rise in the first time they enter
- * the viewport. Reduced motion is honored by the global media-query block,
- * which zeroes the transition so content appears instantly.
- */
+/** Reveal wrapper; reduced motion is handled in global.css. */
 export function Reveal({
   children,
   delay = 0,

@@ -19,19 +19,9 @@ export type ChatSubmission =
   | { readonly outcome: "submitted"; readonly run?: ChatRunClaim }
   | { readonly outcome: "duplicate"; readonly runId: string };
 
-/**
- * Persists the request a turn will answer, and names the durable Run that answers it.
- *
- * Exactly one submitter runs per turn and no other path writes the user Message, which is what keeps
- * that Message written once. A replayed request resolves to `duplicate` instead of answering the
- * same message twice.
- */
+/** One submitter writes the user Message once; replay resolves to `duplicate`. */
 export interface ChatTurnSubmitter {
-  /**
-   * Resolves a request this submitter already answered, before the turn creates anything for it.
-   * Checked ahead of opening the conversation, because a request with no `conversationId` would open
-   * one (and generate its title) only to be refused — leaving a trail of empty conversations behind.
-   */
+  /** Checks duplicates before opening a conversation, avoiding empty refused conversations. */
   findSubmitted?(): Promise<{ readonly runId: string } | null>;
   submit(request: ChatTurnRequest): Promise<ChatSubmission>;
 }
@@ -47,13 +37,7 @@ export interface DurableTurnSubmitterDeps {
   readonly log: FastifyBaseLogger;
 }
 
-/**
- * The submission path every channel converges on: one durable Turn, one Run, one request Artifact,
- * committed before anything streams.
- *
- * The Run is left `queued`. Whoever claims it executes it — a Worker, today, for every channel
- * alike — so this process minting the Run never means this process answering it.
- */
+/** Creates one durable Turn, Run, and request Artifact before streaming; leaves the Run queued. */
 export function durableTurnSubmitter(deps: DurableTurnSubmitterDeps): ChatTurnSubmitter {
   const businessId = deps.principal.businessId;
   // `startTurn` resolves a replay to the same Turn and Run, but silently — and this turn must not

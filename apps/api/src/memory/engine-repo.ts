@@ -15,34 +15,9 @@ import { assertValidAssertion, type MemoryAssertionView, type MemoryRepo } from 
 import type { MemoryEmbedder } from "./embedder";
 import { PgPendingMemoryStore } from "./pending-store";
 
-/**
- * `MemoryRepo` backed by the `@tulipfarm/memory` engine.
- *
- * This is the M1 seam. The KV surface above it — `MemoryService`, `update_memory`,
- * `/api/v1/memory`, Settings → Memory — is unchanged; underneath, every entry is now a scoped,
- * versioned `user_private` Assertion, so edits supersede rather than overwrite and deletes leave
- * an auditable tombstone. Nothing user-visible changes; the history does.
- *
- * Three mappings carry the old contract onto the new model:
- *
- * - `key` → `subject`, `value` → `statement`. The engine's per-subject uniqueness is what made
- *   the old `(user_id, key)` primary key redundant.
- * - `createdAt` → `validFrom`. The KV row preserved its creation time across edits; a superseding
- *   Assertion gets a fresh `createdAt`, so the original is carried forward as valid-time — which
- *   is also what it actually means: when the preference started being true.
- * - `lastWrittenAt` → `updatedAt`, and listing orders by it. The old repo ordered by
- *   `last_written_at`, and `MemoryService`'s LRU eviction consumes that order, so
- *   reproducing it exactly is what keeps eviction behaviour identical.
- */
+/** Memory KV adapter: `key`→`subject`, `value`→`statement`, `createdAt`→`validFrom`. */
 
-/**
- * Deployment-default Memory settings for the KV surface.
- *
- * `user_private` is the only scope this surface has ever written, and inferred memory stays off
- * until M3 ships the extraction pipeline and its confirmation gate — with it off, `rememberMemory`
- * refuses inferred writes outright, so no unconfirmed statement can reach the store through here
- * even by mistake. Per-Agent settings replace this in M3.
- */
+/** Deployment-default Memory settings; inferred writes stay disabled for this KV surface. */
 export const KV_MEMORY_SETTINGS: MemorySettingsView = {
   scopes: ["user_private"],
   inferredDurableMemory: { enabled: false },
@@ -77,11 +52,7 @@ export class EngineMemoryRepo implements MemoryRepo {
     this.pending = new PgPendingMemoryStore(q);
   }
 
-  /**
-   * The engine stamps `updatedAt` from its clock, and `lastWrittenAt` is supplied by the caller
-   * (`MemoryService` passes the write time, and its LRU eviction reads that ordering back).
-   * Binding the clock per operation is what keeps the two the same value.
-   */
+  /** Bind the engine clock per operation so `updatedAt` equals caller `lastWrittenAt`. */
   private depsAt(at: Date): MemoryDeps {
     return {
       store: this.store,

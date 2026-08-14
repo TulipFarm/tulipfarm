@@ -1,10 +1,4 @@
-/**
- * Signs and seals a contiguous slice of a hash-linked chain into independently protected blob
- * storage (SPEC §20: "hash-linked into signed, sealed immutable segments in independently
- * protected blob storage. A verifier can detect missing, reordered, or altered evidence.").
- * Sealing does not replace {@link verifyChain}; it adds an offline-verifiable anchor so tamper
- * can be detected even if the PostgreSQL chain itself is altered.
- */
+/** Sealed segments add offline tamper anchors; they do not replace `verifyChain`. */
 
 import { canonicalHash } from "@tulipfarm/schema";
 import type { BlobPort, BlobRef } from "@tulipfarm/storage";
@@ -51,11 +45,7 @@ function serializeSegment(events: readonly AuditEvent[]): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(body));
 }
 
-/**
- * Seals `events` (one business's contiguous chain slice, ascending `chainIndex`, no gaps) into
- * blob storage and signs the result. Throws {@link SealError} instead of sealing evidence that
- * would already fail {@link verifyChain} — a broken chain must never be signed as authentic.
- */
+/** Seals one contiguous business slice; broken chains are never signed as authentic. */
 export async function sealSegment(
   events: readonly AuditEvent[],
   previousSegmentHash: string | null,

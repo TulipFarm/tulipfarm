@@ -1,8 +1,6 @@
 /**
- * Crypto erase for sealed segments (SPEC §20: "Where erasure is required, content encryption
- * keys can be destroyed while retaining tombstone and integrity evidence."). This module never
- * decrypts or reads segment content; it destroys the segment's content encryption key through an
- * injected port and records a tombstone carrying only hash/count evidence.
+ * Crypto erase destroys only sealed-segment content keys and records hash/count tombstones; content
+ * is never decrypted or read.
  */
 
 import { isDeletionBlocked, type LegalHold } from "./legal-hold";
@@ -36,11 +34,7 @@ export interface Tombstone {
   readonly erasedAt: Date;
 }
 
-/**
- * Destroys `segment`'s content encryption key via `keyPort` and returns a tombstone. Refuses if
- * `category`/`target` is under an active legal hold — hold must block erase, not just plain
- * delete, or "grants no read" would be trivially bypassed by erasing instead of reading.
- */
+/** Legal hold must block crypto erase, or deny-read could be bypassed by destroying content. */
 export async function eraseSegment(
   segmentId: string,
   segment: SealedSegment,

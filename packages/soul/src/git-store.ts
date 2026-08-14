@@ -79,19 +79,7 @@ export interface SoulCommitResult {
   readonly signature: CommitSignature;
 }
 
-/**
- * Atomic, signed writer for the authored Soul tree — step 12 of the single write gateway.
- *
- * The commit is assembled entirely off to the side: blobs and a tree are built in a private,
- * throwaway index (`GIT_INDEX_FILE`) seeded from the expected base, never touching the working
- * tree or the real index. The tree becomes visible only through a single compare-and-swap ref
- * update against the expected base. Consequences:
- *
- * - A stale base (concurrent write) is rejected up front and again by the CAS ref update.
- * - A signing failure aborts before any ref moves.
- * - An interruption before the ref update leaves HEAD, the index, and the working tree untouched;
- *   the orphaned throwaway objects are unreachable and GC-collected. No partial tree is published.
- */
+/** Atomic signed writer: build in a private index, sign, then CAS-update the branch ref. */
 export class SoulGitStore {
   constructor(
     private readonly soulPath: string,
@@ -109,15 +97,9 @@ export class SoulGitStore {
     );
   }
 
-  /** Current committed tip, or null when the branch is unborn (fresh repo, no commits). */
   /**
-   * The ref the compare-and-swap must target: whatever branch HEAD actually points at.
-   *
-   * Assuming `refs/heads/main` was wrong in a way that only showed up off this machine. `git init`
-   * still creates `master` unless `init.defaultBranch` says otherwise, and `GitSyncService`
-   * initialises the Soul repo with a bare `.init()`. A developer whose global config sets `main`
-   * never sees it; a fresh container has no such config, so every write would target a ref that
-   * does not exist — and would be reported as a conflict, whose advertised remedy is to retry.
+   * CAS targets HEAD's actual branch; assuming `main` breaks fresh repos initialized as
+   * `master`.
    */
   private async branchRef(): Promise<string> {
     let ref: string;
@@ -195,12 +177,7 @@ export class SoulGitStore {
     return out.sort();
   }
 
-  /**
-   * Contain a Soul-relative path inside the repo, or null when it escapes.
-   *
-   * Reads are gated the same way writes are: a path that the write gate would refuse to classify
-   * must not become a readable one, or `..` becomes an arbitrary host-file read.
-   */
+  /** Contain Soul-relative paths inside the repo for reads and writes; reject traversal. */
   private resolvePath(path: string): string | null {
     if (path === "" || path.startsWith("/") || path.includes("\\") || path.includes("\0")) {
       return null;
@@ -359,11 +336,7 @@ export class SoulGitStore {
     }
   }
 
-  /**
-   * Atomically publish `request` as a signed commit on `main`. Returns the new commit evidence.
-   * Throws `SoulGitStoreError` (deterministic, no file content) on any failure; nothing partial is
-   * ever left published.
-   */
+  /** Atomically publish a signed commit; failures leave no partial tree visible. */
   async commitChangeset(request: SoulCommitRequest): Promise<SoulCommitResult> {
     const { changeset, files, actor, approval } = request;
     if (actor.principalId !== changeset.principalId) {

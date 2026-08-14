@@ -1,8 +1,4 @@
-/**
- * Git subprocesses must not inherit repository/config/program overrides from the host shell.
- * In particular, `GIT_DIR` and `GIT_WORK_TREE` can redirect a command to an entirely different
- * repository even when simple-git was constructed with the correct cwd.
- */
+/** Strip host Git overrides so subprocesses cannot be redirected to another repo. */
 const UNSAFE_GIT_ENV = new Set([
   "editor",
   "git_askpass",

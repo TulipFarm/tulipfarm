@@ -79,11 +79,7 @@ function persistedBudget(row: BudgetRow): PersistedBudget {
   };
 }
 
-/**
- * PostgreSQL ledger for per-Run budgets (SPEC §9.1). A ceiling is write-once — the trigger rejects
- * any later change — so neither a restart nor an Agent proposal can raise a limit, and the row
- * CHECK makes an overdrawn budget unrepresentable rather than merely unlikely.
- */
+/** Run budget ceilings are write-once; overdraw is made unrepresentable by storage checks. */
 export class BudgetStore {
   constructor(private readonly transactions: TransactionPort) {}
 

@@ -21,21 +21,7 @@ import {
 } from "@tulipfarm/tool-broker";
 import { GITHUB_INSTALLATION_SECRET_REF, githubInstallationSecretRef } from "./github-credentials";
 
-/**
- * The Worker's Tool authority for Routine Runs.
- *
- * Everything a Tool State needs is read from the Run's own pinned, signature-verified bundle: the
- * ToolContract it names, and the Guardrails that decide it. That is what makes the evidence exact
- * — the policy that authorized a dispatch and the contract that shaped it are the ones this Run is
- * bound to, not whatever the live Soul says now — and it is why the bundle digest is the
- * `guardrailRevision` recorded against the effect.
- *
- * Order is load-bearing and fail-closed at every step: authorize, then reserve, then dispatch. A
- * denial never reaches an adapter; a dispatch never happens without a durable reservation carrying
- * the intent digest and the guardrail revision, so a replayed Run finds the effect it already made
- * instead of writing a second one. Nothing here interprets a missing piece as permission: no
- * authority layers, an uncompilable policy, or an unregistered adapter all stop the State.
- */
+/** Routine Tool authority: pinned bundle only; authorize, reserve, then dispatch fail-closed. */
 
 export type RoutineToolOutcome =
   /** Dispatched and confirmed, or recognized as an effect this Run already confirmed. */
@@ -55,12 +41,7 @@ export interface RoutineToolRequest {
   readonly plan: ToolDispatchPlan;
   /** The Run's exact pinned bundle — the only source of contracts and policy. */
   readonly bundle: RuntimeBundle;
-  /**
-   * Layers beyond the bundle's own Tool authority — identity/Run-context layers a future caller
-   * may add. The bundle's ToolContracts always contribute their own layer (see `authorityFor`
-   * below); a Routine's authority can never widen past what it declares wanting to call, no
-   * matter what this array carries.
-   */
+  /** Extra layers cannot widen past the pinned ToolContracts' own authority. */
   readonly authorityLayers: readonly AuthorityLayer[];
 }
 
@@ -85,16 +66,7 @@ function definitionsOf<T>(bundle: RuntimeBundle, kind: string): T[] {
     .map((definition) => definition.document as unknown as T);
 }
 
-/**
- * Scopes a bare GitHub installation-token `credentialRef` to the installation this call names.
- *
- * `CredentialDispatcher` forwards only the ref string, so a Tool State authored against the bare
- * ref is unresolvable the moment a business holds more than one App installation. The arguments
- * already name the repository (or, for repository creation, the account), and that is exactly the
- * selector `selectGitHubInstallation` matches on — so narrowing here is the only place the two can
- * meet. A ref that is already scoped is left alone: the author's explicit choice outranks a
- * derivation, and re-deriving it could only disagree.
- */
+/** Narrow bare GitHub installation refs from arguments; leave authored scoped refs unchanged. */
 function scopedCredentialRef(plan: ToolDispatchPlan): string | undefined {
   const ref = plan.credentialRef;
   if (ref !== GITHUB_INSTALLATION_SECRET_REF) return ref;
@@ -116,7 +88,7 @@ function intentOf(request: RoutineToolRequest): ToolIntent {
   const { plan } = request;
   const credentialRef = scopedCredentialRef(plan);
   return {
-    // Derived from the Run and the State occurrence, so a replay proposes the same intent.
+    // Derived from Run and State occurrence, so replay proposes the same intent.
     intentId: plan.effectId,
     businessId: request.businessId,
     runId: request.runId,
@@ -132,11 +104,7 @@ function intentOf(request: RoutineToolRequest): ToolIntent {
   };
 }
 
-/**
- * A Tool State whose effect is already durable. `confirmed` is the work this attempt was about to
- * do, so the State succeeds without repeating it; `ambiguous` is the one answer no executor may
- * resolve on its own — reconciliation reads the provider, this process does not guess.
- */
+/** Replay durable effects; only reconciliation may resolve `ambiguous`. */
 function replayed(state: string): RoutineToolOutcome {
   switch (state) {
     case "confirmed":
@@ -168,8 +136,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       policy = this.policyFor(request.bundle);
       catalog = this.catalogFor(request.bundle);
     } catch (error) {
-      // An authored rule this deployment cannot express exactly, or a contract the bundle did not
-      // publish. Either way the policy that would decide this call is not the authored one.
+      // If the authored policy/contract cannot be expressed exactly, park instead of guessing.
       if (error instanceof GuardrailPolicyError) {
         return { kind: "unavailable", reason: `guardrail_${error.code}` };
       }
@@ -184,8 +151,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       authorityLayers: [...request.authorityLayers, this.authorityFor(request.bundle)],
       guardrailRules: policy.rules,
       dlpRules: policy.dlpRules,
-      // The bundle digest is the revision: it names every Guardrail this Run is bound to, and
-      // nothing else can change under a Run that is already pinned to it.
+      // The pinned bundle digest is the Guardrail revision; nothing live may replace it.
       guardrailRevision: request.bundle.digest,
       taint: "untrusted",
       autonomy: "execute_policy_authorized",
@@ -227,8 +193,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
       return { kind: "succeeded" };
     } catch (error) {
       if (!(error instanceof ToolDispatchError)) throw error;
-      // `ambiguous` means the provider may or may not have applied the write. Only reconciliation
-      // can answer that, so the State parks rather than retrying or failing over it.
+      // Provider write may have landed; park `ambiguous` for reconciliation, never retry here.
       const effect = await this.options.effects.get(request.businessId, request.plan.effectId);
       if (effect?.state === "ambiguous") return { kind: "unavailable", reason: "effect_ambiguous" };
       return error.code === "adapter_not_found"
@@ -253,7 +218,7 @@ export class BrokerRoutineToolPort implements RoutineToolPort {
     return catalog;
   }
 
-  /** The Routine's own authority: exactly the actions/resources its pinned ToolContracts declare. */
+  /** The Routine's own authority: only what its pinned ToolContracts declare. */
   private authorityFor(bundle: RuntimeBundle): AuthorityLayer {
     const cached = this.authorities.get(bundle.digest);
     if (cached !== undefined) return cached;

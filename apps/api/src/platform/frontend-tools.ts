@@ -2,15 +2,6 @@ import { ajv } from "@tulipfarm/schema";
 import { defineApiTool, toToolDef } from "../tools/define";
 import { err, ok, type RequestContext, type ToolCallResult, type ToolDef } from "../tools/types";
 
-/**
- * Frontend Tools + shared state. Unlike platform Tools (which only see the static
- * PlatformToolContext), these are raw `ToolDef`s so their `execute` receives the per-request
- * `RequestContext` — `get_client_context` reads `ctx.clientContext` (what the user is viewing) and
- * flips `ctx.contextRead`; the action tools (navigate_to / prefill_form / invoke_action) return a
- * descriptor the producer emits as a `client-action` SSE event the web shell executes. Side-effecting
- * actions are HARD-GATED behind a `get_client_context` read so the agent acts on where the user is.
- */
-
 function firstError(errors: ReturnType<typeof ajv.compile>["errors"]): string {
   const e = errors?.[0];
   return e
@@ -18,8 +9,6 @@ function firstError(errors: ReturnType<typeof ajv.compile>["errors"]): string {
     : "invalid arguments";
 }
 
-// Side-effecting actions require the agent to have read the client context first (so it knows where
-// the user is). Returns a denial the model sees — it then calls get_client_context and retries.
 function requireContextRead(ctx: RequestContext): ToolCallResult | null {
   if (ctx.contextRead && !ctx.contextRead.value) {
     return err(
@@ -43,8 +32,6 @@ function frontendActionTarget(args: unknown) {
     ? [{ type: "platform.frontend", id: `action:${name}` }]
     : [];
 }
-
-// ── get_client_context ──────────────────────────────────────────────────────────
 
 const EMPTY_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -80,8 +67,6 @@ export const getClientContextTool: ToolDef = toToolDef(
   (ctx) => ctx
 );
 
-// ── navigate_to ─────────────────────────────────────────────────────────────────
-
 const NAVIGATE_TO_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -91,7 +76,6 @@ const NAVIGATE_TO_SCHEMA: Record<string, unknown> = {
       type: "string",
       minLength: 1,
       // "/" then not another "/" (blocks protocol-relative //host). Written without regex
-      // lookaround: LLM providers reject tool schemas whose `pattern` uses (?!...)/(?=...).
       pattern: "^/([^/].*)?$",
       description: 'An internal app path starting with "/", e.g. "/resources/tickets/TICK-1042".',
     },
@@ -128,8 +112,6 @@ const navigateToToolDefinition = defineApiTool<RequestContext>({
 });
 
 export const navigateToTool: ToolDef = toToolDef(navigateToToolDefinition, (ctx) => ctx);
-
-// ── prefill_form ──────────────────────────────────────────────────────────────
 
 const PREFILL_FORM_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -170,8 +152,6 @@ const prefillFormToolDefinition = defineApiTool<RequestContext>({
 });
 
 export const prefillFormTool: ToolDef = toToolDef(prefillFormToolDefinition, (ctx) => ctx);
-
-// ── invoke_action ───────────────────────────────────────────────────────────────
 
 const INVOKE_ACTION_SCHEMA: Record<string, unknown> = {
   type: "object",
@@ -219,7 +199,6 @@ const invokeActionToolDefinition = defineApiTool<RequestContext>({
 
 export const invokeActionTool: ToolDef = toToolDef(invokeActionToolDefinition, (ctx) => ctx);
 
-/** Frontend tools, registered as raw ToolDefs so they receive the per-request RequestContext. */
 export const FRONTEND_TOOLS: ToolDef[] = [
   getClientContextTool,
   navigateToTool,
@@ -227,14 +206,13 @@ export const FRONTEND_TOOLS: ToolDef[] = [
   invokeActionTool,
 ];
 
-/** Tool names whose result the producer turns into a `client-action` SSE event for the web shell. */
 export const CLIENT_ACTION_TOOLS = new Set<string>([
   "navigate_to",
   "prefill_form",
   "invoke_action",
 ]);
 
-/** The `client-action` SSE payload for a frontend-action tool result, or null for any other tool. */
+/** The `client-action` SSE payload, or null for any other tool. */
 export function clientActionEvent(toolName: string, result: ToolCallResult): unknown | null {
   if (!CLIENT_ACTION_TOOLS.has(toolName) || !result.success) return null;
   return result.data;

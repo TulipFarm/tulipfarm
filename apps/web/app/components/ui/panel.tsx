@@ -2,10 +2,8 @@ import type * as React from "react";
 import { cn } from "~/lib/utils";
 
 /**
- * The standard grouping container for settings and configuration surfaces.
- *
- * The top bar owns page identity, so a Panel names a group of related controls — never the page.
- * Use `flush` when children are full-bleed rows that draw their own separators.
+ * The top bar owns page identity, so a Panel names a group of related controls — never the
+ * page.
  */
 export function Panel({
   title,
@@ -59,7 +57,6 @@ export function Panel({
   );
 }
 
-/** A single full-bleed row inside a `flush` Panel. */
 export function PanelRow({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -72,7 +69,6 @@ export function PanelRow({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
-/** The empty state for a Panel whose collection has no members yet. */
 export function PanelEmpty({ className, ...props }: React.ComponentProps<"p">) {
   return (
     <p className={cn("py-6 text-center text-sm text-muted-foreground", className)} {...props} />

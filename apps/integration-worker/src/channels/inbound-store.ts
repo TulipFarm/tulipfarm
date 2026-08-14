@@ -1,11 +1,7 @@
 import type { ChannelInboundEvent, ChannelInboundStore } from "@tulipfarm/integrations";
 import type { ChannelInboundStore as PgChannelInboundStore } from "@tulipfarm/storage";
 
-/**
- * Adapts the Postgres dedup ledger to the `ChannelInboundStore` port. The port's
- * `ChannelInboundEvent` carries the full normalized inbound shape; only what dedup needs is
- * persisted — the rest lives only in the message this call produces, never at rest here.
- */
+/** Persists only dedup fields; the normalized inbound payload is not stored here. */
 export function channelInboundStore(store: PgChannelInboundStore): ChannelInboundStore {
   return {
     async accept(event: ChannelInboundEvent) {

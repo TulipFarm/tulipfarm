@@ -1,16 +1,4 @@
-/**
- * Zero-unauthorized-disclosure proof for Knowledge (SPEC §14.1).
- *
- * The unit tests next to each module prove that each decision is correct. This suite proves the
- * property that matters end to end: across the full matrix of source status, access-control mode,
- * requester role, revocation, deletion, cache state, and provider behavior, no byte of an
- * unauthorized source — its text, id, revision, digest, classification, owner, or ACL — reaches
- * any egress: the candidate list, the citations handed to a model, the audit payload, or a
- * synthesized conclusion.
- *
- * Every case therefore asserts twice: the decision is right, *and* the serialized output contains
- * none of the marker strings planted in the withheld source.
- */
+/** Proves unauthorized source text, ids, metadata, citations, audit payloads, and conclusions do not leak. */
 
 import type { AuditEventInput } from "@tulipfarm/audit";
 import type { CachePort } from "@tulipfarm/storage";
@@ -28,10 +16,7 @@ import { InMemoryKnowledgeSourceStore } from "../../src/source";
 const NOW = new Date("2026-07-26T12:00:00.000Z");
 const now = () => NOW;
 
-/**
- * Strings planted in the restricted source. If any of these can be found anywhere in a response,
- * an audit event, or a citation, the source leaked — regardless of which field carried it.
- */
+/** Marker strings planted in restricted sources; any serialized appearance is a leak. */
 const SECRETS = [
   "hr-salaries",
   "salaries-external-id",

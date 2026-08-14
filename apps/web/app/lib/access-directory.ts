@@ -1,15 +1,4 @@
-/*
- * Turns principal ids into people.
- *
- * The authorization API keys everything on a principal id, and for a person that id **is** their
- * user id (`principal_id = users.id::text`, set by the `sync_user_authorization` trigger). Nothing
- * joined the two, so the access screens rendered rows of raw UUIDs. This module does the join once
- * so every access surface can show a name and an email.
- *
- * A principal that is not a user still has to render — Agents, Routines, integration adapters and
- * services all hold authority. Those fall back to an honest "not a person here" line rather than
- * being hidden, because an unexplained holder of access is worse than an ugly one.
- */
+/* User principal ids equal `users.id::text`; non-user principals must still render honestly. */
 
 import type { UserStatus } from "./api";
 import type { UserSummary } from "./users";
@@ -44,12 +33,7 @@ function personParty(user: UserSummary): Party {
   };
 }
 
-/**
- * The party behind a principal id, always resolving to something renderable.
- *
- * Unknown ids keep their raw value in `principalId` so a copy action and a support conversation
- * still have the exact string, while `name` stays readable.
- */
+/** Unknown ids keep their raw `principalId` for copy/support while `name` stays readable. */
 export function lookupParty(directory: Directory, principalId: string): Party {
   const known = directory.get(principalId);
   if (known) return known;

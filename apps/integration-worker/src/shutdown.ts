@@ -22,13 +22,7 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-/**
- * Stops accepting new work and waits for what is already claimed to finish.
- *
- * Empty today: no consumer loop is registered yet, so `drain` always resolves `"drained"`
- * immediately. Kept in place so the first real loop (Slack socket, delivery retry) only has to
- * push onto `loops` in the composition root, not rewrite this file.
- */
+/** Drain hook placeholder; resolves immediately until consumer loops register themselves. */
 export async function drain(options: DrainOptions): Promise<DrainOutcome> {
   const sleep = options.sleep ?? delay;
   const pending = new Set(options.loops.map((loop) => loop.name));

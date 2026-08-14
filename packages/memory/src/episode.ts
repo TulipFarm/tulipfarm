@@ -1,11 +1,4 @@
-/**
- * Episodic Memory (M5).
- *
- * Assertions say what is true; Episodes say what happened. The distinction matters because a
- * model-written summary is useful recall context but must not become a standing instruction or a
- * user-stated fact. Episodes therefore carry their own source and outcome, while the composing app
- * may project them into the M2 recall tier through chunks.
- */
+/** Episodes record what happened; they must not become standing instructions or user facts. */
 
 import type { MemoryEvidenceRef } from "./memory";
 import type { MemoryScopeDenialReason, MemoryScopeRequest, MemoryScopeTarget } from "./scope";

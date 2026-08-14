@@ -78,11 +78,7 @@ interface RoutineRunStateReader {
   listStates: Pick<RunStore, "listStates">["listStates"];
 }
 
-/**
- * Durable-wait surface the executor needs; `@tulipfarm/run-kernel`'s `DurableWaitManager`
- * satisfies it. The executor never redeems a wait — the deadline sweep does — so no resume token
- * is read here.
- */
+/** Durable-wait surface; the executor never redeems resume tokens. */
 export interface RoutineWaitPort {
   register(input: RegisterWaitInput): Promise<{ readonly wait: PersistedWait }>;
   find(businessId: string, waitId: string): Promise<PersistedWait | null>;
@@ -95,25 +91,13 @@ interface RoutineExecutorOptions {
   readonly scheduler: Pick<RoutineStateScheduler, "schedule">;
   readonly transitions: StateTransitionPort;
   readonly waits: RoutineWaitPort;
-  /**
-   * Tool authority for `tool` States. Absent, a Tool State is parked rather than dispatched: this
-   * executor holds no second path to an external effect.
-   */
+  /** Absent means `tool` States park; there is no second external-effect path. */
   readonly tools?: RoutineToolPort;
-  /**
-   * Agent authority for `agent` States. Absent, an `agent` State is parked rather than answered:
-   * this executor holds no model of its own and will not invent an answer for a Routine.
-   */
+  /** Absent means `agent` States park; the executor will not invent answers. */
   readonly agents?: RoutineAgentPort;
-  /**
-   * Where an `approval` State's durable wait is opened and its decision read back. Absent, an
-   * `approval` State is parked: a Run may not proceed past a question nobody was asked.
-   */
+  /** Absent means `approval` States park; Runs cannot pass unasked questions. */
   readonly approvals?: RoutineApprovalPort;
-  /**
-   * The authority a Routine Run acts under. Fail-closed by default — with no layers the Tool
-   * Broker denies every intent — because nothing in this process may mint authority of its own.
-   */
+  /** Fail-closed authority; this process may not mint authority of its own. */
   readonly authority?: (run: PersistedRun, state: CompiledState) => readonly AuthorityLayer[];
   readonly now?: () => Date;
   readonly identityCeiling?: (run: PersistedRun) => IdentityCeiling;
@@ -227,20 +211,7 @@ function isRefusal(error: unknown): error is RoutineExecutionRefusal | RoutineSt
   return error instanceof RoutineExecutionRefusal || error instanceof RoutineStepError;
 }
 
-/**
- * Worker-owned executor for the deterministic Routine capabilities: `branch` graphs, durable
- * `wait` timers, and the bounded fan-out and loop constructs (`parallel`, `foreach`,
- * `repeat_until`).
- *
- * Two rules make it replay-safe. Every successor is persisted **before** its predecessor succeeds,
- * so a crash between the two writes replays the same decision into `ensureState` and finds the row
- * it already made. And a fan-out unit is addressed by a durable occurrence key derived from the
- * pinned collection — never from a counter this process holds — so re-executing an attempt walks
- * the same rows instead of scheduling a second copy of settled work.
- *
- * Every other State type is claimed and parked as `needs_reconciliation`: an effect this executor
- * cannot dispatch is never interpreted as a success, and never routed through a second authority.
- */
+/** Executes deterministic Routine States; persists successors before predecessor success. */
 export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecutor {
   const now = options.now ?? (() => new Date());
   const ceiling = options.identityCeiling ?? defaultIdentityCeiling;
@@ -276,8 +247,7 @@ export function createRoutineExecutor(options: RoutineExecutorOptions): RunExecu
       options,
       now,
     });
-    // `waiting` parks the Run holding no lease; the deadline sweep requeues it when its timer
-    // fires, and this executor replays the chain from the top against the durable rows.
+    // `waiting` holds no lease; replay starts from durable rows after the sweep requeues it.
     return execution.runChain(routine.start, "", {}, {}, 0);
   };
 }
@@ -297,13 +267,7 @@ interface ExecutionContext {
 class RoutineExecution {
   constructor(private readonly ctx: ExecutionContext) {}
 
-  /**
-   * Walk one chain of States to its end.
-   *
-   * `prefix` addresses the chain's durable rows: empty for the Run's main line, and the fan-out
-   * occurrence prefix inside a unit. `extras` carries the roots only a unit has — `item` for a
-   * `foreach` body, `loop` for a `repeat_until` body.
-   */
+  /** Walks one chain; `prefix` addresses durable fan-out rows and `extras` adds unit roots. */
   async runChain(
     startName: string,
     prefix: string,
@@ -340,8 +304,7 @@ class RoutineExecution {
         }
       } catch (error) {
         if (!isRefusal(error) && !(error instanceof RoutineInputResolutionError)) throw error;
-        // A settled State cannot be parked; every other path claimed the State before it could
-        // refuse, so the reason is recorded on the State an operator will be looking at.
+        // Settled States cannot be parked; claimed States record the refusal on their own row.
         if (row.status === "succeeded") return "needs_reconciliation";
         await this.park(key, `routine:${error.code}`);
         return "needs_reconciliation";
@@ -355,10 +318,7 @@ class RoutineExecution {
     return "needs_reconciliation";
   }
 
-  /**
-   * Recompute a settled State's successor. The decision is a pure function of the Context, so a
-   * replay of an already-succeeded State can only reach the successor its first execution chose.
-   */
+  /** Recomputes a settled State's pure successor for replay. */
   private replayOutcome(
     state: CompiledState,
     scope: Readonly<Record<string, unknown>>
@@ -428,15 +388,7 @@ class RoutineExecution {
     return { kind: "outcome", outcome };
   }
 
-  /**
-   * One `tool` State: planned here, decided and dispatched by the Tool Broker.
-   *
-   * A confirmed effect succeeds. A definitive refusal — denied by policy, or failed at the
-   * provider — takes the State's authored `onError` path so an author can handle a denial the way
-   * they handle any other failure, and fails the Run when no handler claims it. Everything else
-   * parks: an intent awaiting a human has no Approval to wait on in this process yet, and an
-   * ambiguous or undispatchable effect is a question only reconciliation may answer.
-   */
+  /** Tool States use the Broker; only confirmed effects succeed, ambiguous cases park. */
   private async runTool(
     state: CompiledState,
     key: string,
@@ -471,17 +423,7 @@ class RoutineExecution {
     return "needs_reconciliation";
   }
 
-  /**
-   * One `agent` State: planned in the kernel, answered by the Agent authority.
-   *
-   * The Run's own pinned bundle decides which Agent answers and under which model, so a Run that
-   * waited through a publication still asks the Agent it was minted against. A definitive failure —
-   * a guardrail refusal, an exhausted budget, a model error — takes the State's authored `onError`
-   * path under `agent_<reason>`, so an author handles it exactly as they handle a Tool failure.
-   * A cancellation is left to the cancellation manager, and everything else parks: an answer this
-   * process could not obtain is never invented, and a Tool call the loop sent to a human has no
-   * Approval here to wait on.
-   */
+  /** Agent States use the pinned bundle; failures take `agent_<reason>`, unknowns park. */
   private async runAgent(
     state: CompiledState,
     key: string,
@@ -497,8 +439,7 @@ class RoutineExecution {
       businessId: this.ctx.run.businessId,
       runId: this.ctx.run.id,
       stateKey: key,
-      // The row version this attempt claimed the State at, so a retried State's loop events cannot
-      // collide with the events the previous attempt already appended.
+      // Claimed row version keeps retried loop events from colliding with prior attempts.
       attempt: row.version,
       plan,
       ...(schema === undefined ? {} : { outputSchema: schema }),
@@ -519,11 +460,7 @@ class RoutineExecution {
     return "needs_reconciliation";
   }
 
-  /**
-   * Fan-out and loop States. Units execute in the authored order, in batches no larger than the
-   * authored concurrency bound, and each unit is replayed rather than tracked in memory — the
-   * durable rows under its occurrence key are the only record of what has settled.
-   */
+  /** Fan-out/loop units replay from durable occurrence-key rows, not memory. */
   private async runComposite(
     state: CompiledState,
     key: string,
@@ -589,11 +526,7 @@ class RoutineExecution {
     return this.join(joinForeach(state, progress), state);
   }
 
-  /**
-   * A bounded loop. The iteration count is recovered by replaying the durable bodies rather than
-   * held in memory, and the elapsed-duration bound is measured from the State's own `startedAt`,
-   * so a worker that died mid-loop resumes against the same bounds the first attempt was under.
-   */
+  /** Bounded loops recover iteration count from rows and elapsed time from State `startedAt`. */
   private async runRepeat(
     state: CompiledState,
     key: string,
@@ -658,13 +591,7 @@ class RoutineExecution {
     return this.runChain(bodyName, prefix, extras, { ...outputs }, depth + 1);
   }
 
-  /**
-   * Resolve a settled fan-out.
-   *
-   * A satisfied join that still names units to cancel is refused: this executor can settle a unit
-   * but cannot cancel one that is parked on a live timer, and proceeding past it would leave a
-   * wait whose resume has nowhere to go.
-   */
+  /** Refuses joins that require cancelling live-timer units this executor cannot cancel. */
   private join(
     decision: ReturnType<typeof joinParallel>,
     state: CompiledState
@@ -700,13 +627,7 @@ class RoutineExecution {
     return { kind: "waiting" };
   }
 
-  /**
-   * Open the durable Approval wait for an `approval` State and park on it.
-   *
-   * The wait is planned here and registered by the host, which persists it beside the approval a
-   * human will see, in one transaction. This side never sees the resume token — the decision comes
-   * back as a decision, and the kernel's own resume requeues the Run.
-   */
+  /** Opens API-side approval wait; Worker never sees the resume token. */
   private async openApproval(
     state: CompiledState,
     key: string
@@ -722,8 +643,7 @@ class RoutineExecution {
       wait: planApprovalWait(state, {
         businessId: this.ctx.run.businessId,
         runId: this.ctx.run.id,
-        // Derived from `(runId, occurrence key)`, so a worker that died between opening the
-        // approval and parking the State replays into the approval it already opened.
+        // Derived from `(runId, occurrence key)` so replay finds the same approval.
         waitId: routineWaitId(this.ctx.run.id, key),
         stateKey: key,
         now: this.ctx.now().toISOString(),
@@ -733,13 +653,7 @@ class RoutineExecution {
     return { kind: "waiting" };
   }
 
-  /**
-   * Continue a State whose approval was decided.
-   *
-   * A rejection is a decided negative and takes the authored `approval_rejected` path, failing the
-   * Run when nothing claims it. An expiry is nobody's decision, so it parks for attention rather
-   * than being read as either answer.
-   */
+  /** Rejections take `approval_rejected`; expiries park instead of becoming yes/no. */
   private async resumeApproval(
     state: CompiledState,
     key: string,
@@ -753,8 +667,7 @@ class RoutineExecution {
       runId: this.ctx.run.id,
       stateKey: key,
     });
-    // A parked State whose approval does not exist is a Run nobody can answer; only reconciliation
-    // may decide what became of it.
+    // Missing approval for a parked State is reconciliation-only.
     if (record === undefined) return { kind: "needs_reconciliation" };
     if (record.decision === "pending") return { kind: "waiting" };
 
@@ -778,13 +691,7 @@ class RoutineExecution {
     return { kind: "needs_reconciliation" };
   }
 
-  /**
-   * Continue a State whose timer has resolved; a timer that expired takes its authored path.
-   *
-   * A resolved State is left `running` and its continuation handed back, so the caller settles it
-   * on the one path that persists the successor first — a resumed wait is scheduled exactly like
-   * any other State's successor.
-   */
+  /** Resumed timers stay `running` until the caller persists the successor first. */
   private async resumeWait(
     state: CompiledState,
     key: string,

@@ -339,12 +339,7 @@ const requireOperator: PreHandler = async (req, reply) => {
   }
 };
 
-/**
- * Sequence of the publication currently active, or `undefined` when nothing is active.
- *
- * Needed to tell a publication that is still in flight from one that lost the activation race.
- * Both sit at a non-active stage with no failure recorded, but only the latter is terminal.
- */
+/** Distinguishes in-flight publications from ones that lost the activation race. */
 async function activePublicationSequence(
   deps: SoulPublicationRouteDeps
 ): Promise<number | undefined> {
@@ -356,11 +351,7 @@ async function activePublicationSequence(
   });
 }
 
-/**
- * A publication is superseded when a newer one already holds the active slot: it will never
- * activate, yet it carries no failure. Without this it reports as a healthy `ok` publication whose
- * lag grows forever, which would skew the lag histogram and fire false staleness alerts.
- */
+/** Superseded publications are terminal without failure and must not skew lag health. */
 function isSuperseded(record: PublicationView, activeSequence: number | undefined): boolean {
   if (record.stage === "active" || record.failureCode || record.deadLetteredAt) return false;
   if (activeSequence === undefined || record.publicationSequence === null) return false;

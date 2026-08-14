@@ -21,11 +21,7 @@ import {
 } from "~/lib/settings";
 import { cn } from "~/lib/utils";
 
-/*
- * The wire still carries the retired tier names `quick`/`standard`/`complex`. They are aliases and
- * never shown — `metadata/terminologies.md` retires them in favour of the effort presets a person
- * actually chooses in Chat. This table is the only place the two vocabularies meet.
- */
+/* Retired wire tiers map to effort presets only here. */
 const TIERS = [
   {
     wire: "quick",
@@ -113,12 +109,6 @@ function trimOptional(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/**
- * Models, organised by the effort a person asks for rather than by the provider that answers.
- *
- * The unit on screen is the effort preset, because that is the only part of this a Chat participant
- * ever selects. Each preset owns an ordered fallback chain: the first entry that answers, wins.
- */
 export function ModelChains({
   initial,
   providers,
@@ -493,12 +483,6 @@ function ChainRow({
   );
 }
 
-/**
- * Provider and model picking, moved off the page.
- *
- * Inline editors made the chain unreadable — a list whose whole point is order was buried under
- * four inputs per row. The drawer keeps the ordering visible behind it.
- */
 const CUSTOM_MODEL = "__custom__";
 
 function ModelSheet({
@@ -543,13 +527,7 @@ function ModelSheet({
     };
   }, [open, provider]);
 
-  /**
-   * Pin pricing and context limits for the entered model.
-   *
-   * A catalogue lookup has three outcomes, and all three need a resolution: an exact match pins the
-   * spec; several near-matches need the operator to say which one this is; no match at all still
-   * needs a context window, or the runtime has no budget to plan against.
-   */
+  /** Catalogue misses still need a context window so runtime budgeting can work. */
   async function pinSpec(candidate?: string, modelOverride?: string) {
     const targetModel = modelOverride ?? model;
     if (!provider || !targetModel) return;

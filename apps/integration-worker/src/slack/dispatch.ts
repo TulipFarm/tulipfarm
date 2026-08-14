@@ -11,32 +11,16 @@ function optionalString(value: unknown): string | undefined {
 export interface SlackDispatchDeps {
   businessId: string;
   channelAdapter: SlackChannelAdapter;
-  /**
-   * Filters an `events_api` envelope before it reaches `channelAdapter.receive()` (plan §8).
-   * Undefined skips gating entirely — every DM and channel message would then reach the adapter,
-   * which is only ever intentional in narrow adapter-focused tests.
-   */
+  /** Optional events_api gate; without it every subscribed DM/channel message reaches the adapter. */
   mentionGate?: MentionGateDeps;
-  /**
-   * Answers an unmapped sender with a bind link instead of silence, on `external_identity_unmapped`
-   * denials only. Undefined skips the offer — the denial is still logged as before.
-   */
+  /** Optional bind-link offer for `external_identity_unmapped` denials. */
   identityBindOffer?: ChannelIdentityBindOfferPort;
-  /**
-   * Handles a `block_actions` interactive payload (Approve/Deny clicks). Undefined until the
-   * interactive Block Kit approvals piece lands — an interactive envelope is still acked (Slack
-   * requires that within its 3s window regardless), just dropped with nothing further done.
-   */
+  /** Optional Approve/Deny block-action handler; Slack interactive envelopes are already acked. */
   onInteractive?: (payload: unknown) => Promise<void>;
   log: { warn: (message: string, error?: unknown) => void };
 }
 
-/**
- * Routes one already-acked Socket Mode envelope (the transport, `socket-transport.ts`, acks
- * before this ever runs) to the inbound-message path or the interactive-action path. Anything
- * else — `slash_commands`, unrecognized types — is dropped; Socket Mode only subscribes this app
- * to `events_api` and `interactive` today.
- */
+/** Routes one already-acked Socket Mode envelope; unsupported envelope types are dropped. */
 export async function dispatchSlackEnvelope(
   envelope: SlackSocketEnvelope,
   deps: SlackDispatchDeps

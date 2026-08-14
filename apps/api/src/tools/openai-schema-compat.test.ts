@@ -7,13 +7,6 @@ import { AGENT_TOOLS } from "../soul/agents/tools";
 import { RESOURCE_TYPE_TOOLS } from "../soul/resource-types/tools";
 import { SKILL_TOOLS } from "../soul/skills/tools";
 
-/**
- * Every tool's inputSchema is sent verbatim to the LLM as a function-call parameter schema. The
- * OpenAI/Azure function-calling API REJECTS a top-level `anyOf`/`oneOf`/`allOf`/`enum`/`not` (and a
- * non-`object` root) and 400s the WHOLE request — so one bad schema disables every tool in the turn.
- * This guard fails loudly if any registered tool reintroduces a top-level combinator. Enforce the
- * "at least one of X/Y" style constraint in the handler instead (see agent_update / skill_update).
- */
 const ALL_TOOLS = [
   ...MEMORY_TOOLS,
   ...KNOWLEDGE_TOOLS,

@@ -13,13 +13,7 @@ import { buildPageResolver, type PageResolver, pageHref } from "~/lib/page-href"
 import { cn } from "~/lib/utils";
 import { SidebarSearch } from "./sidebar-search";
 
-/*
- * Unified knowledge tree (the wiki rail). A forest of spaces; each expands lazily into its
- * pages via the `navigate` endpoint. A page that has both a body and children renders as ONE node that
- * is clickable (opens the page) AND expandable (reveals sub-pages) — the merge rule in okf-listing.
- * The active space/page (from the route splat) is highlighted and auto-expanded. The tree re-reads on
- * the `okf:space-changed` window event a write dispatches. cursor-pointer on every interactive node.
- */
+/* Page+directory basename pairs render as one clickable and expandable node. */
 
 const enc = encodeURIComponent;
 

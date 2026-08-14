@@ -20,7 +20,6 @@ export class RoutineStateScheduleError extends Error {
   }
 }
 
-/** Stable reference to one authored State inside an immutable Routine bundle. */
 export function routineStateDefinitionRef(bundle: RunBundle, stateKey: string): string {
   return [
     `bundle:${encodeURIComponent(bundle.digest)}`,
@@ -30,34 +29,19 @@ export function routineStateDefinitionRef(bundle: RunBundle, stateKey: string): 
 }
 
 /**
- * Durable key for one occurrence of an authored State inside a bounded fan-out or loop.
- *
- * A `foreach` item, a `parallel` branch, and a `repeat_until` iteration each execute the same
- * authored States more than once, so the authored name cannot be the durable key. The unit label
- * is part of the key and derived from the pinned collection or the authored branch list, never
- * from a counter this process holds: replaying the same fan-out therefore addresses the same rows
- * instead of scheduling a second copy of work already done.
+ * Occurrence keys include labels from pinned collections or authored branch lists, never process
+ * counters, so replay addresses the same rows.
  */
 export function routineOccurrenceKey(parentKey: string, unit: string, stateKey: string): string {
   return `${parentKey}#${unit}/${stateKey}`;
 }
 
-/**
- * Deterministic wait id for one State occurrence. `run_waits.id` is a primary key, so deriving it
- * from the Run and the occurrence key is what makes registering a wait replay-safe: a worker that
- * died between creating the wait and parking the State finds the wait it already created rather
- * than opening a second timer against the same State.
- */
+/** Wait ids derive from Run and occurrence key so wait registration is replay-safe. */
 export function routineWaitId(runId: string, stateKey: string): string {
   return derivedId("routine-wait", runId, stateKey);
 }
 
-/**
- * Deterministic effect id for one Tool State occurrence. `effect_records.effect_id` is a primary
- * key, so deriving it the same way makes reserving an effect replay-safe: a worker that died
- * between reserving and recording the reservation finds its own row instead of writing a second
- * one against the same State.
- */
+/** Effect ids derive from Run and occurrence key so effect reservation is replay-safe. */
 export function routineEffectId(runId: string, stateKey: string): string {
   return derivedId("routine-effect", runId, stateKey);
 }
@@ -76,16 +60,13 @@ function derivedId(purpose: string, runId: string, stateKey: string): string {
   ].join("-");
 }
 
-/** Narrow surface the scheduler needs; `@tulipfarm/storage`'s `RunStore` satisfies it. */
 export interface RoutineStateScheduleStore {
   ensureState(input: EnsureStateInput): Promise<EnsureStateResult>;
 }
 
 export interface ScheduleRoutineStateInput {
   readonly run: PersistedRun;
-  /** Durable State occurrence key. It may differ from the authored key for bounded fan-out. */
   readonly stateKey: string;
-  /** State name in the pinned Routine definition. */
   readonly definitionStateKey: string;
   readonly resolvedInput: Record<string, unknown>;
   readonly createdAt: string;

@@ -5,23 +5,7 @@ import type {
   IntegrationHttpResponse,
 } from "@tulipfarm/integrations";
 
-/**
- * In-memory GitHub and Jira providers for the GitHub → Jira triage vertical slice.
- *
- * These are fakes of the *provider*, not of the adapters: they answer the exact paths, bodies, and
- * status codes the maintained adapters send, so the adapters, the Tool Broker, the effect ledger,
- * and reconciliation all run unmodified. Three behaviours are deliberately real rather than
- * stubbed, because the phase exists to prove them:
- *
- * - **Idempotency has to be earned.** Nothing here deduplicates on a key the provider does not
- *   have. A repeated comment is a second comment unless the adapter's marker read-back finds the
- *   first, and a repeated Jira create is a second issue unless the label search finds it.
- * - **Failure has a phase.** `applyThenFail` mutates and *then* returns the error, which is the
- *   case a retry would corrupt; `failNext` returns the error without mutating. Both look identical
- *   to the caller, which is precisely why the effect is ambiguous and must be reconciled.
- * - **Credentials are checked.** A request arriving without the leased token is rejected, so a
- *   dispatch path that skipped the Secret Broker cannot quietly pass.
- */
+/** Provider fakes: no hidden idempotency, phase-aware faults, and credential checks. */
 
 const REPOSITORY = "tulip/farm";
 const JIRA_PROJECT = "ENG";
@@ -89,7 +73,7 @@ function stringList(value: unknown): string[] {
     : [];
 }
 
-/** Shared fault plumbing: a queued fault fires once, and `offline` fires until cleared. */
+/** Queued faults fire once; `offline` fires until cleared. */
 abstract class FaultInjectingProvider {
   /** Every request fails while true — a provider outage, not a single lost response. */
   offline = false;
@@ -215,10 +199,7 @@ export class GitHubProvider extends FaultInjectingProvider implements Integratio
       : json(200, this.issueBody(record));
   }
 
-  /**
-   * GitHub issue search over the seeded repository. The subject issue is excluded the way the
-   * provider would: an issue is never its own duplicate candidate.
-   */
+  /** Excludes the subject issue: an issue is never its own duplicate candidate. */
   private search(query: string): IntegrationHttpResponse {
     const free = query
       .split(" ")
@@ -384,11 +365,7 @@ export class JiraProvider extends FaultInjectingProvider implements IntegrationH
       : json(200, this.issueBody(record));
   }
 
-  /**
-   * The two JQL shapes the adapter issues: a label lookup (idempotency and reconciliation) and an
-   * assignee workload count (availability evidence). Anything else matches nothing rather than
-   * guessing at a semantics this fake does not implement.
-   */
+  /** Supports only adapter JQL shapes; unknown JQL matches nothing instead of guessing. */
   private search(jql: string): IntegrationHttpResponse {
     const label = /^labels = "(.+)"$/.exec(jql);
     const matched =

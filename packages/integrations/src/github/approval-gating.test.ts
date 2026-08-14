@@ -3,14 +3,7 @@ import { ToolBroker, ToolCatalog, type ToolIntent } from "@tulipfarm/tool-broker
 import { describe, expect, it } from "vitest";
 import { GITHUB_TOOL_CONTRACTS, GITHUB_TOOL_IDS } from "./contracts";
 
-/**
- * Phase 9 cross-cutting check: approval gating is guardrail-rule-driven, not automatic from
- * `riskClass` (see `packages/authz/src/guardrails/engine.ts` — nothing reads `riskClass` off a
- * Tool contract). The mechanism is provider-neutral, but each high-risk action still needs its own
- * `require_approval` rule wired by the deployment. This asserts the two highest-risk PR/commit
- * contracts (Phase 5/6) gate correctly once such a rule exists, mirroring the pattern already
- * proven for `issueClose` in `apps/worker/test/e2e/github-jira-triage/harness.ts`.
- */
+/** Approval is driven by `require_approval` guardrails, not Tool `riskClass`. */
 
 const catalog = ToolCatalog.load(GITHUB_TOOL_CONTRACTS);
 const broker = new ToolBroker(catalog);

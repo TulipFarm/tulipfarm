@@ -1,9 +1,4 @@
-/**
- * Category retention (SPEC §20: "Retention varies by category."). A category is the caller's
- * classification of an event or segment (e.g. security, access, financial) — this module never
- * infers category from event content; it only evaluates a supplied category against policy and
- * legal hold.
- */
+/** Category retention uses caller-supplied category only; legal hold wins. */
 
 import { isDeletionBlocked, type LegalHold } from "./legal-hold";
 
@@ -53,10 +48,7 @@ export function isRetentionExpired(
   return now.getTime() >= expiresAt;
 }
 
-/**
- * Whether an item in `category`/`target` may be deleted now: retention must have expired AND no
- * legal hold may block it. Hold always wins over an expired policy.
- */
+/** Delete only after retention expires and no legal hold blocks it. */
 export function eligibleForDeletion(
   businessId: string,
   category: string,

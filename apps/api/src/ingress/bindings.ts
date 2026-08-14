@@ -7,37 +7,13 @@ import { dotPath, renderVarTemplate } from "./template";
 /** Actor id stamped on tool calls made by the ingress engine (no human session). */
 export const INGRESS_ACTOR = "integration-ingress";
 
-/**
- * Run identity for an ingress-driven tool call. Declarative egress tools reserve an Effect keyed
- * on `(runId, toolCallId)`, so this is not bookkeeping — it decides whether a repeat call is
- * deduplicated or executed again:
- *
- * - A **reply** passes a stable pair, so a provider redelivering the same webhook posts once.
- * - A **read** (identity resolution) passes a fresh `toolCallId`, because a stable one would make
- *   the Effect store replay the first answer forever and pin a user's email to whatever it was
- *   the first time they spoke.
- */
+/** Ingress Effect identity: stable for replies, fresh for reads to avoid stale replay. */
 export interface IngressRunContext {
   runId: string;
   toolCallId: string;
 }
 
-/**
- * Execute a manifest-declared tool binding through the integration's OWN registry tools —
- * the only outbound path the ingress engine has.
- *
- * The name is derived with `declarativeToolName`, the same function the declarative egress
- * runtime registers under, so an integration's `ingress.chat.reply` binding resolves the tools
- * its own `egress` block publishes. It is imported rather than re-spelled here because the two
- * halves silently do nothing when they disagree: a binding that resolves no tool returns
- * `not_found`, which reads as "the manifest named a tool it does not have" rather than
- * "ingress and egress disagree about naming".
- *
- * Resolution stays scoped to the integration because `slug` is the installed slug, never
- * anything the inbound payload controls — a manifest cannot bind another integration's tools.
- * Args are var-templated: strings substitute, nested objects and arrays are walked, and other
- * JSON values pass through untouched.
- */
+/** Executes through this integration's egress tools; `slug` is installed state, never inbound. */
 export async function executeToolBinding(
   registry: ToolRegistry,
   slug: string,
@@ -62,11 +38,7 @@ export async function executeToolBinding(
   });
 }
 
-/**
- * Pull a dot-path value out of a tool result. MCP results arrive as CallToolResult envelopes
- * (structuredContent object and/or `content` text blocks holding JSON), so try, in order:
- * the data itself, structuredContent, then each parseable text block.
- */
+/** Reads dot-paths from data, `structuredContent`, then parseable JSON text blocks. */
 export function extractFromToolResult(data: unknown, path: string): unknown {
   const direct = dotPath(data, path);
   if (direct !== undefined) return direct;
@@ -93,14 +65,7 @@ export function extractFromToolResult(data: unknown, path: string): unknown {
   return undefined;
 }
 
-/**
- * Substitute `{var}` templates through an arbitrarily shaped arg tree.
- *
- * Walking the whole tree rather than only its top level is what lets a binding target an `openapi`
- * egress tool, whose request body sits nested under `body`. Non-string leaves are returned as they
- * were declared, so a manifest can state a real boolean or number where the provider demands one
- * — templating everything into strings would make that impossible to express.
- */
+/** Recursively substitutes string templates; non-string leaves stay typed as declared. */
 function renderArgs(value: unknown, vars: Record<string, string>): unknown {
   if (typeof value === "string") return renderVarTemplate(value, vars);
   if (Array.isArray(value)) return value.map((entry) => renderArgs(entry, vars));

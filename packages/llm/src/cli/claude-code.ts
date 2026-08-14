@@ -14,43 +14,14 @@ import { createCliJail, jailedEnv } from "./jail";
 import { firstJsonObject, jsonModeInstruction } from "./structured";
 import { functionTools, type RenderedImage, renderTranscript } from "./transcript";
 
-/**
- * `LanguageModelV4` over `@anthropic-ai/claude-agent-sdk` — lets a user with a Claude Pro/Max
- * subscription (no API key) run TulipFarm. See `docs/plans/cli-agent-providers.md` for the full
- * design; the short version: one `query()` call per AgentLoop iteration, tools are declared to
- * the SDK but never executed — the assistant message carrying `tool_use` blocks is captured and
- * the query aborted before the SDK would ever invoke them, so the real dispatch stays on
- * TulipFarm's Tool Broker. `settingSources: []` ignores the host's own `~/.claude` config
- * entirely; the credential and everything else the subprocess can see is scoped by `jail.ts`.
- */
+/** Claude Code declares tools only to capture `tool_use`; Tool Broker dispatches them. */
 
-/**
- * The credential is handed to the child explicitly (`CLAUDE_CODE_OAUTH_TOKEN` in `extraVars`), so
- * nothing Anthropic-shaped is inherited from the host.
- *
- * `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_BASE_URL` were passed through here
- * once and must not come back. TulipFarm's own `api_key_ref: env://ANTHROPIC_API_KEY` escape hatch
- * makes that variable a *supported* way to configure the API-keyed `anthropic` provider, so any
- * deployment running both providers has it set — and the CLI changes credential selection when it
- * sees one. Verified against the vendored `claude` 0.3.211 with a jailed `HOME` and `env -i`:
- * with the OAuth token alone it authenticates as the subscription; add `ANTHROPIC_API_KEY` and it
- * refuses with "a non-OAuth Anthropic credential cannot satisfy the org pin". On a host without
- * that pin the failure is worse than loud — the API key answers, billing the operator's account
- * for a turn TulipFarm reports as unpriced. An ambient `ANTHROPIC_BASE_URL` is the same class of
- * hazard: it silently redirects subscription traffic to a third party.
- */
+/** Only OAuth token reaches the child; ambient Anthropic env can reroute or rebill traffic. */
 const CLAUDE_ENV_PASSTHROUGH = [] as const;
 
 const MCP_SERVER_NAME = "tulipfarm";
 
-/**
- * Tools reach the model through an in-process MCP server, and Claude Code namespaces every MCP
- * tool as `mcp__<server>__<tool>` — that is the name the model puts in its `tool_use` blocks.
- * TulipFarm's AgentLoop resolves a call against the bare names it exposed
- * (`exposed.get(call.name)`, `packages/agent-runtime/src/loop/loop.ts`), so handing the namespaced
- * form straight through refuses *every* call as `tool_not_available`. Strip the one prefix this
- * adapter is responsible for; anything else passes untouched rather than being mangled.
- */
+/** Strips Claude Code MCP prefixes so AgentLoop sees bare Tool names. */
 const MCP_TOOL_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 
 export function stripMcpPrefix(name: string): string {
@@ -90,17 +61,7 @@ function deltaText(message: SDKMessage): string | undefined {
   return undefined;
 }
 
-/**
- * A failed turn arrives as a `result` message whose `result` string is the raw provider error —
- * there is no status code to switch on. Classifying it matters more than it looks: an
- * unclassified credential failure becomes a generic `model_error`, which `isHardFailure`
- * (`packages/llm/src/fallback.ts`) treats as transient, so one expired token walks the entire
- * fallback chain instead of stopping at the provider that actually needs re-authenticating.
- *
- * These patterns are the observed wordings, not guesses — notably Claude Code reports a rejected
- * credential as "Not a valid API key for this workspace", which no "invalid api key" match would
- * ever catch. They are frozen in `claude-code.test.ts` so an SDK rewording fails in CI.
- */
+/** Observed result strings classify credential failures because Claude Code returns no status code. */
 const AUTH_FAILURE_PATTERNS = [
   /not a valid api key/i,
   /invalid api key/i,
@@ -124,9 +85,7 @@ export function isAuthFailure(text: string): boolean {
 const REAUTH_HINT =
   "Claude Code credential rejected — run `claude setup-token` and paste the new token in Settings.";
 
-/** Tools are declared to the SDK so it can emit `tool_use` blocks, but never actually executed —
- * every real call is captured off the assistant message and dispatched through the Tool Broker
- * instead. This handler exists only to satisfy the SDK's `tool()` API; reaching it is a bug. */
+/** Tool handlers must never run; Tool Broker dispatches captured calls. */
 function declareTools(tools: LanguageModelV4CallOptions["tools"]) {
   return functionTools(tools).map((definition) => {
     const schema = fromJSONSchema(
@@ -192,12 +151,7 @@ export class ClaudeCodeModel extends CliLanguageModel {
           settingSources: [],
           strictMcpConfig: true,
           mcpServers: { [MCP_SERVER_NAME]: server },
-          // `allowedTools` is the whole permission story here. Nothing this adapter declares is
-          // ever meant to run — the assistant message carrying `tool_use` is captured and the
-          // query aborted before the SDK reaches execution — so the `bypassPermissions` /
-          // `allowDangerouslySkipPermissions` pair qm needs (its bridged tools genuinely execute)
-          // would be pure attack surface. An explicit allowlist also means a stray call to
-          // anything else cannot silently park the subprocess on an interactive prompt.
+          // Only `allowedTools` permits tool names; handlers still must not execute.
           allowedTools,
           persistSession: false,
           includePartialMessages: true,
@@ -206,12 +160,7 @@ export class ClaudeCodeModel extends CliLanguageModel {
         },
       });
 
-      /**
-       * The SDK re-reports a message's cumulative usage on every `assistant` message it emits for
-       * that message id, so summing naively inflates input tokens — and with them every budget and
-       * metric derived from them. Keep the highest figure seen per id and sum the ids at the end
-       * (ported from `qm/src/harness/claude-harness.ts`).
-       */
+      /** Deduplicate cumulative assistant usage by message id before summing. */
       const usageById = new Map<string, { input: number; output: number }>();
       let buffered = "";
       let sawToolCall = false;

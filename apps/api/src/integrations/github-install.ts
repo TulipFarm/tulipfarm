@@ -8,18 +8,7 @@ import { integrationAppById, integrationAppField, type SecretsService } from "@t
 import type { IntegrationStore } from "@tulipfarm/storage";
 import { GitHubInstallHttp } from "./github-http";
 
-/*
- * Records what a completed GitHub App installation means to the rest of the platform.
- *
- * The credentials themselves are no longer acquired here — `integrations/github/manifest.yml`
- * declares an `app_manifest` step (GitHub creates the App and hands back the private key) followed
- * by an `install` step (the operator picks repos, the callback captures `installation_id`), both
- * driven by the generic auth broker. What remains is GitHub-specific domain work the broker has no
- * business knowing about: resolving the installation's account, listing the repos it actually
- * grants, and writing the `integration_apps` / `integrations` / `integration_access_grants` rows.
- *
- * Runs from the shared `onConnected` hook, the same way `ensureDefaultSlackRoute` does for Slack.
- */
+/** Records completed GitHub App installs; generic integration auth owns credential acquisition. */
 
 const GITHUB_APP = integrationAppById("github");
 
@@ -27,7 +16,6 @@ export interface EnsureGitHubInstallationDeps {
   integrations: IntegrationStore;
   secretsService: SecretsService;
   businessId: string;
-  /** Overridable for tests — defaults to a real `api.github.com` client. */
   http?: IntegrationHttpPort;
   now?: () => Date;
   log?: { warn: (obj: unknown, message?: string) => void };
@@ -62,7 +50,6 @@ export interface InstalledRepository {
   private: boolean;
 }
 
-/** The repos an installation currently grants, as GitHub reports them for its own token. */
 export async function listInstalledRepositories(
   http: IntegrationHttpPort,
   installationToken: string
@@ -87,14 +74,7 @@ export async function listInstalledRepositories(
   return repositories;
 }
 
-/**
- * Idempotent: every write is an upsert keyed on the installation, so a re-run after a repo
- * selection change refreshes the grant rather than duplicating it.
- *
- * Fails soft. This runs after the credentials are already stored and committed, so throwing would
- * turn a successful connect into an error page while leaving the App connected. A failure here
- * leaves the installation unrecorded, which the next connect attempt repairs.
- */
+/** Fail soft after credential storage; reconnects upsert installation grants. */
 export async function ensureGitHubInstallation(
   deps: EnsureGitHubInstallationDeps,
   installationId: string

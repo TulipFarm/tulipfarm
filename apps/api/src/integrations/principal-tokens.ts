@@ -1,19 +1,7 @@
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { Queryable } from "../db";
 
-/**
- * Per-principal provider credentials — authority layer L5's *credential* half (D7).
- *
- * A Tool declaring `credentialMode: "user"` or `"user_preferred"` must spend the calling human's
- * own token, not the deployment's service credential. That is not a convenience: the provider's
- * ACLs are the only thing that can decide whether *this person* may touch *that repository*, and a
- * bot token makes every caller look identical to the provider, so those ACLs stop protecting
- * anything. Acting as the human is what puts them back in the path.
- *
- * No credential material is stored here. Values are sealed into the encrypted secrets store and
- * the row carries only the key — the same split `connection.yaml` makes with `secret://` refs, for
- * the same reason: a database dump taken without the DEK must be inert.
- */
+/** Per-principal credential keys; sealed material stays in the secrets store. */
 
 /** Where a principal's sealed provider credential lives in the secrets store. */
 export function principalSecretKey(
@@ -41,10 +29,7 @@ export interface PrincipalProviderTokenDoc {
 }
 
 export interface PrincipalProviderTokenRepo {
-  /**
-   * The principal's live credential for a provider, or `null`. Revoked rows resolve to `null` —
-   * revocation must take effect on the next call, not on the next cleanup.
-   */
+  /** Revoked credentials resolve to `null` on the next call, not cleanup. */
   find(
     principal: { readonly kind: string; readonly id: string },
     provider: string
@@ -81,16 +66,7 @@ export class PgPrincipalProviderTokenRepo implements PrincipalProviderTokenRepo 
     private readonly businessId: string = DEPLOYMENT_BUSINESS_ID
   ) {}
 
-  /**
-   * A row is only a credential while it is *usable*. Both a tombstone and a lapsed expiry make it
-   * unusable, and nothing in the platform refreshes a principal token — there is no refresh path
-   * from `refresh_secret_key` today, so an expired row is dead, not merely stale.
-   *
-   * Filtering expiry here rather than at the caller is what keeps the answer honest: this method is
-   * how the resolver decides "has this person connected?", and an expired row read as connected
-   * turns an actionable "connect your GitHub" prompt into an opaque provider 401 mid-call, after
-   * the gate has already allowed the effect.
-   */
+  /** Returns only usable credentials; revoked or expired rows are not connected. */
   async find(
     principal: { readonly kind: string; readonly id: string },
     provider: string
@@ -120,10 +96,7 @@ export class PgPrincipalProviderTokenRepo implements PrincipalProviderTokenRepo 
     return rows.map((row) => (row as Record<string, unknown>).provider as string);
   }
 
-  /**
-   * Reconnecting clears `revoked_at`: the same person completing the flow again is granting the
-   * access back, and leaving the tombstone would make the new credential unresolvable.
-   */
+  /** Reconnect clears `revoked_at` so the new credential is resolvable. */
   async upsert(doc: PrincipalProviderTokenDoc): Promise<void> {
     await this.q.query(
       `INSERT INTO principal_provider_tokens (
@@ -170,11 +143,7 @@ export class PgPrincipalProviderTokenRepo implements PrincipalProviderTokenRepo 
 }
 
 /** Test/dev double with the same revocation and reconnect semantics as the Postgres adapter. */
-/**
- * The double must answer "is this a credential?" exactly as the SQL does, or a test proves a
- * property the deployment does not have. Mirrors `revoked_at IS NULL AND (expires_at IS NULL OR
- * expires_at > now())`.
- */
+/** Test double mirrors SQL usability: not revoked and not expired. */
 function usable(row: PrincipalProviderTokenDoc): boolean {
   return row.revokedAt === null && (row.expiresAt === null || row.expiresAt.getTime() > Date.now());
 }

@@ -27,12 +27,9 @@ import { isGitHubInstalled } from "./github-status";
 import { readIntegrationLock, writeIntegrationLock } from "./install";
 import { refuseNonOperator } from "./operator";
 
-/*
- * Generic connect/disconnect backend for Soul-declared integrations (manifest.yml + optional
- * connection.yaml, packages/soul/src/published-loader.ts's loadIntegrations()). Mirrors Skills'
- * install/delete pattern (apps/api/src/soul/skills/routes.ts) — write files under the soul repo,
- * one gitSync.withSync() commit, soulLoader.reload(). No scan/install/marketplace/oauth routes:
- * those are out of scope (arbitrary third-party integration installs, deferred to a future task).
+/**
+ * Generic Soul integration connect/disconnect backend; no scan, marketplace, or bespoke OAuth
+ * routes.
  */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -48,12 +45,7 @@ interface MergedIntegration {
   setupGuide?: string;
 }
 
-// The manifest and setup guide are static, code-shipped content — a business never customizes
-// scopes, field instructions, or the app-manifest text of a bundled integration. Once an
-// integration is installed, only its connection state (enabled/env) is soul-owned; the manifest
-// itself always comes from the bundled template so a code update reaches installed integrations
-// without reinstalling. Soul's own manifest.yml copy is kept only as an install-time record, not
-// read back.
+// Bundled manifests stay code-owned after install; Soul owns only connection state.
 export function mergeIntegrations(
   soulLoader: SoulLoader,
   bundled: ReadonlyMap<string, BundledIntegration>
@@ -92,15 +84,7 @@ function toSummary(entry: MergedIntegration) {
   };
 }
 
-/**
- * The catalog an operator browses: everything present in this deployment, plus the curated
- * third-party entries that are not installed yet.
- *
- * These are one list rather than two pages because "installed" is not a distinction an operator
- * makes — every bundled integration is installed by virtue of shipping in the image, so a tab
- * labelled that way showed things nobody installed and hid things they were looking for. What
- * matters is whether an integration is connected, which is a property of an entry, not a page.
- */
+/** Catalog mixes shipped and curated integrations; connected state is per entry. */
 async function toCatalog(
   merged: Map<string, MergedIntegration>,
   registry: ReadonlyMap<string, RegistryEntry>
@@ -191,13 +175,10 @@ const IntegrationSummarySchema = {
     description: { type: "string" },
     category: { type: "string" },
     homepage: { type: "string" },
-    /** Simple Icons path data for the brand mark; absent when the brand has none. */
     iconPath: { type: "string" },
-    /** The brand's hex without `#`, from the icon set or the registry. Legibility is the client's. */
     iconColor: { type: "string" },
     version: { type: "string" },
     maintainer: { type: "string" },
-    /** Git source of a curated third-party integration; absent when it ships in the image. */
     source: { type: "string" },
     installed: { type: "boolean" },
     status: { type: "string", enum: ["connected", "disconnected"] },
@@ -213,11 +194,7 @@ export function registerIntegrationRoutes(
   requireAuth: PreHandler,
   onConnected?: (name: string) => Promise<void>,
   githubStatus?: { integrations: IntegrationStore; businessId: string },
-  /**
-   * Reconciles manifest-declared Tools against the live registry. Connect syncs through
-   * `onConnected` (shared with the OAuth callback); disconnect and uninstall sync here, so
-   * revoking an integration also revokes the Tools it published.
-   */
+  /** Disconnect and uninstall sync here so revoked integrations revoke their Tools. */
   declarativeTools?: { sync: () => number; countFor: (slug: string) => number },
   // Optional: record connect/disconnect/remove as audit evidence. Connecting an integration grants
   // Agents a new external reach, which is exactly the kind of change an auditor asks about.
@@ -344,7 +321,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      // Deployment-wide credential write: operator only (see refuseNonOperator).
       if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
@@ -427,7 +403,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      // Deployment-wide credential write: operator only (see refuseNonOperator).
       if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name)) {
@@ -471,7 +446,6 @@ export function registerIntegrationRoutes(
       },
     },
     async (req, reply) => {
-      // Deployment-wide credential write: operator only (see refuseNonOperator).
       if (refuseNonOperator(req, reply)) return reply;
       const { name } = req.params as { name: string };
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {

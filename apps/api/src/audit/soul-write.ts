@@ -1,16 +1,4 @@
-/**
- * Audit emission for routes that mutate the Soul repository directly.
- *
- * These routes bypass the Run path entirely — they write files and commit git themselves — so
- * nothing upstream records who reshaped the business's configuration. Without this, the audit
- * ledger answers "what did an Agent do" but not "who changed what the Agents *are*", which is the
- * more consequential question.
- *
- * The helper is shared rather than copied per route file for a specific reason: `reasonCodes` and
- * the actor-extraction shape are what make these events queryable as a class. Four independent
- * copies drift, and a drifted `reasonCode` is invisible until someone runs the query that needed
- * it.
- */
+/** Audit helper for direct Soul writes, which bypass Run-mediated audit emission. */
 
 import type { FastifyRequest } from "fastify";
 import type { UserDoc } from "../auth/users";
@@ -19,14 +7,7 @@ import type { AuditService } from "./service";
 /** Marks an event as a direct Soul repository write rather than a Run-mediated change. */
 export const SOUL_DIRECT_WRITE = "SOUL_DIRECT_WRITE";
 
-/**
- * Records a Soul mutation, attributed to the signed-in user.
- *
- * `recordOrWarn`, not `record`: every call site invokes this *after* the file write and git commit
- * have already landed. Throwing would report an error for work that actually succeeded — and the
- * event is lost either way, so the failed request buys nothing but a confused operator and a
- * client that retries a write it already made.
- */
+/** Records after commit; audit failure must not turn success into retryable failure. */
 export function makeSoulAuditWriter(audit?: AuditService) {
   return (
     req: FastifyRequest,
@@ -46,24 +27,10 @@ export function makeSoulAuditWriter(audit?: AuditService) {
 /** What {@link makeSoulAuditWriter} returns — for call sites that store it on a deps object. */
 export type SoulAuditWriter = ReturnType<typeof makeSoulAuditWriter>;
 
-/**
- * A remote URL with any embedded credential removed, safe to keep forever.
- *
- * Operators paste `https://user:token@host/repo` into both the git-remote and skill-install
- * flows, and the audit package's protected-value patterns only catch *recognised* token formats
- * (`ghp_`, `xoxb-`, `sk-`). A generic password in the userinfo position would sail through and be
- * written into an append-only ledger that is deliberately hard to erase.
- *
- * Returns `"unparsed"` rather than the original string whenever the input is not a plain remote
- * URL, an scp-style locator, or credential-free shorthand. That is deliberately strict: an input
- * this function cannot fully account for is exactly the one most likely to be hiding a credential,
- * and the ledger cannot be edited afterwards.
- */
+/** Returns only credential-free git locators safe for the append-only audit ledger. */
 export function redactRemoteUrl(remoteUrl: string): string {
   const candidate = remoteUrl.trim();
-  // The WHATWG URL parser *silently deletes* tab, newline and CR and folds whatever followed into
-  // the path — so `https://h/r\nAUTH: tok` parses to path `/rAUTH:%20tok` and the secret survives
-  // redaction. Reject these outright rather than trying to preserve a mangled URL.
+  // WHATWG URL parsing can hide control characters; reject before redaction.
   if (hasControlOrSpace(candidate)) return "unparsed";
   if (candidate.length > MAX_REMOTE_LENGTH) return "unparsed";
   // scp-style has no `://`, and its user-less form (`host:path`) otherwise parses as scheme
@@ -90,14 +57,7 @@ export function redactRemoteUrl(remoteUrl: string): string {
   }
 }
 
-/**
- * Credential-free shorthand: `acme/skills`, `acme/skills#main`, `builtin`, `github.com/acme/x`.
- *
- * Skill and Integration sources are usually written this way, not as full URLs — so without this
- * branch the commonest inputs of all collapse to `"unparsed"` and the audit event loses the one
- * fact it exists to record. A credential can only ride in via userinfo, which requires `@` (or a
- * `:` before a host, already handled by `scpStyle`), so a string with neither cannot carry one.
- */
+/** Allows credential-free shorthand sources that cannot carry URL userinfo. */
 function shorthand(candidate: string): string {
   const [locator, ...rest] = candidate.split("#");
   if (rest.length > 1) return "unparsed";
@@ -121,31 +81,12 @@ const MAX_SHORTHAND_SEGMENTS = 4;
 /** Beyond this a "remote" is a blob, not a locator, and is not worth keeping forever. */
 const MAX_REMOTE_LENGTH = 512;
 
-/**
- * The same string with only an embedded credential removed — everything else byte-identical.
- *
- * This is the counterpart to `redactRemoteUrl`, for fields that are *functional provenance* rather
- * than ledger evidence: `skills-lock.json` is committed to the Soul repo and served back out of
- * the API, so it must faithfully record `file://` and shorthand sources that `redactRemoteUrl`
- * deliberately refuses. The strict policy is right for an append-only ledger and wrong here.
- *
- * Deliberately not `new URL`: that parser silently deletes control characters and rewrites the
- * path, so round-tripping through it can both mangle a legitimate source and, with a crafted
- * input, carry a secret past redaction. Matching greedily up to the last `@` before the first `/`
- * is what defeats `https://a@b:token@host/r`, where a non-greedy match leaves the token behind.
- */
+/** Removes only userinfo; provenance fields preserve non-URL/file sources byte-for-byte. */
 export function stripUrlCredentials(source: string): string {
   return source.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/]*@/, "$1");
 }
 
-/**
- * scp-style (`git@host:org/repo`, or `host:org/repo` with the user implied).
- *
- * Tried before `new URL` for scheme-less input because the user-less form parses "successfully"
- * as scheme `host:` — which would be rejected as an unknown scheme and lose real provenance.
- * The user part is dropped so this cannot disagree with the URL branch about what identifies a
- * remote; scp syntax has no password field, so nothing else here is secret.
- */
+/** scp-style remotes are tried before `URL`; user-less forms otherwise parse as schemes. */
 function scpStyle(candidate: string): string {
   const scp = /^(?:[^@\s/:]+@)?([A-Za-z0-9._-]+):([^\s]+)$/.exec(candidate);
   if (!scp) return "unparsed";
@@ -157,12 +98,7 @@ function scpStyle(candidate: string): string {
   return `${host}:${path}`;
 }
 
-/**
- * True for any character at or below `0x20`, plus DEL.
- *
- * Written as a scan rather than a regex because the equivalent character class is itself made of
- * control characters, which is exactly the construct `noControlCharactersInRegex` exists to catch.
- */
+/** Avoids a regex made from control characters, which Biome rejects. */
 function hasControlOrSpace(value: string): boolean {
   for (let i = 0; i < value.length; i += 1) {
     const code = value.charCodeAt(i);

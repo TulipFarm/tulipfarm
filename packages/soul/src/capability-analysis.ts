@@ -1,15 +1,6 @@
 import type { AuthoredDefinition, DefinitionIndex, SoulSemanticIssue } from "./refs";
 
-/**
- * Non-amplification analysis (SPEC invariant 3, §12, §11). Permission never broadens through a
- * dependency (a referenced Tool a definition points at) or a generated/authored plan (a Routine
- * State). Two static widenings are rejected here:
- *
- * 1. An Agent's `permissionCeiling.maxRiskClass` bounds the Tools it may request; referencing an
- *    allowed Tool whose `riskClass` exceeds that ceiling widens authority past the ceiling.
- * 2. A Routine `tool` State cannot dispatch to a `destination` the referenced ToolContract does
- *    not list in `allowedDestinations` — a plan can never widen a Tool's declared destinations.
- */
+/** Reject static authority widening through Agent ceilings or Routine Tool destinations. */
 
 const RISK_RANK: Record<string, number> = { low: 0, medium: 1, high: 2 };
 

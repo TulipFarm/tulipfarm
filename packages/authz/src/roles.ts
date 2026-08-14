@@ -1,9 +1,4 @@
-/**
- * Custom composable roles per SPEC §12: administrators define roles assignable to canonical
- * principal kinds; roles compose through parents but must stay cycle-free; assignment never
- * crosses a business boundary or a principal-kind boundary. Resolution fails closed — an
- * unknown or cyclic reference is an error, and an expired role contributes nothing.
- */
+/** Roles compose cycle-free, stay within business/kind boundaries, and resolve fail-closed. */
 
 import type { AccessGrant } from "./grants";
 import type { Principal, PrincipalKind } from "./principals";
@@ -93,12 +88,7 @@ export function assertRoleAssignable(
   }
 }
 
-/**
- * Flattens the grants of `roleIds` and their composed parents. Fails closed: an unknown role
- * throws {@link RoleResolutionError}, a cycle throws {@link RoleCycleError}, a cross-business
- * composition throws {@link RoleAssignmentError}, and an expired role contributes nothing (its
- * parents included). Each role is visited once.
- */
+/** Flattens role grants; unknown, cyclic, or cross-business composition fails closed. */
 export function collectRoleGrants(
   roleIds: readonly string[],
   rolesById: ReadonlyMap<string, Role>,

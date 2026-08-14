@@ -42,7 +42,6 @@ export interface BudgetDecision {
   readonly consumed: number;
   readonly limit: number | null;
   readonly remaining: number | null;
-  /** Present only when the budget is exhausted. */
   readonly disposition?: BudgetExhaustionPolicy;
 }
 
@@ -62,11 +61,7 @@ export class BudgetError extends Error {
 
 const MICROS_PER_USD = 1_000_000;
 
-/**
- * Converts an authored USD ceiling to the integer micro-USD unit used by Run limits. Positive
- * fractional budgets round up so a tiny explicit budget remains at least one micro-USD instead of
- * silently becoming the hard-failing zero ceiling.
- */
+/** Positive fractional USD ceilings round up to at least one micro-USD, never zero. */
 export function usdToCostMicros(maxCostUsd: number): number {
   if (!Number.isFinite(maxCostUsd) || maxCostUsd < 0) {
     throw new LimitError("invalid_limit", "costMicros");
@@ -78,7 +73,6 @@ export function usdToCostMicros(maxCostUsd: number): number {
   return micros;
 }
 
-/** The execution ceilings a ModelProfile contributes at SPEC §9.1's narrowest scope. */
 export function modelProfileBudgetScopedLimits(
   profile: Pick<ModelProfileSpec, "budgets">
 ): ScopedLimits | undefined {
@@ -102,7 +96,6 @@ export function resolveModelProfileBudgetLimits(
   return resolveLimits(modelLimits === undefined ? scoped : [...scoped, modelLimits]);
 }
 
-/** Narrow surface `RunBudgetManager` needs; `@tulipfarm/storage`'s `BudgetStore` satisfies it. */
 export interface RunBudgetStore {
   open(input: {
     businessId: string;
@@ -119,10 +112,7 @@ export interface RunBudgetStore {
 }
 
 /**
- * Durable per-Run budget ledger over narrowest-wins limits (SPEC §9.1). Consumption is committed
- * before the work it pays for, so a crash or a duplicate retry can never spend a budget twice.
- * Ceilings are write-once: re-opening a Run's budget after a restart keeps the original bound, so
- * neither a restart nor an Agent proposal can raise a limit.
+ * Durable per-Run ledger: commit spend before work, and keep write-once ceilings on restart.
  */
 export class RunBudgetManager {
   constructor(private readonly store: RunBudgetStore) {}
@@ -140,7 +130,6 @@ export class RunBudgetManager {
     });
   }
 
-  /** Charges a budget. Exhaustion is a typed decision, not an exception. */
   async consume(input: ConsumeBudgetInput): Promise<BudgetDecision> {
     if (!Number.isSafeInteger(input.amount) || input.amount <= 0) {
       throw new BudgetError("invalid_consumption", input.key);

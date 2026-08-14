@@ -1,8 +1,6 @@
 /*
- * Shared debounced page-search hook for the knowledge wiki (⌘K palette + sidebar box). Latest-wins
- * (a sequence guard drops out-of-order responses), dedupes by pageId, and on a blank query falls
- * back to the Knowledge "Recently edited" overview. Scope "space" passes the active spaceId so results
- * stay within the current space; "all" searches every space.
+ * Latest-wins (a sequence guard drops out-of-order responses), dedupes by pageId, and on a
+ * blank query falls back to the Knowledge "Recently edited" overview.
  */
 import { useEffect, useRef, useState } from "react";
 import {
@@ -49,8 +47,6 @@ export interface UsePageSearch {
 
 export function usePageSearch(spaceId?: string | null): UsePageSearch {
   const [query, setQuery] = useState("");
-  // The palette mounts once and `spaceId` changes on navigation (no remount), so the default must be
-  // derived reactively — but an explicit user choice (override) sticks across routes.
   const [scopeOverride, setScopeOverride] = useState<SearchScope | null>(null);
   const scope: SearchScope = scopeOverride ?? (spaceId ? "space" : "all");
   const [results, setResults] = useState<PageSearchHit[]>([]);
@@ -59,7 +55,6 @@ export function usePageSearch(spaceId?: string | null): UsePageSearch {
 
   const trimmed = query.trim();
   const isZeroQuery = trimmed === "";
-  // Only scope to a space when "space" is selected AND we actually know the active space.
   const scopedSpace = scope === "space" && spaceId ? spaceId : undefined;
 
   useEffect(() => {

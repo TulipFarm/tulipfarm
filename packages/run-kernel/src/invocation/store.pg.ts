@@ -2,10 +2,6 @@ import type { Queryable, TransactionPort } from "@tulipfarm/storage";
 import type { ArtifactService } from "../artifacts";
 import type { DurableInvocationRecord, DurableInvocationStore } from "./gateway";
 
-/**
- * Binds an `ArtifactService` to an already-open transaction. A factory rather than an instance
- * because the service must publish on the same transaction as the Run, not on the pool.
- */
 export type TransactionalArtifactService = (transaction: Queryable) => ArtifactService;
 
 export const INVOCATION_STORAGE_STATEMENTS: readonly string[] = [
@@ -26,11 +22,7 @@ interface InvocationRow {
   run_id: string;
 }
 
-/**
- * PostgreSQL adapter. The deduplication claim, the request Artifact, the Run, and its
- * initial State commit together, so an API crash cannot acknowledge work that the durable dispatcher
- * cannot subsequently claim — nor leave a Run whose recorded input was never stored.
- */
+/** Deduplication, request Artifact, Run, and initial State commit atomically. */
 export class PgDurableInvocationStore implements DurableInvocationStore {
   constructor(
     private readonly transactions: TransactionPort,

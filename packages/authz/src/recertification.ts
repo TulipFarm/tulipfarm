@@ -1,9 +1,4 @@
-/**
- * Periodic access review (SPEC §12: sensitive grants and service identities require
- * recertification; SPEC §24 separation of duties). A grant under review stops counting the
- * instant it passes its review deadline without a recorded review — recertification fails
- * closed, it never auto-renews — and a reviewer can never recertify their own access.
- */
+/** Recertification fails closed after its deadline and denies self-review. */
 
 export interface RecertificationRecord {
   readonly principalId: string;

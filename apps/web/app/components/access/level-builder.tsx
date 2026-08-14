@@ -1,19 +1,10 @@
 /*
- * Create an access level.
- *
- * The screen this replaces was a chooser with three fixed choices and no way to make a fourth, so
- * an owner whose business did not happen to match "full access / everyday access" had nowhere to
- * go. This is the "make a fourth" path.
- *
- * Two rules shape it, and both come from mistakes already made on this surface:
- *
+ * The screen this replaces was a chooser with three fixed choices and no way to make a fourth,
+ * so an owner whose business did not happen to match "full access / everyday access" had
+ * nowhere to go. Two rules shape it, and both come from mistakes already made on this surface:
  * 1. **Every option comes from the server.** The capabilities listed here are derived from the
- *    Tools themselves, so the screen cannot offer permission to do something the gate would not
- *    recognise. Six separate bugs on this surface were the same bug — a hand-written list of
- *    actions drifting away from the vocabulary the gate actually evaluates — and a picker built
- *    from a local constant would be the seventh.
- * 2. **What cannot be granted is said out loud.** A picker that silently omits what it cannot
- *    express leaves the owner hunting for a permission the screen decided not to mention.
+ * Tools themselves, so the screen cannot offer permission to do something the gate would not
+ * recognise.
  */
 
 import { AlertTriangle, Check, Loader2, Pencil, Search } from "lucide-react";
@@ -36,7 +27,6 @@ function matches(capability: Capability, query: string): boolean {
   );
 }
 
-/** The level being edited, or `undefined` when the sheet is creating a new one. */
 export interface EditableLevel {
   slug: string;
   displayName: string;
@@ -64,9 +54,9 @@ export function LevelBuilder({
   const [error, setError] = useState<string | null>(null);
 
   /*
-   * Editing starts from what the level already grants, not from a blank sheet. An owner adding one
-   * capability must not have to remember and re-tick the other nine — and a half-filled sheet
-   * saved by mistake would silently strip access from everybody holding the level.
+   * Editing starts from what the level already grants, not from a blank sheet. An owner adding
+   * one capability must not have to remember and re-tick the other nine — and a half-filled
+   * sheet saved by mistake would silently strip access from everybody holding the level.
    */
   useEffect(() => {
     if (!open) return;
@@ -123,8 +113,6 @@ export function LevelBuilder({
       reset();
       onClose();
     } catch (err) {
-      // The server names the capability it could not grant and the reason a name was refused;
-      // replacing that with "Something went wrong" would hide the only actionable part.
       setError(
         err instanceof Error
           ? err.message

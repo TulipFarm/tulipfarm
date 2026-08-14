@@ -2,28 +2,13 @@ import type { ModelModality } from "./definitions/common";
 import type { ModelProfileSpec } from "./definitions/model";
 import type { LlmConfig, ModelSpec, ProviderConnection, ProviderEntry } from "./llm";
 
-/**
- * The catalog bridge that makes ModelProfile routing the *only* routing path.
- *
- * SPEC §17 routes on ModelProfiles. The sole authored source is `soul.yaml#llm`; this module
- * derives that config into the same `ModelProfileSpec` shape used by live Chat and immutable
- * publication bundles. One router and one source means Settings cannot update one representation
- * while durable Runs pin another.
- *
- * Capability is read from the pinned LiteLLM `spec` rather than guessed: it already carries
- * `supports_function_calling`, `supports_vision`, and `max_input_tokens`. Where the spec is silent
- * the derivation is deliberately *permissive on tools* and *conservative on modality* — matching
- * what the tier runtime actually did, so migrating a Soul cannot start denying turns that worked.
- */
+/** Derives `soul.yaml#llm` into ModelProfiles; permissive on tools, conservative on modality. */
 
 /** Effort a participant may ask for. `auto` resolves to the configured default. */
 export const EFFORT_PRESETS = ["auto", "fast", "balanced", "thorough"] as const;
 export type EffortPreset = (typeof EFFORT_PRESETS)[number];
 
-/**
- * The rungs `auto` can land on. `auto` is a request, not an answer: it names "let the deployment
- * decide", so it can never be the effort a call actually ran at.
- */
+/** Effort rungs `auto` can resolve to; `auto` is never the applied rung. */
 export const EFFORT_RUNGS = ["fast", "balanced", "thorough"] as const;
 export type EffortRung = (typeof EFFORT_RUNGS)[number];
 
@@ -70,8 +55,7 @@ export interface DerivedModelProfile extends ModelProfileSpec {
 }
 
 function modalitiesFor(spec: ModelSpec | undefined): ModelModality[] {
-  // Absent spec means text-only: claiming vision we cannot prove would let an image reach a model
-  // that silently drops it, which is the exact failure the modality dimension exists to prevent.
+  // Absent spec means text-only; do not claim vision we cannot prove.
   return spec?.supports_vision === true ? ["text", "image"] : ["text"];
 }
 
@@ -88,8 +72,7 @@ function profileFrom(
     connection,
     reasoning: spec?.supports_reasoning === true ? "high" : "medium",
     supports: {
-      // The tier runtime never gated on tool support, so an unpinned spec must not start denying
-      // tool turns that work today. Only an explicit `false` is treated as "cannot".
+      // Only explicit `false` denies tools; unpinned specs keep legacy tool behavior.
       tools: spec?.supports_function_calling !== false,
       structuredOutput: spec?.supports_function_calling !== false,
       contextWindowTokens: spec?.max_input_tokens ?? FALLBACK_CONTEXT_TOKENS,
@@ -114,14 +97,7 @@ export interface HoistedConnections {
   nameFor: (entry: ProviderEntry) => string;
 }
 
-/**
- * Lift per-entry credentials out of the tier config into named connections.
- *
- * The tier config lets each entry carry its own `api_key_ref`/`base_url`/`resource_name`, so two
- * entries naming the same provider may be two different accounts. Collapsing them onto the provider
- * name would silently repoint one account's traffic at another's key, so distinct credential tuples
- * become distinct connections; only the first for a provider gets the bare provider name.
- */
+/** Hoist distinct credential tuples to connections; only the first provider keeps the bare name. */
 export function hoistProviderConnections(config: LlmConfig): HoistedConnections {
   const connections: Record<string, ProviderConnection> = {};
   const namesByKey = new Map<string, string>();
@@ -151,13 +127,7 @@ export function hoistProviderConnections(config: LlmConfig): HoistedConnections 
   };
 }
 
-/**
- * Derive one ModelProfile per configured tier, each keeping the rest of its tier as an ordered
- * fallback chain. Chaining the *whole* tier is what restores the fallback the tier runtime
- * advertised but lost: only the chain head ever crossed the process boundary, so every configured
- * backup provider was inert. Here the chain is part of the profile, and every link is re-checked
- * against the same constraints before it is used.
- */
+/** Derive tier profiles with ordered fallback chains, re-checking each link before use. */
 export function deriveModelProfiles(config: LlmConfig): DerivedModelProfile[] {
   const tiers = config.tiers;
   if (tiers === undefined) return [];
@@ -180,21 +150,7 @@ export function deriveModelProfiles(config: LlmConfig): DerivedModelProfile[] {
   return derived;
 }
 
-/**
- * Resolve an effort preset to a ModelProfile ref.
- *
- * Deterministic and configuration-only: the same request against the same Soul always resolves the
- * same way, which is what keeps a Run replayable and its audit chain meaningful. `auto` is anchored
- * here on a declared default rather than inferred, and this function stays that way — it is reached
- * with a preset and a catalogue, never with the participant's words.
- *
- * Inferring `auto` from the prompt is a layer above, in `@tulipfarm/agent-runtime`'s effort router,
- * and it earns its determinism differently: the heuristic stage is pure, and the model-backed stage
- * runs at most once per Run and is then pinned to the `model.routed` event, so a replay reads back
- * the rung the turn already committed to instead of asking again. Two identical turns can still
- * diverge, but never silently — the score, the signals, and the band that produced each are on the
- * record. Where no prompt exists to score (a Routine's `agent` State), this remains the answer.
- */
+/** Resolve presets from config; prompt inference happens only in agent-runtime. */
 export function resolveEffortPreset(
   preset: EffortPreset,
   config: Pick<LlmConfig, "presets">,

@@ -132,14 +132,7 @@ describe("approval routes — routine_state kind", () => {
   });
 });
 
-/**
- * The same route, deciding an approval a Worker-executed turn parked on.
- *
- * The whole surface is one endpoint on purpose — an operator decides an approval without knowing
- * which process is waiting for it. What the route must get right is the order: the in-process gate
- * settles any pending row it is shown and reports success, so asking it first would record the
- * decision and leave the Run parked with nothing left to resume it.
- */
+/** Worker-parked approvals must resume before any in-process gate can consume the decision. */
 describe("approval routes — durable tool_call kind", () => {
   let app: FastifyInstance;
   let db: PGlite;

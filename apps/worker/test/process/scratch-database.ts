@@ -12,15 +12,7 @@ import {
 import { fromPglite, PgBoss } from "pg-boss";
 import { freePort } from "./free-port";
 
-/**
- * The worker under test is a real child process talking to a real socket, so the harness cannot
- * hand it an in-process PGlite the way the unit suites do. `PGLiteSocketServer` puts the same
- * WASM Postgres behind the wire protocol on an ephemeral port — a scratch database that never
- * touches the developer's, and needs no Docker in CI.
- *
- * `maxConnections` must exceed 1: the worker runs three loops off one `pg.Pool`, and the default
- * single-connection server resets the extras.
- */
+/** Socket-backed PGlite for child-process tests; needs >1 connection for worker loops. */
 const MAX_CONNECTIONS = 20;
 
 export interface ScratchDatabase {
@@ -39,11 +31,7 @@ function transactionPort(database: PGlite): TransactionPort {
   };
 }
 
-/**
- * Boots a scratch Postgres carrying exactly the tables the worker reads, at `schemaVersion`.
- * The API owns migrations, so the harness writes `schema_version` itself rather than importing
- * another app's migration runner.
- */
+/** Boots only worker-read tables; harness writes `schema_version` because API owns migrations. */
 export async function startScratchDatabase(schemaVersion: number): Promise<ScratchDatabase> {
   const database = await PGlite.create();
 
@@ -67,14 +55,12 @@ export async function startScratchDatabase(schemaVersion: number): Promise<Scrat
     schemaVersion,
   ]);
 
-  // The API starts pg-boss with migrations before the Worker is allowed to attach. Reproduce that
-  // ownership here, then prove the bundled Worker can attach with `migrate: false` over the wire.
+  // Reproduce API-owned pg-boss migrations, then Worker attaches with `migrate: false`.
   const migrator = new PgBoss({ db: fromPglite(database), backend: "pglite" });
   await migrator.start();
   await migrator.stop({ close: false });
 
-  // `PGLiteSocketServer` keeps its bound port private, so pick one up front rather than
-  // asking the server which one it got.
+  // PGLiteSocketServer does not expose its bound port, so choose one first.
   const port = await freePort();
   const server = new PGLiteSocketServer({
     db: database,
@@ -129,11 +115,7 @@ export async function insertQueuedRun(
   });
 }
 
-/**
- * Rewrites a Run into the state a `SIGKILL`ed worker leaves behind: `running`, lease held by an
- * owner that no longer exists, expiry already past. This is the row a crash produces — writing it
- * directly makes the recovery assertion deterministic, which timing a real kill mid-batch is not.
- */
+/** Writes the deterministic row shape of a SIGKILLed worker's expired running lease. */
 export async function abandonRunWithExpiredLease(
   scratch: ScratchDatabase,
   options: { businessId: string; runId: string; owner: string }

@@ -2,14 +2,7 @@ import type { ChatMessage, SourceRef, TimelinePart, ToolPreview } from "~/lib/ch
 import type { ConversationMessage, WireMessagePart } from "~/lib/conversations";
 import { randomUUID } from "~/lib/uuid";
 
-/*
- * Rehydrate a restored conversation's persisted messages into the renderable timeline the chat
- * reducer would have produced live. Text is the fidelity bar (every user/assistant turn round-trips);
- * tool calls are reconstructed best-effort from assistant metadata (new agentic turns) or by pairing
- * an assistant `tool-call` part with the following `tool` turn (legacy rows, matched by `toolCallId`).
- * System/summary rows are internal to the prompt and never rendered, so they are dropped. Every
- * message is `sealed` (no further deltas).
- */
+/* Drop system/summary rows; restored messages are sealed and tool calls are best-effort. */
 
 function newId(): string {
   return randomUUID();

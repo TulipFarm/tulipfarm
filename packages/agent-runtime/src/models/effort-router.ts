@@ -2,68 +2,29 @@ import { createHash } from "node:crypto";
 import { type EffortRung, isEffortRung } from "@tulipfarm/schema";
 import { EFFORT_SIGNALS, promptFeatures } from "./effort-signals";
 
-/**
- * A two-stage funnel that infers an effort rung from the prompt, for participants who asked for
- * `auto`.
- *
- * Stage 1 is a weighted sum over {@link EFFORT_SIGNALS} — free, synchronous, and **pure**, so a
- * replayed Run re-derives the identical score. It resolves most prompts outright.
- *
- * Stage 2 is a single call to the weakest configured rung, and runs *only* when stage 1 lands in
- * one of the narrow bands around a threshold. It is the expensive path, so it is also the rare one.
- *
- * Stage 2 is not reproducible, which matters here: routing in this codebase must replay to the same
- * answer or the audit record stops explaining the Run. The caller closes that gap by recording the
- * decision (see the `model.routed` Run event) and passing it back through `pinned` on any later
- * attempt — this module never calls the classifier when it is handed one.
- */
+/** Pure two-stage effort router; classifier is used only near thresholds and never on replay. */
 
-/**
- * Where a score falls. `unsure` is not a rung — it is the funnel admitting that the heuristic did
- * not separate this prompt, which is precisely when a second opinion is worth paying for.
- */
+/** `unsure` means the heuristic should ask the classifier. */
 export type EffortBand = EffortRung | "unsure";
 
-/**
- * The two zone boundaries, and the half-width of the ambiguous strip straddling each.
- *
- * Named because a threshold is the one thing in a router that will be tuned, and a number tuned in
- * place is a number nobody can find. Ambiguity sits at the *boundaries* rather than in the middle
- * of the `balanced` zone: a score dead-centre in `balanced` is the most confident `balanced` there
- * is, so spending a model call on it would buy nothing.
- *
- * Weights are on a 0.5 grid and the margin is 0.75, so every comparison here is exact in binary.
- */
+/** Tunable score thresholds; ambiguity lives only around boundaries. */
 export const EFFORT_FAST_THRESHOLD = -2;
 export const EFFORT_THOROUGH_THRESHOLD = 3;
 export const EFFORT_UNSURE_MARGIN = 0.75;
 
-/**
- * What a malformed classifier answer resolves to.
- *
- * Never `fast` — that answers a hard question with a weak model, which is the failure the funnel
- * exists to avoid. Never `thorough` — a parser bug would then quietly bill every ambiguous turn at
- * the top rung. The middle rung is the only choice that fails in neither direction.
- */
+/** Malformed classifier output falls back to the safe middle rung. */
 export const EFFORT_CLASSIFIER_FALLBACK: EffortRung = "balanced";
 
-/** The score and the signals that produced it. Both are needed to calibrate either one. */
 export interface EffortScore {
   readonly score: number;
   readonly fired: readonly string[];
 }
 
-/**
- * The quick-tier model, as this module needs it: one prompt in, one word out.
- *
- * Injected rather than imported so the routing decision stays in this package while the provider,
- * the credential, and the process that holds them stay in the Worker.
- */
+/** Injected quick-tier classifier; this package must not import providers. */
 export interface EffortClassifierPort {
   classify(prompt: string): Promise<string>;
 }
 
-/** A routing decision, and every input needed to later argue it was wrong. */
 export interface EffortRoutingDecision {
   readonly rung: EffortRung;
   readonly score: number;
@@ -71,30 +32,20 @@ export interface EffortRoutingDecision {
   readonly band: EffortBand;
   /** Whether stage 2 was paid for. */
   readonly usedClassifier: boolean;
-  /**
-   * SHA-256 of the scored text.
-   *
-   * The prompt itself never enters this record: it is durable, operator-visible evidence, and
-   * routing records in this codebase carry reasons, never payloads. A hash still groups repeat
-   * prompts and ties a complaint about one answer to the decision that produced it.
-   */
+  /** Persist only `promptHash`, never prompt text. */
   readonly promptHash: string;
   readonly classifierLatencyMs?: number;
 }
 
-/** Calibration hook. Wired now, consumed later — v1 ships no tuning loop. */
 export type EffortRoutingLogger = (decision: EffortRoutingDecision) => void;
 
 export interface EffortRouteOptions {
-  /** Absent means stage 2 is unavailable; an `unsure` prompt then takes the safe middle rung. */
   readonly classifier?: EffortClassifierPort;
   readonly log?: EffortRoutingLogger;
-  /** A decision already recorded for this turn. Present on a replay; suppresses stage 2 entirely. */
   readonly pinned?: EffortRoutingDecision;
   readonly now?: () => number;
 }
 
-/** The weighted sum, and which signals contributed to it. */
 export function scoreEffortSignals(prompt: string): EffortScore {
   const features = promptFeatures(prompt);
   const fired: string[] = [];
@@ -107,7 +58,6 @@ export function scoreEffortSignals(prompt: string): EffortScore {
   return { score, fired };
 }
 
-/** The weighted sum alone. Use {@link scoreEffortSignals} when the reasons matter. */
 export function scorePrompt(prompt: string): number {
   return scoreEffortSignals(prompt).score;
 }
@@ -120,13 +70,7 @@ export function routeByScore(score: number): EffortBand {
   return "thorough";
 }
 
-/**
- * Stage 2: one call, one word.
- *
- * Every way this can go wrong resolves to {@link EFFORT_CLASSIFIER_FALLBACK} — a wrong word, an
- * empty answer, a sentence of prose, a refusal, a timeout, a thrown provider error. The point of
- * the fallback is that the caller never has to distinguish them, so this function does not either.
- */
+/** Classifier failures all resolve to the safe fallback rung. */
 export async function classifyWithQuickModel(
   prompt: string,
   port: EffortClassifierPort
@@ -139,13 +83,7 @@ export async function classifyWithQuickModel(
   }
 }
 
-/**
- * The label a one-word answer names, or the fallback.
- *
- * Punctuation and surrounding whitespace are tolerated because a model asked for one word still
- * emits `"balanced."` often enough to matter; anything longer than one word is not an answer to
- * the question that was asked and is not mined for a label hiding inside it.
- */
+/** Accept one punctuated word only; prose falls back. */
 function readRung(answer: string): EffortRung {
   const word = answer
     .trim()
@@ -158,12 +96,7 @@ export function hashPrompt(prompt: string): string {
   return createHash("sha256").update(prompt).digest("hex");
 }
 
-/**
- * Run the funnel.
- *
- * Stage 2 runs only for an `unsure` band, only when a classifier was supplied, and never when a
- * decision from an earlier attempt was pinned.
- */
+/** Run the funnel; stage 2 is only for unpinned `unsure` decisions. */
 export async function route(
   prompt: string,
   options: EffortRouteOptions = {}

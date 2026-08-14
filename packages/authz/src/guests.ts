@@ -1,9 +1,4 @@
-/**
- * Sponsored, expiring guest principals (SPEC §12): "Guests require a sponsor, expiry, and
- * explicit access grants." A guest carries no authority beyond its own grants — it never
- * inherits its sponsor's roles or grants (non-amplification) — and stops being usable the
- * instant it is revoked or past expiry, regardless of its stored grants.
- */
+/** Guests require sponsor, expiry, and explicit grants; they never inherit sponsor authority. */
 
 import type { AccessGrant } from "./grants";
 import type { Principal } from "./principals";

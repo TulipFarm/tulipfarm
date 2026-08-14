@@ -1,16 +1,4 @@
-/**
- * Approval validity decisions (SPEC §11.2, §24). Two questions are decided here and nowhere else:
- * whether a principal may record a decision on an Approval, and whether a recorded Approval
- * authorizes one specific use. Both fail closed — an Approval that is expired, consumed, revoked,
- * under-approved, or bound to a different intent authorizes nothing.
- *
- * Denial evidence is a reason code plus the Approval id. Intent arguments, destinations, evidence
- * contents, and Credential references never reach an error message, so audit and error paths
- * cannot leak what the Approval was about (SPEC §13, §20).
- *
- * Storing and mutating Approvals belongs to `@tulipfarm/storage`; this module is a pure decision
- * over a record it is handed.
- */
+/** Approval decisions fail closed and denial evidence omits protected intent details. */
 
 import { type ApprovalBinding, bindingsMatch } from "./binding";
 
@@ -99,11 +87,7 @@ function assertOpen(record: ApprovalRecord, now: Date): void {
   }
 }
 
-/**
- * Throws unless `approver` may record a decision on `record`. Precedence: wrong business, then the
- * Approval's own state (revoked, consumed, expired), then separation of duties, then role
- * qualification, then a repeat decision by the same approver.
- */
+/** Throws unless approver passes business, state, separation, role, and repeat-decision checks. */
 export function assertApproverEligible(
   record: ApprovalRecord,
   approver: ApprovalApprover,
@@ -136,12 +120,7 @@ export function assertApproverEligible(
   }
 }
 
-/**
- * Throws unless `record` authorizes the use described by `presented`. Precedence: the Approval's
- * own state (revoked, consumed, expired), then the exact binding — changed arguments, Tool
- * version, target Record, destination, Credential scope, evidence, or Guardrail revision all
- * surface as `binding_mismatch` — then any explicit denial, then the required approver count.
- */
+/** Throws unless this exact binding is approved, not denied, and meets quorum. */
 export function assertApprovalUsable(
   record: ApprovalRecord,
   presented: ApprovalBinding,

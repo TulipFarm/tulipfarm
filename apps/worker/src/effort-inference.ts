@@ -5,19 +5,7 @@ import type { PersistedRunEvent, RunEventStore } from "@tulipfarm/storage";
 import type { EffortClassifierModelSource } from "./effort-classifier";
 import { classifierRequirements, createEffortClassifier } from "./effort-classifier";
 
-/**
- * The effort funnel, composed for one Run.
- *
- * `@tulipfarm/agent-runtime` decides; this module supplies the two things the decision cannot
- * reach from there — a quick-tier model to ask when the heuristic is undecided, and the decision
- * an earlier attempt already recorded.
- *
- * The second one is what keeps `auto` honest. Routing in this codebase must replay to the same
- * answer: `deriveModelRequirements` is kept pure for exactly that reason, and a model call in the
- * middle of routing would break it. So the first attempt records its decision on `model.routed`,
- * and every later attempt reads it back instead of asking again. The heuristic alone would already
- * replay identically; this covers the ambiguous prompts that reached stage 2.
- */
+/** Composes per-Run effort routing; ambiguous `auto` decisions replay from `model.routed`. */
 
 /** Infers the rung for a turn that asked for `auto`. */
 export interface EffortInferencePort {
@@ -33,11 +21,7 @@ export interface PinnedEffortSource {
 }
 
 export interface EffortInferenceOptions {
-  /**
-   * Resolves the quick tier for stage 2. Absent means stage 2 is unavailable and an ambiguous
-   * prompt takes the middle rung — a deployment without a weak model must not be billed a strong
-   * one for guessing.
-   */
+  /** Absent means ambiguous prompts take the middle rung, not a strong model. */
   readonly models?: EffortClassifierModelSource;
   readonly pinned?: PinnedEffortSource;
   /** Calibration hook. Wired now, consumed later. */
@@ -74,11 +58,7 @@ export function createEffortInference(options: EffortInferenceOptions): EffortIn
   };
 }
 
-/**
- * A missing pin is a normal state, not a failure: the first attempt on a Run has nothing to read.
- * A pin that cannot be read is treated the same way — routing a turn is better than failing it,
- * and the decision this attempt makes is recorded in turn.
- */
+/** Missing or unreadable pins are routed anew; this attempt records the decision. */
 async function readPin(
   source: PinnedEffortSource | undefined
 ): Promise<RunEventEffortInference | undefined> {
@@ -90,13 +70,7 @@ async function readPin(
   }
 }
 
-/**
- * The inferred rung this Run already committed to, read out of its own event stream.
- *
- * The **earliest** record wins. A chat Run carries one turn, so every `effort_inferred` event on it
- * describes the same decision; taking the earliest means a re-dispatch replays the answer the
- * participant was originally routed to rather than the most recent guess.
- */
+/** Reads the earliest inferred rung so re-dispatch replays the original route. */
 export function recordedEffortInference(
   events: readonly PersistedRunEvent[]
 ): RunEventEffortInference | undefined {

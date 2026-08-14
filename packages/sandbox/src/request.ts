@@ -1,9 +1,4 @@
-/**
- * Signed control-plane request/result contract for isolated sandbox work.
- *
- * The wire shape deliberately has no environment, Credential, host-mount, or business-mutation
- * fields. Inputs and durable outputs cross the boundary only as Artifact references.
- */
+/** Sandbox requests/results carry signed Artifact refs only: no env, credentials, or mounts. */
 
 export type SandboxProtocolErrorCode =
   | "backend_failure"

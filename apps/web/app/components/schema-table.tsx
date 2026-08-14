@@ -2,11 +2,7 @@ import { Link } from "@remix-run/react";
 import type { ResourceRecord } from "~/lib/api";
 import { type FieldDescriptor, type RenderedCell, renderValue, type SortState } from "~/lib/schema";
 
-/*
- * Schema-driven record list. Columns come from `listColumns` — no per-resource code. The id column
- * is the detail link (avoids invalid nested anchors when a row also contains an x-links cell);
- * x-links cells link to the target resource. Plain Tailwind table, terminal aesthetic.
- */
+/* The id cell owns detail navigation to avoid nested anchors inside x-links cells. */
 
 // Maps a RenderedCell (from schema.renderValue) to JSX. Shared by the table and the detail view.
 export function ValueCell({ cell }: { cell: RenderedCell }) {

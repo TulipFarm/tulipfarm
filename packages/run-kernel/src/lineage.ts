@@ -7,7 +7,6 @@ import type {
 import { ArtifactAccessError, type ArtifactService } from "./artifacts";
 import type { JsonObject } from "./outputs";
 
-/** Narrow surface `RunOutputLineage` needs; `@tulipfarm/storage`'s `ArtifactStore` satisfies it. */
 export interface OutputBindingStore {
   bindOutput(input: BindOutputInput): Promise<BindOutputResult>;
   resolveOutput(
@@ -20,7 +19,6 @@ export interface OutputBindingStore {
 }
 
 export interface ContextInputMapping {
-  /** Name the resolved content is exposed under in the downstream Context. */
   readonly name: string;
   readonly from: { readonly stateKey: string; readonly outputName: string };
 }
@@ -34,11 +32,7 @@ export interface ContextAssemblyRequest {
   readonly inputs: readonly ContextInputMapping[];
 }
 
-/**
- * Named State-output mappings and the Run's Artifact lineage. Assembling a downstream Context
- * resolves each declared mapping through {@link ArtifactService}, so a missing, unauthorized,
- * tampered, or schema-invalid output fails the whole assembly instead of being silently dropped.
- */
+/** Context assembly fails on missing, unauthorized, tampered, or schema-invalid outputs. */
 export class RunOutputLineage {
   constructor(
     private readonly store: OutputBindingStore,

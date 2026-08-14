@@ -7,40 +7,20 @@ import {
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { GrantRecord, RoleRecord, RoleRepo } from "@tulipfarm/storage";
 
-/**
- * The roles this deployment actually enforces.
- *
- * TulipFarm gates authority on `user.role` today — there is no role editor and no roles table, so
- * this catalog is a faithful description of the checks in the codebase, not an aspirational model.
- * Each entry in {@link ADMIN_ONLY_SURFACES} corresponds to a live `role !== "admin"` check or
- * admin pre-handler; when a surface changes its gate, this list must change with it or the
- * operational Roles view starts lying about who can do what.
- */
+/** Mirrors live role gates; update this catalog whenever route or Tool gates change. */
 export const ADMIN_ONLY_SURFACES: readonly {
   readonly type: string;
   readonly actions: readonly string[];
   readonly enforcedIn: string;
 }[] = [
   { type: "secret", actions: ["secret.write", "secret.delete"], enforcedIn: "secrets/routes.ts" },
-  /**
-   * Sealing, revoking or removing an integration's connection. Same authority as completing a
-   * `scope: "business"` auth step and gated identically — otherwise a member refused there could
-   * seal the provider's client id and secret here instead, re-pointing the deployment's OAuth flow
-   * at an app they control, and disconnect/remove would let them revoke every Agent's reach.
-   */
+  /** Business integration credential changes are admin-only; they affect every Agent. */
   {
     type: "integration",
     actions: ["integration.connect", "integration.disconnect", "integration.remove"],
     enforcedIn: "integrations/operator.ts",
   },
-  /**
-   * GitHub's post-connection surface is the same authority through a different door. Disconnecting
-   * an installation revokes every Agent's reach through it, and the two Soul-repo routes decide
-   * which repository this business's *source of truth* is — a member who could repoint it would
-   * own every artifact every other layer is checked against. The first version of the operator
-   * gate covered `integrations/routes.ts` and missed these, which is why the check now lives in
-   * one shared helper.
-   */
+  /** GitHub install disconnect and Soul repo selection are admin-only shared credentials. */
   {
     type: "integration.github",
     actions: [
@@ -74,14 +54,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
   { type: "audit", actions: ["*"], enforcedIn: "audit/routes.ts" },
   { type: "soul.business_profile", actions: ["*"], enforcedIn: "soul/routes.ts" },
   { type: "soul.publication", actions: ["*"], enforcedIn: "soul/publication-routes.ts" },
-  /**
-   * Authoring a Resource type's *record schema* stays open to members; deciding its **domain**
-   * does not. The domain is the wall between an HR Resource and an engineering one — a member who
-   * could set, change or clear it could re-domain an `hr` type to `engineering`, or delete and
-   * re-create it domainless, and `MEMBER_UNDOMAINED_RECORD_ACTIONS` below would then hand every
-   * member full CRUD on it. Deleting a domained type is gated for the same reason: without it the
-   * POST gate is walkable by delete-then-recreate.
-   */
+  /** Resource domains are admin-only; domained deletes are gated to prevent re-create bypass. */
   {
     type: "soul.resource_type",
     actions: ["soul.resource_type.set_domain", "soul.resource_type.delete_domained"],
@@ -105,12 +78,7 @@ export const ADMIN_ONLY_SURFACES: readonly {
   },
 ];
 
-/**
- * Surfaces that every authenticated member may use today because their routes are guarded only by
- * `requireAuth` or because their chat Tools are currently offered without a role gate. This is the
- * allow-list replacement for the old blanket wildcard: a new surface is unreachable until it is
- * added here, while existing member reach stays represented.
- */
+/** Member allow-list; new surfaces stay unreachable until added here. */
 // Keeps today's access to legacy Resource types that declare no domain. Once a Resource type
 // declares `domain`, this grant no longer matches; that domain needs its own explicit grant.
 const MEMBER_UNDOMAINED_RECORD_ACTIONS = [
@@ -146,28 +114,13 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
     ],
     enforcedIn: "identity/routes.ts",
   },
-  /**
-   * Browsing the catalog only. Connecting, disconnecting and removing an integration write the
-   * **deployment-wide** provider credential — the one every unattended Run and every service-mode
-   * Tool spends — so they are operator acts and live in {@link ADMIN_ONLY_SURFACES}. A blanket
-   * `*` here would have granted a member through `integrations/routes.ts` exactly what
-   * `integrations/auth-routes.ts` refuses them for `scope: "business"`.
-   */
+  /** Catalog browsing only; deployment-wide provider credentials stay in admin surfaces. */
   {
     type: "integration",
     actions: ["integration.read"],
     enforcedIn: "integrations/routes.ts",
   },
-  /**
-   * These name the resources the Tools *declare*, not a parallel vocabulary. `grantMatches`
-   * compares `resourceType` as an exact string, so a grant of `knowledge_space` — the name this
-   * list carried while nothing enforced it — could never match a Tool declaring
-   * `platform.knowledge`, and the mismatch would surface only as a blanket denial after the gate
-   * turns on. `tools/contract-projection.test.ts` now fails if the two drift apart again.
-   *
-   * The space/page/path distinction moved into the target id, where `recordSelector` still scopes
-   * it, so one grant here covers what three unmatchable ones used to claim to.
-   */
+  /** Use exact Tool-declared resource types; kind distinctions live in target ids. */
   { type: "platform.knowledge", actions: ["*"], enforcedIn: "knowledge/tools.ts" },
   { type: "platform.kv", actions: ["*"], enforcedIn: "kv/tools.ts" },
   { type: "kv_user", actions: ["*"], enforcedIn: "kv/routes.ts" },
@@ -197,29 +150,16 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   },
   { type: "surface", actions: ["*"], enforcedIn: "surfaces/routes.ts" },
   { type: "platform.surface", actions: ["*"], enforcedIn: "surfaces/tools.ts" },
-  /**
-   * Delegation is the authority to *route work to* an Agent, which is not the authority to edit
-   * that Agent's definition — that stays `soul.agent`, above.
-   */
+  /** Delegation routes work to an Agent; it does not edit the Agent definition. */
   { type: "platform.agent", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.artifact", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.state", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.task", actions: ["*"], enforcedIn: "platform/tools.ts" },
   { type: "platform.time", actions: ["*"], enforcedIn: "platform/tools.ts" },
-  /**
-   * A member may reach the built-in provider Tools, but reaching them is not the same as being
-   * entitled to the provider. The account-level check stays where it already is — the installation
-   * directory for GitHub, the workspace token for Slack — so an HR user with no GitHub account is
-   * stopped by the provider's own ACL rather than by a Role that would have to be kept in sync with
-   * it. Removing these grants is how an operator revokes the *surface*; it is not the ACL.
-   */
+  /** Provider grants expose the surface only; provider ACLs still decide account access. */
   { type: "integration.github", actions: ["*"], enforcedIn: "tools/github/tools.ts" },
   { type: "integration.slack", actions: ["*"], enforcedIn: "tools/slack/tools.ts" },
-  /**
-   * Records are already reachable through {@link MEMBER_UNDOMAINED_RECORD_ACTIONS}' wildcard grant.
-   * Naming the type explicitly with the *same* action list adds no authority; it makes the
-   * vocabulary complete so the Tool-side declaration has a named counterpart to agree with.
-   */
+  /** Explicit vocabulary counterpart; authority already comes from the wildcard grant. */
   {
     type: "record",
     actions: [...MEMBER_UNDOMAINED_RECORD_ACTIONS],
@@ -228,16 +168,7 @@ export const MEMBER_ALLOWED_SURFACES: readonly {
   { type: "trigger", actions: ["*"], enforcedIn: "triggers/routes.ts" },
 ];
 
-/**
- * Surfaces a member owns for their own records, where only crossing to another user's needs an
- * admin — `auth/routes/tokens.ts` gates on `role !== "admin" && token.userId !== actor._id`, not on
- * role alone. Listing these alongside {@link ADMIN_ONLY_SURFACES} would tell a member their own
- * API tokens are off limits while `/settings/auth` visibly lets them mint one.
- *
- * The deny is scoped by condition instead: `grantMatches` fails closed on scoped dimensions, so it
- * skips a self-service request that carries no `subject` and that request falls through to the
- * explicit `api_token` allow, while a request naming another user's token is denied.
- */
+/** Self-owned surfaces stay member-allowed; scoped denies cover other users' records. */
 export const OWNER_SCOPED_SURFACES: readonly {
   readonly type: string;
   readonly conditions: Readonly<Record<string, string>>;
@@ -248,14 +179,7 @@ export const OWNER_SCOPED_SURFACES: readonly {
     conditions: { subject: "other_user" },
     enforcedIn: "auth/routes/tokens.ts",
   },
-  /**
-   * Connecting an integration splits the same way. `scope: "user"` mints a credential for the
-   * caller alone, bounded by whatever the provider already grants them, so it is self-service —
-   * denying it outright would make personal credentials unusable and push every Tool back onto the
-   * shared bot credential, which is the attribution collapse this layer exists to end.
-   * `scope: "business"` re-points the credential every unattended Run and every service-mode Tool
-   * then spends, so it takes the operator gate.
-   */
+  /** User-scope integration auth is self-service; business-scope auth is admin-only. */
   {
     type: "integration_connection",
     conditions: { scope: "business" },
@@ -272,13 +196,7 @@ function surfaceGrants(
   );
 }
 
-/**
- * Built-in roles, expressed against the `@tulipfarm/authz` contract so authority is described in
- * one vocabulary across the product. `admin` is the deployment owner and keeps an explicit broad
- * grant for bootstrap/operations. `member` is an allow-list: it names the surfaces members can use
- * today, and known admin-only surfaces are listed as denies only so the read-only Roles view is
- * honest about the existing hard gates.
- */
+/** Built-in roles in `@tulipfarm/authz` vocabulary; member is an allow-list. */
 export const DEPLOYMENT_ROLES: readonly Role[] = [
   {
     id: "admin",
@@ -357,10 +275,7 @@ export interface RoleDescription {
   readonly conditions: readonly string[];
 }
 
-/**
- * Flattens the catalog through `collectRoleGrants` so composition, cycles, and expiry are decided
- * by the authz package rather than re-implemented here.
- */
+/** Flattens through `collectRoleGrants`; authz owns composition, cycles, and expiry. */
 export function describeDeploymentRoles(now: Date = new Date()): RoleDescription[] {
   assertRoleGraphAcyclic(DEPLOYMENT_ROLES);
   const byId = new Map(DEPLOYMENT_ROLES.map((role) => [role.id, role]));

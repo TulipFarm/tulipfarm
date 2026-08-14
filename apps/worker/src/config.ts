@@ -1,24 +1,13 @@
 import { hostname } from "node:os";
 import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 
-/**
- * Lowest `schema_version` this worker will run against. The API owns migrations and applies them
- * on boot; the worker only reads. Anything below this floor means the tables it claims from may
- * not exist or may not have the columns it writes, so it refuses to start rather than corrupt.
- * Raise it whenever a migration lands that the worker's queries depend on.
- */
+/** Refuse to boot below the schema floor the worker's queries require. */
 export const REQUIRED_SCHEMA_VERSION = 21;
 
 export interface WorkerConfig {
   readonly databaseUrl: string;
   readonly businessId: string;
-  /**
-   * Where the API's internal turn host answers, without a trailing slash.
-   *
-   * Required rather than optional: a worker that cannot reach it can claim a Chat Run and then
-   * discover it has no way to resolve the Context, which costs the participant a turn to learn
-   * something the deployment already knew. Refusing to start says it once, at boot.
-   */
+  /** API internal turn host, no trailing slash; required before any Run can be claimed. */
   readonly internalApiUrl: string;
   /** `tfc_<clientId>.<secret>` for a service API client. Names a Run, never a principal. */
   readonly internalApiCredential: string;
@@ -30,12 +19,7 @@ export interface WorkerConfig {
   readonly outboxPollMs: number;
   readonly batchSize: number;
   readonly leaseDurationMs: number;
-  /**
-   * Ceiling on how long one Run may keep renewing its lease before this worker presumes its
-   * executor hung and lets the lease expire for reclaim. Must exceed the lease so a healthy turn
-   * renews freely; without it a hung executor would either hold the Run forever or, unrenewed,
-   * hand a live one to a second worker.
-   */
+  /** Must exceed the lease; caps hung executors while healthy turns can renew. */
   readonly runMaxLifetimeMs: number;
   readonly drainTimeoutMs: number;
   /** Only one replica enables scheduled maintenance consumers. */
@@ -56,12 +40,7 @@ function requireString(env: Env, key: string): string {
   return value;
 }
 
-/**
- * Trims trailing slashes so `http://api:8080/` and `http://api:8080` build the same request path.
- *
- * A scan, not `replace(/\/+$/, "")`: the regex backtracks on a long run of slashes, and this value
- * comes from the environment, which a deployment tool composes rather than a person types.
- */
+/** Scan instead of regex: env-provided slash runs must not trigger backtracking. */
 function stripTrailingSlashes(value: string): string {
   let end = value.length;
   while (end > 0 && value[end - 1] === "/") end -= 1;
@@ -86,11 +65,7 @@ function booleanValue(env: Env, key: string, fallback: boolean): boolean {
   throw new WorkerConfigError(`${key} must be "true" or "false", got "${raw}"`);
 }
 
-/**
- * Reads and validates the worker's configuration. Called before any connection is opened, so a
- * misconfigured deployment fails at once with a named cause instead of half-starting and then
- * silently claiming nothing.
- */
+/** Validate before opening connections, so misconfigured workers never claim Runs. */
 export function loadConfig(env: Env = process.env): WorkerConfig {
   const config: WorkerConfig = {
     databaseUrl: requireString(env, "DATABASE_URL"),
@@ -111,15 +86,13 @@ export function loadConfig(env: Env = process.env): WorkerConfig {
   if (config.owner.trim().length === 0) {
     throw new WorkerConfigError("WORKER_OWNER must not be blank");
   }
-  // A lease that expires before the poll interval is reclaimed by this same worker mid-batch,
-  // which reads as two workers fighting over one Run. Refuse the combination outright.
+  // The lease must outlive the poll interval or this worker can reclaim its own batch.
   if (config.leaseDurationMs <= config.runPollMs) {
     throw new WorkerConfigError(
       `WORKER_LEASE_MS (${config.leaseDurationMs}) must exceed WORKER_RUN_POLL_MS (${config.runPollMs})`
     );
   }
-  // A ceiling below the lease would abandon a Run before its first renewal was even due, so a
-  // healthy long turn could never keep its lease. It must leave room for renewals to run.
+  // The lifetime cap must leave room for at least one healthy lease renewal.
   if (config.runMaxLifetimeMs <= config.leaseDurationMs) {
     throw new WorkerConfigError(
       `WORKER_RUN_MAX_LIFETIME_MS (${config.runMaxLifetimeMs}) must exceed WORKER_LEASE_MS (${config.leaseDurationMs})`

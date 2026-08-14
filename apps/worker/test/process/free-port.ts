@@ -1,10 +1,6 @@
 import { createServer } from "node:net";
 
-/**
- * Binds port 0, reads what the kernel handed out, and releases it. Both the scratch database and
- * the worker's probe server need a port nothing else in CI is using, and neither reports the port
- * it ended up on.
- */
+/** Finds a CI-free port for services that cannot report their bound port. */
 export function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const probe = createServer();

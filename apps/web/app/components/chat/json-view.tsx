@@ -4,17 +4,7 @@ import type { ToolPreview } from "~/lib/chat/types";
 import { cn } from "~/lib/utils";
 import { formatBytes } from "./tool-summary";
 
-/**
- * A collapsible JSON viewer for Tool input and output.
- *
- * Replaces a regex highlighter that painted tokens with hardcoded palette classes. Colour comes
- * from the `--code-*` token family, so the viewer reads correctly in both themes without a second
- * set of rules.
- *
- * The values it renders have already been redacted and truncated server-side. A withheld leaf is
- * drawn as an explicit `redacted` chip rather than omitted, because a reader who cannot see a field
- * is owed the difference between "withheld" and "absent".
- */
+/** Withheld leaves render as `redacted` so hidden and absent stay distinct. */
 
 /** Values deeper than this start collapsed, so a large payload opens as an outline. */
 const AUTO_COLLAPSE_DEPTH = 2;
@@ -119,12 +109,7 @@ function Node({ value, depth, path }: { value: JsonValue; depth: number; path: s
   return <Scalar value={value} />;
 }
 
-/**
- * Renders a preview's JSON text.
- *
- * A preview that will not parse is shown verbatim rather than dropped: the stream said something,
- * and hiding it would be a worse failure than showing it raw.
- */
+/** Invalid previews render verbatim instead of disappearing. */
 export function JsonView({ json }: { json: string }) {
   let parsed: JsonValue;
   try {

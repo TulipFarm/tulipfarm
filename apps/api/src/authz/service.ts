@@ -1,23 +1,4 @@
-/**
- * Read/write service behind the Stage 3 admin authorization API.
- *
- * It exposes the durable authority state an owner needs to author and inspect grants *before*
- * Stage 4 flips the gate to default-deny: who holds which Role, which group holds which Role, and
- * — via {@link AuthzAdminService.explain} — what the one decision function would decide for a
- * concrete request and which layer denied it.
- *
- * Two boundaries are load-bearing:
- *
- * - **Role *definitions* are never written here.** `reconcileSoulRoles` reaps every non-reserved
- *   durable Role absent from Soul on each `soul.synced`, so a Role row this service wrote directly
- *   would be silently deleted on the next sync. Soul stays the single writer of Role definitions
- *   (design doc §4 / D1); {@link AuthzAdminService.createRole} therefore reports the missing
- *   authoring path instead of forging a row. Assignments, groups, and memberships are durable
- *   operational state, not Soul artifacts, so this service does write those directly.
- * - **The decision is not reimplemented.** `explain` builds the principal's live authority layer
- *   through the same {@link LiveAuthorityLayerResolver} the gate will use and hands it to
- *   `decideEffectivePermission`; a second intersection would be a defect (design doc invariant 4).
- */
+/** Never writes Role definitions; `explain` uses the live resolver + decision function. */
 
 import {
   type AccessGrant,
@@ -44,26 +25,16 @@ import {
 } from "../identity/authority-layers";
 import { RESERVED_ROLE_IDS } from "../identity/role-reconcile";
 
-/** Reason code stamped on every audit event a mutation on this surface emits (design invariant 5). */
 export const AUTHZ_ADMIN_CHANGE = "AUTHZ_ADMIN_CHANGE";
 
-/**
- * The slice of {@link AuditService} this surface needs. Narrowing to `recordOrWarn` keeps the
- * dependency injectable in tests (a class with private fields is not structurally fakeable) while
- * `AuditService` satisfies it directly in production.
- */
 export interface AuthzAuditPort {
   recordOrWarn(input: AuditRecordInput): Promise<void>;
 }
 
-/**
- * Layers the real gate intersects that this endpoint structurally cannot reach: L3 run context and
- * L4 guardrail policy are pinned inside a Run, and L5 credential scope belongs to one integration
- * grant. Named in every response so an `allowed` is never mistaken for a gate guarantee.
- */
+/** Real gate layers this endpoint cannot evaluate; `allowed` is only a partial answer. */
 const UNREACHABLE_LAYERS: readonly string[] = ["run", "guardrail", "credential"];
 
-/** Why the Role-definition authoring path is unavailable, surfaced verbatim to the caller as `501`. */ export const ROLE_AUTHORING_UNAVAILABLE =
+export const ROLE_AUTHORING_UNAVAILABLE =
   "Role definitions are authored in Soul and published through the Soul changeset gateway, which " +
   "is not yet wired into this API. Writing a durable Role row here would be reaped on the next " +
   "soul sync. Author the Role in Soul instead.";
@@ -74,17 +45,9 @@ export interface AuthzAdminServiceDeps {
   readonly principals: PrincipalRepo;
   readonly resolver: LiveAuthorityLayerResolver;
   readonly businessId: string;
-  /** Optional: authorization changes are audited when present, logged-and-continued when it fails. */
+  /** Authorization changes are audited when present; failures log and continue. */
   readonly audit?: AuthzAuditPort;
-  /**
-   * Authored Role id → how the Soul catalog identifies it: the name its author gave it, and the
-   * slug its artifact directory is named after.
-   *
-   * Read through a function rather than captured, because Soul reloads on every sync: a map taken
-   * at construction would keep naming a level after it was renamed, or leave a newly authored one
-   * anonymous until the process restarted. Absent leaves both fields null, which is what the
-   * pre-Soul boot path and most tests want.
-   */
+  /** Read live because Soul reloads can rename or add authored Roles after construction. */
   readonly roleNames?: () => ReadonlyMap<string, { displayName?: string; slug: string }>;
   now?(): Date;
 }
@@ -98,17 +61,8 @@ export interface GrantView {
 
 export interface RoleView {
   readonly id: string;
-  /**
-   * The name its author gave it. A Role's durable id is a UUID for an authored level, so without
-   * this every level a business creates would be listed to them as `a3f1c0de-...`. Absent for the
-   * built-in Roles, whose names are product copy rather than authored data.
-   */
   readonly displayName: string | null;
-  /**
-   * The artifact directory this level lives in, which is also how it is addressed for deletion.
-   * `null` for the built-ins, and for any authored Role the Soul catalog cannot account for —
-   * a level whose slug is unknown cannot be deleted, which is the right failure.
-   */
+  /** `null` when the built-in or Soul catalog cannot identify the deletion slug. */
   readonly slug: string | null;
   /** `builtin` for the reserved bootstrap Roles (owner/admin/member), `authored` for Soul Roles. */
   readonly source: "builtin" | "authored";
@@ -137,19 +91,11 @@ export interface EffectiveGrantsView {
   readonly principalId: string;
   readonly kind: string;
   readonly grants: readonly GrantView[];
-  /**
-   * Present only when `grants` is empty, naming which of the six emptying situations occurred.
-   * Without it "holds nothing" is indistinguishable from "authority could not be determined".
-   */
+  /** Present only when empty grants need a cause. */
   readonly emptyReason?: LayerEmptyReason;
-  /** Role ids an assignment names that the durable store could not honour. */
   readonly unresolvedRoleIds?: readonly string[];
 }
 
-/**
- * Which principal could not be found, so the route can say *which* id was wrong rather than making
- * an operator guess between the two ids they supplied.
- */
 export type ExplainNotFound = { readonly notFound: "principal" | "agent" };
 
 export interface ExplainInput {
@@ -173,24 +119,13 @@ export interface ExplainView {
   readonly reason: AuthzDecisionReason;
   /** The layer that denied, when denied; absent when allowed. */
   readonly deniedLayer?: string;
-  /**
-   * Exactly which layers this decision intersected. Load-bearing, not diagnostics decoration —
-   * see {@link AuthzAdminService.explain} for why an `allowed` here is an upper bound.
-   */
+  /** Layers actually intersected; `allowed` remains an upper bound. */
   readonly evaluatedLayers: readonly string[];
   /** The layers the real gate will also intersect but this endpoint cannot. Empty means none. */
   readonly unevaluatedLayers: readonly string[];
-  /**
-   * Why an evaluated layer resolved to no grants, keyed by layer name. A `deniedLayer` naming a
-   * layer that appears here is a data fault masquerading as a policy decision.
-   */
   readonly layerEmptyReasons?: Readonly<Record<string, LayerEmptyReason>>;
-  /** Role ids named by assignments the durable store could not honour, across evaluated layers. */
   readonly unresolvedRoleIds?: readonly string[];
-  /**
-   * True whenever `unevaluatedLayers` is non-empty: `allowed: true` means "no layer *checked here*
-   * denied", never "the gate will permit this".
-   */
+  /** True when `allowed` means only "no evaluated layer denied". */
   readonly partial: boolean;
 }
 
@@ -236,7 +171,6 @@ export interface RegisterPrincipalInput {
   readonly expiresAt?: string;
 }
 
-/** How an audited mutation was carried out — the signed-in admin, for attribution. */
 export interface AuthzActor {
   readonly actorId: string | null;
   readonly correlationId?: string;
@@ -271,7 +205,7 @@ function grantView(grant: AccessGrant): GrantView {
   };
 }
 
-/** The Role id that can grant `authz.*`, and therefore the one that must never reach zero holders. */
+/** The Role id that can grant `authz.*`; it must never reach zero holders. */
 const OWNER_ROLE_ID = "owner";
 
 function lastOwner(message: string): MutationResult {
@@ -336,15 +270,7 @@ export class AuthzAdminService {
     return groups.map((group) => ({ id: group.id, expiresAt: iso(group.expiresAt) }));
   }
 
-  /**
-   * Every principal in the deployment, human and not.
-   *
-   * Non-human principals are the reason this exists. A `user` gets its row from the
-   * `sync_user_authorization()` trigger, so it can always be found from the users list — but an
-   * Integration adapter, a service identity or an Agent has no such source. Nothing else in the
-   * product can enumerate them, so without this an operator would have to already know the exact
-   * id of the principal they were about to grant authority to.
-   */
+  /** Includes non-human principals that have no users-list source. */
   async listPrincipals(): Promise<readonly PrincipalView[]> {
     const principals = await this.deps.principals.list(this.deps.businessId);
     return principals.map((principal) => ({
@@ -355,27 +281,7 @@ export class AuthzAdminService {
     }));
   }
 
-  /**
-   * Registers a non-human principal so authority can be granted to it.
-   *
-   * This closes the one gap that made default-deny unrecoverable. Production mints subjects that
-   * are not users — `integration:<slug>` for a Slack or Telegram delivery, `agent:assistant` for a
-   * chat-started Routine, `service:cron-scheduler` for a schedule fire — and a principal with no
-   * durable row resolves to an empty authority layer, which under intersection denies everything.
-   * Soul Role authoring already supports every principal kind end to end (`principalTypes` →
-   * `assignableTo`), so the row was the only missing link: without it there was no id to assign a
-   * Role to, and no UI could restore a deployment that had locked its own channels out.
-   *
-   * Two refusals keep it from becoming a way to rewrite authority rather than extend it:
-   *
-   * - **`user` is refused.** Those rows are owned by the `sync_user_authorization()` trigger. A
-   *   hand-written one would either be overwritten without notice or drift from the account it
-   *   claims to represent.
-   * - **A kind change is refused.** Re-registering an existing id with the same kind is idempotent
-   *   and harmless, but silently re-pointing an id at a different kind would re-interpret every
-   *   Role assignment already made against it — `assertRoleAssignable` is evaluated per kind — so
-   *   it is a conflict, not an update.
-   */
+  /** Registers non-human principals; `user` rows stay users-table managed. */
   async registerPrincipal(
     input: RegisterPrincipalInput,
     actor: AuthzActor
@@ -431,11 +337,7 @@ export class AuthzAdminService {
     };
   }
 
-  /**
-   * A principal's effective grants: its direct assignments unioned with every unexpired
-   * group-held Role it inherits, resolved through the live authority resolver the gate will use.
-   * `null` when the principal has no durable row, so the route answers `404`.
-   */
+  /** Uses the live authority resolver; `null` lets the route answer `404`. */
   async effectiveGrants(principalId: string): Promise<EffectiveGrantsView | null> {
     const principal = await this.deps.principals.get(this.deps.businessId, principalId);
     if (principal === undefined) return null;
@@ -454,30 +356,11 @@ export class AuthzAdminService {
     };
   }
 
-  /**
-   * The single decision endpoint. Resolves the principal's live layer (and the Agent's, when an
-   * `agentId` is given) and hands them to the one decision function; `deniedLayer` names which
-   * layer denied. `null` when the principal has no durable row, so the route answers `404` rather
-   * than inventing an empty layer whose denial would read as a policy gap.
-   *
-   * **An `allowed: true` here is an upper bound, never a guarantee.** `decideEffectivePermission`
-   * allows only when *every* layer allows, so evaluating a subset can only ever be more permissive
-   * than the real gate. This endpoint can reach the live layers (L1 caller, L2 Agent) but not the
-   * pinned ones — L3 run context and L4 guardrail policy exist only inside a Run, and L5 credential
-   * scope belongs to a specific integration grant. A denial here is therefore authoritative (a
-   * layer that denies in isolation denies in the intersection too), while an allow is provisional.
-   *
-   * That asymmetry is why the response names `evaluatedLayers`/`unevaluatedLayers` and sets
-   * `partial` rather than returning a bare boolean: a diagnostic tool that silently answers "yes"
-   * where the gate says "no" is worse than no tool, because it is trusted.
-   */
+  /** Uses the one decision function; missing principals return `404`, not empty-layer denials. */
   async explain(input: ExplainInput): Promise<ExplainView | ExplainNotFound> {
     const principal = await this.deps.principals.get(this.deps.businessId, input.principalId);
     if (principal === undefined) return { notFound: "principal" };
     // The same reasoning that returns 404 for an unknown caller applies to an unknown Agent, and
-    // for a sharper reason: `resolvePrincipalLayer` returns an *empty* layer for a principal that
-    // does not exist, and an empty layer denies. A typo'd agent id would therefore produce a
-    // confident `deniedLayer: "agent"` that this endpoint calls authoritative, and an operator
     // diagnosing a complaint would author grants against a phantom. "No such principal" must not
     // be presented as "policy denied".
     if (input.agentId !== undefined) {
@@ -500,8 +383,6 @@ export class AuthzAdminService {
       );
     }
     const layers = diagnosed.map((entry) => entry.layer);
-    // Attribute each empty layer to its cause. `deniedLayer: "agent"` reads as a policy answer, but
-    // if that layer emptied because an assignment names a Role the store does not have, the honest
     // answer is that authority could not be determined — a different problem with a different fix.
     const layerEmptyReasons: Record<string, LayerEmptyReason> = {};
     const unresolvedRoleIds: string[] = [];
@@ -539,7 +420,6 @@ export class AuthzAdminService {
     };
   }
 
-  /** Role *definition* authoring is not available here — see {@link ROLE_AUTHORING_UNAVAILABLE}. */
   async createRole(): Promise<never> {
     throw new RoleAuthoringUnavailableError();
   }
@@ -593,16 +473,7 @@ export class AuthzAdminService {
     return { ok: true };
   }
 
-  /**
-   * Creates a group, or re-states an existing one.
-   *
-   * The subtlety is the expiry. `putGroup` is a full upsert, so posting an existing id without
-   * `expiresAt` silently *clears* a previously set expiry — turning a deliberately time-boxed group
-   * into a permanent one, answering `201` as though it had just been created, and leaving no trace
-   * of what was dropped. Distinguishing the two cases is what makes that visible: a genuine create
-   * still answers `201`, a re-statement answers `200`, and the audit record carries the previous
-   * expiry so the change is reconstructible.
-   */
+  /** Existing groups without `expiresAt` clear expiry; audit records the previous value. */
   async createGroup(
     groupId: string,
     expiresAt: string | undefined,
@@ -744,24 +615,7 @@ export class AuthzAdminService {
     return { ok: true };
   }
 
-  /**
-   * Refuses any mutation that would leave the deployment with nobody holding the `owner` Role.
-   *
-   * `owner` is the only Role that can grant `authz.*`, and Role *definitions* are Soul-owned — the
-   * admin API answers `501` to authoring one — so an empty owner set cannot be repaired from the
-   * product at all. It is not one door but four, and guarding only the obvious one leaves the
-   * other three wide open:
-   *
-   *   1. revoke the direct `owner` assignment            → revokeRole
-   *   2. remove the last member of a group holding it    → removeGroupMember
-   *   3. revoke `owner` from that group                  → revokeGroupRole
-   *   4. delete the group outright                       → deleteGroup
-   *
-   * Each computes the *resulting* owner set and refuses when it would be empty, rather than
-   * pattern-matching on the specific action — so a fifth door added later fails safe by reusing
-   * this. Today `owner` is not yet enforced by any gate, which makes this look academic; at the
-   * Stage 4 flip it becomes the difference between a recoverable deployment and a bricked one.
-   */
+  /** Refuses any mutation whose resulting owner set would be empty. */
   private async wouldStrandOwnership(exclude: {
     readonly principalId?: string;
     readonly groupId?: string;
@@ -808,13 +662,7 @@ export class AuthzAdminService {
     return holders;
   }
 
-  /**
-   * A group-held Role is resolved per member under the same assignability rule a direct assignment
-   * obeys, and `authority-layers.ts` fails the *entire* group layer closed when one Role does not
-   * apply to that member — stripping them of everything the group grants, not just that Role. So
-   * both writes that can create such a pairing must refuse it up front rather than report success
-   * and silently empty the layer.
-   */
+  /** Refuses group Role/member pairings that would fail the whole group layer closed. */
   private async groupAssignabilityFailure(
     roleIds: readonly string[],
     principals: readonly PrincipalRecord[]

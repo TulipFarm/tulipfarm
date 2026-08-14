@@ -1,12 +1,6 @@
 import { apiDelete, apiGet, apiWrite } from "./api";
 
-/*
- * Client for the integrations API.
- *
- * `listIntegrations` is the whole catalog — what this deployment ships, what has been cloned into
- * the soul repo, and the curated entries that are neither yet. Installing is a separate step only
- * for the last group: inspect a git repo, then install from it.
- */
+/* Catalog rows include shipped, installed, and curated-not-yet-installed integrations. */
 
 export type McpConnectionStatus = "connected" | "connecting" | "error" | "disconnected";
 
@@ -87,21 +81,13 @@ export type AuthStepSummary = {
   description?: string;
   /** Whether the connection env this step produces is already stored. */
   satisfied: boolean;
-  /**
-   * Whether finishing this step writes any connection env. A step that writes nothing — Slack's
-   * "create the app" — is `satisfied` before it is ever started, so a setup walkthrough must use
-   * this to tell "nothing left to prove" apart from "nothing to prove in the first place".
-   */
+  /** `satisfied` can mean the step writes nothing, not that proof already happened. */
   producesEnv: boolean;
   /** Present only for `fields` steps. */
   fields?: RequiredEnvVar[];
 };
 
-/**
- * What the browser must do to advance one step, as decided by the API's auth broker. The UI
- * switches on `action` and never on the integration, which is what keeps the connect flow free of
- * per-provider branches.
- */
+/** UI switches on broker `action`, not provider name, to avoid per-provider branches. */
 export type AuthStartAction =
   | { action: "collect_fields"; fields: RequiredEnvVar[] }
   | { action: "redirect"; url: string }

@@ -13,26 +13,9 @@ const NOT_FOUND = Symbol("github.not-found");
 /** Every named account cleared — distinct from "GitHub could not tell us", which is `undefined`. */
 const CLEARED = Symbol("github.organizations-cleared");
 
-/**
- * Does *this person* have access to the repository this call reaches, on GitHub's own terms?
- *
- * Every GitHub Tool today spends the App installation's credential, and an installation is granted
- * over whole repositories regardless of who is asking. So without this check the platform's answer
- * to "can this person read that repo" is whatever the App can reach — which is the union of what
- * everyone can reach. An HR principal who was never added to a repository would nonetheless read
- * it, because the bot can. That is precisely the bypass D7 names.
- *
- * The check is deliberately GitHub's answer and not ours: we ask GitHub what permission the mapped
- * user holds. Anything short of a clear answer — no linked GitHub identity, an unreachable API, an
- * unparseable response — resolves to `undefined` ("could not determine") and the broker denies,
- * because the alternative is being most permissive exactly when least informed.
- */
+/** Ask GitHub whether the mapped user can access the repo; unclear answers deny. */
 
-/**
- * Must stay identical to `tools/github/tools.ts`'s `GITHUB_AUTHZ_RESOURCE` and `repositoryRef`.
- * Reading a shape the Tools do not emit would silently find no repositories in every call, and a
- * check that never finds anything to check is a check that never denies anything.
- */
+/** Must match `tools/github/tools.ts` resources or every check silently finds no repo. */
 const GITHUB_TARGET_TYPE = "integration.github";
 const REPO_PREFIX = "repo:";
 
@@ -46,53 +29,23 @@ export interface OrganizationStanding {
 
 /** Just enough of GitHub's REST surface to ask about one user's access to one thing. */
 export interface GitHubPermissionApi {
-  /**
-   * `GET /repos/{owner}/{repo}/collaborators/{username}/permission`, reduced to its verdict.
-   * `undefined` for any answer we cannot interpret, including transport failure.
-   */
+  /** Repo permission verdict; `undefined` for transport or unparseable answers. */
   permissionFor(
     repository: string,
     username: string
   ): Promise<"admin" | "write" | "read" | "none" | undefined>;
 
-  /**
-   * `GET /orgs/{org}/memberships/{username}` plus the org's own repository-creation policy,
-   * reduced to the two facts that decide whether a creation may proceed. `undefined` for any
-   * answer we cannot interpret, so the caller denies rather than guesses.
-   */
+  /** Org membership and repo-create verdict; `undefined` means deny rather than guess. */
   organizationStanding(
     organization: string,
     username: string
   ): Promise<OrganizationStanding | undefined>;
 }
 
-/**
- * Targets naming something other than a repository, and what to do about each.
- *
- * `org:` — repository creation. The repository does not exist yet, so there is no access-table
- * entry to read, but that does not make the question unanswerable: GitHub can say whether this
- * person is a member of the organization and whether members may create repositories there. That
- * is the question actually being asked, so we ask it rather than abstaining. Abstaining would have
- * let anyone holding the Role's blanket `integration.github` grant have the bot create a repository
- * under an organization they are not in.
- *
- * `installation:` — the whole installation, emitted by an unrestricted search. That *is* a widening
- * a person may not be entitled to, so it is not exempt: it falls through to the repository check,
- * finds no repository, and denies.
- */
+/** `org:` checks GitHub org membership/create policy; `installation:` falls through and denies. */
 const ORGANIZATION_PREFIX = "org:";
 
-/**
- * The one action that reads no repository contents and makes no provider call: it projects the
- * installation rows this deployment already holds so the model can learn a repository name.
- *
- * Exempting it is not a hole. Every other GitHub Tool requires an `owner/repo` argument the model
- * has no other way to obtain, so denying this one denies the entire family by starving it of its
- * input — while the Tool itself declares `installation:all-repositories` as its target, which
- * already requires installation-wide authority at L1–L4. L5 has nothing to add: it would have to
- * ask GitHub about a repository, and the purpose of the call is to find out which repositories
- * there are.
- */
+/** Local installation listing is L5-exempt because it makes no provider call or content read. */
 const DISCOVERY_ACTION = "github.repository.list";
 
 /** Read actions need any access at all; anything else needs write. */
@@ -103,13 +56,7 @@ function actionKind(action: string): "read" | "write" {
   return READ_ACTIONS.has(verb) ? "read" : "write";
 }
 
-/**
- * The repositories a call reaches, from the Tool's own derived targets.
- *
- * Reading the Tool's derivation rather than re-deriving from arguments is what keeps the
- * entitlement check and the authorization decision talking about the same thing — two derivations
- * would eventually disagree, and the disagreement would always resolve in favour of the looser one.
- */
+/** Read repositories from the Tool's derived targets, never a second argument derivation. */
 function idOf(ref: EntitlementQuery["targetRefs"][number]): string | undefined {
   if (ref.type !== GITHUB_TARGET_TYPE) return undefined;
   return typeof ref.id === "string" ? ref.id : undefined;
@@ -122,21 +69,13 @@ export function repositoriesIn(targetRefs: EntitlementQuery["targetRefs"]): stri
     const id = ref.id;
     if (typeof id !== "string" || !id.startsWith(REPO_PREFIX)) continue;
     const repository = id.slice(REPO_PREFIX.length);
-    // `owner/name` is the only form GitHub's permission endpoint accepts. An `org:` or
-    // `installation:` target names something wider than a repository and deliberately yields
-    // nothing here, so the caller is left unable to determine access rather than reassured.
+    // Only `owner/name` can be checked; wider targets yield nothing so access is undetermined.
     if (/^[^/]+\/[^/]+$/.test(repository)) repos.add(repository);
   }
   return [...repos].sort();
 }
 
-/**
- * The accounts a call names but does not yet have a repository under.
- *
- * A malformed body (empty, or containing a `/`, which would make it a repository and not an
- * account) yields nothing, so the caller falls through to the fail-closed "could not determine"
- * branch rather than probing a name GitHub could never match.
- */
+/** Account targets for repo creation; malformed names yield fail-closed no-targets. */
 export function organizationsIn(targetRefs: EntitlementQuery["targetRefs"]): string[] {
   const orgs = new Set<string>();
   for (const ref of targetRefs) {
@@ -158,11 +97,7 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
   ) {}
 
   async check(query: EntitlementQuery): Promise<EntitlementAnswer> {
-    // Only a person has a GitHub account whose access GitHub could report. An agent, a Routine, a
-    // schedule fire or an unresolved channel delivery is bounded by the authority this platform
-    // granted it (L1–L4) and by the App installation's own scope — there is no third party to ask.
-    // Denying them here would take every Tool of this provider offline for every caller that is
-    // not a signed-in human, which is most of them.
+    // Only user principals have a GitHub account to ask; non-user callers rely on L1–L4 + scope.
     if (query.principal.kind !== "user") return NOT_APPLICABLE;
 
     if (query.action === DISCOVERY_ACTION) return NOT_APPLICABLE;
@@ -170,8 +105,7 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
     const repositories = repositoriesIn(query.targetRefs);
     const organizations = organizationsIn(query.targetRefs);
     if (repositories.length === 0 && organizations.length === 0) {
-      // Naming no repository is not thereby harmless — a repo-less GitHub call reaches whatever
-      // the installation reaches. Refusing to guess is the fail-closed answer.
+      // Repo-less GitHub calls reach installation scope; refuse to guess.
       return undefined;
     }
 
@@ -201,22 +135,14 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
     return { allowed: true };
   }
 
-  /**
-   * Whether this person may act on each named account, or `CLEARED` if every account cleared.
-   *
-   * The wrapper is not ceremony: `undefined` is itself a meaningful answer here ("GitHub could not
-   * tell us"), so it cannot double as the fall-through signal. Conflating the two would let an
-   * unanswerable org probe fall through to a repository loop that has nothing to check and return
-   * `allowed` — the exact fail-open this layer exists to prevent.
-   */
+  /** Return `CLEARED` only when every account cleared; `undefined` means unknown. */
   private async checkOrganizations(
     organizations: readonly string[],
     username: string,
     action: string
   ): Promise<{ readonly answer: EntitlementAnswer } | typeof CLEARED> {
     for (const organization of organizations) {
-      // An account matching the caller's own login is that person's personal namespace. GitHub has
-      // no organization by that name to ask about, and nobody needs permission to be themselves.
+      // A caller's own login is their personal namespace; no org permission applies.
       if (organization.toLowerCase() === username.toLowerCase()) continue;
 
       const standing = await this.api.organizationStanding(organization, username);
@@ -256,17 +182,7 @@ export class GitHubEntitlementPort implements ToolEntitlementPort {
   }
 }
 
-/**
- * Asks GitHub directly, over the App installation's own credential.
- *
- * The installation token is the right one to ask *with* even though the question is about a
- * person: we are asking GitHub to report its own access table, not acting on the person's behalf.
- * It is resolved *per repository* so a business holding several App installations asks each
- * question over the installation that actually covers it.
- * Every answer we cannot interpret — a non-2xx, an unparseable body, a transport failure —
- * collapses to `undefined`, because the caller's fail-closed handling of "could not determine" is
- * the only safe reading of a check that did not complete.
- */
+/** Ask GitHub with the covering installation token; all unparseable answers become `undefined`. */
 export class HttpGitHubPermissionApi implements GitHubPermissionApi {
   constructor(
     private readonly token: (selector: GitHubInstallationSelector) => Promise<string | undefined>,
@@ -297,8 +213,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
       return undefined;
     }
 
-    // 403/404 here means the installation cannot see the repository or the user, which is not the
-    // same as GitHub reporting that the user has no access — we simply were not told.
+    // 403/404 means the installation was not told, not that GitHub returned a no-access verdict.
     if (!response.ok) return undefined;
 
     let body: unknown;
@@ -311,8 +226,7 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
     if (permission === "admin" || permission === "write" || permission === "read") {
       return permission;
     }
-    // GitHub reports "none" for a non-collaborator. Anything else is a shape we do not recognise
-    // and must not read as either allowed or denied.
+    // Only GitHub's `none` is a no-access verdict; unknown shapes stay undetermined.
     return permission === "none" ? "none" : undefined;
   }
 
@@ -327,21 +241,16 @@ export class HttpGitHubPermissionApi implements GitHubPermissionApi {
       token,
       `/orgs/${encodeURIComponent(organization)}/memberships/${encodeURIComponent(username)}`
     );
-    // 404 is GitHub's answer for "not a member", and it is the *only* non-2xx we may read as a
-    // verdict: it is the documented shape of the negative case. Every other failure means we were
-    // not told, which the caller must treat as undetermined rather than as absence.
+    // For org membership, only 404 is a negative verdict; other non-2xx results are undetermined.
     if (membership === NOT_FOUND) return { member: false, canCreateRepositories: false };
     if (membership === undefined) return undefined;
 
     const state = (membership as { state?: unknown }).state;
-    // GitHub's *organization* role, deliberately not named `role`: this platform's deployment
-    // roles are a different vocabulary, and `role === "admin"` is the idiom the role-catalog
-    // fitness check scans for. Conflating them would make this file look like an admin gate.
+    // GitHub org role, not platform `role`; avoid looking like an admin gate.
     const orgRole = (membership as { role?: unknown }).role;
     // A pending invitation is not membership. Only `active` counts.
     if (state !== "active") return { member: false, canCreateRepositories: false };
-    // An owner may always create, so the org policy need not be read — and reading it would fail
-    // for an owner of an org whose policy endpoint the installation cannot see.
+    // Owners may create without reading an org policy endpoint the installation may not see.
     if (orgRole === "admin") return { member: true, canCreateRepositories: true };
     if (orgRole !== "member") return undefined;
 

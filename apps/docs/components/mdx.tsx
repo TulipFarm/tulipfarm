@@ -9,13 +9,7 @@ import type { MDXComponents } from "mdx/types";
 import { PromptBlock } from "@/components/prompt-block";
 import { Screenshot } from "@/components/screenshot";
 
-/**
- * The component vocabulary every `.mdx` page may use without an import. Keep this the single
- * registry — a page that imports a component directly drifts from the rest of the site.
- *
- * `defaultMdxComponents` already supplies Callout, Card/Cards, CodeBlockTabs, and the heading,
- * link, image, table, and `pre` overrides.
- */
+/** Single MDX component registry; direct page imports drift from the site vocabulary. */
 export function getMDXComponents(components?: MDXComponents) {
   return {
     ...defaultMdxComponents,

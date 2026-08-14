@@ -1,11 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Queryable } from "../db";
 
-/**
- * Authentication methods a session can carry (SPEC §12: local credentials and OIDC, with
- * passkeys/MFA where the identity provider supports them). Recorded per session so step-up
- * checks can require a specific method rather than trusting an opaque "logged in" bit.
- */
+/** Session authentication methods; schema currently persists the primary method only. */
 export type AuthMethod = "password" | "oidc" | "totp" | "passkey";
 
 export interface SessionRecord {
@@ -52,11 +48,7 @@ function newCsrfToken(): string {
   return randomBytes(32).toString("hex");
 }
 
-/**
- * Issue a replacement session for `oldSid` and destroy the old one. Every authentication and
- * privilege elevation rotates the identifier so a session id observed before the elevation can
- * never be replayed against the elevated session (SPEC §24 session fixation).
- */
+/** Rotates on authentication and privilege elevation; old sessions are destroyed. */
 export async function rotateSession(
   store: SessionStore,
   oldSid: string | undefined,

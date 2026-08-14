@@ -41,14 +41,7 @@ interface SlackCredentialResponse {
   appToken?: string;
 }
 
-/**
- * Assembles the Slack Socket Mode worker + delivery poll loop, or neither if no bot/app token is
- * sealed yet (plan §6's install bridge, Task #10, is what makes
- * `GET /api/v1/internal/channels/slack/credential` answer `configured`). A business running this
- * process before connecting Slack is a normal, not a failure, state — so this returns an empty
- * array rather than throwing. Callers that want to pick up a later `connect` without a process
- * restart should use `watchForSlackChannelCredential` instead of calling this once at boot.
- */
+/** Starts Slack loops only when tokens are sealed; disconnected Slack returns no loops. */
 export async function createSlackChannelLoops(
   deps: SlackChannelDeps,
   quiet = false
@@ -161,14 +154,7 @@ export async function createSlackChannelLoops(
 
 const CREDENTIAL_POLL_INTERVAL_MS = 30_000;
 
-/**
- * Polls `GET /api/v1/internal/channels/slack/credential` until Slack is connected, then hands the
- * real loops to `onReady` (the composition root pushes them into its own drain-tracked `loops`
- * array). Without this, connecting Slack via the web UI while `apps/integration-worker` is already
- * running requires a manual process restart, since `createSlackChannelLoops` only checks once.
- * Returns a `DrainableLoop` so the wait itself participates in shutdown draining; it never starts
- * the real loops once `deps.signal` has been aborted.
- */
+/** Watches for Slack connection; the wait drains and never starts loops after abort. */
 export function watchForSlackChannelCredential(
   deps: SlackChannelDeps,
   onReady: (loops: DrainableLoop[]) => void,

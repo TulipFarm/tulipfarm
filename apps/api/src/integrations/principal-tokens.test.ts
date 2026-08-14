@@ -116,13 +116,7 @@ describe("PgPrincipalProviderTokenRepo", () => {
     expect(await repo.listProviders(HUMAN)).toEqual(["github", "slack"]);
   });
 
-  /**
-   * Nothing in the platform refreshes a principal token — there is no path from
-   * `refresh_secret_key` back to the provider today — so a lapsed expiry is a dead credential, not
-   * a stale one. It must read as *not connected*, because that is what turns the outcome into an
-   * actionable "connect your GitHub" prompt instead of an opaque provider 401 raised mid-call,
-   * after the gate has already allowed the effect and the model has already committed to the plan.
-   */
+  /** Expired principal tokens are disconnected, because no refresh path exists today. */
   it("does not resolve a token whose expiry has passed", async () => {
     await repo.upsert(doc({ expiresAt: new Date(Date.now() - 60_000) }));
     expect(await repo.find(HUMAN, "github")).toBeNull();
@@ -144,11 +138,7 @@ describe("PgPrincipalProviderTokenRepo", () => {
 });
 
 describe("InMemoryPrincipalProviderTokenRepo", () => {
-  /**
-   * The double is only useful while it answers "is this a credential?" exactly as the SQL does.
-   * A double that resolves what production refuses lets every test above it prove a property the
-   * deployment does not have.
-   */
+  /** The double must answer credential existence exactly like SQL. */
   it("matches the Pg repo on expiry and revocation", async () => {
     const mem = new InMemoryPrincipalProviderTokenRepo();
     await mem.upsert(doc({ expiresAt: new Date(Date.now() - 60_000) }));

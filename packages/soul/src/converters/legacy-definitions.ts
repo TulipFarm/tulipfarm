@@ -13,12 +13,7 @@ export interface LegacyDefinitionBatch {
   readonly skills?: readonly SoulSkill[];
 }
 
-/**
- * Convert a batch of legacy Agents/Skills, aggregating every proposed file and warning across the
- * whole set. Each item is converted independently and deterministically (see `convertLegacyAgent`
- * / `convertLegacySkill`); this is purely a fan-out convenience, it does not change per-item
- * semantics and never publishes.
- */
+/** Convert legacy Agents/Skills independently and aggregate proposed files plus warnings. */
 export function convertLegacyDefinitions(batch: LegacyDefinitionBatch): ConversionResult {
   const results = [
     ...(batch.agents ?? []).map(convertLegacyAgent),

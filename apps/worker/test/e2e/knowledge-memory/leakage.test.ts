@@ -1,18 +1,4 @@
-/**
- * Cross-package proof that Knowledge and Memory compose without a disclosure path.
- *
- * `@tulipfarm/integrations` and `@tulipfarm/memory` may not import `@tulipfarm/knowledge`
- * (`docs/architecture/dependency-rules.md`), so the seams between them are structural contracts and
- * ports that only a composing application can wire. This file is that application, and it owns the
- * two checks nobody else can make:
- *
- * 1. **Conformance** — an integration's `KnowledgeSourceEmission`/`KnowledgeChunkEmission` still
- *    satisfies `KnowledgeSourceRecord`/`KnowledgeIndexEntry`, so the two shapes cannot drift apart
- *    into a runtime coercion that quietly drops an ACL field.
- * 2. **End-to-end non-disclosure** — ingest through retrieval, memory, and a model fake: revoking
- *    the source in Knowledge stops Memory recalling what was derived from it, and no unauthorized
- *    text ever reaches the model's Context.
- */
+/** Cross-package proof: emissions keep ACL shape and revoked evidence cannot reach Context. */
 
 import type {
   KnowledgeChunkEmission,
@@ -77,7 +63,7 @@ const chunkEmission: KnowledgeChunkEmission = {
   text: SECRET_TEXT,
 };
 
-/** The composition seam itself: emissions are stored as Knowledge records without translation. */
+/** Composition seam: emissions store as Knowledge records without translation. */
 class KnowledgeSink implements KnowledgeEmissionSink {
   constructor(
     private readonly sources: InMemoryKnowledgeSourceStore,
@@ -109,10 +95,7 @@ function wire() {
   const index = new InMemoryKnowledgeIndex();
   const sink = new KnowledgeSink(sources, index);
 
-  /**
-   * The port Memory recall reauthorizes evidence through. It is a live call into Knowledge on every
-   * recall — no cached decision — which is what makes revocation propagate to Memory.
-   */
+  /** Live Knowledge reauthorization on every Memory recall; no cached decisions. */
   const evidence: MemoryEvidenceAuthorizationPort = {
     async authorize({ businessId, principalId, sourceId, revision }) {
       const source = await sources.get(businessId, sourceId);
@@ -196,7 +179,7 @@ describe("ingest → retrieve → remember → recall", () => {
     const intruder = await ask({ sources, index, now }, "user-eng");
 
     expect(intruder.candidates).toEqual([]);
-    // The model fake only ever sees what retrieval returned.
+    // The model fake sees only retrieval output.
     const context = intruder.candidates.map((candidate) => candidate.snippet).join("\n");
     expect(context).not.toContain("210000");
     expect(JSON.stringify(intruder)).not.toContain("210000");
@@ -245,7 +228,7 @@ describe("ingest → retrieve → remember → recall", () => {
     const afterRevocation = await recallMemory(memory, scopeRequest);
     expect(afterRevocation.assertions).toEqual([]);
     expect(afterRevocation.exclusions).toEqual([{ reason: "evidence_unauthorized", count: 1 }]);
-    // Retrieval is denied in the same breath, so neither surface can restate the content.
+    // Retrieval is denied too, so neither surface can restate the content.
     expect((await ask({ sources, index, now }, "user-hr")).candidates).toEqual([]);
   });
 

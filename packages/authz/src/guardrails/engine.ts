@@ -1,13 +1,4 @@
-/**
- * Deterministic Guardrail evaluation over action, Resource type, Record, field, data class,
- * destination, audience, volume, taint, and autonomy (SPEC §12). Default deny: with no fully
- * matching allow the decision is a denial. Selector scoping mirrors AccessGrant matching — a
- * rule scoped to a dimension never matches a Context that omits it, for allow and deny alike,
- * so a rule cannot silently widen (SPEC §24 fail-closed defaults). Ceilings (volume, taint,
- * autonomy) deny when exceeded and deny as unverifiable when the Context omits the measured
- * value (missing Context is never assumed safe, SPEC §13). Evaluation is a pure function of its
- * arguments; evidence rules live in ./decision.
- */
+/** Default-deny Guardrail engine; scoped selectors and missing ceilings fail closed. */
 
 import type { GuardrailDecision, GuardrailEffect } from "./decision";
 import { type AutonomyLevel, autonomyWithin, type TaintLevel, taintWithin } from "./risk";
@@ -120,11 +111,7 @@ function checkCeilings(
   return undefined;
 }
 
-/**
- * Decides `context` against `rules` in order. Precedence: a matching explicit deny wins; then a
- * fully passing require_approval (stricter than allow); then a fully passing allow; then the
- * first ceiling denial among matching candidates; otherwise default deny (`no_matching_rule`).
- */
+/** Precedence: deny, require_approval, allow, ceiling denial, then default deny. */
 export function evaluateGuardrail(
   rules: readonly GuardrailRule[],
   context: GuardrailContext

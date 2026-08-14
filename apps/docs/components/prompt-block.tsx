@@ -3,12 +3,7 @@
 import { Check, Copy, Sparkles } from "lucide-react";
 import { useState } from "react";
 
-/**
- * Renders a ```prompt block: an example message a reader types to the assistant.
- * Distinct from a code block — an AI icon labels it, and a warm ruby→amber
- * gradient underline (the one place gradient is allowed in the otherwise flat,
- * ruby-only design language) marks it as a prompt rather than runnable code.
- */
+/** Renders ```prompt blocks; the one allowed gradient marks prompts, not runnable code. */
 export function PromptBlock({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 

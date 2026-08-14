@@ -20,11 +20,7 @@ export function writeSseHeaders(raw: ServerResponse, extra?: Record<string, stri
   }
 }
 
-/**
- * Serialise one event in the SSE wire format the client `EventSource` parses:
- * `id: <seq>` feeds `Last-Event-ID` on reconnect; `event:` selects the typed
- * handler; `data:` carries the JSON payload. Trailing blank line ends the event.
- */
+/** Serializes SSE with `id:` for resume and one `data:` line per physical payload line. */
 export function formatSseEvent(event: StreamEvent): string {
   return `id: ${event.seq}\nevent: ${event.eventType}\ndata: ${JSON.stringify(event.data)}\n\n`;
 }

@@ -1,11 +1,4 @@
-/**
- * Provider-neutral ephemeral cache port.
- *
- * Capability id `cache` (optional accelerator — see `@tulipfarm/observability`
- * capability catalog). Redis is one adapter. Losing the cache cannot lose
- * authoritative state or violate a limit (invariant 16); values are advisory
- * copies of data the correctness core still owns.
- */
+/** Optional cache port; values are advisory and cannot replace authoritative state. */
 
 export interface CachePort {
   get<T>(key: string): Promise<T | undefined>;

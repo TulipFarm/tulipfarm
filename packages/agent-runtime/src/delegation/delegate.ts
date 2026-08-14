@@ -6,13 +6,7 @@ import type {
 } from "@tulipfarm/run-kernel";
 import { ajv, canonicalHash } from "@tulipfarm/schema";
 
-/**
- * Agent delegation (SPEC §10). A helper Agent is a child Run, so it inherits the kernel's
- * non-amplification rules for Tools, classifications, and limits. This module adds the Agent-level
- * defaults on top: a helper starts read-only, its deadline and depth may only narrow, cancellation
- * reaches attached helpers only, and a helper reports back through a schema-validated Artifact
- * rather than free-form text the parent would have to trust.
- */
+/** Helpers are child Runs: authority, deadlines, and depth may only narrow. */
 
 export type DelegationMode = "read_only" | "read_write";
 

@@ -1,9 +1,4 @@
-/**
- * The catalog's contract is that it can only offer what the gate can actually evaluate. These
- * tests are written against that claim, not against the current Tool list — a test that asserted
- * "there are 14 GitHub capabilities" would fail every time someone added a Tool while proving
- * nothing about correctness.
- */
+/** The capability catalog must only advertise gates the auth layer can evaluate. */
 
 import { RoleGrantSchema } from "@tulipfarm/schema";
 import { describe, expect, it } from "vitest";
@@ -41,11 +36,7 @@ function allCapabilities(catalog: ReturnType<typeof buildCapabilityCatalog>) {
 }
 
 describe("the authorable patterns match the schema that will validate the level", () => {
-  /*
-   * The whole point of the catalog is that everything it offers can be authored. If these
-   * constants drift from `RoleSchema`, the catalog starts offering capabilities the authoring
-   * endpoint rejects — a dead end reached only after a user has picked one and pressed the button.
-   */
+  /** Every catalog capability must be authorable by RoleSchema. */
   it("uses the same action pattern the published Role schema enforces", () => {
     const properties = RoleGrantSchema.properties as {
       actions: { items: { pattern: string } };
@@ -88,11 +79,7 @@ describe("buildCapabilityCatalog", () => {
     expect(capabilities[0]?.tools).toEqual(["a", "b"]);
   });
 
-  /*
-   * The grant is shared, so an owner granting it is agreeing to its most powerful use. Reporting
-   * the capability as read-only because *one* of its Tools only reads would understate what they
-   * are handing over.
-   */
+  /** Shared grants are described by their most powerful use. */
   it("treats a capability as changing things when any of its Tools does", () => {
     const catalog = buildCapabilityCatalog([
       toolWith("reader", "record.export", ["record"], false),
@@ -132,11 +119,7 @@ describe("buildCapabilityCatalog", () => {
   });
 
   describe("what cannot be authored is reported, never offered", () => {
-    /*
-     * Offering one of these would produce a level that saves cleanly and then denies every call —
-     * the invisible failure this module exists to prevent. Dropping it silently would leave an
-     * owner hunting for a capability that is never coming.
-     */
+    /** Every advertised scope level must be accepted by the auth schema. */
     it("reports a Tool that declares no resource", () => {
       const catalog = buildCapabilityCatalog([toolWith("t", "thing.do", [])]);
       expect(allCapabilities(catalog)).toEqual([]);
@@ -201,11 +184,7 @@ describe("capabilityLabel", () => {
     expect(capabilityLabel(action)).toBe(expected);
   });
 
-  /*
-   * `read` and `list` are separate grants, so they must not read identically. Both mapped to "See"
-   * before this, and an owner was shown two checkboxes carrying the same words with no way to tell
-   * which was which — seven such pairs existed in the live catalog.
-   */
+  /** `read` and `list` are separate grants, so their descriptions must differ. */
   it.each([
     ["soul.agent.read", "soul.agent.list"],
     ["record.read", "record.list"],
@@ -215,18 +194,12 @@ describe("capabilityLabel", () => {
     expect(capabilityLabel(readAction)).not.toBe(capabilityLabel(listAction));
   });
 
-  /*
-   * With no object segment the verb alone names nothing — "Publish" what? Falling back to the area
-   * is the only reading that stays true to the action.
-   */
+  /** With no object segment, fall back to the area label. */
   it("uses the area as the object when the action has no middle segment", () => {
     expect(capabilityLabel("soul.publish")).toBe("Publish soul");
   });
 
-  /*
-   * A multi-word final segment already names its own object, so appending the area on top of it
-   * produced "Invoke action frontend" for every one of the four frontend capabilities.
-   */
+  /** Multi-word final segments already name their object; do not append the area again. */
   it.each([
     ["frontend.invoke_action", "Invoke action"],
     ["frontend.prefill_form", "Prefill form"],
@@ -239,12 +212,7 @@ describe("capabilityLabel", () => {
     expect(capabilityLabel("github.branch.rebase")).toBe("Rebase branch");
   });
 
-  /*
-   * A standing guard rather than a one-off assertion. Two capabilities in the same area that read
-   * identically are two indistinguishable checkboxes, and the only thing an owner can do with them
-   * is guess. Asserted through the catalog rather than the labeller alone because it is the
-   * catalog that decides an area's contents, and it is there that a collision becomes visible.
-   */
+  /** Guard against duplicate human labels inside one capability area. */
   it("never places two identically labelled capabilities in the same area", () => {
     const catalog = buildCapabilityCatalog([
       toolWith("agent_read", "soul.agent.read", ["soul.agent"]),
@@ -264,10 +232,7 @@ describe("areaLabel", () => {
     expect(areaLabel("github")).toBe("GitHub");
   });
 
-  /*
-   * A new integration must appear with a reasonable name the day it ships. Waiting for someone to
-   * update a map is how the hand-maintained lists this module replaces went stale.
-   */
+  /** New integration capabilities should get reasonable labels the day they ship. */
   it("falls back to the segment itself for an area nobody has named", () => {
     expect(areaLabel("linear")).toBe("Linear");
     expect(areaLabel("google_docs")).toBe("Google docs");

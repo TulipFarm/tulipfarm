@@ -1,13 +1,4 @@
-// Zero-required-env boot: resolve the three bootstrap secrets from, in order,
-// the environment → a persisted file on the data volume → freshly generated randomness.
-//
-// This is what lets `docker-compose.yml` ship with no `.env` at all, so a user can paste it
-// into Portainer/Coolify/Unraid/ACA and get a working instance in one step. The installer
-// still writes real secrets into `.env`, and env vars always win — existing installs never
-// take this path.
-//
-// Pure-ish and injectable (env/fs/log) so the unit tests can exercise every branch without
-// touching a real /data.
+// Zero-required-env boot: env wins, then persisted file, then generated randomness.
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -32,15 +23,7 @@ export interface BootstrapSecretsResult {
 
 export class BootstrapSecretsError extends Error {}
 
-/**
- * Where generated secrets are persisted. Explicit `TF_DATA_DIR` always wins; otherwise the
- * container default `/data` is used only when it already exists.
- *
- * The existence check is what keeps this a container-only feature: outside the image nobody
- * has a `/data`, so a developer who forgot `.env.local` still gets the familiar
- * "Missing required environment variables" error from `validateEnvironment` instead of a
- * confusing permission failure on a directory they never asked for.
- */
+/** Generated secrets persist under explicit `TF_DATA_DIR`, then `/data`, then cwd. */
 export function resolveDataDir(env: NodeJS.ProcessEnv = process.env): string | undefined {
   if (env.TF_DATA_DIR) return env.TF_DATA_DIR;
   try {
@@ -67,14 +50,7 @@ function parseSecretsFile(contents: string): Partial<Record<ManagedSecret, strin
   return out;
 }
 
-/**
- * Fill any missing bootstrap secret on `env`, persisting anything invented so the next boot
- * reuses it. Mutates `env` — callers run this before `validateEnvironment`.
- *
- * Throws `BootstrapSecretsError` when a secret had to be generated but could not be
- * persisted: ephemeral keys would silently orphan every encrypted secret on the next
- * restart, so refusing to boot is the only honest outcome.
- */
+/** Fills missing bootstrap secrets on `env` and persists generated values for reuse. */
 export function bootstrapSecrets(
   env: NodeJS.ProcessEnv = process.env,
   log: Pick<Console, "warn"> = console
@@ -157,12 +133,7 @@ function writeSecretsFile(
   }
 }
 
-/**
- * Second half of the key-loss guard, called once the pool is up (the table only exists after
- * migrations). A freshly generated KEK plus pre-existing wrapped DEKs means the operator lost
- * the old key — every stored secret is already undecryptable, and booting on would provision a
- * second DEK and bury the evidence.
- */
+/** Verifies persisted bootstrap secrets after migrations create the secrets table. */
 export async function assertNoOrphanedDeks(
   query: (sql: string) => Promise<{ rowCount: number | null }>,
   result: BootstrapSecretsResult

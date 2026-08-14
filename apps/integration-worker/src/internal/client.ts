@@ -1,15 +1,4 @@
-/**
- * Transport for `/api/v1/internal/channels/*`.
- *
- * `apps/integration-worker` may not import `apps/api`, so Run minting, reply reading, identity
- * resolution, and approval decisions all cross this boundary over HTTP. This is a deliberate copy
- * of `apps/worker/src/internal/client.ts` — same shape, duplicated rather than shared because an
- * application may not import another application.
- *
- * The credential is a service API-client secret. It is a key to *act on a Run*, never a principal:
- * the host derives authority from each Run's recorded subject, so this client states which Run and
- * never claims whom it is acting as.
- */
+/** Internal channel HTTP client; the secret acts on Runs, not as a principal. */
 
 /** A response the host refused or could not serve. Carries the status so callers can branch. */
 export class InternalApiError extends Error {
@@ -45,10 +34,7 @@ export class InternalApiClient {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  /**
-   * One call whose answer must exist. Anything other than a body is a fault, including `204` — a
-   * caller that asked for a Context or dispatched a Tool has nothing to fall back on.
-   */
+  /** Required response body; any missing body, including 204, is a fault. */
   async require<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
     const response = await this.send(method, path, body);
     if (!response.ok || response.status === 204) {
@@ -57,11 +43,7 @@ export class InternalApiClient {
     return (await response.json()) as T;
   }
 
-  /**
-   * One call whose answer may legitimately be "nothing".
-   *
-   * `absentOn` names exactly which statuses mean that, and every other failure still throws.
-   */
+  /** Optional response body; only statuses in `absentOn` mean “nothing”. */
   async find<T>(
     method: "GET" | "POST",
     path: string,

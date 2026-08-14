@@ -4,17 +4,7 @@ import {
   type ToolContractSpec,
 } from "@tulipfarm/schema";
 
-/**
- * Published GitHub ToolContracts (SPEC §11, §15).
- *
- * These are typed, bounded Tools — never a shell around `gh` and never a raw HTTP passthrough.
- * Each one names the single provider operation it performs, declares its own risk class and
- * mutation flag, and binds to the governed Integration adapter so every call re-enters the Tool
- * Broker. Mutating contracts declare `idempotency.strategy: "reconcile"` (GitHub has no native
- * idempotency key) plus the reconciliation lookup that resolves an ambiguous effect, and are
- * explicitly *not* safe to blind-retry: a write whose outcome is unknown must be reconciled
- * against provider state, not repeated.
- */
+/** Typed GitHub Tools; mutating contracts reconcile unknown outcomes instead of retrying. */
 
 export const GITHUB_ADAPTER_REF = "integration:github";
 
@@ -88,13 +78,7 @@ function issueInput(properties: Record<string, unknown>, required: string[]) {
   };
 }
 
-/**
- * A search input takes `repository` alone (unchanged behavior), `repositories` (an OR-searched
- * bounded set), or neither (every repository the installation covers) — never both `required`,
- * since exactly which of the three applies is resolved by the adapter, not this schema. Bounded to
- * 25 as a sanity cap on query length; GitHub's issue/PR search has no documented limit on repeated
- * `repo:` qualifiers (the 5-operator cap is Code Search only, not Issues/PR search).
- */
+/** Search accepts one repo, up to 25 repos, or adapter-resolved installation repos. */
 function searchInput(properties: Record<string, unknown>, required: string[]) {
   return {
     type: "object",

@@ -26,9 +26,7 @@ const MEMORY_GUIDANCE =
   "'America/New_York' — format all datetimes in it), date_format (e.g. 'DD/MM/YYYY'), " +
   "preferred_name (address the user by this name).";
 
-// Plain JSON Schema literals, matching the codebase's inline-schema convention (see ChatBodySchema).
-// `value` deliberately carries NO maxLength: an oversized write must reach the service so the tool
-// can return the create_knowledge_page suggestion, not a generic schema rejection.
+// `value` has no maxLength: oversized writes must reach the service for a Knowledge suggestion.
 const UPDATE_MEMORY_SCHEMA: Record<string, unknown> = {
   type: "object",
   additionalProperties: false,
@@ -157,12 +155,7 @@ const RECALL_MEMORY_SCHEMA: Record<string, unknown> = {
 
 const validateRecall = ajv.compile(RECALL_MEMORY_SCHEMA);
 
-/**
- * Searches everything durable, not just the always-on `<memory>` block.
- *
- * The block is deliberately small, so anything older or more situational is reachable only by
- * asking. Read-only, and scoped to the calling user by the engine — the tool cannot widen it.
- */
+/** Search durable Memory beyond the small always-on block; the engine scopes to the caller. */
 export const recallMemoryTool = defineApiTool<ToolContext>({
   name: "recall_memory",
   description:
@@ -175,8 +168,7 @@ export const recallMemoryTool = defineApiTool<ToolContext>({
   authorization: {
     action: "memory.recall",
     resources: ["platform.memory"],
-    // A recall searches this user's whole durable Memory; the coarse platform.memory read is the
-    // intended authority, not any one memory key.
+    // Recall searches this user's durable Memory; `platform.memory` is the intended authority.
     targets: () => [],
     dataClasses: ["memory"],
   },
@@ -195,8 +187,7 @@ export const recallMemoryTool = defineApiTool<ToolContext>({
       Math.min(limit ?? RECALL_MEMORY_LIMIT, RECALL_MEMORY_LIMIT),
       ctx.agentId
     );
-    // Only the fields the model should reason about. Ids, versions, and provenance stay internal:
-    // they are not useful to the model and would invite it to quote them back to the user.
+    // Keep ids, versions, and provenance internal so the model cannot quote them back.
     return ok({
       query,
       memories: assertions.map((a) => ({
@@ -233,16 +224,7 @@ const REMEMBER_CORRECTION_SCHEMA: Record<string, unknown> = {
 
 const validateCorrection = ajv.compile(REMEMBER_CORRECTION_SCHEMA);
 
-/**
- * The one place an instruction may legitimately enter Memory.
- *
- * Everything else in Memory is a statement of fact, deliberately, because storing imperatives is
- * how memory poisoning works: text that flowed in from a document or a third party would come back
- * as an order. A correction escapes that ban only because the user said it themselves this turn —
- * which is exactly what the engine enforces (`procedural_requires_explicit_correction` rejects any
- * procedural write that is not explicit and user-stated). Never call this for a rule inferred from
- * behaviour, restated from a document, or relayed on someone else's behalf.
- */
+/** Only explicit user-stated corrections may write procedural Memory; never infer rules. */
 export const rememberCorrectionTool = defineApiTool<ToolContext>({
   name: "remember_correction",
   description:
@@ -279,9 +261,7 @@ export const rememberCorrectionTool = defineApiTool<ToolContext>({
       // The denial reason names an internal policy the model should not see, let alone repeat.
       return err("write_denied", `Could not record the correction for "${subject}".`);
     }
-    // The engine write bypasses the KV service's dual cap, and the prompt assembler drops the
-    // whole `<memory>` block on overflow — so re-apply the cap rather than let a correction
-    // silently cost the user every memory they have.
+    // Re-apply the cap; overflow drops the whole `<memory>` block.
     await ctx.service.enforceCaps(ctx.userId, subject);
     return ok({ subject, stored: true });
   },

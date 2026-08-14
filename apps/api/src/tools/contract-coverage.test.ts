@@ -1,15 +1,4 @@
-/**
- * Stage 1 fitness check: every registered Tool declares its own authority.
- *
- * This is a ratchet, not a unit test. Before `defineTool` existed, a Tool had nowhere to say what
- * authority a call to it required, so the gate had nothing to decide on. Now that every Tool can
- * say it, the only thing keeping that true over time is a check that fails the build when a new
- * Tool is registered without a declaration.
- *
- * Without this, the twelfth tool module added six months from now quietly reintroduces the gap:
- * it registers, it works, it is reachable by a model, and it is invisible to policy. The failure
- * mode of a missing declaration is not an error — it is silence.
- */
+/** Ratchet: every registered Tool must declare authority or the build fails. */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -285,14 +274,7 @@ interface CoveredTools {
   readonly declarativeProblems: readonly string[];
 }
 
-/**
- * Builds the registry the way production does, with every optional service wired to a stub.
- *
- * The stubs are never called: this file inspects declarations, it does not execute Tools. They
- * exist only because `buildToolRegistry` registers a family only when its service is present, and
- * a check that skipped unwired families would be a coverage check with a hole in exactly the shape
- * of whatever was hardest to construct.
- */
+/** Builds the production registry with stubs so service-gated Tool families are still covered. */
 function registerAllFamilies(): CoveredTools {
   const registry = buildToolRegistry({
     ...stubbedCoreServices(),

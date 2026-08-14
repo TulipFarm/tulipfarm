@@ -21,11 +21,6 @@ const UNNAMED: UserSummary = {
 const directory = buildDirectory([PRIYA, UNNAMED]);
 
 describe("lookupParty", () => {
-  /*
-   * The join this module exists for. `principal_id = users.id::text` is written by the
-   * `sync_user_authorization` trigger, and nothing on the access screens used it — which is why
-   * every member row was a raw UUID.
-   */
   test("resolves a principal id to the person's name and email", () => {
     const party = lookupParty(directory, PRIYA.id);
     expect(party.name).toBe("Priya Sharma");
@@ -35,8 +30,6 @@ describe("lookupParty", () => {
   });
 
   test("falls back to the email when nobody has set a name", () => {
-    // Names are self-authored, so an invited account legitimately has none. Guessing one from the
-    // email would look authored and be wrong.
     const party = lookupParty(directory, UNNAMED.id);
     expect(party.name).toBe("rahul@cafe.test");
     expect(party.detail).toBe("rahul@cafe.test");

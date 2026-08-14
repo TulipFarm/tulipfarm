@@ -10,11 +10,7 @@ import { useSessionUser } from "~/lib/use-session-user";
 
 const MAX_NAME_CHARS = 80;
 
-/**
- * The participant's own record. Identity (email, role) is shown but not editable here — both are
- * administered, and offering an input the server would refuse is worse than showing the value
- * plainly with the reason it is fixed.
- */
+/** Email and Role are administered elsewhere, so this page shows why they are fixed. */
 export default function ProfileSettings() {
   const user = useSessionUser();
   const revalidator = useRevalidator();

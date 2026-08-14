@@ -1,15 +1,4 @@
-/**
- * Governed Conversations and Turns (SPEC §10, §18).
- *
- * A Turn is durable before it is dispatched: the user Message and the Turn row are written first,
- * then a Run is started for it. That ordering is what makes a lost response safe to retry — a
- * replayed idempotency key resolves to the same Turn and Run instead of a second Message, and a
- * Turn whose Run never started resumes rather than duplicating.
- *
- * Streaming is cursor-based: readers resume from the Turn's persisted cursor over the Run event
- * stream, so a reconnect never replays or drops. Authorization is re-checked on every Turn and
- * every read; nothing here caches a decision across calls.
- */
+/** SPEC §10/§18: persist the Turn before dispatch; stream resumes from its durable cursor. */
 
 export type TurnStatus = "pending" | "running" | "start_failed" | "succeeded" | "failed";
 
@@ -21,23 +10,14 @@ export interface PersistedMessage {
   readonly role: "user" | "assistant";
   readonly content: string;
   readonly metadata?: Record<string, unknown>;
-  /**
-   * Which Worker attempt wrote this Message. Absent on a user Message — the request belongs to the
-   * Turn, not to an attempt at answering it — and on rows written before attempts existed.
-   */
+  /** Worker attempt that wrote this Message; absent for user Messages and old rows. */
   readonly attempt?: number;
   readonly createdAt: Date;
 }
 
 export type TurnCompletionStatus = Extract<TurnStatus, "succeeded" | "failed">;
 
-/**
- * What one Worker attempt produced for a Turn.
- *
- * Keyed by `(turnId, attempt)` because a Worker killed mid-turn is retried under a *new* attempt:
- * the dead attempt's record stays, and the retry's cannot collide with it. The Turn's answer is
- * whichever attempt wrote a completion naming a Message.
- */
+/** One Worker attempt for a Turn; retries use a new attempt so dead records do not collide. */
 export interface TurnCompletion {
   readonly businessId: string;
   readonly turnId: string;
@@ -68,10 +48,7 @@ export interface PersistedTurn {
 export interface ConversationStore {
   findTurnByIdempotencyKey(businessId: string, key: string): Promise<PersistedTurn | undefined>;
   findTurn(businessId: string, turnId: string): Promise<PersistedTurn | undefined>;
-  /**
-   * The Turn a Run is currently answering. A Run that was superseded by a `same_turn` retry no
-   * longer matches, which is what stops a stale executor from being handed the live Turn.
-   */
+  /** Live Run→Turn mapping; `same_turn` retries supersede stale executors. */
   findTurnByRunId(businessId: string, runId: string): Promise<PersistedTurn | undefined>;
   appendMessage(message: PersistedMessage): Promise<void>;
   saveTurn(turn: PersistedTurn): Promise<void>;
@@ -134,7 +111,7 @@ export interface StartedTurn {
 export interface RetryTurnInput {
   readonly businessId: string;
   readonly turnId: string;
-  /** `same_turn` re-dispatches the existing Turn; `new_turn` replays the request as a fresh Turn. */
+  /** `same_turn` re-dispatches the Turn; `new_turn` replays as a fresh Turn. */
   readonly mode: "same_turn" | "new_turn";
 }
 

@@ -1,8 +1,4 @@
-/**
- * Hash-linking for append-only audit evidence (SPEC §20). Each event's hash covers its own
- * fields plus the previous event's hash, so altering, reordering, or dropping any event changes
- * every hash after it — {@link verifyChain} in `verify.ts` detects the break.
- */
+/** Audit hashes cover the event plus previous hash; edits, reorders, or drops break the tail. */
 
 import { canonicalHash } from "@tulipfarm/schema";
 import type { AuditEvent, AuditEventInput } from "./event";

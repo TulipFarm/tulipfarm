@@ -7,12 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LlmProviderError } from "../provider-error";
 import { buildCodexPrompt, CodexModel, isCodexAuthError, isCodexAuthFailure } from "./codex";
 
-/**
- * Unlike the Claude adapter — whose SDK can be `vi.mock`ed in-process — Codex speaks a wire
- * protocol to a subprocess, so the subprocess is what gets faked. `codex-fake-server.mjs` is a real
- * child process reached through `TF_CODEX_BIN`, which means the transport, the ordering guarantees
- * and the process teardown are all genuinely exercised rather than stubbed away.
- */
+/** Codex tests fake the subprocess to exercise transport, ordering, and teardown. */
 
 const FAKE_SERVER = join(__dirname, "codex-fake-server.mjs");
 
@@ -152,11 +147,7 @@ describe("CodexModel turn", () => {
   });
 
   it("treats cached input tokens as a breakdown of the input total, not an addend", async () => {
-    // Codex's `inputTokens` already includes cache reads — the binary emits
-    // `non_cached_input_tokens` as a third sibling field, which is only meaningful if it does.
-    // Adding the two would inflate input on every cached turn, and because a Subscription Provider
-    // replays the whole transcript each AgentLoop iteration, cache reads are the *majority* of
-    // input. Anthropic's shape is the opposite, which is exactly how the bug got here.
+    // Codex input tokens include cache reads; adding non_cached_input_tokens would inflate input.
     scenario([usage(1000, 10, 900), completed()]);
 
     const result = await model().doGenerate(callOptions());
@@ -315,11 +306,7 @@ describe("tool-call capture", () => {
   });
 
   it("captures every call of a parallel batch, not just the first", async () => {
-    // The plan calls this the most likely correctness bug, and the risk is specific: `finish`
-    // settles the turn on the first interrupt acknowledgement, so a second call still in flight
-    // could be dropped *after* `onRequest` already told the server it was handed to the broker —
-    // a silently lost tool call with no diagnostic. The fake server writes both requests
-    // back-to-back without waiting for a reply, which is how a real parallel batch arrives.
+    // Two parallel tool calls must both be handed to the broker before finish can settle.
     scenario([
       toolCall("call_1", "create_resource", { title: "first" }),
       toolCall("call_2", "send_message", { body: "second" }),
@@ -581,11 +568,7 @@ describe("buildCodexPrompt", () => {
   });
 
   it("carries images rather than replacing them with a placeholder", () => {
-    // `specs.ts` declares `supports_vision: true` for every codex model, which makes the router
-    // deliberately send image-bearing turns here. Dropping the bytes would produce a confident
-    // answer about an image the model never saw — the exact failure the modality dimension exists
-    // to prevent. `{type:"image", url:"data:..."}` is verified accepted by the real 0.147.0
-    // app-server, as is `input_image` inside injected history.
+    // Codex vision support requires images on both trailing turns and replayed history.
     const png = Buffer.from("iVBORw0KGgo=", "base64");
     const prompt: LanguageModelV4Prompt = [
       {

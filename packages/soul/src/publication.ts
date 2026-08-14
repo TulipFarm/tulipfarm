@@ -20,31 +20,7 @@ import { compileExecutionBundle } from "./compiler";
 import { verifyExecutionBundle } from "./signatures";
 import type { Logger } from "./types";
 
-/**
- * Publication projection and reconciliation (SPEC §8.2 steps 13–15).
- *
- * A signed bundle becomes the version the runtime executes only after every stage
- * committed, in this order:
- *
- * 1. `committed` — the immutable bundle is written to content-addressed storage (inert: addressed
- *    by digest, referenced by nothing), then the publication record and one outbox message commit
- *    in a single transaction. Nothing is active yet.
- * 2. `projected` — the authored metadata of that digest replaces the business projection.
- * 3. `stored`    — the bundle is confirmed present and digest-intact in bundle storage.
- * 4. `active`    — the digest becomes the one the runtime reads, and the outbox message is
- *    acknowledged with the consumer identity, in a single transaction.
- *
- * Every stage is idempotent and its own transaction, so an interruption anywhere leaves the
- * previously active digest untouched. {@link SoulPublicationCoordinator.drain} claims due outbox
- * messages with a lease, advances every message it claimed, and records retry/dead-letter evidence
- * per message instead of letting one poison publication block the queue head forever. Publication
- * failure therefore never leaves a partially active version and never stops later publications from
- * being attempted.
- *
- * The authored projection is derived data. {@link SoulPublicationCoordinator.rebuildProjection}
- * recompiles it from the Git commit the active digest was published from and refuses to write when
- * Git no longer reproduces that digest.
- */
+/** Publication is staged and idempotent: committed -> projected -> stored -> active. */
 
 export const SOUL_PUBLICATION_TOPIC = "soul.publication.requested";
 
@@ -223,11 +199,7 @@ export class SoulPublicationCoordinator {
     this.now = options.now ?? (() => new Date());
   }
 
-  /**
-   * Stage 1. Store the immutable bundle, then record the publication and enqueue its outbox
-   * message in one transaction. Returns without activating anything; {@link drain} finishes the
-   * publication. A duplicate request for the same changeset and digest is a no-op.
-   */
+  /** Store the inert bundle first, then atomically record publication plus outbox message. */
   async publish(request: SoulPublishRequest): Promise<void> {
     const record = request.bundle;
     const actorPrincipalId = request.actor.principalId;
@@ -350,14 +322,7 @@ export class SoulPublicationCoordinator {
     );
   }
 
-  /**
-   * The durable job. Claims due, unconsumed publications with a lease, then advances each claimed
-   * message from its recorded stage toward `active`. The lease is necessary because processing
-   * happens after the claim transaction commits; plain row locks would already be released and
-   * would not protect against double-processing. Failures are recorded with exponential backoff and
-   * dead-letter after a bounded number of attempts, so one poison publication cannot block the
-   * queue head.
-   */
+  /** Durable drain: lease due outbox messages and record retries/dead letters per message. */
   async drain(consumer: string, max = 10): Promise<readonly SoulPublicationOutcome[]> {
     const now = this.now();
     const nowIso = now.toISOString();
@@ -401,11 +366,7 @@ export class SoulPublicationCoordinator {
     return runtime;
   }
 
-  /**
-   * Rebuild the authored projection for the active version from Git. The definitions read at the
-   * published commit are recompiled and must reproduce the active digest exactly; anything else
-   * means Git and the active version disagree, and nothing is written.
-   */
+  /** Rebuild active projection only when Git still reproduces the active digest. */
   async rebuildProjection(businessId: string, reader: SoulTreeReader): Promise<string> {
     const record = await this.store.withTransaction(async (tx) => {
       const digest = await tx.getActiveDigest(businessId);
@@ -544,24 +505,7 @@ export class SoulPublicationCoordinator {
     return next;
   }
 
-  /**
-   * Finding 2: an empty definition tree compiles, signs, and drains like any other bundle, so an
-   * accidental removal of every definition directory would activate a bundle that silently
-   * disables every Routine and Trigger. Refuse it — but only when it would destroy a non-empty
-   * active version; a first-ever empty publication is a legitimate fresh install. The failure is
-   * fatal because retrying the identical empty bundle can never succeed, so it dead-letters at once
-   * and leaves the previous version active and diagnosable.
-   */
-  /**
-   * Refuse an activation that would replace a non-empty active bundle with an empty one. `git add
-   * -A` means any accidental deletion of the definition directories produces a legitimately signed
-   * empty bundle, and activating it wipes the projection and silently stops every Routine.
-   *
-   * Reads deliberately happen OUTSIDE the caller's write transaction. The bundle store owns its own
-   * transactions, so calling it while a publication transaction is open takes a second connection
-   * and holds the first — which deadlocks outright on a single-connection database and, on a real
-   * pool, wedges the whole API the moment the pool is saturated.
-   */
+  /** Refuse replacing a non-empty active bundle with an empty one; read bundles outside tx. */
   private async ensureNonDestructiveActivation(target: {
     readonly businessId: string;
     readonly changesetId: string;
@@ -605,18 +549,7 @@ export class SoulPublicationCoordinator {
     return record;
   }
 
-  /**
-   * Retire a publication that lost the activation race to a newer one.
-   *
-   * Being superseded is not a failure: the monotonic guard did exactly its job, and every later
-   * attempt would lose the same race. Treating it as a failure would burn the retry budget, then
-   * dead-letter a publication that is working as designed — leaving the deployment permanently
-   * "degraded" and diluting the dead-letter queue that operators rely on to spot real breakage.
-   *
-   * The outbox message must still be consumed here. `activate` marked it consumed inside the
-   * transaction that rolled back, so without this the lease would expire and the message would be
-   * re-claimed forever.
-   */
+  /** Superseded publications are consumed, not retried, after losing activation to a newer one. */
   private async recordSuperseded(
     record: SoulPublicationRecord,
     consumer: string

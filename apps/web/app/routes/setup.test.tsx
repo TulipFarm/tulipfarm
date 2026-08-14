@@ -7,12 +7,6 @@ import * as settingsLib from "~/lib/settings";
 import * as setupLib from "~/lib/setup";
 import SetupRoute, { buildSetupLlmConfig } from "./setup";
 
-/*
- * Setup wizard flow tests. The wizard is three steps — admin account, business profile, LLM setup
- * — and completing (or skipping) the last one finishes setup. Drafts live in the route so stepping
- * back never discards typed input.
- */
-
 vi.mock("~/lib/setup", () => ({
   getSetupStatus: vi.fn(),
   setupAdmin: vi.fn(),
@@ -162,11 +156,7 @@ test("seeds a schema-valid LLM config where auto resolves to a derived profile",
   });
 });
 
-/*
- * The installer browser smoke (scripts/test/browser-smoke.mjs) fills this field by id rather than
- * by placeholder, after rewriting the placeholder copy silently broke it. Renaming the id would
- * otherwise only surface in the slow Docker installer stage, so pin the contract here instead.
- */
+/* Browser smoke fills by id, so renames must fail here before the slow installer stage. */
 test("keeps the business-name field id the installer browser smoke drives", async () => {
   const user = userEvent.setup();
   setupAdmin.mockResolvedValue(undefined as never);

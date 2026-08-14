@@ -1,15 +1,4 @@
-/**
- * The exact binding an Approval is granted for (SPEC §11.2). An Approval authorizes one canonical
- * Tool intent against one evidence set under one Guardrail revision; if any of those change, the
- * binding changes and the Approval no longer applies. The binding is three digests, never the
- * underlying values, so a persisted Approval, an audit event, or a denial reason can carry it
- * without exposing arguments, destinations, or Credential references (SPEC §13, §20).
- *
- * Normalization is applied only where it cannot weaken the binding: absent optional fields hash as
- * `null` (distinct from any present value) and evidence hashes are order-insensitive because
- * evidence is a set. Everything else — including `targetRefs` order — is bound verbatim, so an
- * unexplained difference fails closed rather than being normalized away.
- */
+/** Approval binding is three safe digests; only evidence order is normalized. */
 
 import { canonicalHash } from "@tulipfarm/schema";
 
@@ -38,11 +27,7 @@ export interface ApprovalBinding {
   readonly guardrailRevision: string;
 }
 
-/**
- * Computes the binding for `input`. Throws `CanonicalizationError` when the intent arguments
- * cannot be canonicalized (dates, class instances, non-finite numbers) — an intent that cannot be
- * hashed exactly is never approximated into a digest.
- */
+/** Throws when intent arguments cannot be canonicalized exactly. */
 export function computeApprovalBinding(input: ApprovalBindingInput): ApprovalBinding {
   const { intent } = input;
   return {

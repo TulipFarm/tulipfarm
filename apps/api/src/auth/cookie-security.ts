@@ -8,12 +8,7 @@
 //
 // PUBLIC_URL is what actually describes the origin users reach, so it decides.
 
-/**
- * Whether cookies issued by this instance should carry the `Secure` attribute.
- *
- * PUBLIC_URL wins when set. Without it we fall back to the old NODE_ENV heuristic, which
- * keeps existing TLS-terminated deployments that never set PUBLIC_URL on the secure path.
- */
+/** `PUBLIC_URL` decides cookie `Secure`; `NODE_ENV` remains a legacy fallback. */
 export function useSecureCookies(env: NodeJS.ProcessEnv = process.env): boolean {
   if (env.PUBLIC_URL) return env.PUBLIC_URL.startsWith("https://");
   return env.NODE_ENV === "production";

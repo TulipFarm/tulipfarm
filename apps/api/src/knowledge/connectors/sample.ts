@@ -18,18 +18,13 @@ export function defaultSampleFixturesPath(): string {
   return join(__dirname, "fixtures", "sample.json");
 }
 
-/**
- * Reference connector reading a local JSON fixtures file. It exercises the full framework path —
- * incremental `listChanged` (by `updatedAt` cursor), `fetch`, and `mapToPage` to a flat page — so
- * the sync orchestration and indexer can be verified without a live third-party source.
- */
 export class SampleConnector implements Connector {
   readonly name = "sample";
 
   constructor(private readonly fixturesPath: string = defaultSampleFixturesPath()) {}
 
   async authenticate(): Promise<void> {
-    // Local fixtures need no credentials; a real connector would load them from SecretsService here.
+    // Local fixtures need no credentials; real connectors load them from SecretsService.
   }
 
   async listChanged(cursor: string | null): Promise<ConnectorChanges> {

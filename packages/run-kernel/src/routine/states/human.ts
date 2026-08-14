@@ -14,15 +14,10 @@ export type HumanTaskResult = "completed" | "declined" | "expired";
 export interface HumanTaskAssignment {
   readonly stateKey: string;
   readonly roles: readonly string[];
-  /** The same roles as canonical principals — exactly who may signal the wait. */
   readonly principals: readonly string[];
 }
 
-/**
- * The assignment a `human_task` State publishes. It names roles, never an individual: picking a
- * person is the assignment surface's job, and the durable wait stays authorized to the whole role
- * so a hand-off does not silently lock the Run to one absent human.
- */
+/** Human-task waits authorize roles, not individuals, so hand-offs remain valid. */
 export function humanTaskAssignment(state: CompiledState): HumanTaskAssignment {
   const roles = requireRoles(state, "assigneeRoles");
   return { stateKey: state.name, roles, principals: roles.map((role) => `role:${role}`) };

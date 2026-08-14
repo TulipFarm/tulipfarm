@@ -2,7 +2,6 @@ import type { CompiledState } from "../compiler";
 import { evaluateCondition } from "../expressions";
 import { RoutineStepError, type StepOutcome, stateOutcome } from "./step";
 
-/** The durable loop record: iterations already completed and when the loop first started. */
 export interface RepeatProgress {
   readonly iterations: number;
   readonly startedAtMs: number;
@@ -17,13 +16,8 @@ export function initRepeatProgress(nowMs: number): RepeatProgress {
 }
 
 /**
- * Decide whether a `repeat_until` State runs its body again or exits.
- *
- * The body runs at least once — the termination condition describes when to stop, not whether to
- * start. Both bounds are required and are checked before every dispatch: an exhausted loop is a
- * fail-closed denial, never a silent exit that would look like the condition was met. A condition
- * that already holds wins over an exhausted bound, so a loop that finished on its last allowed
- * iteration completes normally.
+ * `repeat_until` runs at least once, requires bounds, denies exhausted loops, and lets a satisfied
+ * condition win over an exhausted bound.
  */
 export function stepRepeat(
   state: CompiledState,

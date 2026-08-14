@@ -11,14 +11,7 @@ import {
   sortIssues,
 } from "./refs";
 
-/**
- * Semantic graph validation (SPEC §8.2 step 6) plus the public tree-level entrypoint that
- * orchestrates identifier uniqueness ({@link DefinitionIndex}), reference resolution
- * ({@link resolveReferences}), and non-amplification ({@link analyzeCapabilities}).
- *
- * This runs after strict per-file AJV validation and before signing/compilation. It is
- * synchronous, side-effect free, and deterministic; issues are payload-safe.
- */
+/** Public semantic validation entrypoint; accepts plain documents for focused tests. */
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -179,11 +172,7 @@ function checkSkillCommands(index: DefinitionIndex): SoulSemanticIssue[] {
 
 // ── Reference cycles (Role inheritance, ModelProfile fallbacks) ─────────────────
 
-/**
- * Detect a cycle reachable from `def` over a plain-ref adjacency (slug or id). Reports one
- * issue on the definition that closes the cycle back onto itself, so the same cycle surfaces
- * deterministically regardless of traversal order.
- */
+/** Report one deterministic cycle edge for plain-ref adjacency checks. */
 function detectCycle(
   index: DefinitionIndex,
   code: SoulSemanticIssue["code"],
@@ -258,11 +247,7 @@ function checkStableIdVersions(index: DefinitionIndex): SoulSemanticIssue[] {
 
 // ── Public entrypoint ───────────────────────────────────────────────────────────
 
-/**
- * Validate the semantic graph and cross-references of a proposed Soul tree. `documents` are the
- * strict-AJV-validated authored definitions of the proposed tree (base tree merged with the
- * changeset). Throws {@link SoulSemanticValidationError} with all issues if any check fails.
- */
+/** Validate tree-level semantics and throw one payload-safe error containing all issues. */
 export function validateSoulSemantics(documents: readonly VersionedSchemaDocument[]): void {
   const { index, issues: identityIssues } = DefinitionIndex.build(documents);
   const issues = sortIssues([

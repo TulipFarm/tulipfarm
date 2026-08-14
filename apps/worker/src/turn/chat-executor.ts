@@ -23,20 +23,7 @@ import { reclaimPendingState, reclaimWaitingState } from "./kernel-ports";
 import { type RunEventAppendPort, TurnEventWriter } from "./run-events";
 import { announceToolCalls } from "./tool-events";
 
-/**
- * The `chat` Run executor (plan §4; blocker §2).
- *
- * A claimed Run arrives holding nothing but its id. Everything the turn needs — which Turn it
- * answers, the assembled Context, the Tools, the transcript — is resolved through the internal
- * turn host, which derives all of it from the Run itself. That is what lets one code path serve
- * web, Slack, Telegram, and any channel added later: the executor never learns which channel
- * submitted the request, because nothing it does depends on the answer.
- *
- * The per-turn graph is rebuilt for every Run rather than shared. Three of its parts are
- * genuinely per-turn — the event writer keys events by `(turnId, attempt)`, the budget is charged
- * against this Run, and cancellation is asked of this Run — so a shared instance would have to
- * thread that state through every call and would leak one turn's identity into the next.
- */
+/** Chat Run executor; resolves all Turn facts from the Run and rebuilds per-Run state. */
 
 /** The single State a Chat invocation runs on, as the API's invocation gateway records it. */
 const INVOKE_STATE_KEY = "invoke";
@@ -62,21 +49,14 @@ export interface ChatExecutorOptions {
   now?(): Date;
 }
 
-/**
- * Run statuses that mean the turn must stop.
- *
- * Asked of the Run rather than of a flag in memory: cancellation is requested by whoever owns the
- * Run — an operator, a parent Run, a client abandoning the conversation — and none of them can
- * reach into this process.
- */
+/** Cancellation is read from the Run, not in-memory flags. */
 const CANCELLING_STATUSES: ReadonlySet<string> = new Set(["cancelling", "cancelled"]);
 
 export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
   return async (run: PersistedRun): Promise<RunOutcome> => {
     const identity = await options.host.findTurn(run.id);
     if (identity === undefined) {
-      // The Run names no Turn: superseded by a retry, or already answered. Nothing is owed, and
-      // failing it would tell a reader the conversation broke when it did not.
+      // No Turn means superseded or already answered; nothing is owed.
       return "succeeded";
     }
 
@@ -86,9 +66,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       return "needs_reconciliation";
     }
 
-    // A Run resumed from an approval arrives with its State still parked. Re-claiming it here, on
-    // the same Run and the same State, is what makes an approval a pause rather than a restart:
-    // nothing mints a second Run, and the conversation gains no second Turn.
+    // Reclaim the same State after approval; no second Run or Turn is minted.
     if (state.status === "waiting") {
       await reclaimWaitingState(options.transitions, {
         businessId: run.businessId,
@@ -97,9 +75,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       });
     }
 
-    // A first dispatch arrives `pending` — the gateway's INSERT default, shared with a Routine's
-    // start State. Nothing leases a State the way a Run is leased, so this claims it the same way
-    // a resumed one is reclaimed above.
+    // First dispatch claims the gateway's `pending` invoke State.
     if (state.status === "pending") {
       await reclaimPendingState(options.transitions, {
         businessId: run.businessId,
@@ -137,18 +113,13 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
           })
         : options.model;
 
-    // Built here and configured by the driver once the Context names a policy: the dispatch port
-    // has to be wrapped before the loop exists, and the policy is not known until then. Until it is
-    // configured every stage refuses, so there is no window in which a Tool runs unguarded.
+    // Wrap dispatch before the loop exists; unconfigured guards refuse every stage.
     const guardrails = new TurnGuardrails(options.log);
 
     const loop = new AgentLoop({
       model,
-      // Guarding wraps announcing, not the other way round: a call a guard refuses never reached a
-      // Tool, so announcing it as a call that ran would misreport the turn.
+      // Guard before announcing; refused Tool calls never ran.
       tools: guardrails.guard(announceToolCalls(options.host, writer), writer),
-      // Counters are also charged against the durable Run budget below, which is what actually
-      // caps a resumed State. These are the loop's local view for one execution.
       checkpoints: new InMemoryLoopCheckpointStore(),
       events: writer,
       budget: runBudget(options.budgets, run.businessId, run.id),
@@ -170,8 +141,7 @@ export function createChatExecutor(options: ChatExecutorOptions): RunExecutor {
       completer: new ConversationTurnCompleter({ store: options.host }),
       guardrails,
       buildEvents: () => writer,
-      // Only a port that keeps a receipt can report one; a caller-supplied plain `ModelPort`
-      // finishes the turn without one rather than naming a model it never observed.
+      // Only receipt-capable model ports can name the model actually observed.
       ...(isReceiptSource(model) ? { modelReceipt: () => model.latestModelCallReceipt() } : {}),
     });
 

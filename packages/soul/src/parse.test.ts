@@ -53,11 +53,7 @@ const VALID_LEGACY_ROUTINE_YAML = stringify({
   "x-triggers": [{ type: "manual" }],
 });
 
-/**
- * The regression this whole change exists to prevent: the gate used to be written against a layout
- * the runtime never adopted, so it rejected almost every real file and was therefore never wired
- * into a write path. If any of these fail, the gate has drifted from reality again.
- */
+/** Regression: the write gate must use schema-owned layout paths, not stale hardcoded paths. */
 describe("parseSoulFile admits what the runtime actually writes", () => {
   it.each([
     ["agents/ada/AGENT.md", LEGACY_AGENT_MD, "legacy"],

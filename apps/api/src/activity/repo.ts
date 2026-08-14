@@ -4,12 +4,7 @@ import { type PaginatedResult, toPage } from "../pagination";
 export type ActivityActorType = "user" | "system";
 export type ActivityStatus = "ok" | "error";
 
-/**
- * One row in the workspace activity feed (Activities page). Append-only: written at event time by
- * `ActivityService.record()` and never updated. `actorType` is 'user' (with `actorId`) or 'system';
- * `targetId` is text because some targets are names (skills, agents) rather than UUIDs. `metadata`
- * carries event-specific detail (counts, error message, source url) round-tripped through jsonb.
- */
+/** Append-only activity row; `targetId` may be a non-UUID name and `metadata` is jsonb. */
 export interface ActivityRow {
   _id: string;
   category: string;
@@ -85,8 +80,7 @@ export class PgActivityRepo implements ActivityRepo {
       conds.push(`category = $${params.length}`);
     }
     if (opts.after) {
-      // Keyset over the (created_at DESC, id DESC) order. Expanded (not a row-value comparison) so
-      // the same SQL runs cleanly on pg and PGlite without param-type inference surprises.
+      // Expanded keyset comparison keeps pg and PGlite param inference aligned.
       params.push(opts.after.createdAt);
       const at = params.length;
       params.push(opts.after._id);

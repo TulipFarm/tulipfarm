@@ -1,12 +1,6 @@
 import { canonicalHash } from "@tulipfarm/schema";
 
-/**
- * Agent eval suite and activation gate (SPEC §10). Publishing an action-capable Agent is gated on
- * evidence, not intent: every blocking case must pass, and a case that used to pass and now fails
- * blocks activation. The only way past a regression is a named admin exception that is scoped to
- * this Agent and these cases, expires, and points at its own audit event — so the bypass is itself
- * a durable, reviewable fact rather than a flag someone can leave on.
- */
+/** Activation requires passing blocking evals or a scoped, expiring admin exception. */
 
 export type EvalSeverity = "blocking" | "advisory";
 

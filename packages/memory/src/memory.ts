@@ -1,16 +1,4 @@
-/**
- * Versioned, scoped Memory assertions (SPEC §14.2).
- *
- * This replaces the flat "remember this string" model: every durable statement is an assertion
- * carrying its scope owner, provenance, evidence, confidence, confirmation state, expiry, and
- * version lineage. Nothing is ever overwritten — an edit writes a new version and supersedes the
- * old one, so what an Agent believed and why stays auditable.
- *
- * Two rules are absolute here:
- * - a save is authorized against the scope's *owner*, never against the caller's general authority;
- * - an inferred statement never becomes durable without explicit confirmation. `rememberMemory`
- *   parks it as a pending record and writes nothing to the assertion store.
- */
+/** Scoped Memory assertions are versioned; inferred saves become Pending Memory. */
 
 import type { AuditEventInput } from "@tulipfarm/audit";
 import type { MemoryScope, MemorySettingsDefinition } from "@tulipfarm/schema";
@@ -40,11 +28,7 @@ export type MemoryStatus = "active" | "superseded" | "forgotten";
 export const MEMORY_TYPES = ["preference", "fact", "procedural", "episodic"] as const;
 export type MemoryType = (typeof MEMORY_TYPES)[number];
 
-/**
- * How far an assertion's origin is trusted, most to least. The tier is a property of where the
- * statement came from, never of who saved it: text that arrived from an external Knowledge source
- * is `external_derived` even when an Agent with broad authority chose to save it.
- */
+/** Origin trust follows source, not saver; external Knowledge stays `external_derived`. */
 export const MEMORY_TRUST_TIERS = ["user_stated", "agent_inferred", "external_derived"] as const;
 export type MemoryTrustTier = (typeof MEMORY_TRUST_TIERS)[number];
 
@@ -83,12 +67,7 @@ export interface MemoryAssertion {
   readonly version: number;
   readonly createdAt: string;
   readonly updatedAt: string;
-  /**
-   * Transaction time, closing half. `createdAt` is when this belief started being held;
-   * `recordedUntil` is when it stopped — set when the assertion is superseded or forgotten, and
-   * absent while the belief is current. Paired with `validFrom`/`validTo`, this makes the store
-   * bi-temporal: *when we believed it* is recorded separately from *when it was true*.
-   */
+  /** Transaction-time close; separate from valid time so belief history and world truth differ. */
   readonly recordedUntil?: string;
   /** Valid time: when the statement started being true in the world. Defaults to `createdAt`. */
   readonly validFrom: string;
@@ -104,11 +83,7 @@ export interface MemoryAssertion {
   readonly lastAccessedAt?: string;
 }
 
-/**
- * Names one scope owner exactly, for store queries that must not scan the whole business.
- * This is a *lookup* filter, never an authorization decision — `authorizeMemoryScope` still runs
- * on everything a store returns.
- */
+/** Lookup filter only; `authorizeMemoryScope` still authorizes returned rows. */
 export interface MemoryScopeFilter {
   readonly scope: MemoryScope;
   readonly subjectPrincipalId?: string;
@@ -123,19 +98,12 @@ export interface MemoryStore {
   /** Every assertion in the business, whatever its status — recall does its own filtering. */
   list(businessId: string): Promise<readonly MemoryAssertion[]>;
   listActive(businessId: string): Promise<readonly MemoryAssertion[]>;
-  /**
-   * Active assertions owned by one scope, oldest-created first. A durable store cannot answer
-   * `listActive` for a whole business cheaply, so every caller that already knows whose memory it
-   * wants asks for that owner directly.
-   */
+  /** Active assertions for one owner, oldest-created first; callers must name the owner. */
   listActiveForScope(
     businessId: string,
     filter: MemoryScopeFilter
   ): Promise<readonly MemoryAssertion[]>;
-  /**
-   * Fetch a specific set of assertions. Retrieval ranks ids before it has rows, so the alternative
-   * is loading the business to find a handful of them.
-   */
+  /** Fetch ranked assertion ids without loading a whole business. */
   getMany(businessId: string, assertionIds: readonly string[]): Promise<readonly MemoryAssertion[]>;
   erase(assertion: MemoryAssertion): Promise<MemoryEraseStoreCounts>;
 }
@@ -265,12 +233,7 @@ export function memorySettingsView(definition: MemorySettingsDefinition): Memory
   };
 }
 
-/**
- * Reauthorizes the Knowledge sources an assertion was derived from. Memory may not import
- * `@tulipfarm/knowledge` (see `docs/architecture/dependency-rules.md`), and it must not cache that
- * decision, so the composing application supplies this port. `undefined` means "could not be
- * established", which denies — the same fail-closed rule Knowledge itself applies.
- */
+/** Knowledge-backed evidence is reauthorized through an app port; `undefined` denies. */
 export interface MemoryEvidenceAuthorizationPort {
   authorize(input: {
     readonly businessId: string;
@@ -284,16 +247,9 @@ export interface MemoryDeps {
   readonly store: MemoryStore;
   readonly pending: PendingMemoryStore;
   readonly evidence?: MemoryEvidenceAuthorizationPort;
-  /**
-   * Relevance retrieval. Optional: with no index wired, recall falls back to recency ordering
-   * rather than failing, so an unindexed deployment degrades instead of breaking.
-   */
+  /** Optional relevance retrieval; without it recall falls back to recency. */
   readonly index?: MemoryRecallIndex;
-  /**
-   * Judges whether a new statement contradicts one already stored. Optional: with none wired,
-   * nothing is ever auto-invalidated, which leaves a stale fact in recall rather than risking the
-   * removal of a true one.
-   */
+  /** Optional contradiction judge; without it stale facts remain rather than closing true ones. */
   readonly contradiction?: MemoryContradictionPort;
   readonly settings: MemorySettingsView;
   readonly audit?: MemoryAuditSink;
@@ -311,11 +267,7 @@ export interface RememberRequest {
   readonly provenance: MemoryProvenance;
   /** Defaults to `fact` — the least behaviour-changing kind. */
   readonly memoryType?: MemoryType;
-  /**
-   * Defaults from the origin: an explicit save is `user_stated`, an inferred one
-   * `agent_inferred`. A caller ingesting external content must pass `external_derived` itself,
-   * because only the caller knows where the text came from.
-   */
+  /** Defaults from origin; callers must mark external content themselves. */
   readonly trustTier?: MemoryTrustTier;
   /** Defaults to `confidence` when unset. */
   readonly importance?: number;
@@ -375,10 +327,7 @@ function expiryFrom(
   return new Date(now.getTime() + settings.defaultExpiryDays * 86_400_000).toISOString();
 }
 
-/**
- * Build the durable assertion for an authorized save, superseding a prior version when asked.
- * Shared with the confirmation path so a confirmed inferred memory lands identically.
- */
+/** Builds the durable assertion for save and confirmation, superseding prior versions when asked. */
 export async function commitAssertion(
   deps: MemoryDeps,
   request: RememberRequest,
@@ -452,13 +401,7 @@ export async function commitAssertion(
   return { ok: true, assertion };
 }
 
-/**
- * Save a statement, or park it for confirmation.
- *
- * Explicit and authorized saves land immediately. Inferred statements never do: they become a
- * pending record that only becomes durable through {@link resolvePendingMemory}, and if the Agent's
- * MemorySettings disable inferred durable memory they are refused outright.
- */
+/** Explicit saves land immediately; inferred statements become pending or are refused by settings. */
 export async function rememberMemory(
   deps: MemoryDeps,
   request: RememberRequest,
@@ -560,13 +503,7 @@ export interface ProceduralCorrectionRequest {
   readonly entities?: readonly string[];
 }
 
-/**
- * Records an explicit human correction as procedural Memory.
- *
- * This is the narrow M6 write path: procedural assertions are user-stated corrections, never
- * background extraction output. The generic extractor still refuses `procedural` candidates before
- * they can become Pending Memory.
- */
+/** Records a human procedural correction; extraction cannot create procedural Memory. */
 export function rememberProceduralCorrection(
   deps: MemoryDeps,
   request: ProceduralCorrectionRequest,
@@ -605,10 +542,7 @@ export type ForgetResult =
   | { readonly outcome: "denied"; readonly reason: MemoryScopeDenialReason }
   | { readonly outcome: "not_found" };
 
-/**
- * Forget an assertion: the record survives as a tombstone for lineage, its statement does not.
- * Keeping the text of a "forgotten" memory would make forgetting a lie.
- */
+/** Forget tombstones an assertion and removes its statement; retained text would defeat forgetting. */
 export async function forgetMemory(
   deps: MemoryDeps,
   request: ForgetRequest,
@@ -682,12 +616,7 @@ export type EraseResult =
   | { readonly outcome: "denied"; readonly reason: MemoryScopeDenialReason }
   | { readonly outcome: "not_found" };
 
-/**
- * Erase an assertion: remove the row and every derived copy the store can reach.
- *
- * Audit proves that an erase happened, but records only scope, version, and abstract counts. The
- * erased subject, statement, evidence refs, and assertion id deliberately stay out of it.
- */
+/** Erase deletes row and derived copies; audit records only safe scope/version/count evidence. */
 export async function eraseMemory(
   deps: MemoryDeps,
   request: ForgetRequest,

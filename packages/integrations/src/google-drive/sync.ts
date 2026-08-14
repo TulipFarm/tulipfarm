@@ -1,20 +1,6 @@
 /**
- * Google Drive/Docs Knowledge sync (SPEC §14.1, §15).
- *
- * One change at a time, checkpointed after each committed change. That is deliberately unbatched:
- * the checkpoint is the durability contract, and advancing it past a change whose emission failed
- * would silently drop a document — or worse, drop a *deletion* and leave revoked content readable.
- *
- * Fail-closed decisions this module makes:
- * - permissions unreadable -> `unverifiable` source (retrieval denies) rather than an open one;
- * - a permission holder with no Tulip identity mapping -> dropped, never an implicit grant;
- * - `anyone`/link sharing -> grants nothing, because it names no Tulip principal;
- * - sensitive classification -> `live` access control, so no cached ACL can outlive a change;
- * - removed or trashed file -> `deleted` source *and* immediate content removal;
- * - extraction denied by Guardrail -> source without indexed text, never text without a decision.
- *
- * Results carry counts and stable failure codes. File names, provider errors, and ACL contents
- * never appear in a result, so a sync report cannot become a disclosure channel.
+ * Drive sync fails closed: unreadable ACLs, link shares, unmapped subjects, deletes, and denied
+ * extraction never leak indexed text; checkpoints advance only after each committed change.
  */
 
 import type { GuardrailRule } from "@tulipfarm/authz";
@@ -119,11 +105,7 @@ function deletionEmission(
   };
 }
 
-/**
- * Sync one Drive Integration forward from its stored checkpoint. Returns after the first failed
- * change so the checkpoint stays on the last change that actually committed; the next run retries
- * from exactly there.
- */
+/** Stop on first failed change so the checkpoint remains at the last committed change. */
 export async function syncDriveKnowledge(
   deps: DriveKnowledgeSyncDeps,
   options: DriveKnowledgeSyncOptions

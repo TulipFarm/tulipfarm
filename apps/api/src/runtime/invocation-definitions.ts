@@ -24,7 +24,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** `undefined`: no mapping authored. `null`: authored but malformed — the caller must fail closed. */
+/** undefined: no mapping authored. null: malformed mapping; callers must fail closed. */
 function mapInputMappings(raw: unknown): Record<string, string> | undefined | null {
   if (raw === undefined) return undefined;
   if (!isRecord(raw)) return null;
@@ -37,9 +37,8 @@ function mapInputMappings(raw: unknown): Record<string, string> | undefined | nu
 }
 
 /**
- * Resolves a Routine only from the verified active Soul bundle. The live Git checkout and the
- * legacy Routine registry are deliberately not consulted: a missing, draft, or malformed active
- * definition denies the invocation before it can mint a Run.
+ * Resolve Routines only from verified active Soul bundles; drafts and live checkout do not mint
+ * Runs.
  */
 export class ActiveRoutineInvocationResolver implements RoutineInvocationResolver {
   constructor(
@@ -93,11 +92,8 @@ export class ActiveRoutineInvocationResolver implements RoutineInvocationResolve
 }
 
 /**
- * Resolves a Trigger only from the verified active Soul bundle, for the same reason as
- * {@link ActiveRoutineInvocationResolver}: a missing, draft, or malformed active definition denies
- * the invocation before it can mint a Run. `semanticIntakeAgent` is never set — no authored Trigger
- * can declare it today — and `requireVerified` is never set, since the manual/internal_api envelopes
- * this resolver serves are always constructed `unverified` by the invoking route.
+ * Resolve Triggers only from verified active bundles; manual/internal_api envelopes stay
+ * unverified.
  */
 export class ActiveTriggerInvocationResolver {
   constructor(
@@ -174,9 +170,8 @@ export class ActiveTriggerInvocationResolver {
 }
 
 /**
- * Resolves a webhook Trigger only from the verified active Soul bundle, for the same reason as
- * {@link ActiveTriggerInvocationResolver}. Never populates `filter`: the authored `filter` is a
- * plain dot-path string, structurally incompatible with `WebhookTrigger`'s `{path, equals}` shape.
+ * Resolve webhook Triggers only from verified active bundles; authored dot-path filters are
+ * incompatible.
  */
 export class ActiveWebhookTriggerResolver {
   constructor(

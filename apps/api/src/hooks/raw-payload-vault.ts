@@ -3,12 +3,7 @@ import type { RawPayloadVault } from "@tulipfarm/run-kernel";
 import { encryptSecret } from "@tulipfarm/secrets";
 import type { Queryable } from "../db";
 
-/**
- * Encrypted store for raw webhook delivery bytes, ahead of any Run — `ArtifactService` requires a
- * `{runId, stateKey, attempt}` producer, which does not exist yet at ingestion time. Encrypted
- * under the same DEK `SecretsService` uses for stored secrets, so no new key material is
- * provisioned. Only `store` is implemented: nothing reads this table back yet.
- */
+/** Encrypted ingress-byte vault for pre-Run webhooks; no read path exists yet. */
 export class PgRawPayloadVault implements RawPayloadVault {
   constructor(
     private readonly db: Queryable,

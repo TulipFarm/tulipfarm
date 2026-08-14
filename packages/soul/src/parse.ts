@@ -73,11 +73,7 @@ function hasFrontmatterBlock(content: string): boolean {
   return /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.test(content);
 }
 
-/**
- * Strict `apiVersion`/`kind` validation, plus the check the registry cannot make on its own: that
- * the document's `kind` agrees with the directory it was filed under. Without it an Agent could be
- * written under `roles/` and pass validation, and the loader would never find it again.
- */
+/** Validate `apiVersion`/`kind` and ensure the kind matches the artifact path. */
 function parseDefinition(
   content: string,
   location: ClassifiedSoulPath,
@@ -103,11 +99,7 @@ function parseDefinition(
   }
 }
 
-/**
- * The superseded, pre-envelope formats. They are still validated — admitting a legacy path is not
- * the same as trusting its contents — but by the validator that owns each shape rather than by the
- * definition registry, which these files predate.
- */
+/** Legacy formats are still shape-validated by their owner validators. */
 function parseLegacy(content: string, location: ClassifiedSoulPath, path: string): ParseAttempt {
   try {
     switch (location.kind) {
@@ -165,12 +157,7 @@ function parseLegacy(content: string, location: ClassifiedSoulPath, path: string
   }
 }
 
-/**
- * Shapes owned by another package. `GuardrailsPolicy` is checked here because its validator
- * already lives in `@tulipfarm/schema`; the rest are content-addressed at this layer and validated
- * by their owner on load, since reaching into `@tulipfarm/surface` from here would invert the
- * package rank order.
- */
+/** Delegated shapes are content-addressed here; their owners validate them on load. */
 function parseDelegated(content: string, location: ClassifiedSoulPath, path: string): ParseAttempt {
   const parsed = parseYamlObject(content);
   if (!parsed) return rejected("FILE_PARSE_FAILED", path);
@@ -185,18 +172,7 @@ function parseDelegated(content: string, location: ClassifiedSoulPath, path: str
   return admitted(content, location, "delegated");
 }
 
-/**
- * Classify one proposed file change and check its content against whatever contract governs that
- * path.
- *
- * Paths resolve through the single artifact layout table in `@tulipfarm/schema`, so this function
- * no longer carries its own idea of where artifacts live — the divergence that made its
- * predecessor reject nearly every real file, and the reason no write path ever adopted it.
- *
- * A path admitting several content modes (a migration in progress) is tried in the declared order,
- * canonical form first, and the mode that succeeded is reported so callers can measure how much of
- * the tree still needs migrating.
- */
+/** Classify and validate one file via schema-owned artifact layouts and declared content modes. */
 export function parseSoulFile(change: SoulFileChange): ParseAttempt {
   const location = classifySoulPath(change.path);
 

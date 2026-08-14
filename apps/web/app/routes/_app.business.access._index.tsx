@@ -1,25 +1,4 @@
-/*
- * Access › People — the answer to "what can this person do, and how do I change it".
- *
- * This page used to lead with Groups: a slug field, a list of raw principal UUIDs, and a wall of
- * `allow any action on platform.kv` chips. That is the storage model, not anyone's question. An
- * owner arrives here holding a person in mind, so the person is the object: their name, their
- * face, what they can do in sentences, and one button to change it.
- *
- * Two truths the old page hid and this one states plainly:
- *
- * 1. **`admin` and `member` are not grantable here.** Those Role rows are written by the
- *    `sync_user_authorization` database trigger from `users.role`. Revoking one through this API
- *    would delete a row the trigger owns and silently restore it on the next account change, so it
- *    is shown as account-derived and is not offered as a control.
- * 2. **Team-inherited access cannot be removed from a person.** It belongs to the team. Offering a
- *    remove button here that quietly did nothing was the kind of lie this redesign exists to end.
- *
- * This page also absorbed the old `/business/people`. Splitting "who exists" from "what they can
- * do" across two screens meant an owner adding a new hire had to visit both and hold the link
- * between them in their head — and the same person appeared twice, described two different ways.
- * Inviting, turning an account off, and giving access are one job, so they are one page.
- */
+/* User-role Rows are trigger-owned, and team-inherited access cannot be removed here. */
 
 import {
   type ClientLoaderFunctionArgs,
@@ -94,10 +73,7 @@ import {
 
 export const meta: MetaFunction = () => [{ title: "People · Access · tulipfarm" }];
 
-/**
- * Roles the account owns, not this page. They exist as rows only because a trigger mirrors
- * `users.role` into `role_assignments`; treating them as grantable would desync the two.
- */
+/** Trigger-owned account Roles are shown but not grantable here. */
 const ACCOUNT_ROLE_IDS: ReadonlySet<string> = new Set(["admin", "member"]);
 
 type SelectedAccess =
@@ -200,10 +176,7 @@ export default function AccessPeople() {
     }
   }
 
-  /**
-   * An issued link is shown once and never readable again, so it must survive the modal that
-   * produced it closing. It is held here, above both modals, rather than inside either.
-   */
+  /** Invite links are shown once, so store them above both modals. */
   function show(email: string, invite: Invite | null) {
     if (invite) setIssued({ email, invite });
   }
@@ -330,11 +303,7 @@ export default function AccessPeople() {
   );
 }
 
-/**
- * The one and only sighting of an invite link. The API stores a hash, so this is not recoverable —
- * it sits above the page rather than inside the modal that produced it, so closing that modal
- * cannot destroy the thing the admin came for.
- */
+/** Invite links are unrecoverable after first display because the API stores only a hash. */
 function IssuedLink({
   issued,
   onDismiss,
@@ -400,13 +369,6 @@ function InviteForm({
   );
 }
 
-/**
- * What each level of access means, in the same words the rest of the page uses.
- *
- * Levels are authored in Soul and read-only here, but an owner choosing one still has to know what
- * it does. This used to live on a separate page as a list of raw grant strings, which answered the
- * question only for someone who already knew the schema.
- */
 function LevelsPanel({
   roles,
   catalog,
@@ -475,13 +437,7 @@ function LevelsPanel({
   );
 }
 
-/**
- * Editing reuses the create sheet, pre-filled with what the level already grants.
- *
- * Only authored levels get this: a built-in has no Soul artifact to rewrite. The edit keeps the
- * level's identity, so nobody holding it loses it — which is the whole reason this exists rather
- * than telling an owner to delete and rebuild.
- */
+/** Only authored levels can be edited; built-ins have no Soul artifact to rewrite. */
 function EditLevelButton({
   role,
   slug,
@@ -511,15 +467,7 @@ function EditLevelButton({
   );
 }
 
-/**
- * Deleting a level takes it away from everyone holding it at once, with no undo: the reconciler
- * reaps the durable row and every assignment of it cascades away. So the first click arms and
- * states the consequence, and the second does it — the same two-step this page already uses for
- * taking access away, rather than a browser dialog that reads like a bug.
- *
- * `slug` is required, not nullable: a level whose Soul artifact the loader cannot account for has
- * no address to delete, and the caller withholds the button rather than rendering a dead one.
- */
+/** Deleting a level cascades to every holder; withhold the button when `slug` is absent. */
 function DeleteLevelButton({
   role,
   slug,
@@ -638,12 +586,7 @@ function PersonDetail({
   const roleById = new Map(roles.map((role) => [role.id, role]));
   const nameOf = roleNamer(roles);
   const alreadyHeld = new Set(person?.directRoles.map((held) => held.roleId) ?? []);
-  /*
-   * A Role its own definition says a person may not hold is not an option for a person. The page
-   * cannot tell an Agent from a Routine from a service for the non-person principals below, so it
-   * does not guess — the server's own check rejects those, and a wrong guess here would hide a
-   * Role that is perfectly valid.
-   */
+  /* Person-ineligible Roles are hidden only for people; other kinds are server-checked. */
   const grantable = roles.filter(
     (role) =>
       !ACCOUNT_ROLE_IDS.has(role.id) &&
@@ -653,12 +596,7 @@ function PersonDetail({
   const chosen = roleById.get(roleId);
   const isSelf = sessionUser?.id === party.principalId;
 
-  /*
-   * "Taking away your own access could lock you out" was printed over any direct Role at all, on a
-   * page where the owner's real power comes from their account and is not touched by this button.
-   * A warning that is usually false is worse than none: it teaches people to click past the one
-   * that is true. So warn only when this Role is genuinely the single thing holding them up.
-   */
+  /* Warn only when a direct Role is the single source keeping the current user unrestricted. */
   const mySources = keepers.filter((source) => source.principalId === party.principalId);
   const onlySource = mySources.length === 1 ? mySources[0] : null;
   const soleRoleId = onlySource?.key.startsWith("role:")
@@ -846,18 +784,7 @@ function PersonDetail({
   );
 }
 
-/**
- * Why somebody holds nothing.
- *
- * `not-authenticatable` is a fault only when nothing else explains it. It is the *ordinary* state
- * of an account that has just been invited and has never set a password, and of one that has been
- * deliberately turned off — and raising "The principal is suspended or expired, so it can hold no
- * authority" over every new hire is both frightening and false. Worse, it is the fastest way to
- * teach an owner that the red banners on this page mean nothing.
- *
- * So the account's own status is consulted first. When it accounts for the emptiness, the plain
- * sentence is shown; when it does not, the fault stands exactly as before.
- */
+/** Account status explains empty access before generic `not-authenticatable` faults. */
 function EmptyReason({ reason, status }: { reason: LayerEmptyReason; status?: UserStatus }) {
   const explained =
     reason === "not-authenticatable" && (status === "invited" || status === "disabled");
@@ -879,19 +806,7 @@ function EmptyReason({ reason, status }: { reason: LayerEmptyReason; status?: Us
   );
 }
 
-/**
- * The account itself: whether they can sign in, and how to fix it when they cannot.
- *
- * This is the half of the old `/business/people` that belongs beside a person's access, because
- * the two answer one question together. An owner reading "Owner — can do anything" needs to see in
- * the same breath that the account was never accepted, or was turned off last week.
- *
- * Their level here (`admin` / `member`) is deliberately not editable: it is written by the
- * `sync_user_authorization` trigger from `users.role`, and no API route changes it.
- *
- * An admin gets no controls at all. One admin resetting or locking out another is how a workspace
- * gets taken, and there is no approval step here that would make it safe.
- */
+/** Account Role is trigger-owned and not editable here; admins cannot reset or suspend admins. */
 function AccountBlock({
   person,
   busy,
@@ -1001,18 +916,7 @@ function teamsFor(teams: AuthzGroupDetail[], principalId: string) {
     .map((team) => ({ id: team.id, roleIds: team.roles.map((role) => role.roleId) }));
 }
 
-/**
- * Every place unrestricted access currently comes from.
- *
- * A business needs at least one of these to survive: whoever holds unrestricted access is the only
- * one who can hand it back. Strip the last one and nothing in the product can undo it — not this
- * page, not the API, only somebody with a database prompt. So the take-away has to know whether it
- * is the last, and the only way to know is to look at all of them at once.
- *
- * A source is keyed by where it comes from, because the button can only remove one kind: a Role
- * granted to a person directly. Account-derived access is trigger-owned and not removable here at
- * all, and team-derived access is removed on the Teams tab — both still count as a survivor.
- */
+/** Last-unrestricted checks must count direct, account-derived, and team-derived sources. */
 type KeeperSource = { principalId: string; key: string };
 
 function findKeepers(data: LoaderData, people: PersonAccess[]): KeeperSource[] {
@@ -1048,11 +952,7 @@ function isLastKeeper(keepers: KeeperSource[], principalId: string, roleId: stri
   );
 }
 
-/**
- * Principals holding access that are not user accounts. Collected from both sources rather than
- * one, because a service principal can hold a Role directly, sit in a team, or both — and an
- * access holder this page cannot name is exactly the thing worth showing.
- */
+/** Non-user principals can hold direct Roles, team access, or both, so collect both sources. */
 function buildNonPeople(data: LoaderData, directory: Directory): Party[] {
   const ids = new Set<string>();
   for (const entry of data.assignments) {
@@ -1088,10 +988,7 @@ export function teamTitle(teamId: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-/**
- * A date picker yields a day, but authority expires at an instant. End of that local day is the
- * reading a person intends by "until the 5th" — expiring at its first second would cut a day short.
- */
+/** Date-only expiry means end of that local day. */
 function expiryIso(value: string): string | undefined {
   const trimmed = value.trim();
   if (trimmed.length === 0) return undefined;

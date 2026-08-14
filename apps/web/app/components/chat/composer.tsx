@@ -46,14 +46,7 @@ export type ComposerAgent = {
   autonomy?: Autonomy;
 };
 
-/**
- * Message composer: a Tiptap rich-text editor over a control row (effort override + send). The editor
- * supports markdown formatting (bold/italic/code/link via shortcuts + a selection BubbleMenu) and four
- * mention triggers — `@agent` (routes the turn), `/skill` and `#resource` (eagerly injected into the
- * agent's context for the turn). On send the document is serialized (`serializeDoc`) to markdown text
- * plus the structured tags. Enter sends; Shift+Enter is a newline; Enter is deferred to the suggestion
- * menu while one is open. There is deliberately NO attachment affordance (no blob storage in V1).
- */
+/** Enter sends unless a suggestion menu owns it; Shift+Enter inserts a newline. */
 export function Composer({
   onSend,
   onStop,
@@ -65,20 +58,12 @@ export function Composer({
   suggestions = [],
 }: {
   onSend: (text: string, opts: ComposerSendOptions) => void;
-  // Halt the in-flight reply (shown as a Stop button while `busy`); also restores the last sent
-  // prompt into the editor to fix and resend.
   onStop?: () => void;
   busy?: boolean;
   defaultModel?: ChatModelSelector;
-  // The active conversation agent's preset — reflected when no `@agent` is typed.
   activeAgentPreset?: ChatModelSelector;
-  // agentId → its pickable preset; used to reflect an `@`-mentioned agent's preset as it's typed.
   presetById?: (id: string) => ChatModelSelector | undefined;
-  // Quiet context indicator above the prompt surface. The editor's `@agent` mention still owns
-  // per-Turn routing; this label describes the Agent currently attached to the Chat.
   activeAgent?: ComposerAgent;
-  // Adaptive starter prompts. Selecting one drafts it in the editor so the person can review or
-  // refine it before sending; suggestions never run automatically.
   suggestions?: Suggestion[];
 }) {
   const [model, setModel] = useState<ChatModelSelector>(defaultModel);

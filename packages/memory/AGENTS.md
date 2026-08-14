@@ -1,27 +1,32 @@
-# Memory — Agent Conventions
+# Memory (`@tulipfarm/memory`)
+Scoped, versioned memory assertions, confirmations, provenance, contradiction handling, ranking,
+supersession, and expiry.
 
-`@tulipfarm/memory` — scoped, versioned memory assertions, confirmations, provenance,
-supersession, and expiry. tsconfig extends `@tulipfarm/tsconfig/base.json`. See root `AGENTS.md`
-for commands/lint.
+## Read on / Skip
+- **Read on if** you touch memory scopes, explicit confirmation, inferred statements,
+  supersession/tombstones, recall ranking, evidence authorization, or memory telemetry.
+- **Skip if** you touch Knowledge retrieval (`../knowledge/AGENTS.md`), Agent prompt assembly
+  (`../agent-runtime/AGENTS.md`), storage repositories, or authz primitives.
 
-## Layout
+## Map
+| Path | Owns |
+| --- | --- |
+| `src/{scope,memory,confirm}.ts` | Scope auth, assertions, confirmation, tombstones. |
+| `src/{retrieve,rank,contradiction}.ts` | Recall, ranking, contradiction handling. |
+| `src/{extract,episode}.ts` | Extraction and episode modeling. |
+| `src/telemetry.ts` | Redaction-safe metric/span names and helpers. |
+| `test/security/` | Scope/requester/lifecycle/evidence-provider side-channel matrices. |
 
-- `src/scope.ts` — `authorizeMemoryScope`: an identity match against the scope's *owner*, never a
-  capability the caller carries. Default-deny for unknown or disabled scopes.
-- `src/memory.ts` — the `MemoryAssertion` shape, `rememberMemory`, `forgetMemory`, and
-  `commitAssertion`. Edits supersede rather than overwrite; forgetting keeps a tombstone, not text.
-- `src/confirm.ts` — inferred statements live here, outside the assertion store, until the scope
-  owner confirms. Deny and expiry delete the pending record and persist nothing.
-- `src/retrieve.ts` — `recallMemory`: reauthorizes scope *and* Knowledge evidence on every recall
-  through `MemoryEvidenceAuthorizationPort` (supplied by the composing app, since this package may
-  not import `@tulipfarm/knowledge`). Exclusions are reason counts only.
-- `src/telemetry.ts` — Memory metric/span names plus redaction-safe helpers. Labels and span
-  attributes are bounded enums/counts only; never pass statement, subject, entity, query, principal,
-  business, Assertion, Pending Memory, Episode, Conversation, or Run ids.
-- `test/security/` — scope × requester × lifecycle × evidence-provider matrices with side-channel
-  assertions.
-
-May import: `@tulipfarm/schema`, `@tulipfarm/authz`, `@tulipfarm/audit`, `@tulipfarm/storage`,
-`@tulipfarm/observability`. See
-[`docs/architecture/dependency-rules.md`](../../docs/architecture/dependency-rules.md). Durable
-writes require explicit confirmation; nothing in this package infers or persists unscoped memory.
+## Rules
+- May import only `@tulipfarm/schema`, `authz`, `audit`, `storage`, and `observability`; see
+  [dependency rules](../../docs/architecture/dependency-rules.md).
+- Scope auth matches the scope owner, not a caller capability; unknown or disabled scopes deny.
+- Durable writes require explicit confirmation; this package never infers or persists unscoped
+  memory.
+- Edits supersede instead of overwrite. Forgetting keeps a tombstone, not statement text.
+- Denied or expired pending inferred statements are deleted and persist nothing.
+- Recall reauthorizes scope and Knowledge evidence every time through an injected
+  `MemoryEvidenceAuthorizationPort`; this package must not import `@tulipfarm/knowledge`.
+- Telemetry labels/attributes are bounded enums or counts only; never pass statements, subjects,
+  entities, queries, principals, businesses, assertions, pending memories, episodes,
+  conversations, or Run ids.

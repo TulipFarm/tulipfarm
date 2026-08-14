@@ -36,11 +36,7 @@ export interface CommitSignature {
   readonly value: string;
 }
 
-/**
- * A pluggable commit signer. Signing key material never enters this package — the caller injects a
- * concrete signer bound to an authorized key. `sign` throwing aborts the whole commit before any
- * ref moves, so a signing failure can never publish a tree.
- */
+/** Pluggable signer; key material stays with the caller and signing failure aborts before refs move. */
 export interface CommitSigner {
   readonly keyId: string;
   sign(payload: string): string;
@@ -58,11 +54,7 @@ function canonicalSchemas(schemas: readonly CommitSchemaRef[]): string[] {
   return [...schemas].map((schema) => `${schema.kind}@${schema.apiVersion}`).sort();
 }
 
-/**
- * Canonical bytes the signature covers. Deterministic in field order and schema ordering so the
- * same tree + metadata always signs identically, and any tampering with the published tree,
- * actor, or approval invalidates the signature.
- */
+/** Deterministic commit-signing bytes covering tree, actor, schemas, and approval. */
 export function buildCommitSigningPayload(
   treeSha: string,
   parentSha: string | null,

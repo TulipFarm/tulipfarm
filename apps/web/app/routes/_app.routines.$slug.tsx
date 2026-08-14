@@ -15,11 +15,7 @@ export async function clientLoader({ params }: { params: { slug: string } }) {
   return { routine, runs };
 }
 
-/**
- * Manual-trigger form derived from the routine's x-inputs JSON Schema (ROUT-V1-007):
- * string → text, number/integer → number, boolean → checkbox, enum → select.
- * Validation stays server-authoritative — the API's 400 message renders below.
- */
+/** Validation remains server-authoritative; the API 400 message renders below. */
 function TriggerForm({
   routine,
   onTriggered,

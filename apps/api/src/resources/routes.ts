@@ -59,24 +59,12 @@ export function registerResourceRoutes(
   requireAuth: PreHandler,
   hookExecutor?: HookExecutor,
   events?: EventEmitter,
-  /**
-   * Decides record authority for this door (`authorize.ts`). Optional for the same reason the chat
-   * dispatcher's gate is: a deployment can run with no durable principals at all (tests, and the
-   * pre-authorization boot path). Where it is absent these routes are exactly as authorized as they
-   * were before — `requireAuth` only. Production always wires it, which `app.test.ts` pins.
-   */
+  /** Optional only for tests/pre-auth boot; production wires record authority. */
   recordAuthorizer?: RecordAuthorizer
 ): void {
   const counter = counterStore.makeCounterFn();
 
-  /**
-   * Refuses a record request the caller's grants do not cover, answering `403` with the same
-   * shape every other denial uses.
-   *
-   * A request whose principal kind the authority model does not know is refused rather than
-   * passed: "I could not be described" must not be the cheapest way past the check — the same rule
-   * `tool-dispatch.ts` applies to an undescribable subject.
-   */
+  /** Refuse uncovered or undescribable principals with the shared `403` denial shape. */
   async function denyUnauthorized(
     req: FastifyRequest,
     reply: FastifyReply,

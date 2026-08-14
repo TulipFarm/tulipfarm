@@ -8,11 +8,6 @@ import type { ChatMessage } from "~/lib/chat/types";
 import * as conversations from "~/lib/conversations";
 import ChatConversationRoute, { clientLoader } from "./_app.chat.$id";
 
-/*
- * Restore-route tests: the clientLoader hydrates a persisted conversation (and redirects a missing one
- * to the new-chat surface), and the Component renders the rehydrated transcript. useLoaderData/lib
- * calls are mocked; Link needs router context → createRemixStub at "/".
- */
 vi.mock("@remix-run/react", async () => {
   const actual = await vi.importActual<typeof import("@remix-run/react")>("@remix-run/react");
   return { ...actual, useLoaderData: vi.fn() };
@@ -29,7 +24,6 @@ vi.mock("~/lib/agents", () => ({
 const loaderArgs = (id: string) =>
   ({ params: { id } }) as unknown as Parameters<typeof clientLoader>[0];
 
-// jsdom has no layout engine; the transcript's auto-scroll calls scrollIntoView.
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });

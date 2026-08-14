@@ -1,10 +1,4 @@
-/**
- * Access-level authoring.
- *
- * The tests that matter here are the refusals. A level that saves and then grants nothing is the
- * failure mode this module exists to prevent, and it is invisible at the moment it happens — the
- * owner sees a success, and finds out weeks later when someone cannot do their job.
- */
+/** Access-level authoring tests focus on refusals that would otherwise save but grant nothing. */
 
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -287,11 +281,7 @@ describe("createLevel and deleteLevel", () => {
   });
 });
 
-/**
- * Editing exists because delete-and-recreate is not a substitute for it: the durable role row is
- * keyed on `metadata.id`, so a recreated level is a different level and every assignment to it is
- * gone. An owner adding one capability must not have to re-grant the level to everybody.
- */
+/** Editing must preserve durable role ids and existing assignments. */
 describe("updateLevel", () => {
   let soulPath: string;
   let withSync: ReturnType<typeof vi.fn>;
@@ -432,11 +422,7 @@ describe("updateLevel", () => {
   });
 });
 
-/**
- * `slug` reaches `deleteLevel` from a URL parameter, so it is attacker-controlled input joined
- * into a filesystem path followed by a recursive delete. The first version of this module built
- * the path before validating it; the test below is what found that.
- */
+/** URL slugs are attacker-controlled path input before recursive delete. */
 describe("deleteLevel refuses to leave the roles directory", () => {
   let soulPath: string;
   let withSync: ReturnType<typeof vi.fn>;

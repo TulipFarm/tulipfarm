@@ -35,7 +35,7 @@ import {
 } from "./invocation-callers";
 import { ActiveRoutineInvocationResolver } from "./invocation-definitions";
 
-/** A verified Slack delivery as the ingress route hands it over, after signature + accept checks. */
+/** Verified Slack delivery after signature and accept checks. */
 const SLACK_JOB = {
   slug: "slack",
   body: {
@@ -64,11 +64,7 @@ function runInvocation(overrides: Partial<RunInvocation> = {}): RunInvocation {
   };
 }
 
-/**
- * The non-chat entrypoints over real SQL. A channel delivery and a Routine trigger get the same
- * durability the chat path does: the request that minted the Run is a persisted, schema-valid
- * Artifact, so PR 3's worker can execute a delivery the API only acknowledged.
- */
+/** Non-chat entrypoints persist schema-valid request Artifacts before Worker execution. */
 describe("non-chat invocation callers", () => {
   let db: PGlite;
   let invocations: DurableInvocationGateway;
@@ -165,7 +161,7 @@ describe("non-chat invocation callers", () => {
     expect(runs.rows).toHaveLength(1);
     const run = runs.rows[0];
     expect(run?.source).toBe("integration");
-    // No human has been resolved yet; PR 3's classifier publishes a derived Artifact that names one.
+    // No human is resolved yet; the classifier publishes a derived Artifact naming one.
     expect(run?.identity.initiator).toEqual({ kind: "integration", id: "slack" });
     expect(run?.identity.effectiveSubject).toEqual({ kind: "integration", id: "slack" });
 

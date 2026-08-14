@@ -76,12 +76,7 @@ export interface WaitSignalInput {
   readonly receivedAt: string;
 }
 
-/**
- * Caller-owned policy evaluated inside the wait's row lock. `authorize` returns a denial reason
- * code (never a payload) or `null`, and is told whether this correlation key was already
- * recorded so an at-least-once redelivery stays idempotent; `isSatisfied` decides resolution
- * from the post-insert count.
- */
+/** Wait policy runs inside the row lock; denial reasons are codes, never payloads. */
 export interface WaitSignalPolicy {
   authorize(wait: PersistedWait, isDuplicate: boolean): string | null;
   isSatisfied(wait: PersistedWait, signalCount: number): boolean;
@@ -271,11 +266,7 @@ const WAIT_COLUMNS = `id, business_id, run_id, state_key, kind, aggregation, sta
 const SIGNAL_COLUMNS =
   "id, business_id, wait_id, correlation_key, signal_digest, principal, received_at";
 
-/**
- * PostgreSQL persistence for durable Runs waits, their recorded signals, and one-use resume
- * tokens. Every delivery and every due resolution runs inside the wait's row lock, so a duplicate
- * delivery, a concurrent worker, or a restart resolves the wait — and consumes its token — once.
- */
+/** Durable waits lock each delivery/resolution so duplicates consume the token once. */
 export class WaitStore {
   constructor(private readonly transactions: TransactionPort) {}
 

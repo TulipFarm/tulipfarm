@@ -1,8 +1,4 @@
-/**
- * Persistence for the distinct principal kinds SPEC §12 requires — user, Agent, Routine,
- * integration adapter, API, and service — each scoped to a business_id. Storage owns the
- * mechanics; `@tulipfarm/authz` owns the authenticate/substitute decision.
- */
+/** Principal persistence only; `@tulipfarm/authz` owns authenticate/substitute decisions. */
 
 import type { PrincipalKind as SchemaPrincipalKind } from "@tulipfarm/schema";
 import type { TransactionPort } from "../ports";
@@ -22,11 +18,7 @@ export interface PrincipalRecord {
 export interface PrincipalRepo {
   get(businessId: string, id: string): Promise<PrincipalRecord | undefined>;
   put(record: PrincipalRecord): Promise<void>;
-  /**
-   * Every principal in a business, ordered by id. Needed because non-human principals are
-   * *registered*, not derived from a user row, so nothing else can enumerate them — without this
-   * an operator granting a Slack adapter its authority would have to already know the exact id.
-   */
+  /** Lists registered principals so non-human ids are discoverable for grants. */
   list(businessId: string): Promise<readonly PrincipalRecord[]>;
 }
 

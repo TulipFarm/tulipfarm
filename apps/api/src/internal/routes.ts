@@ -23,24 +23,8 @@ import {
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
-/**
- * `/api/v1/internal/*` — what the Worker calls back into (plan §3).
- *
- * These routes are not part of the product surface. They exist because the Worker executes turns
- * while the conversation history, the Soul artifacts, and the Tool catalog still live here, and an
- * application may not import another application. PR 4 moves the implementations into the Worker
- * and these routes go away; nothing outside this directory is built against them.
- *
- * Two gates, both non-negotiable. Only a **service** principal may call at all — a signed-in person
- * holding a session cookie is refused, so a browser cannot reach the turn machinery. And every
- * handler names only a Run: authority comes from the Run's recorded `effectiveSubject`, never from
- * the caller, so a stolen worker credential cannot act as anyone it likes.
- */
-
 const DENIAL_STATUS: Readonly<Record<TurnAuthorityDenial, number>> = {
   run_not_found: 404,
-  // The Run exists but no executor is entitled to write for it: a redelivery, or a worker whose
-  // lease has already been reclaimed by another. Not the caller's fault, and not retriable as-is.
   run_not_running: 409,
   turn_not_found: 404,
 };
@@ -48,31 +32,23 @@ const DENIAL_STATUS: Readonly<Record<TurnAuthorityDenial, number>> = {
 const DELIVERY_DENIAL_STATUS: Readonly<Record<DeliveryDenial, number>> = {
   run_not_found: 404,
   run_not_running: 409,
-  // The Run exists and is live, but it was not minted by an Integration delivery. Nothing about
-  // waiting or retrying changes that, so it is the caller's mistake rather than a conflict.
   not_a_delivery: 400,
-  // The Integration was disconnected, removed, or lost its handler after the delivery was
-  // acknowledged. The delivery stays stored; there is simply nobody left to interpret it.
   integration_unavailable: 409,
 };
 
 const ROUTINE_APPROVAL_DENIAL_STATUS: Readonly<Record<RoutineApprovalDenial, number>> = {
   run_not_found: 404,
   run_not_running: 409,
-  // The Run is live but was not minted as a Routine, so it has no authored State to approve.
-  // Nothing about retrying changes that.
   not_a_routine: 400,
 };
 
-/** Maps a host denial onto a status, or rethrows anything the caller did not cause. */
 type DenialGuard = <T>(reply: FastifyReply, run: () => Promise<T>) => Promise<T | undefined>;
 
 /**
- * A durable wait exactly as the run-kernel planned it, minus the identity the route states.
- *
- * The Worker sends a plan rather than a registered wait because the plan is authored data — the
- * State's deadline, its approver roles, its schema — while the resume token the registration mints
- * is a capability, and that must never travel back over this hop.
+ * A durable wait exactly as the run-kernel planned it, minus the identity the route states. The
+ * Worker sends a plan rather than a registered wait because the plan is authored data — the State's
+ * deadline, its approver roles, its schema — while the resume token the registration mints is a
+ * capability, and that must never travel back over this hop.
  */
 const WaitPlanSchema = {
   type: "object",
@@ -134,11 +110,10 @@ export interface InternalTurnRouteDeps {
   readonly host: InternalTurnHost;
   /**
    * The channel side of the same boundary. Absent in a deployment that composes no Integration
-   * ingress at all, in which case the delivery routes are simply not registered.
-   *
-   * Built from the app's logger, which does not exist until the app does: a delivery that is
-   * ignored, refused, or answered with a bind link says so through the same Pino instance as
-   * everything else, rather than through a second logger nobody is watching.
+   * ingress at all, in which case the delivery routes are simply not registered. Built from the
+   * app's logger, which does not exist until the app does: a delivery that is ignored, refused, or
+   * answered with a bind link says so through the same Pino instance as everything else, rather
+   * than through a second logger nobody is watching.
    */
   deliveries?(log: FastifyBaseLogger): IngressDeliveryHost;
   /**
@@ -147,10 +122,6 @@ export interface InternalTurnRouteDeps {
    * refs against the encrypted secret store itself, so the key material never crosses this hop.
    */
   llmConfig(): unknown;
-  /**
-   * The approval side of a Routine Run. Absent in a deployment that composes no Routine execution,
-   * in which case the routine-approval routes are simply not registered.
-   */
   readonly routineApprovals?: InternalRoutineApprovalHost;
 }
 
@@ -825,11 +796,10 @@ export function registerInternalTurnRoutes(
 
 /**
  * The Routine-approval hop: a Routine State that needs a human parks on a durable kernel wait, and
- * the wait is registered **here**, in the process that will redeem its resume token.
- *
- * Both routes are idempotent by State occurrence. A worker that died between opening the approval
- * and parking the State replays into the approval it already opened, so a crash never costs a
- * second human decision.
+ * the wait is registered **here**, in the process that will redeem its resume token. Both routes
+ * are idempotent by State occurrence. A worker that died between opening the approval and parking
+ * the State replays into the approval it already opened, so a crash never costs a second human
+ * decision.
  */
 function registerRoutineApprovalRoutes(
   app: FastifyInstance,
@@ -917,7 +887,6 @@ function registerRoutineApprovalRoutes(
         host.find(DEPLOYMENT_BUSINESS_ID, runId, stateKey).then((record) => record ?? null)
       );
       // `undefined` is the guard's — it already answered with the denial. `null` is this route's:
-      // the Run is one the Worker may read, and this State occurrence has no approval open.
       if (found === undefined) return;
       if (found === null) return reply.code(204).send();
       return reply.send(found);

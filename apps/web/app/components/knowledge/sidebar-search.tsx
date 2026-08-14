@@ -1,8 +1,4 @@
-/*
- * Persistent sidebar search affordance for the knowledge wiki. Rendered as an input-styled button so
- * the search surface stays single (the ⌘K CommandPalette) — clicking dispatches the shared open event
- * instead of duplicating the results dropdown.
- */
+/* Opens the shared CommandPalette instead of duplicating search state. */
 import { Search } from "lucide-react";
 import { OPEN_SEARCH_EVENT } from "./command-palette";
 

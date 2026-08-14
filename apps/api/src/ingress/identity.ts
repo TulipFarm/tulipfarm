@@ -17,23 +17,7 @@ import {
 import { assertUserAuthenticatable } from "../identity/principal";
 import { executeToolBinding, extractFromToolResult } from "./bindings";
 
-/**
- * Resolves an inbound channel sender to the TulipFarm user the turn runs as.
- *
- * A channel sender is an external identity like any other, so the authority is
- * `external_identity_mappings` and the check is `assertExternalIdentityMapped` (SPEC §12) — there is
- * no channel-specific table and no channel-specific rule. What is channel-specific is how a mapping
- * first comes to exist, and that is the whole of this class:
- *
- *  1. **An existing mapping wins.** Verified once, honoured thereafter.
- *  2. **The manifest identity binding.** Execute the bound tool, read `email_path`, and if it names
- *     a known account, persist the mapping. Persisting is the point: the previous per-boot cache
- *     re-derived identity on every restart, so the same sender's authority depended on how recently
- *     the process had started, and nothing about the binding was auditable afterwards.
- *  3. **Neither.** The sender is unlinked. The agent is *not* invoked — an unknown sender is never
- *     silently answered as somebody, least of all as an administrator — and a single-use bind link
- *     is offered so the person behind the sender can claim it inside their own session.
- */
+/** Resolves channel senders; unknown senders never invoke an Agent. */
 export type ChannelSenderResolution =
   | { outcome: "linked"; user: UserDoc }
   | { outcome: "unlinked"; bindOffer: IssuedChannelBind | null };
@@ -100,7 +84,7 @@ export class IngressIdentityResolver {
     return user;
   }
 
-  /** Step 2 — the manifest's declarative identity binding, persisted when it names a known account. */
+  /** Step 2 — persist the manifest identity binding when it names a known account. */
   private async claimByManifestEmail(opts: {
     slug: string;
     sender: string;

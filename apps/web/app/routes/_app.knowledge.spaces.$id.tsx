@@ -20,11 +20,6 @@ export async function clientLoader({ params }: ClientLoaderFunctionArgs) {
   return { space };
 }
 
-/*
- * Per-space wrapper: loads the space and hands it to the nested page routes (front page, a page,
- * the graph, or a form) via the outlet context. The page-tree rail lives in the shell
- * (_app.knowledge.tsx) and persists across spaces, so this route holds no chrome of its own.
- */
 export default function SpaceWorkspace() {
   const { space } = useLoaderData<typeof clientLoader>();
   return <Outlet context={{ space } satisfies SpaceOutletContext} />;

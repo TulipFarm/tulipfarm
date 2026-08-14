@@ -17,8 +17,7 @@ import { startProbeServer } from "./probe-server";
 import { type DrainableLoop, drain } from "./shutdown";
 
 /**
- * Attached once the pool is up, since the sink writes through it. Until then — and whenever a write
- * fails — records still reach stdout, so capture is strictly additive to the output that came before.
+ * Attached after pool startup; stdout still receives records before that and when writes fail.
  */
 let logSink: BatchingLogSink | null = null;
 
@@ -39,22 +38,10 @@ const logger = {
   },
 };
 
-/**
- * Composition root for the integration worker.
- *
- * Boot skeleton proving the process shape (schema-floor wait, `/livez`+`/readyz`, drain on
- * `SIGTERM`), plus the Slack Socket Mode worker and its delivery poll loop (`channels/index.ts`)
- * pushed onto `loops`. Telegram long-poll and other future channels land the same way — push onto
- * this array, don't touch the boot sequence.
- */
+/** Composition root: wait for schema, serve probes, register channel loops, and drain. */
 export async function main(): Promise<void> {
   loadEnv({ path: ".env.local" });
-  // Retried rather than read once: Turbo starts the API and this process concurrently in `pnpm
-  // dev`, and the API needs a database round trip before the file is (re)written — most visibly
-  // right after `reset-dev.sh`, where the old file's credential no longer matches the wiped DB.
-  // `verify` closes a narrower gap than presence: a stale file from *before* the reset can already
-  // be non-empty on this process's very first read, satisfying the missing-keys check moments
-  // before the API overwrites it with the real value — so presence alone is not proof of validity.
+  // Turbo boots API concurrently; verify the volume credential, since presence may be stale.
   const fromVolume = await waitForDataDirEnv({
     attempts: 15,
     delayMs: 1_000,
@@ -94,10 +81,7 @@ export async function main(): Promise<void> {
     },
   });
 
-  // Deliberately not gated on REQUIRED_SCHEMA_VERSION. `log_event` arrives in migration 43, but a
-  // missing table only makes a flush fail into stderr — the records still reach stdout either way.
-  // Raising the floor for it would trade that graceful degradation for a refusal to boot, making
-  // telemetry load-bearing for work that does not depend on it.
+  // Do not gate on `log_event`: missing telemetry degrades to stderr, not boot failure.
   logSink = new BatchingLogSink({
     service: "integration-worker",
     writer: new PgLogWriter(pool),
@@ -170,9 +154,7 @@ export async function main(): Promise<void> {
       );
     }
 
-    // Emitted above rather than after the drain below, because a timed-out drain is exactly the
-    // record an operator needs and the sink could not capture it once stopped. Both calls precede
-    // pool.end(): the sink writes through that pool.
+    // Stop telemetry before `pool.end()`; it writes through this pool.
     await resourceSampler.stop();
     await logSink?.stop();
     await pool.end();

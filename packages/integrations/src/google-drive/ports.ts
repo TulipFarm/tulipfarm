@@ -1,12 +1,4 @@
-/**
- * Provider-neutral Google Drive/Docs boundary (SPEC §15: concrete transports live in
- * `apps/integration-worker`, never here).
- *
- * The two `undefined` returns are load-bearing, not conveniences: `getPermissions` returning
- * `undefined` means "the ACL could not be established", which the sync turns into an
- * `unverifiable` source that denies, and `getFile` returning `undefined` means the file is gone,
- * which becomes a deletion. Neither is ever treated as "no restrictions".
- */
+/** Drive `undefined` means deleted or unverifiable; never treat it as unrestricted. */
 
 /** One entry from Drive's change feed. `cursor` is the resume position *after* this change. */
 export interface DriveChange {
@@ -26,7 +18,6 @@ export interface DriveFile {
   readonly contentHash: string;
   readonly modifiedTime: string;
   readonly trashed: boolean;
-  /** Classification labels the workspace applied; absent falls back to the configured default. */
   readonly classification?: readonly string[];
   /** True for scanned/image content, which needs OCR before it can be indexed. */
   readonly requiresOcr?: boolean;
@@ -34,7 +25,7 @@ export interface DriveFile {
 
 export interface DrivePermission {
   readonly type: "user" | "group" | "domain" | "anyone";
-  /** Email, domain, or `anyone`. Resolved through the identity map; unmapped subjects are dropped. */
+  /** Email, domain, or `anyone`; unmapped subjects are dropped. */
   readonly externalSubject: string;
   readonly role: string;
 }
@@ -58,10 +49,7 @@ export interface DriveSyncCheckpoint {
   readonly updatedAt: string;
 }
 
-/**
- * Durable resume position. The sync advances it only after a change has been fully committed to
- * the Knowledge sink, so a crash re-processes the failed change instead of skipping it.
- */
+/** Checkpoint advances only after the change commits to the Knowledge sink. */
 export interface DriveSyncCheckpointStore {
   load(integrationId: string): Promise<DriveSyncCheckpoint | undefined>;
   save(checkpoint: DriveSyncCheckpoint): Promise<void>;

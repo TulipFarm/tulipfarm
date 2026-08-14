@@ -18,16 +18,7 @@ import { loadBundledIntegrations } from "../soul/integrations/bundled";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
 import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
-/*
- * Drives the real shipped `integrations/github/manifest.yml` end to end through the generic broker.
- *
- * GitHub is the harder proof. Connecting it used to mean a five-step wizard: register an App on
- * github.com by hand, copy an App ID, a slug, a generated `.pem`, and a webhook secret back into
- * TulipFarm, then install it. That is now two declarative steps — GitHub creates the App from a
- * manifest and hands every credential back for a one-time code, then the operator picks repos.
- * These tests assert the credentials land where the token-minting code reads them, and that the
- * installation is still recorded.
- */
+/* Exercises the shipped GitHub manifest through the broker, including credential landing. */
 
 const TEST_CSRF = "a".repeat(64);
 const logger = { info() {}, warn() {}, error() {}, debug() {} };

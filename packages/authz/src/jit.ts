@@ -1,10 +1,4 @@
-/**
- * Just-in-time grant issuance (SPEC §12: "Sensitive grants support just-in-time issuance and
- * periodic access review"). A JIT grant is issued for one principal by an approver in the same
- * business, must carry its own expiry (never a standing grant), and separation of duties denies
- * self-approval — an approver can never issue a JIT grant to themselves (SPEC §24 confused
- * deputy / privilege-escalation controls).
- */
+/** JIT grants require same-business approval, explicit expiry, and no self-approval. */
 
 import type { AccessGrant } from "./grants";
 import type { Principal } from "./principals";
@@ -32,11 +26,7 @@ export class JitDeniedError extends Error {
   }
 }
 
-/**
- * Throws unless `request` may be approved by `approver` at `now`: the grant must carry its own
- * expiry, the approver must belong to the same business as the requesting principal, and the
- * approver may not approve a grant for themselves.
- */
+/** Throws unless the approver is same-business, distinct from requester, and the grant expires. */
 export function assertJitGrantIssuable(
   request: JitGrantRequest,
   approver: Pick<Principal, "id" | "businessId" | "status" | "expiresAt">,

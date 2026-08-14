@@ -1,14 +1,4 @@
-/**
- * Persistence for Approvals and their decisions (SPEC §11.2). Storage owns the durable mechanics —
- * uniqueness, append-only decisions, and the atomic one-use consumption — while `@tulipfarm/authz`
- * owns whether an Approval is valid. Everything an Approval decision depends on lives in the
- * record, never in process memory, so decisions, expiry, and the spent one-use marker survive a
- * restart; an adapter rehydrates the same rows and reaches the same answers.
- *
- * The binding is stored as digests only, and the human-facing `preview`/`riskSummary` are safe
- * summary text — no intent arguments, Credential material, or Secrets are persisted here
- * (SPEC §13, §20).
- */
+/** Approval storage keeps safe summaries/digests, append-only decisions, and atomic spend. */
 
 /** Digests identifying the exact intent, evidence, and Guardrail revision an Approval covers. */
 export interface ApprovalBindingRecord {
@@ -82,11 +72,7 @@ export interface ApprovalRepo {
     approvalId: string,
     decision: ApprovalDecisionEntry
   ): Promise<ApprovalGrantRecord>;
-  /**
-   * Spends a valid one-use decision only for its exact `binding`. Expiry, denial, qualified
-   * approver count, binding, and the consumed marker must be checked in the same atomic storage
-   * operation: of any number of concurrent attempts exactly one succeeds.
-   */
+  /** Atomic one-use spend: state, binding, quorum, and consumed marker must validate together. */
   consume(
     businessId: string,
     approvalId: string,
@@ -125,13 +111,7 @@ function bindingsEqual(a: ApprovalBindingRecord, b: ApprovalBindingRecord): bool
   );
 }
 
-/**
- * Process-local reference implementation for tests and single-process composition. A durable
- * PostgreSQL adapter implements the same {@link ApprovalRepo} contract, where `create` maps to a
- * primary key, `appendDecision` to a unique `(approval_id, approver_principal_id)` constraint, and
- * `consume` to a transaction that locks and validates the Approval before a conditional
- * `UPDATE … WHERE consumed_at IS NULL` returning the affected row.
- */
+/** Process-local ApprovalRepo double; durable adapters enforce the same constraints in storage. */
 export class InMemoryApprovalRepo implements ApprovalRepo {
   private readonly records = new Map<string, ApprovalGrantRecord>();
 

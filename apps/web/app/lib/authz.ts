@@ -1,23 +1,11 @@
 /*
  * Client for the admin authorization surface (`/api/v1/authz`). Every route behind it is
- * admin-gated server-side; this module adds no gate of its own, so a non-admin sees `403` rather
- * than a hidden button — the server stays the authority.
- *
- * One deliberate asymmetry runs through the whole surface, and the UI must not flatten it:
- * **Role definitions are authored in Soul, not here.** `POST /api/v1/authz/roles` answers `501`
- * on purpose. Durable Role rows are projected from Soul on every sync and every non-reserved row
- * absent from Soul is reaped, so a Role forged through this API would be silently deleted minutes
- * later. What this surface writes is *operational* state — who holds which Role, and through which
- * group.
- *
- * Access levels are the supported way to author one: `POST /api/v1/authz/levels` writes the Soul
- * artifact, commits it, and projects it, so the level survives the next reconcile. That is why
- * `createLevel` exists below and `createRole` still does not.
+ * admin-gated server-side; this module adds no gate of its own, so a non-admin sees `403`
+ * rather than a hidden button — the server stays the authority.
  */
 
 import { apiDelete, apiGet, apiWrite } from "./api";
 
-/** Effect codes as the server spells them. `deny` always beats `allow` in the decision function. */
 export type GrantEffect = "allow" | "deny";
 
 export type AuthzGrant = {
@@ -38,15 +26,14 @@ export type AuthzRole = {
   id: string;
   source: RoleSource;
   /**
-   * What the author called this level, when they called it anything. `null` for the built-ins and
-   * for any Soul Role authored without a `displayName` — the UI must fall back to a humanized id
-   * rather than showing a bare UUID.
+   * `null` for the built-ins and for any Soul Role authored without a `displayName` — the UI
+   * must fall back to a humanized id rather than showing a bare UUID.
    */
   displayName: string | null;
   /**
-   * The Soul artifact directory this level lives in, and how deletion addresses it. `null` for the
-   * built-ins and for any authored Role whose artifact the loader cannot account for — the UI must
-   * not offer a delete it has no address for.
+   * The Soul artifact directory this level lives in, and how deletion addresses it. `null` for
+   * the built-ins and for any authored Role whose artifact the loader cannot account for — the
+   * UI must not offer a delete it has no address for.
    */
   slug: string | null;
   assignableTo: string[];
@@ -65,11 +52,10 @@ export type AuthzGroupDetail = AuthzGroup & {
 };
 
 /**
- * Why an authority layer resolved to no grants. Only `no-roles-assigned` and `roles-grant-nothing`
- * are unremarkable; every other value is a fault the operator must act on, and `unknown-role` /
- * `role-not-assignable` in particular mean a principal is locked out by dangling data rather than
- * by policy. Rendering an empty grant set as "expected" without checking this tells an operator
- * everything is fine at the exact moment it is not.
+ * Why an authority layer resolved to no grants. Only `no-roles-assigned` and
+ * `roles-grant-nothing` are unremarkable; every other value is a fault the operator must act
+ * on, and `unknown-role` / `role-not-assignable` in particular mean a principal is locked out
+ * by dangling data rather than by policy.
  */
 export type LayerEmptyReason =
   | "no-such-principal"
@@ -81,7 +67,6 @@ export type LayerEmptyReason =
   | "role-not-assignable"
   | "grant-collection-failed";
 
-/** The empty reasons that are ordinary. Anything else is a fault worth surfacing loudly. */
 export const BENIGN_EMPTY_REASONS: ReadonlySet<LayerEmptyReason> = new Set([
   "no-roles-assigned",
   "roles-grant-nothing",
@@ -91,7 +76,6 @@ export function isLayerFault(reason: LayerEmptyReason | undefined): boolean {
   return reason !== undefined && !BENIGN_EMPTY_REASONS.has(reason);
 }
 
-/** Operator-facing wording for each emptying cause. */
 export const LAYER_EMPTY_REASON_LABEL: Record<LayerEmptyReason, string> = {
   "no-such-principal": "No such principal in this business.",
   "not-authenticatable": "The principal is suspended or expired, so it can hold no authority.",
@@ -108,7 +92,6 @@ export type EffectiveGrants = {
   principalId: string;
   kind: string;
   grants: AuthzGrant[];
-  /** Present only when `grants` is empty. See {@link LayerEmptyReason}. */
   emptyReason?: LayerEmptyReason;
   unresolvedRoleIds?: string[];
 };
@@ -116,19 +99,9 @@ export type EffectiveGrants = {
 export type AuthzDecisionReason = "allowed" | "no_layers" | "explicit_deny" | "no_matching_allow";
 
 /**
- * The result of an explain call.
- *
- * `allowed` is **not** symmetric with `!allowed`, and the UI must render it that way. The decision
- * function permits an action only when *every* authority layer permits it, so evaluating a subset
- * of layers can only ever be more permissive than the real gate. This endpoint reaches the live
- * layers (the caller, plus the Agent when one is named) but never the pinned run, guardrail and
- * credential layers, which exist only inside a Run. Therefore:
- *
- * - a **denial** is authoritative — a layer that denies alone denies in the intersection too;
- * - an **allow** is an upper bound — some unevaluated layer may still deny.
- *
- * `partial` is true whenever `unevaluatedLayers` is non-empty. Never present an `allowed: true`
- * with `partial: true` as "this will work".
+ * `allowed` is **not** symmetric with `!allowed`, and the UI must render it that way. The
+ * decision function permits an action only when *every* authority layer permits it, so
+ * evaluating a subset of layers can only ever be more permissive than the real gate.
  */
 export type ExplainResult = {
   principalId: string;
@@ -140,9 +113,8 @@ export type ExplainResult = {
   unevaluatedLayers: string[];
   partial: boolean;
   /**
-   * Why an evaluated layer came out empty, keyed by layer name. A `deniedLayer` that appears here
-   * with a non-benign reason is a data fault wearing the costume of a policy decision — granting
-   * more access will not fix it.
+   * A `deniedLayer` that appears here with a non-benign reason is a data fault wearing the
+   * costume of a policy decision — granting more access will not fix it.
    */
   layerEmptyReasons?: Record<string, LayerEmptyReason>;
   unresolvedRoleIds?: string[];
@@ -152,7 +124,6 @@ export type ExplainQuery = {
   principalId: string;
   action: string;
   resourceType: string;
-  /** Supply to intersect the Agent's own layer, as a real chat call would. */
   agentId?: string;
   domain?: string;
   recordId?: string;
@@ -162,32 +133,25 @@ export type ExplainQuery = {
   conditions?: Record<string, string>;
 };
 
-// ── Reads ────────────────────────────────────────────────────────────────────
-
 /**
- * One thing a person can be allowed to do. Derived server-side from the Tools themselves, so a
- * capability offered here is one the gate will actually evaluate — the UI cannot invent an action
- * that matches no rule.
+ * Derived server-side from the Tools themselves, so a capability offered here is one the gate
+ * will actually evaluate — the UI cannot invent an action that matches no rule.
  */
 export type Capability = {
-  /** Stable id, equal to the action the gate checks. */
   id: string;
   action: string;
   resourceTypes: string[];
-  /** Plain language, e.g. "Add pull request". */
   label: string;
-  /** True when using it changes something rather than only looking. */
   changesThings: boolean;
-  /** Which Tools need it — shown so an owner can see what they are turning on. */
   tools: string[];
 };
 
 export type CapabilityArea = { id: string; label: string; capabilities: Capability[] };
 
 /**
- * `unavailable` is deliberately part of the payload. These are capabilities a Tool requires that an
- * authored level cannot express, and showing them is more honest than a picker that quietly offers
- * less than the system does.
+ * `unavailable` is deliberately part of the payload. These are capabilities a Tool requires
+ * that an authored level cannot express, and showing them is more honest than a picker that
+ * quietly offers less than the system does.
  */
 export type CapabilityCatalog = {
   areas: CapabilityArea[];
@@ -228,7 +192,6 @@ export function getGroup(groupId: string): Promise<AuthzGroupDetail> {
   return apiGet<AuthzGroupDetail>(`/api/v1/authz/groups/${encodeURIComponent(groupId)}`);
 }
 
-/** A principal's direct assignments unioned with every unexpired group-held Role it inherits. */
 export function getEffectiveGrants(principalId: string): Promise<EffectiveGrants> {
   return apiGet<EffectiveGrants>(
     `/api/v1/authz/principals/${encodeURIComponent(principalId)}/grants`
@@ -239,18 +202,12 @@ export function explain(query: ExplainQuery): Promise<ExplainResult> {
   return apiWrite<ExplainResult>("POST", "/api/v1/authz/explain", query);
 }
 
-// ── Writes ───────────────────────────────────────────────────────────────────
-// No `createRole`: see the module comment. Role definitions are Soul-authored — `createLevel` is
-// the supported path, and it writes the artifact rather than a bare row.
-
 /** Authors a new access level from capabilities the server offered. */
 export function createLevel(name: string, capabilities: string[]): Promise<AccessLevel> {
   return apiWrite<AccessLevel>("POST", "/api/v1/authz/levels", { name, capabilities });
 }
 
 /**
- * Replaces a level's name and capabilities in place.
- *
  * Not delete-then-create: the level keeps its identity, so everybody already holding it keeps
  * holding it. The slug never changes, even when the name does.
  */

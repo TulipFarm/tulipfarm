@@ -18,12 +18,7 @@ import { Response } from "./response";
 import { ToolCallRow } from "./tool-call";
 import { isHiddenToolPart } from "./tool-summary";
 
-/**
- * The model's private reasoning, collapsed by default.
- *
- * No duration is shown: the wire carries no reasoning timing, and inventing one would be a
- * fake-precise number attached to the one part a reader is least able to verify.
- */
+/** No duration: the wire carries no reasoning timing. */
 function ReasoningPart({ text, streaming }: { text: string; streaming?: boolean }) {
   const [open, setOpen] = useState(false);
   return (
@@ -76,12 +71,6 @@ function StepGlyph({ status }: { status: StepStatus }) {
   return <Circle aria-hidden className={cn("size-3.5", tone)} />;
 }
 
-/**
- * A plan as a vertical step rail.
- *
- * Replaces `[ ] [~] [x] [!]` ASCII marks. The rail gives a multi-step turn a spine to read down,
- * which a flat list of bracketed marks never did.
- */
 function PlanPart({ title, steps }: { title?: string; steps: PlanStep[] }) {
   const done = steps.filter((step) => step.status === "done").length;
 
@@ -143,12 +132,6 @@ function sourceHost(url: string | undefined): string | undefined {
   }
 }
 
-/**
- * Cited sources as cards.
- *
- * A citation is evidence, and evidence should be inspectable at a glance: where it came from, what
- * it was called, and whether it is reachable. A bare bullet list gave none of that.
- */
 function SourcesPart({ sources }: { sources: SourceRef[] }) {
   return (
     <div>

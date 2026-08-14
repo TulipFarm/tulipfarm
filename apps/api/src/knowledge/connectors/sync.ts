@@ -23,13 +23,7 @@ export interface ConnectorSyncResult {
   error?: string;
 }
 
-/**
- * Sync one connector: authenticate → listChanged(cursor) → for each changed record fetch + map +
- * write through the existing funnels (the indexer embeds it) → advance the cursor. A failure is
- * recorded on the connector's state row and isolated to that connector (never throws to the caller),
- * so one broken connector can't stall the others. The cursor only advances on success, so a failed
- * run is retried from the same position next time.
- */
+/** Sync one connector; record failures, never throw, and advance the cursor only on success. */
 export async function syncConnector(
   connector: Connector,
   deps: ConnectorSyncDeps
@@ -47,21 +41,16 @@ export async function syncConnector(
       try {
         const record = await connector.fetch(id);
         const page = connector.mapToPage(record);
-        // Flat pages upsert by (source, sourceId); a connector setting source != "authored" can
-        // never collide with a hand-authored page. OKF pages go through writePage, which owns the
-        // (spaceId, path) — an OKF-kind connector is expected to write into a space it owns (no V1
-        // connector uses this path; the SampleConnector is flat).
+        // Flat pages upsert by (source, sourceId), so non-authored connectors cannot collide.
         if (page.kind === "flat") await service.ingestSource(page.input);
         else await service.writePage(page.input);
         synced += 1;
       } catch (recErr) {
-        // Per-record isolation: one bad record is recorded and skipped, never stalling the cursor
-        // for the whole connector. Connector-level failures (auth/listChanged) are caught below.
+        // Per-record failures are recorded and skipped; connector-level failures are caught below.
         failures.push(`${id}: ${recErr instanceof Error ? recErr.message : String(recErr)}`);
       }
     }
-    // Cursor advances even with per-record failures so a permanently-bad record can't wedge the
-    // connector; the failures are surfaced on last_error for visibility.
+    // Advance despite per-record failures so one bad record cannot wedge the connector.
     await state.setCursor(connector.name, changes.cursor);
     if (failures.length > 0) {
       const message = `${failures.length} record(s) failed: ${failures.join("; ")}`;
@@ -71,8 +60,7 @@ export async function syncConnector(
     await state.recordRun(connector.name);
     return { connector: connector.name, synced };
   } catch (err) {
-    // Connector-level failure (authenticate / listChanged): cursor is NOT advanced, so the run is
-    // retried from the same position next time.
+    // Connector-level failures do not advance the cursor; retry from the same position.
     const message = err instanceof Error ? err.message : String(err);
     await state.recordError(connector.name, message);
     return { connector: connector.name, synced: 0, error: message };
@@ -100,8 +88,7 @@ export async function registerConnectorSync(boss: PgBoss, deps: ConnectorSyncDep
       CONNECTOR_SYNC_QUEUE,
       async () => {
         const results = await runConnectorSync(deps);
-        // A connector that actually synced records (or errored) gets its own feed row; silent
-        // no-op connectors stay out of the 'connector' category (the job-run row still covers them).
+        // Only connectors that synced or errored get feed rows; silent no-ops stay out.
         for (const r of results) {
           if (r.synced > 0 || r.error) {
             await deps.activity?.record({

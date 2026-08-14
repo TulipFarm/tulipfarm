@@ -8,18 +8,7 @@ import {
   secretReferenceSchema,
 } from "./common";
 
-/**
- * Routine definition meta-schema (SPEC §7.1, §9.1). A Routine is a versioned automation
- * definition with an input/output schema and a typed State graph. State outputs are
- * immutable typed values; there is no mutable global Routine Context (SPEC invariant 8).
- *
- * Bounds are enforced structurally so no authored Routine can express an unbounded
- * loop, fan-out, or retry (SPEC §9.1):
- * - `foreach` requires both a `maxItems` bound and a `maxConcurrency` cap.
- * - `repeat_until` requires both a `maxIterations` and a `maxDurationMs` bound.
- * - `parallel` requires a `maxConcurrency` cap over its branches.
- * - a retry policy requires a bounded `maxAttempts`.
- */
+/** Routine schema: typed States, immutable outputs, and bounded loops/fan-out/retries. */
 
 const apiVersion = DEFINITION_API_VERSION;
 const kind = "Routine";
@@ -63,7 +52,7 @@ const nonEmptyString = Type.String({ minLength: 1 });
 const positiveInteger = Type.Integer({ minimum: 1 });
 const stateName = Type.String({ minLength: 1, pattern: "^[A-Za-z][A-Za-z0-9_]*$" });
 
-// An authored JSON Schema fragment (opaque here; validated as a schema by later stages).
+// Opaque here; later stages validate this as JSON Schema.
 const jsonSchemaObject = Type.Unknown({ type: "object", additionalProperties: true });
 
 const definitionRef = Type.Object(
@@ -111,7 +100,6 @@ const onErrorHandler = Type.Object(
   { additionalProperties: false }
 );
 
-// Fields shared by every typed State.
 const sharedStateProps = {
   name: stateName,
   transition: Type.Optional(stateName),
@@ -331,10 +319,7 @@ export const RoutineSchemaRegistration = ROUTINE_DEFINITION;
 
 let registry: SchemaRegistry | undefined;
 
-/**
- * Validate a Routine definition. Returns the canonical validated document (typed) on
- * success; throws a `SchemaContractError` subtype on failure.
- */
+/** Validate a Routine definition through the registry. */
 export function validateRoutineDefinition(document: unknown): ValidatedRoutineDocument {
   registry ??= new SchemaRegistry([RoutineSchemaRegistration]);
   return registry.validate(document) as ValidatedRoutineDocument;

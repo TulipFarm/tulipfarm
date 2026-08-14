@@ -6,12 +6,7 @@ import { ErrorSchema } from "../auth/schemas";
 import { DEFAULT_ASSISTANT_NAME } from "../soul/agents/platform-agents";
 import { integrationSecretKey, resolveConnectionEnv } from "./connection-env";
 
-/*
- * Slack -> Channel-routing bridge (plan §6d). Not part of the generic connect flow above: binding
- * an installed integration to an Agent's routing table is a Slack-specific concept, not something
- * every integration type needs. Mints IntegrationStore rows the integration-worker's routing
- * source (apps/integration-worker/src/channels/routing-source.ts) reads at delivery time.
- */
+/* Slack-specific bridge from connected workspace to integration-worker channel routing. */
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -20,14 +15,7 @@ export interface SlackAuthTestResult {
   appId: string;
 }
 
-/**
- * Resolves the real Slack App ID (`A...`) from a bot user id (`B...`) via `bots.info`. `auth.test`
- * does not return `app_id` in its response schema, only `bot_id` — and `bot_id` is a different ID
- * space than the `api_app_id` every inbound Events API envelope carries
- * (`packages/integrations/src/slack/adapter.ts`'s `normalizeSlackEvent`). Storing `bot_id` in place
- * of the real App ID means `resolveChannelRoute`'s app lookup can never match a real event, ever —
- * this call is what makes the two line up.
- */
+/** Resolve real Slack App ID from bot id; Events API envelopes carry `api_app_id`, not `bot_id`. */
 async function resolveSlackAppId(botToken: string, botId: string): Promise<string> {
   const res = await fetch(`https://slack.com/api/bots.info?bot=${encodeURIComponent(botId)}`, {
     headers: { Authorization: `Bearer ${botToken}` },
@@ -43,12 +31,7 @@ async function resolveSlackAppId(botToken: string, botId: string): Promise<strin
   return body.bot.app_id;
 }
 
-/**
- * Single verify call against Slack's auth.test — no persistent connection is opened. `app_id` is
- * not part of `auth.test`'s response schema at all, so when it's absent this resolves the real
- * App ID via `bots.info` instead of substituting `bot_id` (a different Slack ID space — see
- * `resolveSlackAppId`).
- */
+/** Verifies auth.test; absent `app_id` resolves via bots.info, never `bot_id`. */
 export async function verifySlackBotToken(botToken: string): Promise<SlackAuthTestResult> {
   const res = await fetch("https://slack.com/api/auth.test", {
     headers: { Authorization: `Bearer ${botToken}` },
@@ -92,11 +75,7 @@ const RouteSchema = {
   },
 } as const;
 
-/**
- * Resolves the deterministic app/integration ids for the connected Slack workspace by re-running
- * `auth.test`. Shared by bind/list/unbind so all three agree on exactly which integration a given
- * channel mapping belongs to without persisting a second copy of Slack's identifiers.
- */
+/** Recomputes deterministic Slack app/integration ids so bind/list/unbind target one row. */
 async function resolveSlackIntegration(
   deps: SlackBindDeps,
   verify: (botToken: string) => Promise<SlackAuthTestResult>
@@ -133,12 +112,7 @@ async function resolveSlackIntegration(
   }
 }
 
-/**
- * Auto-binds every Slack DM/channel to the platform default assistant on connect, so a business
- * gets working Slack routing with zero manual setup. Best-effort: a bad token here must not fail
- * the connect request — GET /api/v1/integrations/slack/routes re-runs the same verify call and
- * surfaces the failure to the UI, and reconnecting with a good token re-runs this.
- */
+/** Best-effort default Slack binding; route listing surfaces bad-token failures later. */
 export async function ensureDefaultSlackRoute(deps: SlackBindDeps): Promise<void> {
   const verify = deps.verifyBotToken ?? verifySlackBotToken;
   const resolved = await resolveSlackIntegration(deps, verify);

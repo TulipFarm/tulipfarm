@@ -14,8 +14,8 @@ export interface RunReplayDeps {
   loadRecordedRun(req: FastifyRequest, runId: string): Promise<RecordedRun | null>;
   loadRoutine(recorded: RecordedRun): Promise<CompiledRoutine | null>;
   /**
-   * Authorize a live replay and mint a fresh effect identity for it. Returning `null` denies.
-   * Only called on the live path — the default simulation path never needs it.
+   * Authorize a live replay and mint a fresh effect identity for it. Returning `null` denies. Only
+   * called on the live path — the default simulation path never needs it.
    */
   authorizeLiveReplay(req: FastifyRequest, runId: string): Promise<ReplayAuthorization | null>;
   startReplayRun(plan: ReplayPlan): Promise<{ runId: string }>;
@@ -29,13 +29,11 @@ const REPLAY_LIMIT = 30;
 const REPLAY_WINDOW_MS = 60_000;
 
 /**
- * `POST /api/v1/runs/:id/replay` (SPEC §18).
- *
- * Replay defaults to a new simulation Run: the recorded fixture is re-executed with effect
- * previews only and the response carries the diff against the original Run. A live replay must be
- * asked for explicitly, and is granted only when the caller holds the live-replay grant and a
- * fresh effect identity — a stale or missing one denies rather than falling back to simulation,
- * so the caller always knows which of the two happened.
+ * `POST /api/v1/runs/:id/replay` (SPEC §18). Replay defaults to a new simulation Run: the recorded
+ * fixture is re-executed with effect previews only and the response carries the diff against the
+ * original Run. A live replay must be asked for explicitly, and is granted only when the caller
+ * holds the live-replay grant and a fresh effect identity — a stale or missing one denies rather
+ * than falling back to simulation, so the caller always knows which of the two happened.
  */
 export function registerRunReplayRoutes(
   app: FastifyInstance,
@@ -43,7 +41,6 @@ export function registerRunReplayRoutes(
   requireAuth: preHandlerHookHandler,
   rateLimiter?: RateLimiter
 ): void {
-  // Limit per caller when a limiter is wired, keyed on the authenticated user so one caller
   // cannot spend another's budget, falling back to the address for the unauthenticated case.
   const rateLimitHook = rateLimiter
     ? makeRateLimitHook(

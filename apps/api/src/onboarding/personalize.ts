@@ -7,17 +7,7 @@ import type { FastifyBaseLogger } from "fastify";
 import type { KvService } from "../kv/service";
 import type { Suggestion } from "./suggestions";
 
-/*
- * LLM personalization for the onboarding surface (ONBOARDING ONB-V1, issue #130). When the soul
- * carries a `businessDescription`, a single quick-tier LLM call produces suggestion chips + checklist
- * recommendations tailored to the business AND the current soul state (existing resource/agent/skill
- * names) — so e.g. a `tickets` resource yields a "create an agent for tickets" recommendation.
- *
- * The result is cached in the system-scoped KV store keyed by a hash of (businessDescription + sorted
- * soul names), so it regenerates only when that state changes — one LLM call per distinct state. When
- * no businessDescription / no LLM / no KV is available, or the call fails, the orchestrator returns
- * null and the routes fall back to the static CATALOG + RULES (behavior identical to before).
- */
+/* Caches one quick-tier LLM personalization per business-description plus soul-name hash. */
 
 const KV_NAMESPACE = "onboarding";
 
@@ -97,7 +87,7 @@ function readSoulState(soul: PersonalizeSoulSlice): SoulState {
   };
 }
 
-/** Stable KV key: sha256 of (businessDescription + sorted soul names). Changes iff the state does. */
+/** Stable KV key: sha256 of business description plus sorted soul names. */
 export function buildStateKey(businessDescription: string, state: SoulState): string {
   const hash = createHash("sha256")
     .update(JSON.stringify({ d: businessDescription, ...state }))
@@ -144,11 +134,7 @@ function stringField(manifest: Record<string, unknown> | null, key: string): str
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
-/**
- * Orchestrator used by both onboarding routes. Returns the personalized surfaces, or `null` when
- * personalization is unavailable (no businessDescription / no LLM / no KV) or the LLM call fails —
- * in which case the caller falls back to the static catalog + rules. Never throws.
- */
+/** Returns personalized onboarding, or null so callers fall back to static catalog/rules. */
 export async function getPersonalizedOnboarding(
   soul: PersonalizeSoulSlice,
   deps: PersonalizeDeps

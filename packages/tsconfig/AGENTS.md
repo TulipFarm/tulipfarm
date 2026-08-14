@@ -1,19 +1,24 @@
-# tsconfig — Agent Conventions
+# tsconfig (`@tulipfarm/tsconfig`)
 
-`@tulipfarm/tsconfig` — shared TypeScript config bases. Config-only: no `src/`, no build, no
-tests. Profiles are exposed via `package.json` `exports`. See root `AGENTS.md` for commands/lint.
+Shared TypeScript config bases. Config-only: no `src/`, build, or tests.
 
-## Profiles & actual usage
+## Read on / Skip
+
+- **Read on if** you change TS compiler profiles or add a new runtime target.
+- **Skip if** you only need a consumer's local `tsconfig.json`; read that package's `AGENTS.md`.
+
+## Map
 
 | File | Adds | Used by |
 | --- | --- | --- |
-| `base.json` | `strict`, ES2022 target/lib, `esModuleInterop`, `skipLibCheck`, `resolveJsonModule` | every `packages/*` library (`llm`, `soul`, `secrets`, `validation`, `types`, `utils`, `constants`) |
-| `node.json` | base + `module` / `moduleResolution: NodeNext` | `apps/api` |
-| `remix.json` | base + `jsx: react-jsx`, DOM libs, `module: ESNext`, `moduleResolution: bundler` | `apps/web`, `packages/ui` |
+| `base.json` | Strict ES2022 base, interop, JSON. | `apps/docs`; base packages. |
+| `node.json` | NodeNext module settings. | API, worker, integration worker apps. |
+| `remix.json` | React JSX, DOM libs, bundler resolution. | web, editor, surface-web, ui. |
+| `package.json` | Exports the profiles above. | All profile consumers. |
 
-## Convention
+## Rules
 
-- A consumer's `tsconfig.json` should `extends` exactly one profile and add only what's local.
-- **Changing a profile affects every consumer above** — change deliberately and run a full
-  `pnpm typecheck` before finishing.
-- Add a new target as a new `<name>.json` and register it in `package.json` `exports`.
+- "Base packages" means every `packages/*` workspace except editor, surface-web, and ui.
+- A consumer's `tsconfig.json` should extend exactly one profile and add only local settings.
+- **Changing a profile affects every consumer above**; change deliberately and run full typecheck.
+- Add a new target as `<name>.json` and register it in `package.json` `exports`.

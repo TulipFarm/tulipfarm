@@ -19,13 +19,7 @@ export async function handleHookRequest(
   return runResourceHook(request, options.resourceLookup);
 }
 
-/**
- * Serve isolate requests on the worker thread's port until the host asks it to stop.
- *
- * Each application supplies its own entrypoint module that calls this with the capabilities it is
- * willing to grant, so the isolate logic exists once while an app can never accidentally hand an
- * isolate a reach it did not mean to.
- */
+/** Apps pass only the capabilities their isolate may receive; the shared host grants no extras. */
 export function serveHookRequests(options: HookWorkerHostOptions = {}): void {
   parentPort?.on("message", async (request: WorkerRequest) => {
     if ((request as unknown as { type?: string }).type === "shutdown") {

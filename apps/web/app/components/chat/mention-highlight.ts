@@ -1,12 +1,8 @@
 /*
- * Highlight `@agent` mentions inside a rendered user message. The composer serializes a mention to
- * literal `@<label>` text (the structured chip is lost), and a label may contain spaces
- * ("@Sprint Planner") — so we can't regex-guess a boundary. Instead we wrap occurrences of the EXACT
- * known agent phrases in a `<span class="tf-mention">`, reusing the composer's ruby chip styling.
- *
- * Implemented as a rehype plugin (operates on the rendered hast tree via the shared `walkTextNodes`)
- * so it composes with the rest of the markdown rendering and never highlights inside code spans or
- * links.
+ * The composer serializes a mention to literal `@<label>` text (the structured chip is lost),
+ * and a label may contain spaces ("@Sprint Planner") — so we can't regex-guess a boundary.
+ * Instead we wrap occurrences of the EXACT known agent phrases in a `<span
+ * class="tf-mention">`, reusing the composer's ruby chip styling.
  */
 
 import { type HastNode, walkTextNodes } from "~/lib/hast-text-walk";
@@ -34,9 +30,8 @@ function splitMentions(text: string, pattern: RegExp): HastNode[] {
 }
 
 /**
- * rehype plugin (use as `[rehypeMentions, { phrases }]`). Wraps each known mention phrase in a ruby
- * `.tf-mention` chip. Longest-first matching so "@Sprint Planner" beats a "@Sprint" prefix; word
- * boundaries guard against partial hits ("@A" inside "@Andrew") and emails ("foo@bar").
+ * Longest-first matching so "@Sprint Planner" beats a "@Sprint" prefix; word boundaries guard
+ * against partial hits ("@A" inside "@Andrew") and emails ("foo@bar").
  */
 export function rehypeMentions(options: { phrases: string[] }) {
   const phrases = [...new Set(options.phrases.filter(Boolean))].sort((a, b) => b.length - a.length);

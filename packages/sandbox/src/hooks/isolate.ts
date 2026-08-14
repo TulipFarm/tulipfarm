@@ -12,23 +12,8 @@ const HOOK_TIMEOUT_MS = 2000;
 const EXPRESSION_TIMEOUT_MS = 100;
 const MEMORY_LIMIT_MB = 128;
 
-/**
- * The one host capability a resource hook may reach: read another record.
- *
- * It is injected rather than implemented here because the tables it reads belong to whichever
- * application owns them, and this package owns the isolation boundary, not the schema. A host
- * that passes nothing gets a sandbox with no reach out of the isolate at all — which is what the
- * classifier and expression paths want.
- */
-/**
- * A hook module is an object-literal *expression*, and it is interpolated inside parentheses —
- * so a trailing `;`, which any formatter adds to a file that is also valid TypeScript, turns the
- * wrapper into a syntax error.
- *
- * Normalised here rather than forbidden in authoring, because the failure it causes is both
- * remote from its cause and total: every delivery to that integration fails to parse, and the
- * author's only clue is a column number inside generated code they never wrote.
- */
+/** Optional host read capability for resource hooks; absent means no reach outside the isolate. */
+/** Hook modules are parenthesized object expressions; trim trailing `;` before wrapping. */
 export function hookExpression(source: string): string {
   return source.replace(/;\s*$/, "");
 }
@@ -38,11 +23,7 @@ export type ResourceLookup = (
   resourceId: string
 ) => Promise<Record<string, unknown> | null>;
 
-/**
- * Deterministic-time / seeded-random preamble shared by every sandbox variant. Two runs of the
- * same hook over the same record produce the same result, so a replay is evidence rather than a
- * fresh roll of the dice.
- */
+/** Deterministic time/random makes hook replay evidence, not a fresh roll. */
 function determinismPreamble(now: number): string {
   const seed = (now ^ 0xdeadbeef) >>> 0;
   return `
@@ -71,11 +52,7 @@ function dispose(isolate: ivm.Isolate): void {
   }
 }
 
-/**
- * Evaluate a routine data-flow expression: scope keys become locals, the expression's
- * value is copied back out. No host callbacks are installed — the isolate has no
- * host/fs/net reach at all.
- */
+/** Evaluate a data-flow expression with scope locals and no host/fs/net reach. */
 export async function runExpression(req: ExpressionRequest): Promise<WorkerResponse> {
   const { id, code, scope } = req;
   const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
@@ -98,11 +75,7 @@ export async function runExpression(req: ExpressionRequest): Promise<WorkerRespo
   }
 }
 
-/**
- * Call one function from a routine's hooks.ts object literal
- * (`({ beforeHook(ctx){}, myFn(ctx, args){} })`). Gets hash/uuid helpers on ctx like
- * resource hooks, but no patch/resource access — hooks compute, they don't write.
- */
+/** Call a Routine hook with hash/uuid helpers but no patch/resource access. */
 export async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerResponse> {
   const { id, hookSource, fnName, invocation, args, optional } = req;
   const isolate = new ivm.Isolate({ memoryLimit: MEMORY_LIMIT_MB });
@@ -147,11 +120,7 @@ export async function runRoutineHook(req: RoutineHookRequest): Promise<WorkerRes
   }
 }
 
-/**
- * Run a resource before/after hook. `before` collects `ctx.patch(...)` calls and returns the
- * patched record; `after` returns the record untouched — an after hook observes a write that
- * already happened, so letting it edit the record would be editing history.
- */
+/** `before` may patch; `after` observes committed history and cannot edit it. */
 export async function runResourceHook(
   req: ResourceHookRequest,
   lookup?: ResourceLookup

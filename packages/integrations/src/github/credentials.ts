@@ -1,18 +1,7 @@
 import { createSign } from "node:crypto";
 import type { IntegrationHttpPort } from "../http";
 
-/**
- * GitHub App credential minting: App JWT signing and installation-access-token exchange.
- *
- * Deliberately has no dependency on `@tulipfarm/secrets` — this package may not import it (see
- * `docs/architecture/dependency-rules.md`). These are pure functions over an `IntegrationHttpPort`;
- * the composing application (which imports both `@tulipfarm/integrations` and
- * `@tulipfarm/secrets`) is responsible for reading the App's stored id/private key/webhook secret
- * and wrapping `mintInstallationToken` behind a caching `SecretProvider`.
- *
- * Nothing here caches. A fresh App JWT is minted per exchange call; the installation token itself
- * is never persisted, logged, or retained by this module — the caller owns its lifetime.
- */
+/** Pure GitHub App JWT/token minting; secrets and token caching stay in the caller. */
 
 export type GitHubCredentialErrorReason =
   | "invalid_private_key"
@@ -35,9 +24,7 @@ function base64url(input: Buffer | string): string {
   return buffer.toString("base64url");
 }
 
-/**
- * Sign a GitHub App JWT (RS256, `iss` = App ID). `now` is injected for deterministic tests.
- */
+/** Sign a GitHub App JWT (RS256, `iss` = App ID). */
 export function signAppJwt(
   appId: string,
   privateKeyPem: string,
@@ -70,11 +57,7 @@ export interface MintedInstallationToken {
   readonly expiresAt: Date;
 }
 
-/**
- * Exchange an App JWT for a short-lived (~1hr) installation access token, scoped to whatever
- * repositories/permissions the installation grants. Returns null (never a stale/guessed value) on
- * any non-2xx — the caller decides how to surface that as a denied credential lease.
- */
+/** Exchange an App JWT for a short-lived installation token scoped by the installation. */
 export async function mintInstallationToken(
   http: IntegrationHttpPort,
   appJwt: string,
@@ -112,9 +95,7 @@ interface CachedInstallationToken {
   readonly expiresAt: Date;
 }
 
-/** What `createCachingInstallationTokenMinter` needs to sign a fresh App JWT and exchange it —
- * resolved fresh on every cache miss, since the private key is a `SecretsService` read this
- * package may not perform itself (see module doc). */
+/** Context resolved fresh on cache miss because this package cannot read secrets. */
 export interface InstallationTokenMintContext {
   readonly appExternalId: string;
   readonly installationId: string;
@@ -123,20 +104,12 @@ export interface InstallationTokenMintContext {
 
 export interface CachingInstallationTokenMinterDeps {
   readonly http: IntegrationHttpPort;
-  /** Resolves the App/installation/key to mint against, or `undefined` when nothing is
-   * configured/active — the caller's own lookup (App config, installation directory, secrets). */
+  /** Resolves mint context, or `undefined` when no active config exists. */
   readonly resolveContext: () => Promise<InstallationTokenMintContext | undefined>;
   readonly now?: () => Date;
 }
 
-/**
- * The caching "sign a fresh App JWT, exchange it for an installation token, keep the token until
- * it's due to expire" sequence that both `apps/api` (soul repo credentials) and `apps/worker`
- * (Tool-dispatch credentials) need identically — only *what* they resolve the mint context from
- * differs (a named installation vs. "the business's one active installation"), which is why that
- * part stays a caller-supplied `resolveContext`. Fails closed: `undefined` on any unconfigured
- * state or minting failure, never a stale or guessed token.
- */
+/** Cache tokens until refresh margin; failures return `undefined`, never stale data. */
 export function createCachingInstallationTokenMinter(
   deps: CachingInstallationTokenMinterDeps
 ): () => Promise<string | undefined> {

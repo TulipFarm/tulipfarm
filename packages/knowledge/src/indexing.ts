@@ -1,12 +1,4 @@
-/**
- * Knowledge index boundary (SPEC §14.1: "indexes are partitions or filters that cannot expose
- * disallowed candidate text or metadata").
- *
- * The port makes that structural rather than procedural: {@link KnowledgeIndexQuery} *requires*
- * `allowedSourceIds`, so there is no way to rank, score, or read a candidate without first having
- * produced an allow list in `acl.ts`. An adapter that ignores the filter is still caught — the
- * retrieval path re-checks every returned candidate against the same set.
- */
+/** Knowledge index queries require authorized source ids; retrieval re-checks returned ids. */
 
 export interface KnowledgeIndexEntry {
   readonly businessId: string;
@@ -53,11 +45,7 @@ function terms(value: string): string[] {
     .filter((term) => term.length > 0);
 }
 
-/**
- * Deterministic keyword index for tests and single-process composition. Scoring is plain term
- * overlap: ranking quality is not the contract under test here, the ACL filter is. Ties break on
- * chunk id so results never depend on insertion order.
- */
+/** Test index: term-overlap scoring, ACL filter first, deterministic chunk-id tie break. */
 export class InMemoryKnowledgeIndex implements MutableKnowledgeIndexPort {
   private readonly byChunk = new Map<string, KnowledgeIndexEntry>();
 

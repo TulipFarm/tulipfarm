@@ -1,12 +1,4 @@
-/*
- * Registry of LLM providers the instance supports. Each provider declares the FULL set of inputs it
- * needs — some secret (API keys), some plain config (Azure resource_name, custom base_url). This is
- * the single source of truth: the Settings UI configures a provider in one place by rendering its
- * fields, every value is stored in the secrets store keyed by the field's `key`, and the LLM layer
- * resolves a provider's credentials/config from the store via this registry (so a soul.yaml `llm`
- * row is just { provider, model }). Lives in @tulipfarm/secrets; consumed by @tulipfarm/llm and the web app
- * (over HTTP). Grows as new providers/integrations are added.
- */
+/* Provider registry for Settings/secrets/LLM resolution; provider ids and field keys are canonical. */
 
 export type LlmProviderId =
   | "anthropic"
@@ -99,11 +91,7 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
     ],
   },
   {
-    // Runs the Claude Code CLI as the model, authenticated with a portable token minted from a
-    // Claude Pro/Max subscription (`claude setup-token`, read via CLAUDE_CODE_OAUTH_TOKEN) instead
-    // of an API key — lets a user with no API budget run TulipFarm. See
-    // docs/plans/cli-agent-providers.md. Reuses role: "api_key" so Settings, /setup, and the
-    // delete-key-prunes-config cascade all work unchanged.
+    // Claude Code uses a subscription OAuth token but keeps role "api_key" for existing flows.
     id: "claude-code",
     label: "Claude Code (subscription)",
     fields: [
@@ -118,13 +106,7 @@ export const LLM_PROVIDERS: readonly LlmProviderInfo[] = [
     ],
   },
   {
-    // Runs the Codex CLI as the model on a ChatGPT Plus/Pro/Business plan. Unlike every other
-    // provider the credential is a *file*, not a token: `codex login` writes ~/.codex/auth.json and
-    // the CLI reads it back from $CODEX_HOME, so the whole blob is stored as one secret and
-    // materialised into the per-turn jail. Subscription-only on purpose — an API-key blob is
-    // rejected on save, because accepting it would bill the operator's OpenAI account for turns
-    // TulipFarm reports as unpriced. Reuses role: "api_key" so Settings, /setup, and the
-    // delete-key-prunes-config cascade all work unchanged.
+    // Codex stores a subscription auth.json blob; API-key blobs are rejected to avoid API billing.
     id: "codex",
     label: "Codex (subscription)",
     fields: [

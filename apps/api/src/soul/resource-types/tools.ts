@@ -79,18 +79,7 @@ function validateSchemaYaml(
   return { ok: true, parsed: parsed as Record<string, unknown>, yaml: schemaYaml };
 }
 
-/**
- * Neither Tool takes a `domain`.
- *
- * A Resource's domain is the wall between an HR Resource and an engineering one, so setting or
- * changing it is admin-only (`ADMIN_ONLY_SURFACES` → `soul.resource_type.set_domain`). The REST
- * routes enforce that with a role check. This chat path **cannot**: a Tool declares one fixed
- * `authorization.action`, so `create_resource_type` cannot present itself as the admin-only action
- * only when `domain` is present — and until Stage 4 the chat dispatcher runs no authorization at
- * all. Accepting the argument here would therefore hand every member the exact bypass the route
- * gate closes. Domain stays an admin-surface operation; `update_resource_type` carries an existing
- * domain through untouched. Restore a distinct admin-actioned Tool once the gate enforces.
- */
+/** These Tools never accept `domain`; Resource domain changes are admin-only. */
 const CREATE_SCHEMA = {
   type: "object",
   required: ["name", "schema"],
@@ -346,10 +335,7 @@ const validateHooksWrite = ajv.compile(HOOKS_WRITE_SCHEMA);
 const validateHooksGet = ajv.compile(HOOKS_GET_SCHEMA);
 const validateHooksDelete = ajv.compile(HOOKS_DELETE_SCHEMA);
 
-/**
- * Validate hook source: must be a parenthesized object literal with only `before`/`after` keys,
- * and must pass the banned-pattern static analysis.
- */
+/** Hook source must be a parenthesized object literal and pass banned-pattern analysis. */
 function validateHookSource(source: string): ToolCallResult | null {
   try {
     analyzeHook(source);

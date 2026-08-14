@@ -10,13 +10,6 @@ import { parseOkf } from "~/lib/okf";
 import { rewriteWikiLinks } from "~/lib/okf-listing";
 import type { PageResolver } from "~/lib/page-href";
 
-/*
- * Read-only OKF page view: a document-style page — title + a single metadata line (type · updated ·
- * resource · tags), the markdown body rendered as prose (links rewritten to SPA routes, `#tag` → chips),
- * then a "Linked from" backlinks footer. Edit links out; the `⋯` overflow menu holds History (opens a
- * right-side drawer) and Delete (two-step confirm; the route owns the delete). An empty body shows a
- * placeholder with an Edit affordance.
- */
 export function PageDetail({
   spaceId,
   doc,

@@ -31,28 +31,14 @@ import { type ModelBudgetEvidence, openModelProfileRunBudget } from "../model-bu
 import type { RunEventAppendPort } from "../turn/run-events";
 import { TurnEventWriter } from "../turn/run-events";
 
-/**
- * The Worker's Agent authority for Routine Runs (SPEC §10).
- *
- * A Routine `agent` State asks an Agent a question, and every part of that question is read from the
- * Run's own pinned, signature-verified bundle: which Agent, at which authored version, with which
- * personality, against which ModelProfile. A Run that waited a week through three publications asks
- * the Agent the bundle it was minted against describes — not whatever the live Soul says now.
- *
- * It runs the same `AgentLoop` a chat turn runs, over the same Context manifest and the same three
- * guardrail stages, so an Agent reached from a Routine is bounded exactly like an Agent reached from
- * a conversation. What it deliberately does *not* do is expose Tools: a Routine's effects belong to
- * its own `tool` States, where the Broker authorizes them against the pinned Guardrails and the
- * effect ledger reserves them. Letting the loop dispatch as well would put a second effect path
- * beside the one the Routine author declared.
- */
+/** Routine Agent authority: read pinned bundles, run chat-equivalent guards, expose no Tools. */
 
 export type RoutineAgentOutcome =
   /** The Agent answered, and the answer satisfied whatever schema the State declared. */
   | { readonly kind: "succeeded"; readonly output: unknown }
   /** A definitive negative the authored `onError` path may claim, named by its reason code. */
   | { readonly kind: "failed"; readonly reason: string }
-  /** The loop held a Tool call for a human. Nothing here can open that Approval, so the Run parks. */
+  /** The loop held a Tool call for a human; this port cannot open that Approval. */
   | { readonly kind: "awaiting_approval"; readonly reason: string }
   /** The Run is being cancelled; the executor leaves the State to the cancellation manager. */
   | { readonly kind: "cancelled" }
@@ -78,17 +64,7 @@ export interface RoutineAgentPort {
 }
 
 export interface BundleRoutineAgentPortOptions {
-  /**
-   * Builds the port for a chain the router has **already** selected, rather than a shared port that
-   * would re-resolve the selection.
-   *
-   * A Routine routes over its Run's *pinned bundle* (see `bundleCatalog`), so the profile it picks
-   * need not exist in the deployment's current configuration at all. Handing a shared `ModelPort`
-   * the bundle's profile id would send it back through config-derived resolution, where that id is
-   * unknown — silently discarding both the pinned bundle and every constraint-equivalent fallback
-   * the router just chose. Binding the port to the chain keeps the decision made here the decision
-   * that runs.
-   */
+  /** Bind to the already-selected pinned-bundle chain; do not re-resolve via live config. */
   model(selection: RoutineModelSelection): ModelPort;
   readonly events: RunEventAppendPort;
   readonly budgets: RunBudgetStore;
@@ -109,12 +85,7 @@ export interface RoutineModelSelection {
 /** Run statuses that mean the question must stop being asked. */
 const CANCELLING_STATUSES: ReadonlySet<string> = new Set(["cancelling", "cancelled"]);
 
-/**
- * The loop's bounds for a Routine `agent` State.
- *
- * No Tools are exposed, so no Tool budget is either: one model call answers the question, and the
- * only authored dial is how many malformed answers may be sent back for repair.
- */
+/** Routine Agent exposes no Tools; one model call plus authored repair attempts. */
 const MAX_ITERATIONS = 1;
 
 const SYSTEM_SOURCE_ID = "system";
@@ -132,13 +103,7 @@ function definitionOf<T>(bundle: RuntimeBundle, kind: string, slug: string): T |
   return bundle.get(kind, slug)?.document as T | undefined;
 }
 
-/**
- * The Run's own pinned bundle as a routing catalog.
- *
- * Routing reads the bundle and nothing else, for the same reason every other decision here does: a
- * Run that waited through three publications must be answered against the ModelProfiles it was
- * minted with, not whichever ones are live now.
- */
+/** Routing catalog from the Run's pinned bundle only, never live ModelProfiles. */
 function bundleCatalog(bundle: RuntimeBundle): ModelProfileCatalog {
   return {
     get(profileId) {
@@ -179,11 +144,7 @@ function modelRoutingPayload(
   };
 }
 
-/**
- * The Context manifest's candidates: the Agent's own instructions, then the question the Routine
- * resolved. The question sits at `user_request`, below the Agent's instructions, so a Routine input
- * carrying instruction-shaped text can never outrank the Agent it is being asked.
- */
+/** Agent instructions outrank Routine input, so input text cannot override the Agent. */
 function candidatesFor(system: string, question: string): readonly ContextCandidate[] {
   const allow = { decision: "allow" } as const;
   return [
@@ -221,7 +182,7 @@ const NO_TOOLS: ToolDispatchPort = {
   }),
 };
 
-/** An answer as the text a guard reads. Structured output is canonicalized, never stringified ad hoc. */
+/** Guard text for an answer; structured output is canonicalized. */
 function answerText(output: unknown): string {
   return typeof output === "string" ? output : canonicalize(output);
 }
@@ -238,21 +199,16 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
     const agent = definitionOf<AgentDefinition>(bundle, "Agent", plan.agentRef.name);
     if (agent === undefined) return { kind: "unavailable", reason: "agent_not_in_bundle" };
 
-    // The authored reference names an exact version; a bundle holding a different one is not the
-    // Agent this Routine was published against, and picking the one that is there would silently
-    // answer with something else.
+    // The authored Agent version is exact; a different bundled version is not a substitute.
     const authoredVersion = bundle.get("Agent", plan.agentRef.name)?.authoredVersion;
     if (authoredVersion !== Number(plan.agentRef.version)) {
       return { kind: "unavailable", reason: "agent_version_mismatch" };
     }
 
-    // The guards are rebuilt from the deployment's default policy, and the digest recorded as
-    // evidence is the one this service actually compiled — never a digest for a policy that did not
-    // run. A bundle-authored prompt policy would be read here once Souls publish one.
+    // Record the digest of the guard policy this service actually compiled and ran.
     const guardrails = new GuardrailsService();
     guardrails.init(null, this.options.log);
-    // A Routine State has no participant and no conversation; the Run is the whole identity a guard
-    // gets, and naming it as one keeps a guard from being told about a user who is not there.
+    // Routine States have no participant; guards see the Run as the whole identity.
     const guardContext: GuardContext = {
       userId: SERVICE_PRINCIPAL,
       conversationId: request.runId,
@@ -265,9 +221,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       ...(agent.spec.personality === undefined ? {} : { personality: agent.spec.personality }),
       memory: [],
       governancePages: [],
-      // A Routine State has no participant, so there is no `timezone` preference to read and the
-      // block renders UTC. Naming the Run's own clock is still worth more than leaving the Agent to
-      // date-reason from its training cutoff.
+      // No participant timezone exists; use the Run clock so the Agent does not guess dates.
       temporal: { now: this.now() },
     });
     const question = canonicalize(plan.input);
@@ -279,18 +233,13 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       events: this.options.events,
       businessId: request.businessId,
       runId: request.runId,
-      // No Turn exists — a Routine State is not a conversation. The State occurrence and the row
-      // version it was claimed at are what make this attempt's event keys its own.
+      // No Turn exists; State occurrence plus row version make event keys attempt-scoped.
       turnId: request.stateKey,
       attempt: request.attempt,
       now: this.now,
     });
 
-    // Routines used to read `profile.spec.model` and invoke it, skipping every constraint the
-    // profile declares — a State could be answered by a model that could not hold its context, or
-    // that broke the profile's residency or retention terms, with nothing in the record saying so.
-    // The router that governs a chat turn decides here too, over a catalog of the Run's own pinned
-    // bundle, and a denial parks the State rather than answering against the profile's terms.
+    // Route through the pinned-bundle catalog; denial parks instead of bypassing profile terms.
     const selection = selectModelProfile(
       agent.spec.modelProfile,
       deriveModelRequirements({
@@ -336,7 +285,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       bundleDigest: bundle.digest,
       budgetTokens: primary.supports.contextWindowTokens,
     });
-    // A question the Agent's own context window cannot hold is not one to ask half of.
+    // Never ask a question the selected Agent context window cannot hold in full.
     if (manifest.excluded.length > 0) return { kind: "unavailable", reason: "context_budget" };
 
     await events.emit(
@@ -390,8 +339,7 @@ export class BundleRoutineAgentPort implements RoutineAgentPort {
       return { kind: "awaiting_approval", reason: "approval_required" };
     }
 
-    // The last point at which a refusal costs nothing: the answer has not settled the State, so no
-    // downstream State has read it and no effect has been dispatched on the strength of it.
+    // Last zero-cost refusal point: no State is settled and no downstream effect has run.
     const guardedOutput = await guardrails.runOutput(answerText(outcome.output), guardContext);
     if (guardedOutput.blocked) return { kind: "failed", reason: "guardrail_output_blocked" };
 

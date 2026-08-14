@@ -51,11 +51,8 @@ function baseRun(overrides: Partial<PersistedRun>): PersistedRun {
 }
 
 /**
- * In-memory Run store with the durability semantics the PostgreSQL tables enforce — compare-and-set
- * on `(status, version)`, owner-checked heartbeats, and expiry-driven lease reclaim — plus failure
- * injection at each write boundary. It exists so recovery can be proven at the boundary a crash
- * actually lands on: `crashBefore` loses the write, `crashAfter` commits it and loses the
- * acknowledgement. Both must leave the Run recoverable and must not admit a second commit.
+ * In-memory store with CAS, owner heartbeats, lease reclaim, and write-boundary crash injection;
+ * both `crashBefore` and `crashAfter` must recover without a second commit.
  */
 export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, ReconcilableStateStore {
   private readonly runs = new Map<string, PersistedRun>();
@@ -63,9 +60,7 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
   private readonly crashesBefore = new Set<string>();
   private readonly crashesAfter = new Set<string>();
 
-  /** Every write that reached storage, in order — a duplicate commit would show up here. */
   readonly transitions: Array<{ runId: string; from: string; to: string; version: number }> = [];
-  /** Number of Runs actually requeued out of `waiting`. */
   requeues = 0;
 
   seedRun(overrides: Partial<PersistedRun> = {}): PersistedRun {
@@ -87,12 +82,10 @@ export class SimulatedRunStore implements RunLeaseStore, RunResumeStore, Reconci
     return this.states.get(stateKey);
   }
 
-  /** The next call to `operation` throws without writing. */
   crashBefore(operation: string): void {
     this.crashesBefore.add(operation);
   }
 
-  /** The next call to `operation` writes, then throws — the caller never learns it committed. */
   crashAfter(operation: string): void {
     this.crashesAfter.add(operation);
   }

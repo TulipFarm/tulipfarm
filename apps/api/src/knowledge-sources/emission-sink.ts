@@ -7,11 +7,7 @@ import type { KnowledgeSourceRecord } from "@tulipfarm/knowledge";
 import type { PgKnowledgeIndexStore } from "./index-store";
 import type { PgKnowledgeSourceStore } from "./source-store";
 
-/**
- * `KnowledgeSourceEmission` is structurally identical to `KnowledgeSourceRecord` by design
- * (`packages/integrations/src/knowledge/source.ts`'s doc comment) — this is a field-for-field
- * projection, not a transform, so the two shapes cannot silently drift without a compile error.
- */
+/** Field-for-field projection; `KnowledgeSourceEmission` and record shapes must drift together. */
 function toSourceRecord(source: KnowledgeSourceEmission): KnowledgeSourceRecord {
   return {
     sourceId: source.sourceId,
@@ -32,13 +28,7 @@ function toSourceRecord(source: KnowledgeSourceEmission): KnowledgeSourceRecord 
   };
 }
 
-/**
- * Composes the Postgres source/index stores into the emission sink adapters own
- * (`@tulipfarm/integrations` may not import `@tulipfarm/knowledge`, per
- * `packages/integrations/AGENTS.md`). `emitSource`+`removeSourceContent` are called in the same
- * pass by every caller in `sync.ts` (revoked/archived/unverifiable sources), so a crash between the
- * two never leaves readable content behind an unreachable record for longer than the next resync.
- */
+/** Composes source/index stores; revoked content is removed in the same sync pass. */
 export class PgKnowledgeEmissionSink implements KnowledgeEmissionSink {
   constructor(
     private readonly sources: PgKnowledgeSourceStore,

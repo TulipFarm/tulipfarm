@@ -2,13 +2,8 @@ import { createHash, createHmac, createPublicKey, timingSafeEqual, verify } from
 import { event as eventSchema } from "@tulipfarm/schema";
 
 /**
- * Signed-webhook ingress: raw provider delivery in, one canonical `EventEnvelope` out.
- *
- * The pipeline is fail-closed and strictly ordered — body cap, then signature, then parse, then
- * filter, then the encrypted raw payload, and only then the canonical event. Acceptance is
- * reported to the provider *after* the event is persisted, so a `202` always means the delivery
- * is durable. Denials carry a stable code and nothing else: no payload values, no Secret, no
- * indication of which check the caller failed to satisfy beyond the code itself.
+ * Webhook ingress is fail-closed: cap, signature, parse, filter, encrypted raw payload, canonical
+ * event, then `202`; denials expose only stable codes.
  */
 
 export type WebhookVerificationMethod = "hmac_sha256" | "hmac_sha1" | "ed25519";
@@ -17,15 +12,12 @@ export interface WebhookVerification {
   readonly method: WebhookVerificationMethod;
   readonly secretRef: string;
   readonly signatureHeader: string;
-  /** Canonical signing string; `{body}` is substituted with the raw bytes. Defaults to `{body}`. */
   readonly signingTemplate?: string;
-  /** Header-value shape, `{signature}` for the hex digest. Defaults to `{signature}`. */
   readonly signatureFormat?: string;
   readonly timestampHeader?: string;
   readonly toleranceMs?: number;
 }
 
-/** A declarative accept filter: the delivery is ignored unless `path` equals `equals`. */
 export interface WebhookFilter {
   readonly path: string;
   readonly equals: unknown;
@@ -49,7 +41,6 @@ export interface WebhookTrigger {
 export interface WebhookRequest {
   readonly rawBody: Buffer;
   readonly headers: Readonly<Record<string, string | string[] | undefined>>;
-  /** The receiver's clock reading, injected so ingress stays deterministic under test. */
   readonly receivedAt: string;
 }
 
@@ -101,7 +92,6 @@ export type WebhookIngressResult =
     }
   | { readonly status: 400 | 401 | 413; readonly code: WebhookDenialCode };
 
-/** Default body cap. A provider that needs more must say so on its Trigger. */
 export const WEBHOOK_MAX_BODY_BYTES = 1_048_576;
 const DEFAULT_TOLERANCE_MS = 300_000;
 
@@ -221,12 +211,7 @@ async function verifySignature(
   return constantTimeEquals(expected, signature) ? null : "signature_invalid";
 }
 
-/**
- * Verify, normalize, and durably record one webhook delivery.
- *
- * A `202` result is only produced after `sink.accept` has committed; a persistence failure is
- * propagated to the caller so the provider retries rather than being told the delivery landed.
- */
+/** Return `202` only after `sink.accept` commits; propagate persistence failures for retry. */
 export async function ingestWebhook(
   trigger: WebhookTrigger,
   request: WebhookRequest,

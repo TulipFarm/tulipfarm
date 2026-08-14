@@ -1,9 +1,4 @@
-/**
- * Verifies a business's audit chain against tamper, reorder, deletion, and fork (SPEC §20, §24:
- * "audit tampering, deletion, reordering, forked chains ... " must be detectable). Takes the
- * chain as returned by {@link AuditEventRepo.listChain} — callers decide the query boundary;
- * this module only re-derives evidence from what it is given.
- */
+/** Verifies the supplied audit chain for tamper, reorder, deletion, fork, and anchor drift. */
 
 import { recomputeEventHash } from "./chain";
 import { type AuditEvent, AuditInputError, normalizeAuditEventInput } from "./event";
@@ -47,14 +42,7 @@ function inputOf(event: AuditEvent) {
   return input;
 }
 
-/**
- * Verifies `events` as a single business's chain, in the order given.
- *
- * - **tampered**: an event's recomputed hash does not match its recorded `hash`.
- * - **forked**: more than one event claims the same `chainIndex`.
- * - **missing**: a `chainIndex` gap (a segment was deleted).
- * - **reordered**: an event's `previousHash` does not match the preceding index's recorded hash.
- */
+/** Verifies one business chain; reports tampered, forked, missing, and reordered evidence. */
 export function verifyChain(
   events: readonly AuditEvent[],
   expectation: VerifyExpectation = {}

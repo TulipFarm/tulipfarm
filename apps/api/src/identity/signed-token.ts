@@ -1,26 +1,14 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-/**
- * The signed short-lived token codec used by `channel-link.ts` (bind offers): provision/memoize an
- * HMAC signing key in the secret store, then sign and verify `base64url(JSON claims).hex(hmac)`
- * tokens with a constant-time comparison. What the claims mean, how long they're valid, and
- * whether they're also checked against a database row (channel-link's nonce spend) stays with each
- * caller — this module only proves a token was issued by this deployment and decodes intact.
- */
+/** Signs base64url(JSON claims).hex(hmac); callers enforce shape, TTL, and nonce spending. */
 
-/** Just enough of `SecretsService` to hold one key, so callers need not carry the whole service. */
 export interface SigningKeyStore {
   list(): Promise<{ key: string }[]>;
   get(key: string): Promise<string>;
   set(key: string, plaintext: string, type: "auto-generated"): Promise<void>;
 }
 
-/**
- * Reads the signing key, provisioning one on first use so a fresh deployment needs no operator
- * step. Existence is checked through `list` rather than by catching `get`, because a secret store
- * that is merely *unreachable* also fails `get` — and minting a second key in that case would
- * silently invalidate every token already in flight.
- */
+/** Use list before minting; unreachable get must not invalidate tokens in flight. */
 export async function resolveSigningKey(
   secrets: SigningKeyStore,
   keyName: string
@@ -56,11 +44,7 @@ export function signToken<T>(key: Buffer, claims: T): string {
   return `${payload}.${hmacHex(key, payload)}`;
 }
 
-/**
- * Verifies the signature (constant-time) and decodes the claims, or returns `null` for anything
- * malformed or not signed by this key. Callers still owe their own shape/TTL/row checks — this
- * only proves the token came from this deployment.
- */
+/** Verify HMAC in constant time; callers still enforce shape, TTL, and row checks. */
 export function verifyToken<T>(key: Buffer, token: string): T | null {
   const separator = token.indexOf(".");
   if (separator <= 0) return null;

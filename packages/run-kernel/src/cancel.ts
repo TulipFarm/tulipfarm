@@ -15,7 +15,6 @@ export type StateCancellationAction =
 
 export interface CancellationPlan {
   readonly states: readonly StateCancellationAction[];
-  /** Where the Run lands once the plan is applied. */
   readonly terminalRunStatus: "cancelled" | "needs_reconciliation";
 }
 
@@ -37,7 +36,6 @@ export class CancellationError extends Error {
   }
 }
 
-/** Narrow surface the manager needs; `@tulipfarm/storage`'s `RunStore` satisfies it. */
 export interface CancellableRunStore {
   find(businessId: string, runId: string): Promise<{ status: string; version: number } | null>;
   listStates(businessId: string, runId: string): Promise<readonly CancellableState[]>;
@@ -68,7 +66,6 @@ export interface CancelRunInput {
   readonly businessId: string;
   readonly runId: string;
   readonly reason: string;
-  /** Per-Run State keys with a side effect whose outcome is not yet known. */
   readonly inFlightEffects: Readonly<Record<string, readonly string[]>>;
   readonly now: string;
 }
@@ -89,7 +86,6 @@ const TERMINAL_STATE_STATUSES: readonly StateStatus[] = [
   "cancelled",
 ];
 
-/** States that can legitimately hold an unresolved side effect. */
 const EFFECT_BEARING_STATUSES: readonly StateStatus[] = [
   "running",
   "waiting",
@@ -97,10 +93,7 @@ const EFFECT_BEARING_STATUSES: readonly StateStatus[] = [
 ];
 
 /**
- * Decides, per State, whether cancellation may take it straight to `cancelled` or must park it in
- * `needs_reconciliation` (SPEC §23). A State with an unresolved side effect never becomes
- * `cancelled` on assumption; an effect reported against a State that cannot hold one is a caller
- * bug and is rejected rather than dropped.
+ * Cancellation parks unresolved effects in `needs_reconciliation`; impossible effects are rejected.
  */
 export function planCancellation(
   states: readonly CancellableState[],
@@ -134,10 +127,8 @@ export function planCancellation(
 const UNCANCELLABLE_RUN_STATUSES: readonly string[] = ["succeeded", "failed", "cancelled"];
 
 /**
- * Run cancellation with propagation (SPEC §§7.3, 23). Future work is cancelled, in-flight effects
- * are parked for reconciliation, attached children are cancelled recursively, and explicitly
- * detached children are left alone. A parent never reports a clean `cancelled` while any of its
- * own States or any cascaded child still has an unresolved effect.
+ * Cancels future work and attached children, parks in-flight effects, and leaves detached children.
+ * A parent is not cleanly `cancelled` while any cascaded unresolved effect remains.
  */
 export class RunCancellationManager {
   constructor(

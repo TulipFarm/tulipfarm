@@ -1,10 +1,4 @@
-/**
- * Slack renders an `@mention` in outgoing message text as an opaque `<@USERID>` token. Nothing
- * downstream (the LLM agent, resource records, other channel replies) can turn that back into a
- * name, so an unresolved mention becomes a raw Slack id wherever the agent copies it — e.g. into a
- * record's `assignee` field. Resolving mentions here, before the agent ever sees the text, means
- * the fix applies uniformly to every field or record type an agent might write the name into.
- */
+/** Decode Slack `<@USERID>` mentions before agents can copy opaque ids into records. */
 
 export interface SlackMentionResolverPort {
   /** Resolves a Slack user id to a display name, or undefined if unknown/unavailable. */
@@ -16,10 +10,7 @@ export interface SlackMentionResolverPort {
 // regex on uncontrolled input).
 const MENTION_PATTERN = /<@([A-Z0-9]+)(?:\|[^>]{0,80})?>/g;
 
-/**
- * Replaces every `<@USERID>` token with `@DisplayName`. A token whose id the resolver cannot
- * resolve is left untouched — best-effort, never blocks the message on a Slack API hiccup.
- */
+/** Best-effort `<@USERID>` to `@DisplayName`; unresolved ids stay unchanged. */
 export async function resolveMentionsInText(
   text: string,
   resolver: SlackMentionResolverPort
@@ -51,17 +42,10 @@ export interface SlackUserLookupPort {
   resolveUserId(name: string): Promise<string | undefined>;
 }
 
-// Matches a plain `@name` the agent wrote as prose — never a token already inside `<@ID>`/`<@ID|label>`,
-// since those are Slack's own opaque mention syntax and must pass through unchanged.
+// Matches prose `@name`, never Slack's existing `<@ID>`/`<@ID|label>` tokens.
 const PLAIN_MENTION_PATTERN = /(?<=^|[\s(])@([A-Za-z0-9][\w.'-]{0,79})(?=[\s.,!?;:)]|$)/g;
 
-/**
- * Replaces every plain `@name` token with the resolved `<@USERID>` Slack mention syntax, the
- * opposite direction of `resolveMentionsInText`. Without this, an agent's `@name` in outgoing
- * message text posts as inert text — Slack only renders a highlighted, notifying mention for the
- * `<@ID>` form. Best-effort, same as the decode side: a name the resolver cannot match is left
- * untouched rather than blocking the send.
- */
+/** Best-effort prose `@name` to Slack `<@USERID>`; unresolved names stay unchanged. */
 export async function encodeMentionsInText(
   text: string,
   resolver: SlackUserLookupPort

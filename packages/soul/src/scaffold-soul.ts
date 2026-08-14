@@ -6,14 +6,7 @@ import { hermeticGitEnv } from "./git-env";
 
 const SCAFFOLD_DIRS = ["resources", "routines", "agents", "skills", "integrations", "roles"];
 
-/**
- * Populate a fresh, commit-less soul checkout with the same stub layout
- * `scripts/setup-dev.sh` creates for local dev, then makes the first local commit. Callers use
- * this for a per-business checkout that starts life empty (no `setup-dev.sh` involved) — e.g. a
- * newly connected/created GitHub repo — so it has something to push and initialize `origin/main`
- * with. No `llm:` key in `soul.yaml`: an empty/comment-only one fails LLM-config validation
- * (requires `tiers`), so LLM features stay disabled until the setup wizard writes one.
- */
+/** Populate a fresh checkout with stub layout plus `.gitkeep` files so Git tracks directories. */
 export async function scaffoldSoul(soulPath: string): Promise<void> {
   for (const dir of SCAFFOLD_DIRS) {
     mkdirSync(join(soulPath, dir), { recursive: true });

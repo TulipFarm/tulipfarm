@@ -3,10 +3,8 @@ import type { ReactNode } from "react";
 import { cn } from "~/lib/utils";
 
 /**
- * The result of a save, stated in one place.
- *
- * Errors are the API's own message, unprefixed — the old pages rendered `error: {message}`, which
- * says "error" twice next to a red icon. Success copy is confident, not celebratory.
+ * Errors are the API's own message, unprefixed — the old pages rendered `error: {message}`,
+ * which says "error" twice next to a red icon. Success copy is confident, not celebratory.
  */
 export function FormStatus({
   tone,

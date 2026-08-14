@@ -43,15 +43,8 @@ function reason(err: unknown): string {
 }
 
 /**
- * Resolves a single active embedding provider by priority — cloud (OpenAI /
- * Azure / openai-compatible) → Ollama local → none — and exposes it to the
- * (future) knowledge layer. When nothing is available, `isAvailable()` is false,
- * which the search layer turns into a lexical `$text` fallback with
- * `warnings: [EMBEDDING_UNAVAILABLE_WARNING]`.
- *
- * Resolution is eager (at init and on every `soul.synced` reload). The
- * previously-active dimension is remembered across reloads so a dimension change
- * raises a full-re-index guard (`consumePendingReindex`).
+ * Picks one active embedding provider eagerly. No provider yields lexical fallback; dimension
+ * changes are remembered across reloads for full re-index guards.
  */
 export class EmbeddingService {
   private active: ActiveEmbedder | null = null;

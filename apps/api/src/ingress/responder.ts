@@ -7,13 +7,7 @@ type ResponderLogger = {
   error: (obj: unknown, msg?: string) => void;
 };
 
-/**
- * Post a chat reply through the manifest's named reply binding — the classifier's decision
- * picks the binding ("thread", "default", …) and supplies the vars; the manifest maps them
- * onto the integration's own MCP send tool. The reply text is always injected as {text}.
- * Never throws: the turn result is already durable in the conversation, so a failed reply
- * only logs.
- */
+/** Sends replies through the manifest reply binding with `{text}` injected; failures only log. */
 export async function postReply(
   deps: { registry?: ToolRegistry; log: ResponderLogger },
   opts: {

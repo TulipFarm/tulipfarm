@@ -3,11 +3,6 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, test, vi } from "vitest";
 
-/*
- * Connecting, disconnecting and removing an integration seal or revoke the deployment-wide
- * provider credential, so the API refuses a non-admin. The page has to agree: offering a control
- * the server will 403 teaches people the product is broken rather than that they lack authority.
- */
 let admin = true;
 
 vi.mock("~/lib/use-session-user", () => ({
@@ -45,8 +40,6 @@ function detail(over: Partial<IntegrationDetail> = {}): IntegrationDetail {
     connected: false,
     auth: [],
     grants: [],
-    // The page reads nothing out of the raw manifest any more — connect steps arrive resolved as
-    // `auth`, and the old type/transport readout is gone.
     manifest: {},
     ...over,
   };
@@ -67,9 +60,6 @@ function renderDetail(integration: IntegrationDetail) {
 test("leads with the brand name but keeps the slug visible", async () => {
   renderDetail(detail({ name: "github", title: "GitHub" }));
   const heading = await screen.findByRole("heading", { level: 1, name: "GitHub" });
-  // Every URL, log line, and manifest calls it by the slug — losing it strands anyone
-  // cross-referencing the page against a config file. It appears once, next to the brand name,
-  // rather than being repeated in the breadcrumb.
   const header = heading.closest("header") as HTMLElement;
   expect(within(header).getByText("github")).toBeInTheDocument();
   expect(screen.getAllByText("github")).toHaveLength(1);
@@ -105,8 +95,6 @@ test("lists the authority being granted, in the provider's own words", async () 
 });
 
 test("hides the access section entirely when an integration asks for no authority", async () => {
-  // A bot-token integration like Telegram grants nothing enumerable. An empty "Access you grant"
-  // panel would imply the answer is unknown rather than none.
   renderDetail(detail({ grants: [] }));
   await screen.findByRole("heading", { level: 1 });
   expect(screen.queryByText(/access you grant/i)).not.toBeInTheDocument();
@@ -149,7 +137,6 @@ test("keeps removal behind an overflow menu and a confirm step", async () => {
   renderDetail(detail());
   await screen.findByRole("heading", { level: 1 });
 
-  // Nothing destructive is reachable in one click from a page people come to in order to connect.
   expect(screen.queryByRole("menuitem", { name: /confirm remove/i })).not.toBeInTheDocument();
 
   await user.click(screen.getByRole("button", { name: /more actions/i }));
@@ -177,13 +164,6 @@ test("says so plainly when an integration needs no credentials at all", async ()
   expect(await screen.findByText(/declares no credentials/i)).toBeInTheDocument();
 });
 
-/*
- * The member's view of the same page. These pin the boundary the API now enforces on
- * `POST /integrations/:name/connect|disconnect`, `DELETE /integrations/:name`, and GitHub's
- * installation-disconnect and Soul-repo routes: everything that reads stays, everything that
- * writes the connection goes. A member still needs this page — it is where they learn what the
- * integration reaches and whether it is connected at all.
- */
 test("offers a member no way to connect, and says why instead", async () => {
   admin = false;
   renderDetail(
@@ -194,7 +174,6 @@ test("offers a member no way to connect, and says why instead", async () => {
   );
   await screen.findByRole("heading", { level: 1 });
 
-  // The heading stays, so the section is not silently missing — only its controls are.
   expect(screen.getByText(/^connect$/i)).toBeInTheDocument();
   expect(await screen.findByText(/an admin has to do it/i)).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /^continue$/i })).not.toBeInTheDocument();
@@ -206,8 +185,6 @@ test("hides disconnect and remove from a member", async () => {
   await screen.findByRole("heading", { level: 1 });
 
   expect(screen.queryByRole("button", { name: /disconnect/i })).not.toBeInTheDocument();
-  // The overflow menu holds only the destructive action, so it goes with it rather than opening
-  // onto nothing.
   expect(screen.queryByRole("button", { name: /more actions/i })).not.toBeInTheDocument();
 });
 

@@ -10,27 +10,10 @@ import {
 } from "@tulipfarm/secrets";
 import type { GitHubInstallationDirectory } from "./github-installation";
 
-/**
- * The `SecretProvider` this Run's `credentialRef` resolves to when a Tool State's `credentialRef`
- * names the GitHub App installation token. Mirrors `apps/api/src/tools/github/credentials.ts`
- * (a deliberate local copy — an application may not import another application).
- *
- * The ref is **installation-selective**: `CredentialDispatcher` forwards only the bare `secretRef`
- * string into `SecretBroker.redeem`, so the only way the target repository can reach this call is
- * inside the ref itself. `intentOf` scopes the authored ref from the plan's own arguments before
- * dispatch, which is what lets a business holding several App installations resolve a Tool State's
- * credential at all. A ref that still names no installation resolves only when there is exactly one
- * to choose from, and fails closed (`null`) otherwise rather than guessing.
- */
+/** GitHub installation-token refs must carry scope; bare refs fail closed if ambiguous. */
 export const GITHUB_INSTALLATION_SECRET_REF = "secret://integrations/github/installation-token";
 
-/**
- * Which installation a call needs the credential of.
- *
- * `any` is the bare ref: it resolves only when the business has exactly one active installation,
- * and fails closed otherwise. It is not a fallback for a failed selection — a call that named a
- * repository no installation covers must not then borrow the sole installation's token.
- */
+/** `any` is only the bare ref; it is not fallback after scoped selection fails. */
 export type GitHubInstallationSelector =
   | { readonly kind: "any" }
   | { readonly kind: "repository"; readonly repository: string }
@@ -50,11 +33,7 @@ export function githubInstallationSecretRef(selector: GitHubInstallationSelector
   return GITHUB_INSTALLATION_SECRET_REF;
 }
 
-/**
- * `undefined` for any ref this provider does not own, so the composite router and the default-deny
- * authorizer can both ask one question. A scoped ref with a malformed selector body is *not* read
- * as the bare ref — it must not silently widen to "the sole installation".
- */
+/** Malformed scoped refs return `undefined`; they never widen to the bare ref. */
 export function parseGitHubInstallationSecretRef(
   secretRef: string
 ): GitHubInstallationSelector | undefined {
@@ -80,14 +59,7 @@ export function isGitHubInstallationSecretRef(secretRef: string): boolean {
   );
 }
 
-/**
- * The one active installation this selector names, or `undefined`.
- *
- * Refuses on ambiguity in every branch: two installations listing the same repository, or two
- * covering the same account, is a state we cannot resolve without guessing whose credential the
- * effect should be attributed to. The bare `any` selector refuses whenever there is more than one
- * installation at all, because it names nothing to disambiguate by.
- */
+/** Returns the one matching installation; ambiguity always fails closed. */
 export function selectGitHubInstallation<
   T extends { readonly accountLogin: string; readonly repositories: readonly string[] },
 >(
@@ -124,17 +96,7 @@ export interface GitHubInstallationTokenProviderDeps {
   readonly log?: { warn: (obj: unknown, message?: string) => void };
 }
 
-/**
- * Mints and caches a GitHub App installation access token via the shared caching sequence in
- * `@tulipfarm/integrations` (`createCachingInstallationTokenMinter`). Fails closed: any minting
- * failure — unconfigured App, unreadable private key, no matching installation, an ambiguous
- * selector, a non-2xx from GitHub — returns `null` rather than a stale or guessed token.
- *
- * One minter is kept per resolved ref rather than one per provider, because each installation has
- * its own token with its own expiry. A single shared cache would hand a call against account A the
- * token minted for account B, which the scope check would then have to catch after the credential
- * was already leased.
- */
+/** Mints per-ref installation tokens; any minting or selection failure returns `null`. */
 export class GitHubInstallationTokenProvider implements SecretProvider {
   private readonly minters = new Map<string, () => Promise<string | undefined>>();
 

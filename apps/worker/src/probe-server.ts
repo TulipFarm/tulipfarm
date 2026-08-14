@@ -17,11 +17,7 @@ export interface ProbeServerOptions {
   readonly areConsumersReady: () => boolean;
 }
 
-/**
- * Readiness: the datastore is reachable, still at or above the schema floor, and this worker is
- * not draining. Liveness deliberately checks none of that — a Postgres outage must not make the
- * orchestrator kill an otherwise-healthy process that will recover on its own.
- */
+/** Readiness checks datastore/schema/drain; liveness must not fail on recoverable outages. */
 export async function probeReadiness(options: ProbeServerOptions): Promise<ReadinessResult> {
   if (!options.isServing()) return { status: "down", detail: "draining" };
   if (!options.areConsumersReady()) {
@@ -35,11 +31,7 @@ export async function probeReadiness(options: ProbeServerOptions): Promise<Readi
   }
 }
 
-/**
- * Kubernetes-shaped probe pair over `node:http`. The worker serves no other HTTP surface, so this
- * stays dependency-free rather than pulling Fastify in for two routes. Route names mirror
- * `apps/api` (`/livez`, `/readyz`) so one orchestrator config covers both processes.
- */
+/** Dependency-free `/livez` and `/readyz`, matching the API probe names. */
 export function startProbeServer(options: ProbeServerOptions): Promise<Server> {
   const server = createServer((req, res) => {
     const path = (req.url ?? "").split("?")[0];

@@ -11,13 +11,7 @@ import {
   type ToolRiskClass,
 } from "./common";
 
-/**
- * ToolContract authored definition (SPEC §7.1, §11). Versioned input/output/error schemas, risk
- * and mutation classification, required actions/resources, data classes, allowed destinations,
- * idempotency behaviour, timeout/retry rules, dry-run support, compensation/reconciliation
- * operations, and the implementation adapter. Every Tool call re-enters the Tool Broker; the
- * contract is data, not an execution bypass (SPEC §11.1).
- */
+/** ToolContract definition; every call still re-enters the Tool Broker. */
 
 const KIND = "ToolContract";
 

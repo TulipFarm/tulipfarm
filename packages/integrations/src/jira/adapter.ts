@@ -30,15 +30,8 @@ import {
 } from "./scope";
 
 /**
- * Jira Integration adapter (SPEC §11.3, §15).
- *
- * Replaces CLI/MCP-shaped access — where an Agent could phrase any provider call it liked — with a
- * fixed set of typed operations behind the Tool Broker's adapter port. The invariants match the
- * GitHub adapter deliberately: site scope then AccessGrant then leased credential, all before any
- * provider call; paged reads bounded and loud rather than truncated; a 5xx on a write reported as
- * `after_dispatch` so the ledger marks it ambiguous and reconciliation resolves it against
- * provider state. Jira has no idempotency key, so a created issue carries a label derived from the
- * effect key and every mutation reads state before writing.
+ * Default-deny Jira adapter: site scope, AccessGrant, and credential gate provider calls; writes
+ * use effect labels and reconcile ambiguous 5xx outcomes against provider state.
  */
 
 export interface JiraEffectContext {
@@ -65,11 +58,7 @@ const MAX_PAGES = 10;
 const DEFAULT_LIMIT = 25;
 const DEFAULT_MAX_OPEN_ISSUES = 5;
 
-/**
- * Jira labels cannot carry arbitrary characters, so the effect key is hashed into a fixed-shape
- * label. It marks the created issue as *this* effect's, which is what makes a duplicate delivery
- * and a post-crash reconciliation both resolvable.
- */
+/** Hash effect keys into fixed-shape Jira labels for duplicate and reconciliation lookup. */
 export function jiraEffectLabel(idempotencyKey: string): string {
   return `tulipfarm-effect-${canonicalHash(idempotencyKey).slice(0, 32)}`;
 }

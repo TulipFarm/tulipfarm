@@ -1,11 +1,6 @@
 import { apiDelete, apiGet, apiWrite } from "./api";
 
-/*
- * Client for the skills API (SKILLS / SKL-V1-001..003). Skills are SKILL.md files in the soul repo.
- * Read endpoints (list/get) plus the install-from-git flow: scan a git repo, run an advisory
- * SkillAudit on a discovered Skill, then explicitly confirm the install. Executable commands are
- * published only when their package and pinned runtime requirements pass the server-side gates.
- */
+/* Skill installs publish executable commands only after server-side package/runtime gates pass. */
 
 export type SkillProvenance = "builtin" | "marketplace" | "user";
 

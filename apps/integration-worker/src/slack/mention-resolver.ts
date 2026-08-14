@@ -22,12 +22,7 @@ function displayNameFrom(body: SlackUsersInfoResponse): string | undefined {
   return user.profile?.display_name || user.profile?.real_name || user.real_name || user.name;
 }
 
-/**
- * `SlackMentionResolverPort` backed by `users.info`, reusing the same `IntegrationHttpPort` +
- * bot token already leased for delivery. Best-effort: any failure resolves to `undefined` rather
- * than throwing, so a Slack API hiccup never blocks message ingestion. Cached per-instance
- * (one instance per business boot) since the same person is commonly mentioned repeatedly.
- */
+/** Best-effort `users.info` resolver; Slack failures never block message ingestion. */
 export function slackUserDirectoryMentionResolver(
   http: IntegrationHttpPort,
   credential: string,

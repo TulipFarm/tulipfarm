@@ -8,14 +8,7 @@ interface SchemaVersionRow {
   version: number | string;
 }
 
-/**
- * Fail-closed startup check.
- *
- * This process never migrates — `apps/api` owns `schema_version` and applies migrations on boot.
- * That makes a process started against an older database the dangerous case: it would read
- * columns that may not exist yet, failing one by one instead of failing once. Refusing to start is
- * the honest outcome; an orchestrator restart loop is a visible signal.
- */
+/** Fail closed if the API-owned schema version is too old for this read-only worker. */
 export async function assertSchemaFloor(
   database: Queryable,
   requiredVersion: number
@@ -54,10 +47,7 @@ interface WaitForSchemaOptions {
   onRetry?: (error: PreflightError, attempt: number) => void;
 }
 
-/**
- * Waits for the API's bounded migration window without ever reading against an old schema. This
- * primarily handles local `pnpm dev`, where Turbo starts API and this process concurrently.
- */
+/** Waits for API migrations during concurrent local startup without reading an old schema. */
 export async function waitForSchemaFloor(
   database: Queryable,
   requiredVersion: number,

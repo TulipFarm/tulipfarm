@@ -3,14 +3,7 @@ import { KV_NAME_RE, MAX_KEY_CHARS, MAX_NAMESPACE_CHARS } from "./limits";
 
 export type KvScope = "system" | "user" | "agent";
 
-/**
- * One generic key-value entry (KV-V1). Identity is the composite (scope, ownerId, namespace, key).
- * `ownerId` is `undefined` for scope='system' (app-wide infra) and required for 'user'/'agent'. The
- * DB stores a '' sentinel for system rows — a nullable column can't be part of a PRIMARY KEY and NULL
- * is "distinct" in unique indexes, which would break `ON CONFLICT` upserts — but the sentinel never
- * leaves the repo: callers always see `undefined` for system. `value` is arbitrary JSON round-tripped
- * through jsonb. `expiresAt` undefined ⇒ never expires.
- */
+/** Scoped KV entry; `ownerId` is null only for business scope. */
 export interface KvEntry {
   scope: KvScope;
   ownerId?: string;
@@ -32,13 +25,10 @@ export class InvalidKvEntryError extends Error {
 /** The '' sentinel standing in for "no owner" (scope='system') in the composite primary key. */
 const SYSTEM_OWNER = "";
 
-/** Live-row filter shared by every read: NULL expiry never expires; otherwise it must be in the future. */
+/** Live-row filter: NULL expiry never expires; otherwise it must be in the future. */
 const NOT_EXPIRED = "(expires_at IS NULL OR expires_at > now())";
 
-/**
- * Write-time hard floor (mirrors Memory's `assertValidAssertion`): the structural invariants no
- * row may break. Charset/length live here; the value byte-cap is a softer service-layer policy.
- */
+/** Write-time structural invariants no row may break. */
 export function assertValidAssertion(doc: KvEntry): void {
   ownerColumn(doc.scope, doc.ownerId); // throws if a user/agent entry is missing an owner
   if (doc.scope === "system" && doc.ownerId !== undefined && doc.ownerId !== "") {
@@ -63,7 +53,7 @@ function ownerColumn(scope: KvScope, ownerId: string | undefined): string {
   return ownerId;
 }
 
-/** Map a row back to a KvEntry. pg + PGlite return jsonb already parsed and timestamptz as a Date. */
+/** Map a row back to KvEntry; pg/PGlite already parse jsonb and timestamptz. */
 function rowToEntry(row: Record<string, unknown>): KvEntry {
   const scope = row.scope as KvScope;
   const owner = row.owner_id as string;
@@ -111,8 +101,7 @@ export class PgKvRepo implements KvRepo {
 
   async upsert(doc: KvEntry): Promise<void> {
     assertValidAssertion(doc);
-    // `created_at` is deliberately omitted from the DO UPDATE set, so it is preserved on conflict
-    // (only INSERTs use the supplied created_at). Last-write-wins on value + expiry.
+    // Preserve created_at on conflict; only INSERT uses the supplied value.
     await this.q.query(
       `INSERT INTO kv_store (scope, owner_id, namespace, key, value, expires_at, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)

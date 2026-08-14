@@ -1,10 +1,4 @@
-/**
- * Dependency-free OTLP/HTTP-JSON metrics export to Grafana Cloud (Mimir). Counters are accumulated
- * in-process as cumulative monotonic sums (the temporality Prometheus/Mimir expects) keyed by a
- * bounded label set, then pushed on an interval. Only loaded/started when observability is enabled,
- * so the default path carries zero overhead and no OTel SDK weight. Labels are bounded by design
- * (model/provider/tier/status/tool_name) — high-cardinality ids never become metric labels.
- */
+/** Dependency-free OTLP metrics export with bounded labels and cumulative monotonic sums. */
 
 export interface LlmCallMetric {
   model: string;
@@ -16,7 +10,7 @@ export interface LlmCallMetric {
   costUsd: number | null;
 }
 
-/** A sink the observability subscriber feeds; the OTLP exporter implements it (no-op when absent). */
+/** Sink fed by the observability subscriber; OTLP implements it when enabled. */
 export interface MetricsSink {
   recordLlmCall(d: LlmCallMetric): void;
   recordToolCall(d: { toolName: string; status: string }): void;
@@ -52,7 +46,7 @@ function labelKey(labels: LabelSet): string {
 }
 
 // Labels are bounded by design, but a provider that returns ever-varying model ids (e.g. dated
-// variants) could still grow a counter slowly. Cap distinct label sets per metric as a hard backstop.
+// variants) could still grow counters. Cap label sets per metric as a hard backstop.
 const MAX_LABEL_SETS = 2000;
 
 /** Finite-safe epoch-ms → nanosecond string (BigInt(NaN/Infinity) would throw). */

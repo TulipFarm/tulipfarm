@@ -6,17 +6,12 @@ import type { ToolRegistry } from "../../broker/tool-adapter";
 import { buildDeclarativeTools } from "./tools";
 
 /**
- * Keeps the live Tool registry in step with which integrations are connected.
- *
  * Registration cannot be a boot-time act for manifest integrations the way it is for the bundled
  * families: an operator connects Notion at 3pm and expects to use it at 3:01, without a restart.
  * The registry is a long-lived singleton with `register`/`unregister`, so the sync re-derives the
  * whole declarative set and reconciles it — which also means a *disconnect* removes the Tools it
- * added, instead of leaving an agent holding a capability whose credential was just revoked.
- *
- * Only connected integrations publish. An installed-but-unconnected integration has no credential,
- * so its Tools could only ever fail; offering them would read as a broken product rather than an
- * unconnected one.
+ * added, instead of leaving an agent holding a capability whose credential was just revoked. Only
+ * connected integrations publish.
  */
 export interface DeclarativeToolSyncDeps {
   readonly registry: ToolRegistry;
@@ -33,13 +28,11 @@ export interface DeclarativeToolSyncDeps {
 }
 
 export class DeclarativeToolSync {
-  /** Exactly what this syncer registered last time, so it only ever unregisters its own names. */
   private registered: ReadonlySet<string> = new Set();
   private registeredBySlug: ReadonlyMap<string, ReadonlySet<string>> = new Map();
 
   constructor(private readonly deps: DeclarativeToolSyncDeps) {}
 
-  /** Reconciles the registry against the currently connected integrations; returns the live count. */
   sync(): number {
     const logger = this.deps.logger?.();
     const connected = [...this.deps.integrations()].filter(
@@ -94,7 +87,6 @@ export class DeclarativeToolSync {
     return registered.size;
   }
 
-  /** How many Tools one integration currently publishes — the connect response's `toolCount`. */
   countFor(slug: string): number {
     return this.registeredBySlug.get(slug)?.size ?? 0;
   }

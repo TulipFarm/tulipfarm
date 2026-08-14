@@ -31,23 +31,18 @@ export type NavItem = {
   to: string;
   label: string;
   icon: LucideIcon;
-  /** Carries the pending-approvals count. */
   badge?: boolean;
-  /** The server refuses to *read* this for non-admins, so the link would only lead to a 403. */
   adminOnly?: boolean;
-  /** Development-only surfaces stay out of production navigation. */
   devOnly?: boolean;
   /**
    * The one line the top bar cannot say. Rendered by the section shell instead of a second page
    * title, so a page is named once.
    */
   description?: string;
-  /** Dashboards and explorers fill the main width; form-style pages stay constrained. */
   wide?: boolean;
 };
 
 export type NavSection = {
-  /** Omitted for a single ungrouped list. */
   heading?: string;
   items: NavItem[];
 };
@@ -64,16 +59,8 @@ export const MODE_META: Record<ProductMode, { label: string; to: string; icon: L
   settings: { label: "Settings", to: "/settings", icon: Settings },
 };
 
-// Settings is a lower utility destination, so it sits below the rail divider rather than in this list.
 export const PRIMARY_MODES = ["chat", "build", "knowledge", "operate"] as const;
 
-/*
- * Context-panel contents per mode. This is the only place a section is declared: the sidebar and
- * every route that needs a section's label or icon read from here rather than keeping a copy.
- *
- * Settings is strictly personal — one participant's own account. Everything that configures the
- * workspace lives under Operate, where the person changing it is acting as an operator.
- */
 export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[]> = {
   build: [
     {
@@ -210,7 +197,6 @@ export const MODE_SECTIONS: Record<"build" | "operate" | "settings", NavSection[
   ],
 };
 
-/** The sections a given participant should actually see. */
 export function visibleSections(
   mode: "build" | "operate" | "settings",
   { isAdmin, isDev }: { isAdmin: boolean; isDev: boolean }
@@ -249,11 +235,6 @@ export function modeForPath(pathname: string): ProductMode {
   return "chat";
 }
 
-/*
- * Page identity for the top bar. Longest-prefix-first, so `/chats` resolves before `/chat` and
- * `/business/models` before `/business`. The icon belongs to the page, while the breadcrumb's
- * parent crumb belongs to the mode.
- */
 const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
   { prefix: "/business/activities", label: "Activities", icon: History },
   { prefix: "/business/observability", label: "Observability", icon: Gauge },
@@ -262,8 +243,6 @@ const PAGE_META: Array<{ prefix: string; label: string; icon: LucideIcon }> = [
   { prefix: "/business/secrets", label: "Secrets", icon: KeyRound },
   { prefix: "/business/soul", label: "Soul", icon: Sparkles },
   { prefix: "/business/guardrails", label: "Guardrails", icon: ShieldCheck },
-  // `/business/people` merged into `/business/access` and now redirects there. It keeps an entry so
-  // the top bar names the destination during that redirect rather than falling back to Chat.
   { prefix: "/business/people", label: "People & access", icon: Users },
   { prefix: "/business/access", label: "People & access", icon: Users },
   { prefix: "/business/about", label: "About", icon: Info },
@@ -300,12 +279,10 @@ export function iconForPath(pathname: string): LucideIcon {
   return pageForPath(pathname)?.icon ?? MessageSquare;
 }
 
-/** Flat index of every declared section, for shells that render a page's description. */
 const ALL_ITEMS: NavItem[] = Object.values(MODE_SECTIONS).flatMap((sections) =>
   sections.flatMap((section) => section.items)
 );
 
-/** The declared section a path belongs to, longest match first so nested routes still resolve. */
 export function sectionForPath(pathname: string): NavItem | undefined {
   return [...ALL_ITEMS]
     .sort((a, b) => b.to.length - a.to.length)

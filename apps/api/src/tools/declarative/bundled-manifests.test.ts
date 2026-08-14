@@ -9,14 +9,7 @@ import { parse as parseYaml } from "yaml";
 import { bundledIntegrationsDir } from "../../soul/integrations/bundled";
 import { buildDeclarativeTools } from "./tools";
 
-/**
- * Every shipped integration, compiled from the files that actually ship.
- *
- * The per-integration suites (notion, telegram) go deep on one. This goes wide, so adding a
- * provider cannot quietly ship a manifest that names a missing operation, a base URL that fails
- * the trust rules, or a connect flow the loader rejects — the kind of break that otherwise
- * surfaces as an operator connecting successfully and receiving zero Tools.
- */
+/** Compile every shipped Integration manifest so missing operations and invalid auth fail here. */
 describe("bundled integrations", () => {
   let entries: { slug: string; manifest: IntegrationManifest; spec?: unknown; env: string[] }[];
 
@@ -64,8 +57,7 @@ describe("bundled integrations", () => {
   it("compiles every declared operation, with connection env the flow actually collects", () => {
     for (const entry of entries) {
       if (entry.manifest.egress?.type !== "openapi") continue;
-      // Every declared var set to a placeholder: a `base_url` naming one the connect flow never
-      // collects must fail here rather than after an operator has connected.
+      // Placeholder every declared var; uncollected `base_url` vars must fail here.
       const env = Object.fromEntries(entry.env.map((name) => [name, "placeholder"]));
       const { tools, problems } = buildDeclarativeTools(
         [
@@ -95,8 +87,7 @@ describe("bundled integrations", () => {
       for (const operation of entry.manifest.egress?.type === "openapi"
         ? (entry.manifest.egress.operations ?? [])
         : []) {
-        // The model picks a Tool by reading this. An empty or one-word description is the most
-        // common reason a correct integration goes unused.
+        // The model picks Tools by description; empty or one-word descriptions make Tools unused.
         expect(
           operation.description?.length ?? 0,
           `${entry.slug}.${operation.name}`

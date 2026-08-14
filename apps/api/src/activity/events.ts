@@ -14,20 +14,13 @@ function fireAndForget(p: Promise<unknown>): void {
   );
 }
 
-/** Best human label for a resource: its title, then name, falling back to the id. */
 function describeResource(record: Record<string, unknown>, resourceId: string): string {
   if (typeof record.title === "string" && record.title.length > 0) return record.title;
   if (typeof record.name === "string" && record.name.length > 0) return record.name;
   return resourceId;
 }
 
-/**
- * Wire the activity feed to the domain-event bus: every resource write and new conversation is
- * recorded as one feed row. Mirrors `subscribeKnowledgeIndexing`. `ActivityService.record` is
- * already best-effort (never throws), so a failed write only logs. Conversation *completion* is
- * intentionally NOT recorded — it fires every turn, which would flood the feed; "chat created"
- * (one row per conversation) is the signal users want.
- */
+/** Activity writes are best-effort; completion events are skipped to avoid turn-level noise. */
 export function subscribeActivityLogging(emitter: EventEmitter, activity: ActivityService): void {
   const onResource =
     (verb: "created" | "updated") =>

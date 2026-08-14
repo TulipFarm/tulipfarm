@@ -6,28 +6,17 @@ import { Button } from "~/components/ui/button";
 import { mergeTags } from "~/lib/inline-tags";
 import { EMPTY_OKF_FIELDS, type OkfFields, parseOkf, serializeOkf } from "~/lib/okf";
 
-/*
- * Dual-mode OKF page editor. "Guided" exposes the structured frontmatter (type/title/description/
- * resource/tags) plus a WYSIWYG markdown body (the shared @tulipfarm/editor PageEditor — markdown in
- * and out). "Raw" is a single textarea of the whole OKF string (the escape hatch — the body editor
- * normalizes markdown). Switching tabs converts via the client serialize/parse in lib/okf. Submit
- * posts `{ path, content }`; the server re-validates and any 400 is surfaced via `formError`.
- */
+/* Switching tabs converts via the client serialize/parse in lib/okf. */
 
 const inputClass =
   "w-full rounded-sm border border-border bg-background px-3 py-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:opacity-60";
 
 export type PageFormProps = {
   mode: "create" | "edit";
-  /** The space this page lives in — drives the `@`/`#` editor mention menus. */
   spaceId: string;
-  /** Fixed space path of the page on edit (read-only); seed/initial on create. */
   initialPath?: string;
-  /** Lock the path field even on create (e.g. authoring the reserved `index` front page). */
   lockPath?: boolean;
-  /** Full OKF markdown to seed the editor (edit, or pre-filling an existing front page). */
   initialContent?: string;
-  /** Which tab to open on (front pages are frontmatter-less overrides → "raw"). */
   initialTab?: Tab;
   onSubmit: (path: string, content: string) => void | Promise<void>;
   submitting: boolean;
@@ -71,8 +60,6 @@ export function PageForm({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    // Guided mode: union inline `#tag` body tokens into the frontmatter tags so the stored `tags[]`
-    // stays authoritative. Raw mode is the escape hatch — the author owns its frontmatter verbatim.
     const content =
       tab === "raw" ? raw : serializeOkf({ ...fields, tags: mergeTags(fields.tags, fields.body) });
     onSubmit(path.trim(), content);

@@ -1,10 +1,4 @@
-/**
- * Rewrites ```prompt fenced blocks into a <PromptBlock> component before the
- * code reaches the syntax highlighter. Example prompts are natural language a
- * reader types to the assistant, not code — so they get a distinct treatment
- * (AI icon + gradient underline) instead of Shiki tokens. Running at the remark
- * (mdast) stage means the highlighter never sees the unknown `prompt` language.
- */
+/** Rewrites ```prompt fences to <PromptBlock> before syntax highlighting. */
 
 interface MdastNode {
   type: string;

@@ -4,19 +4,8 @@ import { routineEffectId } from "../scheduling";
 import { RoutineStepError } from "./step";
 
 /**
- * Planning for a `tool` State. This decides *what* would be dispatched and never dispatches it:
- * the Tool Broker owns authorization, the effect ledger owns the reservation, and an adapter owns
- * the call. Keeping the plan here — rather than in whichever process happens to hold a broker —
- * is what lets a replay reach byte-identical arguments, the same idempotency key, and the same
- * effect id as the attempt it is replaying.
- *
- * The two derived identities carry the replay guarantee:
- *
- * - `idempotencyKey` is derived from the Run and the durable State occurrence, so a retried
- *   attempt, a resumed Run, and a re-executed fan-out unit all converge on the effect already
- *   reserved instead of writing a second one.
- * - `effectId` is derived from the same pair, so a worker that died between reserving an effect
- *   and recording that it did finds its own reservation rather than opening another.
+ * Tool planning is side-effect-free and derives arguments, `idempotencyKey`, and `effectId` from
+ * the Run and durable occurrence so retries, resumes, and replay converge on the same effect.
  */
 
 export interface ToolStateRef {
@@ -28,7 +17,6 @@ export interface ToolStateRef {
 export interface ToolDispatchContext {
   readonly businessId: string;
   readonly runId: string;
-  /** Durable State occurrence key — the authored name outside a fan-out, the occurrence inside. */
   readonly stateKey: string;
 }
 
@@ -48,11 +36,7 @@ function authored(state: CompiledState): Record<string, unknown> {
   return state.definition as unknown as Record<string, unknown>;
 }
 
-/**
- * The authored Tool reference and action. Both are required by the Routine schema; reading them
- * defensively means a State that reached here without them is refused by name rather than
- * dispatched against a reference this code invented.
- */
+/** Missing authored Tool reference or action is refused by State name, never invented. */
 function toolRefOf(state: CompiledState): { ref: ToolStateRef; action: string } {
   const value = authored(state).toolRef;
   const action = authored(state).action;
@@ -74,12 +58,10 @@ function optionalString(state: CompiledState, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/** Deterministic idempotency key for one Tool State occurrence in one Run. */
 export function routineIdempotencyKey(runId: string, stateKey: string): string {
   return `routine:${runId}:${stateKey}`;
 }
 
-/** Plan the dispatch a `tool` State describes, with its arguments resolved from the Context. */
 export function planToolDispatch(
   state: CompiledState,
   scope: Readonly<Record<string, unknown>>,

@@ -2,13 +2,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { ajv } from "./ajv";
 import { TulipFarmValidationError } from "./error";
 
-/**
- * guardrails.yaml meta-schema. Strict per-stage guard unions (V1 fixed set — a guard
- * placed in the wrong stage fails validation). Validated at the soul write boundary;
- * `"soul"` is the closest existing `ValidationBoundary` (it is a soul config file).
- * Mirrors `agent.ts` enum style (`Type.Unsafe` + `enum` so AJV emits self-correctable
- * messages).
- */
+/** guardrails.yaml schema: strict per-stage unions; wrong-stage guards fail validation. */
 
 const SENSITIVITY = ["low", "medium", "high"] as const;
 const CONTENT_PATTERNS = ["credit_card", "ssn", "api_key", "email"] as const;
@@ -67,10 +61,7 @@ export type ContentFilterConfig = Static<typeof ContentFilterGuard>;
 
 const check = ajv.compile(GuardrailsConfigSchema);
 
-/**
- * Validate a guardrails config against the meta-schema. Returns the typed object on
- * success; throws `TulipFarmValidationError` (boundary `"soul"`) on the first failure.
- */
+/** Validate guardrails config; throws `TulipFarmValidationError` on the first failure. */
 export function validateGuardrailsConfig(data: unknown): GuardrailsConfig {
   if (!check(data)) {
     const e = check.errors?.[0];

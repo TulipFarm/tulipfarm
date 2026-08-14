@@ -46,11 +46,7 @@ describe("describeDeploymentRoles", () => {
     expect(grants).toContain("allow secret.read on secret");
   });
 
-  /*
-   * `auth/routes/tokens.ts` gates on `role !== "admin" && token.userId !== actor._id`, so a member
-   * manages their own tokens from /settings/auth. A blanket `deny any action on api_token` would
-   * make the Roles view contradict a page the same member can plainly use.
-   */
+  /* Members manage their own tokens; the Roles view must not deny all api_token actions. */
   it("scopes the member api_token deny to other users rather than denying outright", () => {
     const grants = member().grants;
     expect(grants).not.toContain("deny any action on api_token");

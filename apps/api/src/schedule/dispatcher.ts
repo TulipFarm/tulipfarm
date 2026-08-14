@@ -20,17 +20,7 @@ export interface ScheduleDispatcherDeps {
   readonly log?: ScheduleDispatcherLogger;
 }
 
-/**
- * Ticks every `cron`/`interval`/`datetime` `x-triggers` entry across all active Routines and starts
- * a Run for whatever's due. Lives in `apps/api` (not the Worker) because it reads the live Soul
- * checkout via `soulLoader` — `apps/worker/AGENTS.md` forbids that there; only this process holds
- * it, alongside the existing Soul down-sync timer (`apps/api/src/soul-sync.ts`).
- *
- * V1 uses a fixed schedule policy (`spec.ts`'s `FIXED_POLICY`) with `activeRuns` always `0` — an
- * in-flight overlapping fire is never suppressed yet, since idempotency alone already prevents a
- * duplicate Run for the *same* occurrence. Real overlap suppression (skip/supersede while a
- * previous fire is still running) is a follow-up once this base loop is proven.
- */
+/** API-owned Routine schedule ticker reads live Soul and starts due Runs idempotently. */
 export class ScheduleDispatcher {
   private readonly now: () => number;
 

@@ -26,15 +26,7 @@ import {
   type ReferenceEdge,
 } from "./refs";
 
-/**
- * Bundle compilation (SPEC §8.2 step 9): resolve every reference to an exact authored version,
- * canonicalize, and hash the complete immutable runtime bundle.
- *
- * Compilation runs after strict AJV validation and semantic validation, and
- * before signing. It is synchronous, side-effect free, and fail-closed: a reference that does not
- * resolve, a version constraint the tree cannot satisfy, or any secret value found in the tree
- * rejects the whole bundle rather than compiling a partial one.
- */
+/** Compile a validated Soul tree into an exact-version, secret-free runtime bundle. */
 
 export interface BundleCompileRequest {
   readonly businessId: string;
@@ -57,15 +49,7 @@ export interface BundleSourceFile {
 /** Authored field names that may only ever carry an opaque reference, never a value. */
 const SECRET_BEARING_KEY = /(secret|password|passwd|token|credential|api[-_]?key|private[-_]?key)/i;
 
-/**
- * Canonical secret reference shape used by schema definitions and connection.yaml sealing:
- * `secret://` plus non-empty slash-separated key segments. This intentionally excludes bare secret
- * keys, env var names, and traversal-shaped refs.
- *
- * `isSecretReference` is imported from `@tulipfarm/schema` rather than redeclared here: the
- * authoring boundary and this publication boundary must agree, or a value the schema accepts is
- * unpublishable forever — and under auto-publish that wedges every later Soul change behind it.
- */
+/** Secret refs must match the schema package shape or authoring and publication can diverge. */
 
 /** Shapes that are credential material regardless of the field they appear under. */
 const CREDENTIAL_MATERIAL: readonly RegExp[] = [

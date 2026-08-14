@@ -1,15 +1,4 @@
-/**
- * Provider-neutral sandbox execution port.
- *
- * Capability id `sandbox` (optional — see `@tulipfarm/observability` capability
- * catalog). Adapts Hermes's workspace/backend ergonomics while rejecting its
- * local/SSH execution as a production isolation boundary (SPEC §13). Production
- * execution requires a strong-isolation backend (microVM or managed remote
- * sandbox); local and SSH backends exist only as clearly marked development
- * adapters and can never satisfy the production gate. Default sandbox guardrail
- * denies network, credential access, host mounts, and business mutation; business
- * effects must still traverse the Tool Broker.
- */
+/** Sandbox port: production requires strong isolation; local/SSH never satisfy the gate. */
 
 export type SandboxIsolation = "microvm" | "remote-managed" | "container" | "local" | "ssh";
 

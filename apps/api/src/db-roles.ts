@@ -1,63 +1,30 @@
 import type { Queryable } from "./db";
 
-/**
- * Privilege separation for the runtime connection.
- *
- * The application connects as a database superuser by default, which makes every `GRANT`/`REVOKE`
- * decorative — a superuser bypasses permission checks entirely. That is fine until something needs
- * to be genuinely un-writable, such as the audit log, where "the code never updates it" is a
- * convention and conventions do not survive a bad migration or a careless repository method.
- *
- * So the runtime pool connects *as a non-superuser role*, and the audit tables simply do not grant
- * it `UPDATE` or `DELETE`. Migrations keep the owner connection, because they must create objects.
- */
+/** Runtime uses a non-superuser role so privilege limits bind. */
 
-/** The role every runtime connection assumes. Owns nothing; is granted what the app needs. */
 export const RUNTIME_ROLE = "tulipfarm_runtime";
 
-/**
- * Schemas the application writes to at runtime. `resources` holds the per-resource-type tables the
- * app creates on demand, so the runtime role needs `CREATE` there, not merely `USAGE`.
- * `pgboss` is absent deliberately: pg-boss opens its own connection as the owner and manages its
- * own schema.
- */
+/** Runtime-writable schemas; resources needs CREATE for per-type tables. */
 const APP_SCHEMAS = ["public", "resources"] as const;
 
-/**
- * Schemas the runtime role may only *read*. pg-boss owns and writes `pgboss` through its own owner
- * connection, but `makeIndexQueueStats` reads the failed-job row from it to surface the last
- * indexing error. Without this grant that read fails with `42501`, gets swallowed by its own
- * `catch`, and the diagnostic reports "no errors" forever instead of "cannot read" — a silent
- * blind spot rather than a loud one.
- */
+/** Read-only pgboss access keeps failed-job diagnostics honest. */
 const READ_ONLY_SCHEMAS = ["pgboss"] as const;
 
-/**
- * Tables the runtime role may append to but never change. The `audit_events` trigger already
- * refuses UPDATE/DELETE for everyone; this removes the privilege as well, so a tamper attempt is
- * rejected before it reaches the trigger and cannot be re-enabled merely by disabling it.
- */
+/** Audit tables are append-only by privilege as well as by trigger. */
 const APPEND_ONLY_TABLES = ["audit_events"] as const;
 
 export type RoleSeparation =
-  /** The operator supplied a separate migration URL, so they own the separation themselves. */
   | { readonly mode: "operator" }
-  /** This process provisioned the role and will connect through it. */
   | { readonly mode: "managed"; readonly role: string }
-  /** No separation available. The app still runs; the audit trigger remains the backstop. */
   | { readonly mode: "single"; readonly reason: string };
 
-/** The migration connection, which may differ from the runtime one on a managed host. */
 export function migrationConnectionString(): string {
   const migrations = process.env.DATABASE_URL_MIGRATIONS;
   if (typeof migrations === "string" && migrations.length > 0) return migrations;
   return process.env.DATABASE_URL as string;
 }
 
-/**
- * True when the operator already split the two connections. Their runtime role is then whatever
- * they chose, and this process must not second-guess it by provisioning a role of its own.
- */
+/** If the operator split connections, do not provision another runtime role. */
 export function hasOperatorSeparation(): boolean {
   const migrations = process.env.DATABASE_URL_MIGRATIONS;
   return (
@@ -67,12 +34,7 @@ export function hasOperatorSeparation(): boolean {
   );
 }
 
-/**
- * Creates the runtime role and brings its privileges up to date. Safe to run on every boot, and it
- * has to be: migrations may have added tables since the last one, and grants are not retroactive.
- *
- * Runs on the *owner* connection, before the runtime pool opens.
- */
+/** Idempotently refresh the runtime role before opening the runtime pool. */
 export async function provisionRuntimeRole(db: Queryable): Promise<RoleSeparation> {
   if (hasOperatorSeparation()) return { mode: "operator" };
 
@@ -133,11 +95,7 @@ function isDuplicateObject(error: unknown): boolean {
   return (error as { code?: string })?.code === "42710";
 }
 
-/**
- * Grants everything the app needs and nothing it does not need *yet*: `ALL PRIVILEGES` here is
- * deliberate, because the point of the role is not to enumerate a minimal privilege set — it is to
- * stop being a superuser, so that a later targeted `REVOKE` (the audit tables) actually binds.
- */
+/** ALL PRIVILEGES stops superuser bypass first; targeted revokes bind after. */
 async function grantSchemaPrivileges(db: Queryable): Promise<void> {
   const { rows } = await db.query(
     "SELECT nspname FROM pg_namespace WHERE nspname = ANY($1::text[])",
@@ -157,15 +115,7 @@ async function grantSchemaPrivileges(db: Queryable): Promise<void> {
   await revokeAppendOnlyPrivileges(db);
 }
 
-/**
- * Read-only access to schemas another component owns.
- *
- * `ALL TABLES` is not enough by itself: pg-boss creates a partition table per queue, so a queue
- * added after this boot would not be covered. `ALTER DEFAULT PRIVILEGES` closes that gap for
- * everything the owner creates later. On the very first boot the schema does not exist yet —
- * pg-boss creates it during `boss.start()`, well after this runs — but there are no failed jobs to
- * read then either, and the next boot grants it.
- */
+/** Grant pg-boss read access for current and future partition tables. */
 async function grantReadOnlySchemas(db: Queryable): Promise<void> {
   const { rows } = await db.query(
     "SELECT nspname FROM pg_namespace WHERE nspname = ANY($1::text[])",
@@ -192,14 +142,7 @@ async function revokeAppendOnlyPrivileges(db: Queryable): Promise<void> {
   }
 }
 
-/**
- * libpq connection options that pin the role for the whole session.
- *
- * Deliberately not a `pool.on("connect")` hook: a hook can be skipped by a connection that errors
- * mid-handshake, and its failure is asynchronous and easy to swallow — leaving a superuser
- * connection in the pool that looks identical to a safe one. Setting `role` as a startup parameter
- * makes the server apply it, and makes a missing role fail the *connection* instead.
- */
+/** Pin the role in libpq startup options so missing roles fail connection creation. */
 export function runtimeConnectionOptions(separation: RoleSeparation): string | undefined {
   return separation.mode === "managed" ? `-c role=${separation.role}` : undefined;
 }

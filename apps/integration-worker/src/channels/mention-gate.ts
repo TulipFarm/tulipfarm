@@ -1,12 +1,7 @@
 import type { SlackEventEnvelope } from "@tulipfarm/integrations";
 import type { ChannelMentionedThreadStore } from "@tulipfarm/storage";
 
-/**
- * Fields Slack's Events API sends that `SlackEventEnvelope`/`SlackMessageEvent`
- * (`@tulipfarm/integrations`) leave typed as `unknown` — this gate reads them before the payload
- * is normalized, so it declares its own narrow, permissive view rather than widening the shared
- * adapter types for a filter concern the adapter itself doesn't need.
- */
+/** Narrow raw Slack fields used before adapter normalization. */
 interface MentionGateEvent {
   type?: unknown;
   channel?: unknown;
@@ -32,12 +27,7 @@ function requiredString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/**
- * Filters a raw Slack event envelope before it reaches `SlackChannelAdapter.receive()` (plan §8,
- * decision #3): DMs always pass; `app_mention` always passes and marks its thread; a channel
- * `message` passes only if it's a reply inside an already-mentioned thread. Everything else is
- * dropped here, before it becomes a durable `channel_inbound_events` row.
- */
+/** DMs and app mentions pass; channel replies pass only in already-mentioned threads. */
 export async function applyMentionGate(
   envelope: SlackEventEnvelope,
   deps: MentionGateDeps

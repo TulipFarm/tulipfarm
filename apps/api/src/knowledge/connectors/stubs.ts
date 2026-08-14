@@ -1,10 +1,6 @@
 import type { Connector, ConnectorChanges, ConnectorPage, ConnectorRecord } from "./types";
 
-/**
- * Compatibility shims for the legacy flat-page connector registry. Notion and Google Docs now
- * sync through the ACL-preserving `knowledge_source_*` pipeline in `knowledge-sources/k3-*`; the
- * old connector interface cannot express per-user source ACLs, so these are intentionally inert.
- */
+/** Legacy flat-page connectors are inert; ACL-preserving sync uses knowledge_source_*. */
 abstract class KnowledgeSourcePipelineConnector implements Connector {
   abstract readonly name: string;
 

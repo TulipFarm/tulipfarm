@@ -3,12 +3,6 @@ import { useState } from "react";
 import type { SoulTreeNode } from "~/lib/soul";
 import { cn } from "~/lib/utils";
 
-/*
- * Read-only VS Code-style file tree for the soul repo. Fully eager — the whole tree arrives as
- * props from a single API call. Selecting a file is local panel state (a button), not navigation.
- * Visual idioms mirror components/knowledge/space-tree.tsx.
- */
-
 type Props = {
   root: SoulTreeNode[];
   selected: string | null;

@@ -1,9 +1,4 @@
-/**
- * Model usage evidence (SPEC §10 step 7, §17). Every model attempt persists token, cost, latency,
- * and routing facts so budgets and audits read the same durable record. Evidence carries no
- * prompt, Message, Context, or model output content — protected contents travel as authorized
- * Artifacts, never as inline evidence.
- */
+/** Durable usage evidence carries routing facts, never prompt or model content. */
 
 export type ModelUsageOutcome =
   | "succeeded"
@@ -37,7 +32,6 @@ export interface ModelUsageSink {
   record(event: ModelUsageEvent): Promise<void>;
 }
 
-/** Collects usage in memory. Tests and warm caches only; never an authoritative ledger. */
 export class InMemoryModelUsageSink implements ModelUsageSink {
   readonly events: ModelUsageEvent[] = [];
 

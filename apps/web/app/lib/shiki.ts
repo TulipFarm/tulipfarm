@@ -3,7 +3,7 @@ import type { Highlighter } from "shiki";
 /*
  * Lazy, single-instance Shiki highlighter for the Soul Explorer file viewer. Shiki (and its
  * oniguruma WASM) is dynamically imported so it stays out of the main bundle — loaded only when
- * the Soul tab opens a file. Both themes are pre-registered so light/dark switching is instant.
+ * the Soul tab opens a file.
  */
 
 const THEMES = { light: "github-light", dark: "github-dark" } as const;

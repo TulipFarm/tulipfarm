@@ -7,13 +7,7 @@ export type SetOutcome =
   | { kind: "rejected_oversize"; bytes: number }
   | { kind: "rejected_invalid"; reason: string };
 
-/**
- * Owns the KV write policy (KV-V1): namespace/key charset+length validation, the value BYTE cap, and
- * TTL handling. The repo stays dumb CRUD so this is testable against an in-memory fake. The tool and
- * route layers pin `scope`+`ownerId` from caller identity before calling in; internal backend callers
- * may address any scope directly. `created_at` preservation is handled by the repo's upsert (it omits
- * created_at from the conflict update), so no read-before-write is needed.
- */
+/** KV-V1 write policy: validate namespace/key/value/TTL; callers pin scope and owner. */
 export class KvService {
   constructor(private readonly repo: KvRepo) {}
 

@@ -1,22 +1,11 @@
-/**
- * Effective permission is the intersection of authority layers (invoking identity, Agent, Run
- * Context, Tool/target Guardrail, AccessGrant/Credential scope — SPEC §12): every layer must
- * independently allow, an explicit deny in any layer wins, and adding a layer can only narrow.
- * Teams, delegation, and Agents therefore never union authority (SPEC §5.3, §10). The decision
- * carries deterministic reason codes and the denying layer name as audit evidence — never
- * request payloads.
- */
+/** Authority is an intersection: any deny or missing allow denies with safe reason evidence. */
 
 import { type AccessGrant, type AccessRequest, grantMatches } from "./grants";
 
 /** One layer's verdict: an explicit deny, an allow, or no matching grant at all. */
 export type GrantOutcome = "allow" | "deny" | "abstain";
 
-/**
- * Evaluates one layer's grants against `request`. Any matching deny wins over every matching
- * allow; with no matching grant the layer abstains — which the intersection treats as a denial
- * (default deny).
- */
+/** One layer: matching deny wins; no matching grant abstains, which the intersection denies. */
 export function evaluateGrants(
   grants: readonly AccessGrant[],
   request: AccessRequest,
@@ -46,11 +35,7 @@ export interface AuthzDecision {
   readonly deniedLayer?: string;
 }
 
-/**
- * Intersects `layers` over `request`: allowed only when every layer allows. An explicit deny
- * or a missing allow in any layer denies, naming that layer. No layers at all denies
- * (fail closed).
- */
+/** Intersects layers: every layer must allow; no layers means fail closed. */
 export function decideEffectivePermission(
   layers: readonly AuthorityLayer[],
   request: AccessRequest,

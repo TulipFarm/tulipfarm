@@ -36,7 +36,7 @@ const PUT_BODY = {
   properties: { value: {}, ttlSeconds: { type: "integer", minimum: 1 } },
 } as const;
 
-/** API view of an entry — value passes through untouched (no response schema, so jsonb isn't mangled). */
+/** API view of an entry; value passes through untouched so jsonb is not mangled. */
 function toApi(entry: KvEntry): Record<string, unknown> {
   return {
     namespace: entry.namespace,
@@ -48,11 +48,7 @@ function toApi(entry: KvEntry): Record<string, unknown> {
   };
 }
 
-/**
- * Registers the four CRUD routes for one scope under `cfg.prefix`. Scope and owner are pinned from
- * the caller's identity (never the request), so a user can only ever address their own keyspace and
- * system scope is admin-gated. Mirrors the secrets-route admin gating (403 for non-admins).
- */
+/** Registers scope-pinned CRUD routes; scope and owner never come from the request. */
 function registerScopedKvRoutes(
   app: FastifyInstance,
   kvService: KvService,
@@ -169,11 +165,7 @@ function registerScopedKvRoutes(
   );
 }
 
-/**
- * User-scoped KV under `/api/v1/kv` (owner = authenticated user) and admin-only system-scoped KV under
- * `/api/v1/admin/kv` (owner = none). The admin prefix is deliberately a separate path — not
- * `/api/v1/kv/system` — so it can never collide with a user namespace literally named `system`.
- */
+/** Admin KV uses a separate path so user namespace `system` cannot collide with system scope. */
 export function registerKvRoutes(
   app: FastifyInstance,
   kvService: KvService,

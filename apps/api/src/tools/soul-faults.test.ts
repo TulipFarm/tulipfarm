@@ -1,12 +1,4 @@
-/**
- * The taxonomy's missing half, tested.
- *
- * `s6-taxonomy` gave the dispatcher a retry loop for infrastructure faults, but nothing on the
- * platform-Tool path produced one — every Soul-writing Tool caught its git failure as
- * `internal_error`, which is classified *business* and therefore handed to the model as a repair
- * signal it can do nothing with. These tests pin both directions of the split: contention is
- * promoted, and a decision the remote made is not.
- */
+/** Pins Soul Tool fault taxonomy: git contention retries; remote decisions stay business faults. */
 
 import { describe, expect, it } from "vitest";
 import { isTransientGitFailure, soulCommitError, soulCommitFaultCode } from "./soul-faults";
