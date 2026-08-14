@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/TulipFarm/tulipfarm/compare/v0.9.0...v0.10.0) (2026-08-14)
+
+### Features
+
+* **authz:** harden the effect plane and make access owner-editable ([#364](https://github.com/TulipFarm/tulipfarm/issues/364)) ([93cdf83](https://github.com/TulipFarm/tulipfarm/commit/93cdf83faf42f8233c004e58537c3f3bdf70757b))
+* **bundle-store:** ship the publication producer and harden activation ([#363](https://github.com/TulipFarm/tulipfarm/issues/363)) ([823bdc8](https://github.com/TulipFarm/tulipfarm/commit/823bdc88e5917068bc5973995385634f15464938))
+* cli harness: claude and codex support ([#365](https://github.com/TulipFarm/tulipfarm/issues/365)) ([92f0bf8](https://github.com/TulipFarm/tulipfarm/commit/92f0bf81c9354880fea9cf477c211aa0f6ddae53))
+* **postgres:** harden database layer and expose the audit ledger ([#361](https://github.com/TulipFarm/tulipfarm/issues/361)) ([3142422](https://github.com/TulipFarm/tulipfarm/commit/3142422059f57becf5bca2e87f12968d513f7cd6))
+* **soul:** route Soul writes through a validating gateway ([#360](https://github.com/TulipFarm/tulipfarm/issues/360)) ([2c18466](https://github.com/TulipFarm/tulipfarm/commit/2c1846625651705892adde82a76825ffaeef1b8a))
+
+### Maintenance
+
+* **ci:** remove Claude automation workflows, add README badges ([#366](https://github.com/TulipFarm/tulipfarm/issues/366)) ([08a8bd1](https://github.com/TulipFarm/tulipfarm/commit/08a8bd14a206130a6d686426da1bf34b78139677))
+
 ## [0.9.0](https://github.com/TulipFarm/tulipfarm/compare/v0.8.2...v0.9.0) (2026-08-10)
 
 ### Features
