@@ -99,7 +99,9 @@ Never let these bleed: UI/URL never say "conversation"; domain/DB never say "cha
 | Closing a stored Assertion's validity because a newer one replaced it | **Contradiction** | `MemoryContradictionPort` | — | — | closes `valid_to`, never deletes; scoped, trust-ranked, and offered-ids-only; ⛔ "overwrite", "conflict resolution" |
 | Asking what was true at a past moment | **Point-in-time Recall** | `validAt` | — | — | includes superseded Assertions whose valid interval covers the moment; ⛔ "time travel", "history query" |
 | Assembled model-input window for a turn | **Context** | `Context` | — | — | the Context Engine (assembly, compaction); ≠ Memory |
-| First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | |
+| First-run setup wizard | **Onboarding** | `Onboarding` | `/onboarding` | "Onboarding" | route rename from `/setup` deferred — `/setup` is still named in ~10 published docs pages and `apps/web/app/routes/_app.tsx`; tracked in Rename backlog below |
+| The persistent post-login onboarding assistant | **Companion** | `OnboardingCompanion` | — | "Companion" | floating bottom-right ≥`sm`, top-bar icon button below it; never auto-opens; ⛔ "clippy", "mascot", "tour", "walkthrough" |
+| One thing the Companion asks the operator or a user to supply | **Quest** | `Quest` | `/api/v1/onboarding/quests` | "Quest" | tiered: hardcoded gate, derived checklist, AI-generated profile gap; dismissal is per-quest, never global |
 | Model Context Protocol (external tool servers) | **MCP** | `MCP` | — | "MCP" | acronym, verbatim |
 | A governed model routing record derived from Soul Config | **ModelProfile** | `ModelProfile` | `/api/v1/model-profiles` | "Model profile" | one word, `PascalCase` — synthesized deterministically from `soul.yaml#llm` and pinned into immutable bundles; holds provider/model, capability, modality, constraints, budgets, fallbacks. There is no authored `models/` directory. ⛔ "tier" as the routing unit — retired |
 | A named effort level a participant may pick | **Effort Preset** | `EffortPreset` | — | "Auto"/"Fast"/"Balanced"/"Thorough" | the ONLY model concept a user sees; maps to a ModelProfile ref, one marked default. ⛔ "quick"/"standard"/"complex" — retired |
@@ -165,3 +167,12 @@ URL, UI, and docs. Migration `v18` renamed the physical Knowledge tables/columns
 5. **Integration**: `SoulIntegration.connection`→`config` (file `connection.yaml`→
    `config.yaml`). "connection" now means only a DB pool / SSE stream.
 6. **Skill**: `capability`-as-synonym removed from Skill Forge copy.
+
+## Rename backlog
+
+1. **`/setup` → `/onboarding`**: canonical route decided above but not yet applied. The route,
+   its file (`apps/web/app/routes/setup.tsx`), and its redirect target
+   (`apps/web/app/routes/_app.tsx`) still say `setup`, as do ~10 published `apps/docs` pages
+   (installation, deploy/coolify, deploy/headless, deploy/tls, getting-started, troubleshooting,
+   concepts/setup, production-checklist). Rename is a docs sweep, not just a route change —
+   scope it as its own change.

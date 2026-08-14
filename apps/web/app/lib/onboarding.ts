@@ -35,3 +35,34 @@ export async function getOnboardingChecklist(): Promise<OnboardingChecklist> {
 export async function dismissOnboardingChecklist(): Promise<void> {
   await apiWrite("PUT", "/api/v1/kv/onboarding/checklist", { value: { dismissed: true } });
 }
+
+/*
+ * The Companion's quest ladder (ONB-V2): tier 1 (hardcoded gate), tier 2 (checklist), tier 3
+ * (AI profile gaps). `answer` only accepts tier-1 form quests; tier 2/3 route through chat.
+ */
+
+export type QuestAction =
+  | { kind: "form"; field: "name" | "description" }
+  | { kind: "link"; href: string }
+  | { kind: "chat"; prompt: string };
+
+export type Quest = {
+  id: string;
+  tier: 1 | 2 | 3;
+  label: string;
+  hint?: string;
+  action: QuestAction;
+};
+
+export async function listQuests(): Promise<Quest[]> {
+  const body = await apiGet<{ quests: Quest[] }>("/api/v1/onboarding/quests");
+  return body.quests;
+}
+
+export async function answerQuest(id: string, value: string): Promise<void> {
+  await apiWrite("POST", `/api/v1/onboarding/quests/${encodeURIComponent(id)}/answer`, { value });
+}
+
+export async function dismissQuest(id: string): Promise<void> {
+  await apiWrite("POST", `/api/v1/onboarding/quests/${encodeURIComponent(id)}/dismiss`, {});
+}

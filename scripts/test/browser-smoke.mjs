@@ -101,22 +101,13 @@ try {
   if (onSetup) {
     log("running the setup wizard");
 
-    // Step 1 — admin account (email, password, confirm).
+    // One question per screen: name, then email, then password, then Finish.
+    await page.locator('input[type="text"]').fill("Smoke Test");
+    await page.getByRole("button", { name: "Continue" }).click();
     await page.locator('input[type="email"]').fill(EMAIL);
-    await page.locator('input[type="password"]').nth(0).fill(PASSWORD);
-    await page.locator('input[type="password"]').nth(1).fill(PASSWORD);
     await page.getByRole("button", { name: "Continue" }).click();
-
-    // Step 2 — business profile. The description is optional; the name is not. Anchored to the
-    // field id (the label's htmlFor target), not the placeholder: placeholder text is example
-    // copy, and rewriting it is what silently broke this step once already.
-    await page.locator("#setup-business-name").fill("Smoke Test Co");
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    // Step 3 — LLM config, and the last step. Skipped: no API key in CI, and the chat crash we
-    // are hunting happens client-side before any model call. Skipping the final step is what
-    // completes setup, so there is nothing to click after this.
-    await page.getByRole("button", { name: /Skip for now/i }).click();
+    await page.locator('input[type="password"]').fill(PASSWORD);
+    await page.getByRole("button", { name: "Finish" }).click();
   } else {
     log("instance already configured — signing in");
     await page.getByLabel("email").fill(EMAIL);

@@ -159,6 +159,11 @@ export class LlmService {
     return this.byModelId.has(id);
   }
 
+  /** Whether any provider built at all, e.g. to gate a "add a provider key" onboarding quest. */
+  isConfigured(): boolean {
+    return this.configured;
+  }
+
   /** The pinned spec for a configured model id, for cost attribution and capability derivation. */
   specFor(id: string): ModelSpec | undefined {
     return this.entryByModelId.get(id)?.spec;

@@ -208,6 +208,7 @@ export async function createUser(
   role: Role,
   options: {
     readonly setupBootstrap?: boolean;
+    readonly name?: string;
     readonly insert?: (user: UserDoc) => Promise<void>;
   } = {}
 ): Promise<UserDoc> {
@@ -215,7 +216,7 @@ export async function createUser(
     _id: randomUUID(),
     email: normalizeEmail(email),
     passwordHash: await hashPassword(password),
-    name: null,
+    name: options.name ?? null,
     role,
     status: "active",
     createdAt: new Date(),

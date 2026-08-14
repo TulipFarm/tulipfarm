@@ -17,18 +17,11 @@ actually does work for you — about twenty minutes, all of it in the browser.
 ### Create your admin account
 
 Open your instance's URL. Because no admin exists yet, the app redirects to the setup wizard
-at `/setup`. Work through the three steps:
+at `/setup`. It asks one question at a time — your name, your email, then a password — and
+locks after you finish, so a second browser visitor cannot create another admin through it.
 
-1. **Admin account** — enter an email and password. This creates the first admin and logs
-   you in.
-2. **Business profile** — give your instance a name and optional description. Agents read
-   this, so a real sentence about what your business does is worth more than a placeholder.
-3. **LLM provider** — choose a provider (Anthropic, OpenAI, Azure Foundry, or an
-   OpenAI-compatible endpoint), enter the credentials, and pick a model. You can skip this
-   and configure it later.
-
-After step 3 the wizard redirects to the main workspace and the setup route locks — a second
-browser visitor cannot create another admin through it.
+That is all setup collects up front. A provider key and your business's name and description
+come next, inside the app, from the onboarding **Companion** — see the next step.
 
 <Callout type="warn">
   Until an admin exists, `/setup` is unauthenticated: on an internet-reachable instance,
@@ -42,13 +35,17 @@ browser visitor cannot create another admin through it.
 
 ### Give the assistant a model
 
-You build everything else by talking to the assistant, so it needs a model to run. If you
-skipped step 3 of the wizard, nothing below will work until you finish this one.
+You build everything else by talking to the assistant, so it needs a model to run. A tulip
+icon in the corner of the app — the Companion — opens with this as its first quest; answering
+it there takes you straight to the right screen. Nothing below works until it is done.
 
 Open **Operate → Business → Secrets**, add an API key for a provider, then open
 **Operate → Business → Models** and assign models to the **Fast**, **Balanced**, and **Thorough**
 chains. In **What each effort means**, choose which profile **Auto** resolves to when nobody picks
 an effort.
+
+The Companion also asks for your business's name and a short description of what it does —
+agents read that description, so answering it is worth doing before you build much else.
 
 The walkthrough is in
 [Configure LLM providers](/docs/guides/configure-llm-providers). No API key? A Claude or ChatGPT
