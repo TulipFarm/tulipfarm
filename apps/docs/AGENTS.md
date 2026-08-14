@@ -46,6 +46,7 @@ It owns docs content, MDX rendering, prompt blocks, install snippets, and site s
 - Use ` ```text ` only for diagrams such as trees or envelopes.
 - Do not route prompts through the syntax highlighter; keep `lib/remark-prompt.ts` in the MDX path.
 - After changing `source.config.ts`, restart the dev server; content and `meta.json` hot-reload.
+- The canonical site URL is `https://tulipfarm.site`, defined once in `lib/shared.ts`.
 - Never write the site domain in MDX/TS/TSX; use `{{SITE_URL}}` or import `SITE_URL`.
 - `scripts/site-url.test.ts` allows GitHub clone URLs but rejects bare docs-site domains.
 - Anything imported by `source.config.ts` must be relative; no bare `@tulipfarm/*` specifiers.
