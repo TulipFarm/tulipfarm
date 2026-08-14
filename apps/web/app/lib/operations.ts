@@ -42,6 +42,20 @@ export async function getOperationalRun(id: string): Promise<OperationalRun> {
   return (await apiGet<{ run: OperationalRun }>(`/api/v1/runs/${encodeURIComponent(id)}`)).run;
 }
 
+export type RunBudget = {
+  key: string;
+  limit: number;
+  consumed: number;
+  exhaustionPolicy: "failure_path" | "attention_required";
+};
+
+/** Reads the enforced write-once `run_budgets` ledger for one Run — not a recomputation. */
+export function getRunBudgets(id: string): Promise<{ runId: string; budgets: RunBudget[] }> {
+  return apiGet<{ runId: string; budgets: RunBudget[] }>(
+    `/api/v1/runs/${encodeURIComponent(id)}/budgets`
+  );
+}
+
 export function commandRun(
   run: OperationalRun,
   action: RunCommandAction,

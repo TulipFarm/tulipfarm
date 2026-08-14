@@ -42,6 +42,7 @@ import {
 } from "@tulipfarm/soul";
 import {
   ArtifactStore,
+  BudgetStore,
   ChannelMentionedThreadStore,
   ChannelRunDeliveryStore,
   ChildLinkStore,
@@ -192,6 +193,11 @@ import {
   resolveSoulBundleVerifier,
   type SoulBundleKeyStore,
 } from "./runtime/soul-bundle-signer";
+import {
+  createSoulWriter,
+  resolveSoulCommitSigner,
+  SYSTEM_SOUL_COMMIT_ACTOR,
+} from "./runtime/soul-writer";
 import { ScheduleDispatcher } from "./schedule/dispatcher";
 import { registerScheduleDispatch } from "./schedule/register";
 import { RoutineScheduleStateStore } from "./schedule/state-store";
@@ -239,13 +245,6 @@ const secretsBootstrap = ((): BootstrapSecretsResult => {
 validateEnvironment();
 
 const port = Number.parseInt(process.env.PORT || "4010", 10);
-// Fallback actor for genuinely system-initiated Soul commits (format migrations, tool writes with
-// no request actor). Deliberately synthetic so the activation ledger never mistakes it for a user.
-const SYSTEM_SOUL_COMMIT_ACTOR: CommitActor = {
-  principalId: "service:tulipfarm-system",
-  name: "TulipFarm (system)",
-  email: "",
-};
 const SOUL_SYNC_COMMIT_ACTOR: CommitActor = {
   principalId: "service:tulipfarm-soul-sync",
   name: "TulipFarm Soul Sync",
@@ -484,6 +483,17 @@ async function boot() {
 
     const soulLoader = new SoulLoader(soulPath, console, surfaceRendererRegistry);
     await soulLoader.load();
+    // The single ADR-007 write gateway. Every authoring surface writes through this instance, so
+    // path building, validation, atomic commit, push, catalog reload and bundle publication happen
+    // in exactly one place instead of being re-implemented at each call site.
+    const soulWriter = createSoulWriter({
+      soulPath,
+      signer: await resolveSoulCommitSigner(secretsService),
+      logger: console,
+      gitSync,
+      reload: () => soulLoader.load(),
+      publisher: soulPublisher,
+    });
     const bundledSkills = await loadBundledSkills(console);
     const disabledBundledSkills = await loadDisabledBundledSkills(soulPath, console);
     const bundledIntegrations = await loadBundledIntegrations(console);
@@ -545,6 +555,7 @@ async function boot() {
     const webhookRawPayloadVault = new PgRawPayloadVault(pool, activeDek.key);
     const runStore = new RunStore(runTransactions);
     const runEventStore = new RunEventStore(runTransactions);
+    const budgetStore = new BudgetStore(runTransactions);
     const runCancel = runCanceller(
       new RunCancellationManager(runStore, new ChildLinkStore(runTransactions))
     );
@@ -725,7 +736,7 @@ async function boot() {
       memoryLifecycle: memoryLifecycleService,
       kv: kvService,
       knowledge: knowledgeService,
-      surfaceComponents: { gitSync, surfaceSupport: surfaceRendererRegistry },
+      surfaceComponents: { gitSync, soulWriter, surfaceSupport: surfaceRendererRegistry },
       resources: {
         repoFactory: resourceRepoFactory,
         counterStore,
@@ -733,10 +744,11 @@ async function boot() {
         hookExecutor,
         events: domainEventEmitter,
       },
-      resourceTypes: { gitSync, soulLoader, reconcile: reconcileResources },
-      agentTools: { gitSync, soulLoader },
+      resourceTypes: { gitSync, soulWriter, soulLoader, reconcile: reconcileResources },
+      agentTools: { gitSync, soulWriter, soulLoader },
       skillTools: {
         gitSync,
+        soulWriter,
         soulLoader,
         llmService,
         bundledSkills,
@@ -749,6 +761,7 @@ async function boot() {
         soulLoader,
         soulPath,
         gitSync,
+        soulWriter,
         bundledSkills,
         disabledBundledSkills,
         triggerRoutine: manualRoutineTrigger(invocations),
@@ -889,6 +902,7 @@ async function boot() {
       rateLimiter,
       secretsService,
       gitSync,
+      soulWriter,
       soulLoader,
       bundledSkills,
       disabledBundledSkills,
@@ -991,7 +1005,7 @@ async function boot() {
         activity: activityService,
         approvals: approvalsRepo,
         toolApprovals,
-        runs: createRunReader(runStore),
+        runs: createRunReader(runStore, budgetStore),
         healthProbes: [
           postgresProbe(pool),
           queueProbe(boss),

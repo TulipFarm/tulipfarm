@@ -1,9 +1,10 @@
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import type { SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ErrorSchema } from "../auth/schemas";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import { ALLOWED_SOURCE_HINT, isAllowedSource } from "../soul/git-source";
 import type { BundledIntegration } from "../soul/integrations/bundled";
+import { isSoulWriteError, soulWriteHttpError } from "../soul/write-errors";
 import {
   IntegrationInstallError,
   inspectIntegrationSource,
@@ -31,7 +32,7 @@ const DiscoveredSchema = {
 export function registerIntegrationMarketplaceRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
-  gitSync: GitSyncService,
+  soulWriter: SoulWriter,
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler
 ): void {
@@ -133,6 +134,8 @@ export function registerIntegrationMarketplaceRoutes(
           401: ErrorSchema,
           404: ErrorSchema,
           409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -144,11 +147,20 @@ export function registerIntegrationMarketplaceRoutes(
       try {
         return await installIntegrationFromSource(
           { source, name },
-          { soulLoader, gitSync, bundledSlugs: bundledSlugs(), actor: commitActorFromRequest(req) }
+          {
+            soulLoader,
+            soulWriter,
+            bundledSlugs: bundledSlugs(),
+            actor: commitActorFromRequest(req),
+          }
         );
       } catch (error) {
         if (error instanceof IntegrationInstallError) {
           return reply.code(error.status).send({ error: error.message });
+        }
+        if (isSoulWriteError(error)) {
+          const mapped = soulWriteHttpError(error);
+          return reply.code(mapped.status).send(mapped.body);
         }
         throw error;
       }

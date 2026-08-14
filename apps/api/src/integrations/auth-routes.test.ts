@@ -1,6 +1,3 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +10,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
+import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 import type { IntegrationAuthRequestDoc, IntegrationAuthRequestRepo } from "./auth-broker";
 import { InMemoryPrincipalProviderTokenRepo } from "./principal-tokens";
 
@@ -118,14 +116,13 @@ const NOTION_MANIFEST: BundledIntegration["manifest"] = {
 describe("integration auth routes", () => {
   let app: FastifyInstance;
   let sid: string;
-  let soulPath: string;
+  let soul: ReturnType<typeof makeSoulWriterDouble>;
   let soulLoader: SoulLoader;
   let secretsService: FakeSecretsService;
   let repo: MemoryAuthRequestRepo;
   let principalTokens: InMemoryPrincipalProviderTokenRepo;
   let memberSid: string;
   let fetchImpl: ReturnType<typeof vi.fn>;
-  const temps: string[] = [];
 
   beforeEach(async () => {
     const store = new MemorySessionStore();
@@ -138,28 +135,26 @@ describe("integration auth routes", () => {
     const memberUser = await createUser(userRepo, "member@example.com", "pass", "member");
     memberSid = await store.create(memberUser._id);
 
-    soulPath = await mkdtemp(join(tmpdir(), "integration-auth-soul-"));
-    temps.push(soulPath);
+    soul = makeSoulWriterDouble();
 
-    async function reloadFromDisk(): Promise<Map<string, SoulIntegration>> {
+    function reloadFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      const dir = join(soulPath, "integrations", "notion");
-      try {
-        const connection = parseYaml(await readFile(join(dir, "connection.yaml"), "utf8"));
+      const manifestRaw = soul.writer.read("Integration", "notion");
+      const connectionRaw = soul.writer.readCompanion("Integration", "notion", "connection.yaml");
+      if (manifestRaw !== null || connectionRaw !== null) {
+        const connection = connectionRaw === null ? undefined : parseYaml(connectionRaw);
         map.set("notion", {
           slug: "notion",
           sourceIntegration: "notion",
           manifest: NOTION_MANIFEST,
           connection,
         });
-      } catch {
-        // not materialized yet
       }
       return map;
     }
 
     const reload = vi.fn().mockImplementation(async () => {
-      soulLoader.integrations = await reloadFromDisk();
+      soulLoader.integrations = reloadFromTree();
     });
     soulLoader = {
       integrations: new Map<string, SoulIntegration>(),
@@ -168,11 +163,8 @@ describe("integration auth routes", () => {
     } as unknown as SoulLoader;
 
     const gitSync = {
-      path: soulPath,
-      withSync: vi.fn().mockImplementation(async () => {
-        soulLoader.integrations = await reloadFromDisk();
-        return { sha: "abc1234", filesChanged: 1 };
-      }),
+      path: "/soul",
+      withSync: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -187,6 +179,7 @@ describe("integration auth routes", () => {
       userRepo,
       tokenRepo: new FakeTokenRepo(),
       gitSync,
+      soulWriter: soul.writer,
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations: new Map([["notion", { manifest: NOTION_MANIFEST }]]),
@@ -200,7 +193,6 @@ describe("integration auth routes", () => {
 
   afterEach(async () => {
     await app.close();
-    for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
@@ -353,10 +345,7 @@ describe("integration auth routes", () => {
         url: `/api/v1/integrations/auth/callback?state=${state}&code=abc`,
       });
 
-      const raw = await readFile(
-        join(soulPath, "integrations", "notion", "connection.yaml"),
-        "utf8"
-      );
+      const raw = soul.writer.readCompanion("Integration", "notion", "connection.yaml") ?? "";
       // The file is committed and pushed to the user's soul git repo, so it must never hold the
       // token itself.
       expect(raw).not.toContain("tok");
@@ -378,7 +367,7 @@ describe("integration auth routes", () => {
       });
 
       const parsed = parseYaml(
-        await readFile(join(soulPath, "integrations", "notion", "connection.yaml"), "utf8")
+        soul.writer.readCompanion("Integration", "notion", "connection.yaml") ?? ""
       );
       expect(parsed.env.NOTION_CLIENT_ID).toBe("cid");
       expect(parsed.env.NOTION_CLIENT_SECRET).toMatch(/^secret:\/\//);
@@ -418,10 +407,7 @@ describe("integration auth routes", () => {
 
     it("writes nothing when the token exchange fails", async () => {
       const state = await startedState();
-      const before = await readFile(
-        join(soulPath, "integrations", "notion", "connection.yaml"),
-        "utf8"
-      );
+      const before = soul.writer.readCompanion("Integration", "notion", "connection.yaml");
       fetchImpl.mockResolvedValue(
         new Response(JSON.stringify({ error: "bad_verification_code" }), {
           headers: { "content-type": "application/json" },
@@ -431,9 +417,7 @@ describe("integration auth routes", () => {
         method: "GET",
         url: `/api/v1/integrations/auth/callback?state=${state}&code=abc`,
       });
-      expect(
-        await readFile(join(soulPath, "integrations", "notion", "connection.yaml"), "utf8")
-      ).toBe(before);
+      expect(soul.writer.readCompanion("Integration", "notion", "connection.yaml")).toBe(before);
     });
   });
 });

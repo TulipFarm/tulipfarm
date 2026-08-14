@@ -209,6 +209,7 @@ export type {
   WebhookSecurity,
 } from "./types";
 export type {
+  SoulBundlePublishPort,
   SoulPrecondition,
   SoulPushPort,
   SoulReadResult,

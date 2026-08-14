@@ -65,7 +65,10 @@ afterEach(() => {
   }
 });
 
-describe("release changelog generation", () => {
+// Every test here drives a real git repository through a dozen commits, which costs seconds even
+// on an idle machine. The default 5s budget left no headroom and tipped over as soon as another
+// file joined the worker pool, so the timeout is stated explicitly rather than left to luck.
+describe("release changelog generation", { timeout: 30_000 }, () => {
   it("includes every allowed Conventional Commit type", async () => {
     const cwd = createRepository();
     const changes = [

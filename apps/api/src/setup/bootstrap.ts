@@ -31,6 +31,8 @@ async function seedLlmConfig(deps: BootstrapDeps, provider: "anthropic" | "opena
 
   // `writeLlmConfigToSoulYaml` assumes the soul directory exists. Nothing guarantees that here:
   // the only earlier writer is the BUSINESS_NAME patch, which is optional.
+  // soul-write-exception: headless bootstrap seeds soul.yaml before the artifact catalog and the
+  // SoulWriter gateway exist, so there is no gateway to route this through yet.
   await mkdir(deps.soulPath, { recursive: true });
   const entry = { provider, model: DEFAULT_MODEL[provider] };
   await writeLlmConfigToSoulYaml(deps.soulPath, {

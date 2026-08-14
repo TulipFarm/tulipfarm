@@ -1,20 +1,27 @@
-import { existsSync } from "node:fs";
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { ajv } from "@tulipfarm/schema";
-import type { GitSyncService } from "@tulipfarm/soul";
+import {
+  type GitSyncService,
+  type SoulWrite,
+  SoulWriteError,
+  type SoulWriter,
+} from "@tulipfarm/soul";
 import {
   type SoulSurfaceComponent,
   type SurfaceComponentSupport,
   validateSoulSurfaceComponent,
 } from "@tulipfarm/surface";
 import { parse, stringify } from "yaml";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 import { type ApiToolDefinition, defineApiTool } from "../../tools/define";
 import { soulCommitError } from "../../tools/soul-faults";
 import { err, ok, type RequestContext, type ToolCallResult } from "../../tools/types";
 
 export interface SurfaceComponentToolContext {
   readonly gitSync: GitSyncService;
+  readonly soulWriter: SoulWriter;
   readonly surfaceSupport?: SurfaceComponentSupport;
   readonly requestContext?: RequestContext;
 }
@@ -162,51 +169,109 @@ function validateComponent(
   return null;
 }
 
-async function writeComponent(
-  context: SurfaceComponentToolContext,
-  value: {
-    slug: string;
-    version: string;
-    description: string;
-    propsSchema: Record<string, unknown>;
-    events: unknown[];
-    examples: unknown[];
-    targets: unknown[];
-    views: Record<string, unknown>;
+/**
+ * Map a Soul write-gateway rejection onto the Surface component tools' error vocabulary.
+ *
+ * `PRECONDITION_FAILED` is the one code whose meaning is site-specific — an "already exists" on
+ * create, a "not found" on update — so each caller supplies that mapping. The rest are fixed: a
+ * rejected changeset (bad target or invalid definition) is a `validation_error`, a moved base is
+ * transient (`unavailable`), and a failed commit is classified by `soulCommitError` so git
+ * contention is reported as `unavailable` rather than as a request the model should repair. The
+ * gateway's message carries only structured evidence, never file content, so it is safe to surface.
+ */
+function mapSurfaceWriteError(
+  error: SoulWriteError,
+  onPrecondition: () => ToolCallResult
+): ToolCallResult {
+  switch (error.code) {
+    case "PRECONDITION_FAILED":
+      return onPrecondition();
+    case "VALIDATION_FAILED":
+    case "INVALID_TARGET":
+      return err("validation_error", error.message);
+    case "CONFLICT":
+      return err("unavailable", error.message);
+    default:
+      return soulCommitError(error, error.message);
   }
-): Promise<void> {
-  const componentDirectory = directory(context, value.slug);
-  const viewsDirectory = join(componentDirectory, "views");
-  await mkdir(viewsDirectory, { recursive: true });
-  await writeFile(
-    join(componentDirectory, "component.yaml"),
-    stringify({
-      name: `business.${value.slug}`,
-      version: value.version,
-      description: value.description,
-      propsSchema: value.propsSchema,
-      events: value.events,
-      examples: value.examples,
-      targets: value.targets,
-      metadata: { protocol: "tsp", protocolVersion: "1.0" },
-    }),
-    "utf8"
-  );
+}
+
+type ComponentValue = {
+  slug: string;
+  version: string;
+  description: string;
+  propsSchema: Record<string, unknown>;
+  events: unknown[];
+  examples: unknown[];
+  targets: unknown[];
+  views: Record<string, unknown>;
+};
+
+function componentDefinitionContent(value: ComponentValue): string {
+  return stringify({
+    name: `business.${value.slug}`,
+    version: value.version,
+    description: value.description,
+    propsSchema: value.propsSchema,
+    events: value.events,
+    examples: value.examples,
+    targets: value.targets,
+    metadata: { protocol: "tsp", protocolVersion: "1.0" },
+  });
+}
+
+/** The `.yaml` view files currently on disk beside the component, or `[]` when the dir is absent. */
+async function existingViewFiles(
+  context: SurfaceComponentToolContext,
+  slug: string
+): Promise<string[]> {
+  try {
+    const entries = await readdir(join(directory(context, slug), "views"));
+    return entries.filter((entry) => entry.endsWith(".yaml"));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Build the single changeset that publishes a component: the definition, every desired view, and a
+ * delete for any stale view file the new definition no longer declares — so the whole artifact
+ * lands atomically instead of the previous mkdir + writeFile + unlink sequence.
+ */
+async function buildComponentChanges(
+  context: SurfaceComponentToolContext,
+  value: ComponentValue
+): Promise<SoulWrite[]> {
+  const changes: SoulWrite[] = [
+    {
+      op: "put",
+      target: { kind: "SurfaceComponent", slug: value.slug },
+      content: componentDefinitionContent(value),
+    },
+  ];
   const desiredViewFiles = new Set(Object.keys(value.views).map((target) => `${target}.yaml`));
-  for (const existing of await readdir(viewsDirectory)) {
-    if (existing.endsWith(".yaml") && !desiredViewFiles.has(existing)) {
-      await unlink(join(viewsDirectory, existing));
+  for (const existing of await existingViewFiles(context, value.slug)) {
+    if (!desiredViewFiles.has(existing)) {
+      changes.push({
+        op: "delete",
+        target: { kind: "SurfaceComponent", slug: value.slug, companion: `views/${existing}` },
+      });
     }
   }
   for (const [target, view] of Object.entries(value.views)) {
-    await writeFile(join(viewsDirectory, `${target}.yaml`), stringify(view), "utf8");
+    changes.push({
+      op: "put",
+      target: { kind: "SurfaceComponent", slug: value.slug, companion: `views/${target}.yaml` },
+      content: stringify(view),
+    });
   }
+  return changes;
 }
 
 const create = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_create",
   description:
-    "Create a validated business Surface component under surface-components/<slug> and publish it through Soul git sync.",
+    "Create a validated business Surface component under surface-components/<slug> and publish it atomically to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: DEFINITION,
@@ -220,18 +285,23 @@ const create = defineApiTool<SurfaceComponentToolContext>({
   handler: async (args, context) => {
     const invalid = validateComponent(args, context.surfaceSupport);
     if (invalid) return invalid;
-    const value = args as Parameters<typeof writeComponent>[1];
-    if (existsSync(directory(context, value.slug))) {
-      return err("validation_error", "Surface component already exists.");
-    }
+    const value = args as ComponentValue;
     try {
-      await writeComponent(context, value);
-      await context.gitSync.withSync(
-        `soul: add Surface component ${value.slug}`,
-        context.requestContext?.actor
-      );
+      await context.soulWriter.apply({
+        subject: `soul: add Surface component ${value.slug}`,
+        source: "agent",
+        actor: context.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: await buildComponentChanges(context, value),
+        preconditions: [{ kind: "SurfaceComponent", slug: value.slug, state: "absent" }],
+      });
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
+      if (error instanceof SoulWriteError) {
+        return mapSurfaceWriteError(error, () =>
+          err("validation_error", "Surface component already exists.")
+        );
+      }
       return soulCommitError(error, reason(error));
     }
   },
@@ -240,7 +310,7 @@ const create = defineApiTool<SurfaceComponentToolContext>({
 const update = defineApiTool<SurfaceComponentToolContext>({
   name: "surface_component_update",
   description:
-    "Replace and revalidate an existing business Surface component, then publish it through Soul git sync.",
+    "Replace and revalidate an existing business Surface component, then publish it atomically to the soul repo.",
   tier: "system",
   mutating: true,
   inputSchema: DEFINITION,
@@ -254,18 +324,23 @@ const update = defineApiTool<SurfaceComponentToolContext>({
   handler: async (args, context) => {
     const invalid = validateComponent(args, context.surfaceSupport);
     if (invalid) return invalid;
-    const value = args as Parameters<typeof writeComponent>[1];
-    if (!existsSync(directory(context, value.slug))) {
-      return err("not_found", "Surface component was not found.");
-    }
+    const value = args as ComponentValue;
     try {
-      await writeComponent(context, value);
-      await context.gitSync.withSync(
-        `soul: update Surface component ${value.slug}`,
-        context.requestContext?.actor
-      );
+      await context.soulWriter.apply({
+        subject: `soul: update Surface component ${value.slug}`,
+        source: "agent",
+        actor: context.requestContext?.actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+        businessId: DEPLOYMENT_BUSINESS_ID,
+        changes: await buildComponentChanges(context, value),
+        preconditions: [{ kind: "SurfaceComponent", slug: value.slug, state: "present" }],
+      });
       return ok({ name: `business.${value.slug}`, version: value.version });
     } catch (error) {
+      if (error instanceof SoulWriteError) {
+        return mapSurfaceWriteError(error, () =>
+          err("not_found", "Surface component was not found.")
+        );
+      }
       return soulCommitError(error, reason(error));
     }
   },

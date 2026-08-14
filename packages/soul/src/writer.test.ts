@@ -573,6 +573,47 @@ function writeLegacyAgent(slug: string): void {
   execFileSync("git", ["commit", "--quiet", "-m", "legacy agent"], { cwd: soulPath });
 }
 
+describe("SoulWriter — superseded definition mode", () => {
+  it("writes the superseded definition when the target names it", async () => {
+    await apply([
+      {
+        op: "put",
+        target: { kind: "Agent", slug: "triage", definitionMode: "legacy" },
+        content: "---\nlabel: Triage\n---\nBody\n",
+      },
+    ]);
+
+    expect(existsSync(join(soulPath, "agents/triage/AGENT.md"))).toBe(true);
+    expect(existsSync(join(soulPath, "agents/triage/agent.yaml"))).toBe(false);
+  });
+
+  it("refuses a superseded write while the canonical definition survives", async () => {
+    await apply([put("triage")]);
+
+    await expect(
+      apply([
+        {
+          op: "put",
+          target: { kind: "Agent", slug: "triage", definitionMode: "legacy" },
+          content: "---\nlabel: Triage\n---\nBody\n",
+        },
+      ])
+    ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
+  });
+
+  it("refuses to address a superseded definition for a kind that has none", async () => {
+    await expect(
+      apply([
+        {
+          op: "put",
+          target: { kind: "Skill", slug: "triage", definitionMode: "legacy" },
+          content: "x",
+        },
+      ])
+    ).rejects.toMatchObject({ code: "INVALID_TARGET" });
+  });
+});
+
 describe("SoulWriter — degraded dependencies", () => {
   it("keeps a committed write when the remote push fails", async () => {
     const failing = new SoulWriter(store, logger, {
@@ -612,5 +653,43 @@ describe("SoulWriter — degraded dependencies", () => {
 
     expect(result.commitSha).toBeTruthy();
     expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("reload"));
+  });
+
+  it("publishes the committed tree as a bundle so the Runtime sees the write", async () => {
+    const publishCommittedTree = vi.fn(async () => undefined);
+    const writer = new SoulWriter(store, logger, undefined, undefined, { publishCommittedTree });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(publishCommittedTree).toHaveBeenCalledWith({
+      commitSha: result.commitSha,
+      actor: ACTOR,
+    });
+  });
+
+  it("keeps a committed write when bundle publication fails", async () => {
+    const writer = new SoulWriter(store, logger, undefined, undefined, {
+      publishCommittedTree: async () => {
+        throw new Error("publisher exploded");
+      },
+    });
+
+    const result = await writer.apply({
+      subject: "soul: add agent triage",
+      source: "api",
+      actor: ACTOR,
+      businessId: "biz-1",
+      changes: [put("triage")],
+    });
+
+    expect(result.commitSha).toBeTruthy();
+    expect(existsSync(join(soulPath, "agents/triage/agent.yaml"))).toBe(true);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining("bundle publication failed"));
   });
 });

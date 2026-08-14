@@ -1,18 +1,10 @@
-import type { GitSyncService, SoulLoader, SoulResource } from "@tulipfarm/soul";
+import type { GitSyncService, SoulLoader, SoulResource, SoulWriter } from "@tulipfarm/soul";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RESOURCE_TYPE_TOOLS, type ResourceTypeToolContext } from "./tools";
 
 vi.mock("node:fs", () => ({ existsSync: vi.fn() }));
-vi.mock("node:fs/promises", () => ({
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  readFile: vi.fn().mockResolvedValue(""),
-  rm: vi.fn().mockResolvedValue(undefined),
-  unlink: vi.fn().mockResolvedValue(undefined),
-}));
 
 import { existsSync } from "node:fs";
-import { mkdir, rm, unlink, writeFile } from "node:fs/promises";
 
 const VALID_SCHEMA_YAML = `type: object
 properties:
@@ -36,14 +28,32 @@ function makeSoulLoader(resources: SoulResource[] = []): SoulLoader {
   } as unknown as SoulLoader;
 }
 
+function makeSoulWriter(): SoulWriter {
+  return {
+    apply: vi
+      .fn()
+      .mockResolvedValue({ commitSha: "abc1234", filesChanged: 1, paths: [], pushed: false }),
+    // Non-null by default so hook deletion proceeds; tests that need "absent" override it.
+    readCompanion: vi.fn().mockReturnValue("({ before() {} })"),
+  } as unknown as SoulWriter;
+}
+
 function makeCtx(resources: SoulResource[] = []): ResourceTypeToolContext & {
   gitSync: ReturnType<typeof makeGitSync>;
   soulLoader: ReturnType<typeof makeSoulLoader>;
+  soulWriter: SoulWriter & {
+    apply: ReturnType<typeof vi.fn>;
+    readCompanion: ReturnType<typeof vi.fn>;
+  };
   reconcile: ReturnType<typeof vi.fn>;
 } {
   return {
     gitSync: makeGitSync(),
     soulLoader: makeSoulLoader(resources),
+    soulWriter: makeSoulWriter() as SoulWriter & {
+      apply: ReturnType<typeof vi.fn>;
+      readCompanion: ReturnType<typeof vi.fn>;
+    },
     reconcile: vi.fn().mockResolvedValue(undefined),
   };
 }
@@ -128,7 +138,7 @@ describe("create_resource_type", () => {
     vi.mocked(existsSync).mockReturnValue(false);
   });
 
-  it("creates schema.yml, commits via withSync, reloads, reconciles", async () => {
+  it("creates the schema definition through the write gateway, reloads, reconciles", async () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "ticket", schema: VALID_SCHEMA_YAML }, ctx);
 
@@ -136,15 +146,19 @@ describe("create_resource_type", () => {
       success: true,
       data: { name: "ticket", schema: VALID_SCHEMA_YAML, hasHooks: false },
     });
-    expect(mkdir).toHaveBeenCalledWith(expect.stringContaining("resources/ticket"), {
-      recursive: true,
-    });
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("schema.yml"),
-      VALID_SCHEMA_YAML,
-      "utf8"
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: add resource type ticket",
+        source: "agent",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            content: VALID_SCHEMA_YAML,
+          },
+        ],
+      })
     );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith("soul: add resource type ticket", undefined);
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
   });
@@ -161,15 +175,14 @@ describe("create_resource_type", () => {
     );
 
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(writeFile).not.toHaveBeenCalled();
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid name (uppercase)", async () => {
     const ctx = makeCtx();
     const res = await createTool.handler({ name: "MyType", schema: VALID_SCHEMA_YAML }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for name starting with digit", async () => {
@@ -186,7 +199,7 @@ describe("create_resource_type", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("already exists") },
     });
-    expect(mkdir).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid YAML", async () => {
@@ -219,7 +232,7 @@ describe("create_resource_type", () => {
       "type: object\nproperties:\n  phone:\n    type: string\n    x-normalize:\n      - bad-fn\n";
     const res = await createTool.handler({ name: "ticket", schema }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("does not call reconcile when not provided", async () => {
@@ -341,21 +354,25 @@ describe("resource_type_update", () => {
     vi.clearAllMocks();
   });
 
-  it("overwrites schema.yml, commits via withSync, reloads, reconciles", async () => {
+  it("replaces the legacy schema definition through the write gateway, reloads, reconciles", async () => {
     const ctx = makeCtx([
       { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
     ]);
     const res = await updateTool.handler({ name: "ticket", schema: UPDATED_YAML }, ctx);
 
     expect(res.success).toBe(true);
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("schema.yml"),
-      UPDATED_YAML,
-      "utf8"
-    );
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
-      "soul: update resource type ticket",
-      undefined
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: update resource type ticket",
+        source: "agent",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", definitionMode: "legacy" },
+            content: UPDATED_YAML,
+          },
+        ],
+      })
     );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
     expect(ctx.reconcile).toHaveBeenCalledOnce();
@@ -371,7 +388,7 @@ describe("resource_type_update", () => {
     );
 
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   // A member editing the schema of a domained Resource is ordinary; the wall must survive it.
@@ -388,19 +405,29 @@ describe("resource_type_update", () => {
     const res = await updateTool.handler({ name: "salary-review", schema: UPDATED_YAML }, ctx);
 
     expect(res.success).toBe(true);
-    expect(writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("resource.yaml"),
-      expect.stringContaining("domain: hr"),
-      "utf8"
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: update resource type salary-review",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "salary-review" },
+            content: expect.stringContaining("domain: hr"),
+          },
+          {
+            op: "delete",
+            target: { kind: "Resource", slug: "salary-review", definitionMode: "legacy" },
+          },
+        ],
+      })
     );
-    expect(rm).toHaveBeenCalledWith(expect.stringContaining("schema.yml"), { force: true });
   });
 
   it("returns not_found when type does not exist", async () => {
     const ctx = makeCtx();
     const res = await updateTool.handler({ name: "ghost", schema: UPDATED_YAML }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for invalid schema YAML", async () => {
@@ -409,7 +436,7 @@ describe("resource_type_update", () => {
     ]);
     const res = await updateTool.handler({ name: "ticket", schema: "type: 123\n" }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for missing args", async () => {
@@ -431,17 +458,25 @@ describe("create_resource_hooks", () => {
     vi.clearAllMocks();
   });
 
-  it("writes hooks.ts, commits via withSync, reloads", async () => {
+  it("writes hooks.ts through the write gateway, reloads", async () => {
     const ctx = makeCtx([
       { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
     ]);
     const res = await createHooksTool.handler({ name: "ticket", source: VALID_HOOK }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "ticket", hasHooks: true } });
-    expect(writeFile).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"), VALID_HOOK, "utf8");
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
-      "soul: add hooks for resource type ticket",
-      undefined
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: add hooks for resource type ticket",
+        source: "agent",
+        changes: [
+          {
+            op: "put",
+            target: { kind: "Resource", slug: "ticket", companion: "hooks.ts" },
+            content: VALID_HOOK,
+          },
+        ],
+      })
     );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
@@ -450,7 +485,7 @@ describe("create_resource_hooks", () => {
     const ctx = makeCtx();
     const res = await createHooksTool.handler({ name: "ghost", source: VALID_HOOK }, ctx);
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
-    expect(ctx.gitSync.withSync).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for banned pattern (require)", async () => {
@@ -463,7 +498,7 @@ describe("create_resource_hooks", () => {
       success: false,
       error: { code: "validation_error", message: expect.stringContaining("banned pattern") },
     });
-    expect(writeFile).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 
   it("returns validation_error for banned pattern (fetch)", async () => {
@@ -546,18 +581,22 @@ describe("resource_hooks_delete", () => {
     vi.clearAllMocks();
   });
 
-  it("deletes hooks.ts, commits via withSync, reloads", async () => {
-    vi.mocked(existsSync).mockReturnValue(true);
+  it("deletes hooks.ts through the write gateway, reloads", async () => {
     const ctx = makeCtx([
       { name: "ticket", schema: { type: "object" }, hasHooks: true, hooksEnabled: true },
     ]);
     const res = await deleteHooksTool.handler({ name: "ticket" }, ctx);
 
     expect(res).toEqual({ success: true, data: { name: "ticket", hasHooks: false } });
-    expect(unlink).toHaveBeenCalledWith(expect.stringContaining("hooks.ts"));
-    expect(ctx.gitSync.withSync).toHaveBeenCalledWith(
-      "soul: remove hooks for resource type ticket",
-      undefined
+    expect(ctx.soulWriter.readCompanion).toHaveBeenCalledWith("Resource", "ticket", "hooks.ts");
+    expect(ctx.soulWriter.apply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subject: "soul: remove hooks for resource type ticket",
+        source: "agent",
+        changes: [
+          { op: "delete", target: { kind: "Resource", slug: "ticket", companion: "hooks.ts" } },
+        ],
+      })
     );
     expect(ctx.soulLoader.reload).toHaveBeenCalledOnce();
   });
@@ -569,16 +608,16 @@ describe("resource_hooks_delete", () => {
   });
 
   it("returns not_found when hooks.ts does not exist", async () => {
-    vi.mocked(existsSync).mockReturnValue(false);
     const ctx = makeCtx([
       { name: "ticket", schema: { type: "object" }, hasHooks: false, hooksEnabled: true },
     ]);
+    ctx.soulWriter.readCompanion.mockReturnValue(null);
     const res = await deleteHooksTool.handler({ name: "ticket" }, ctx);
     expect(res).toMatchObject({
       success: false,
       error: { code: "not_found", message: expect.stringContaining("no hooks.ts") },
     });
-    expect(unlink).not.toHaveBeenCalled();
+    expect(ctx.soulWriter.apply).not.toHaveBeenCalled();
   });
 });
 

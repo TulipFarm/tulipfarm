@@ -9,13 +9,18 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import { DEFINITION_REGISTRATIONS, type RoleDefinition, SchemaRegistry } from "@tulipfarm/schema";
-import type { CommitActor, GitSyncService } from "@tulipfarm/soul";
+import {
+  type CommitActor,
+  type SoulPrecondition,
+  type SoulWrite,
+  SoulWriteError,
+  type SoulWriter,
+} from "@tulipfarm/soul";
 import { stringify as stringifyYaml } from "yaml";
 import type { CapabilityCatalog } from "../../authz/capabilities";
+import { SYSTEM_SOUL_COMMIT_ACTOR } from "../../runtime/soul-writer";
 
 const definitionRegistry = new SchemaRegistry(DEFINITION_REGISTRATIONS);
 
@@ -65,7 +70,8 @@ export interface LevelInput {
 }
 
 export interface LevelDeps {
-  readonly gitSync: Pick<GitSyncService, "path" | "withSync">;
+  /** The ADR-007 write gateway: reads, existence checks, and atomic commits all go through it. */
+  readonly soulWriter: Pick<SoulWriter, "exists" | "read" | "apply">;
   readonly catalog: () => CapabilityCatalog;
   readonly reconcile: () => Promise<void>;
 }
@@ -162,6 +168,52 @@ export function buildLevelDefinition(
   return definition;
 }
 
+/**
+ * Commit a level change through the write gateway, translating its failures into this module's
+ * error vocabulary. `CONFLICT` is reported as `not_found`'s sibling rather than swallowed: the
+ * caller computed the definition from a tree that has since moved, so the edit must be recomputed
+ * rather than retried with the same bytes.
+ */
+async function applyLevelWrite(
+  deps: LevelDeps,
+  write: {
+    subject: string;
+    changes: readonly SoulWrite[];
+    preconditions: readonly SoulPrecondition[];
+  },
+  actor?: CommitActor
+): Promise<void> {
+  try {
+    await deps.soulWriter.apply({
+      subject: write.subject,
+      source: "api",
+      actor: actor ?? SYSTEM_SOUL_COMMIT_ACTOR,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      changes: write.changes,
+      preconditions: write.preconditions,
+    });
+  } catch (error) {
+    if (error instanceof SoulWriteError) throw levelErrorFor(error);
+    throw error;
+  }
+}
+
+function levelErrorFor(error: SoulWriteError): LevelError {
+  switch (error.code) {
+    case "PRECONDITION_FAILED":
+      return new LevelError("not_found", "the access level changed before this edit was saved");
+    case "VALIDATION_FAILED":
+      return new LevelError("invalid_definition", "the generated definition was not a valid Role");
+    case "CONFLICT":
+      return new LevelError(
+        "invalid_definition",
+        "another change landed first; reopen the access level and try again"
+      );
+    default:
+      return new LevelError("invalid_definition", "the access level could not be saved");
+  }
+}
+
 export interface LevelResult {
   readonly id: string;
   readonly slug: string;
@@ -176,24 +228,24 @@ export async function createLevel(
 ): Promise<LevelResult> {
   const definition = buildLevelDefinition(input, deps.catalog());
   const slug = definition.metadata.slug;
-  const directory = join(deps.gitSync.path, "roles", slug);
-  if (existsSync(directory)) {
+  if (deps.soulWriter.exists("Role", slug)) {
     throw new LevelError(
       "slug_taken",
       `an access level named "${input.name.trim()}" already exists`
     );
   }
 
-  await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, "role.yaml"), stringifyYaml(definition), "utf8");
-  try {
-    await deps.gitSync.withSync(`soul: add access level ${slug}`, actor);
-  } catch (error) {
-    // The commit is what makes a level real. Leaving the directory behind after a failed commit
-    // would make the next attempt fail with "already exists" for a level nobody ever created.
-    await rm(directory, { recursive: true, force: true });
-    throw error;
-  }
+  // No hand-rolled rollback: the changeset either commits whole or leaves the tree untouched, so
+  // a failed write cannot strand a directory that makes the next attempt report "already exists".
+  await applyLevelWrite(
+    deps,
+    {
+      subject: `soul: add access level ${slug}`,
+      changes: [{ op: "put", target: { kind: "Role", slug }, content: stringifyYaml(definition) }],
+      preconditions: [{ kind: "Role", slug, state: "absent" }],
+    },
+    actor
+  );
   await deps.reconcile();
 
   return {
@@ -216,13 +268,10 @@ export async function updateLevel(
   if (RESERVED_SLUGS.has(slug)) {
     throw new LevelError("reserved_slug", "a built-in access level cannot be changed");
   }
-  const directory = join(deps.gitSync.path, "roles", slug);
-  const file = join(directory, "role.yaml");
-  if (!existsSync(file)) {
+  const previous = deps.soulWriter.read("Role", slug);
+  if (previous === null) {
     throw new LevelError("not_found", `no access level named "${slug}"`);
   }
-
-  const previous = await readFile(file, "utf8");
   const current = definitionRegistry.validateYaml(previous);
   if (current.kind !== "Role") {
     throw new LevelError("invalid_definition", `"${slug}" is not an access level`);
@@ -235,14 +284,15 @@ export async function updateLevel(
     authoredVersion: metadata.authoredVersion + 1,
   });
 
-  await writeFile(file, stringifyYaml(definition), "utf8");
-  try {
-    await deps.gitSync.withSync(`soul: update access level ${slug}`, actor);
-  } catch (error) {
-    // Put back exactly what was there. Without this a failed commit leaves the working tree
-    await writeFile(file, previous, "utf8");
-    throw error;
-  }
+  await applyLevelWrite(
+    deps,
+    {
+      subject: `soul: update access level ${slug}`,
+      changes: [{ op: "put", target: { kind: "Role", slug }, content: stringifyYaml(definition) }],
+      preconditions: [{ kind: "Role", slug, state: "present" }],
+    },
+    actor
+  );
   await deps.reconcile();
 
   return {
@@ -265,11 +315,17 @@ export async function deleteLevel(
   if (RESERVED_SLUGS.has(slug)) {
     throw new LevelError("reserved_slug", "a built-in access level cannot be deleted");
   }
-  const directory = join(deps.gitSync.path, "roles", slug);
-  if (!existsSync(join(directory, "role.yaml"))) {
+  if (!deps.soulWriter.exists("Role", slug)) {
     throw new LevelError("not_found", `no access level named "${slug}"`);
   }
-  await rm(directory, { recursive: true, force: true });
-  await deps.gitSync.withSync(`soul: remove access level ${slug}`, actor);
+  await applyLevelWrite(
+    deps,
+    {
+      subject: `soul: remove access level ${slug}`,
+      changes: [{ op: "deleteArtifact", kind: "Role", slug }],
+      preconditions: [{ kind: "Role", slug, state: "present" }],
+    },
+    actor
+  );
   await deps.reconcile();
 }

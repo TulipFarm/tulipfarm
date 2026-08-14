@@ -13,6 +13,7 @@ import { SESSION_COOKIE } from "../auth/middleware";
 import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
+import { makeSoulWriterDouble, type SoulWriterDouble } from "./soul-writer-double";
 import { inferLanguage } from "./tree";
 
 vi.mock("node:fs/promises", async (importOriginal) => {
@@ -146,6 +147,7 @@ describe("soul routes", () => {
   let userRepo: FakeUserRepo;
   let tokenRepo: FakeTokenRepo;
   let gitSync: GitSyncService;
+  let soul: SoulWriterDouble;
   let sid: string;
 
   beforeEach(async () => {
@@ -153,66 +155,22 @@ describe("soul routes", () => {
     userRepo = new FakeUserRepo();
     tokenRepo = new FakeTokenRepo();
     gitSync = makeFakeGitSync();
+    soul = makeSoulWriterDouble();
 
     const user = await createUser(userRepo, "user@example.com", "pass", "member");
     sid = await store.create(user._id);
 
-    app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync });
+    app = await buildApp({
+      sessionStore: store,
+      userRepo,
+      tokenRepo,
+      gitSync,
+      soulWriter: soul.writer,
+    });
   });
 
   afterEach(async () => {
     await app.close();
-  });
-
-  describe("POST /api/v1/soul/commit", () => {
-    it("returns 401 without auth", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/soul/commit",
-        payload: { message: "chore: update soul" },
-      });
-      expect(res.statusCode).toBe(401);
-    });
-
-    it("returns 200 with sha and filesChanged on successful commit", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/soul/commit",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
-        headers: { [CSRF_HEADER]: TEST_CSRF },
-        payload: { message: "chore: update soul" },
-      });
-      expect(res.statusCode).toBe(200);
-      expect(res.json()).toEqual({ sha: "abc1234", filesChanged: 2 });
-    });
-
-    it("returns 204 when nothing to commit (empty sha)", async () => {
-      gitSync = makeFakeGitSync({
-        commit: vi.fn().mockResolvedValue({ sha: "", filesChanged: 0 }),
-      });
-      await app.close();
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync });
-
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/soul/commit",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
-        headers: { [CSRF_HEADER]: TEST_CSRF },
-        payload: { message: "chore: update soul" },
-      });
-      expect(res.statusCode).toBe(204);
-    });
-
-    it("returns 400 when message is missing", async () => {
-      const res = await app.inject({
-        method: "POST",
-        url: "/api/v1/soul/commit",
-        cookies: { [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF },
-        headers: { [CSRF_HEADER]: TEST_CSRF },
-        payload: {},
-      });
-      expect(res.statusCode).toBe(400);
-    });
   });
 
   describe("POST /api/v1/soul/push", () => {
@@ -235,7 +193,13 @@ describe("soul routes", () => {
     it("returns 200 with pushed: false when no remote configured", async () => {
       gitSync = makeFakeGitSync({ push: vi.fn().mockResolvedValue(false) });
       await app.close();
-      app = await buildApp({ sessionStore: store, userRepo, tokenRepo, gitSync });
+      app = await buildApp({
+        sessionStore: store,
+        userRepo,
+        tokenRepo,
+        gitSync,
+        soulWriter: soul.writer,
+      });
 
       const res = await app.inject({
         method: "POST",
@@ -404,6 +368,7 @@ describe("soul routes", () => {
         tokenRepo,
         gitSync,
         secretsService,
+        soulWriter: soul.writer,
       });
       return secretsService;
     }
@@ -606,11 +571,11 @@ describe("soul routes", () => {
           payload: { remoteUrl: "https://github.com/acme/soul.git", credential: "ghp_test" },
         });
         expect(res.statusCode).toBe(204);
-        expect(vi.mocked(soulConfigFs.writeFile)).toHaveBeenCalledWith(
-          expect.stringContaining("soul.yaml"),
-          expect.stringContaining("https://github.com/acme/soul.git"),
-          "utf8"
-        );
+        expect(soul.applied.at(-1)?.changes[0]).toEqual({
+          op: "put",
+          target: { kind: "Settings" },
+          content: expect.stringContaining("https://github.com/acme/soul.git"),
+        });
         expect(secretsService.set).toHaveBeenCalledWith("soul-git-credential", "ghp_test");
         expect(gitSync.configureRemote).toHaveBeenCalledWith(
           "https://github.com/acme/soul.git",
@@ -692,9 +657,11 @@ describe("soul routes", () => {
         description: "Coffee.",
         website: "",
       });
-      expect(vi.mocked(soulConfigFs.writeFile).mock.calls.at(-1)?.[1]).toContain(
-        "businessName: Fernwood Roasters"
-      );
+      expect(soul.applied.at(-1)?.changes[0]).toEqual({
+        op: "put",
+        target: { kind: "Settings" },
+        content: expect.stringContaining("businessName: Fernwood Roasters"),
+      });
       expect(vi.mocked(gitSync.emit)).toHaveBeenCalledWith("soul.synced");
     });
 

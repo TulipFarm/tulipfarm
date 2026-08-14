@@ -244,7 +244,11 @@ describe("SoulPublisher", () => {
       committedTreePublisher: publisher,
     });
 
-    const commit = await gitSync.commit("soul: publish routine and role", ACTOR);
+    const commit = await gitSync.commitPaths(
+      "soul: publish routine and role",
+      [definitionPath("Routine", "daily-briefing"), definitionPath("Role", "ops-reviewer")],
+      ACTOR
+    );
     expect(log.error).not.toHaveBeenCalled();
     await publications.drain("test");
 

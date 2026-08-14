@@ -13,7 +13,7 @@ import type { BatchingLogSink } from "@tulipfarm/observability";
 import type { DurableInvocationGateway } from "@tulipfarm/run-kernel";
 import type { HookExecutor } from "@tulipfarm/sandbox";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
+import type { GitSyncService, SoulLoader, SoulWriter } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import Fastify, { type FastifyBaseLogger, type FastifyReply, type FastifyRequest } from "fastify";
 import { registerActivityRoutes } from "./activity/routes";
@@ -130,6 +130,12 @@ export interface AppOptions {
   secretsService?: SecretsService;
   setupAdminCreator?: SetupAdminCreator;
   gitSync?: GitSyncService;
+  /**
+   * The ADR-007 write gateway. Every authoring surface writes the Soul tree through this; a route
+   * that reaches for `fs` plus `gitSync.withSync` instead bypasses validation, atomicity, conflict
+   * detection and bundle publication at once.
+   */
+  soulWriter?: SoulWriter;
   soulLoader?: SoulLoader;
   bundledSkills?: ReadonlyMap<string, BundledSkill>;
   disabledBundledSkills?: Set<string>;
@@ -466,10 +472,10 @@ export async function buildApp(opts: AppOptions = {}) {
     if (opts.secretsService) {
       registerSecretsRoutes(app, opts.secretsService, requireAuth, {
         onSecretDeleted:
-          opts.soulLoader && opts.gitSync && opts.llmService
+          opts.soulLoader && opts.soulWriter && opts.llmService
             ? makeLlmCascadeOnSecretDelete(
                 opts.soulLoader,
-                opts.gitSync,
+                opts.soulWriter,
                 opts.llmService,
                 opts.secretsService,
                 app.log
@@ -523,12 +529,20 @@ export async function buildApp(opts: AppOptions = {}) {
         opts.resourceRepo
       );
     }
-    if (opts.gitSync) {
-      registerSoulRoutes(app, opts.gitSync, requireAuth, opts.secretsService, opts.auditService);
-      if (opts.soulLoader) {
+    if (opts.gitSync && opts.soulWriter) {
+      registerSoulRoutes(
+        app,
+        opts.gitSync,
+        opts.soulWriter,
+        requireAuth,
+        opts.secretsService,
+        opts.auditService
+      );
+      if (opts.soulLoader && opts.soulWriter) {
         registerResourceTypeRoutes(
           app,
-          opts.gitSync,
+          opts.soulWriter,
+          opts.gitSync.path,
           opts.soulLoader,
           requireAuth,
           opts.reconcileResources,
@@ -536,11 +550,11 @@ export async function buildApp(opts: AppOptions = {}) {
           opts.auditService
         );
         registerAgentRoutes(app, opts.soulLoader, requireAuth);
-        if (opts.toolRegistry && opts.reconcileSoulRoles) {
+        if (opts.toolRegistry && opts.reconcileSoulRoles && opts.soulWriter) {
           const toolRegistry = opts.toolRegistry;
           const reconcileRoles = opts.reconcileSoulRoles;
           registerAccessLevelRoutes(app, {
-            gitSync: opts.gitSync,
+            soulWriter: opts.soulWriter,
             requireAuth,
             auditWrite: makeSoulAuditWriter(opts.auditService),
             catalog: () => buildCapabilityCatalog(toolRegistry.getAll()),
@@ -588,7 +602,7 @@ export async function buildApp(opts: AppOptions = {}) {
           registerIntegrationRoutes(
             app,
             opts.soulLoader,
-            opts.gitSync,
+            opts.soulWriter,
             opts.secretsService,
             opts.bundledIntegrations ?? new Map(),
             requireAuth,
@@ -605,7 +619,7 @@ export async function buildApp(opts: AppOptions = {}) {
           registerIntegrationMarketplaceRoutes(
             app,
             opts.soulLoader,
-            opts.gitSync,
+            opts.soulWriter,
             opts.bundledIntegrations ?? new Map(),
             requireAuth
           );
@@ -617,7 +631,7 @@ export async function buildApp(opts: AppOptions = {}) {
               app,
               {
                 soulLoader: opts.soulLoader,
-                gitSync: opts.gitSync,
+                soulWriter: opts.soulWriter,
                 secrets: opts.secretsService,
                 repo: opts.integrationAuth.repo,
                 bundled: opts.bundledIntegrations ?? new Map(),
@@ -643,6 +657,7 @@ export async function buildApp(opts: AppOptions = {}) {
             app,
             opts.soulLoader,
             opts.gitSync,
+            opts.soulWriter,
             opts.llmService,
             requireAuth,
             opts.activityService,
@@ -654,7 +669,7 @@ export async function buildApp(opts: AppOptions = {}) {
             registerLlmConfigRoutes(
               app,
               opts.soulLoader,
-              opts.gitSync,
+              opts.soulWriter,
               opts.llmService,
               opts.secretsService,
               requireAuth,

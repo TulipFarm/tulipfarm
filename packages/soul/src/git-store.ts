@@ -201,6 +201,17 @@ export class SoulGitStore {
     }
   }
 
+  /**
+   * Verify the content matches what was validated, then commit the author's own bytes.
+   *
+   * The bytes are deliberately *not* replaced with the canonical serialization. Soul is a
+   * human-authored, human-reviewed git repository: rewriting `role.yaml` to single-line canonical
+   * JSON on every write would make the tree unreadable and every diff a one-line churn, which is
+   * precisely what makes people edit around the gateway. Determinism does not depend on it — the
+   * changeset hash is computed over the *parsed document*, not the raw bytes, so two spellings of
+   * the same document already hash identically, and the commit signature covers the resulting tree
+   * either way.
+   */
   private validatedFiles(
     validated: ValidatedSoulChangeset,
     files: readonly SoulFileChange[]
@@ -227,12 +238,7 @@ export class SoulGitStore {
         );
       }
     });
-    return files.map((file) => {
-      if (file.operation === "delete") return file;
-      const parsed = parseSoulFile(file).parsed;
-      if (parsed?.definition === undefined) return file;
-      return { ...file, content: `${parsed.definition.canonical}\n` };
-    });
+    return [...files];
   }
 
   private buildMetadata(

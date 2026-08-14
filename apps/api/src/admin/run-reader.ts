@@ -1,5 +1,12 @@
-import type { PersistedRun, PersistedState, RunLineage, RunStore } from "@tulipfarm/storage";
-import type { RunReadModel, RunStateReadModel } from "./routes";
+import type {
+  BudgetStore,
+  PersistedBudget,
+  PersistedRun,
+  PersistedState,
+  RunLineage,
+  RunStore,
+} from "@tulipfarm/storage";
+import type { RunBudgetReadModel, RunReadModel, RunStateReadModel } from "./routes";
 
 /** Reads Runs through `RunStore`; the API must not query storage-owned tables directly. */
 export interface RunReader {
@@ -8,6 +15,22 @@ export interface RunReader {
     options: { cursor?: string; limit: number }
   ): Promise<{ items: readonly RunReadModel[]; nextCursor: string | null }>;
   get(businessId: string, runId: string): Promise<RunReadModel | null>;
+  /**
+   * The write-once budget ledger for one Run. `null` means the Run does not exist for this
+   * business — the existence check is scoped to `businessId`, so another business's Run is
+   * indistinguishable from an unknown one. An existing Run with no ledger rows is unbounded and
+   * returns an empty list, which the caller must not conflate with `null`.
+   */
+  budgets(businessId: string, runId: string): Promise<readonly RunBudgetReadModel[] | null>;
+}
+
+function budgetReadModel(budget: PersistedBudget): RunBudgetReadModel {
+  return {
+    key: budget.key,
+    limit: budget.limit,
+    consumed: budget.consumed,
+    exhaustionPolicy: budget.exhaustionPolicy,
+  };
 }
 
 function stateReadModel(state: PersistedState, attempts: number): RunStateReadModel {
@@ -57,7 +80,7 @@ function runReadModel(
 }
 
 /** List pages omit per-Run detail to stay one round trip. */
-export function createRunReader(runs: RunStore): RunReader {
+export function createRunReader(runs: RunStore, budgets: Pick<BudgetStore, "usage">): RunReader {
   return {
     async list(businessId, options) {
       const page = await runs.list({
@@ -84,6 +107,14 @@ export function createRunReader(runs: RunStore): RunReader {
         states.map((state) => stateReadModel(state, attempts.get(state.key) ?? 0)),
         lineage.map(lineageReadModel)
       );
+    },
+
+    async budgets(businessId, runId) {
+      // Scope existence to the business so a guessed `runId` from another tenant looks unknown.
+      const run = await runs.find(businessId, runId);
+      if (!run) return null;
+      const ledger = await budgets.usage(businessId, runId);
+      return ledger.map(budgetReadModel);
     },
   };
 }

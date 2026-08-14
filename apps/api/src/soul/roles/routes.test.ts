@@ -1,9 +1,16 @@
 /** Access-level route tests pin the gate for reads and writes of grantable authority. */
 
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { GitSyncService } from "@tulipfarm/soul";
+import {
+  type CommitSigner,
+  type Logger,
+  SoulGitStore,
+  type SoulWriteResult,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../../app";
@@ -96,7 +103,9 @@ describe("access level routes", () => {
   let app: FastifyInstance;
   let store: MemorySessionStore;
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriter: SoulWriter;
+  /** Commit subjects the gateway accepted, so a rejected request can assert nothing landed. */
+  let commits: string[];
   let reconcile: ReturnType<typeof vi.fn>;
   let adminSid: string;
   let memberSid: string;
@@ -104,7 +113,27 @@ describe("access level routes", () => {
 
   beforeEach(async () => {
     soulPath = await mkdtemp(join(tmpdir(), "tf-level-routes-"));
-    withSync = vi.fn(async () => undefined);
+    for (const args of [
+      ["init", "--quiet", "--initial-branch=main"],
+      ["config", "user.email", "bot@example.com"],
+      ["config", "user.name", "bot"],
+    ]) {
+      execFileSync("git", args, { cwd: soulPath });
+    }
+    const signer: CommitSigner = { keyId: "test-key", sign: () => "signature" };
+    const noop = () => undefined;
+    const logger = { info: noop, warn: noop, error: noop, debug: noop } as unknown as Logger;
+    const writer = new SoulWriter(new SoulGitStore(soulPath, signer, logger), logger);
+    commits = [];
+    soulWriter = {
+      exists: (kind, slug) => writer.exists(kind, slug),
+      read: (kind, slug) => writer.read(kind, slug),
+      apply: async (request): Promise<SoulWriteResult> => {
+        const result = await writer.apply(request);
+        commits.push(request.subject);
+        return result;
+      },
+    } as SoulWriter;
     reconcile = vi.fn(async () => undefined);
     auditWrite = vi.fn(async () => undefined);
     store = new MemorySessionStore();
@@ -117,7 +146,7 @@ describe("access level routes", () => {
 
     app = await buildApp({ sessionStore: store, userRepo, tokenRepo });
     registerAccessLevelRoutes(app, {
-      gitSync: { path: soulPath, withSync } as unknown as GitSyncService,
+      soulWriter,
       requireAuth: makeRequireAuth({ store, userRepo, tokenRepo }),
       catalog: () => CATALOG,
       reconcile: reconcile as unknown as () => Promise<void>,
@@ -171,7 +200,7 @@ describe("access level routes", () => {
     ] as const)("refuses %s %s for a member", async (method, url, payload) => {
       const res = await app.inject(as(memberSid, method, url, payload));
       expect(res.statusCode).toBe(403);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
 
     /* The catalog maps grantable authority, so it is owner-only. */
@@ -254,7 +283,7 @@ describe("access level routes", () => {
         as(adminSid, "POST", "/api/v1/authz/levels", { name: "Empty", capabilities: [] })
       );
       expect(res.statusCode).toBe(400);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
   });
 
@@ -289,12 +318,12 @@ describe("access level routes", () => {
         as(adminSid, "PATCH", `/api/v1/authz/levels/${encodeURIComponent("../..")}`, CREATE)
       );
       expect(res.statusCode).toBe(404);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
 
     it("refuses a level with no capabilities", async () => {
       await app.inject(as(adminSid, "POST", "/api/v1/authz/levels", CREATE));
-      withSync.mockClear();
+      commits.length = 0;
       const res = await app.inject(
         as(adminSid, "PATCH", "/api/v1/authz/levels/kitchen-staff", {
           name: "Kitchen staff",
@@ -302,7 +331,7 @@ describe("access level routes", () => {
         })
       );
       expect(res.statusCode).toBe(400);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
   });
 
@@ -331,7 +360,7 @@ describe("access level routes", () => {
         as(adminSid, "DELETE", `/api/v1/authz/levels/${encodeURIComponent("../..")}`)
       );
       expect(res.statusCode).toBe(404);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(commits).toEqual([]);
     });
   });
 

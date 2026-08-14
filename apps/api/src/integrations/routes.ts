@@ -1,15 +1,15 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { SecretsService } from "@tulipfarm/secrets";
 import {
   authStepProducesEnv,
   authStepSatisfied,
-  type GitSyncService,
   type IntegrationManifest,
   resolveAuthSteps,
   resolveGrants,
   type SoulIntegration,
   type SoulLoader,
+  type SoulWrite,
+  type SoulWriter,
 } from "@tulipfarm/soul";
 import type { IntegrationStore } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -20,11 +20,12 @@ import { ErrorSchema } from "../auth/schemas";
 import { commitActorFromRequest } from "../soul/commit-actor";
 import type { BundledIntegration } from "../soul/integrations/bundled";
 import { loadIntegrationRegistry, type RegistryEntry } from "../soul/integrations/registry";
+import { isSoulWriteError, soulWriteHttpError } from "../soul/write-errors";
 import { brandIcon } from "./brand-icon";
 import { deleteConnectionSecrets, ForeignSecretRefError } from "./connection-env";
 import { mergeConnectionEnv } from "./connection-writer";
 import { isGitHubInstalled } from "./github-status";
-import { readIntegrationLock, writeIntegrationLock } from "./install";
+import { readIntegrationLock, serializeIntegrationLock } from "./install";
 import { refuseNonOperator } from "./operator";
 
 /**
@@ -188,7 +189,7 @@ const IntegrationSummarySchema = {
 export function registerIntegrationRoutes(
   app: FastifyInstance,
   soulLoader: SoulLoader,
-  gitSync: GitSyncService,
+  soulWriter: SoulWriter,
   secretsService: SecretsService,
   bundled: ReadonlyMap<string, BundledIntegration>,
   requireAuth: PreHandler,
@@ -201,34 +202,55 @@ export function registerIntegrationRoutes(
   audit?: AuditService
 ): void {
   const auditWrite = makeSoulAuditWriter(audit);
-  async function materializeIfBundledOnly(slug: string): Promise<void> {
+  // Materialize a bundled-only integration into the soul repo so its connection state has a home.
+  // The manifest is authored as the legacy `manifest.yml` (definitionMode "legacy"), and its
+  // companions land in the SAME atomic changeset — the loader treats a declared-but-missing egress
+  // spec or ingress handler as fatal, so a partial materialization must never be committable.
+  async function materializeIfBundledOnly(
+    slug: string,
+    actor: ReturnType<typeof commitActorFromRequest>
+  ): Promise<void> {
     if (soulLoader.integrations.has(slug)) return;
     const bundledEntry = bundled.get(slug);
     if (!bundledEntry) return;
-    const dir = join(gitSync.path, "integrations", slug);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, "manifest.yml"), stringifyYaml(bundledEntry.manifest), "utf8");
+    const changes: SoulWrite[] = [
+      {
+        op: "put",
+        target: { kind: "Integration", slug, definitionMode: "legacy" },
+        content: stringifyYaml(bundledEntry.manifest),
+      },
+    ];
     if (bundledEntry.setupGuide) {
-      await writeFile(join(dir, "setup-guide.md"), bundledEntry.setupGuide, "utf8");
+      changes.push({
+        op: "put",
+        target: { kind: "Integration", slug, companion: "setup-guide.md" },
+        content: bundledEntry.setupGuide,
+      });
     }
-    // The manifest names this file, and the Soul loader treats a declared-but-missing spec as
-    // fatal — so it must land with the manifest, not after it.
     if (bundledEntry.egressSpecFile) {
-      await writeFile(
-        join(dir, bundledEntry.egressSpecFile.file),
-        bundledEntry.egressSpecFile.raw,
-        "utf8"
-      );
+      changes.push({
+        op: "put",
+        target: { kind: "Integration", slug, companion: bundledEntry.egressSpecFile.file },
+        content: bundledEntry.egressSpecFile.raw,
+      });
     }
     // Same contract for the ingress classifier: the manifest names it and the loader hashes it,
     // so a channel installed without its handler would fail to load rather than run unclassified.
     if (bundledEntry.ingressHandlerFile) {
-      await writeFile(
-        join(dir, bundledEntry.ingressHandlerFile.file),
-        bundledEntry.ingressHandlerFile.raw,
-        "utf8"
-      );
+      changes.push({
+        op: "put",
+        target: { kind: "Integration", slug, companion: bundledEntry.ingressHandlerFile.file },
+        content: bundledEntry.ingressHandlerFile.raw,
+      });
     }
+    await soulWriter.apply({
+      subject: `soul: materialize integration ${slug}`,
+      source: "api",
+      actor,
+      businessId: DEPLOYMENT_BUSINESS_ID,
+      changes,
+    });
+    await soulLoader.reload();
   }
 
   function resolve(slug: string): MergedIntegration | undefined {
@@ -317,6 +339,9 @@ export function registerIntegrationRoutes(
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -348,23 +373,28 @@ export function registerIntegrationRoutes(
         return reply.code(400).send({ error: `missing required env: ${missing.join(", ")}` });
       }
 
-      await materializeIfBundledOnly(name);
+      const actor = commitActorFromRequest(req);
       let enabled: boolean;
       let connectedNow: boolean;
       try {
+        await materializeIfBundledOnly(name, actor);
         ({ enabled, connectedNow } = await mergeConnectionEnv(
-          { gitSync, soulLoader, secrets: secretsService },
+          { soulWriter, soulLoader, secrets: secretsService },
           {
             slug: name,
             manifest: entry.manifest,
             patch: env,
             commitMessage: `soul: connect integration ${name}`,
-            actor: commitActorFromRequest(req),
+            actor,
           }
         ));
       } catch (error) {
         if (error instanceof ForeignSecretRefError) {
           return reply.code(400).send({ error: error.message });
+        }
+        if (isSoulWriteError(error)) {
+          const mapped = soulWriteHttpError(error);
+          return reply.code(mapped.status).send(mapped.body);
         }
         throw error;
       }
@@ -396,9 +426,13 @@ export function registerIntegrationRoutes(
             required: ["status"],
             properties: { status: { type: "string" } },
           },
+          400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -411,13 +445,27 @@ export function registerIntegrationRoutes(
       const soulEntry: SoulIntegration | undefined = soulLoader.integrations.get(name);
       if (!soulEntry) return reply.code(404).send({ error: `integration not connected: ${name}` });
 
-      const dir = join(gitSync.path, "integrations", name);
-      await writeFile(
-        join(dir, "connection.yaml"),
-        stringifyYaml({ enabled: false, env: soulEntry.connection?.env ?? {} }),
-        "utf8"
-      );
-      await gitSync.withSync(`soul: disconnect integration ${name}`, commitActorFromRequest(req));
+      try {
+        await soulWriter.apply({
+          subject: `soul: disconnect integration ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [
+            {
+              op: "put",
+              target: { kind: "Integration", slug: name, companion: "connection.yaml" },
+              content: stringifyYaml({ enabled: false, env: soulEntry.connection?.env ?? {} }),
+            },
+          ],
+        });
+      } catch (error) {
+        if (isSoulWriteError(error)) {
+          const mapped = soulWriteHttpError(error);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw error;
+      }
       await soulLoader.reload();
       // An agent must not keep calling a provider whose credential the operator just revoked.
       const revoked = declarativeTools?.sync();
@@ -439,9 +487,13 @@ export function registerIntegrationRoutes(
         params: { type: "object", required: ["name"], properties: { name: { type: "string" } } },
         response: {
           204: { type: "null" },
+          400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
           404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -451,16 +503,35 @@ export function registerIntegrationRoutes(
       if (!NAME_RE.test(name) || !soulLoader.integrations.has(name)) {
         return reply.code(404).send({ error: `integration not found: ${name}` });
       }
-      await rm(join(gitSync.path, "integrations", name), { recursive: true, force: true });
       await deleteConnectionSecrets(name, secretsService);
       // Drop the provenance record too, so a later reinstall from a different source is not
-      // reported against the old one.
-      const lock = await readIntegrationLock(gitSync.path);
+      // reported against the old one. The lock is a root singleton, so it never overlaps the
+      // integration directory this changeset also deletes.
+      const lock = readIntegrationLock(soulWriter);
+      const changes: SoulWrite[] = [{ op: "deleteArtifact", kind: "Integration", slug: name }];
       if (name in lock.integrations) {
         delete lock.integrations[name];
-        await writeIntegrationLock(gitSync.path, lock);
+        changes.push({
+          op: "put",
+          target: { kind: "IntegrationsLock" },
+          content: serializeIntegrationLock(lock),
+        });
       }
-      await gitSync.withSync(`soul: remove integration ${name}`, commitActorFromRequest(req));
+      try {
+        await soulWriter.apply({
+          subject: `soul: remove integration ${name}`,
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes,
+        });
+      } catch (error) {
+        if (isSoulWriteError(error)) {
+          const mapped = soulWriteHttpError(error);
+          return reply.code(mapped.status).send(mapped.body);
+        }
+        throw error;
+      }
       await soulLoader.reload();
       declarativeTools?.sync();
       await auditWrite(req, "integration.remove", `integration:${name}`, { secretsDeleted: true });

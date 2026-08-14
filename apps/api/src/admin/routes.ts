@@ -1,3 +1,4 @@
+import type { BudgetExhaustionPolicy } from "@tulipfarm/storage";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { makeRateLimitHook, type RateLimiter } from "../rate-limit";
 
@@ -46,6 +47,18 @@ export interface RunReadModel {
   readonly guardrailDecisions: readonly Record<string, unknown>[];
   readonly lineage: readonly Record<string, unknown>[];
   readonly costs: { readonly amountUsd: number; readonly modelTokens: number };
+}
+
+/**
+ * One limit key of a Run's write-once budget ledger (`run_budgets`), projected for reading: the
+ * committed ceiling, how much has been consumed against it, and the exhaustion policy that applies
+ * once it is spent. This is the enforced ledger, not a recomputation.
+ */
+export interface RunBudgetReadModel {
+  readonly key: string;
+  readonly limit: number;
+  readonly consumed: number;
+  readonly exhaustionPolicy: BudgetExhaustionPolicy;
 }
 
 export type RunCommandAction = "pause" | "resume" | "cancel" | "retry" | "reconcile";
@@ -137,6 +150,14 @@ export interface OperationalApiDeps {
     options: { cursor?: string; limit: number }
   ): Promise<{ items: readonly RunReadModel[]; nextCursor: string | null }>;
   getRun(grant: OperationalGrant, runId: string): Promise<RunReadModel | null>;
+  /**
+   * The write-once budget ledger for one Run. `null` denies existence (unknown Run, or a Run owned
+   * by another business — the two are indistinguishable), which the route answers as `404`.
+   */
+  getRunBudgets(
+    grant: OperationalGrant,
+    runId: string
+  ): Promise<readonly RunBudgetReadModel[] | null>;
   commandRun(
     grant: OperationalGrant,
     input: RunCommandInput
@@ -336,6 +357,18 @@ const runSchema = {
   },
 } as const;
 
+const budgetSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["key", "limit", "consumed", "exhaustionPolicy"],
+  properties: {
+    key: { type: "string" },
+    limit: { type: "integer" },
+    consumed: { type: "integer" },
+    exhaustionPolicy: { type: "string", enum: ["failure_path", "attention_required"] },
+  },
+} as const;
+
 export function registerOperationalRoutes(
   app: FastifyInstance,
   deps: OperationalApiDeps,
@@ -413,6 +446,47 @@ export function registerOperationalRoutes(
       const run = await deps.getRun(grant, id);
       if (!run) return fail(reply, request, 404, "run_not_found", "Run not found.");
       return { run };
+    }
+  );
+
+  app.get(
+    "/api/v1/runs/:id/budgets",
+    {
+      preHandler: limitedAuth,
+      schema: {
+        description:
+          "Read the write-once budget ledger for one Run: per limit key, the committed ceiling, " +
+          "the amount consumed against it, and the exhaustion policy applied once it is spent. " +
+          "This is the enforced `run_budgets` ledger, not a recomputation. A Run with no ledger " +
+          "rows is unbounded and returns an empty list. An unknown Run and a Run owned by another " +
+          "business are indistinguishable — both answer 404 — so the route is not an existence " +
+          "oracle.",
+        tags: ["runs"],
+        security,
+        params: idParams,
+        response: {
+          200: {
+            type: "object",
+            additionalProperties: false,
+            required: ["runId", "budgets"],
+            properties: {
+              runId: { type: "string" },
+              budgets: { type: "array", items: budgetSchema },
+            },
+          },
+          401: errorSchema,
+          403: errorSchema,
+          404: errorSchema,
+        },
+      },
+    },
+    async (request, reply) => {
+      const grant = await requireGrant(request, reply, deps, "runs:read");
+      if (!grant) return;
+      const { id } = request.params as { id: string };
+      const budgets = await deps.getRunBudgets(grant, id);
+      if (!budgets) return fail(reply, request, 404, "run_not_found", "Run not found.");
+      return { runId: id, budgets };
     }
   );
 

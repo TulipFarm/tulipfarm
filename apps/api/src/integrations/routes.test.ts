@@ -1,6 +1,3 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { InMemoryAuditEventRepo } from "@tulipfarm/audit";
 import type { GitSyncService, SoulIntegration, SoulLoader } from "@tulipfarm/soul";
 import type { FastifyInstance } from "fastify";
@@ -15,6 +12,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
+import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 import type { SlackAuthTestResult } from "./slack-binding";
 
 const TEST_CSRF = "a".repeat(64);
@@ -125,8 +123,7 @@ describe("integrations routes", () => {
   let auditRepo: InMemoryAuditEventRepo;
   let store: MemorySessionStore;
   let sid: string;
-  let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soul: ReturnType<typeof makeSoulWriterDouble>;
   let reload: ReturnType<typeof vi.fn>;
   let soulIntegrations: Map<string, SoulIntegration>;
   let soulLoader: SoulLoader;
@@ -134,7 +131,6 @@ describe("integrations routes", () => {
   let bundledIntegrations: Map<string, BundledIntegration>;
   let integrationStore: FakeIntegrationStore;
   let memberSid: string;
-  const temps: string[] = [];
 
   beforeEach(async () => {
     store = new MemorySessionStore();
@@ -145,27 +141,23 @@ describe("integrations routes", () => {
     const member = await createUser(userRepo, "member@example.com", "pass", "member");
     memberSid = await store.create(member._id);
 
-    soulPath = await mkdtemp(join(tmpdir(), "integrations-soul-"));
-    temps.push(soulPath);
-    withSync = vi.fn().mockImplementation(async () => {
-      soulLoader.integrations = await reloadIntegrationsFromDisk();
-      return { sha: "abc1234", filesChanged: 1 };
-    });
+    // The write gateway is an in-memory double (ADR-007): handlers address artifacts by kind/slug
+    // and the double models a flat tree, so `reload` reprojects the catalog from what was written
+    // rather than from bytes on disk.
+    soul = makeSoulWriterDouble();
     reload = vi.fn().mockImplementation(async () => {
-      soulLoader.integrations = await reloadIntegrationsFromDisk();
+      soulLoader.integrations = reloadIntegrationsFromTree();
     });
 
-    async function reloadIntegrationsFromDisk(): Promise<Map<string, SoulIntegration>> {
+    function reloadIntegrationsFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      const dir = join(soulPath, "integrations", "slack");
-      try {
-        const manifest = parseYaml(await readFile(join(dir, "manifest.yml"), "utf8"));
-        let connection: SoulIntegration["connection"];
-        try {
-          connection = parseYaml(await readFile(join(dir, "connection.yaml"), "utf8"));
-        } catch {}
+      const manifestRaw = soul.writer.read("Integration", "slack");
+      if (manifestRaw !== null) {
+        const manifest = parseYaml(manifestRaw);
+        const connectionRaw = soul.writer.readCompanion("Integration", "slack", "connection.yaml");
+        const connection = connectionRaw === null ? undefined : parseYaml(connectionRaw);
         map.set("slack", { slug: "slack", sourceIntegration: "slack", manifest, connection });
-      } catch {}
+      }
       return map;
     }
 
@@ -180,14 +172,15 @@ describe("integrations routes", () => {
       reload,
     } as unknown as SoulLoader;
 
+    secretsService = new FakeSecretsService();
+    // The integration routes write only through `soul.writer`; `gitSync` is a bare stub because
+    // app.ts still gates the whole Soul route block on its presence (and other Soul routes use it).
     const gitSync = {
-      path: soulPath,
-      withSync,
+      path: "/soul",
+      withSync: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
-
-    secretsService = new FakeSecretsService();
     bundledIntegrations = new Map([
       [
         "slack",
@@ -238,6 +231,7 @@ describe("integrations routes", () => {
       userRepo,
       tokenRepo,
       gitSync,
+      soulWriter: soul.writer,
       soulLoader,
       secretsService: secretsService as never,
       bundledIntegrations,
@@ -260,7 +254,6 @@ describe("integrations routes", () => {
 
   afterEach(async () => {
     await app.close();
-    for (const dir of temps.splice(0)) await rm(dir, { recursive: true, force: true });
   });
 
   const auth = () => ({ [SESSION_COOKIE]: sid, [CSRF_COOKIE]: TEST_CSRF });
@@ -426,12 +419,23 @@ describe("integrations routes", () => {
       expect(res.json()).toEqual({ status: "connected", toolCount: 0 });
 
       const written = parseYaml(
-        await readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
+        soul.writer.readCompanion("Integration", "slack", "connection.yaml") ?? ""
       );
       expect(written.enabled).toBe(true);
       expect(written.env.SLACK_TEAM_ID).toBe("T123");
       expect(written.env.SLACK_BOT_TOKEN).toMatch(/^secret:\/\//);
       expect(await secretsService.get("integration.slack.SLACK_BOT_TOKEN")).toBe("xoxb-secret");
+
+      // The manifest materialized as legacy `manifest.yml`, and the connection landed as a
+      // companion in the same slug — both through the gateway, never a raw fs write.
+      const connectWrite = soul.applied.at(-1);
+      expect(connectWrite?.source).toBe("api");
+      expect(connectWrite?.changes).toEqual([
+        expect.objectContaining({
+          op: "put",
+          target: expect.objectContaining({ kind: "Integration", slug: "slack" }),
+        }),
+      ]);
 
       const detail = await app.inject({
         method: "GET",
@@ -458,9 +462,7 @@ describe("integrations routes", () => {
       });
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toContain("may not reference another secret");
-      await expect(
-        readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
-      ).rejects.toThrow();
+      expect(soul.writer.readCompanion("Integration", "slack", "connection.yaml")).toBeNull();
     });
 
     it("accepts a resubmitted reference to its own sealed value", async () => {
@@ -508,7 +510,7 @@ describe("integrations routes", () => {
       expect(res.json()).toEqual({ status: "disconnected" });
 
       const written = parseYaml(
-        await readFile(join(soulPath, "integrations", "slack", "connection.yaml"), "utf8")
+        soul.writer.readCompanion("Integration", "slack", "connection.yaml") ?? ""
       );
       expect(written.enabled).toBe(false);
       expect(written.env.SLACK_BOT_TOKEN).toMatch(/^secret:\/\//);

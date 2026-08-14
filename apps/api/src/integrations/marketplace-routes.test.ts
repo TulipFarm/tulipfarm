@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -15,6 +15,7 @@ import { MemorySessionStore } from "../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../auth/users";
 import type { PaginatedResult } from "../pagination";
 import type { BundledIntegration } from "../soul/integrations/bundled";
+import { makeSoulWriterDouble } from "../soul/soul-writer-double";
 
 /** Exercises browse and install through real local git clones, offline. */
 
@@ -132,12 +133,11 @@ async function headOf(dir: string): Promise<string> {
 describe("integration marketplace routes", () => {
   let app: FastifyInstance;
   let sid: string;
-  let soulPath: string;
+  let soul: ReturnType<typeof makeSoulWriterDouble>;
   let registryDir: string;
   let soulIntegrations: Map<string, SoulIntegration>;
   let soulLoader: SoulLoader;
   let bundledIntegrations: Map<string, BundledIntegration>;
-  let withSync: ReturnType<typeof vi.fn>;
   const temps: string[] = [];
 
   beforeEach(async () => {
@@ -148,8 +148,7 @@ describe("integration marketplace routes", () => {
     const user = await createUser(userRepo, "user@example.com", "pass", "admin");
     sid = await store.create(user._id);
 
-    soulPath = await mkdtemp(join(tmpdir(), "integrations-soul-"));
-    temps.push(soulPath);
+    soul = makeSoulWriterDouble();
 
     // Use a curated registry so tests do not drift with the shipped catalog.
     registryDir = await mkdtemp(join(tmpdir(), "integrations-registry-"));
@@ -174,34 +173,20 @@ describe("integration marketplace routes", () => {
     process.env.BUNDLED_INTEGRATIONS_DIR = registryDir;
 
     soulIntegrations = new Map();
-    async function reloadFromDisk(): Promise<Map<string, SoulIntegration>> {
+    function reloadFromTree(): Map<string, SoulIntegration> {
       const map = new Map<string, SoulIntegration>();
-      let names: string[];
-      try {
-        const { readdir } = await import("node:fs/promises");
-        names = (await readdir(join(soulPath, "integrations"), { withFileTypes: true }))
-          .filter((entry) => entry.isDirectory())
-          .map((entry) => entry.name);
-      } catch {
-        return map;
-      }
-      for (const name of names) {
-        const dir = join(soulPath, "integrations", name);
-        try {
-          const manifest = parseYaml(await readFile(join(dir, "manifest.yml"), "utf8"));
-          map.set(name, { slug: name, sourceIntegration: manifest.name, manifest });
-        } catch {
-          // not a readable integration
-        }
+      for (const name of ["asana", "broken", "linear", "slack", "sneaky"]) {
+        const manifestRaw = soul.writer.read("Integration", name);
+        if (manifestRaw === null) continue;
+        const manifest = parseYaml(manifestRaw);
+        const setupGuide =
+          soul.writer.readCompanion("Integration", name, "setup-guide.md") ?? undefined;
+        map.set(name, { slug: name, sourceIntegration: manifest.name, manifest, setupGuide });
       }
       return map;
     }
-    withSync = vi.fn().mockImplementation(async () => {
-      soulLoader.integrations = await reloadFromDisk();
-      return { sha: "abc1234", filesChanged: 1 };
-    });
     const reload = vi.fn().mockImplementation(async () => {
-      soulLoader.integrations = await reloadFromDisk();
+      soulLoader.integrations = reloadFromTree();
     });
     soulLoader = {
       integrations: soulIntegrations,
@@ -210,8 +195,8 @@ describe("integration marketplace routes", () => {
     } as unknown as SoulLoader;
 
     const gitSync = {
-      path: soulPath,
-      withSync,
+      path: "/soul",
+      withSync: vi.fn(),
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -226,6 +211,7 @@ describe("integration marketplace routes", () => {
       userRepo,
       tokenRepo,
       gitSync,
+      soulWriter: soul.writer,
       soulLoader,
       secretsService: new FakeSecretsService() as never,
       bundledIntegrations,
@@ -345,7 +331,7 @@ describe("integration marketplace routes", () => {
           issues: [],
         },
       ]);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(soul.applied).toHaveLength(0);
     });
 
     it("reports why a code-bearing integration is not installable instead of hiding it", async () => {
@@ -394,12 +380,10 @@ describe("integration marketplace routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toMatchObject({ name: "linear", ref: await headOf(repo) });
 
-      const written = parseYaml(
-        await readFile(join(soulPath, "integrations", "linear", "manifest.yml"), "utf8")
-      );
+      const written = parseYaml(soul.writer.read("Integration", "linear") ?? "");
       expect(written.name).toBe("linear");
 
-      const lock = JSON.parse(await readFile(join(soulPath, "integrations-lock.json"), "utf8"));
+      const lock = JSON.parse(soul.writer.read("IntegrationsLock") ?? "{}");
       expect(lock.integrations.linear).toMatchObject({
         sourceUrl: `file://${repo}`,
         sourceType: "git",
@@ -407,7 +391,17 @@ describe("integration marketplace routes", () => {
         ref: await headOf(repo),
       });
       expect(lock.integrations.linear.hash).toMatch(/^[0-9a-f]{64}$/);
-      expect(withSync).toHaveBeenCalledWith("soul: install integration linear", expect.any(Object));
+      const installWrite = soul.applied.at(-1);
+      expect(installWrite?.subject).toBe("soul: install integration linear");
+      expect(installWrite?.source).toBe("api");
+      expect(installWrite?.changes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            op: "put",
+            target: expect.objectContaining({ kind: "Integration", slug: "linear" }),
+          }),
+        ])
+      );
     });
 
     it("copies a setup guide when the repo ships one", async () => {
@@ -422,9 +416,9 @@ describe("integration marketplace routes", () => {
         headers,
         payload: { source: `file://${repo}` },
       });
-      expect(
-        await readFile(join(soulPath, "integrations", "linear", "setup-guide.md"), "utf8")
-      ).toBe("# Connect Linear");
+      expect(soul.writer.readCompanion("Integration", "linear", "setup-guide.md")).toBe(
+        "# Connect Linear"
+      );
     });
 
     it("makes the installed integration visible to the rest of the API", async () => {
@@ -486,10 +480,8 @@ describe("integration marketplace routes", () => {
           });
           expect(res.statusCode).toBe(400);
           expect(res.json().error).toContain(expected);
-          await expect(
-            readFile(join(soulPath, "integrations", "sneaky", "manifest.yml"), "utf8")
-          ).rejects.toThrow();
-          expect(withSync).not.toHaveBeenCalled();
+          expect(soul.writer.read("Integration", "sneaky")).toBeNull();
+          expect(soul.applied).toHaveLength(0);
         });
       }
     });
@@ -547,7 +539,7 @@ describe("integration marketplace routes", () => {
       // ACME_CLIENT_ID/SECRET are never supplied by an earlier step, so the flow can never finish.
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toContain("no earlier step supplies");
-      expect(withSync).not.toHaveBeenCalled();
+      expect(soul.applied).toHaveLength(0);
     });
 
     it("names the choices when a repo offers several integrations", async () => {
@@ -580,9 +572,7 @@ describe("integration marketplace routes", () => {
       });
       expect(res.statusCode).toBe(200);
       expect(res.json().name).toBe("asana");
-      await expect(
-        readFile(join(soulPath, "integrations", "linear", "manifest.yml"), "utf8")
-      ).rejects.toThrow();
+      expect(soul.writer.read("Integration", "linear")).toBeNull();
     });
 
     it("404s a name the repo does not offer", async () => {
@@ -649,15 +639,13 @@ describe("integration marketplace routes", () => {
         payload: { source: `file://${repo}` },
       });
       expect(res.statusCode).toBe(200);
-      await expect(
-        readFile(join(soulPath, "integrations", "linear", "setup-guide.md"), "utf8")
-      ).rejects.toThrow();
+      expect(soul.writer.readCompanion("Integration", "linear", "setup-guide.md")).toBeNull();
     });
 
     // Failed partial installs must not be loadable on the next boot.
     it("leaves nothing behind when the commit fails", async () => {
       const repo = await makeTemp({ linear: declarativeManifest("linear") });
-      withSync.mockRejectedValueOnce(new Error("git push rejected"));
+      soul.failNextWith(new Error("git push rejected"));
       const res = await app.inject({
         method: "POST",
         url: "/api/v1/integrations/install",
@@ -666,9 +654,8 @@ describe("integration marketplace routes", () => {
         payload: { source: `file://${repo}` },
       });
       expect(res.statusCode).toBe(500);
-      await expect(
-        readFile(join(soulPath, "integrations", "linear", "manifest.yml"), "utf8")
-      ).rejects.toThrow();
+      expect(soul.writer.read("Integration", "linear")).toBeNull();
+      expect(soul.applied).toHaveLength(0);
     });
 
     it("400s an unreachable repo", async () => {
@@ -701,7 +688,7 @@ describe("integration marketplace routes", () => {
         headers,
       });
       expect(res.statusCode).toBe(204);
-      const lock = JSON.parse(await readFile(join(soulPath, "integrations-lock.json"), "utf8"));
+      const lock = JSON.parse(soul.writer.read("IntegrationsLock") ?? "{}");
       expect(lock.integrations).toEqual({});
     });
   });

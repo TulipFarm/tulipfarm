@@ -2,16 +2,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assembleSystemPrompt } from "@tulipfarm/agent-runtime";
-import type { SoulAgent, SoulRoutine, SoulSkill } from "@tulipfarm/soul";
+import type { SoulAgent, SoulRoutine, SoulSkill, SoulWriter } from "@tulipfarm/soul";
 import { describe, expect, it, vi } from "vitest";
 import type { BundledSkill } from "../soul/skills/bundled";
 import {
-  beginSoulBatchTool,
   callSkillTool,
   completeStateTool,
   completeTaskTool,
   delegateToAgentTool,
-  endSoulBatchTool,
   getCurrentTimeTool,
   loadSkillReferenceTool,
   loadSkillTool,
@@ -19,7 +17,6 @@ import {
   type PlatformToolContext,
   routineForgeTool,
   routinePickerTool,
-  soulRepoCommitTool,
   soulRepoPushTool,
   transferToAgentTool,
   triggerRoutineTool,
@@ -56,6 +53,17 @@ function makeRoutine(name: string, title?: string, description?: string): SoulRo
   };
 }
 
+function makeSoulWriter(): SoulWriter & { apply: ReturnType<typeof vi.fn> } {
+  return {
+    apply: vi.fn().mockResolvedValue({
+      commitSha: "abc1234",
+      filesChanged: 1,
+      paths: [],
+      pushed: false,
+    }),
+  } as unknown as SoulWriter & { apply: ReturnType<typeof vi.fn> };
+}
+
 function makeCtx(
   skills: Record<string, SoulSkill> = {},
   agents: Record<string, SoulAgent> = {},
@@ -69,6 +77,7 @@ function makeCtx(
       routines: new Map(Object.entries(routines)),
     },
     soulPath,
+    soulWriter: makeSoulWriter(),
   };
 }
 
@@ -122,13 +131,18 @@ describe("platform authorization declarations", () => {
     ]);
   });
 
-  it("authorizes both halves of a Soul batch against the same resource", () => {
-    expect(beginSoulBatchTool.authorization.resources).toEqual(["soul.repo"]);
-    expect(endSoulBatchTool.authorization.resources).toEqual(["soul.repo"]);
-    expect(beginSoulBatchTool.targetsFor({})).toEqual([]);
-    expect(endSoulBatchTool.targetsFor({ message: "publish" })).toEqual([
-      { type: "soul.repo", id: "entire-repository" },
-    ]);
+  it("exposes no Tool that can commit the Soul repository directly", () => {
+    // ADR-007: an Agent reaches Soul only through SoulWriter, which validates and commits one
+    // artifact-addressed changeset. begin/end_soul_batch and soul_repo_commit were removed because
+    // they committed whatever happened to be dirty in the worktree, bypassing that entirely.
+    const names = new Set(PLATFORM_TOOLS.map((tool) => tool.name));
+    for (const removed of ["begin_soul_batch", "end_soul_batch", "soul_repo_commit"]) {
+      expect(names.has(removed)).toBe(false);
+    }
+  });
+
+  it("scopes the surviving repo-wide Tool to the whole repository", () => {
+    expect(soulRepoPushTool.authorization.resources).toEqual(["soul.repo"]);
     expect(soulRepoPushTool.targetsFor({})).toEqual([
       { type: "soul.repo", id: "entire-repository" },
     ]);
@@ -145,7 +159,6 @@ describe("platform authorization declarations", () => {
       triggerRoutineTool,
       routineForgeTool,
       routinePickerTool,
-      endSoulBatchTool,
       soulRepoPushTool,
     ];
     const rawInputs: unknown[] = [
@@ -188,12 +201,13 @@ describe("loadSkillTool", () => {
   });
 
   it("returns not_found when soulLoader is absent", async () => {
-    const res = await loadSkillTool.handler({ name: "anything" }, {});
+    const res = await loadSkillTool.handler({ name: "anything" }, { soulWriter: makeSoulWriter() });
     expect(res).toMatchObject({ success: false, error: { code: "not_found" } });
   });
 
   it("falls back to a bundled Skill when not in the Soul", async () => {
     const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
       bundledSkills: new Map([["resource-forge", makeBundledSkill("resource-forge")]]),
     };
     const res = await loadSkillTool.handler({ name: "resource-forge" }, ctx);
@@ -219,7 +233,7 @@ describe("completeTaskTool", () => {
   it("returns the structured completion result handed back to the front desk", async () => {
     const res = await completeTaskTool.handler(
       { status: "success", summary: "built invoices", result: { resources: 1 } },
-      {}
+      { soulWriter: makeSoulWriter() }
     );
     expect(res).toMatchObject({
       success: true,
@@ -233,7 +247,10 @@ describe("completeTaskTool", () => {
   });
 
   it("returns validation_error for an invalid status", async () => {
-    const res = await completeTaskTool.handler({ status: "weird" }, {});
+    const res = await completeTaskTool.handler(
+      { status: "weird" },
+      { soulWriter: makeSoulWriter() }
+    );
     expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
@@ -312,6 +329,7 @@ describe("loadSkillReferenceTool", () => {
     await mkdir(join(skillDirectory, "references"), { recursive: true });
     await writeFile(join(skillDirectory, "references", "guide.md"), "bundled guide", "utf8");
     const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
       bundledSkills: new Map([["research", makeBundledSkill("research", skillDirectory)]]),
     };
     try {
@@ -410,6 +428,7 @@ describe("transferToAgentTool", () => {
 
   it("accepts the built-in platform assistant as a transfer target", async () => {
     const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
       platformAgentNames: new Set(["GeneralAssistant"]),
     };
     const res = await transferToAgentTool.handler(
@@ -526,6 +545,7 @@ describe("routinePickerTool", () => {
 
   it("falls back to name as title when config has no title", async () => {
     const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
       soulLoader: {
         skills: new Map(),
         agents: new Map(),
@@ -542,79 +562,6 @@ describe("routinePickerTool", () => {
   it("returns empty list when no routines in soul", async () => {
     const res = await routinePickerTool.handler({}, makeCtx());
     expect(res).toEqual({ success: true, data: { routines: [] } });
-  });
-});
-
-// ── begin_soul_batch ──────────────────────────────────────────────────────────
-
-describe("beginSoulBatchTool", () => {
-  it("returns status open", async () => {
-    const res = await beginSoulBatchTool.handler({}, makeCtx());
-    expect(res).toEqual({ success: true, data: { status: "open" } });
-  });
-});
-
-// ── end_soul_batch ────────────────────────────────────────────────────────────
-
-describe("endSoulBatchTool", () => {
-  it("calls withSync and returns sha + filesChanged", async () => {
-    const gitSync = makeGitSync({ commitResult: { sha: "deadbeef", filesChanged: 3 } });
-    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
-    const res = await endSoulBatchTool.handler({ message: "soul: batch write" }, ctx);
-    expect(res).toEqual({ success: true, data: { sha: "deadbeef", filesChanged: 3 } });
-    expect(gitSync.withSync).toHaveBeenCalledWith("soul: batch write", undefined);
-  });
-
-  it("returns internal_error when gitSync absent", async () => {
-    const res = await endSoulBatchTool.handler({ message: "batch" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
-  });
-
-  it("returns internal_error on withSync failure", async () => {
-    const gitSync = makeGitSync({ commitError: "git push failed" });
-    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
-    const res = await endSoulBatchTool.handler({ message: "batch" }, ctx);
-    expect(res).toMatchObject({
-      success: false,
-      error: { code: "internal_error", message: "git push failed" },
-    });
-  });
-
-  it("returns validation_error for missing message", async () => {
-    const res = await endSoulBatchTool.handler({}, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
-  });
-});
-
-// ── soul_repo_commit ──────────────────────────────────────────────────────────
-
-describe("soulRepoCommitTool", () => {
-  it("calls commit and returns sha + filesChanged", async () => {
-    const gitSync = makeGitSync({ commitResult: { sha: "c0ffee", filesChanged: 1 } });
-    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
-    const res = await soulRepoCommitTool.handler({ message: "soul: add agent" }, ctx);
-    expect(res).toEqual({ success: true, data: { sha: "c0ffee", filesChanged: 1 } });
-    expect(gitSync.commit).toHaveBeenCalledWith("soul: add agent", undefined);
-  });
-
-  it("returns internal_error when gitSync absent", async () => {
-    const res = await soulRepoCommitTool.handler({ message: "x" }, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "internal_error" } });
-  });
-
-  it("returns internal_error on commit failure", async () => {
-    const gitSync = makeGitSync({ commitError: "nothing to commit" });
-    const ctx: PlatformToolContext = { ...makeCtx(), gitSync };
-    const res = await soulRepoCommitTool.handler({ message: "x" }, ctx);
-    expect(res).toMatchObject({
-      success: false,
-      error: { code: "internal_error", message: "nothing to commit" },
-    });
-  });
-
-  it("returns validation_error for missing message", async () => {
-    const res = await soulRepoCommitTool.handler({}, makeCtx());
-    expect(res).toMatchObject({ success: false, error: { code: "validation_error" } });
   });
 });
 
@@ -697,6 +644,7 @@ describe("callSkillTool", () => {
   it("loads a bundled Skill in routine context", async () => {
     const bundled = makeBundledSkill("summarize");
     const ctx: PlatformToolContext = {
+      soulWriter: makeSoulWriter(),
       routineContext: routineCtx,
       bundledSkills: new Map([[bundled.name, bundled]]),
     };
@@ -754,9 +702,6 @@ describe("PLATFORM_TOOLS registry", () => {
       "trigger_routine",
       "routine_forge",
       "routine_picker",
-      "begin_soul_batch",
-      "end_soul_batch",
-      "soul_repo_commit",
       "soul_repo_push",
       "call_skill",
       "complete_state",
@@ -769,9 +714,6 @@ describe("PLATFORM_TOOLS registry", () => {
     const byName = Object.fromEntries(PLATFORM_TOOLS.map((t) => [t.name, t.mutating]));
     expect(byName.trigger_routine).toBe(true);
     expect(byName.routine_picker).toBe(false);
-    expect(byName.begin_soul_batch).toBe(false);
-    expect(byName.end_soul_batch).toBe(true);
-    expect(byName.soul_repo_commit).toBe(true);
     expect(byName.soul_repo_push).toBe(true);
     expect(byName.call_skill).toBe(false);
     expect(byName.complete_state).toBe(true);

@@ -1,8 +1,16 @@
 /** Access-level authoring tests focus on refusals that would otherwise save but grant nothing. */
 
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  type CommitSigner,
+  type Logger,
+  SoulGitStore,
+  type SoulWriteResult,
+  SoulWriter,
+} from "@tulipfarm/soul";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CapabilityCatalog } from "../../authz/capabilities";
 import {
@@ -152,14 +160,52 @@ describe("buildLevelDefinition", () => {
   });
 });
 
+/**
+ * A real gateway over a real repository. These tests assert artifacts actually land on disk, so a
+ * mocked writer would let a path, validation or atomicity regression pass unnoticed.
+ */
+function makeSoulHarness(soulPath: string): {
+  soulWriter: SoulWriter;
+  committed: ReturnType<typeof vi.fn>;
+} {
+  for (const args of [
+    ["init", "--quiet", "--initial-branch=main"],
+    ["config", "user.email", "bot@example.com"],
+    ["config", "user.name", "bot"],
+  ]) {
+    execFileSync("git", args, { cwd: soulPath });
+  }
+  const signer: CommitSigner = { keyId: "test-key", sign: () => "signature" };
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  } as unknown as Logger;
+  const writer = new SoulWriter(new SoulGitStore(soulPath, signer, logger), logger);
+  const committed = vi.fn();
+  const soulWriter = {
+    exists: (kind, slug) => writer.exists(kind, slug),
+    read: (kind, slug) => writer.read(kind, slug),
+    apply: async (request): Promise<SoulWriteResult> => {
+      const result = await writer.apply(request);
+      committed(request.subject);
+      return result;
+    },
+  } as SoulWriter;
+  return { soulWriter, committed };
+}
+
 describe("createLevel and deleteLevel", () => {
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriter: SoulWriter;
+  /** Records each gateway commit. */
+  let committed: ReturnType<typeof vi.fn>;
   let reconcile: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     soulPath = await mkdtemp(join(tmpdir(), "tf-levels-"));
-    withSync = vi.fn(async () => undefined);
+    ({ soulWriter, committed } = makeSoulHarness(soulPath));
     reconcile = vi.fn(async () => undefined);
   });
 
@@ -169,7 +215,7 @@ describe("createLevel and deleteLevel", () => {
 
   function deps() {
     return {
-      gitSync: { path: soulPath, withSync } as never,
+      soulWriter,
       catalog: () => CATALOG,
       reconcile: reconcile as unknown as () => Promise<void>,
     };
@@ -186,10 +232,10 @@ describe("createLevel and deleteLevel", () => {
     const written = await readFile(join(soulPath, "roles", "kitchen-staff", "role.yaml"), "utf8");
     expect(written).toContain("kind: Role");
     expect(written).toContain("record.read");
-    expect(withSync).toHaveBeenCalledOnce();
+    expect(committed).toHaveBeenCalledOnce();
     // Order matters: projecting before the commit would leave a durable row with no artifact
     // behind it, which the next reconcile would reap.
-    expect(withSync.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
       reconcile.mock.invocationCallOrder[0] ?? 0
     );
   });
@@ -207,9 +253,18 @@ describe("createLevel and deleteLevel", () => {
    * they cannot see.
    */
   it("leaves nothing behind when the commit fails", async () => {
-    withSync.mockRejectedValueOnce(new Error("git is unhappy"));
+    const failing = {
+      ...deps(),
+      soulWriter: {
+        exists: () => false,
+        read: () => null,
+        apply: async () => {
+          throw new Error("git is unhappy");
+        },
+      } as unknown as SoulWriter,
+    };
     await expect(
-      createLevel({ name: "Doomed", capabilities: ["record.read"] }, deps())
+      createLevel({ name: "Doomed", capabilities: ["record.read"] }, failing)
     ).rejects.toThrow("git is unhappy");
 
     await expect(
@@ -222,17 +277,17 @@ describe("createLevel and deleteLevel", () => {
     await expect(
       createLevel({ name: "Bad", capabilities: ["nope.nothing"] }, deps())
     ).rejects.toThrowError(expect.objectContaining({ code: "unknown_capabilities" }));
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   it("deletes a level, commits, and reprojects", async () => {
     await createLevel({ name: "Temp", capabilities: ["record.read"] }, deps());
-    withSync.mockClear();
+    committed.mockClear();
 
     await deleteLevel("temp", deps());
 
     await expect(readFile(join(soulPath, "roles", "temp", "role.yaml"), "utf8")).rejects.toThrow();
-    expect(withSync).toHaveBeenCalledOnce();
+    expect(committed).toHaveBeenCalledOnce();
     expect(reconcile).toHaveBeenCalledTimes(2);
   });
 
@@ -240,14 +295,14 @@ describe("createLevel and deleteLevel", () => {
     await expect(deleteLevel("owner", deps())).rejects.toThrowError(
       expect.objectContaining({ code: "reserved_slug" })
     );
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   it("reports a level that does not exist rather than committing an empty change", async () => {
     await expect(deleteLevel("ghost", deps())).rejects.toThrowError(
       expect.objectContaining({ code: "not_found" })
     );
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   /*
@@ -258,7 +313,7 @@ describe("createLevel and deleteLevel", () => {
   it("reads the catalog at the moment of the call", async () => {
     let catalog: CapabilityCatalog = { areas: [], unavailable: [] };
     const live = {
-      gitSync: { path: soulPath, withSync } as never,
+      soulWriter,
       catalog: () => catalog,
       reconcile: reconcile as unknown as () => Promise<void>,
     };
@@ -284,12 +339,13 @@ describe("createLevel and deleteLevel", () => {
 /** Editing must preserve durable role ids and existing assignments. */
 describe("updateLevel", () => {
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriter: SoulWriter;
+  let committed: ReturnType<typeof vi.fn>;
   let reconcile: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     soulPath = await mkdtemp(join(tmpdir(), "tf-levels-edit-"));
-    withSync = vi.fn(async () => undefined);
+    ({ soulWriter, committed } = makeSoulHarness(soulPath));
     reconcile = vi.fn(async () => undefined);
   });
 
@@ -299,7 +355,7 @@ describe("updateLevel", () => {
 
   function deps() {
     return {
-      gitSync: { path: soulPath, withSync } as never,
+      soulWriter,
       catalog: () => CATALOG,
       reconcile: reconcile as unknown as () => Promise<void>,
     };
@@ -349,7 +405,7 @@ describe("updateLevel", () => {
 
   it("commits before projecting", async () => {
     await createLevel({ name: "Kitchen", capabilities: ["record.read"] }, deps());
-    withSync.mockClear();
+    committed.mockClear();
     reconcile.mockClear();
 
     await updateLevel(
@@ -358,8 +414,8 @@ describe("updateLevel", () => {
       deps()
     );
 
-    expect(withSync).toHaveBeenCalledOnce();
-    expect(withSync.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(committed).toHaveBeenCalledOnce();
+    expect(committed.mock.invocationCallOrder[0]).toBeLessThan(
       reconcile.mock.invocationCallOrder[0] ?? 0
     );
   });
@@ -371,10 +427,19 @@ describe("updateLevel", () => {
   it("puts the previous artifact back when the commit fails", async () => {
     await createLevel({ name: "Kitchen", capabilities: ["record.read"] }, deps());
     const before = await readFile(join(soulPath, "roles", "kitchen", "role.yaml"), "utf8");
-    withSync.mockRejectedValueOnce(new Error("git is unhappy"));
+    const failing = {
+      ...deps(),
+      soulWriter: {
+        exists: (kind: never, slug: never) => soulWriter.exists(kind, slug),
+        read: (kind: never, slug: never) => soulWriter.read(kind, slug),
+        apply: async () => {
+          throw new Error("git is unhappy");
+        },
+      } as unknown as SoulWriter,
+    };
 
     await expect(
-      updateLevel("kitchen", { name: "Kitchen", capabilities: ["github.issue.create"] }, deps())
+      updateLevel("kitchen", { name: "Kitchen", capabilities: ["github.issue.create"] }, failing)
     ).rejects.toThrow("git is unhappy");
 
     const after = await readFile(join(soulPath, "roles", "kitchen", "role.yaml"), "utf8");
@@ -385,27 +450,27 @@ describe("updateLevel", () => {
     await expect(
       updateLevel("owner", { name: "Owner", capabilities: ["record.read"] }, deps())
     ).rejects.toThrowError(expect.objectContaining({ code: "reserved_slug" }));
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   it("reports a level that does not exist", async () => {
     await expect(
       updateLevel("ghost", { name: "Ghost", capabilities: ["record.read"] }, deps())
     ).rejects.toThrowError(expect.objectContaining({ code: "not_found" }));
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   it("writes nothing when a capability is not grantable", async () => {
     await createLevel({ name: "Kitchen", capabilities: ["record.read"] }, deps());
     const before = await readFile(join(soulPath, "roles", "kitchen", "role.yaml"), "utf8");
-    withSync.mockClear();
+    committed.mockClear();
 
     await expect(
       updateLevel("kitchen", { name: "Kitchen", capabilities: ["nope.nothing"] }, deps())
     ).rejects.toThrowError(expect.objectContaining({ code: "unknown_capabilities" }));
 
     expect(await readFile(join(soulPath, "roles", "kitchen", "role.yaml"), "utf8")).toBe(before);
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 
   /*
@@ -418,18 +483,19 @@ describe("updateLevel", () => {
         updateLevel(slug, { name: "X", capabilities: ["record.read"] }, deps())
       ).rejects.toThrowError(expect.objectContaining({ code: "not_found" }));
     }
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 });
 
 /** URL slugs are attacker-controlled path input before recursive delete. */
 describe("deleteLevel refuses to leave the roles directory", () => {
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriter: SoulWriter;
+  let committed: ReturnType<typeof vi.fn>;
 
   beforeEach(async () => {
     soulPath = await mkdtemp(join(tmpdir(), "tf-levels-esc-"));
-    withSync = vi.fn(async () => undefined);
+    ({ soulWriter, committed } = makeSoulHarness(soulPath));
   });
 
   afterEach(async () => {
@@ -449,13 +515,13 @@ describe("deleteLevel refuses to leave the roles directory", () => {
 
     await expect(
       deleteLevel(slug, {
-        gitSync: { path: join(soulPath, "soul"), withSync } as never,
+        soulWriter,
         catalog: () => CATALOG,
         reconcile: async () => undefined,
       })
     ).rejects.toThrowError(expect.objectContaining({ code: "not_found" }));
 
     await expect(readFile(outside, "utf8")).resolves.toBe("important");
-    expect(withSync).not.toHaveBeenCalled();
+    expect(committed).not.toHaveBeenCalled();
   });
 });

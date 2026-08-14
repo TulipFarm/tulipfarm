@@ -388,20 +388,11 @@ export class GitSyncService extends EventEmitter {
     await git.pull("origin", "main", ["--ff-only"]);
   }
 
-  async commit(
-    message: string,
-    actor?: CommitActor
-  ): Promise<{ sha: string; filesChanged: number }> {
-    await this.ensureRepo();
-    const git = await this.gitAt();
-    await git.add("-A");
-    const result = await git.commit(message);
-    const committed = { sha: result.commit, filesChanged: result.summary.changes };
-    await this.afterSuccessfulCommit(committed, actor);
-    return committed;
-  }
-
-  /** Commit only migration-owned paths, preserving unrelated local Soul edits. */
+  /**
+   * Commit an explicit list of paths. This is the only commit primitive: it stages the paths it is
+   * given by name, so a commit can never sweep in unrelated worktree state. The `git add -A`
+   * variants it replaced were removed with ADR-007 — see `scripts/soul-write-gateway.test.ts`.
+   */
   async commitPaths(
     message: string,
     paths: readonly string[],
@@ -463,24 +454,7 @@ export class GitSyncService extends EventEmitter {
   }
 
   /** Commit then best-effort push (SOUL-V1-003). Push failure is logged, not thrown. */
-  async withSync(
-    message: string,
-    actor?: CommitActor
-  ): Promise<{ sha: string; filesChanged: number }> {
-    const result = await this.commit(message, actor);
-    if (this.remoteUrl) {
-      try {
-        await this.push();
-      } catch (err) {
-        this.logger.warn(
-          `Soul: withSync push failed — ${err instanceof Error ? err.message : String(err)}`
-        );
-      }
-    }
-    return result;
-  }
-
-  /** Scoped variant used by format migrations so later Settings commits never sweep their files. */
+  /** `commitPaths` plus a best-effort push. The only way a Soul commit reaches the remote. */
   async withSyncPaths(
     message: string,
     paths: readonly string[],

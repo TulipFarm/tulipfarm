@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GitSyncService, SoulLoader } from "@tulipfarm/soul";
@@ -12,6 +12,7 @@ import { SESSION_COOKIE } from "../../auth/middleware";
 import { MemorySessionStore } from "../../auth/session-store";
 import { createUser, type UserDoc, type UserRepo } from "../../auth/users";
 import type { PaginatedResult } from "../../pagination";
+import { makeSoulWriterDouble, type SoulWriterDouble } from "../soul-writer-double";
 import { __resetLlmCatalogCache } from "./routes";
 
 const TEST_CSRF = "a".repeat(64);
@@ -79,7 +80,7 @@ describe("llm-config routes", () => {
   let memberSid: string;
   let adminSid: string;
   let soulPath: string;
-  let withSync: ReturnType<typeof vi.fn>;
+  let soulWriterDouble: SoulWriterDouble;
   let reload: ReturnType<typeof vi.fn>;
   let init: ReturnType<typeof vi.fn>;
   let secretsGet: ReturnType<typeof vi.fn>;
@@ -95,14 +96,14 @@ describe("llm-config routes", () => {
 
     soulPath = await mkdtemp(join(tmpdir(), "llm-soul-"));
     temps.push(soulPath);
-    withSync = vi.fn().mockResolvedValue({ sha: "abc1234", filesChanged: 1 });
+    soulWriterDouble = makeSoulWriterDouble();
 
-    // reload re-reads the written file (mirrors SoulLoader), so the PUT response reflects what was saved.
+    // reload re-reads the config the gateway just wrote (mirrors SoulLoader), so the PUT response
+    // reflects what was saved. The route writes the whole soul.yaml under the `Settings` artifact.
     let current: unknown = validConfig;
     reload = vi.fn(async () => {
-      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
-        llm?: unknown;
-      };
+      const raw = soulWriterDouble.writer.read("Settings");
+      const manifest = (raw === null ? {} : parseYaml(raw)) as { llm?: unknown };
       current = manifest.llm;
     });
     const soulLoader = {
@@ -114,7 +115,6 @@ describe("llm-config routes", () => {
 
     const gitSync = {
       path: soulPath,
-      withSync,
       commit: vi.fn(),
       push: vi.fn(),
     } as unknown as GitSyncService;
@@ -141,6 +141,7 @@ describe("llm-config routes", () => {
       soulLoader,
       llmService,
       secretsService,
+      soulWriter: soulWriterDouble.writer,
     });
     // Default: empty catalog, so PUT's auto-enrich is a no-op (no specs pinned) and no real network
     // call happens. Tests that exercise enrichment/resolve override with their own catalog.
@@ -237,8 +238,7 @@ describe("llm-config routes", () => {
         payload: validConfig,
       });
       expect(res.statusCode).toBe(403);
-      expect(withSync).not.toHaveBeenCalled();
-      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
+      expect(soulWriterDouble.applied).toEqual([]);
     });
 
     it("validates, writes, commits, reloads, and re-inits the LlmService", async () => {
@@ -285,11 +285,15 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual(next);
 
-      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+      const manifest = parseYaml(soulWriterDouble.writer.read("Settings") ?? "") as {
         llm: unknown;
       };
       expect(manifest.llm).toEqual(next);
-      expect(withSync).toHaveBeenCalledWith("soul: update llm config", expect.any(Object));
+      expect(soulWriterDouble.applied).toHaveLength(1);
+      expect(soulWriterDouble.applied[0]).toMatchObject({
+        subject: "soul: update llm config",
+        changes: [{ op: "put", target: { kind: "Settings" } }],
+      });
       expect(reload).toHaveBeenCalledOnce();
       expect(init).toHaveBeenCalledOnce();
     });
@@ -348,7 +352,7 @@ describe("llm-config routes", () => {
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual(next);
 
-      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+      const manifest = parseYaml(soulWriterDouble.writer.read("Settings") ?? "") as {
         llm: unknown;
       };
       expect(manifest.llm).toEqual(next);
@@ -371,7 +375,7 @@ describe("llm-config routes", () => {
       });
       expect(res.statusCode).toBe(422);
       expect(res.json().error).toContain("missing-profile");
-      expect(withSync).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
       expect(init).not.toHaveBeenCalled();
     });
 
@@ -385,9 +389,8 @@ describe("llm-config routes", () => {
         payload: { tiers: { quick: { providers: [] } } },
       });
       expect(res.statusCode).toBe(422);
-      expect(withSync).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
       expect(init).not.toHaveBeenCalled();
-      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
     });
   });
 
@@ -556,7 +559,7 @@ describe("llm-config routes", () => {
       });
       expect(res.statusCode).toBe(200);
       // The written soul file should now carry the pinned spec (auto-resolved from LiteLLM).
-      const manifest = parseYaml(await readFile(join(soulPath, "soul.yaml"), "utf8")) as {
+      const manifest = parseYaml(soulWriterDouble.writer.read("Settings") ?? "") as {
         llm: {
           tiers: { quick: { providers: Array<{ spec?: { input_cost_per_token: number } }> } };
         };
@@ -581,10 +584,9 @@ describe("llm-config routes", () => {
       });
       expect(res.statusCode).toBe(422);
       expect(res.json().error).toContain("needs a verified context window");
-      expect(withSync).not.toHaveBeenCalled();
+      expect(soulWriterDouble.applied).toEqual([]);
       expect(reload).not.toHaveBeenCalled();
       expect(init).not.toHaveBeenCalled();
-      await expect(access(join(soulPath, "soul.yaml"))).rejects.toThrow();
     });
 
     it("accepts an explicit context capacity when pricing stays unresolved", async () => {

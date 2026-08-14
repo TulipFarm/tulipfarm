@@ -21,7 +21,7 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
 | [`src/identity/`](src/identity/AGENTS.md) | Principals, OIDC, step-up, API clients. |
 | `src/chat/`, `src/conversations/` | Chat routes, Turn persistence, durable stream handoff. |
 | `src/runs/` | Persisted Run event SSE, cursor resume, cancellation. |
-| `src/runtime/` | Durable invocation callers and Routine invocation resolution. |
+| `src/runtime/` | Durable invocation callers, Routine invocation resolution, Soul write gateway composition. |
 | `src/internal/` | Service-only Worker callbacks for Context, Tools, delivery, completion. |
 | `src/tools/` | ToolRegistry, batch execution, truncation, declarative egress sync. |
 | `src/resources/`, `src/soul/` | Resource CRUD and Soul-backed agents, skills, resource types. |
@@ -52,8 +52,9 @@ PostgreSQL persistence composition, auth, Soul Git writes, and Worker callback p
   `@electric-sql/pglite-pgvector` when bumping PGlite.
 - Tools return `ok(data)` or `err(code, message)`, never throw; ToolRegistry validates
   JSON Schema before execution. Read batches run in parallel; mutating batches are serial.
-- Soul-mutating tools in `resources/` and `soul/*/tools.ts` must use
-  `GitSyncService.withSync(commitMsg)`.
+- Every write to the authored Soul tree goes through `SoulWriter.apply()` (ADR-007) — routes, Tools
+  and installers alike. There is no other door, and `scripts/soul-write-gateway.test.ts` fails CI on
+  a new bypass. Raw `fs` writes plus a commit are not an alternative.
 - Third-party provider Tools come from Integration manifest `egress`, not handwritten TypeScript;
   `tools/github/` and `tools/slack/` are exceptions.
 - Guardrail enforcement lives in `@tulipfarm/agent-runtime` and the Worker. API owns config loading

@@ -1,12 +1,14 @@
+import { DEPLOYMENT_BUSINESS_ID } from "@tulipfarm/constants";
 import type { SecretsService } from "@tulipfarm/secrets";
-import type { GitSyncService } from "@tulipfarm/soul";
+import type { GitSyncService, SoulWriter } from "@tulipfarm/soul";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuditService } from "../audit/service";
 import { makeSoulAuditWriter, redactRemoteUrl } from "../audit/soul-write";
 import { ErrorSchema } from "../auth/schemas";
-import { patchSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
+import { mergeSoulConfig, readSoulConfig, SOUL_GIT_CREDENTIAL_KEY } from "../setup/soul-config";
 import { commitActorFromRequest } from "./commit-actor";
 import { readSoulFile, resolveSafe, UnsafePathError, walkTree } from "./tree";
+import { isSoulWriteError, soulWriteHttpError } from "./write-errors";
 
 type PreHandler = (req: FastifyRequest, reply: FastifyReply) => Promise<void>;
 
@@ -28,6 +30,7 @@ const BusinessProfileSchema = {
 export function registerSoulRoutes(
   app: FastifyInstance,
   gitSync: GitSyncService,
+  soulWriter: SoulWriter,
   requireAuth: PreHandler,
   secretsService?: SecretsService,
   // Optional: record direct Soul config writes as audit evidence. The git-remote route below is
@@ -48,44 +51,6 @@ export function registerSoulRoutes(
     },
     required: ["name", "path", "type"],
   });
-  app.post(
-    "/api/v1/soul/commit",
-    {
-      preHandler: requireAuth,
-      schema: {
-        description: "Stage all soul changes and commit as tulipfarm-bot.",
-        tags: ["soul"],
-        security: [{ sessionCookie: [] }, { bearerToken: [] }],
-        body: {
-          type: "object",
-          required: ["message"],
-          properties: { message: { type: "string", minLength: 1 } },
-        },
-        response: {
-          200: {
-            type: "object",
-            properties: {
-              sha: { type: "string" },
-              filesChanged: { type: "number" },
-            },
-            required: ["sha", "filesChanged"],
-          },
-          204: { type: "null" },
-          400: ErrorSchema,
-          401: ErrorSchema,
-        },
-      },
-    },
-    async (req, reply) => {
-      const { message } = req.body as { message: string };
-      const result = await gitSync.commit(message, commitActorFromRequest(req));
-      if (result.sha === "") {
-        return reply.code(204).send();
-      }
-      return reply.send(result);
-    }
-  );
-
   app.post(
     "/api/v1/soul/push",
     {
@@ -268,6 +233,10 @@ export function registerSoulRoutes(
           400: ErrorSchema,
           401: ErrorSchema,
           403: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -281,14 +250,26 @@ export function registerSoulRoutes(
       const description = body.description?.trim() ?? "";
       const website = body.website?.trim() ?? "";
 
-      await patchSoulConfig(gitSync.path, {
+      const next = mergeSoulConfig(soulWriter.read("Settings"), {
         businessName: name,
         businessDescription: description,
         businessWebsite: website,
       });
-      await gitSync
-        .commit("chore: update business profile", commitActorFromRequest(req))
-        .catch(() => {});
+      try {
+        await soulWriter.apply({
+          subject: "chore: update business profile",
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [{ op: "put", target: { kind: "Settings" }, content: next }],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const m = soulWriteHttpError(e);
+          return reply.code(m.status).send(m.body);
+        }
+        throw e;
+      }
       // Without this the manifest in memory keeps answering with the old profile until the next
       // periodic sync — which never runs at all on a remote-less soul.
       gitSync.emit("soul.synced");
@@ -411,6 +392,10 @@ export function registerSoulRoutes(
           204: { type: "null" },
           400: ErrorSchema,
           401: ErrorSchema,
+          404: ErrorSchema,
+          409: ErrorSchema,
+          422: ErrorSchema,
+          500: ErrorSchema,
         },
       },
     },
@@ -420,7 +405,22 @@ export function registerSoulRoutes(
       const credential = typeof body.credential === "string" ? body.credential.trim() : "";
       if (!remoteUrl) return reply.code(400).send({ error: "remoteUrl is required" });
 
-      await patchSoulConfig(gitSync.path, { gitRemoteUrl: remoteUrl });
+      const next = mergeSoulConfig(soulWriter.read("Settings"), { gitRemoteUrl: remoteUrl });
+      try {
+        await soulWriter.apply({
+          subject: "chore: configure soul git remote",
+          source: "api",
+          actor: commitActorFromRequest(req),
+          businessId: DEPLOYMENT_BUSINESS_ID,
+          changes: [{ op: "put", target: { kind: "Settings" }, content: next }],
+        });
+      } catch (e) {
+        if (isSoulWriteError(e)) {
+          const m = soulWriteHttpError(e);
+          return reply.code(m.status).send(m.body);
+        }
+        throw e;
+      }
       if (credential) {
         await secretsService.set(SOUL_GIT_CREDENTIAL_KEY, credential);
       }

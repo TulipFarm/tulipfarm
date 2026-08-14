@@ -29,6 +29,16 @@ export interface SoulWriteTarget {
   readonly slug?: string;
   /** Address a companion beside the definition (`hooks.ts`, `connection.yaml`, an egress spec). */
   readonly companion?: string;
+  /**
+   * Which definition file to address. Defaults to the canonical one.
+   *
+   * `"legacy"` names the superseded file for kinds that still have one (`AGENT.md`, `schema.yml`,
+   * `manifest.yml`). It exists so a surface whose on-disk format has not been migrated yet can
+   * still write *through this gateway* rather than around it — an unwritable format is precisely
+   * the pressure that produces a raw-filesystem bypass. Either way exactly one definition may
+   * survive, so this selects the format; it never permits both.
+   */
+  readonly definitionMode?: "canonical" | "legacy";
 }
 
 export type SoulWrite =
@@ -109,13 +119,25 @@ export interface SoulReloadPort {
   reload(): Promise<unknown>;
 }
 
-/** Single authored-Soul write gateway: validate, atomically commit, push, then reload. */
+/**
+ * Publish the committed tree as a signed runtime bundle.
+ *
+ * The gateway commits through `SoulGitStore`, not `GitSyncService`, so it must discharge the
+ * publication obligation `afterSuccessfulCommit` normally carries — without this port a write
+ * lands the commit and silently leaves `soul_active_bundles` stale.
+ */
+export interface SoulBundlePublishPort {
+  publishCommittedTree(input: { commitSha: string; actor: CommitActor }): Promise<unknown>;
+}
+
+/** Single authored-Soul write gateway: validate, atomically commit, publish, push, then reload. */
 export class SoulWriter {
   constructor(
     private readonly store: SoulGitStore,
     private readonly logger: Logger,
     private readonly push?: SoulPushPort,
-    private readonly reload?: SoulReloadPort
+    private readonly reload?: SoulReloadPort,
+    private readonly publisher?: SoulBundlePublishPort
   ) {}
 
   /** Whether a collection artifact currently exists (its definition file is present). */
@@ -200,6 +222,7 @@ export class SoulWriter {
     }
 
     const pushed = await this.publish(changeset.id);
+    await this.publishBundle(result, request.actor, changeset.id);
     await this.refresh(changeset.id);
     return {
       commitSha: result.commitSha,
@@ -245,20 +268,28 @@ export class SoulWriter {
     return files;
   }
 
-  /** Refuse canonical writes while legacy definitions for the same artifact still exist. */
+  /**
+   * Refuse a definition write while the other form survives for the same artifact. Two definitions
+   * is an ambiguity the loader can only resolve by guessing, and the writer will not delete the
+   * other itself: the forms carry content in different shapes, so migration must be stated. Runs
+   * in both directions.
+   */
   private checkNoAmbiguousDefinition(
     changes: readonly SoulWrite[],
     paths: ReadonlySet<string>
   ): void {
     for (const change of changes) {
       if (change.op !== "put" || change.target.companion !== undefined) continue;
-      const legacy = legacyDefinitionPaths(change.target.kind, change.target.slug).filter(
-        (path) => !paths.has(path) && this.store.exists(path)
-      );
-      if (legacy.length > 0) {
+      const { kind, slug } = change.target;
+      const superseded =
+        change.target.definitionMode === "legacy"
+          ? [this.buildPath(() => definitionPath(kind, slug))]
+          : this.buildLegacyDefinitionPaths(kind, slug);
+      const surviving = superseded.filter((path) => !paths.has(path) && this.store.exists(path));
+      if (surviving.length > 0) {
         throw new SoulWriteError(
           "PRECONDITION_FAILED",
-          `Soul write: ${change.target.kind} "${change.target.slug ?? ""}" still has a superseded definition at ${legacy.join(", ")}; the changeset must remove it`
+          `Soul write: ${kind} "${slug ?? ""}" still has a superseded definition at ${surviving.join(", ")}; the changeset must remove it`
         );
       }
     }
@@ -286,10 +317,27 @@ export class SoulWriter {
       }
       return path;
     }
+    if (target.definitionMode === "legacy") return this.legacyDefinitionPath(kind, slug);
     return this.buildPath(() => definitionPath(kind, slug));
   }
 
-  private buildLegacyDefinitionPaths(kind: ArtifactKind, slug: string): string[] {
+  /**
+   * The single superseded definition path for a kind that still has one. A kind with no legacy
+   * form, or with several, cannot be addressed this way — the caller would be guessing which file
+   * the read side resolves.
+   */
+  private legacyDefinitionPath(kind: ArtifactKind, slug?: string): string {
+    const candidates = this.buildLegacyDefinitionPaths(kind, slug);
+    if (candidates.length !== 1) {
+      throw new SoulWriteError(
+        "INVALID_TARGET",
+        `Soul write: ${kind} has no single superseded definition file to address`
+      );
+    }
+    return candidates[0];
+  }
+
+  private buildLegacyDefinitionPaths(kind: ArtifactKind, slug?: string): string[] {
     try {
       return legacyDefinitionPaths(kind, slug);
     } catch (error) {
@@ -337,6 +385,22 @@ export class SoulWriter {
     } catch (error) {
       this.logger.warn(`Soul: push after changeset ${changesetId} failed — ${errText(error)}`);
       return false;
+    }
+  }
+
+  /** Publication failures are logged because the write is already durable. */
+  private async publishBundle(
+    result: SoulCommitResult,
+    actor: CommitActor,
+    changesetId: string
+  ): Promise<void> {
+    if (this.publisher === undefined || result.filesChanged === 0) return;
+    try {
+      await this.publisher.publishCommittedTree({ commitSha: result.commitSha, actor });
+    } catch (error) {
+      this.logger.error(
+        `Soul: committed ${result.commitSha} for changeset ${changesetId} but bundle publication failed; the Runtime keeps serving the previous bundle — ${errText(error)}`
+      );
     }
   }
 

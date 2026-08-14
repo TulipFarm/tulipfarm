@@ -14,27 +14,31 @@ Loader, compiler, publisher, and git-sync engine for Soul artifacts. Root `soul/
 | `src/signatures.ts`, `src/publication.ts`, `src/publisher.ts` | Publish flow. |
 | `src/git-*`, `src/pinned-definition.ts`, `src/definition-reader.ts` | Git and pinned reads. |
 | `src/integration-*`, `src/types.ts` | Integration manifest trust/auth contracts. |
-| `src/migrations/`, `src/soul-migrations.ts`, `src/writer.ts` | Migrations and authoring. |
+| `src/migrations/`, `src/soul-migrations.ts` | Migrations. |
+| `src/writer.ts` | `SoulWriter` — the one authored-tree write gateway. |
 
 ## Rules
 - Do not put package code in root `soul/`; it is a separate runtime git repo.
 - `SoulLoader` reads `agents/*/AGENT.md`, `skills/*/SKILL.md`, `resources/*/schema.yml`,
-  `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`.
-- Resource schemas must pass `validateResourceSchema()` on load.
-- Bad files are logged and skipped; if `egress.spec` is declared but missing, that integration
-  silently disappears. Writers must copy the spec beside `manifest.yml`.
-- Add artifact kinds to `@tulipfarm/schema` `ARTIFACT_LAYOUTS` first; derive paths, companions,
-  bundle membership, and temporal class from it. No custom regex/table.
-- Pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown kinds; `temporalClass`
-  means which digest to read, not whether the artifact is bundled.
-- SOUL-V1-004: upstream wins on real divergence; preserve unpushed local commits by retrying push.
-- Every successful Soul git commit helper must call the post-commit publication hook.
-- Publication activates one signed digest only after committed -> projected -> stored -> active.
-- API signs bundles with the private key; Workers verify with public keys only.
-- Widening integration types widens third-party trust; update `integration-trust.ts` too.
-- Third-party manifests reject `ts-code`, `stdio`, and non-HTTPS/non-literal `base_url`; bundled
-  integrations are exempt.
+  `routines/*/routine.yaml`, `integrations/*/manifest.yml`, root `soul.yaml`, `guardrails.yaml`;
+  resource schemas must pass `validateResourceSchema()` on load.
+- Bad files are logged and skipped; a declared-but-missing `egress.spec` silently drops that
+  integration, so writers must copy the spec beside `manifest.yml`.
+- Add artifact kinds to `@tulipfarm/schema` `ARTIFACT_LAYOUTS` first and derive paths, companions,
+  bundle membership and temporal class from it — no custom regex/table.
+- Pinned reads refuse `live` kinds (`Role`, `AccessGrant`) and unknown kinds; `temporalClass` means
+  which digest to read, not whether the artifact is bundled.
+- `SoulWriter.apply()` is the only authored-tree write path: validate, commit atomically, publish,
+  push, reload. Add no other commit helper.
+- `GitSyncService` stages only the paths given (`commitPaths`/`withSyncPaths`); there is no ambient
+  `commit`/`withSync`, and `git add -A` is confined to scaffolding an empty repo.
+- Every commit helper must call the post-commit publication hook; publication activates one signed
+  digest only after committed -> projected -> stored -> active.
+- API signs bundles with the private key; Workers verify with public keys only. SOUL-V1-004:
+  upstream wins on real divergence; preserve unpushed local commits by retrying push.
+- Widening integration types widens third-party trust; update `integration-trust.ts` too. Third-party
+  manifests reject `ts-code`, `stdio` and non-HTTPS/non-literal `base_url`; bundled ones are exempt.
 - Env names: `SOUL_GIT_REMOTE_URL`, `SOUL_GIT_CREDENTIAL`; commits use bot name/email constants.
+  Auth is HTTPS PAT injection only; SSH remotes are unsupported.
 - `bootSync()` must not throw; `configureRemote()` must throw so `PUT /soul/git-config` can 400.
-- Git auth is HTTPS PAT injection only; SSH remotes are unsupported.
 See [building an integration](../../docs/architecture/building-an-integration.md).

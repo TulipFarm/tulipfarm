@@ -157,6 +157,10 @@ export function createRuntimeOperationalApi(deps: RuntimeOperationalDeps): Opera
       return deps.runs.get(grant.businessId, runId);
     },
 
+    async getRunBudgets(grant: OperationalGrant, runId: string) {
+      return deps.runs.budgets(grant.businessId, runId);
+    },
+
     async commandRun() {
       return notImplemented(
         "Run control",
