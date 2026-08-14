@@ -140,7 +140,7 @@ export default function BusinessSecrets() {
       <Field
         key={field.key}
         label={`${field.label}${field.optional ? " (optional)" : ""}`}
-        help={stored ? "Already set. Leave blank to keep it." : undefined}
+        help={stored ? "Already set. Leave blank to keep it." : field.hint}
       >
         <Input
           type={field.kind === "secret" ? "password" : "text"}

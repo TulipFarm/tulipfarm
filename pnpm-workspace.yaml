@@ -116,3 +116,5 @@ overrides:
   valibot@<=1.4.1: ^1.4.2
   vite@<=6.4.1: ^6.4.2
   vite@<=6.4.2: ^6.4.3
+patchedDependencies:
+  '@electric-sql/pglite-socket@0.2.7': patches/@electric-sql__pglite-socket@0.2.7.patch

@@ -111,6 +111,8 @@ export function modelFailureMessage(reason: string | undefined): string {
       return "The model provider's API billing is inactive. Activate billing or use another Provider Credential.";
     case "model_authentication_failed":
       return "The Provider Credential was rejected. Update it before trying again.";
+    case "model_not_configured":
+      return "No model is configured for this business. Add a model chain under Business → Models.";
     case "model_not_found":
       return "The configured model is unavailable. Choose another ModelProfile in Settings.";
     case "model_rate_limited":

@@ -215,6 +215,14 @@ class EventSinkFailure extends Error {
 
 type CompiledValidator = ReturnType<typeof ajv.compile>;
 
+/** Walks a wrapped error's `.cause` chain to the innermost message, e.g. the actual subprocess
+ *  output a `LlmProviderError` wraps its participant-safe reason string around. */
+function deepestErrorMessage(diagnostic: unknown): string {
+  let current = diagnostic;
+  while (current instanceof Error && current.cause !== undefined) current = current.cause;
+  return current instanceof Error ? current.message : String(current);
+}
+
 export class AgentLoop {
   constructor(private readonly deps: AgentLoopDependencies) {}
 
@@ -363,7 +371,7 @@ export class AgentLoop {
             requestId: request.requestId,
             iteration: counters.iterations,
             reason,
-            error: diagnostic instanceof Error ? diagnostic.message : String(diagnostic),
+            error: deepestErrorMessage(diagnostic),
           },
           "model call failed"
         );

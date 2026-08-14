@@ -1,0 +1,131 @@
+---
+title: Run on a subscription plan
+description: Use a Claude Pro/Max or ChatGPT Plus/Pro/Business plan as TulipFarm's model provider instead of an API key.
+---
+
+TulipFarm can run on a **Claude Pro/Max** or **ChatGPT Plus/Pro/Business** plan you already pay for,
+with no LLM API key and no per-token bill. Instead of calling a hosted endpoint, TulipFarm spawns
+the vendor's coding-agent CLI and uses it as a model.
+
+Like [Configure LLM providers](/docs/guides/configure-llm-providers), this is UI-first rather than
+prompt-first: provider credentials are set by admins in **Operate**, not by chat. The one difference
+is that the credential is **minted in a terminal** rather than copied from a billing dashboard.
+
+For what these providers are and how they behave at routing time, see
+[Model routing](/docs/concepts/llm#subscription-providers).
+
+## Before you start
+
+- A paid plan. A free Claude or ChatGPT account will not work.
+- The vendor CLI installed **on your own machine**, only to mint the credential. It does not need to
+  be installed on the TulipFarm server — the binary that answers turns ships inside TulipFarm.
+- Admin access to **Operate → Business → Secrets**.
+
+## Outcome
+
+At the end, at least one effort preset is backed by your subscription and chat answers without an
+API key configured.
+
+## Claude Code
+
+<Steps>
+  <Step>
+    On your own machine, mint a portable token:
+
+    ```bash
+    claude setup-token
+    ```
+
+    This prints a token beginning `sk-ant-oat01-`. It is tied to your Claude subscription, not to an
+    API workspace, and it is what an API key would otherwise be.
+  </Step>
+  <Step>
+    Open **Operate → Business → Secrets**, choose provider **Claude Code (subscription)**, paste the
+    token into **OAuth token**, and choose **Save provider**.
+
+    TulipFarm validates the token by running one real turn before it accepts it. A token that
+    cannot answer is rejected on the spot rather than at your first chat message.
+  </Step>
+  <Step>
+    Open **Operate → Business → Models** and add a row using provider `claude-code` and one of the
+    models `opus`, `sonnet`, or `haiku`.
+
+    These are the same three tiers your plan gives you in the CLI — `opus` is the most capable,
+    `sonnet` the everyday choice, `haiku` the fastest.
+  </Step>
+</Steps>
+
+## Codex
+
+Codex is the only provider whose credential is a **file** rather than a token, because `codex login`
+writes a session to disk and the CLI reads it back.
+
+<Steps>
+  <Step>
+    On your own machine, sign in:
+
+    ```bash
+    codex login
+    ```
+
+    This completes a browser sign-in and writes `~/.codex/auth.json`.
+  </Step>
+  <Step>
+    Copy the whole file:
+
+    ```bash
+    cat ~/.codex/auth.json
+    ```
+  </Step>
+  <Step>
+    Open **Operate → Business → Secrets**, choose provider **Codex (subscription)**, paste the
+    entire contents into **auth.json**, and choose **Save provider**.
+  </Step>
+  <Step>
+    Open **Operate → Business → Models** and add a row using provider `codex` and one of the models
+    `gpt-5.6-sol`, `gpt-5.6-terra`, or `gpt-5.6-luna` — flagship, balanced, and low-latency
+    respectively.
+  </Step>
+</Steps>
+
+<Callout type="warn">
+An API-key `auth.json` — one containing `OPENAI_API_KEY`, written by signing in with a key instead
+of a ChatGPT account — is **rejected on save**. Accepting it would bill your OpenAI account for
+turns TulipFarm reports as unpriced. Run `codex login` and choose the ChatGPT sign-in.
+</Callout>
+
+## Verify
+
+Start a new chat and ask a simple question. The reply receipt names the model that answered. Confirm
+it is your subscription model, and that no cost is reported for the turn — subscription turns are
+unpriced by design.
+
+Then ask for something that needs a tool, so you can confirm the governance path is intact:
+
+```prompt
+Create a customer record for Acme Corp with the email ops@acme.example.
+```
+
+An [approval](/docs/concepts/approvals)-gated tool must still park the turn and wait for a human.
+If it does, the Tool Broker is running the effect — which is the point: the CLI itself never
+executes a tool, it only proposes them.
+
+## Keeping it working
+
+**Credentials expire.** When a plan session lapses, the turn fails as a hard error naming the
+command to run — `claude setup-token` or `codex login`. Re-mint it and save the new value over the
+old secret. Failure is deliberate rather than silent fallback, because a chain cannot recover from a
+credential another provider does not share.
+
+**Codex refreshes itself.** Its session rotates during normal use, and TulipFarm writes the rotated
+credential back to the stored secret, so a working Codex provider keeps working without you pasting
+the file again.
+
+**Deleting the secret prunes the provider** from your model chains, exactly as it does for an API
+key.
+
+<Callout type="info">
+Subscription providers cannot be seeded by [headless bootstrap](/docs/concepts/setup#headless-mode).
+`LLM_PROVIDER` accepts `anthropic` and `openai` only, because minting a plan credential needs an
+interactive browser sign-in. Configure them in the wizard or in **Operate → Business → Secrets**.
+</Callout>

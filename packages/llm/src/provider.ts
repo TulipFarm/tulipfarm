@@ -12,6 +12,8 @@ import {
   type SecretsService,
   SecretUnavailableError,
 } from "@tulipfarm/secrets";
+import { ClaudeCodeModel } from "./cli/claude-code";
+import { CodexModel } from "./cli/codex";
 import { ClassifiedLanguageModel } from "./provider-error";
 
 export async function resolveApiKey(
@@ -65,9 +67,20 @@ async function resolveStored(
   }
 }
 
+/** Per-call knobs a caller can impose on the built model. */
+export interface CreateModelOptions {
+  /**
+   * Wall clock for one model call. A Subscription Provider spawns a real subprocess and bounds the
+   * whole turn; it defaults generously — right for a chat turn — which is wrong for a credential
+   * probe running inside an HTTP request, so `/setup` passes a short one (see setup's LLM step).
+   */
+  timeoutMs?: number;
+}
+
 export async function createModel(
   entry: ProviderEntry,
-  secrets: SecretsService
+  secrets: SecretsService,
+  options: CreateModelOptions = {}
 ): Promise<LanguageModelV4> {
   const info = llmProviderById(entry.provider);
 
@@ -113,6 +126,28 @@ export async function createModel(
       }
       const p = createAzure({ resourceName, baseURL: baseUrl, apiKey });
       return new ClassifiedLanguageModel(p(entry.model));
+    }
+    case "claude-code": {
+      // Not an API key — `apiKey` above resolved the claude-code-oauth-token secret (role:
+      // "api_key"). A Subscription Provider is not wrapped in ClassifiedLanguageModel: its errors
+      // already arrive as a plain Error or an LlmProviderError, not the AI SDK's APICallError
+      // shape that classifier inspects.
+      return new ClaudeCodeModel(entry.model, apiKey, options.timeoutMs);
+    }
+    case "codex": {
+      // Likewise not an API key: `apiKey` is the whole `auth.json` blob, stored under the registry's
+      // `codex-auth-json` field. The write-back closure is what keeps a subscription usable past
+      // its first access-token expiry — Codex rotates the file itself, and the jail holding it is
+      // deleted when the turn ends. Keyed on the same field the blob was read from, so a rotation
+      // can never land on another provider's secret.
+      const key = entry.api_key_ref ?? apiKeyField?.key;
+      const persist =
+        key && !key.startsWith("env://")
+          ? async (authJson: string) => {
+              await secrets.set(key, authJson);
+            }
+          : undefined;
+      return new CodexModel(entry.model, apiKey, options.timeoutMs, persist);
     }
     default:
       throw new LlmConfigValidationError(`unknown provider: ${entry.provider}`);

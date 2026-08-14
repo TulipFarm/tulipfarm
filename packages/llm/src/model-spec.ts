@@ -1,5 +1,7 @@
 import type { ModelSpec } from "@tulipfarm/schema";
 
+export type { ModelSpec };
+
 /**
  * Config-time model-spec resolution from LiteLLM's community-maintained
  * `model_prices_and_context_window.json` — the de-facto pricing/capability DB across the LLM tooling

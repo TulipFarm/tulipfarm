@@ -4,6 +4,7 @@
     "index",
     "---Set up---",
     "configure-llm-providers",
+    "run-on-a-subscription",
     "store-a-secret",
     "invite-your-team",
     "issue-an-api-token",

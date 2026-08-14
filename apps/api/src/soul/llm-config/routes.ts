@@ -1,4 +1,6 @@
 import {
+  cliModelIds,
+  cliModelSpec,
   fetchLiteLlmCatalog,
   type LiteLlmCatalog,
   type LlmService,
@@ -206,13 +208,18 @@ async function enrichSpecs(config: LlmConfig, force: boolean): Promise<LlmConfig
   if (!tiers) return config; // defensive for unchecked callers; validation requires chains
   const all = TIER_KEYS.flatMap((t) => tiers[t].providers);
   if (!force && all.every((p) => p.spec)) return config; // nothing missing → no fetch
+  // CLI providers (e.g. claude-code) run on a subscription, not an API key, so they never resolve
+  // against the LiteLLM catalog — no pricing exists for a subscription turn. Their spec comes from
+  // a static local table instead; validateRoutingCapacity still requires *some* spec.
   const catalog = await getCatalog(force);
-  if (!catalog) return config; // can't reach LiteLLM → save as-is
   const fetchedAt = new Date().toISOString().slice(0, 10);
   const enrichTier = (tier: TierConfig): TierConfig => ({
     ...tier,
     providers: tier.providers.map((p) => {
       if (p.spec && !force) return p;
+      const cliSpec = cliModelSpec(p.provider, p.model);
+      if (cliSpec) return { ...p, spec: cliSpec };
+      if (!catalog) return p; // can't reach LiteLLM → leave unresolved, save as-is
       const { spec } = resolveModelSpec(p.provider, p.model, catalog, fetchedAt);
       return spec ? { ...p, spec } : p;
     }),
@@ -459,6 +466,11 @@ export function registerLlmConfigRoutes(
         const live = await fetchLiveModelOptions(secrets, req.log);
         if (live) return reply.send({ models: live, source: "live" });
       }
+
+      // CLI providers (e.g. claude-code) never appear in the LiteLLM catalog — their model ids
+      // come from the same static table `enrichSpecs` uses for spec resolution.
+      const cliModels = cliModelIds(provider);
+      if (cliModels.length > 0) return reply.send({ models: cliModels, source: "catalog" });
 
       const catalog = await getCatalog();
       if (!catalog) {

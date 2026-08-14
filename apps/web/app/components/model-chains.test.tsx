@@ -174,9 +174,9 @@ test("editing a chain entry opens the drawer and writes the chosen model back", 
   const onSubmit = renderChains();
 
   await userEvent.click(screen.getByRole("button", { name: "Edit claude-haiku-4-5" }));
-  const model = await screen.findByLabelText("Model ID");
-  await userEvent.clear(model);
-  await userEvent.type(model, "claude-sonnet-4-6");
+  // The target id is one of the catalogue suggestions, so it is chosen from the dropdown rather
+  // than typed. Free-text entry is the "Custom…" branch, covered by the tests below.
+  await userEvent.selectOptions(await screen.findByLabelText("Model ID"), "claude-sonnet-4-6");
   await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
   await userEvent.click(screen.getByRole("button", { name: /save changes/i }));
 

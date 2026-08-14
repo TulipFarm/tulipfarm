@@ -84,6 +84,7 @@ export type ProviderField = {
   kind: "secret" | "config";
   optional?: boolean;
   placeholder?: string;
+  hint?: string;
 };
 
 export type LlmProviderInfo = {
