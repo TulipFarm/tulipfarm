@@ -52,6 +52,9 @@ overrides:
   vite@<=6.4.1: ^6.4.2
   vite@<=6.4.2: ^6.4.3
 
+patchedDependencies:
+  '@electric-sql/pglite-socket@0.2.7': 1e9dd249fc76d45f05292d66ef5f2b6fae7166f4b74a0757f71eac4f39ecb0ea
+
 importers:
 
   .:
@@ -349,7 +352,7 @@ importers:
         version: 0.5.3
       '@electric-sql/pglite-socket':
         specifier: ^0.2.7
-        version: 0.2.7(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
+        version: 0.2.7(patch_hash=1e9dd249fc76d45f05292d66ef5f2b6fae7166f4b74a0757f71eac4f39ecb0ea)(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
       '@tulipfarm/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig
@@ -594,7 +597,7 @@ importers:
         version: 0.5.3
       '@electric-sql/pglite-socket':
         specifier: ^0.2.7
-        version: 0.2.7(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
+        version: 0.2.7(patch_hash=1e9dd249fc76d45f05292d66ef5f2b6fae7166f4b74a0757f71eac4f39ecb0ea)(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)
       '@tulipfarm/authz':
         specifier: workspace:*
         version: link:../../packages/authz
@@ -8582,7 +8585,7 @@ snapshots:
     dependencies:
       '@electric-sql/pglite': 0.5.3
 
-  '@electric-sql/pglite-socket@0.2.7(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)':
+  '@electric-sql/pglite-socket@0.2.7(patch_hash=1e9dd249fc76d45f05292d66ef5f2b6fae7166f4b74a0757f71eac4f39ecb0ea)(@electric-sql/pglite-age@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_hashids@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_ivm@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_textsearch@0.0.6(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pg_uuidv7@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgtap@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite-pgvector@0.0.5(@electric-sql/pglite@0.5.3))(@electric-sql/pglite@0.5.3)':
     dependencies:
       '@electric-sql/pglite': 0.5.3
       '@electric-sql/pglite-age': 0.0.5(@electric-sql/pglite@0.5.3)

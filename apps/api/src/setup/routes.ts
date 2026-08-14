@@ -410,21 +410,13 @@ export function registerSetupRoutes(app: FastifyInstance, deps: SetupDeps): void
           204: { type: "null" },
           401: ErrorSchema,
           403: ErrorSchema,
-          422: ErrorSchema,
         },
       },
     },
     async (req, reply) => {
-      // Completing hides the wizard permanently, and the wizard is the only surface that writes
-      // `llm:`. Marking an instance complete with no model chain therefore strands it: every Run
-      // fails routing, and a participant sees a generic model failure with nothing to act on.
-      const cfg = (await readSoulConfig(soulPath)) as { llm?: unknown };
-      if (cfg.llm === undefined) {
-        return reply.code(422).send({
-          error:
-            "Cannot complete setup without an LLM configuration. Configure a model provider first.",
-        });
-      }
+      // The LLM step is deliberately skippable (`optional: true` in the wizard) — a model provider
+      // can be configured later from Settings. Do not require `llm:` here: that would strand the
+      // documented "Skip for now" flow the wizard and installer smoke both rely on.
       await patchSoulConfig(soulPath, { setupComplete: true });
       await gitSync
         .commit("chore: complete first-run setup", commitActorFromRequest(req))

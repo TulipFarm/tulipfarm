@@ -462,19 +462,16 @@ describe("setup routes", () => {
     expect(after.statusCode).toBe(403);
   });
 
-  it("complete refuses while soul.yaml has no llm config", async () => {
+  it("completes setup with no llm config — the LLM step is optional and skippable", async () => {
     const cookies = await createAdmin();
     const res = await app.inject({
       method: "POST",
       url: "/api/v1/setup/complete",
       headers: authHeaders(cookies),
     });
-    expect(res.statusCode).toBe(422);
-    expect(res.json().error).toMatch(/without an LLM configuration/i);
-    // Refusing must not half-complete the wizard. Nothing configured yet, so soul.yaml may not
-    // even exist — what matters is that no `setupComplete` flag was written.
-    const raw = await fs.readFile(path.join(dir, "soul", "soul.yaml"), "utf8").catch(() => "");
-    expect((parse(raw || "{}") as { setupComplete?: boolean }).setupComplete).toBeUndefined();
+    expect(res.statusCode).toBe(204);
+    const status = await app.inject({ method: "GET", url: "/api/v1/setup/status" });
+    expect(status.json()).toEqual({ needsSetup: false });
   });
 
   it("complete marks setupComplete=true in soul.yaml", async () => {
