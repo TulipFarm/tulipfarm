@@ -1,79 +1,56 @@
 name: Compose parity
 
-# Reusable parity gate (INST-008 / AC-007): boot the FULL bundled compose stack
-# and prove the health probes pass in-container. The container path — not native
-# `pnpm dev` — is the tested release path. Runs independently for every PR and
-# main push, and remains callable from publish-image.yml with the exact candidate.
+# Reusable parity gate (INST-008 / AC-007), called by publish-image.yml to verify the
+# exact published release candidate before it is promoted.
 #
-# Three phases, all against the one image built below:
+# The pull-request and main-push copy of this gate lives in container.yml, where the
+# image it tests is built once and shared. This file is deliberately `workflow_call`
+# only: having it also trigger on `pull_request` meant a third independent build of the
+# same amd64 image, racing two other jobs for one BuildKit cache scope.
+#
+# Three phases, all against the one candidate image:
 #   1. zero-env   — no `.env` at all, the paste-and-run path (INST-002). Also proves the
 #                   generated secrets survive a restart.
 #   2. key-loss   — data volume wiped, database intact: the app must REFUSE to boot rather
 #                   than silently orphan every encrypted secret.
 #   3. configured — the installer's path, with real secrets supplied in `.env`.
 on:
-  pull_request:
-  push:
-    branches: [main]
-  workflow_dispatch:
   workflow_call:
     inputs:
       image:
-        description: "Published candidate image to verify; empty builds the checkout locally"
-        required: false
+        description: "Published candidate image to verify"
+        required: true
         type: string
-        default: ""
 
 permissions:
   contents: read
   packages: read
 
-concurrency:
-  group: compose-parity-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ inputs.image == '' }}
-
 jobs:
   compose-parity:
     name: Compose parity
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     env:
-      # `--pull missing` (below) + this pinned tag make compose reuse the image built here
-      # instead of pulling the not-yet-published tag from GHCR. Exported rather than written
-      # to `.env` so phase 1 can genuinely run with no `.env` file on disk.
+      # `--pull missing` in the compose files plus this pinned tag make compose reuse the
+      # image pulled below instead of the not-yet-published release tag. Exported rather
+      # than written to `.env` so phase 1 genuinely runs with no `.env` file on disk.
       TULIPFARM_VERSION: ci
     steps:
       - uses: actions/checkout@v7
-      - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
-        if: ${{ inputs.image != '' }}
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-      # Build the single bundled image once and load it into the local daemon, tagged
-      # to match what compose resolves. No push, no creds.
-      - name: Build app image (load into daemon)
-        if: ${{ inputs.image == '' }}
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          load: true
-          tags: ghcr.io/tulipfarm/tulipfarm:ci
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=tulipfarm-amd64
-          cache-to: type=gha,mode=min,ignore-error=true,scope=tulipfarm-amd64
-      - name: Load published candidate
-        if: ${{ inputs.image != '' }}
+      - name: Pull and tag the candidate
         env:
           CANDIDATE_IMAGE: ${{ inputs.image }}
         run: |
           set -euo pipefail
           docker pull "$CANDIDATE_IMAGE"
           docker tag "$CANDIDATE_IMAGE" ghcr.io/tulipfarm/tulipfarm:ci
-
       - name: Run Compose parity test
         run: |
           set -o pipefail
@@ -103,7 +80,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: log-compose-parity
+          name: log-compose-parity-candidate
           path: compose-parity.log
           if-no-files-found: ignore
           retention-days: 7

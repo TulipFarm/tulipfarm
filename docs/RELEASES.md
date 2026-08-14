@@ -47,8 +47,9 @@ Merging a same-repository `release/v<version>` PR starts **Publish release**:
 ```text
 release PR merged into main
   -> validate version, non-empty changelog, changed files, and source ancestry
-  -> run lint, typecheck, tests, and the workspace build on the reviewed snapshot
-  -> build one linux/amd64 + linux/arm64 image as sha-<release-snapshot>
+  -> assert the required CI checks already recorded a pass for that exact commit
+  -> build one linux/amd64 + linux/arm64 image as sha-<release-snapshot>,
+     each platform on a native runner (no QEMU)
   -> verify both platforms are present
   -> run Compose parity against that exact candidate image
   -> create the annotated v<version> tag with its main source boundary
@@ -77,9 +78,16 @@ release tags to the verified manifest without rebuilding it.
 
 ## Failure and retry behavior
 
-The GitHub Release is the final publication step. If source validation, the quality suite, the
-multi-architecture build, or Compose parity fails, no GitHub Release is created and neither the
-version tag nor `latest` is moved.
+The GitHub Release is the final publication step. If source validation, the required-check
+assertion, the multi-architecture build, or Compose parity fails, no GitHub Release is created
+and neither the version tag nor `latest` is moved.
+
+The publication path deliberately does **not** re-run lint, typecheck, tests, and the build. The
+release commit is the head of a pull request that branch protection already required to be green,
+so `Verify merged source` asserts the recorded conclusions of `CI Success`, `Docker build`,
+`Compose parity`, and `Installer smoke` for that SHA instead of recomputing them. Re-running them
+added roughly sixteen minutes to every release and put the repository's least reliable command
+(root `pnpm test`) on the publication critical path.
 
 If a later publication step fails, rerun the failed jobs from the **Publish release** workflow.
 Tag creation and candidate building are idempotent when they already point to the expected release
@@ -110,4 +118,5 @@ workflow token.
 | `scripts/release-changelog.ts` | Resolves source boundaries and generates/validates release notes |
 | `.github/workflows/release.yml` | Generates the version/changelog commit and opens the release PR |
 | `.github/workflows/publish-image.yml` | Validates the merge, builds, verifies, promotes, and releases |
-| `.github/workflows/compose-parity.yml` | Verifies either a local CI build or the exact release candidate |
+| `.github/workflows/compose-parity.yml` | Reusable gate that verifies the exact release candidate image |
+| `.github/workflows/container.yml` | Pull-request and main container pipeline: builds the image once, then runs Compose parity and the installer smoke against it |
